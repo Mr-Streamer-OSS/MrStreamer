@@ -1,0 +1,9 @@
+node_modules/
+out/
+dist/
+.DS_Store
+*.log
+# Private local configuration (subscription details, test access). Never commit.
+.local/
+.env*
+!.env.example

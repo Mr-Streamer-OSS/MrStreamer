@@ -1,0 +1,44 @@
+# Installers for slice 01: an arm64 DMG for Apple Silicon Macs and an x64 NSIS installer for Windows 11.
+# Build both on a Mac: `pnpm dist:mac` and `pnpm dist:win`. On Linux the Windows installer step needs
+# a system Wine; without it electron-builder stops after packaging dist/win-unpacked.
+appId: io.github.stienswout.mrstreamer
+productName: Mr. Streamer
+copyright: Copyright © 2026 Wout Stiens
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**/*
+  - package.json
+electronLanguages: [en]
+
+mac:
+  target:
+    - target: dmg
+      arch: [arm64]
+  category: public.app-category.entertainment
+  icon: build/icon.icns
+  # Signs with a Developer ID from the login keychain when one exists, ad hoc otherwise.
+  # Notarization runs only when APPLE_API_KEY, APPLE_API_KEY_ID and APPLE_API_ISSUER are set.
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  artifactName: Mr-Streamer-${version}-mac-${arch}.${ext}
+dmg:
+  title: Mr. Streamer ${version}
+  contents:
+    - { x: 160, y: 200, type: file }
+    - { x: 480, y: 200, type: link, path: /Applications }
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.ico
+  artifactName: Mr-Streamer-${version}-win-${arch}-setup.${ext}
+nsis:
+  # Per-user install into %LOCALAPPDATA%, no admin prompt. Uninstalling keeps the login and preferences.
+  oneClick: true
+  perMachine: false
+  shortcutName: Mr. Streamer
+  deleteAppDataOnUninstall: false

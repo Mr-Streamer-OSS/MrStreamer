@@ -1,0 +1,6 @@
+# Single-package repo. This file only carries pnpm settings.
+allowBuilds:
+  electron: true
+  electron-winstaller: false
+  esbuild: true
+  sharp: true
