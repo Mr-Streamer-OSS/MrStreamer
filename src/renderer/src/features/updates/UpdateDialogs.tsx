@@ -10,11 +10,12 @@ import { call } from "../../lib/ipc.ts";
 import { useUpdates } from "./use-updates.ts";
 
 /**
- * Installs and restarts. The call only returns when the app is still running, because the
- * system refused the release; Settings then shows why.
+ * Installs and restarts. The call only settles when the app is still running, because the
+ * release was refused or the install couldn't start; Settings then shows why.
  */
 function install(method: "updates.restart" | "updates.startFresh"): void {
-  void call(method).then(() => useUi.setState({ settingsOpen: true }));
+  const showSettings = () => useUi.setState({ settingsOpen: true });
+  call(method).then(showSettings, showSettings);
 }
 
 export function UpdateDialogs() {
