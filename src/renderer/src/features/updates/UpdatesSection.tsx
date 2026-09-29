@@ -9,6 +9,12 @@ import { useUi } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { useUpdates } from "./use-updates.ts";
 
+const FAILED_STEP = {
+  check: "Couldn't check for updates.",
+  download: "The download stopped.",
+  install: "The update couldn't be installed.",
+} as const;
+
 const CHANNELS: readonly { value: Channel; label: string; hint: string }[] = [
   { value: "stable", label: "Stable", hint: "Tested releases." },
   { value: "nightly", label: "Nightly", hint: "New builds first, plus every stable release." },
@@ -99,10 +105,7 @@ function UpdateState({ status }: { status: UpdateStatus }) {
       );
     case "failed":
       return (
-        <Row
-          note={`${update.step === "check" ? "Couldn't check for updates." : "The download stopped."} ${update.detail}`}
-          error
-        >
+        <Row note={`${FAILED_STEP[update.step]} ${update.detail}`} error>
           <Button
             onClick={() => run(update.step === "check" ? "updates.check" : "updates.download")}
           >
@@ -161,7 +164,8 @@ function FreshStartState({ status }: { status: UpdateStatus }) {
     case "not-installed":
       return (
         <Row
-          note={`Stable ${fresh.version} wasn't installed. This device's data was erased as you asked.`}
+          note={`Stable ${fresh.version} wasn't installed, so nothing was erased.${fresh.detail ? ` ${fresh.detail}` : ""}`}
+          error
         >
           <Button onClick={() => run("updates.prepareFresh")}>Try again</Button>
         </Row>

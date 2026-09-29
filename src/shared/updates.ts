@@ -11,7 +11,11 @@ export type UpdatePhase =
   | { readonly kind: "downloading"; readonly version: string; readonly percent: number }
   /** Downloaded and checked; installs when the user confirms the restart. */
   | { readonly kind: "ready"; readonly version: string }
-  | { readonly kind: "failed"; readonly step: "check" | "download"; readonly detail: string };
+  | {
+      readonly kind: "failed";
+      readonly step: "check" | "download" | "install";
+      readonly detail: string;
+    };
 
 /** Going back to Stable with this device's data erased. */
 export type FreshStart =
@@ -20,8 +24,11 @@ export type FreshStart =
   /** Stable is downloaded and checked; erasing waits for the final confirmation. */
   | { readonly kind: "ready"; readonly version: string }
   | { readonly kind: "failed"; readonly detail: string }
-  /** A confirmed start erased this device's data, but Stable did not install. */
-  | { readonly kind: "not-installed"; readonly version: string };
+  /**
+   * A confirmed start didn't install Stable, so nothing was erased. `detail` is the system's
+   * reason when it refused the release; null when an earlier run was interrupted.
+   */
+  | { readonly kind: "not-installed"; readonly version: string; readonly detail: string | null };
 
 export interface UpdateStatus {
   /** The installed version. */

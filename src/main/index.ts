@@ -10,7 +10,7 @@ import { createLibrary, type Library } from "./services/library.ts";
 import { createPlayback, type Playback } from "./services/playback.ts";
 import { createPreferences } from "./services/preferences.ts";
 import { createSubscriptions, type Subscriptions } from "./services/subscription.ts";
-import { createUpdates, eraseDeviceData, finishFreshStart } from "./services/updates.ts";
+import { createUpdates, finishFreshStart } from "./services/updates.ts";
 import { fetchReleases, metadataFileFor } from "./updates/feed.ts";
 
 // Matches `appId` in electron-builder.yml: Windows groups taskbar entries and notifications by it.
@@ -83,7 +83,10 @@ async function start(): Promise<void> {
   const dataDir = app.getPath("userData");
   await removeUnfinishedWrites(dataDir);
   // Before any service reads the data: a fresh start from the last run may have to finish.
-  const freshOutcome = await finishFreshStart(dataDir, app.getVersion());
+  const freshOutcome = await finishFreshStart(dataDir, app.getVersion(), async () => {
+    await session.defaultSession.clearStorageData();
+    await session.defaultSession.clearCache();
+  });
   const userAgent = `MrStreamer/${app.getVersion()}`;
 
   session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) => {
@@ -114,12 +117,6 @@ async function start(): Promise<void> {
     metadataFile: metadataFileFor(process.platform),
     releases: () => fetchReleases(UPDATE_FEED, REPOSITORY),
     installer: electronInstaller(),
-    erase: async () => {
-      playback.closeAll();
-      await eraseDeviceData(dataDir);
-      await session.defaultSession.clearStorageData();
-      await session.defaultSession.clearCache();
-    },
     freshOutcome,
     onChanged: (status) => {
       if (mainWindow) emit(mainWindow.webContents, "updates.changed", status);
@@ -178,8 +175,8 @@ async function start(): Promise<void> {
         updates.cancel();
         return null;
       },
-      "updates.restart": () => {
-        updates.restart();
+      "updates.restart": async () => {
+        await updates.restart();
         return null;
       },
       "updates.prepareFresh": () => updates.prepareFresh(),
