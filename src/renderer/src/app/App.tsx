@@ -5,6 +5,7 @@ import { HomeScreen } from "../features/home/HomeScreen.tsx";
 import { LiveScreen } from "../features/live/LiveScreen.tsx";
 import { SearchPalette } from "../features/search/SearchPalette.tsx";
 import { SettingsSheet } from "../features/settings/SettingsSheet.tsx";
+import { UpdateDialogs } from "../features/updates/UpdateDialogs.tsx";
 import { appError, describeError } from "../lib/errors.ts";
 import { queries } from "../lib/queries.ts";
 import { player } from "../player/player.ts";
@@ -58,6 +59,7 @@ function Shell() {
       {view === "home" ? <HomeScreen /> : <LiveScreen />}
       <SearchPalette />
       <SettingsSheet />
+      <UpdateDialogs />
     </>
   );
 }
