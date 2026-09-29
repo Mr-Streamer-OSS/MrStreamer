@@ -39,6 +39,8 @@ export function ffmpegArguments(conversion: Conversion): string[] {
     // ffmpeg reads 5 s of a stream before its first output by default; 1.5 s is enough to learn
     // the tracks the program table already announced.
     ...["-probesize", "1000000", "-analyzeduration", "1500000"],
+    // Damaged broadcasts send frames without timestamps; ffmpeg fills in what it can.
+    ...["-fflags", "+genpts"],
     ...["-f", "mpegts", "-i", "pipe:0"],
   ];
   if (conversion.video !== "none") args.push("-map", "0:v:0");
