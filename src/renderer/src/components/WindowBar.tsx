@@ -20,6 +20,8 @@ export function WindowBar({
   overlay?: boolean;
 }) {
   const view = useUi((state) => state.view);
+  const settingsOpen = useUi((state) => state.settings !== null);
+  const current = settingsOpen ? null : view;
   return (
     <header
       className={cn("drag flex flex-none items-center gap-1", isMac ? "pr-4" : "pl-4", className)}
@@ -34,8 +36,8 @@ export function WindowBar({
         <Logo className="size-5" />
         <b className="text-[0.9375rem] tracking-tight">mr. streamer</b>
       </span>
-      <NavButton view="home" current={view} overlay={overlay} icon={<House />} label="Home" />
-      <NavButton view="live" current={view} overlay={overlay} icon={<Tv />} label="Live TV" />
+      <NavButton view="home" current={current} overlay={overlay} icon={<House />} label="Home" />
+      <NavButton view="live" current={current} overlay={overlay} icon={<Tv />} label="Live TV" />
       <div className="ml-auto flex items-center gap-1.5">
         <UpdateIndicator overlay={overlay} />
         <Button
@@ -47,10 +49,11 @@ export function WindowBar({
           <Search />
         </Button>
         <Button
-          variant={overlay ? "media" : "ghost"}
+          variant={settingsOpen ? "secondary" : overlay ? "media" : "ghost"}
           size="icon-sm"
           aria-label="Settings"
-          onClick={() => useUi.setState({ settingsOpen: true })}
+          aria-pressed={settingsOpen}
+          onClick={() => useUi.setState({ settings: settingsOpen ? null : "subscription" })}
         >
           <Settings />
         </Button>
@@ -67,7 +70,8 @@ function NavButton({
   label,
 }: {
   view: View;
-  current: View;
+  /** The view on screen; null while Settings covers it. */
+  current: View | null;
   overlay: boolean;
   icon: ReactNode;
   label: string;
@@ -78,7 +82,7 @@ function NavButton({
       variant={active ? "secondary" : overlay ? "media" : "ghost"}
       size="sm"
       className={cn(active && "text-white")}
-      onClick={() => useUi.setState({ view, guideDepth: toDepth(0) })}
+      onClick={() => useUi.setState({ view, guideDepth: toDepth(0), settings: null })}
     >
       {icon}
       {label}

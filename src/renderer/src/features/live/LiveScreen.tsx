@@ -53,7 +53,7 @@ export function LiveScreen() {
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       const ui = useUi.getState();
-      if (isTyping(event) || event.repeat || ui.searchOpen || ui.settingsOpen) return;
+      if (isTyping(event) || event.repeat || ui.searchOpen || ui.settings) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (event.key === "f") toggleFullscreen();
       else if (event.key === "m") player.toggleMute();

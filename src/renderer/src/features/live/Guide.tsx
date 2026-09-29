@@ -138,7 +138,10 @@ export function Guide({
     else if (item === "home") useUi.setState({ view: "home", guideDepth: toDepth(0) });
     else {
       setDepth(base);
-      useUi.setState({ searchOpen: item === "search", settingsOpen: item === "settings" });
+      useUi.setState({
+        searchOpen: item === "search",
+        settings: item === "settings" ? "subscription" : null,
+      });
     }
   }
 
@@ -181,8 +184,9 @@ export function Guide({
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       const ui = useUi.getState();
-      if (isTyping(event) || hasModifier(event) || event.isComposing) return;
-      if (ui.searchOpen || ui.settingsOpen) return;
+      if (event.defaultPrevented || isTyping(event) || hasModifier(event) || event.isComposing)
+        return;
+      if (ui.searchOpen || ui.settings) return;
       const now = state.current;
       const act = actions.current;
       const current = now.depth;
