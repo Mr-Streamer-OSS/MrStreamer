@@ -22,7 +22,7 @@ test           Vitest suites, the fake provider, codec clips and the packaged-ap
 
 ## Data
 
-Everything lives in Electron's `userData` folder, named after the product, not the app id: see the [user troubleshooting page](../user/troubleshooting.md#where-your-data-is). Each file is written atomically; leftovers of an interrupted write are removed at startup.
+Everything lives in Electron's `userData` folder, named after the product, not the app id: see the [user troubleshooting page](../user/troubleshooting.md#where-your-data-is). Each file is written atomically; leftovers of an interrupted write are removed at startup. Changes to these files must stay readable by the newest stable release: choosing Stable on a nightly installs that release over the nightly, and it reads what the nightly wrote.
 
 | File                | Owner                                                                   |
 | ------------------- | ----------------------------------------------------------------------- |
