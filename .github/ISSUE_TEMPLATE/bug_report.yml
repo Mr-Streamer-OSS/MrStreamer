@@ -1,0 +1,31 @@
+name: Bug report
+description: Something in Mr. Streamer doesn't work as it should.
+body:
+  - type: markdown
+    attributes:
+      value: Leave out your provider's server address, username and password.
+  - type: input
+    id: version
+    attributes:
+      label: Mr. Streamer version
+      description: Settings shows it under Updates.
+    validations:
+      required: true
+  - type: dropdown
+    id: system
+    attributes:
+      label: System
+      options:
+        - macOS
+        - Windows
+        - Linux (deb)
+        - Linux (AppImage)
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead. Include any message Mr. Streamer showed.
+    validations:
+      required: true

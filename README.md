@@ -8,11 +8,11 @@ Mr. Streamer works with providers that offer Xtream Codes access (a server addre
 
 Get the latest release from the [Releases page](https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest).
 
-| System                             | File                                        |
-| ---------------------------------- | ------------------------------------------- |
-| macOS 13 or later, Apple silicon   | `Mr-Streamer-<version>-mac-arm64.dmg`       |
-| Windows 11, 64-bit                 | `Mr-Streamer-<version>-win-x64-setup.exe`   |
-| Linux, 64-bit (Ubuntu, Debian)     | `Mr-Streamer-<version>-linux-amd64.deb`     |
+| System                              | File                                          |
+| ----------------------------------- | --------------------------------------------- |
+| macOS 13 or later, Apple silicon    | `Mr-Streamer-<version>-mac-arm64.dmg`         |
+| Windows 11, 64-bit                  | `Mr-Streamer-<version>-win-x64-setup.exe`     |
+| Linux, 64-bit (Ubuntu, Debian)      | `Mr-Streamer-<version>-linux-amd64.deb`       |
 | Linux, 64-bit (other distributions) | `Mr-Streamer-<version>-linux-x86_64.AppImage` |
 
 ## Install
