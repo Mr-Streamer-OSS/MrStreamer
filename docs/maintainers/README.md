@@ -1,32 +1,21 @@
-# Maintainer and agent documentation
+# Planning
 
-How Mr. Streamer is built, tested and released, and where its planning lives. Users start at the [README](../../README.md) and [user guides](../user/).
-
-| Guide                              | For                                                                |
-| ---------------------------------- | ------------------------------------------------------------------ |
-| [Development](development.md)      | Setup, running the app, environment variables, building installers |
-| [Architecture](architecture.md)    | Layout, IPC, data files, catalogue, the playback pipeline, updates |
-| [Testing](testing.md)              | The test suite, fake provider, codec clips, packaged-app test, CI  |
-| [Releasing](releasing.md)          | Versions, nightly and stable releases, dry runs, testing updates   |
-| [Signing](signing.md)              | Apple credentials, renewal, checking a signed build, Windows later |
-| [Playback evaluation](playback.md) | Real-stream measurements behind the playback design                |
-
-## Planning
+> For maintainers. The [docs index](../README.md) lists every guide.
 
 Work is planned in slices. Start with [Slice 02: reliable playback and releases](slices/02-reliability-and-releases.md) when planning or implementing the current slice. It records the agreed decisions, task order, acceptance checks and actions reserved for Wout.
 
 The [idea and roadmap](https://r3b736io0gst.postplan.dev) owns the product direction and links the other slices. The [published slice 02](https://tk1ixs600mix.postplan.dev) mirrors the repository handoff; keep both aligned when its scope changes.
 
-### Current sequence
+## Current sequence
 
 1. Finish the latest slice 01 build and record its acceptance results. Linux is already part of the desktop baseline alongside Mac and Windows.
 2. Wout transfers the existing repository into [Mr-Streamer-OSS](https://github.com/Mr-Streamer-OSS). Verify the actual destination before configuring releases.
 3. Deliver slice 02 while the repository remains private.
 4. Make the repository public for the first good release after slice 02, when Wout authorizes publication.
 
-### Roadmap adjustments
+## Roadmap adjustments
 
-- Slice 02 now includes playback compatibility, library reliability, Mac signing/notarization, the DMG redesign, manual nightly/stable releases, in-app updates and documentation for public launch.
+- Slice 02 now includes playback compatibility, library reliability, Mac signing/notarization, the DMG redesign, automatic nightlies with manual Stable promotion, in-app updates and documentation for public launch.
 - User documentation and maintainer/agent documentation must have separate entry points. During the active build-out, code contributions are limited to small bug fixes; document this policy for prospective contributors.
 - Additional provider types and multiple subscriptions remain deferred. Their old placement in the slice 02 outline does not authorize implementing them now.
 - Slices 03-05 retain live TV/EPG, movies/series and Home/everyday controls respectively.

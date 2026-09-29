@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /*
- * Mr. Streamer runs on a true black canvas. Tokens follow T3 Code's OLED dark theme.
+ * Mr. Streamer runs on a true black canvas, with dark tokens tuned for OLED screens.
  * The root font size grows with the window, and everything is sized in rem, so the UI keeps its
  * proportions from a 14-inch MacBook (about 15 px) to a 34-inch ultrawide (20 px).
  */

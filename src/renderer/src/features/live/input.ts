@@ -5,7 +5,7 @@ import type { LiveChannel } from "../../../../shared/library.ts";
 /**
  * True only when the pointer really moved. Chromium sends synthetic mouse moves when a list
  * scrolls under a resting pointer; treating those as hover would pull the highlight away from
- * the keyboard. One highlight follows whichever input moved last, as in T3 Code's lists.
+ * the keyboard. One highlight follows whichever input moved last.
  */
 export function usePointerIntent(): (event: MouseEvent) => boolean {
   const last = useRef<{ x: number; y: number } | null>(null);

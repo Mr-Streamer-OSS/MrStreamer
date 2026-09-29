@@ -47,7 +47,7 @@ Found a bug? [Report it](https://github.com/Mr-Streamer-OSS/MrStreamer/issues/ne
 
 ## Development
 
-Mr. Streamer is open source and under active development. Contributions are limited to small bug fixes for now; see [CONTRIBUTING.md](CONTRIBUTING.md). Building, testing and releasing are covered in the [maintainer documentation](docs/maintainers/README.md).
+Mr. Streamer is open source and under active development. Contributions are limited to small bug fixes for now; see [CONTRIBUTING.md](CONTRIBUTING.md). Building, testing and releasing are covered in the [docs](docs/README.md#working-on-mr-streamer).
 
 ## License
 
