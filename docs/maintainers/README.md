@@ -2,16 +2,15 @@
 
 > For maintainers. The [docs index](../README.md) lists every guide.
 
-Work is planned in slices. Start with [Slice 02: reliable playback and releases](slices/02-reliability-and-releases.md) when planning or implementing the current slice. It records the agreed decisions, task order, acceptance checks and actions reserved for Wout.
+Work is planned in slices. [Slice 02: reliable playback and releases](slices/02-reliability-and-releases.md) is complete; its handoff records the decisions, acceptance and known gaps. Slice 03 is next.
 
-The [idea and roadmap](https://r3b736io0gst.postplan.dev) owns the product direction and links the other slices. The [published slice 02](https://tk1ixs600mix.postplan.dev) mirrors the repository handoff; keep both aligned when its scope changes.
+The [idea and roadmap](https://r3b736io0gst.postplan.dev) owns the product direction and links the other slices. The [published slice 02](https://tk1ixs600mix.postplan.dev) mirrors the repository handoff; keep both aligned when scope changes.
 
 ## Current sequence
 
-1. Finish the latest slice 01 build and record its acceptance results. Linux is already part of the desktop baseline alongside Mac and Windows.
-2. Wout transfers the existing repository into [Mr-Streamer-OSS](https://github.com/Mr-Streamer-OSS). Verify the actual destination before configuring releases.
-3. Deliver slice 02 while the repository remains private.
-4. Make the repository public for the first good release after slice 02, when Wout authorizes publication.
+1. Slice 01 delivered the desktop baseline on Mac, Windows and Linux.
+2. Slice 02 is complete: the repository is public at [Mr-Streamer-OSS/MrStreamer](https://github.com/Mr-Streamer-OSS/MrStreamer), nightlies publish automatically, and Stable 0.0.1 follows once Wout has tested the next nightly.
+3. Slice 03, live TV and the EPG, starts next.
 
 ## Roadmap adjustments
 

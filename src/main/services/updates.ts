@@ -5,9 +5,11 @@
 // installs a stable build stays on Nightly.
 //
 // Starting fresh downloads and checks Stable first; cancelling or a failure changes nothing.
-// Only after the final confirmation does it write a marker, erase this device's data and
-// install. The next start calls `finishFreshStart` before anything reads the data: it completes
-// an erase a crash interrupted and says whether Stable arrived.
+// After the final confirmation it writes a marker naming that Stable version and installs. The
+// data is erased only once Stable itself starts: `finishFreshStart` runs before anything reads
+// the data and erases it when the running version is the one the marker names. When the system
+// refuses the update, or an interrupted install leaves the old build running, the data stays.
+// The marker is read by the Stable build, so its format must stay readable by later versions.
 import { join } from "node:path";
 import { type } from "arktype";
 import type { FreshStart, UpdatePhase, UpdateStatus } from "../../shared/updates.ts";
@@ -34,8 +36,11 @@ export interface Installer {
     onProgress: (percent: number) => void,
     signal: AbortSignal,
   ): Promise<void>;
-  /** Quits, installs the downloaded release and starts it. */
-  install(): void;
+  /**
+   * Quits, installs the downloaded release and starts it. Rejects when the system refuses the
+   * release, as macOS does when its signature doesn't match; otherwise the app quits first.
+   */
+  install(): Promise<void>;
 }
 
 export interface UpdatesDeps {
@@ -46,8 +51,6 @@ export interface UpdatesDeps {
   readonly metadataFile: string;
   readonly releases: () => Promise<readonly PublishedRelease[]>;
   readonly installer: Installer;
-  /** Erases this device's data; `eraseDeviceData` plus whatever the browser session keeps. */
-  readonly erase: () => Promise<void>;
   /** What `finishFreshStart` found at this start. */
   readonly freshOutcome: FreshStart;
   readonly onChanged: (status: UpdateStatus) => void;
@@ -61,24 +64,35 @@ const DEVICE_FILES = ["subscription.json", "preferences.json", "catalogue.json",
 const Settings = type({ channel: "'stable' | 'nightly'" });
 const Marker = type({ version: "string" });
 
-/** Deletes this device's data files. Safe to repeat. */
-export async function eraseDeviceData(dataDir: string): Promise<void> {
-  await Promise.all(DEVICE_FILES.map((file) => removeFile(join(dataDir, file))));
-}
-
 /**
  * Finishes a fresh start the previous run began. Call before anything reads the data folder.
- * Returns `not-installed` when the data was erased but Stable did not replace this build.
+ * When Stable is now running, erases this device's data files and, through `eraseBrowserData`,
+ * what the browser session keeps; Stable then starts clean, on Stable. When the previous build
+ * is still running, Stable didn't install: the data stays, and the outcome says so.
  */
-export async function finishFreshStart(dataDir: string, installed: string): Promise<FreshStart> {
-  const marker = await readJsonFile(join(dataDir, MARKER_FILE), Marker);
+export async function finishFreshStart(
+  dataDir: string,
+  installed: string,
+  eraseBrowserData: () => Promise<void>,
+): Promise<FreshStart> {
+  const markerPath = join(dataDir, MARKER_FILE);
+  const marker = await readJsonFile(markerPath, Marker);
   if (!marker) return { kind: "idle" };
-  await eraseDeviceData(dataDir);
+  if (installed !== marker.version) {
+    await removeFile(markerPath);
+    return { kind: "not-installed", version: marker.version, detail: null };
+  }
+  // The marker goes last, so an erase a crash interrupts runs again at the next start.
+  await Promise.all(DEVICE_FILES.map((file) => removeFile(join(dataDir, file))));
+  await eraseBrowserData();
   await writeJsonFile(join(dataDir, SETTINGS_FILE), { channel: "stable" });
-  await removeFile(join(dataDir, MARKER_FILE));
-  return installed === marker.version
-    ? { kind: "idle" }
-    : { kind: "not-installed", version: marker.version };
+  await removeFile(markerPath);
+  return { kind: "idle" };
+}
+
+/** Whether a channel receives `version`: Nightly receives everything, Stable only stable releases. */
+function receives(channel: Channel, version: string): boolean {
+  return channel === "nightly" || !parseVersion(version)?.nightly;
 }
 
 export function createUpdates(deps: UpdatesDeps) {
@@ -97,6 +111,8 @@ export function createUpdates(deps: UpdatesDeps) {
   let target: Candidate | null = null;
   /** The one download in flight, update or fresh start: there is one installer. */
   let downloading: AbortController | null = null;
+  /** The update download whose outcome still counts; a channel change can void it. */
+  let attempt: object | null = null;
 
   function getChannel(): Promise<Channel> {
     channel ??= readJsonFile(settingsPath, Settings).then(async (stored) => {
@@ -138,11 +154,12 @@ export function createUpdates(deps: UpdatesDeps) {
       await deps.installer.download(
         { feedUrl: release.feedUrl, version: formatVersion(release.version), allowDowngrade },
         (percent) => {
-          if (downloading === controller) onPercent(percent);
+          if (downloading === controller && !controller.signal.aborted) onPercent(percent);
         },
         controller.signal,
       );
-      return "done";
+      // A download that finishes after it was cancelled still doesn't count.
+      return controller.signal.aborted ? "cancelled" : "done";
     } catch (cause) {
       if (controller.signal.aborted) return "cancelled";
       throw cause;
@@ -154,12 +171,22 @@ export function createUpdates(deps: UpdatesDeps) {
   return {
     status,
 
-    /** Changes the channel. Takes effect at the next check; nothing is installed or removed. */
+    /**
+     * Changes the channel. Takes effect at the next check. An update the new channel doesn't
+     * receive, such as a nightly after switching to Stable, is dropped: its download stops, and
+     * a downloaded one won't install. Nothing installed is removed.
+     */
     async setChannel(next: Channel): Promise<UpdateStatus> {
-      await writeJsonFile(settingsPath, { channel: next });
       channel = Promise.resolve(next);
-      if (update.kind !== "downloading" && update.kind !== "ready") update = { kind: "idle" };
+      const staged = update.kind === "downloading" || update.kind === "ready" ? update : null;
+      if (!staged || !receives(next, staged.version)) {
+        if (staged?.kind === "downloading") downloading?.abort();
+        attempt = null;
+        target = null;
+        update = { kind: "idle" };
+      }
       aheadOf = null;
+      await writeJsonFile(settingsPath, { channel: next });
       changed();
       return status();
     },
@@ -192,23 +219,33 @@ export function createUpdates(deps: UpdatesDeps) {
       return status();
     },
 
-    /** Downloads the release the last check found. Playback carries on meanwhile. */
+    /**
+     * Downloads the release the last check found, or again after a failed download or install.
+     * Playback carries on meanwhile.
+     */
     async download(): Promise<UpdateStatus> {
-      if (update.kind !== "available" || !target || downloading) return status();
+      const retry = update.kind === "failed" && update.step !== "check";
+      if ((update.kind !== "available" && !retry) || !target || downloading) return status();
       const release = target;
       const version = formatVersion(release.version);
+      const mine = {};
+      attempt = mine;
       update = { kind: "downloading", version, percent: 0 };
       fresh = fresh.kind === "not-installed" ? fresh : { kind: "idle" };
       changed();
       try {
         const outcome = await fetchRelease(release, false, (percent) => {
+          if (attempt !== mine) return;
           update = { kind: "downloading", version, percent };
           changed();
         });
+        if (attempt !== mine) return status();
         update = outcome === "done" ? { kind: "ready", version } : { kind: "available", version };
       } catch (cause) {
+        if (attempt !== mine) return status();
         update = { kind: "failed", step: "download", detail: reason(cause) };
       }
+      attempt = null;
       changed();
       return status();
     },
@@ -219,8 +256,14 @@ export function createUpdates(deps: UpdatesDeps) {
     },
 
     /** Installs the downloaded update. The user has confirmed the restart. */
-    restart(): void {
-      if (update.kind === "ready") deps.installer.install();
+    async restart(): Promise<void> {
+      if (update.kind !== "ready") return;
+      try {
+        await deps.installer.install();
+      } catch (cause) {
+        update = { kind: "failed", step: "install", detail: reason(cause) };
+        changed();
+      }
     },
 
     /** Downloads and checks the newest stable release, even when it is older than this build. */
@@ -257,15 +300,21 @@ export function createUpdates(deps: UpdatesDeps) {
     },
 
     /**
-     * Erases this device's data and installs the downloaded Stable. The user has confirmed
-     * both. The marker goes first, so an interrupted erase finishes at the next start.
+     * Installs the downloaded Stable, which erases this device's data when it starts. The user
+     * has confirmed both. When the system refuses Stable, nothing is erased.
      */
     async startFresh(): Promise<void> {
       if (fresh.kind !== "ready") return;
-      await writeJsonFile(join(deps.dataDir, MARKER_FILE), { version: fresh.version });
-      await deps.erase();
-      await writeJsonFile(settingsPath, { channel: "stable" });
-      deps.installer.install();
+      const { version } = fresh;
+      const markerPath = join(deps.dataDir, MARKER_FILE);
+      await writeJsonFile(markerPath, { version });
+      try {
+        await deps.installer.install();
+      } catch (cause) {
+        await removeFile(markerPath);
+        fresh = { kind: "not-installed", version, detail: reason(cause) };
+        changed();
+      }
     },
   };
 }

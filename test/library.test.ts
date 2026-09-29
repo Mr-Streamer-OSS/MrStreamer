@@ -130,6 +130,21 @@ describe("live library", () => {
     expect(await library.channels({})).toEqual(before);
   });
 
+  it("keeps the catalogue when the confirming fetch comes back empty", async () => {
+    const { provider, library, create } = await connectedLibrary();
+    const before = await library.channels({});
+    let requests = 0;
+    provider.serveChannels((all) => (++requests === 1 ? all.slice(0, 5) : []));
+
+    await expect(library.refresh()).rejects.toMatchObject({
+      error: { kind: "incomplete-catalogue", received: 5 },
+    });
+
+    expect(await library.channels({})).toEqual(before);
+    expect((await library.status()).failure).toMatchObject({ kind: "incomplete-catalogue" });
+    expect(await create().channels({})).toEqual(before);
+  });
+
   it("uses a much shorter channel list only when a second fetch confirms it", async () => {
     const { provider, library } = await connectedLibrary();
     const before = await library.channels({});

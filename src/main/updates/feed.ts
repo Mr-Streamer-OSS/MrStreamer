@@ -4,6 +4,7 @@
 // and it carries this platform's update metadata. Stable takes the highest stable release;
 // Nightly the highest of all. Highest by version order, never by date, so a build published late
 // cannot replace a newer one. Drafts are invisible to the app.
+import { type } from "arktype";
 import {
   channelOf,
   compareVersions,
@@ -54,24 +55,42 @@ export function metadataFileFor(platform: NodeJS.Platform): string {
   return "latest-linux.yml";
 }
 
-/** Reads published releases from a GitHub-compatible API: GitHub itself, or a test feed. */
+const GitHubRelease = type({
+  tag_name: "string",
+  prerelease: "boolean",
+  draft: "boolean",
+  assets: type({ name: "string", browser_download_url: "string" }).array(),
+});
+
+/**
+ * Reads published releases from a GitHub-compatible API: GitHub itself, or a test feed. The
+ * newest hundred hold the newest nightly. The newest stable release can be older than all of
+ * them, so it also comes from the latest-release endpoint, which only a stable release can be.
+ */
 export async function fetchReleases(
   api: string,
   repository: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<PublishedRelease[]> {
-  const response = await fetchImpl(`${api}/repos/${repository}/releases?per_page=100`, {
-    headers: { Accept: "application/vnd.github+json" },
-    signal: AbortSignal.timeout(20_000),
-  });
-  if (!response.ok) throw new Error(`The release list answered HTTP ${response.status}.`);
-  const body = (await response.json()) as {
-    tag_name: string;
-    prerelease: boolean;
-    draft: boolean;
-    assets: { name: string; browser_download_url: string }[];
-  }[];
-  return body.map((release) => ({
+  const read = async (path: string, allowMissing: boolean) => {
+    const response = await fetchImpl(`${api}/repos/${repository}${path}`, {
+      headers: { Accept: "application/vnd.github+json" },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (allowMissing && response.status === 404) return null;
+    if (!response.ok) throw new Error(`The release list answered HTTP ${response.status}.`);
+    return response.json();
+  };
+  const [page, latest] = await Promise.all([
+    read("/releases?per_page=100", false),
+    read("/releases/latest", true),
+  ]);
+  const releases = GitHubRelease.array().assert(page);
+  const stable = latest === null ? null : GitHubRelease.assert(latest);
+  if (stable && !releases.some((release) => release.tag_name === stable.tag_name)) {
+    releases.push(stable);
+  }
+  return releases.map((release) => ({
     tag: release.tag_name,
     prerelease: release.prerelease,
     draft: release.draft,

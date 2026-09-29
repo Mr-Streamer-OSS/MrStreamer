@@ -2,15 +2,16 @@
 
 The suite checks what the services promise, through their public functions, against a fake provider. It stays small: each test describes a behaviour a user or the release process depends on.
 
-| File                        | Covers                                                                                                |
-| --------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `test/subscription.test.ts` | Logins, M3U links, account states, restarts, removal racing a slow account check, keychain loss       |
-| `test/library.test.ts`      | Loading, search, cache after restart, failed, empty and short refreshes, ids across renames           |
-| `test/catalogue.test.ts`    | Display names and region grouping                                                                     |
-| `test/preferences.test.ts`  | History order and limits, restarts, older files                                                       |
-| `test/playback.test.ts`     | The local proxy, one-connection switching, refusals, and what the player receives for each codec clip |
-| `test/updates.test.ts`      | Channels, release routing, user-started downloads, restarts, starting fresh and its recovery          |
-| `test/release.test.ts`      | Version order, when a nightly is due, which commit a stable release builds, and refused versions      |
+| File                        | Covers                                                                                                                                                        |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test/subscription.test.ts` | Logins, M3U links, account states, restarts, removal racing a slow account check, keychain loss                                                               |
+| `test/library.test.ts`      | Loading, search, cache after restart, failed, empty and short refreshes, ids across renames                                                                   |
+| `test/catalogue.test.ts`    | Display names and region grouping                                                                                                                             |
+| `test/preferences.test.ts`  | History order and limits, restarts, older files                                                                                                               |
+| `test/playback.test.ts`     | The local proxy, one-connection switching, refusals, and what the player receives for each codec clip                                                         |
+| `test/updates.test.ts`      | Channels, release routing, downloads and retries, channel switches, refused installs, starting fresh and its recovery, Stable behind a full page of nightlies |
+| `test/installer.test.ts`    | The electron-updater adapter: cancelling at every step, refused installs                                                                                      |
+| `test/release.test.ts`      | Version order, when a nightly is due, which commit a stable release builds, and refused versions                                                              |
 
 `pnpm test` runs them all. The conversion tests need `ffmpeg` and `ffprobe`: they use the ffmpeg on PATH, or `MR_STREAMER_FFMPEG`, and skip without one. CI installs both.
 

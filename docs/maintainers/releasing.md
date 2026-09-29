@@ -93,4 +93,4 @@ Windows installers are unsigned for now, and SmartScreen warns on first run. Sig
 
 ## Testing updates against another feed
 
-The app reads releases from `https://api.github.com`. To try an update flow without publishing, serve a folder of releases through any server that answers `/repos/Mr-Streamer-OSS/MrStreamer/releases` like GitHub (tag, draft and pre-release flags, and assets with download URLs), and start the app with `MR_STREAMER_UPDATE_FEED` pointing at it.
+The app reads releases from `https://api.github.com`. To try an update flow without publishing, serve a folder of releases through any server that answers `/repos/Mr-Streamer-OSS/MrStreamer/releases` and `/releases/latest` like GitHub (tag, draft and pre-release flags, and assets with download URLs; 404 for the latest release before the first stable one), and start the app with `MR_STREAMER_UPDATE_FEED` pointing at it.

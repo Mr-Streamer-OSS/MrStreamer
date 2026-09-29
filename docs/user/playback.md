@@ -20,6 +20,7 @@ Converted channels take a moment longer to start, about a second, and use more o
 - Subtitles and teletext aren't shown yet.
 - When a channel carries several sound tracks, the first one plays.
 - Surround sound that needs converting plays as stereo.
+- A damaged broadcast can take more than ten seconds to start, while Mr. Streamer retries it with the picture re-encoded.
 - Interlaced channels that play directly, common in European HD broadcasts, aren't deinterlaced; fast motion can show fine horizontal lines.
 - Movies and series aren't available yet; Mr. Streamer shows live channels.
 

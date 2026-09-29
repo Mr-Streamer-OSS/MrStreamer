@@ -166,7 +166,7 @@ export function createLibrary(deps: LibraryDeps) {
       );
       const again = await source.provider.liveCatalogue();
       const difference = Math.abs(again.channels.length - received);
-      if (difference <= Math.max(10, received * 0.05)) return again;
+      if (again.channels.length > 0 && difference <= Math.max(10, received * 0.05)) return again;
     }
     throw new AppFailure({ kind: "incomplete-catalogue", received, previous: before });
   }
