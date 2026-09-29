@@ -4,7 +4,7 @@ import { Radio } from "@base-ui/react/radio";
 import { RadioGroup } from "@base-ui/react/radio-group";
 import type { ReactNode } from "react";
 import type { UpdateStatus } from "../../../../shared/updates.ts";
-import { channelOf, parseVersion, type Channel } from "../../../../shared/version.ts";
+import type { Channel } from "../../../../shared/version.ts";
 import { useUi } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { useUpdates } from "./use-updates.ts";
@@ -50,14 +50,7 @@ export function UpdatesSection() {
           </label>
         ))}
       </RadioGroup>
-      {status.aheadOf && (
-        <p className="mb-2 text-[0.8125rem] text-muted-foreground">
-          You're on a nightly newer than Stable {status.aheadOf}. You'll move to Stable with its
-          next release after this build.
-        </p>
-      )}
       <UpdateState status={status} />
-      <FreshStartState status={status} />
     </section>
   );
 }
@@ -111,63 +104,6 @@ function UpdateState({ status }: { status: UpdateStatus }) {
           >
             Try again
           </Button>
-        </Row>
-      );
-  }
-}
-
-/** The way back to Stable with this device's data erased; offered on nightly builds. */
-function FreshStartState({ status }: { status: UpdateStatus }) {
-  const { run, cancel } = useUpdates();
-  const { fresh } = status;
-  const installed = parseVersion(status.version);
-  switch (fresh.kind) {
-    case "idle":
-      // Offered on nightly builds, while no update occupies the one download.
-      if (!installed || channelOf(installed) !== "nightly") return null;
-      if (status.update.kind === "downloading" || status.update.kind === "ready") return null;
-      return (
-        <div className="mt-3">
-          <Button
-            variant="ghost"
-            onClick={() => useUi.setState({ updateDialog: "fresh", settingsOpen: false })}
-          >
-            Start fresh on Stable…
-          </Button>
-        </div>
-      );
-    case "downloading":
-      return (
-        <Progress label={`Downloading Stable ${fresh.version}`} percent={fresh.percent}>
-          <Button variant="ghost" onClick={cancel}>
-            Cancel
-          </Button>
-        </Progress>
-      );
-    case "ready":
-      return (
-        <Row note={`Stable ${fresh.version} is ready.`}>
-          <Button
-            variant="destructive"
-            onClick={() => useUi.setState({ updateDialog: "erase", settingsOpen: false })}
-          >
-            Erase and install…
-          </Button>
-        </Row>
-      );
-    case "failed":
-      return (
-        <Row note={`Couldn't prepare Stable. ${fresh.detail}`} error>
-          <Button onClick={() => run("updates.prepareFresh")}>Try again</Button>
-        </Row>
-      );
-    case "not-installed":
-      return (
-        <Row
-          note={`Stable ${fresh.version} wasn't installed, so nothing was erased.${fresh.detail ? ` ${fresh.detail}` : ""}`}
-          error
-        >
-          <Button onClick={() => run("updates.prepareFresh")}>Try again</Button>
         </Row>
       );
   }

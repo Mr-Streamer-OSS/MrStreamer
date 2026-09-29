@@ -48,9 +48,6 @@ export const ipcInputs = {
   "updates.download": none,
   "updates.cancel": none,
   "updates.restart": none,
-  "updates.prepareFresh": none,
-  "updates.keepEverything": none,
-  "updates.startFresh": none,
 } satisfies Record<keyof IpcOutputs, { infer: unknown }>;
 
 /** What each IPC method resolves to when it succeeds. */
@@ -77,7 +74,7 @@ export interface IpcOutputs {
   /** Remembers a channel as last and recently watched. */
   "preferences.recordWatch": Preferences;
   "updates.status": UpdateStatus;
-  /** Chooses Stable or Nightly for the next check; installs and removes nothing. */
+  /** Chooses Stable or Nightly and checks what it offers; installs and removes nothing. */
   "updates.setChannel": UpdateStatus;
   "updates.check": UpdateStatus;
   /** Downloads the update the last check found. Resolves when it is ready or failed. */
@@ -86,12 +83,6 @@ export interface IpcOutputs {
   "updates.cancel": null;
   /** Quits and installs the downloaded update. Only after the user confirmed the restart. */
   "updates.restart": null;
-  /** Downloads the newest stable release for a fresh start; erases nothing. */
-  "updates.prepareFresh": UpdateStatus;
-  /** Leaves a fresh start before anything is erased. */
-  "updates.keepEverything": UpdateStatus;
-  /** Erases this device's data and installs Stable. Only after the final confirmation. */
-  "updates.startFresh": null;
 }
 
 export type IpcMethod = keyof IpcOutputs;
@@ -106,7 +97,7 @@ export type IpcArgs<M extends IpcMethod> =
 export interface IpcEvents {
   /** A catalogue refresh finished, or failed and kept the previous channels. */
   "library.updated": CatalogueStatus;
-  /** The update or fresh start moved on, for example a download's progress. */
+  /** The update moved on, for example a download's progress. */
   "updates.changed": UpdateStatus;
 }
 export type IpcEvent = keyof IpcEvents;

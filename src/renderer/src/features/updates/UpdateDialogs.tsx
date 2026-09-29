@@ -1,9 +1,6 @@
-// The confirmations around updates: restarting into a downloaded update, and the two steps of
-// starting fresh on Stable. Erasing needs its own tick, right before it happens.
-import { Checkbox } from "@base-ui/react/checkbox";
+// The confirmation before restarting into a downloaded update.
 import { Dialog } from "@base-ui/react/dialog";
-import { Check } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useUi } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { call } from "../../lib/ipc.ts";
@@ -13,138 +10,34 @@ import { useUpdates } from "./use-updates.ts";
  * Installs and restarts. The call only settles when the app is still running, because the
  * release was refused or the install couldn't start; Settings then shows why.
  */
-function install(method: "updates.restart" | "updates.startFresh"): void {
+function restart(): void {
   const showSettings = () => useUi.setState({ settingsOpen: true });
-  call(method).then(showSettings, showSettings);
+  call("updates.restart").then(showSettings, showSettings);
 }
 
 export function UpdateDialogs() {
   const dialog = useUi((state) => state.updateDialog);
-  const { status, run } = useUpdates();
+  const { status } = useUpdates();
   const close = () => useUi.setState({ updateDialog: null });
-
-  // The final step opens once Stable is downloaded: the user asked for it moments before.
-  const freshKind = status?.fresh.kind;
-  useEffect(() => {
-    if (freshKind === "ready") useUi.setState({ updateDialog: "erase", settingsOpen: false });
-  }, [freshKind]);
-
   const update = status?.update;
-  const fresh = status?.fresh;
   return (
-    <>
-      <Modal open={dialog === "restart"} onClose={close} title="Restart to update?">
-        <p>
-          Playback stops and Mr. Streamer reopens on{" "}
-          {update?.kind === "ready" ? update.version : "the new version"}.
-        </p>
-        <Actions>
-          <Button
-            variant="primary"
-            onClick={() => {
-              close();
-              install("updates.restart");
-            }}
-          >
-            Restart now
-          </Button>
-          <Button variant="ghost" onClick={close}>
-            Later
-          </Button>
-        </Actions>
-      </Modal>
-
-      <Modal open={dialog === "fresh"} onClose={close} title="Start fresh on Stable?">
-        <p>
-          Mr. Streamer downloads the newest stable release first. Nothing is erased until you
-          confirm again.
-        </p>
-        <Actions>
-          <Button
-            variant="primary"
-            onClick={() => {
-              close();
-              run("updates.prepareFresh");
-            }}
-          >
-            Download Stable
-          </Button>
-          <Button variant="ghost" onClick={close}>
-            Cancel
-          </Button>
-        </Actions>
-      </Modal>
-
-      <EraseDialog
-        open={dialog === "erase"}
-        version={fresh?.kind === "ready" ? fresh.version : null}
-        onKeep={() => {
-          close();
-          run("updates.keepEverything");
-        }}
-        onClose={close}
-      />
-    </>
-  );
-}
-
-function EraseDialog({
-  open,
-  version,
-  onKeep,
-  onClose,
-}: {
-  open: boolean;
-  version: string | null;
-  onKeep: () => void;
-  onClose: () => void;
-}) {
-  const [understood, setUnderstood] = useState(false);
-  useEffect(() => {
-    if (!open) setUnderstood(false);
-  }, [open]);
-  return (
-    <Modal
-      open={open && version !== null}
-      onClose={onClose}
-      title={`Erase and install Stable ${version}?`}
-    >
-      <p>Stable {version} is downloaded and checked. Restarting erases this device's:</p>
-      <ul className="mt-2 list-disc pl-5">
-        <li>subscription login</li>
-        <li>preferences</li>
-        <li>watch history</li>
-        <li>channel list</li>
-      </ul>
-      <p className="mt-3">
-        You'll connect your subscription again. Your provider account and other devices aren't
-        affected.
+    <Modal open={dialog === "restart"} onClose={close} title="Restart to update?">
+      <p>
+        Playback stops and Mr. Streamer reopens on{" "}
+        {update?.kind === "ready" ? update.version : "the new version"}.
       </p>
-      <label className="mt-4 flex items-center gap-2.5">
-        <Checkbox.Root
-          checked={understood}
-          onCheckedChange={setUnderstood}
-          className="grid size-4 flex-none place-items-center rounded-[4px] shadow-[inset_0_0_0_1.5px_rgb(255_255_255/55%)] outline-none focus-visible:ring-2 focus-visible:ring-ring data-checked:bg-white data-checked:shadow-none"
-        >
-          <Checkbox.Indicator className="text-black">
-            <Check className="size-3" strokeWidth={3} />
-          </Checkbox.Indicator>
-        </Checkbox.Root>
-        I understand this can't be undone
-      </label>
       <Actions>
         <Button
-          variant="destructive"
-          disabled={!understood}
+          variant="primary"
           onClick={() => {
-            onClose();
-            install("updates.startFresh");
+            close();
+            restart();
           }}
         >
-          Erase and restart
+          Restart now
         </Button>
-        <Button variant="ghost" onClick={onKeep}>
-          Keep everything
+        <Button variant="ghost" onClick={close}>
+          Later
         </Button>
       </Actions>
     </Modal>

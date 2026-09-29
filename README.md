@@ -35,7 +35,7 @@ Settings (⌘, or Ctrl ,) shows your subscription, refreshes the channel list an
 
 Mr. Streamer never updates on its own. In Settings, choose **Check for updates**, then **Update**. Once the download is ready, it asks before restarting, so nothing interrupts what you're watching.
 
-There are two channels: **Stable** for tested releases, and **Nightly** for the newest builds. Installing a newer version by hand from the Releases page also keeps your login and preferences. [Updates and channels](docs/user/updates.md) covers switching channels and starting over on Stable.
+There are two channels: **Stable** for tested releases, and **Nightly** for the newest builds. Installing a newer version by hand from the Releases page also keeps your login and preferences. [Updates and channels](docs/user/updates.md) covers switching channels.
 
 ## Help
 

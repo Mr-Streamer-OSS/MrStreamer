@@ -5,10 +5,7 @@ import type { Channel } from "../../../../shared/version.ts";
 import { call } from "../../lib/ipc.ts";
 import { queries } from "../../lib/queries.ts";
 
-type StatusMethod = Extract<
-  IpcMethod,
-  "updates.check" | "updates.download" | "updates.prepareFresh" | "updates.keepEverything"
->;
+type StatusMethod = Extract<IpcMethod, "updates.check" | "updates.download">;
 
 /** The update status and the actions on it. Every action answers with the new status. */
 export function useUpdates() {

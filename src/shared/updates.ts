@@ -17,28 +17,9 @@ export type UpdatePhase =
       readonly detail: string;
     };
 
-/** Going back to Stable with this device's data erased. */
-export type FreshStart =
-  | { readonly kind: "idle" }
-  | { readonly kind: "downloading"; readonly version: string; readonly percent: number }
-  /** Stable is downloaded and checked; erasing waits for the final confirmation. */
-  | { readonly kind: "ready"; readonly version: string }
-  | { readonly kind: "failed"; readonly detail: string }
-  /**
-   * A confirmed start didn't install Stable, so nothing was erased. `detail` is the system's
-   * reason when it refused the release; null when an earlier run was interrupted.
-   */
-  | { readonly kind: "not-installed"; readonly version: string; readonly detail: string | null };
-
 export interface UpdateStatus {
   /** The installed version. */
   readonly version: string;
   readonly channel: Channel;
-  /**
-   * On Stable, when the installed nightly is newer than the newest stable release: that
-   * release. Updates resume once Stable passes the installed version.
-   */
-  readonly aheadOf: string | null;
   readonly update: UpdatePhase;
-  readonly fresh: FreshStart;
 }
