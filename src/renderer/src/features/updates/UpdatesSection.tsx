@@ -1,4 +1,4 @@
-// Updates in the Settings sheet: the installed version, the channel, and the one action that
+// The Updates tab of Settings: the installed version, the channel, and the one action that
 // fits the current state. Downloads and restarts only happen when the user starts them.
 import { Radio } from "@base-ui/react/radio";
 import { RadioGroup } from "@base-ui/react/radio-group";
@@ -24,8 +24,7 @@ export function UpdatesSection() {
   const { status, setChannel } = useUpdates();
   if (!status) return null;
   return (
-    <section className="mt-10">
-      <h3 className="mb-4 text-sm font-medium text-muted-foreground">Updates</h3>
+    <section>
       <div className="mb-4 flex gap-4 text-[0.9375rem]">
         <span className="w-28 flex-none text-muted-foreground">Version</span>
         <span className="min-w-0 truncate">{status.version}</span>
@@ -88,10 +87,7 @@ function UpdateState({ status }: { status: UpdateStatus }) {
     case "ready":
       return (
         <Row note={`Version ${update.version} is ready.`}>
-          <Button
-            variant="primary"
-            onClick={() => useUi.setState({ updateDialog: "restart", settingsOpen: false })}
-          >
+          <Button variant="primary" onClick={() => useUi.setState({ updateDialog: "restart" })}>
             Restart to update
           </Button>
         </Row>

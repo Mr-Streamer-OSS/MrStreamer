@@ -12,13 +12,17 @@ export function toDepth(value: number): GuideDepth {
 
 export type View = "home" | "live";
 
+/** The tabs of the Settings page. */
+export type SettingsTab = "subscription" | "updates" | "about";
+
 /** The update dialog on screen: the restart question. */
 type UpdateDialog = "restart";
 
 interface UiState {
   readonly view: View;
   readonly searchOpen: boolean;
-  readonly settingsOpen: boolean;
+  /** The Settings tab on screen, over the current view; null while Settings is closed. */
+  readonly settings: SettingsTab | null;
   /** Set while the login form edits an existing subscription. */
   readonly editingLogin: boolean;
   /** Selected Live TV category. Null shows all channels. */
@@ -31,7 +35,7 @@ interface UiState {
 export const useUi = create<UiState>(() => ({
   view: "home",
   searchOpen: false,
-  settingsOpen: false,
+  settings: null,
   editingLogin: false,
   categoryId: null,
   guideDepth: 0,

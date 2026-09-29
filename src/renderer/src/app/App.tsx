@@ -4,7 +4,7 @@ import { ConnectScreen } from "../features/connect/ConnectScreen.tsx";
 import { HomeScreen } from "../features/home/HomeScreen.tsx";
 import { LiveScreen } from "../features/live/LiveScreen.tsx";
 import { SearchPalette } from "../features/search/SearchPalette.tsx";
-import { SettingsSheet } from "../features/settings/SettingsSheet.tsx";
+import { SettingsPage } from "../features/settings/SettingsPage.tsx";
 import { UpdateDialogs } from "../features/updates/UpdateDialogs.tsx";
 import { appError, describeError } from "../lib/errors.ts";
 import { queries } from "../lib/queries.ts";
@@ -46,7 +46,7 @@ function Shell() {
     function onKey(event: KeyboardEvent) {
       if (!hasModifier(event)) return;
       if (event.key === "k") useUi.setState((state) => ({ searchOpen: !state.searchOpen }));
-      else if (event.key === ",") useUi.setState({ settingsOpen: true, searchOpen: false });
+      else if (event.key === ",") useUi.setState({ settings: "subscription", searchOpen: false });
       else return;
       event.preventDefault();
     }
@@ -58,7 +58,7 @@ function Shell() {
     <>
       {view === "home" ? <HomeScreen /> : <LiveScreen />}
       <SearchPalette />
-      <SettingsSheet />
+      <SettingsPage />
       <UpdateDialogs />
     </>
   );

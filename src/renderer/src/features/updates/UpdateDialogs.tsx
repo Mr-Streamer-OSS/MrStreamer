@@ -11,7 +11,7 @@ import { useUpdates } from "./use-updates.ts";
  * release was refused or the install couldn't start; Settings then shows why.
  */
 function restart(): void {
-  const showSettings = () => useUi.setState({ settingsOpen: true });
+  const showSettings = () => useUi.setState({ settings: "updates" });
   call("updates.restart").then(showSettings, showSettings);
 }
 

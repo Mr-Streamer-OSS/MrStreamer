@@ -9,7 +9,7 @@ export function UpdateIndicator({ overlay }: { overlay: boolean }) {
   if (!status) return null;
   const { update } = status;
   const quiet = overlay ? "media" : "ghost";
-  const openSettings = () => useUi.setState({ settingsOpen: true });
+  const openSettings = () => useUi.setState({ settings: "updates" });
 
   if (update.kind === "downloading") {
     return (

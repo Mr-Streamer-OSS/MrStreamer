@@ -46,7 +46,7 @@ function Palette() {
 
   const choose = (channel: LiveChannel | undefined) => {
     if (!channel) return;
-    useUi.setState({ searchOpen: false, view: "live" });
+    useUi.setState({ searchOpen: false, settings: null, view: "live" });
     player.play(channel);
   };
 
