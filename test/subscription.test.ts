@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { AppFailure, type AppError } from "../src/shared/errors.ts";
 import { createSubscriptions } from "../src/main/services/subscription.ts";
 import type { Secrets } from "../src/main/platform/secrets.ts";
-import { mockProvider, tempDir, testSecrets, userAgent } from "./support.ts";
+import { fakeProvider, tempDir, testSecrets, userAgent } from "./support.ts";
 
 async function subscriptions(fetchImpl: typeof fetch = fetch) {
   const dataDir = await tempDir();
@@ -51,7 +51,7 @@ async function failure(promise: Promise<unknown>): Promise<AppError> {
 
 describe("subscriptions", () => {
   it("connects with a valid login and reports the account", async () => {
-    const provider = await mockProvider();
+    const provider = await fakeProvider();
     const { service } = await subscriptions();
 
     const summary = await service.connect({
@@ -67,7 +67,7 @@ describe("subscriptions", () => {
   });
 
   it("accepts a pasted M3U link that carries the login", async () => {
-    const provider = await mockProvider();
+    const provider = await fakeProvider();
     const { service } = await subscriptions();
 
     const summary = await service.connect({
@@ -80,7 +80,7 @@ describe("subscriptions", () => {
   });
 
   it("rejects a wrong password", async () => {
-    const provider = await mockProvider();
+    const provider = await fakeProvider();
     const { service } = await subscriptions();
 
     const error = await failure(
@@ -92,7 +92,7 @@ describe("subscriptions", () => {
   });
 
   it("explains an expired account", async () => {
-    const provider = await mockProvider({ accountStatus: "Expired" });
+    const provider = await fakeProvider({ accountStatus: "Expired" });
     const { service } = await subscriptions();
 
     const error = await failure(
@@ -103,7 +103,7 @@ describe("subscriptions", () => {
   });
 
   it("reports a server that cannot be reached", async () => {
-    const provider = await mockProvider();
+    const provider = await fakeProvider();
     await provider.close();
     const { service } = await subscriptions();
 
@@ -125,7 +125,7 @@ describe("subscriptions", () => {
   });
 
   it("survives a restart without storing the password in plain text", async () => {
-    const provider = await mockProvider({ password: "s3cret-pass" });
+    const provider = await fakeProvider({ password: "s3cret-pass" });
     const { dataDir, create, service } = await subscriptions();
     await service.connect({
       server: `${provider.url}/`,
@@ -141,7 +141,7 @@ describe("subscriptions", () => {
   });
 
   it("keeps a removal when an account check answers afterwards", async () => {
-    const provider = await mockProvider();
+    const provider = await fakeProvider();
     const holdable = holdableFetch();
     const { create, service } = await subscriptions(holdable.fetch);
     await service.connect({ server: provider.url, username: "demo", password: "demo" });
@@ -158,7 +158,7 @@ describe("subscriptions", () => {
   });
 
   it("keeps a newer login when an account check answers afterwards", async () => {
-    const [first, second] = [await mockProvider(), await mockProvider()];
+    const [first, second] = [await fakeProvider(), await fakeProvider()];
     const holdable = holdableFetch();
     const { create, service } = await subscriptions(holdable.fetch);
     await service.connect({ server: first.url, username: "demo", password: "demo" });
@@ -175,7 +175,7 @@ describe("subscriptions", () => {
   });
 
   it("asks for the password again when the keychain no longer opens it", async () => {
-    const provider = await mockProvider();
+    const provider = await fakeProvider();
     const dataDir = await tempDir();
     const login = { server: provider.url, username: "demo", password: "demo" };
     const create = (secrets: Secrets) =>
@@ -197,7 +197,7 @@ describe("subscriptions", () => {
   });
 
   it("forgets the subscription when removed", async () => {
-    const provider = await mockProvider();
+    const provider = await fakeProvider();
     const { create, service } = await subscriptions();
     await service.connect({ server: provider.url, username: "demo", password: "demo" });
 

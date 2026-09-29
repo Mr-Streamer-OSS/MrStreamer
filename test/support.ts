@@ -1,15 +1,10 @@
-// Shared test helpers: a mock provider per test and throwaway data folders.
+// Shared test helpers: a fake provider per test and throwaway data folders.
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach } from "vitest";
 import type { Secrets } from "../src/main/platform/secrets.ts";
-import {
-  startMockProvider,
-  type MockProvider,
-  type MockProviderOptions,
-} from "../tools/mock-provider/app.ts";
-import { nullPacketSource } from "../tools/mock-provider/streams.ts";
+import { startFakeProvider, type FakeProvider, type FakeProviderOptions } from "./fake-provider.ts";
 
 const cleanups: (() => Promise<void>)[] = [];
 
@@ -17,14 +12,8 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-export async function mockProvider(
-  options: Partial<MockProviderOptions> = {},
-): Promise<MockProvider> {
-  const provider = await startMockProvider({
-    streams: nullPacketSource(),
-    channels: 300,
-    ...options,
-  });
+export async function fakeProvider(options: FakeProviderOptions = {}): Promise<FakeProvider> {
+  const provider = await startFakeProvider(options);
   cleanups.push(() => provider.close());
   return provider;
 }
