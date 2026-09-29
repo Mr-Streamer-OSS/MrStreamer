@@ -3,9 +3,11 @@
 #
 #   scripts/build-ffmpeg.sh mac-arm64    on an Apple silicon Mac
 #   scripts/build-ffmpeg.sh linux-x64    on x64 Linux
-#   scripts/build-ffmpeg.sh win-x64      on x64 Linux, cross-compiled with mingw-w64
+#   scripts/build-ffmpeg.sh win-x64      on Windows in an MSYS2 MINGW64 shell, or cross-compiled
+#                                        on x64 Linux with mingw-w64
 #
-# Needs a C compiler, make, nasm, pkg-config, git and curl; win-x64 also x86_64-w64-mingw32-gcc.
+# Needs a C compiler, make, nasm, pkg-config, git and curl; a Linux cross build also needs
+# x86_64-w64-mingw32-gcc.
 # Sources are pinned: FFmpeg by SHA-256, x264 by commit. The result lands in vendor/ffmpeg/<target>
 # with the licences and the exact configuration, where electron-builder picks it up. The build
 # keeps only what the conversion uses: MPEG-TS in and out, the decoders for the codecs IPTV
@@ -32,9 +34,12 @@ case $target in
     ;;
   linux-x64) ;;
   win-x64)
-    x264_flags+=(--host=x86_64-w64-mingw32 --cross-prefix=x86_64-w64-mingw32-)
-    ffmpeg_flags+=(--target-os=mingw32 --arch=x86_64 --cross-prefix=x86_64-w64-mingw32-
-      --enable-cross-compile --extra-ldflags=-static --pkg-config=pkg-config)
+    ffmpeg_flags+=(--extra-ldflags=-static --pkg-config=pkg-config)
+    if [[ $(uname -s) != MINGW* ]]; then
+      x264_flags+=(--host=x86_64-w64-mingw32 --cross-prefix=x86_64-w64-mingw32-)
+      ffmpeg_flags+=(--target-os=mingw32 --arch=x86_64 --cross-prefix=x86_64-w64-mingw32-
+        --enable-cross-compile)
+    fi
     executable=ffmpeg.exe
     ;;
   *)
@@ -97,7 +102,7 @@ cp "ffmpeg/$executable" "$out/"
 case $target in
   mac-arm64) strip -x "$out/$executable" ;;
   linux-x64) strip "$out/$executable" ;;
-  win-x64) x86_64-w64-mingw32-strip "$out/$executable" ;;
+  win-x64) "$(command -v x86_64-w64-mingw32-strip || command -v strip)" "$out/$executable" ;;
 esac
 cp ffmpeg/COPYING.GPLv2 "$out/LICENSE-FFmpeg.txt"
 cp x264/COPYING "$out/LICENSE-x264.txt"

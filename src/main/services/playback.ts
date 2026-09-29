@@ -12,6 +12,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { Readable } from "node:stream";
 import { AppFailure } from "../../shared/errors.ts";
 import type { Codec, StreamFailure, StreamFormat, StreamSession } from "../../shared/playback.ts";
+import { createCleanStart } from "../playback/clean-start.ts";
 import { ffmpegArguments, planConversion, type Conversion } from "../playback/convert.ts";
 import { createInspector, type Inspection, type StreamLayout } from "../playback/inspect.ts";
 import type { CatalogueSource } from "./library.ts";
@@ -20,6 +21,8 @@ import type { CatalogueSource } from "./library.ts";
 const CONNECT_TIMEOUT_MS = 15_000;
 /** Waits before retrying a refused stream. Providers can take a moment to free the slot of a stream we just closed. */
 const REFUSED_RETRY_DELAYS_MS = [500, 1500];
+/** Video codecs whose streams start on a keyframe; see ../playback/clean-start.ts. */
+const CLEAN_START_CODECS: ReadonlySet<Codec> = new Set(["h264", "hevc", "hevc-10bit"]);
 /** How much of a stream the proxy reads, at most, before deciding how to deliver it. */
 const INSPECT_LIMIT = { bytes: 2 * 1024 * 1024, ms: 2500 };
 
@@ -111,7 +114,12 @@ export function createPlayback(deps: PlaybackDeps) {
       response.destroy();
       return;
     }
-    const body = Readable.from(replay(start, reader));
+    const video = start.layout?.video;
+    const chunks =
+      video && video.codec !== "unknown" && CLEAN_START_CODECS.has(video.codec)
+        ? cleanStart(replay(start, reader), createCleanStart(video.pid, video.codec))
+        : replay(start, reader);
+    const body = Readable.from(chunks);
     body.on("error", (cause) => {
       if (!signal.aborted) session.failure = { kind: "network", detail: String(cause) };
       response.destroy();
@@ -152,10 +160,13 @@ export function createPlayback(deps: PlaybackDeps) {
       if (!signal.aborted) session.failure = { kind: "unsupported", detail: String(cause) };
       response.destroy();
     });
-    child.on("exit", (code) => {
+    // "close" comes after ffmpeg's output has been read, so a stream that ends normally reaches
+    // the player whole; only a failed conversion cuts the response.
+    child.on("close", (code) => {
       signal.removeEventListener("abort", stop);
       body.destroy();
-      if (!signal.aborted && code !== 0 && !session.failure) {
+      if (code === 0 || signal.aborted) return;
+      if (!session.failure) {
         const detail = errors.trim().split("\n").at(-1) ?? `ffmpeg exited with ${code}`;
         session.failure = {
           kind: "unsupported",
@@ -339,6 +350,17 @@ async function* replay(
     }
   } finally {
     void reader.cancel().catch(() => {});
+  }
+}
+
+/** The stream from its first decodable picture on. */
+async function* cleanStart(
+  chunks: AsyncGenerator<Uint8Array>,
+  filter: ReturnType<typeof createCleanStart>,
+): AsyncGenerator<Uint8Array> {
+  for await (const chunk of chunks) {
+    const filtered = filter.push(chunk);
+    if (filtered.length > 0) yield filtered;
   }
 }
 

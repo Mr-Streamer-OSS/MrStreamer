@@ -67,6 +67,8 @@ export const FIXTURE_CHANNELS: readonly { name: string; fixture: string | null }
   { name: "TEST | HEVC + AAC", fixture: "hevc-aac.mpegts" },
   { name: "TEST | HEVC 10-bit + AAC", fixture: "hevc10-aac.mpegts" },
   { name: "TEST | MPEG-2 + MP2", fixture: "mpeg2-mp2.mpegts" },
+  /** An open-GOP broadcast joined mid-sequence: it starts with frames that cannot be decoded. */
+  { name: "TEST | H.264 joined mid-stream", fixture: "h264-open-gop-joined.mpegts" },
   { name: "TEST | Offline", fixture: null },
 ];
 

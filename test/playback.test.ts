@@ -166,7 +166,36 @@ describe("playback", () => {
     await playback.dispose();
   });
 
-  describe.skipIf(!hasFfmpeg)("with ffmpeg", () => {
+  // Converting video in software takes seconds, more so while other tests run.
+  describe.skipIf(!hasFfmpeg)("with ffmpeg", { timeout: 30_000 }, () => {
+    it("starts a stream joined mid-sequence on its first decodable picture", async () => {
+      const { provider, playback } = await connectedPlayback();
+
+      const session = await playback.open(
+        channelNamed(provider, "TEST | H.264 joined mid-stream"),
+        LINUX,
+      );
+      const received = Buffer.from(await (await fetch(session.url)).arrayBuffer());
+      const probe = spawnSync(
+        "ffprobe",
+        [
+          "-select_streams",
+          "v",
+          "-show_entries",
+          "frame=key_frame",
+          "-of",
+          "csv=p=0",
+          "-i",
+          "pipe:0",
+        ],
+        { input: received, encoding: "utf8" },
+      );
+
+      expect(probe.stdout.trim().split("\n")[0]).toBe("1");
+      expect(probe.stderr).not.toMatch(/non-existing|decode_slice_header error|reference/i);
+      await playback.dispose();
+    });
+
     it.each([
       ["TEST | H.264 + MP2", LINUX, { video: "h264", audio: "aac" }],
       ["TEST | H.264 + AC-3", LINUX, { video: "h264", audio: "aac" }],

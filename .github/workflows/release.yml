@@ -1,24 +1,28 @@
-# Prepares a Stable or Nightly release as a draft: checks, installers for macOS, Windows and Linux,
-# installed-app smoke tests, update metadata, checksums and notes. Nothing is published; a
-# maintainer tests the draft's files and publishes it. docs/maintainers/releasing.md explains
-# the versions and the steps around it.
+# Builds releases: macOS, Windows and Linux installers, installed-app smoke tests, update metadata,
+# checksums and notes. docs/maintainers/releasing.md explains versions and the steps around it.
 #
-# On a pull request labelled "release dry run" it builds, signs and tests the same way, keeps the
-# files as workflow artifacts and creates no release.
+# - Nightly: every six hours when main has changed since the last nightly, or by hand. Published
+#   as a pre-release once every check passes; the app's Nightly channel picks it up.
+# - Stable: by hand. Created as a draft for a maintainer to test and publish. Afterwards main
+#   moves on to the next minor version in a chore(release) commit, which later nightlies build.
+# - Dry run: a pull request labelled "release dry run" builds, signs and tests the same way,
+#   keeps the files as workflow artifacts and releases nothing.
 name: Release
 
 on:
+  schedule:
+    - cron: "23 */6 * * *"
   workflow_dispatch:
     inputs:
       channel:
         description: Channel
         type: choice
         options: [nightly, stable]
-        required: true
+        default: nightly
       version:
-        description: Stable version, or the stable version a nightly leads up to, such as 0.2.0
+        description: Stable version to release, such as 0.2.0. Empty uses the version on main.
         type: string
-        required: true
+        required: false
   pull_request:
     types: [labeled, synchronize]
 
@@ -32,21 +36,42 @@ concurrency:
 jobs:
   plan:
     name: Plan the version
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'release dry run')
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'release dry run')
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.plan.outputs.version }}
       tag: ${{ steps.plan.outputs.tag }}
       channel: ${{ steps.plan.outputs.channel }}
-      dry-run: ${{ github.event_name != 'workflow_dispatch' }}
+      dry-run: ${{ github.event_name == 'pull_request' }}
+      skip: ${{ steps.changes.outputs.skip }}
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
+      - name: Releases come from main
+        if: github.event_name != 'pull_request' && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Run releases from main; use a pull request labelled \"release dry run\" to try a branch."
+          exit 1
+      # A scheduled nightly only builds when main changed since the last nightly. Version bumps
+      # after a stable release don't count.
+      - id: changes
+        if: github.event_name == 'schedule'
+        run: |
+          last=$(gh release list --limit 100 --json tagName,isPrerelease,isDraft \
+            --jq '[.[] | select(.isPrerelease and (.isDraft | not))][0].tagName // empty')
+          if [ -n "$last" ] && [ -z "$(git log --format=%s "$last..HEAD" | grep -v '^chore(release)')" ]; then
+            echo "Nothing new on main since $last."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
       - id: plan
+        if: steps.changes.outputs.skip != 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
           CHANNEL: ${{ inputs.channel || 'nightly' }}
           VERSION: ${{ inputs.version }}
         run: |
@@ -56,48 +81,12 @@ jobs:
 
   checks:
     needs: plan
+    if: needs.plan.outputs.skip != 'true'
     uses: ./.github/workflows/ci.yml
-
-  ffmpeg:
-    name: ffmpeg ${{ matrix.target }}
-    needs: plan
-    strategy:
-      matrix:
-        include:
-          - { target: linux-x64, runner: ubuntu-24.04 }
-          - { target: win-x64, runner: ubuntu-24.04 }
-          - { target: mac-arm64, runner: macos-15 }
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - id: cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: vendor/ffmpeg/${{ matrix.target }}
-          key: ffmpeg-${{ matrix.target }}-${{ hashFiles('scripts/build-ffmpeg.sh') }}
-      # Linux and Windows builds use Ubuntu 22.04, so the Linux binary runs on older systems too.
-      - if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Linux'
-        run: |
-          docker run --rm -v "$PWD":/repo -w /repo ubuntu:22.04 bash -c '
-            apt-get update -qq &&
-            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-              build-essential nasm pkg-config git curl ca-certificates xz-utils mingw-w64 >/dev/null &&
-            scripts/build-ffmpeg.sh ${{ matrix.target }} &&
-            chown -R '"$(id -u):$(id -g)"' vendor'
-      - if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'macOS'
-        run: |
-          brew install --quiet nasm pkg-config
-          scripts/build-ffmpeg.sh ${{ matrix.target }}
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: ffmpeg-${{ matrix.target }}
-          path: vendor/ffmpeg/${{ matrix.target }}
-          if-no-files-found: error
 
   package:
     name: Package ${{ matrix.target }}
-    needs: [plan, checks, ffmpeg]
+    needs: [plan, checks]
     strategy:
       matrix:
         include:
@@ -119,17 +108,48 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+
+      # The bundled ffmpeg, rebuilt only when scripts/build-ffmpeg.sh changes.
+      - id: ffmpeg
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          name: ffmpeg-${{ matrix.target }}
           path: vendor/ffmpeg/${{ matrix.target }}
-      - run: chmod +x vendor/ffmpeg/${{ matrix.target }}/ffmpeg*
+          key: ffmpeg-${{ matrix.target }}-${{ hashFiles('scripts/build-ffmpeg.sh') }}
+      - name: Build ffmpeg on Linux
+        # Ubuntu 22.04, so the binary also runs on older systems.
+        if: steps.ffmpeg.outputs.cache-hit != 'true' && runner.os == 'Linux'
+        run: |
+          docker run --rm -v "$PWD":/repo -w /repo ubuntu:22.04 bash -c '
+            apt-get update -qq &&
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+              build-essential nasm pkg-config git curl ca-certificates xz-utils >/dev/null &&
+            scripts/build-ffmpeg.sh linux-x64 &&
+            chown -R '"$(id -u):$(id -g)"' vendor'
+      - name: Build ffmpeg on macOS
+        if: steps.ffmpeg.outputs.cache-hit != 'true' && runner.os == 'macOS'
+        run: |
+          brew install --quiet nasm pkg-config
+          scripts/build-ffmpeg.sh mac-arm64
+      - if: steps.ffmpeg.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            make git curl mingw-w64-x86_64-gcc mingw-w64-x86_64-nasm mingw-w64-x86_64-pkgconf
+      - name: Build ffmpeg on Windows
+        if: steps.ffmpeg.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        shell: msys2 {0}
+        run: scripts/build-ffmpeg.sh win-x64
+
       - run: npm pkg set version="$VERSION"
       - run: pnpm build
 
       - name: Build for macOS, signed and notarized
         if: runner.os == 'macOS'
         env:
+          # Dry runs happen on this repository's own labelled pull requests, so they sign too.
+          CSC_FOR_PULL_REQUEST: "true"
           CSC_LINK: ${{ secrets.MAC_CERTIFICATE_P12 }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
           APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
@@ -213,7 +233,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    name: Create the draft release
+    name: Release
     needs: [plan, package]
     if: needs.plan.outputs.dry-run == 'false'
     runs-on: ubuntu-24.04
@@ -242,7 +262,10 @@ jobs:
       - name: Write checksums and notes
         run: |
           (cd release && sha256sum * > SHA256SUMS.txt)
-          previous=$(gh release list --limit 100 --json tagName,isDraft --jq '[.[] | select(.isDraft | not) | .tagName][0] // empty')
+          # Notes list the changes since the previous release of the same channel.
+          prerelease=$([ "$CHANNEL" = nightly ] && echo true || echo false)
+          previous=$(gh release list --limit 100 --json tagName,isDraft,isPrerelease \
+            --jq "[.[] | select((.isDraft | not) and .isPrerelease == $prerelease)][0].tagName // empty")
           {
             echo "**${CHANNEL^}** · built from \`${GITHUB_SHA::12}\`"
             echo
@@ -251,8 +274,40 @@ jobs:
             gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" \
               ${previous:+-f previous_tag_name="$previous"} --jq .body
           } > notes.md
-      - name: Create the draft
+      # Nightlies go out as pre-releases right away; stable releases wait as drafts for testing.
+      - name: Create the release
         run: |
-          gh release create "$TAG" release/* --draft --target "$GITHUB_SHA" \
-            --title "Mr. Streamer $VERSION" --notes-file notes.md \
-            $([ "$CHANNEL" = nightly ] && echo --prerelease)
+          if [ "$CHANNEL" = nightly ]; then
+            flags=(--prerelease --latest=false)
+          else
+            flags=(--draft)
+          fi
+          gh release create "$TAG" release/* "${flags[@]}" --target "$GITHUB_SHA" \
+            --title "Mr. Streamer $VERSION" --notes-file notes.md
+
+  next-version:
+    name: Move main to the next version
+    needs: [plan, release]
+    if: needs.plan.outputs.channel == 'stable'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+      - name: Set the next minor version on main
+        run: |
+          current=$(node -p 'require("./package.json").version')
+          next=$(node -p "const [major, minor] = process.env.VERSION.split('.').map(Number); major + '.' + (minor + 1) + '.0'")
+          if [ "$(printf '%s\n' "$current" "$next" | sort -V | tail -1)" = "$current" ]; then
+            echo "main is already at $current."
+            exit 0
+          fi
+          npm pkg set version="$next"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore(release): start $next after releasing $VERSION"
+          git push origin HEAD:main

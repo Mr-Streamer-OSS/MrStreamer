@@ -61,7 +61,9 @@ export function ffmpegArguments(conversion: Conversion): string[] {
     );
   }
   if (conversion.audio === "copy") args.push("-c:a", "copy");
-  if (conversion.audio === "aac") args.push("-c:a", "aac", "-b:a", "256k");
+  // Stereo: Chromium's player cannot always read converted 5.1 AAC, and plays 5.1 as stereo on
+  // stereo outputs anyway.
+  if (conversion.audio === "aac") args.push("-c:a", "aac", "-b:a", "192k", "-ac", "2");
   args.push("-f", "mpegts", "-muxdelay", "0", "-muxpreload", "0", "pipe:1");
   return args;
 }
