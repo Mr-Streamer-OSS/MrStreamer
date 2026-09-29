@@ -1,17 +1,19 @@
-# Builds releases: macOS, Windows and Linux installers, installed-app smoke tests, update metadata,
-# checksums and notes. docs/maintainers/releasing.md explains versions and the steps around it.
+# Builds and publishes releases; docs/maintainers/releasing.md describes the process.
 #
-# - Nightly: every six hours when main has changed since the last nightly, or by hand. Published
-#   as a pre-release once every check passes; the app's Nightly channel picks it up.
-# - Stable: by hand. Created as a draft for a maintainer to test and publish. Afterwards main
-#   moves on to the next minor version in a chore(release) commit, which later nightlies build.
-# - Dry run: a pull request labelled "release dry run" builds, signs and tests the same way,
-#   keeps the files as workflow artifacts and releases nothing.
+# - Nightly: checked every 30 minutes, built when main has new commits and the last nightly is at
+#   least six hours old. Started by hand, it builds main right away.
+# - Stable: by hand. Rebuilds the commit of the latest published nightly with a stable version,
+#   publishes it as the latest release, then records the version on main.
+# - Dry run: labelling a pull request "release dry run" builds, signs and tests its head commit
+#   once, keeps the files as workflow artifacts and publishes nothing.
+#
+# Every job checks out the commit the plan resolved, so main moving during a run changes nothing.
 name: Release
 
 on:
   schedule:
-    - cron: "23 */6 * * *"
+    # Away from the top of the hour, when scheduled runs start late.
+    - cron: "8,38 * * * *"
   workflow_dispatch:
     inputs:
       channel:
@@ -20,73 +22,113 @@ on:
         options: [nightly, stable]
         default: nightly
       version:
-        description: Stable version to release, such as 0.2.0. Empty uses the version on main.
+        description: Stable version, such as 0.1.0. Empty releases the version the latest nightly previewed.
         type: string
         required: false
   pull_request:
-    types: [labeled, synchronize]
+    types: [labeled]
 
 permissions:
   contents: read
 
+# One queue for nightlies, one for stable releases and one per pull request's dry runs. A run waits
+# for the one ahead of it and is never cancelled, so a requested stable release is never dropped.
+# A scheduled nightly decides whether it is due once its turn comes.
 concurrency:
-  group: release-${{ github.ref }}
+  group: >-
+    release-${{ github.event_name == 'pull_request' && format('dry-run-{0}', github.event.pull_request.number)
+    || inputs.channel == 'stable' && 'stable' || 'nightly' }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   plan:
-    name: Plan the version
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'release dry run')
+    name: Plan
+    # Dry runs only for branches of this repository: forks get no signing secrets.
+    if: >-
+      github.event_name != 'pull_request' || (github.event.label.name == 'release dry run'
+      && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
     outputs:
+      skip: ${{ steps.plan.outputs.skip }}
+      channel: ${{ steps.plan.outputs.channel }}
       version: ${{ steps.plan.outputs.version }}
       tag: ${{ steps.plan.outputs.tag }}
-      channel: ${{ steps.plan.outputs.channel }}
+      sha: ${{ steps.plan.outputs.sha }}
+      previous-tag: ${{ steps.plan.outputs.previous-tag }}
       dry-run: ${{ github.event_name == 'pull_request' }}
-      skip: ${{ steps.changes.outputs.skip }}
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - name: Releases come from main
-        if: github.event_name != 'pull_request' && github.ref != 'refs/heads/main'
-        run: |
-          echo "::error::Run releases from main; use a pull request labelled \"release dry run\" to try a branch."
-          exit 1
-      # A scheduled nightly only builds when main changed since the last nightly. Version bumps
-      # after a stable release don't count.
-      - id: changes
-        if: github.event_name == 'schedule'
-        run: |
-          last=$(gh release list --limit 100 --json tagName,isPrerelease,isDraft \
-            --jq '[.[] | select(.isPrerelease and (.isDraft | not))][0].tagName // empty')
-          if [ -n "$last" ] && [ -z "$(git log --format=%s "$last..HEAD" | grep -v '^chore(release)')" ]; then
-            echo "Nothing new on main since $last."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          fi
+      # The label asks for one dry run of the commit it was added to. Add it again for another.
+      - name: Take the label off
+        if: github.event_name == 'pull_request'
+        run: gh api -X DELETE "repos/$GITHUB_REPOSITORY/issues/${{ github.event.pull_request.number }}/labels/release%20dry%20run" --silent || echo "The label was already off."
       - id: plan
-        if: steps.changes.outputs.skip != 'true'
         env:
-          CHANNEL: ${{ inputs.channel || 'nightly' }}
+          CHANNEL: ${{ inputs.channel }}
           VERSION: ${{ inputs.version }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN: ${{ github.run_number }}
         run: |
-          node scripts/release-plan.ts --channel "$CHANNEL" \
-            --version "${VERSION:-$(node -p 'require("./package.json").version')}" \
-            --run "${{ github.run_number }}"
+          case "$GITHUB_EVENT_NAME/$CHANNEL" in
+            schedule/*)
+              node scripts/release-plan.ts nightly --ref "$GITHUB_REF" --sha "$GITHUB_SHA" --run "$RUN" --scheduled ;;
+            pull_request/*)
+              node scripts/release-plan.ts nightly --ref "$GITHUB_REF" --sha "$HEAD_SHA" --run "$RUN" --dry-run ;;
+            workflow_dispatch/stable)
+              node scripts/release-plan.ts stable --ref "$GITHUB_REF" --version "$VERSION" ;;
+            workflow_dispatch/nightly)
+              node scripts/release-plan.ts nightly --ref "$GITHUB_REF" --sha "$GITHUB_SHA" --run "$RUN" ;;
+          esac
 
   checks:
+    name: Checks
     needs: plan
-    if: needs.plan.outputs.skip != 'true'
+    if: needs.plan.outputs.skip == 'false'
     uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.plan.outputs.sha }}
+
+  # The JavaScript is the same on every platform: built once, packaged three times.
+  bundle:
+    name: Build JS bundle
+    needs: plan
+    if: needs.plan.outputs.skip == 'false'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: npm pkg set version="${{ needs.plan.outputs.version }}"
+      - run: pnpm build
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: js-bundle
+          path: out/
+          retention-days: 1
+          if-no-files-found: error
 
   package:
     name: Package ${{ matrix.target }}
-    needs: [plan, checks]
+    needs: [plan, bundle]
     strategy:
       # Every platform reports its own result; the release still needs all of them.
       fail-fast: false
@@ -104,6 +146,8 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -145,7 +189,10 @@ jobs:
         run: scripts/build-ffmpeg.sh win-x64
 
       - run: npm pkg set version="$VERSION"
-      - run: pnpm build
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: js-bundle
+          path: out
 
       - name: Build for macOS, signed and notarized
         if: runner.os == 'macOS'
@@ -233,27 +280,44 @@ jobs:
             dist/*.deb
             dist/*.blockmap
             dist/latest*.yml
+          # Dry runs keep their files for testing; a release keeps them on GitHub Releases.
+          retention-days: ${{ needs.plan.outputs.dry-run == 'true' && 14 || 3 }}
           if-no-files-found: error
 
-  release:
-    name: Release
-    needs: [plan, package]
+  publish:
+    name: Publish GitHub Release
+    needs: [plan, checks, package]
     if: needs.plan.outputs.dry-run == 'false'
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
+      CHANNEL: ${{ needs.plan.outputs.channel }}
       VERSION: ${{ needs.plan.outputs.version }}
       TAG: ${{ needs.plan.outputs.tag }}
-      CHANNEL: ${{ needs.plan.outputs.channel }}
+      SHA: ${{ needs.plan.outputs.sha }}
+      PREVIOUS_TAG: ${{ needs.plan.outputs.previous-tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: release-*
           path: release
           merge-multiple: true
+      - name: Check every platform's files are here
+        run: |
+          for pattern in "Mr-Streamer-$VERSION-mac-arm64.dmg" "Mr-Streamer-$VERSION-mac-arm64.zip" latest-mac.yml \
+            "Mr-Streamer-$VERSION-win-x64-setup.exe" latest.yml \
+            "Mr-Streamer-$VERSION-linux-*.AppImage" "Mr-Streamer-$VERSION-linux-*.deb" latest-linux.yml; do
+            compgen -G "release/$pattern" >/dev/null || { echo "::error::No $pattern among the packaged files."; exit 1; }
+          done
       # The installers contain FFmpeg and x264 under the GPL; their exact sources ship alongside.
       - name: Add the FFmpeg and x264 sources
         run: |
@@ -265,34 +329,40 @@ jobs:
       - name: Write checksums and notes
         run: |
           (cd release && sha256sum * > SHA256SUMS.txt)
-          # Notes list the changes since the previous release of the same channel.
-          prerelease=$([ "$CHANNEL" = nightly ] && echo true || echo false)
-          previous=$(gh release list --limit 100 --json tagName,isDraft,isPrerelease \
-            --jq "[.[] | select((.isDraft | not) and .isPrerelease == $prerelease)][0].tagName // empty")
           {
-            echo "**${CHANNEL^}** · built from \`${GITHUB_SHA::12}\`"
+            echo "**${CHANNEL^}** · built from \`${SHA::12}\`"
             echo
             echo "Download the DMG on Mac, the setup .exe on Windows, and the AppImage or .deb on Linux. SHA256SUMS.txt lists every file's checksum."
             echo
-            gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" \
-              ${previous:+-f previous_tag_name="$previous"} --jq .body
+            gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$TAG" -f target_commitish="$SHA" \
+              ${PREVIOUS_TAG:+-f previous_tag_name="$PREVIOUS_TAG"} --jq .body
           } > notes.md
-      # Nightlies go out as pre-releases right away; stable releases wait as drafts for testing.
-      - name: Create the release
+      # A failed or repeated attempt can leave a draft with this tag. Users never saw it.
+      - name: Remove an unfinished attempt
         run: |
-          if [ "$CHANNEL" = nightly ]; then
-            flags=(--prerelease --latest=false)
-          else
-            flags=(--draft)
-          fi
-          gh release create "$TAG" release/* "${flags[@]}" --target "$GITHUB_SHA" \
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq ".[] | select(.draft and .tag_name == \"$TAG\") | .id" |
+            while read -r id; do gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"; done
+      - name: Check the version is still new
+        run: node scripts/release-plan.ts check --version "$VERSION"
+      # Uploads into a draft, which the app can't see, and publishes once every file is in.
+      - name: Publish
+        run: |
+          nightly=$([ "$CHANNEL" = nightly ] && echo true || echo false)
+          gh release create "$TAG" release/* --draft --prerelease="$nightly" --target "$SHA" \
             --title "Mr. Streamer $VERSION" --notes-file notes.md
+          if [ "$nightly" = true ]; then
+            gh release edit "$TAG" --draft=false --latest=false
+          else
+            gh release edit "$TAG" --draft=false --latest
+          fi
 
-  next-version:
-    name: Move main to the next version
-    needs: [plan, release]
+  finalize:
+    name: Record the stable version on main
+    needs: [plan, publish]
     if: needs.plan.outputs.channel == 'stable'
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     permissions:
       contents: write
     env:
@@ -300,17 +370,22 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: main
-      - name: Set the next minor version on main
+          ref: ${{ github.ref_name }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      # Main may move while this runs: start again from its newest commit when a push is refused.
+      - name: Commit the version
         run: |
-          current=$(node -p 'require("./package.json").version')
-          next=$(node -p "const [major, minor] = process.env.VERSION.split('.').map(Number); major + '.' + (minor + 1) + '.0'")
-          if [ "$(printf '%s\n' "$current" "$next" | sort -V | tail -1)" = "$current" ]; then
-            echo "main is already at $current."
-            exit 0
-          fi
-          npm pkg set version="$next"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -am "chore(release): start $next after releasing $VERSION"
-          git push origin HEAD:main
+          for attempt in 1 2 3; do
+            git fetch -q --depth 1 origin "$GITHUB_REF_NAME" && git reset -q --hard FETCH_HEAD
+            node scripts/release-plan.ts record --version "$VERSION"
+            git diff --quiet && exit 0
+            git commit -qam "chore(release): prepare v$VERSION"
+            git push -q origin "HEAD:$GITHUB_REF_NAME" && exit 0
+            sleep $((attempt * 5))
+          done
+          echo "::error::Main kept moving; run this job again."
+          exit 1

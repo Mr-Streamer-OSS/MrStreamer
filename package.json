@@ -1,7 +1,7 @@
 {
   "name": "mr-streamer",
   "productName": "Mr. Streamer",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "description": "A cinematic player for your existing IPTV subscriptions.",
   "homepage": "https://github.com/Mr-Streamer-OSS/MrStreamer",
   "repository": {

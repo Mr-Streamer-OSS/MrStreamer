@@ -18,7 +18,7 @@ Download the newer installer from the [Releases page](https://github.com/Mr-Stre
 ## Stable and Nightly
 
 - **Stable** gets tested releases only.
-- **Nightly** gets new builds first, several times a day when there are changes, and every stable release too. Nightly builds can have rough edges.
+- **Nightly** gets new builds first, up to four a day when there are changes, and every stable release too. Nightly builds can have rough edges.
 
 The version you download sets your channel on first launch. After that, only your choice under **Updates** in Settings changes it. Installing a stable release while on Nightly keeps you on Nightly.
 
