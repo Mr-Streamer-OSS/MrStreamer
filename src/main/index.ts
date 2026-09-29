@@ -1,15 +1,19 @@
 // Composition root: creates the window and wires the services to IPC.
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { app, BrowserWindow, Menu, safeStorage, session, shell } from "electron";
 import { emit, registerIpc } from "./ipc.ts";
+import { removeUnfinishedWrites } from "./platform/json-file.ts";
 import { keychainSecrets } from "./platform/secrets.ts";
 import { createLibrary, type Library } from "./services/library.ts";
 import { createPlayback, type Playback } from "./services/playback.ts";
 import { createPreferences } from "./services/preferences.ts";
 import { createSubscriptions, type Subscriptions } from "./services/subscription.ts";
 
-const APP_ID = "io.github.stienswout.mrstreamer";
+// Matches `appId` in electron-builder.yml: Windows groups taskbar entries and notifications by it.
+const APP_ID = "io.github.mr-streamer-oss.mrstreamer";
 const isMac = process.platform === "darwin";
+const isWindows = process.platform === "win32";
 
 /** Refresh the channel list in the background when the cached copy is older than this. */
 const CATALOGUE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
@@ -70,6 +74,7 @@ async function start(): Promise<void> {
     safeStorage.setUsePlainTextEncryption(true);
   }
   const dataDir = app.getPath("userData");
+  await removeUnfinishedWrites(dataDir);
   const userAgent = `MrStreamer/${app.getVersion()}`;
 
   session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) => {
@@ -88,7 +93,11 @@ async function start(): Promise<void> {
       if (mainWindow) emit(mainWindow.webContents, "library.updated", status);
     },
   });
-  const playback = createPlayback({ source: subscriptions.source, userAgent });
+  const playback = createPlayback({
+    source: subscriptions.source,
+    userAgent,
+    ffmpeg: ffmpegPath(),
+  });
   const preferences = createPreferences(dataDir);
 
   registerIpc(
@@ -125,7 +134,7 @@ async function start(): Promise<void> {
       "library.channels": (filter) => library.channels(filter),
       "library.channel": ({ channelId }) => library.channel(channelId),
       "library.refresh": () => library.refresh(),
-      "playback.open": ({ channelId }) => playback.open(channelId),
+      "playback.open": ({ channelId, decoders }) => playback.open(channelId, decoders),
       "playback.close": ({ sessionId }) => {
         playback.close(sessionId);
         return null;
@@ -147,6 +156,18 @@ async function start(): Promise<void> {
   });
 
   void refreshInBackground(subscriptions, library);
+}
+
+/**
+ * The ffmpeg that converts streams the player cannot decode: bundled with packaged builds, from
+ * PATH during development. MR_STREAMER_FFMPEG points at another build.
+ */
+function ffmpegPath(): string | null {
+  const override = process.env["MR_STREAMER_FFMPEG"];
+  if (override) return override;
+  if (!app.isPackaged) return "ffmpeg";
+  const bundled = join(process.resourcesPath, "ffmpeg", isWindows ? "ffmpeg.exe" : "ffmpeg");
+  return existsSync(bundled) ? bundled : null;
 }
 
 /** Keeps account status and the channel list current without making the UI wait. */

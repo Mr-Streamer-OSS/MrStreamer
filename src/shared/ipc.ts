@@ -5,7 +5,7 @@
 import { type } from "arktype";
 import type { Result } from "./errors.ts";
 import type { CatalogueStatus, Category, LiveChannel } from "./library.ts";
-import type { StreamFailure, StreamSession } from "./playback.ts";
+import { CODECS, type StreamFailure, type StreamSession } from "./playback.ts";
 import { Preferences } from "./preferences.ts";
 import type { SubscriptionSummary } from "./subscription.ts";
 
@@ -29,7 +29,7 @@ export const ipcInputs = {
   "library.channels": type({ "categoryId?": "string", "query?": "string", "ids?": "string[]" }),
   "library.channel": type({ channelId: "string" }),
   "library.refresh": none,
-  "playback.open": type({ channelId: "string" }),
+  "playback.open": type({ channelId: "string", decoders: type.enumerated(...CODECS).array() }),
   "playback.close": type({ sessionId: "string" }),
   "playback.failure": type({ sessionId: "string" }),
   "preferences.get": none,

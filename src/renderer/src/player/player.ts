@@ -8,6 +8,7 @@ import type { LiveChannel } from "../../../shared/library.ts";
 import type { StreamFailure, StreamSession } from "../../../shared/playback.ts";
 import { appError } from "../lib/errors.ts";
 import { call } from "../lib/ipc.ts";
+import { decoders } from "./decoders.ts";
 import {
   createEngine,
   isEngineError,
@@ -108,7 +109,7 @@ async function start(channel: LiveChannel, attempt: number): Promise<void> {
 
   let session: StreamSession;
   try {
-    session = await call("playback.open", { channelId: channel.id });
+    session = await call("playback.open", { channelId: channel.id, decoders: [...decoders] });
   } catch (cause) {
     if (mine === selection)
       store.setState({
@@ -195,6 +196,8 @@ function classify(upstream: StreamFailure | null, error: EngineError): PlaybackP
       return { kind: "provider-error", status: upstream.status };
     case "network":
       return { kind: "network", detail: upstream.detail };
+    case "unsupported":
+      return { kind: "unsupported", detail: upstream.detail };
     case undefined:
       return error.kind === "network"
         ? { kind: "network", detail: error.detail }

@@ -3,17 +3,25 @@
 // The UI never sees provider URLs: they carry the login. It gets a 127.0.0.1 URL with a random
 // token instead. Only one session is open at a time, so switching channels always releases the
 // previous provider connection first. Many subscriptions allow a single connection.
+//
+// The proxy reads the start of each MPEG-TS stream to learn its codecs. A stream the UI's player
+// decodes passes through untouched; otherwise ffmpeg converts only the tracks it cannot decode.
+import { spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { AppFailure } from "../../shared/errors.ts";
-import type { StreamFailure, StreamFormat, StreamSession } from "../../shared/playback.ts";
+import type { Codec, StreamFailure, StreamFormat, StreamSession } from "../../shared/playback.ts";
+import { ffmpegArguments, planConversion, type Conversion } from "../playback/convert.ts";
+import { createInspector, type Inspection, type StreamLayout } from "../playback/inspect.ts";
 import type { CatalogueSource } from "./library.ts";
 
 /** How long the provider gets to start answering before the stream counts as failed. */
 const CONNECT_TIMEOUT_MS = 15_000;
 /** Waits before retrying a refused stream. Providers can take a moment to free the slot of a stream we just closed. */
 const REFUSED_RETRY_DELAYS_MS = [500, 1500];
+/** How much of a stream the proxy reads, at most, before deciding how to deliver it. */
+const INSPECT_LIMIT = { bytes: 2 * 1024 * 1024, ms: 2500 };
 
 interface Session {
   readonly id: string;
@@ -21,6 +29,8 @@ interface Session {
   readonly channelId: string;
   readonly upstreamUrl: string;
   readonly format: StreamFormat;
+  /** What the UI's player decodes. */
+  readonly decoders: ReadonlySet<Codec>;
   /** Aborts every upstream request of this session. */
   readonly closed: AbortController;
   /** The request currently being served. A new request for the same session replaces it. */
@@ -31,6 +41,8 @@ interface Session {
 export interface PlaybackDeps {
   readonly source: () => Promise<CatalogueSource | null>;
   readonly userAgent: string;
+  /** The ffmpeg executable that converts streams, or null when this build has none. */
+  readonly ffmpeg: string | null;
   readonly fetch?: typeof fetch;
 }
 
@@ -88,17 +100,75 @@ export function createPlayback(deps: PlaybackDeps) {
     }
     if (!upstream.ok) {
       session.failure = upstream.failure;
-      response.writeHead(upstream.failure.kind === "network" ? 502 : upstream.failure.status).end();
+      response.writeHead("status" in upstream.failure ? upstream.failure.status : 502).end();
       return;
     }
 
-    response.writeHead(200, { "Content-Type": upstream.contentType ?? "video/mp2t" });
-    const body = Readable.fromWeb(upstream.body);
+    const reader = upstream.body.getReader();
+    const start = await inspectStart(reader, session.decoders);
+    if (signal.aborted) {
+      void reader.cancel().catch(() => {});
+      response.destroy();
+      return;
+    }
+    const body = Readable.from(replay(start, reader));
     body.on("error", (cause) => {
       if (!signal.aborted) session.failure = { kind: "network", detail: String(cause) };
       response.destroy();
     });
-    body.pipe(response);
+
+    const conversion = start.layout ? planConversion(start.layout, session.decoders) : null;
+    if (!conversion) {
+      response.writeHead(200, { "Content-Type": upstream.contentType ?? "video/mp2t" });
+      body.pipe(response);
+      return;
+    }
+    if (!deps.ffmpeg) {
+      session.failure = { kind: "unsupported", detail: describeLayout(start.layout) };
+      body.destroy();
+      response.writeHead(415).end();
+      return;
+    }
+    convert(deps.ffmpeg, conversion, body, response, session, signal);
+  }
+
+  /** Pipes the stream through ffmpeg. A conversion that fails counts as an unsupported stream. */
+  function convert(
+    ffmpeg: string,
+    conversion: Conversion,
+    body: Readable,
+    response: ServerResponse,
+    session: Session,
+    signal: AbortSignal,
+  ): void {
+    const child = spawn(ffmpeg, ffmpegArguments(conversion), { stdio: ["pipe", "pipe", "pipe"] });
+    let errors = "";
+    child.stderr.on("data", (chunk: Buffer) => {
+      errors = (errors + chunk.toString()).slice(-2000);
+    });
+    const stop = () => child.kill("SIGKILL");
+    signal.addEventListener("abort", stop, { once: true });
+    child.on("error", (cause) => {
+      if (!signal.aborted) session.failure = { kind: "unsupported", detail: String(cause) };
+      response.destroy();
+    });
+    child.on("exit", (code) => {
+      signal.removeEventListener("abort", stop);
+      body.destroy();
+      if (!signal.aborted && code !== 0 && !session.failure) {
+        const detail = errors.trim().split("\n").at(-1) ?? `ffmpeg exited with ${code}`;
+        session.failure = {
+          kind: "unsupported",
+          detail: `The stream could not be converted. ${detail}`,
+        };
+      }
+      response.destroy();
+    });
+    // ffmpeg stops reading when it fails or is killed; that write error is not the stream's.
+    child.stdin.on("error", () => {});
+    body.pipe(child.stdin);
+    response.writeHead(200, { "Content-Type": "video/mp2t" });
+    child.stdout.pipe(response);
   }
 
   /** Opens the upstream request, retrying briefly when the provider refuses. */
@@ -143,8 +213,11 @@ export function createPlayback(deps: PlaybackDeps) {
   }
 
   return {
-    /** Opens a stream for a channel. Closes any open stream first. */
-    async open(channelId: string): Promise<StreamSession> {
+    /**
+     * Opens a stream for a channel. Closes any open stream first. `decoders` lists what the
+     * UI's player decodes; the proxy converts the rest.
+     */
+    async open(channelId: string, decoders: readonly Codec[]): Promise<StreamSession> {
       const source = await deps.source();
       if (!source) throw new AppFailure({ kind: "no-subscription" });
       for (const session of sessions.values()) closeSession(session);
@@ -156,6 +229,7 @@ export function createPlayback(deps: PlaybackDeps) {
         channelId,
         upstreamUrl: upstream.url,
         format: upstream.format,
+        decoders: new Set(decoders),
         closed: new AbortController(),
         active: null,
         failure: null,
@@ -195,6 +269,85 @@ export function createPlayback(deps: PlaybackDeps) {
       server = null;
     },
   };
+}
+
+type ReadResult = Awaited<ReturnType<ReadableStreamDefaultReader<Uint8Array>["read"]>>;
+
+interface StreamStart {
+  /** The tracks, or null when the data is not MPEG-TS. */
+  readonly layout: StreamLayout | null;
+  /** What was read while inspecting; the player still needs it. */
+  readonly head: readonly Uint8Array[];
+  /** A read still in flight when time ran out. */
+  readonly pending: Promise<ReadResult> | null;
+}
+
+/**
+ * Reads until the stream's codecs settle how to deliver it, or the inspection limit is reached.
+ * A track can stay undetermined when every codec it may turn out to be gets the same treatment.
+ */
+async function inspectStart(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  decoders: ReadonlySet<Codec>,
+): Promise<StreamStart> {
+  const inspector = createInspector();
+  const head: Uint8Array[] = [];
+  let size = 0;
+  let latest: Inspection | null = null;
+  let pending: Promise<ReadResult> | null = null;
+  const deadline = Date.now() + INSPECT_LIMIT.ms;
+  while (size < INSPECT_LIMIT.bytes) {
+    pending ??= reader.read();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expired = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), Math.max(0, deadline - Date.now()));
+    });
+    const result = await Promise.race([pending, expired]).catch(() => null);
+    clearTimeout(timer);
+    if (result === null) break;
+    pending = null;
+    if (result.done) break;
+    head.push(result.value);
+    size += result.value.length;
+    latest = inspector.push(result.value) ?? latest;
+    const settled = latest?.open.every((candidates) => {
+      const decoded = candidates.filter((codec) => decoders.has(codec)).length;
+      return decoded === 0 || decoded === candidates.length;
+    });
+    if (latest && settled) return { layout: latest.layout, head, pending: null };
+    if (inspector.notTransportStream) return { layout: null, head, pending: null };
+  }
+  return { layout: latest?.layout ?? null, head, pending };
+}
+
+/** The inspected start of the stream followed by the rest of it. */
+async function* replay(
+  start: StreamStart,
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): AsyncGenerator<Uint8Array> {
+  try {
+    yield* start.head;
+    if (start.pending) {
+      const result = await start.pending;
+      if (result.done) return;
+      yield result.value;
+    }
+    for (;;) {
+      const result = await reader.read();
+      if (result.done) return;
+      yield result.value;
+    }
+  } finally {
+    void reader.cancel().catch(() => {});
+  }
+}
+
+/** "HEVC 10-bit video and MP2 sound", for a stream this build cannot convert. */
+function describeLayout(layout: StreamLayout | null): string {
+  const video = layout?.video?.codec;
+  const audio = layout?.audio[0]?.codec;
+  const parts = [video && `${video} video`, audio && `${audio} sound`].filter(Boolean);
+  return `This stream carries ${parts.join(" and ") || "an unknown format"}.`;
 }
 
 function classify(status: number): StreamFailure {
