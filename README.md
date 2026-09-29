@@ -1,96 +1,54 @@
 # Mr. Streamer
 
-A cinematic desktop player for your existing IPTV subscriptions. Electron app for macOS (Apple Silicon), Windows 11 (x64) and Linux (x64). Your login, channel list and preferences stay on the device.
+A desktop player for the IPTV subscription you already have. Connect it once, then browse and search your live channels and watch them full screen. Your login, channel list and preferences stay on your computer.
 
-Status: slice 01 (install and watch live TV) is built and in acceptance. It connects one Xtream Codes subscription, lets you browse and search its live channels, and plays them. The Mac build passed Wout's test. The Windows installer builds on Linux and passes the viewing workflow under Wine; it still needs a run on a real Windows PC. Linux packages are new and pass the same workflow on a headless Ubuntu 24.04 machine.
+Mr. Streamer works with providers that offer Xtream Codes access (a server address, username and password, or an M3U link that contains them).
 
-## Develop
+## Download
 
-Needs Node 24 and pnpm 11.
+Get the latest release from the [Releases page](https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest).
 
-```sh
-pnpm install
-pnpm dev          # app with hot reload
-pnpm test         # service tests against the mock provider
-pnpm typecheck
-```
+| System                             | File                                        |
+| ---------------------------------- | ------------------------------------------- |
+| macOS 13 or later, Apple silicon   | `Mr-Streamer-<version>-mac-arm64.dmg`       |
+| Windows 11, 64-bit                 | `Mr-Streamer-<version>-win-x64-setup.exe`   |
+| Linux, 64-bit (Ubuntu, Debian)     | `Mr-Streamer-<version>-linux-amd64.deb`     |
+| Linux, 64-bit (other distributions) | `Mr-Streamer-<version>-linux-x86_64.AppImage` |
 
-### Mock provider
+## Install
 
-`pnpm mock:provider` runs a local Xtream Codes compatible provider with 12,000 channels on `http://127.0.0.1:7811` (login `demo` / `demo`). It allows one connection at a time, like most real subscriptions. The category `TEST | Streams and failures` holds channels for the cases the player has to handle:
+**macOS:** open the DMG and drag Mr. Streamer to Applications. Open it from Applications.
 
-| Channel                                                             | What it sends                    |
-| ------------------------------------------------------------------- | -------------------------------- |
-| H.264 + AAC, H.264 + MP2, H.264 + AC-3, HEVC + AAC, MPEG-2 SD + MP2 | Live MPEG-TS in that codec mix   |
-| Offline                                                             | HTTP 404                         |
-| Slow start                                                          | Data after 6 seconds             |
-| Drops after 20 s                                                    | Closes the connection mid-stream |
+**Windows:** run the setup file. It installs for your user account only, without asking for administrator rights. Windows SmartScreen may warn that the app is unrecognised, because the installer isn't signed yet: choose **More info**, then **Run anyway**.
 
-Streams need `ffmpeg` on your PATH (`brew install ffmpeg`, or `winget install Gyan.FFmpeg`). `--null-streams` skips ffmpeg and sends empty MPEG-TS packets.
+**Linux:** install the deb with `sudo apt install ./Mr-Streamer-<version>-linux-amd64.deb`, then start Mr. Streamer from your applications menu. The AppImage runs without installing: make it executable (`chmod +x`) and open it. AppImages need FUSE 2; on Ubuntu, `sudo apt install libfuse2t64` provides it.
 
-### Probing a real subscription
+## Use
 
-Put the login in `.local/subscription.json`. The `.local/` folder is gitignored.
+1. Enter your provider's server address, username and password, or paste the M3U link your provider sent. Mr. Streamer checks the login and loads your channels.
+2. Pick a channel from Home, browse Live TV by country and category, or search every channel with ⌘K (Ctrl K on Windows and Linux).
+3. While watching, the arrow keys switch channels and open the guide, number keys jump to a channel number, F toggles full screen and M mutes. Backspace returns to the previous channel.
 
-```json
-{ "server": "http://line.example.tv:8080", "username": "…", "password": "…" }
-```
+Settings (⌘, or Ctrl ,) shows your subscription, refreshes the channel list and holds updates.
 
-`node tools/probe-provider.ts --streams 6` prints the account limits, catalogue size and the codecs of a few live streams (needs `ffprobe`). Each stream probe uses one of your provider connections.
+## Updates
 
-## Build installers
+Mr. Streamer never updates on its own. In Settings, choose **Check for updates**, then **Update**. Once the download is ready, it asks before restarting, so nothing interrupts what you're watching.
 
-| Platform             | Command                             | Output                                                                                           |
-| -------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------ |
-| macOS, Apple Silicon | `pnpm dist:mac` on a Mac            | `dist/Mr-Streamer-<version>-mac-arm64.dmg`                                                       |
-| Windows 11, x64      | `pnpm dist:win` on any of the three | `dist/Mr-Streamer-<version>-win-x64-setup.exe`                                                   |
-| Linux, x64           | `pnpm dist:linux` on Linux          | `dist/Mr-Streamer-<version>-linux-x86_64.AppImage`, `dist/Mr-Streamer-<version>-linux-amd64.deb` |
+There are two channels: **Stable** for tested releases, and **Nightly** for the newest builds. Installing a newer version by hand from the Releases page also keeps your login and preferences. [Updates and channels](docs/user/updates.md) covers switching channels and starting over on Stable.
 
-electron-builder needs Wine to build the Windows installer on Linux, and the Wine it downloads itself has no Windows DLLs. So on Linux `pnpm dist:win` downloads a pinned, checksummed standalone Wine 11 into `~/.cache/mr-streamer` and sets it up once (about a minute). See `scripts/dist-win.ts`.
+## Help
 
-The Mac build signs with a Developer ID certificate from your login keychain when there is one, and notarizes when `APPLE_API_KEY`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER` are set. The Windows installer is unsigned for now: the first run shows SmartScreen, where **More info**, then **Run anyway** continues.
+- [Updates and channels](docs/user/updates.md)
+- [What plays](docs/user/playback.md), including formats that are converted and known limits
+- [Troubleshooting](docs/user/troubleshooting.md): login and keychain, installation warnings, where your data is stored
 
-Without a Developer ID, `scripts/mac-ad-hoc-sign.ts` seals the Mac app with an ad hoc signature, and a downloaded copy opens once through **System Settings > Privacy & Security > Open Anyway**. Without that seal macOS would call the app damaged. Each ad hoc build has a new signature, and macOS keeps it from the Keychain key an older build created. After such an update the app asks for the password again; if the Keychain still refuses, delete "Mr. Streamer Safe Storage" in Keychain Access and reopen the app. A Developer ID signature keeps access across updates.
+Found a bug? [Report it](https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose) with your system, the Mr. Streamer version from Settings, and what happened.
 
-On Linux the password key lives in the desktop keyring (GNOME Keyring or KWallet). Without one, the app falls back to Chromium's fixed-key encryption, as Chromium does for its own passwords: the login still saves, but other programs running as you can read it. The deb installs an AppArmor profile so Chromium's sandbox works on Ubuntu 24.04. The AppImage needs FUSE 2 there (`sudo apt install libfuse2t64`), or runs with `--appimage-extract-and-run`. Linux Chromium plays H.264 and AAC; HEVC, AC-3 and MP2 channels show "Can't play this channel".
+## Development
 
-App icons come from `assets/brand/`. After changing the artwork, run `pnpm icons:export`.
-
-### Testing the Windows build on Linux
-
-The installed Windows app runs under the same Wine, in a separate prefix, on a virtual display:
-
-```sh
-W=~/.cache/mr-streamer/wine-11.0-amd64-wow64
-export WINEPREFIX=~/.cache/mr-streamer-wintest/prefix WINEDEBUG=-all
-$W/bin/wine wineboot --init
-# The installer asks PowerShell whether the app is running, and Wine's PowerShell is a stub that
-# always says yes. Put a program that exits 1 in its place, in both system folders, and load it.
-for dir in system32 syswow64; do cp "$WINEPREFIX/drive_c/windows/$dir/hostname.exe" "$WINEPREFIX/drive_c/windows/$dir/WindowsPowerShell/v1.0/powershell.exe"; done
-WINEDLLOVERRIDES="powershell.exe=n" xvfb-run -a $W/bin/wine dist/Mr-Streamer-<version>-win-x64-setup.exe /S
-WINEDLLOVERRIDES="winealsa.drv,winepulse.drv=d" xvfb-run -a $W/bin/wine "C:\\users\\$USER\\AppData\\Local\\Programs\\mr-streamer\\Mr. Streamer.exe" --no-sandbox --disable-gpu --remote-debugging-port=9224
-```
-
-With sound drivers disabled Chromium uses its silent audio output, so playback does not wait on a sound device. The first channel after launch can still fail while Wine starts audio; the next one plays.
-
-## Layout
-
-```
-src/shared     Contracts between the UI and the main process: IPC schemas, library model, errors
-src/main       Electron main process
-  providers    Provider adapters that report a provider's catalogue as it is (Xtream Codes)
-  catalogue    Display names and region grouping, the same rules for every provider
-  services     Subscription, live library, stream proxy, preferences
-  platform     Keychain, DPAPI or keyring backed secrets, and atomic JSON files
-src/preload    The typed bridge exposed to the UI
-src/renderer   React UI; player/ holds the playback engines and the player controller
-scripts        Icon export, the Windows build with its Wine, and the Mac ad hoc signing hook
-tools          Mock provider and the subscription probe
-test           Service and catalogue tests
-```
-
-The UI never sees provider URLs or passwords. The main process proxies streams through a random-token URL on `127.0.0.1` and closes the previous stream before it opens the next one.
+Mr. Streamer is open source and under active development. Contributions are limited to small bug fixes for now; see [CONTRIBUTING.md](CONTRIBUTING.md). Building, testing and releasing are covered in the [maintainer documentation](docs/maintainers/README.md).
 
 ## License
 
-GPL-3.0. See [LICENSE](LICENSE).
+GPL-3.0. See [LICENSE](LICENSE). Installers include FFmpeg and x264, also under the GPL; their sources are attached to every release.

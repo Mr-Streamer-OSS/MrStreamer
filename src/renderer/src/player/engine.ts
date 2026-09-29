@@ -1,5 +1,5 @@
-// Playback engines behind one interface. Which engine plays which streams is what the slice 01
-// playback evaluation decides, so the rest of the UI only ever talks to `Engine`.
+// Playback engines behind one interface, so the rest of the UI only ever talks to `Engine`. The
+// main process delivers each stream in codecs these engines decode; see src/main/playback.
 import Hls from "hls.js";
 import mpegts from "mpegts.js";
 import type { StreamFormat } from "../../../shared/playback.ts";
