@@ -1,4 +1,5 @@
 // The library model: how the app sees content, independent of the provider that supplied it.
+import type { AppError } from "./errors.ts";
 
 /** A live TV channel. */
 export interface LiveChannel {
@@ -32,4 +33,6 @@ export interface CatalogueStatus {
   readonly channelCount: number;
   /** Epoch milliseconds, or null before the first successful fetch. */
   readonly fetchedAt: number | null;
+  /** Why the latest refresh failed, when it did. The catalogue from `fetchedAt` stays in use. */
+  readonly failure: AppError | null;
 }

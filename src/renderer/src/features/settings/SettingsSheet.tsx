@@ -67,7 +67,9 @@ function Subscription() {
         : "Not loaded yet",
     ],
   ];
-  const error = refresh.error ?? remove.error;
+  // A failed refresh keeps the previous channels, but says why the list may be out of date.
+  const failed = refresh.error ?? remove.error;
+  const error = failed ? appError(failed) : (status.data?.failure ?? null);
 
   return (
     <section>
@@ -81,7 +83,7 @@ function Subscription() {
         ))}
       </dl>
 
-      {error && <p className="mb-4 text-sm text-destructive">{describeError(appError(error))}</p>}
+      {error && <p className="mb-4 text-sm text-destructive">{describeError(error)}</p>}
 
       {confirmRemove ? (
         <div className="rounded-2xl bg-white/5 p-5">

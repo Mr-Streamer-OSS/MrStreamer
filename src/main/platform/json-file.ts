@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { ArkErrors } from "arktype";
 
 /**
@@ -39,6 +39,13 @@ export async function writeJsonFile(path: string, value: unknown): Promise<void>
   const temp = `${path}.${randomUUID()}.tmp`;
   await writeFile(temp, JSON.stringify(value), "utf8");
   await rename(temp, path);
+}
+
+/** Deletes what writes interrupted by a crash or power loss left behind in `dir`. */
+export async function removeUnfinishedWrites(dir: string): Promise<void> {
+  const names = await readdir(dir).catch(() => []);
+  const unfinished = names.filter((name) => /\.json\.[0-9a-f-]{36}\.tmp$/.test(name));
+  await Promise.all(unfinished.map((name) => rm(join(dir, name), { force: true })));
 }
 
 export async function removeFile(path: string): Promise<void> {

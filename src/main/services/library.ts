@@ -1,7 +1,7 @@
 // The live catalogue: fetched from the provider, cached on disk, queried by the UI over IPC.
 import { join } from "node:path";
 import { type } from "arktype";
-import { AppFailure } from "../../shared/errors.ts";
+import { AppFailure, type AppError } from "../../shared/errors.ts";
 import type { CatalogueStatus, Category, LiveChannel } from "../../shared/library.ts";
 import { normalize } from "../../shared/text.ts";
 import { normalizeCatalogue } from "../catalogue/normalize.ts";
@@ -10,6 +10,12 @@ import type { LiveCatalogue, LiveProvider } from "../providers/provider.ts";
 
 /** How many results a search returns. Enough to scroll, small enough to send per keystroke. */
 const SEARCH_LIMIT = 200;
+/**
+ * A refresh that returns fewer than this share of the channels before counts as possibly
+ * incomplete. It replaces the catalogue only when a second fetch confirms it.
+ */
+const SHRINK_CONFIRM_SHARE = 0.5;
+const SHRINK_CONFIRM_DELAY_MS = 3000;
 
 // The cache stores the catalogue as the provider sent it, and display names are worked out on
 // load, so improved naming rules apply without fetching again.
@@ -44,8 +50,10 @@ export interface CatalogueSource {
 export interface LibraryDeps {
   readonly dataDir: string;
   readonly source: () => Promise<CatalogueSource | null>;
-  /** Called after every successful refresh. */
+  /** Called after every refresh, successful or not. */
   readonly onUpdated: (status: CatalogueStatus) => void;
+  /** Waits before a confirming fetch. Tests make it instant. */
+  readonly confirmDelayMs?: number;
 }
 
 interface IndexedCatalogue {
@@ -66,6 +74,8 @@ export function createLibrary(deps: LibraryDeps) {
   const cachePath = join(deps.dataDir, "catalogue.json");
   let catalogue: IndexedCatalogue | null = null;
   let refreshing: { readonly key: string; readonly run: Promise<CatalogueStatus> } | null = null;
+  /** Why the latest refresh of this subscription failed, until one succeeds. */
+  let failure: { readonly key: string; readonly error: AppError } | null = null;
 
   async function requireSource(): Promise<CatalogueSource> {
     const source = await deps.source();
@@ -103,24 +113,32 @@ export function createLibrary(deps: LibraryDeps) {
     if (refreshing?.key === source.key) return refreshing.run;
 
     const run = (async () => {
-      const fetched = await source.provider.liveCatalogue();
-      // Drop the result if the user switched subscriptions while it downloaded.
-      if ((await deps.source())?.key !== source.key) {
-        throw new AppFailure({
-          kind: "unexpected",
-          detail: "The subscription changed while loading channels.",
-        });
+      try {
+        const fetched = await complete(source, await cached(source.key));
+        // Drop the result if the user switched subscriptions while it downloaded.
+        if ((await deps.source())?.key !== source.key) {
+          throw new AppFailure({
+            kind: "unexpected",
+            detail: "The subscription changed while loading channels.",
+          });
+        }
+        const file: CatalogueFile = {
+          version: 4,
+          key: source.key,
+          fetchedAt: Date.now(),
+          categories: fetched.categories,
+          channels: fetched.channels,
+        };
+        // Written before it is used: the next start must not find an older catalogue on disk.
+        await writeJsonFile(cachePath, file);
+        catalogue = index(file);
+        failure = null;
+      } catch (cause) {
+        if (cause instanceof AppFailure) failure = { key: source.key, error: cause.error };
+        deps.onUpdated(statusOf(await cached(source.key), failure?.error ?? null));
+        throw cause;
       }
-      const file: CatalogueFile = {
-        version: 4,
-        key: source.key,
-        fetchedAt: Date.now(),
-        categories: fetched.categories,
-        channels: fetched.channels,
-      };
-      catalogue = index(file);
-      await writeJsonFile(cachePath, file);
-      const status = statusOf(catalogue);
+      const status = statusOf(catalogue, null);
       deps.onUpdated(status);
       return status;
     })().finally(() => {
@@ -130,12 +148,36 @@ export function createLibrary(deps: LibraryDeps) {
     return run;
   }
 
+  /**
+   * Fetches the catalogue and checks it against the one in use. An empty list never replaces
+   * channels, and a much shorter one only when a second fetch returns the same.
+   */
+  async function complete(
+    source: CatalogueSource,
+    previous: IndexedCatalogue | null,
+  ): Promise<LiveCatalogue> {
+    const fetched = await source.provider.liveCatalogue();
+    const before = previous?.channels.length ?? 0;
+    const received = fetched.channels.length;
+    if (before === 0 || received >= before * SHRINK_CONFIRM_SHARE) return fetched;
+    if (received > 0) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, deps.confirmDelayMs ?? SHRINK_CONFIRM_DELAY_MS),
+      );
+      const again = await source.provider.liveCatalogue();
+      const difference = Math.abs(again.channels.length - received);
+      if (difference <= Math.max(10, received * 0.05)) return again;
+    }
+    throw new AppFailure({ kind: "incomplete-catalogue", received, previous: before });
+  }
+
   return {
     refresh,
 
     async status(): Promise<CatalogueStatus> {
       const source = await deps.source();
-      return statusOf(source ? await cached(source.key) : null);
+      if (!source) return statusOf(null, null);
+      return statusOf(await cached(source.key), failure?.key === source.key ? failure.error : null);
     },
 
     async categories(): Promise<readonly Category[]> {
@@ -164,13 +206,18 @@ export function createLibrary(deps: LibraryDeps) {
     /** Forgets the cached catalogue, for when the subscription is removed. */
     async clear(): Promise<void> {
       catalogue = null;
+      failure = null;
       await removeFile(cachePath);
     },
   };
 }
 
-function statusOf(catalogue: IndexedCatalogue | null): CatalogueStatus {
-  return { channelCount: catalogue?.channels.length ?? 0, fetchedAt: catalogue?.fetchedAt ?? null };
+function statusOf(catalogue: IndexedCatalogue | null, failure: AppError | null): CatalogueStatus {
+  return {
+    channelCount: catalogue?.channels.length ?? 0,
+    fetchedAt: catalogue?.fetchedAt ?? null,
+    failure,
+  };
 }
 
 function index(file: CatalogueFile): IndexedCatalogue {
