@@ -62,7 +62,9 @@ export function LiveScreen() {
     return () => window.removeEventListener("keydown", onKey);
   }, [toggleFullscreen]);
 
-  const base = layout.pinned ? 1 : 0;
+  // Full screen is the picture alone: no side panels, and the guide only when asked for.
+  const pinned = layout.pinned && !fullscreen;
+  const base = pinned ? 1 : 0;
   const guideOverPicture = depth > base;
   const watch = () => {
     if (shown) player.play(shown);
@@ -99,7 +101,7 @@ export function LiveScreen() {
     vertical: switchBy,
   });
 
-  const stage: CSSProperties = layout.pinned
+  const stage: CSSProperties = pinned
     ? { left: layout.side, width: layout.videoWidth }
     : { left: 0, right: 0 };
   const notice = catalogueState({
@@ -141,7 +143,7 @@ export function LiveScreen() {
       >
         {notice ? (
           <CatalogueNotice state={notice} />
-        ) : layout.pinned || depth === 0 ? (
+        ) : pinned || depth === 0 ? (
           <PlaybackState
             channel={shown}
             onWatch={watch}
@@ -153,7 +155,7 @@ export function LiveScreen() {
 
       {categories.data && (
         <Guide
-          pinned={layout.pinned}
+          pinned={pinned}
           side={layout.side}
           rem={layout.rem}
           channels={list}
@@ -166,17 +168,19 @@ export function LiveScreen() {
       )}
 
       {/* Home, Live TV, search and settings along the top, shown with the other controls. */}
-      <div
-        className={cn(
-          "absolute inset-x-0 top-0 z-30 bg-gradient-to-b from-black/70 to-transparent transition-opacity duration-300",
-          controlsVisible || guideOverPicture ? "opacity-100" : "pointer-events-none opacity-0",
-        )}
-      >
-        <WindowBar overlay />
-      </div>
+      {!fullscreen && (
+        <div
+          className={cn(
+            "absolute inset-x-0 top-0 z-30 bg-gradient-to-b from-black/70 to-transparent transition-opacity duration-300",
+            controlsVisible || guideOverPicture ? "opacity-100" : "pointer-events-none opacity-0",
+          )}
+        >
+          <WindowBar overlay />
+        </div>
+      )}
 
       {shown &&
-        (layout.pinned ? (
+        (pinned ? (
           <NowPlayingPanel width={layout.side} channel={shown} {...nowPlaying} />
         ) : (
           depth === 0 && <NowPlayingBar visible={controlsVisible} channel={shown} {...nowPlaying} />
