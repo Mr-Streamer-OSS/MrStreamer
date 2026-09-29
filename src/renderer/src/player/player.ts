@@ -92,7 +92,11 @@ function release(): void {
   current = null;
 }
 
-async function start(channel: LiveChannel, attempt: number): Promise<void> {
+/**
+ * Opens and plays a stream. `repair` has the main process re-encode the picture, which conceals
+ * a damaged broadcast the way standalone players do; it costs CPU, so it is the second try.
+ */
+async function start(channel: LiveChannel, attempt: number, repair = false): Promise<void> {
   const mine = ++selection;
   if (attempt === 0 && tuned?.id !== channel.id) {
     if (tuned) store.setState({ previous: tuned });
@@ -109,7 +113,11 @@ async function start(channel: LiveChannel, attempt: number): Promise<void> {
 
   let session: StreamSession;
   try {
-    session = await call("playback.open", { channelId: channel.id, decoders: [...decoders] });
+    session = await call("playback.open", {
+      channelId: channel.id,
+      decoders: [...decoders],
+      repair,
+    });
   } catch (cause) {
     if (mine === selection)
       store.setState({
@@ -135,7 +143,7 @@ async function start(channel: LiveChannel, attempt: number): Promise<void> {
   }
   if (mine !== selection) return;
   if (failure) {
-    await recover(mine, channel, session, failure, attempt);
+    await recover(mine, channel, session, failure, attempt, repair);
     return;
   }
 
@@ -143,7 +151,7 @@ async function start(channel: LiveChannel, attempt: number): Promise<void> {
   void call("preferences.recordWatch", { channelId: channel.id }).catch(() => {});
   // A stream that played fine gets the full set of reconnect attempts when it breaks later.
   engine.onFailure((error) => {
-    if (mine === selection) void recover(mine, channel, session, error, 0);
+    if (mine === selection) void recover(mine, channel, session, error, 0, repair);
   });
 }
 
@@ -157,19 +165,28 @@ async function startFailure(engine: Engine): Promise<EngineError | null> {
   }
 }
 
-/** Decides whether a failed or broken stream is worth reconnecting, and does so after a delay. */
+/**
+ * Decides what to do about a failed or broken stream: reconnect after a delay when the network
+ * failed, try once more with the picture repaired when the player could not decode it, or give up.
+ */
 async function recover(
   mine: number,
   channel: LiveChannel,
   session: StreamSession,
   error: EngineError,
   attempt: number,
+  repaired: boolean,
 ): Promise<void> {
   const upstream = await call("playback.failure", { sessionId: session.sessionId }).catch(
     () => null,
   );
   if (mine !== selection) return;
   const problem = classify(upstream, error);
+  if (problem.kind === "unsupported" && upstream === null && !repaired) {
+    release();
+    await start(channel, attempt, true);
+    return;
+  }
   const delay = RECONNECT_DELAYS_MS[attempt];
   const retryable = problem.kind === "network" || problem.kind === "provider-error";
 
@@ -183,7 +200,7 @@ async function recover(
     phase: { kind: "reconnecting", attempt: attempt + 1, of: RECONNECT_DELAYS_MS.length },
   });
   await new Promise((resolve) => setTimeout(resolve, delay));
-  if (mine === selection) await start(channel, attempt + 1);
+  if (mine === selection) await start(channel, attempt + 1, repaired);
 }
 
 function classify(upstream: StreamFailure | null, error: EngineError): PlaybackProblem {

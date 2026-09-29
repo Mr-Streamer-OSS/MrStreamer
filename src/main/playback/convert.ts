@@ -11,15 +11,19 @@ export interface Conversion {
 
 /**
  * What to convert so the player decodes the picture and the first sound track, or null when it
- * already does. The player plays the first sound track, so the others do not matter.
+ * already does. The player plays the first sound track, so the others do not matter. `repair`
+ * re-encodes the picture as well.
  */
 export function planConversion(
   layout: StreamLayout,
   decoders: ReadonlySet<Codec>,
+  options: { readonly repair?: boolean } = {},
 ): Conversion | null {
   const { video } = layout;
   const audio = layout.audio[0];
-  const videoOk = !video || (video.codec !== "unknown" && decoders.has(video.codec));
+  // Repairing re-encodes a picture the player could decode but not survive.
+  const videoOk =
+    !video || (!options.repair && video.codec !== "unknown" && decoders.has(video.codec));
   const audioOk = !audio || (audio.codec !== "unknown" && decoders.has(audio.codec));
   if (videoOk && audioOk) return null;
   return {

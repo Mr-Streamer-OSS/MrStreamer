@@ -34,6 +34,8 @@ interface Session {
   readonly format: StreamFormat;
   /** What the UI's player decodes. */
   readonly decoders: ReadonlySet<Codec>;
+  /** Re-encode the picture even when the player could decode it; see `open`. */
+  readonly repair: boolean;
   /** Aborts every upstream request of this session. */
   readonly closed: AbortController;
   /** The request currently being served. A new request for the same session replaces it. */
@@ -125,7 +127,9 @@ export function createPlayback(deps: PlaybackDeps) {
       response.destroy();
     });
 
-    const conversion = start.layout ? planConversion(start.layout, session.decoders) : null;
+    const conversion = start.layout
+      ? planConversion(start.layout, session.decoders, { repair: session.repair })
+      : null;
     if (!conversion) {
       response.writeHead(200, { "Content-Type": upstream.contentType ?? "video/mp2t" });
       body.pipe(response);
@@ -226,9 +230,14 @@ export function createPlayback(deps: PlaybackDeps) {
   return {
     /**
      * Opens a stream for a channel. Closes any open stream first. `decoders` lists what the
-     * UI's player decodes; the proxy converts the rest.
+     * UI's player decodes; the proxy converts the rest. `repair` re-encodes the picture too, for
+     * a broadcast the player failed to decode: ffmpeg conceals damage that stops the player.
      */
-    async open(channelId: string, decoders: readonly Codec[]): Promise<StreamSession> {
+    async open(
+      channelId: string,
+      decoders: readonly Codec[],
+      options: { readonly repair?: boolean } = {},
+    ): Promise<StreamSession> {
       const source = await deps.source();
       if (!source) throw new AppFailure({ kind: "no-subscription" });
       for (const session of sessions.values()) closeSession(session);
@@ -241,6 +250,7 @@ export function createPlayback(deps: PlaybackDeps) {
         upstreamUrl: upstream.url,
         format: upstream.format,
         decoders: new Set(decoders),
+        repair: options.repair ?? false,
         closed: new AbortController(),
         active: null,
         failure: null,

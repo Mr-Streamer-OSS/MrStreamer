@@ -63,7 +63,10 @@ async function firstBytes(
 async function playerReceives(
   url: string,
 ): Promise<{ video: string | null; audio: string | null }> {
-  const body = Buffer.from(await (await fetch(url)).arrayBuffer());
+  return playerReceivesBytes(Buffer.from(await (await fetch(url)).arrayBuffer()));
+}
+
+function playerReceivesBytes(body: Buffer): { video: string | null; audio: string | null } {
   const probe = spawnSync(
     "ffprobe",
     ["-v", "error", "-show_entries", "stream=codec_type,codec_name", "-of", "json", "-i", "pipe:0"],
@@ -168,6 +171,25 @@ describe("playback", () => {
 
   // Converting video in software takes seconds, more so while other tests run.
   describe.skipIf(!hasFfmpeg)("with ffmpeg", { timeout: 30_000 }, () => {
+    it("re-encodes a damaged picture when asked to repair a stream", async () => {
+      const { provider, playback } = await connectedPlayback({ ffmpeg: true });
+      const decodeErrors = (stream: Buffer) =>
+        spawnSync("ffmpeg", ["-v", "error", "-i", "pipe:0", "-map", "0:v", "-f", "null", "-"], {
+          input: stream,
+          encoding: "utf8",
+        }).stderr.trim();
+      const channel = channelNamed(provider, "TEST | H.264 damaged");
+
+      const direct = await playback.open(channel, LINUX);
+      expect(decodeErrors(Buffer.from(await (await fetch(direct.url)).arrayBuffer()))).not.toBe("");
+      const repaired = await playback.open(channel, LINUX, { repair: true });
+      const received = Buffer.from(await (await fetch(repaired.url)).arrayBuffer());
+
+      expect(decodeErrors(received)).toBe("");
+      expect(playerReceivesBytes(received)).toEqual({ video: "h264", audio: "aac" });
+      await playback.dispose();
+    });
+
     it("starts a stream joined mid-sequence on its first decodable picture", async () => {
       const { provider, playback } = await connectedPlayback();
 

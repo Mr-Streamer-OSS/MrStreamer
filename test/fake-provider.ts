@@ -69,6 +69,8 @@ export const FIXTURE_CHANNELS: readonly { name: string; fixture: string | null }
   { name: "TEST | MPEG-2 + MP2", fixture: "mpeg2-mp2.mpegts" },
   /** An open-GOP broadcast joined mid-sequence: it starts with frames that cannot be decoded. */
   { name: "TEST | H.264 joined mid-stream", fixture: "h264-open-gop-joined.mpegts" },
+  /** Lost packets mid-stream, which a decoder has to conceal. */
+  { name: "TEST | H.264 damaged", fixture: "h264-damaged.mpegts" },
   { name: "TEST | Offline", fixture: null },
 ];
 

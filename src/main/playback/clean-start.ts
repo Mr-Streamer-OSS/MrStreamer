@@ -3,19 +3,26 @@
 // Joining a broadcast lands mid-sequence. Pictures before the first keyframe reference frames the
 // app never received, and in open-GOP streams the frames that follow the first keyframe but
 // display before it do too. ffmpeg skips such frames; Chromium's decoder stops the stream. This
-// filter drops them: every video frame before the first keyframe, then the "leading" frames whose
-// presentation time comes before it. From the first frame after that, packets pass unchanged.
+// filter drops them: every video frame before the first keyframe, then, among the frames that
+// follow it closely, the "leading" ones whose presentation time comes before it. Interlaced video
+// sends each field on its own, so the keyframe's second field can arrive before the leading
+// frames; the window of LEADING_WINDOW frames covers that. After it, packets pass unchanged.
 // Other tracks are never touched.
 import type { Codec } from "../../shared/playback.ts";
 
 const PACKET = 188;
 const PTS_WRAP = 2 ** 33;
+/** How many frames or fields after the keyframe may still be leading ones. */
+const LEADING_WINDOW = 60;
 
 type State =
   /** Waiting for the first keyframe; `held` collects the packets of the frame being examined. */
   | { readonly kind: "seeking"; held: Uint8Array[] }
-  /** After the keyframe: dropping frames that display before it, `dropping` the current one. */
-  | { readonly kind: "leading"; readonly keyframePts: number; dropping: boolean }
+  /**
+   * After the keyframe: dropping frames that display before it. `dropping` is the verdict on the
+   * current frame, `remaining` how many frames the window still covers.
+   */
+  | { readonly kind: "leading"; readonly keyframePts: number; dropping: boolean; remaining: number }
   | { readonly kind: "passing" };
 
 /**
@@ -57,17 +64,20 @@ export function createCleanStart(pid: number, codec: Codec) {
       const pts = presentationTime(pes);
       for (const held of state.held) out.push(renumber(held));
       state =
-        pts === null ? { kind: "passing" } : { kind: "leading", keyframePts: pts, dropping: false };
+        pts === null
+          ? { kind: "passing" }
+          : { kind: "leading", keyframePts: pts, dropping: false, remaining: LEADING_WINDOW };
       return;
     }
-    if (state.kind === "leading") {
-      if (start) {
+    if (state.kind === "leading" && start) {
+      if (state.remaining-- === 0) {
+        state = { kind: "passing" };
+      } else {
         const pts = presentationTime(payload(packet));
         state.dropping = pts !== null && signedDifference(pts, state.keyframePts) < 0;
-        if (!state.dropping) state = { kind: "passing" };
       }
-      if (state.kind === "leading" && state.dropping) return;
     }
+    if (state.kind === "leading" && state.dropping) return;
     out.push(renumber(packet));
   }
 
