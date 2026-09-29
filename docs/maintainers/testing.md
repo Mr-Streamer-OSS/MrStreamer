@@ -41,8 +41,8 @@ ffmpeg -f lavfi -i smptebars=size=128x72:rate=25 -f lavfi -i sine=frequency=440:
 
 ```sh
 node test/e2e/packaged-app.ts "/Applications/Mr. Streamer.app/Contents/MacOS/Mr. Streamer" -- --use-mock-keychain
-node test/e2e/packaged-app.ts "$LOCALAPPDATA\Programs\mr-streamer\Mr. Streamer.exe"
-xvfb-run -a node test/e2e/packaged-app.ts "/opt/Mr. Streamer/mr-streamer" -- --no-sandbox
+node test/e2e/packaged-app.ts "$LOCALAPPDATA\Programs\mrstreamer\Mr. Streamer.exe"
+xvfb-run -a node test/e2e/packaged-app.ts "/opt/Mr. Streamer/mrstreamer" -- --no-sandbox
 ```
 
 `--use-mock-keychain` keeps a macOS run away from the real Keychain.

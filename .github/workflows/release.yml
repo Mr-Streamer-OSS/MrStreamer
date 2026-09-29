@@ -258,7 +258,7 @@ jobs:
         run: |
           $installer = Get-ChildItem dist/*-setup.exe | Select-Object -First 1
           Start-Process -FilePath $installer.FullName -ArgumentList '/S' -Wait
-          node test/e2e/packaged-app.ts "$env:LOCALAPPDATA\Programs\mr-streamer\Mr. Streamer.exe"
+          node test/e2e/packaged-app.ts "$env:LOCALAPPDATA\Programs\mrstreamer\Mr. Streamer.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Smoke test the installed app on Linux
@@ -266,7 +266,7 @@ jobs:
         run: |
           # AppImages need FUSE 2, as on a user's Ubuntu.
           sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libfuse2t64 ./dist/*.deb
-          xvfb-run -a node test/e2e/packaged-app.ts "/opt/Mr. Streamer/mr-streamer" -- --no-sandbox
+          xvfb-run -a node test/e2e/packaged-app.ts "/opt/Mr. Streamer/mrstreamer" -- --no-sandbox
           xvfb-run -a node test/e2e/packaged-app.ts dist/*.AppImage -- --no-sandbox
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

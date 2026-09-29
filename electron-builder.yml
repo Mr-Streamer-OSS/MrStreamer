@@ -1,7 +1,9 @@
 # Installers: an arm64 DMG for Apple silicon Macs (`pnpm dist:mac`, on a Mac), an x64 NSIS installer
 # for Windows 11 (`pnpm dist:win`, on Windows), and an x64 AppImage and deb for Linux
 # (`pnpm dist:linux`, on Linux). The release workflow builds all of them.
-appId: io.github.mr-streamer-oss.mrstreamer
+# Fixed from the first release on: macOS updates and Keychain access, and Windows installs, are
+# tied to it. Letters only, so Android and iOS accept the same id.
+appId: app.mrstreamer.player
 productName: Mr. Streamer
 copyright: Copyright © 2026 Wout Stiens
 directories:
@@ -72,7 +74,7 @@ linux:
   syncDesktopName: true
   icon: build/icon.png
   synopsis: A cinematic player for your existing IPTV subscriptions.
-  maintainer: Wout Stiens <woutstoens@gmail.com>
+  maintainer: Wout Stiens <hello@mrstreamer.app>
   artifactName: Mr-Streamer-${version}-linux-${arch}.${ext}
 deb:
   # electron-builder's defaults, plus ALSA, which Chromium loads at start and minimal systems lack.

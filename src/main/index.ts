@@ -14,7 +14,7 @@ import { createUpdates, eraseDeviceData, finishFreshStart } from "./services/upd
 import { fetchReleases, metadataFileFor } from "./updates/feed.ts";
 
 // Matches `appId` in electron-builder.yml: Windows groups taskbar entries and notifications by it.
-const APP_ID = "io.github.mr-streamer-oss.mrstreamer";
+const APP_ID = "app.mrstreamer.player";
 const isMac = process.platform === "darwin";
 const isWindows = process.platform === "win32";
 

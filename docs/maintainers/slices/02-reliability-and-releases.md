@@ -18,7 +18,7 @@ Recorded 29 Sep 2026. Measurements and their method are in the [playback evaluat
 
 | Task                      | State                                                                                                                                                                                                                                                                                                                   |
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 02.1 Baseline             | Done. Repository at `Mr-Streamer-OSS/MrStreamer`, public since 29 Sep, `main` at `06b2298` when work began. App id now `io.github.mr-streamer-oss.mrstreamer`; the data folder is unchanged.                                                                                                                            |
+| 02.1 Baseline             | Done. Repository at `Mr-Streamer-OSS/MrStreamer`, public since 29 Sep, `main` at `06b2298` when work began. App id now `app.mrstreamer.player`; the data folder is unchanged.                                                                                                                                           |
 | 02.2 Playback             | Chromium plus a bundled ffmpeg chosen and built. All 14 real-stream samples play on the M4 Mac; Linux verified functionally; Windows smoke-tested on GitHub's runner. Open: measurements on the Windows PC and a Linux desktop with a GPU.                                                                              |
 | 02.3 Library              | Done: failed, empty and short refreshes keep the last catalogue; tests cover them.                                                                                                                                                                                                                                      |
 | 02.4 Visuals              | Option B chosen for the DMG and the update flow; both built.                                                                                                                                                                                                                                                            |
@@ -33,7 +33,7 @@ Decisions changed since scoping, by Wout:
 - Release policy updated again on 29 September: automatic nightlies, and Stable by manual promotion of the latest published nightly's commit. The earlier stable-draft and next-minor-bump behavior is superseded; see 02.5.
 - The first release is 0.0.1.
 - Wout made the repository public on 29 September, before the first release.
-- The app id moved to the organization: a clean start, since nothing was released under the old id.
+- The app id moved to `app.mrstreamer.player`, on Wout's `mrstreamer.app` domain: a clean start, since nothing was released under the old id. It has no hyphens, so Android and iOS accept it too. The Linux package, executable and Windows install folder are now `mrstreamer`.
 - The development mock provider and other investigation tooling left the source; tests keep a small fake provider.
 - ffmpeg builds inside each release packaging job, not in a separate job.
 - Commits are authored as Wout Stiens with his GitHub no-reply address.

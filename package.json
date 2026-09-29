@@ -1,9 +1,9 @@
 {
-  "name": "mr-streamer",
+  "name": "mrstreamer",
   "productName": "Mr. Streamer",
   "version": "0.0.0",
   "description": "A cinematic player for your existing IPTV subscriptions.",
-  "homepage": "https://github.com/Mr-Streamer-OSS/MrStreamer",
+  "homepage": "https://mrstreamer.app",
   "repository": {
     "type": "git",
     "url": "https://github.com/Mr-Streamer-OSS/MrStreamer.git"
@@ -13,7 +13,7 @@
   "private": true,
   "type": "module",
   "main": "out/main/index.js",
-  "desktopName": "mr-streamer.desktop",
+  "desktopName": "mrstreamer.desktop",
   "author": "Wout Stiens",
   "scripts": {
     "dev": "electron-vite dev",
