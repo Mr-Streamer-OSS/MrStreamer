@@ -39,9 +39,9 @@ mac:
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   artifactName: Mr-Streamer-${version}-mac-${arch}.${ext}
-# The window takes its 660 x 420 size from the background; `pnpm dmg:background` renders it.
+# The window takes its size from the background, which `pnpm dmg:background` renders.
 dmg:
-  title: Mr. Streamer ${version}
+  title: Mr. Streamer
   background: build/dmg-background.png
   iconSize: 132
   iconTextSize: 13
