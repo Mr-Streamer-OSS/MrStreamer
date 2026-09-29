@@ -48,7 +48,8 @@ export function registerIpc(
       } catch (cause) {
         if (cause instanceof AppFailure) return { ok: false, error: cause.error };
         console.error(`[ipc] ${method} failed`, cause);
-        return { ok: false, error: { kind: "unexpected", detail: String(cause) } };
+        const detail = cause instanceof Error ? cause.message : String(cause);
+        return { ok: false, error: { kind: "unexpected", detail } };
       }
     });
   }

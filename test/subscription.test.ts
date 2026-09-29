@@ -3,13 +3,40 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { AppFailure, type AppError } from "../src/shared/errors.ts";
 import { createSubscriptions } from "../src/main/services/subscription.ts";
+import type { Secrets } from "../src/main/platform/secrets.ts";
 import { mockProvider, tempDir, testSecrets, userAgent } from "./support.ts";
 
-async function subscriptions() {
+async function subscriptions(fetchImpl: typeof fetch = fetch) {
   const dataDir = await tempDir();
   const create = () =>
-    createSubscriptions({ dataDir, secrets: testSecrets, providerOptions: { userAgent } });
+    createSubscriptions({
+      dataDir,
+      secrets: testSecrets,
+      providerOptions: { userAgent, fetch: fetchImpl },
+    });
   return { dataDir, create, service: create() };
+}
+
+/** A fetch that can hold the provider's answer to the next request until the test releases it. */
+function holdableFetch() {
+  let next: { arrived: () => void; answer: Promise<void> } | null = null;
+  const holdable: typeof fetch = async (input, init) => {
+    const held = next;
+    next = null;
+    held?.arrived();
+    const response = await fetch(input, init);
+    await held?.answer;
+    return response;
+  };
+  return {
+    fetch: holdable,
+    holdNext() {
+      const arrived = Promise.withResolvers<void>();
+      const answer = Promise.withResolvers<void>();
+      next = { arrived: arrived.resolve, answer: answer.promise };
+      return { arrived: arrived.promise, release: answer.resolve };
+    },
+  };
 }
 
 async function failure(promise: Promise<unknown>): Promise<AppError> {
@@ -111,6 +138,62 @@ describe("subscriptions", () => {
     expect(await restarted.get()).toMatchObject({ server: provider.url, username: "demo" });
     expect(await restarted.recheck()).toMatchObject({ account: { state: "active" } });
     expect(await readFile(join(dataDir, "subscription.json"), "utf8")).not.toContain("s3cret-pass");
+  });
+
+  it("keeps a removal when an account check answers afterwards", async () => {
+    const provider = await mockProvider();
+    const holdable = holdableFetch();
+    const { create, service } = await subscriptions(holdable.fetch);
+    await service.connect({ server: provider.url, username: "demo", password: "demo" });
+
+    const held = holdable.holdNext();
+    const check = service.recheck();
+    await held.arrived;
+    await service.remove();
+    held.release();
+
+    expect(await check).toBeNull();
+    expect(await service.get()).toBeNull();
+    expect(await create().get()).toBeNull();
+  });
+
+  it("keeps a newer login when an account check answers afterwards", async () => {
+    const [first, second] = [await mockProvider(), await mockProvider()];
+    const holdable = holdableFetch();
+    const { create, service } = await subscriptions(holdable.fetch);
+    await service.connect({ server: first.url, username: "demo", password: "demo" });
+
+    const held = holdable.holdNext();
+    const check = service.recheck();
+    await held.arrived;
+    await service.connect({ server: second.url, username: "demo", password: "demo" });
+    held.release();
+    await check;
+
+    expect(await service.get()).toMatchObject({ server: second.url });
+    expect(await create().get()).toMatchObject({ server: second.url });
+  });
+
+  it("asks for the password again when the keychain no longer opens it", async () => {
+    const provider = await mockProvider();
+    const dataDir = await tempDir();
+    const login = { server: provider.url, username: "demo", password: "demo" };
+    const create = (secrets: Secrets) =>
+      createSubscriptions({ dataDir, secrets, providerOptions: { userAgent } });
+    await create(testSecrets).connect(login);
+
+    // What a new app signature or a reset keychain looks like to the app.
+    const locked = create({
+      seal: testSecrets.seal,
+      open: () => {
+        throw new AppFailure({ kind: "keychain-refused" });
+      },
+    });
+
+    expect(await locked.get()).toMatchObject({ username: "demo", needsPassword: true });
+    expect(await locked.source()).toBeNull();
+    expect(await locked.recheck()).toMatchObject({ needsPassword: true });
+    expect(await locked.connect(login)).toMatchObject({ needsPassword: false });
   });
 
   it("forgets the subscription when removed", async () => {

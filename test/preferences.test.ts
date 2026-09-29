@@ -1,7 +1,9 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { type } from "arktype";
 import { describe, expect, it } from "vitest";
 import { createPreferences } from "../src/main/services/preferences.ts";
+import { ipcInputs } from "../src/shared/ipc.ts";
 import { tempDir } from "./support.ts";
 
 describe("preferences", () => {
@@ -16,6 +18,17 @@ describe("preferences", () => {
     expect(latest.recentChannelIds).toHaveLength(12);
     expect(latest.recentChannelIds.slice(0, 3)).toEqual(["b", "x19", "x18"]);
     expect(new Set(latest.recentChannelIds).size).toBe(12);
+  });
+
+  it("keeps the recently watched list when the UI changes the volume", async () => {
+    const preferences = createPreferences(await tempDir());
+    await preferences.recordWatch("818");
+
+    const patch = ipcInputs["preferences.update"]({ volume: 0.3, muted: false });
+    if (patch instanceof type.errors) throw new Error(patch.summary);
+    const updated = await preferences.update(patch);
+
+    expect(updated).toMatchObject({ volume: 0.3, lastChannelId: "818", recentChannelIds: ["818"] });
   });
 
   it("survives a restart", async () => {

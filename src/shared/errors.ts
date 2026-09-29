@@ -16,6 +16,8 @@ export type AppError =
   /** The provider answered with an HTTP status the app does not expect. */
   | { readonly kind: "provider-error"; readonly status: number }
   | { readonly kind: "no-subscription" }
+  /** The system keychain would not store the password, or no longer gives it back. */
+  | { readonly kind: "keychain-refused" }
   | { readonly kind: "channel-not-found"; readonly channelId: string }
   /** An IPC call carried input that failed validation. Indicates a UI bug. */
   | { readonly kind: "invalid-input"; readonly detail: string }

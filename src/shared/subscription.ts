@@ -17,4 +17,9 @@ export interface SubscriptionSummary {
   readonly server: string;
   readonly username: string;
   readonly account: AccountStatus;
+  /**
+   * True when the saved password can no longer be read, for example after the keychain denied
+   * access. The subscription stays, but nothing plays until the user enters the password again.
+   */
+  readonly needsPassword: boolean;
 }

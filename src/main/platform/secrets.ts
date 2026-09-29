@@ -1,4 +1,5 @@
 import { safeStorage } from "electron";
+import { AppFailure } from "../../shared/errors.ts";
 
 /** Encrypts small secrets (the subscription password) before they are written to disk. */
 export interface Secrets {
@@ -7,17 +8,23 @@ export interface Secrets {
 }
 
 /**
- * Secrets backed by Electron's safeStorage. On macOS the key lives in the login Keychain.
- * Only usable after the app's `ready` event.
+ * Secrets backed by Electron's safeStorage: the key lives in the macOS Keychain, Windows DPAPI,
+ * or the Linux keyring. Only usable after the app's `ready` event.
  */
 export const keychainSecrets: Secrets = {
   seal(plain) {
-    if (!safeStorage.isEncryptionAvailable()) {
-      throw new Error("Secure storage is not available on this system.");
+    if (!safeStorage.isEncryptionAvailable()) throw new AppFailure({ kind: "keychain-refused" });
+    try {
+      return safeStorage.encryptString(plain).toString("base64");
+    } catch {
+      throw new AppFailure({ kind: "keychain-refused" });
     }
-    return safeStorage.encryptString(plain).toString("base64");
   },
   open(sealed) {
-    return safeStorage.decryptString(Buffer.from(sealed, "base64"));
+    try {
+      return safeStorage.decryptString(Buffer.from(sealed, "base64"));
+    } catch {
+      throw new AppFailure({ kind: "keychain-refused" });
+    }
   },
 };

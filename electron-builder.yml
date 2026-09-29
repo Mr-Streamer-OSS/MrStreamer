@@ -1,6 +1,6 @@
-# Installers for slice 01: an arm64 DMG for Apple Silicon Macs and an x64 NSIS installer for Windows 11.
-# Build both on a Mac: `pnpm dist:mac` and `pnpm dist:win`. On Linux the Windows installer step needs
-# a system Wine; without it electron-builder stops after packaging dist/win-unpacked.
+# Installers: an arm64 DMG for Apple Silicon Macs (`pnpm dist:mac`, on a Mac), an x64 NSIS installer
+# for Windows 11 (`pnpm dist:win`, on any system; Linux fetches its own Wine for it), and an x64
+# AppImage and deb for Linux (`pnpm dist:linux`, on Linux).
 appId: io.github.stienswout.mrstreamer
 productName: Mr. Streamer
 copyright: Copyright © 2026 Wout Stiens
@@ -11,6 +11,8 @@ files:
   - out/**/*
   - package.json
 electronLanguages: [en]
+# Seals Mac builds with an ad hoc signature, so they open without a Developer ID. See the script.
+afterPack: ./scripts/mac-ad-hoc-sign.ts
 
 mac:
   target:
@@ -18,7 +20,8 @@ mac:
       arch: [arm64]
   category: public.app-category.entertainment
   icon: build/icon.icns
-  # Signs with a Developer ID from the login keychain when one exists, ad hoc otherwise.
+  # Signs with a Developer ID from the login keychain when one exists; otherwise the afterPack
+  # hook's ad hoc signature stays.
   # Notarization runs only when APPLE_API_KEY, APPLE_API_KEY_ID and APPLE_API_ISSUER are set.
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
@@ -42,3 +45,15 @@ nsis:
   perMachine: false
   shortcutName: Mr. Streamer
   deleteAppDataOnUninstall: false
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+  category: AudioVideo
+  icon: build/icon.png
+  synopsis: A cinematic player for your existing IPTV subscriptions.
+  maintainer: Wout Stiens <woutstoens@gmail.com>
+  artifactName: Mr-Streamer-${version}-linux-${arch}.${ext}

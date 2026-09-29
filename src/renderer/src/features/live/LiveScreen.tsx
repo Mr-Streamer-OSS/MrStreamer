@@ -2,14 +2,12 @@
 // wide windows, stands in the bars beside it. Every action has a control for the mouse; the
 // keyboard and trackpad gestures are shortcuts for the same actions.
 import { useQuery } from "@tanstack/react-query";
-import { RotateCw } from "lucide-react";
 import { useEffect, useRef, type CSSProperties } from "react";
 import type { LiveChannel } from "../../../../shared/library.ts";
 import { isTyping } from "../../app/platform.ts";
 import { toDepth, useUi } from "../../app/ui-store.ts";
-import { Button } from "../../components/ui/button.tsx";
+import { CatalogueNotice, catalogueState } from "../../components/CatalogueNotice.tsx";
 import { WindowBar } from "../../components/WindowBar.tsx";
-import { appError, describeError } from "../../lib/errors.ts";
 import { queries, useCategoryMap } from "../../lib/queries.ts";
 import { cn } from "../../lib/utils.ts";
 import { player, usePlayer } from "../../player/player.ts";
@@ -104,7 +102,10 @@ export function LiveScreen() {
   const stage: CSSProperties = layout.pinned
     ? { left: layout.side, width: layout.videoWidth }
     : { left: 0, right: 0 };
-  const libraryProblem = categories.error ?? channels.error;
+  const notice = catalogueState({
+    data: categories.data,
+    error: categories.error ?? channels.error,
+  });
   const controlsVisible = awake || phase.kind !== "playing";
   const nowPlaying = {
     categories: categoryMap,
@@ -138,14 +139,8 @@ export function LiveScreen() {
         className="pointer-events-none absolute inset-y-0 z-10 flex items-center justify-center"
         style={stage}
       >
-        {libraryProblem ? (
-          <LibraryProblem
-            message={describeError(appError(libraryProblem))}
-            loginProblem={isLoginProblem(libraryProblem)}
-            onRetry={() => void categories.refetch()}
-          />
-        ) : categories.isPending ? (
-          <p className="text-sm text-muted-foreground">Loading channels…</p>
+        {notice ? (
+          <CatalogueNotice state={notice} />
         ) : layout.pinned || depth === 0 ? (
           <PlaybackState
             channel={shown}
@@ -190,40 +185,6 @@ export function LiveScreen() {
       <NumberEntry />
     </div>
   );
-}
-
-function LibraryProblem({
-  message,
-  loginProblem,
-  onRetry,
-}: {
-  message: string;
-  loginProblem: boolean;
-  onRetry: () => void;
-}) {
-  return (
-    <div className="pointer-events-auto flex max-w-[32rem] flex-col items-center px-8 text-center">
-      <h2 className="text-2xl font-semibold tracking-tight">Channels unavailable</h2>
-      <p className="mt-3 text-[0.9375rem] leading-relaxed text-muted-foreground">{message}</p>
-      <div className="mt-7">
-        {loginProblem ? (
-          <Button variant="primary" onClick={() => useUi.setState({ editingLogin: true })}>
-            Update login
-          </Button>
-        ) : (
-          <Button variant="primary" onClick={onRetry}>
-            <RotateCw />
-            Try again
-          </Button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function isLoginProblem(cause: unknown): boolean {
-  const { kind } = appError(cause);
-  return kind === "invalid-login" || kind === "account-inactive";
 }
 
 /** The last watched channel, so Live TV opens on it without starting a stream. */

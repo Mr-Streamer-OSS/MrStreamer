@@ -6,6 +6,7 @@ import { ChevronRight, List, Play } from "lucide-react";
 import { useMemo, type ReactNode } from "react";
 import type { Category, LiveChannel } from "../../../../shared/library.ts";
 import { toDepth, useUi, type GuideDepth } from "../../app/ui-store.ts";
+import { CatalogueNotice, catalogueState } from "../../components/CatalogueNotice.tsx";
 import { ChannelLogo, hueOf } from "../../components/ChannelLogo.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { WindowBar } from "../../components/WindowBar.tsx";
@@ -43,11 +44,26 @@ export function HomeScreen() {
   const current = useQuery({ ...queries.channels(categoryId), enabled: categories.isSuccess });
   const category = categoryId ? categoryMap.get(categoryId) : undefined;
   const hero = recent.data?.[0] ?? null;
+  const notice = catalogueState(categories);
 
+  if (notice) {
+    return (
+      <div className="flex h-full flex-col">
+        <WindowBar className="bg-black" />
+        <div className="flex flex-1 items-center justify-center pb-14">
+          <CatalogueNotice state={notice} />
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="h-full overflow-y-auto">
       <WindowBar className="sticky top-0 z-20 bg-black" />
-      <Hero channel={hero} categories={categoryMap} />
+      <Hero
+        channel={hero}
+        pending={recentIds.length > 0 && recent.isPending}
+        categories={categoryMap}
+      />
       <div className="space-y-12 px-10 pt-4 pb-16">
         {recent.data && recent.data.length > 0 && (
           <Row title="Recently watched">
@@ -87,9 +103,12 @@ export function HomeScreen() {
 
 function Hero({
   channel,
+  pending,
   categories,
 }: {
   channel: LiveChannel | null;
+  /** The last watched channel is still loading: show the backdrop without any text yet. */
+  pending: boolean;
   categories: ReadonlyMap<string, Category>;
 }) {
   const hue = channel ? hueOf(channel.title) : 220;
@@ -110,7 +129,7 @@ function Hero({
       <div className="absolute inset-0 bg-gradient-to-r from-black via-black/60 to-transparent" />
       <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black to-transparent" />
       <div className="relative max-w-[44rem]">
-        {channel ? (
+        {pending ? null : channel ? (
           <>
             <div className="text-sm text-muted-foreground">
               Last watched · {channelLine(channel, categories)}

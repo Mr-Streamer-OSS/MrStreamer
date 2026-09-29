@@ -2,6 +2,7 @@
 const userAgent = navigator.userAgent;
 
 export const isMac = userAgent.includes("Mac OS X");
+export const isWindows = userAgent.includes("Windows");
 
 /** Label for the main modifier key in shortcut hints. */
 export const modifierLabel = isMac ? "⌘" : "Ctrl ";

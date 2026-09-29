@@ -33,7 +33,9 @@ export const ipcInputs = {
   "playback.close": type({ sessionId: "string" }),
   "playback.failure": type({ sessionId: "string" }),
   "preferences.get": none,
-  "preferences.update": Preferences.partial(),
+  // The recent list changes only through recordWatch. Leaving it out also keeps its default from
+  // filling in an empty list on every update.
+  "preferences.update": Preferences.omit("recentChannelIds").partial(),
   "preferences.recordWatch": type({ channelId: "string" }),
 } satisfies Record<keyof IpcOutputs, { infer: unknown }>;
 

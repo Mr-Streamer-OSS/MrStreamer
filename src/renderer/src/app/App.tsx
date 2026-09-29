@@ -31,7 +31,9 @@ export function App() {
       <p className="p-10 text-sm text-destructive">{describeError(appError(subscription.error))}</p>
     );
   }
-  if (!subscription.data || editingLogin) return <ConnectScreen existing={subscription.data} />;
+  if (!subscription.data || subscription.data.needsPassword || editingLogin) {
+    return <ConnectScreen existing={subscription.data} />;
+  }
   return <Shell />;
 }
 

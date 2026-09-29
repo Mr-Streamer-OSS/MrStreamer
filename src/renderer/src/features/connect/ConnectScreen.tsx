@@ -3,7 +3,7 @@ import { Link2, KeyRound } from "lucide-react";
 import { useState, type FormEvent, type ReactNode } from "react";
 import type { LoginInput } from "../../../../shared/ipc.ts";
 import type { SubscriptionSummary } from "../../../../shared/subscription.ts";
-import { isMac } from "../../app/platform.ts";
+import { isMac, isWindows } from "../../app/platform.ts";
 import { useUi } from "../../app/ui-store.ts";
 import { Logo } from "../../components/Logo.tsx";
 import { Button } from "../../components/ui/button.tsx";
@@ -55,12 +55,18 @@ export function ConnectScreen({ existing }: { existing: SubscriptionSummary | nu
       <form className="flex w-[26rem] flex-col py-12" onSubmit={submit}>
         <Logo className="mb-7 size-14" />
         <h1 className="mb-2 text-4xl font-semibold tracking-tight">
-          {existing ? "Update your login" : "Connect your subscription"}
+          {existing?.needsPassword
+            ? "Enter your password again"
+            : existing
+              ? "Update your login"
+              : "Connect your subscription"}
         </h1>
         <p className="mb-9 text-[0.9375rem] text-muted-foreground">
-          {mode === "login"
-            ? "Your provider's server address and login."
-            : "The M3U link from your provider."}
+          {existing?.needsPassword
+            ? "Your keychain no longer gives Mr. Streamer the saved password."
+            : mode === "login"
+              ? "Your provider's server address and login."
+              : "The M3U link from your provider."}
         </p>
 
         {mode === "login" ? (
@@ -70,7 +76,7 @@ export function ConnectScreen({ existing }: { existing: SubscriptionSummary | nu
                 value={server}
                 onChange={(e) => setServer(e.target.value)}
                 placeholder="http://line.example.tv:8080"
-                autoFocus
+                autoFocus={!existing?.needsPassword}
               />
             </Field>
             <Field label="Username">
@@ -86,6 +92,7 @@ export function ConnectScreen({ existing }: { existing: SubscriptionSummary | nu
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
+                autoFocus={existing?.needsPassword}
               />
             </Field>
           </div>
@@ -114,7 +121,7 @@ export function ConnectScreen({ existing }: { existing: SubscriptionSummary | nu
             {mode === "login" ? <Link2 /> : <KeyRound />}
             {mode === "login" ? "Use an M3U link" : "Use server and login"}
           </Button>
-          {existing && (
+          {existing && !existing.needsPassword && (
             <Button
               variant="ghost"
               size="lg"
@@ -126,8 +133,11 @@ export function ConnectScreen({ existing }: { existing: SubscriptionSummary | nu
           )}
         </div>
         <p className="mt-10 text-xs leading-relaxed text-muted-foreground/80">
-          Stays on this {isMac ? "Mac" : "PC"}. The password is encrypted with{" "}
-          {isMac ? "your macOS Keychain" : "your Windows account"}.
+          {isMac
+            ? "Stays on this Mac. The password is encrypted with your macOS Keychain."
+            : isWindows
+              ? "Stays on this PC. The password is encrypted with your Windows account."
+              : "Stays on this computer. The password is encrypted with your keyring."}
         </p>
       </form>
     </div>

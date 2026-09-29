@@ -64,9 +64,9 @@ async function start(): Promise<void> {
     Menu.setApplicationMenu(null);
     app.setAppUserModelId(APP_ID);
   }
-  if (process.platform === "linux" && !app.isPackaged) {
-    // Linux ships later. Headless dev boxes often lack a keyring, so development falls back to
-    // Chromium's fixed-key encryption there instead of refusing to store the login.
+  if (process.platform === "linux" && safeStorage.getSelectedStorageBackend() === "basic_text") {
+    // No keyring (GNOME Keyring or KWallet) to hold the key. Like Chromium's own passwords, the
+    // login then uses a fixed key: it still saves, but other programs of the same user can read it.
     safeStorage.setUsePlainTextEncryption(true);
   }
   const dataDir = app.getPath("userData");
@@ -95,9 +95,9 @@ async function start(): Promise<void> {
     {
       "subscription.get": () => subscriptions.get(),
       "subscription.connect": async (login) => {
-        const previous = await subscriptions.source();
+        const previous = await subscriptions.get();
         const connected = await subscriptions.connect(login);
-        if (previous?.key !== `${connected.server}|${connected.username}`) {
+        if (previous?.server !== connected.server || previous.username !== connected.username) {
           // A different account: its channels, and what was last watched, no longer apply.
           playback.closeAll();
           await library.clear();

@@ -19,7 +19,8 @@
     "dist:mac": "electron-vite build && electron-builder --mac --arm64 --publish never",
     "icons:export": "node scripts/export-icons.ts",
     "mock:provider": "node tools/mock-provider/server.ts",
-    "dist:win": "electron-vite build && electron-builder --win --x64 --publish never"
+    "dist:win": "electron-vite build && node scripts/dist-win.ts",
+    "dist:linux": "electron-vite build && electron-builder --linux --publish never"
   },
   "engines": {
     "node": ">=24"

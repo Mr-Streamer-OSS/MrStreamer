@@ -1,4 +1,5 @@
 import { AppFailure, type AppError } from "../../../shared/errors.ts";
+import { isMac } from "../app/platform.ts";
 
 /** The typed error behind a failed call, or an `unexpected` error for anything else. */
 export function appError(cause: unknown): AppError {
@@ -23,6 +24,10 @@ export function describeError(error: AppError): string {
       return `The provider answered with an error (HTTP ${error.status}).`;
     case "no-subscription":
       return "No subscription is connected.";
+    case "keychain-refused":
+      return isMac
+        ? 'The macOS Keychain would not store your password. Open Keychain Access, delete "Mr. Streamer Safe Storage", then quit and reopen Mr. Streamer.'
+        : "Your system's keychain would not store your password.";
     case "channel-not-found":
       return "This channel is no longer in the provider's list.";
     case "invalid-input":
