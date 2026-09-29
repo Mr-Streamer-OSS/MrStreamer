@@ -24,10 +24,13 @@ function release(
 
 /**
  * Records what the updates service asked of the installer. `failures` downloads fail before one
- * succeeds; `hold` keeps a download open until `release()`; `refuse` is the reason the system
- * gives for rejecting the install.
+ * succeeds; `hold` keeps a download open until `release()`, and `finishesAnyway` lets it finish
+ * even after a cancel, as a real one can at that moment; `refuse` is the reason the system gives
+ * for rejecting the install.
  */
-function fakeInstaller(options: { failures?: number; hold?: boolean; refuse?: string } = {}) {
+function fakeInstaller(
+  options: { failures?: number; hold?: boolean; finishesAnyway?: boolean; refuse?: string } = {},
+) {
   const downloads: { feedUrl: string; version: string; allowDowngrade: boolean }[] = [];
   let installs = 0;
   let failures = options.failures ?? 0;
@@ -39,6 +42,7 @@ function fakeInstaller(options: { failures?: number; hold?: boolean; refuse?: st
       if (options.hold) {
         await new Promise<void>((resolve, reject) => {
           release = resolve;
+          if (options.finishesAnyway) return;
           signal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true });
         });
       }
@@ -173,17 +177,21 @@ describe("in-app updates", () => {
     expect(fake.installs()).toBe(1);
   });
 
-  it("goes back to the available update when a download is cancelled", async () => {
-    const fake = fakeInstaller({ hold: true });
-    const { service } = await updates("0.2.0", PUBLISHED, { installer: fake.installer });
-    await service.check();
+  it.each([false, true])(
+    "goes back to the available update when a download is cancelled (finishes anyway: %s)",
+    async (finishesAnyway) => {
+      const fake = fakeInstaller({ hold: true, finishesAnyway });
+      const { service } = await updates("0.2.0", PUBLISHED, { installer: fake.installer });
+      await service.check();
 
-    const download = service.download();
-    await Promise.resolve();
-    service.cancel();
+      const download = service.download();
+      await Promise.resolve();
+      service.cancel();
+      fake.release();
 
-    expect((await download).update).toEqual({ kind: "available", version: "0.2.1" });
-  });
+      expect((await download).update).toEqual({ kind: "available", version: "0.2.1" });
+    },
+  );
 
   it("reports a failed download, and downloads again on Try again", async () => {
     const fake = fakeInstaller({ failures: 1 });
@@ -233,7 +241,7 @@ describe("in-app updates", () => {
   });
 
   it("drops a nightly download that finishes after the switch to Stable", async () => {
-    const fake = fakeInstaller({ hold: true });
+    const fake = fakeInstaller({ hold: true, finishesAnyway: true });
     const { service } = await updates("0.3.0-nightly.20261001.10", PUBLISHED, {
       installer: fake.installer,
     });

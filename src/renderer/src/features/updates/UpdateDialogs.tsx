@@ -9,6 +9,14 @@ import { Button } from "../../components/ui/button.tsx";
 import { call } from "../../lib/ipc.ts";
 import { useUpdates } from "./use-updates.ts";
 
+/**
+ * Installs and restarts. The call only returns when the app is still running, because the
+ * system refused the release; Settings then shows why.
+ */
+function install(method: "updates.restart" | "updates.startFresh"): void {
+  void call(method).then(() => useUi.setState({ settingsOpen: true }));
+}
+
 export function UpdateDialogs() {
   const dialog = useUi((state) => state.updateDialog);
   const { status, run } = useUpdates();
@@ -34,7 +42,7 @@ export function UpdateDialogs() {
             variant="primary"
             onClick={() => {
               close();
-              void call("updates.restart");
+              install("updates.restart");
             }}
           >
             Restart now
@@ -129,7 +137,7 @@ function EraseDialog({
           disabled={!understood}
           onClick={() => {
             onClose();
-            void call("updates.startFresh");
+            install("updates.startFresh");
           }}
         >
           Erase and restart
