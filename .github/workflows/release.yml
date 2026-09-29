@@ -1,0 +1,391 @@
+# Builds and publishes releases; docs/maintainers/releasing.md describes the process.
+#
+# - Nightly: checked every 30 minutes, built when main has new commits and the last nightly is at
+#   least six hours old. Started by hand, it builds main right away.
+# - Stable: by hand. Rebuilds the commit of the latest published nightly with a stable version,
+#   publishes it as the latest release, then records the version on main.
+# - Dry run: labelling a pull request "release dry run" builds, signs and tests its head commit
+#   once, keeps the files as workflow artifacts and publishes nothing.
+#
+# Every job checks out the commit the plan resolved, so main moving during a run changes nothing.
+name: Release
+
+on:
+  schedule:
+    # Away from the top of the hour, when scheduled runs start late.
+    - cron: "8,38 * * * *"
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Channel
+        type: choice
+        options: [nightly, stable]
+        default: nightly
+      version:
+        description: Stable version, such as 0.1.0. Empty releases the version the latest nightly previewed.
+        type: string
+        required: false
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+# One queue for nightlies, one for stable releases and one per pull request's dry runs. A run waits
+# for the one ahead of it and is never cancelled, so a requested stable release is never dropped.
+# A scheduled nightly decides whether it is due once its turn comes.
+concurrency:
+  group: >-
+    release-${{ github.event_name == 'pull_request' && format('dry-run-{0}', github.event.pull_request.number)
+    || inputs.channel == 'stable' && 'stable' || 'nightly' }}
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  plan:
+    name: Plan
+    # Dry runs only for branches of this repository: forks get no signing secrets.
+    if: >-
+      github.event_name != 'pull_request' || (github.event.label.name == 'release dry run'
+      && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    outputs:
+      skip: ${{ steps.plan.outputs.skip }}
+      channel: ${{ steps.plan.outputs.channel }}
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+      sha: ${{ steps.plan.outputs.sha }}
+      previous-tag: ${{ steps.plan.outputs.previous-tag }}
+      dry-run: ${{ github.event_name == 'pull_request' }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      # The label asks for one dry run of the commit it was added to. Add it again for another.
+      - name: Take the label off
+        if: github.event_name == 'pull_request'
+        run: gh api -X DELETE "repos/$GITHUB_REPOSITORY/issues/${{ github.event.pull_request.number }}/labels/release%20dry%20run" --silent || echo "The label was already off."
+      - id: plan
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          VERSION: ${{ inputs.version }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN: ${{ github.run_number }}
+        run: |
+          case "$GITHUB_EVENT_NAME/$CHANNEL" in
+            schedule/*)
+              node scripts/release-plan.ts nightly --ref "$GITHUB_REF" --sha "$GITHUB_SHA" --run "$RUN" --scheduled ;;
+            pull_request/*)
+              node scripts/release-plan.ts nightly --ref "$GITHUB_REF" --sha "$HEAD_SHA" --run "$RUN" --dry-run ;;
+            workflow_dispatch/stable)
+              node scripts/release-plan.ts stable --ref "$GITHUB_REF" --version "$VERSION" ;;
+            workflow_dispatch/nightly)
+              node scripts/release-plan.ts nightly --ref "$GITHUB_REF" --sha "$GITHUB_SHA" --run "$RUN" ;;
+          esac
+
+  checks:
+    name: Checks
+    needs: plan
+    if: needs.plan.outputs.skip == 'false'
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.plan.outputs.sha }}
+
+  # The JavaScript is the same on every platform: built once, packaged three times.
+  bundle:
+    name: Build JS bundle
+    needs: plan
+    if: needs.plan.outputs.skip == 'false'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: npm pkg set version="${{ needs.plan.outputs.version }}"
+      - run: pnpm build
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: js-bundle
+          path: out/
+          retention-days: 1
+          if-no-files-found: error
+
+  package:
+    name: Package ${{ matrix.target }}
+    needs: [plan, bundle]
+    strategy:
+      # Every platform reports its own result; the release still needs all of them.
+      fail-fast: false
+      matrix:
+        include:
+          - { target: mac-arm64, runner: macos-15, builder: --mac --arm64 }
+          - { target: win-x64, runner: windows-2025, builder: --win --x64 }
+          - { target: linux-x64, runner: ubuntu-24.04, builder: --linux --x64 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # The bundled ffmpeg, rebuilt only when scripts/build-ffmpeg.sh changes.
+      - id: ffmpeg
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor/ffmpeg/${{ matrix.target }}
+          key: ffmpeg-${{ matrix.target }}-${{ hashFiles('scripts/build-ffmpeg.sh') }}
+      - name: Build ffmpeg on Linux
+        # Ubuntu 22.04, so the binary also runs on older systems.
+        if: steps.ffmpeg.outputs.cache-hit != 'true' && runner.os == 'Linux'
+        run: |
+          docker run --rm -v "$PWD":/repo -w /repo ubuntu:22.04 bash -c '
+            apt-get update -qq &&
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+              build-essential nasm pkg-config git curl ca-certificates xz-utils >/dev/null &&
+            scripts/build-ffmpeg.sh linux-x64 &&
+            chown -R '"$(id -u):$(id -g)"' vendor'
+      - name: Build ffmpeg on macOS
+        if: steps.ffmpeg.outputs.cache-hit != 'true' && runner.os == 'macOS'
+        run: |
+          brew install --quiet nasm pkg-config
+          scripts/build-ffmpeg.sh mac-arm64
+      - if: steps.ffmpeg.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            make git curl mingw-w64-x86_64-gcc mingw-w64-x86_64-nasm mingw-w64-x86_64-pkgconf
+      - name: Build ffmpeg on Windows
+        if: steps.ffmpeg.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        shell: msys2 {0}
+        run: scripts/build-ffmpeg.sh win-x64
+
+      - run: npm pkg set version="$VERSION"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: js-bundle
+          path: out
+
+      - name: Build for macOS, signed and notarized
+        if: runner.os == 'macOS'
+        env:
+          # Dry runs happen on this repository's own labelled pull requests, so they sign too.
+          CSC_FOR_PULL_REQUEST: "true"
+          CSC_LINK: ${{ secrets.MAC_CERTIFICATE_P12 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY_P8 APPLE_API_KEY_ID APPLE_API_ISSUER; do
+            [ -n "${!name}" ] || { echo "::error::The $name secret is missing; see docs/maintainers/signing.md"; exit 1; }
+          done
+          export APPLE_API_KEY="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s\n' "$APPLE_API_KEY_P8" > "$APPLE_API_KEY"
+          pnpm exec electron-builder ${{ matrix.builder }} --publish never
+          node scripts/notarize-dmg.ts dist/*.dmg
+          rm -f "$APPLE_API_KEY"
+
+      - name: Check the macOS signature
+        if: runner.os == 'macOS'
+        env:
+          TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          app="dist/mac-arm64/Mr. Streamer.app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -dv "$app" 2>&1 | grep -qx "TeamIdentifier=$TEAM_ID"
+          codesign -dv "$app" 2>&1 | grep -q "flags=0x10000(runtime)"
+          spctl --assess --type execute --verbose "$app"
+          spctl --assess --type open --context context:primary-signature --verbose dist/*.dmg
+          xcrun stapler validate "$app"
+          xcrun stapler validate dist/*.dmg
+
+      # Windows installers are unsigned for now. Signing belongs here, as its own step with its
+      # own secrets, without touching the Mac certificate; docs/maintainers/signing.md.
+      - name: Build for Windows
+        if: runner.os == 'Windows'
+        run: pnpm exec electron-builder ${{ matrix.builder }} --publish never
+
+      - name: Build for Linux
+        if: runner.os == 'Linux'
+        run: pnpm exec electron-builder ${{ matrix.builder }} --publish never
+
+      - name: Check the update metadata
+        run: |
+          for file in dist/latest*.yml; do
+            grep -qx "version: $VERSION" "$file" || { echo "::error::$file does not name $VERSION"; exit 1; }
+          done
+
+      - name: Smoke test the installed app on macOS
+        if: runner.os == 'macOS'
+        run: |
+          mount=$(hdiutil attach -nobrowse -readonly dist/*.dmg | tail -1 | cut -f3)
+          ditto "$mount/Mr. Streamer.app" "/Applications/Mr. Streamer.app"
+          hdiutil detach "$mount"
+          node test/e2e/packaged-app.ts "/Applications/Mr. Streamer.app/Contents/MacOS/Mr. Streamer" -- --use-mock-keychain
+
+      - name: Smoke test the installed app on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem dist/*-setup.exe | Select-Object -First 1
+          Start-Process -FilePath $installer.FullName -ArgumentList '/S' -Wait
+          node test/e2e/packaged-app.ts "$env:LOCALAPPDATA\Programs\mrstreamer\Mr. Streamer.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Smoke test the installed app on Linux
+        if: runner.os == 'Linux'
+        run: |
+          # AppImages need FUSE 2, as on a user's Ubuntu.
+          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libfuse2t64 ./dist/*.deb
+          xvfb-run -a node test/e2e/packaged-app.ts "/opt/Mr. Streamer/mrstreamer" -- --no-sandbox
+          xvfb-run -a node test/e2e/packaged-app.ts dist/*.AppImage -- --no-sandbox
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.exe
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.blockmap
+            dist/latest*.yml
+          # Dry runs keep their files for testing; a release keeps them on GitHub Releases.
+          retention-days: ${{ needs.plan.outputs.dry-run == 'true' && 14 || 3 }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: [plan, checks, package]
+    if: needs.plan.outputs.dry-run == 'false'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CHANNEL: ${{ needs.plan.outputs.channel }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      SHA: ${{ needs.plan.outputs.sha }}
+      PREVIOUS_TAG: ${{ needs.plan.outputs.previous-tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*
+          path: release
+          merge-multiple: true
+      - name: Check every platform's files are here
+        run: |
+          for pattern in "Mr-Streamer-$VERSION-mac-arm64.dmg" "Mr-Streamer-$VERSION-mac-arm64.zip" latest-mac.yml \
+            "Mr-Streamer-$VERSION-win-x64-setup.exe" latest.yml \
+            "Mr-Streamer-$VERSION-linux-*.AppImage" "Mr-Streamer-$VERSION-linux-*.deb" latest-linux.yml; do
+            compgen -G "release/$pattern" >/dev/null || { echo "::error::No $pattern among the packaged files."; exit 1; }
+          done
+      # The installers contain FFmpeg and x264 under the GPL; their exact sources ship alongside.
+      - name: Add the FFmpeg and x264 sources
+        run: |
+          eval "$(grep -E '^(FFMPEG_VERSION|FFMPEG_SHA256|X264_COMMIT)=' scripts/build-ffmpeg.sh)"
+          curl -sSfL -o "release/ffmpeg-$FFMPEG_VERSION.tar.xz" "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz"
+          echo "$FFMPEG_SHA256  release/ffmpeg-$FFMPEG_VERSION.tar.xz" | sha256sum -c -
+          git init -q x264 && git -C x264 fetch -q --depth 1 https://code.videolan.org/videolan/x264.git "$X264_COMMIT"
+          git -C x264 archive --format=tar.gz --prefix="x264-$X264_COMMIT/" -o "../release/x264-$X264_COMMIT.tar.gz" FETCH_HEAD
+      - name: Write checksums and notes
+        run: |
+          (cd release && sha256sum * > SHA256SUMS.txt)
+          {
+            echo "**${CHANNEL^}** · built from \`${SHA::12}\`"
+            echo
+            echo "Download the DMG on Mac, the setup .exe on Windows, and the AppImage or .deb on Linux. SHA256SUMS.txt lists every file's checksum."
+            echo
+            gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$TAG" -f target_commitish="$SHA" \
+              ${PREVIOUS_TAG:+-f previous_tag_name="$PREVIOUS_TAG"} --jq .body
+          } > notes.md
+      # A failed or repeated attempt can leave a draft with this tag. Users never saw it.
+      - name: Remove an unfinished attempt
+        run: |
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq ".[] | select(.draft and .tag_name == \"$TAG\") | .id" |
+            while read -r id; do gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"; done
+      - name: Check the version is still new
+        run: node scripts/release-plan.ts check --version "$VERSION"
+      # Uploads into a draft, which the app can't see, and publishes once every file is in.
+      - name: Publish
+        run: |
+          nightly=$([ "$CHANNEL" = nightly ] && echo true || echo false)
+          gh release create "$TAG" release/* --draft --prerelease="$nightly" --target "$SHA" \
+            --title "Mr. Streamer $VERSION" --notes-file notes.md
+          if [ "$nightly" = true ]; then
+            gh release edit "$TAG" --draft=false --latest=false
+          else
+            gh release edit "$TAG" --draft=false --latest
+          fi
+
+  finalize:
+    name: Record the stable version on main
+    needs: [plan, publish]
+    if: needs.plan.outputs.channel == 'stable'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      # Main may move while this runs: start again from its newest commit when a push is refused.
+      - name: Commit the version
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for attempt in 1 2 3; do
+            git fetch -q --depth 1 origin "$GITHUB_REF_NAME" && git reset -q --hard FETCH_HEAD
+            node scripts/release-plan.ts record --version "$VERSION"
+            git diff --quiet && exit 0
+            git commit -qam "chore(release): prepare v$VERSION"
+            git push -q origin "HEAD:$GITHUB_REF_NAME" && exit 0
+            sleep $((attempt * 5))
+          done
+          echo "::error::Main kept moving; run this job again."
+          exit 1

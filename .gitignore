@@ -1,6 +1,8 @@
 node_modules/
 out/
 dist/
+# Built by scripts/build-ffmpeg.sh.
+vendor/
 .DS_Store
 *.log
 # Private local configuration (subscription details, test access). Never commit.

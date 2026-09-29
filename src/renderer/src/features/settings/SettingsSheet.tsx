@@ -9,6 +9,7 @@ import { appError, describeError, formatDate } from "../../lib/errors.ts";
 import { call } from "../../lib/ipc.ts";
 import { queries } from "../../lib/queries.ts";
 import { player } from "../../player/player.ts";
+import { UpdatesSection } from "../updates/UpdatesSection.tsx";
 
 /** The subscription and what to do with it, in a sheet over the picture. Opens with ⌘, or Ctrl ,. */
 export function SettingsSheet() {
@@ -25,6 +26,7 @@ export function SettingsSheet() {
             </Dialog.Close>
           </div>
           <Subscription />
+          <UpdatesSection />
         </Dialog.Popup>
       </Dialog.Portal>
     </Dialog.Root>
@@ -67,7 +69,9 @@ function Subscription() {
         : "Not loaded yet",
     ],
   ];
-  const error = refresh.error ?? remove.error;
+  // A failed refresh keeps the previous channels, but says why the list may be out of date.
+  const failed = refresh.error ?? remove.error;
+  const error = failed ? appError(failed) : (status.data?.failure ?? null);
 
   return (
     <section>
@@ -81,7 +85,7 @@ function Subscription() {
         ))}
       </dl>
 
-      {error && <p className="mb-4 text-sm text-destructive">{describeError(appError(error))}</p>}
+      {error && <p className="mb-4 text-sm text-destructive">{describeError(error)}</p>}
 
       {confirmRemove ? (
         <div className="rounded-2xl bg-white/5 p-5">

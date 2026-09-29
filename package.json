@@ -1,12 +1,19 @@
 {
-  "name": "mr-streamer",
+  "name": "mrstreamer",
   "productName": "Mr. Streamer",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "description": "A cinematic player for your existing IPTV subscriptions.",
+  "homepage": "https://mrstreamer.app",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Mr-Streamer-OSS/MrStreamer.git"
+  },
+  "bugs": "https://github.com/Mr-Streamer-OSS/MrStreamer/issues",
   "license": "GPL-3.0-only",
   "private": true,
   "type": "module",
   "main": "out/main/index.js",
+  "desktopName": "mrstreamer.desktop",
   "author": "Wout Stiens",
   "scripts": {
     "dev": "electron-vite dev",
@@ -14,13 +21,15 @@
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p src/renderer/tsconfig.json",
     "test": "vitest run",
+    "lint": "oxlint --deny-warnings --report-unused-disable-directives",
+    "knip": "knip",
     "fmt": "prettier --write .",
     "fmt:check": "prettier --check .",
     "dist:mac": "electron-vite build && electron-builder --mac --arm64 --publish never",
+    "dist:win": "electron-vite build && electron-builder --win --x64 --publish never",
+    "dist:linux": "electron-vite build && electron-builder --linux --publish never",
     "icons:export": "node scripts/export-icons.ts",
-    "mock:provider": "node tools/mock-provider/server.ts",
-    "dist:win": "electron-vite build && node scripts/dist-win.ts",
-    "dist:linux": "electron-vite build && electron-builder --linux --publish never"
+    "dmg:background": "electron scripts/export-dmg-background.mjs 1 && electron scripts/export-dmg-background.mjs 2"
   },
   "engines": {
     "node": ">=24"
@@ -39,10 +48,13 @@
     "class-variance-authority": "0.7.1",
     "electron": "44.4.5",
     "electron-builder": "26.15.3",
+    "electron-updater": "6.8.10",
     "electron-vite": "5.0.0",
     "hls.js": "1.7.3",
+    "knip": "6.38.0",
     "lucide-react": "1.48.0",
     "mpegts.js": "1.8.2",
+    "oxlint": "1.86.0",
     "prettier": "^3.9.9",
     "react": "19.3.0",
     "react-dom": "19.3.0",

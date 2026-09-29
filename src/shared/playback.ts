@@ -3,6 +3,28 @@
 /** Container formats the UI's playback engines know how to load. */
 export type StreamFormat = "mpegts" | "hls";
 
+/**
+ * Codecs the app tells apart in a stream. The UI reports which of them its player decodes, and
+ * the main process converts the rest before they reach it.
+ */
+export const CODECS = [
+  "h264",
+  "hevc",
+  "hevc-10bit",
+  "mpeg2",
+  "aac",
+  /** AAC whose channel layout is only described in the stream, which browsers do not read. */
+  "aac-pce",
+  "aac-latm",
+  "mp3",
+  "mp2",
+  "ac3",
+  "eac3",
+  "dts",
+  "opus",
+] as const;
+export type Codec = (typeof CODECS)[number];
+
 export interface StreamSession {
   readonly sessionId: string;
   readonly channelId: string;
@@ -19,4 +41,6 @@ export type StreamFailure =
   | { readonly kind: "unavailable"; readonly status: number }
   | { readonly kind: "provider-error"; readonly status: number }
   /** No response before the timeout, or the connection dropped. */
-  | { readonly kind: "network"; readonly detail: string };
+  | { readonly kind: "network"; readonly detail: string }
+  /** The stream arrived, but its format cannot be played or converted here. */
+  | { readonly kind: "unsupported"; readonly detail: string };

@@ -1,5 +1,5 @@
-// Playback engines behind one interface. Which engine plays which streams is what the slice 01
-// playback evaluation decides, so the rest of the UI only ever talks to `Engine`.
+// Playback engines behind one interface, so the rest of the UI only ever talks to `Engine`. The
+// main process delivers each stream in codecs these engines decode; see src/main/playback.
 import Hls from "hls.js";
 import mpegts from "mpegts.js";
 import type { StreamFormat } from "../../../shared/playback.ts";
@@ -10,6 +10,11 @@ const START_TIMEOUT_MS = 20_000;
 const STALL_TIMEOUT_MS = 15_000;
 /** This much buffered media without the clock starting means the stream cannot be decoded. */
 const UNPLAYABLE_BUFFER_S = 4;
+/**
+ * A clock that stands still this long while that much media waits beyond it means the stream's
+ * timing is broken, as with frames that lack timestamps: data arrives but cannot be played.
+ */
+const BROKEN_TIMING_STALL_MS = 4000;
 
 export type EngineName = "mpegts.js" | "hls.js" | "native";
 
@@ -207,8 +212,13 @@ function lifecycle(video: HTMLVideoElement, teardown: () => void) {
           detail: `No picture or sound within ${START_TIMEOUT_MS / 1000} s.`,
         });
       }
-    } else if (!video.paused && now - lastProgressAt > STALL_TIMEOUT_MS) {
-      fail({ kind: "network", detail: "The stream stopped delivering data." });
+    } else if (!video.paused) {
+      const stalled = now - lastProgressAt;
+      if (stalled > BROKEN_TIMING_STALL_MS && bufferedAhead(video) >= UNPLAYABLE_BUFFER_S) {
+        fail({ kind: "media", detail: "The stream arrives, but its timing is broken." });
+      } else if (stalled > STALL_TIMEOUT_MS) {
+        fail({ kind: "network", detail: "The stream stopped delivering data." });
+      }
     }
   }, 1000);
 

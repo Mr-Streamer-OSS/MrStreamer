@@ -42,6 +42,13 @@ export const queries = {
       staleTime: Infinity,
       enabled: ids.length > 0,
     }),
+  /** Kept current by `syncUpdates`, so it never needs refetching. */
+  updates: () =>
+    queryOptions({
+      queryKey: ["updates"],
+      queryFn: () => call("updates.status"),
+      staleTime: Infinity,
+    }),
   search: (query: string) =>
     queryOptions({
       queryKey: ["library", "search", query],
@@ -51,7 +58,7 @@ export const queries = {
     }),
 };
 
-export function useCategories() {
+function useCategories() {
   return useQuery(queries.categories());
 }
 
@@ -65,5 +72,12 @@ export function useCategoryMap(): ReadonlyMap<string, Category> {
 export function syncLibraryUpdates(client: QueryClient): () => void {
   return listen("library.updated", () => {
     void client.invalidateQueries({ queryKey: ["library"] });
+  });
+}
+
+/** Keeps the update status current: download progress and outcomes arrive as events. */
+export function syncUpdates(client: QueryClient): () => void {
+  return listen("updates.changed", (status) => {
+    client.setQueryData(queries.updates().queryKey, status);
   });
 }

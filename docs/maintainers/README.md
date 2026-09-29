@@ -1,6 +1,8 @@
-# Mr. Streamer maintainer planning
+# Planning
 
-Start with [Slice 02: reliable playback and releases](slices/02-reliability-and-releases.md) when planning or implementing the next slice. It records the agreed decisions, task order, acceptance checks and actions reserved for Wout.
+> For maintainers. The [docs index](../README.md) lists every guide.
+
+Work is planned in slices. Start with [Slice 02: reliable playback and releases](slices/02-reliability-and-releases.md) when planning or implementing the current slice. It records the agreed decisions, task order, acceptance checks and actions reserved for Wout.
 
 The [idea and roadmap](https://r3b736io0gst.postplan.dev) owns the product direction and links the other slices. The [published slice 02](https://tk1ixs600mix.postplan.dev) mirrors the repository handoff; keep both aligned when its scope changes.
 
@@ -13,7 +15,7 @@ The [idea and roadmap](https://r3b736io0gst.postplan.dev) owns the product direc
 
 ## Roadmap adjustments
 
-- Slice 02 now includes playback compatibility, library reliability, Mac signing/notarization, the DMG redesign, manual nightly/stable releases, in-app updates and documentation for public launch.
+- Slice 02 now includes playback compatibility, library reliability, Mac signing/notarization, the DMG redesign, automatic nightlies with manual Stable promotion, in-app updates and documentation for public launch.
 - User documentation and maintainer/agent documentation must have separate entry points. During the active build-out, code contributions are limited to small bug fixes; document this policy for prospective contributors.
 - Additional provider types and multiple subscriptions remain deferred. Their old placement in the slice 02 outline does not authorize implementing them now.
 - Slices 03-05 retain live TV/EPG, movies/series and Home/everyday controls respectively.

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Help with installing and using Mr. Streamer
+    url: https://github.com/Mr-Streamer-OSS/MrStreamer/blob/main/docs/user/troubleshooting.md
+    about: Answers to common questions about logins, installation warnings and your data.

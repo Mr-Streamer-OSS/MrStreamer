@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { isMac } from "../app/platform.ts";
 import { toDepth, useUi, type View } from "../app/ui-store.ts";
 import { cn } from "../lib/utils.ts";
+import { UpdateIndicator } from "../features/updates/UpdateIndicator.tsx";
 import { Logo } from "./Logo.tsx";
 import { Button } from "./ui/button.tsx";
 
@@ -33,6 +34,7 @@ export function WindowBar({
       <NavButton view="home" current={view} overlay={overlay} icon={<House />} label="Home" />
       <NavButton view="live" current={view} overlay={overlay} icon={<Tv />} label="Live TV" />
       <div className="ml-auto flex items-center gap-1.5">
+        <UpdateIndicator overlay={overlay} />
         <Button
           variant={overlay ? "media" : "ghost"}
           size="icon-sm"

@@ -2,8 +2,6 @@ import { join } from "node:path";
 import { defaultPreferences, Preferences, RECENT_LIMIT } from "../../shared/preferences.ts";
 import { readJsonFile, writeJsonFile } from "../platform/json-file.ts";
 
-export type PreferenceStore = ReturnType<typeof createPreferences>;
-
 /** Viewing preferences stored in the app's data folder. Updates are applied and written in call order. */
 export function createPreferences(dataDir: string) {
   const path = join(dataDir, "preferences.json");

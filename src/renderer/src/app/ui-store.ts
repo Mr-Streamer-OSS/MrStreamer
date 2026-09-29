@@ -12,6 +12,9 @@ export function toDepth(value: number): GuideDepth {
 
 export type View = "home" | "live";
 
+/** The update dialog on screen: the restart question, or one of the two fresh-start steps. */
+type UpdateDialog = "restart" | "fresh" | "erase";
+
 interface UiState {
   readonly view: View;
   readonly searchOpen: boolean;
@@ -21,6 +24,7 @@ interface UiState {
   /** Selected Live TV category. Null shows all channels. */
   readonly categoryId: string | null;
   readonly guideDepth: GuideDepth;
+  readonly updateDialog: UpdateDialog | null;
 }
 
 /** Navigation and overlay state for the window. */
@@ -31,4 +35,5 @@ export const useUi = create<UiState>(() => ({
   editingLogin: false,
   categoryId: null,
   guideDepth: 0,
+  updateDialog: null,
 }));

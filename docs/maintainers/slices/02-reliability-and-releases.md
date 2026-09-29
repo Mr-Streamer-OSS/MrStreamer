@@ -1,6 +1,6 @@
 # Slice 02: reliable playback and releases
 
-Status: scoped for the next agent. Implementation has not been completed by this handoff.
+Status: in progress on pull request #1 (not merged). Playback conversion, catalogue safeguards, Mac signing, CI, the release workflow, in-app updates, both routes back to Stable and the documentation split are built and tested; see [Progress](#progress) for what remains.
 
 Outcome: play a broader, verified set of the selected subscription's streams on Mac, Windows and Linux; preserve usable data through refreshes and normal upgrades; prepare nightly or stable releases; update from inside the app or through a downloaded installer.
 
@@ -12,11 +12,37 @@ Outcome: play a broader, verified set of the selected subscription's streams on 
 - Repository transfer blocks release-destination setup, not independent playback investigation, library work or design exploration.
 - Use the existing modular boundaries. Keep provider access, library state, playback, platform installation/signing and UI responsibilities separate. Reuse work that already satisfies the contract.
 
+## Progress
+
+Recorded 29 Sep 2026. Measurements and their method are in the [playback evaluation](../playback.md).
+
+| Task                      | State                                                                                                                                                                                                                                                                                                                   |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 02.1 Baseline             | Done. Repository at `Mr-Streamer-OSS/MrStreamer`, public since 29 Sep, `main` at `06b2298` when work began. App id now `app.mrstreamer.player`; the data folder is unchanged.                                                                                                                                           |
+| 02.2 Playback             | Chromium plus a bundled ffmpeg chosen and built. All 14 real-stream samples play on the M4 Mac; Linux verified functionally; Windows smoke-tested on GitHub's runner. Open: measurements on the Windows PC and a Linux desktop with a GPU.                                                                              |
+| 02.3 Library              | Done: failed, empty and short refreshes keep the last catalogue; tests cover them.                                                                                                                                                                                                                                      |
+| 02.4 Visuals              | Option B chosen for the DMG and the update flow; both built.                                                                                                                                                                                                                                                            |
+| 02.5 Releases and signing | Signing, notarization and stapling pass in CI and on the Mac mini. The release workflow checks nightly eligibility, promotes the latest nightly to Stable, builds one bundle for every platform and records stable versions; its planning is tested. Open: a dry run of the reworked workflow, then release acceptance. |
+| 02.6 Updates              | Built. In-app update and data preservation verified on Linux (AppImage); deb in a container, Mac and Windows open.                                                                                                                                                                                                      |
+| 02.7 Back to Stable       | Built. Start fresh verified on Linux (AppImage): Stable downloaded first, erase only after the tick, clean start on Stable.                                                                                                                                                                                             |
+| 02.8 Docs                 | README, user guides, maintainer guides, CONTRIBUTING, PR and issue templates written.                                                                                                                                                                                                                                   |
+| 02.9 Acceptance           | Open.                                                                                                                                                                                                                                                                                                                   |
+
+Decisions changed since scoping, by Wout:
+
+- Release policy updated again on 29 September: automatic nightlies, and Stable by manual promotion of the latest published nightly's commit. The earlier stable-draft and next-minor-bump behavior is superseded; see 02.5.
+- The first release is 0.0.1.
+- Wout made the repository public on 29 September, before the first release.
+- The app id moved to `app.mrstreamer.player`, on Wout's `mrstreamer.app` domain: a clean start, since nothing was released under the old id. It has no hyphens, so Android and iOS accept it too. The Linux package, executable and Windows install folder are now `mrstreamer`.
+- The development mock provider and other investigation tooling left the source; tests keep a small fake provider.
+- ffmpeg builds inside each release packaging job, not in a separate job.
+- Commits are authored as Wout Stiens with his GitHub no-reply address.
+
 ## Agreed product decisions
 
 - One desktop app supports Mac, Windows and Linux. It has Stable and Nightly distribution channels with shared local data.
-- Releases are cut only when Wout chooses. A manual GitHub workflow prepares either a nightly or stable release. Nightly is a development channel, not a scheduled build.
-- The workflow prepares a draft release with checks, platform artifacts and release notes. Wout tests the actual artifacts before publication.
+- Automatic nightlies with a six-hour minimum gap and new commits, plus manual Stable promotion of the latest published nightly's exact commit. Manual nightly dispatch remains available. See 02.5.
+- Publish complete releases only after all required checks and platform artifacts pass. Nightlies publish as prereleases; Wout starts Stable promotion after testing the nightly. Use a separate maintainer dry run for artifact testing without publication.
 - Mac ships as a direct-download DMG. Wout has paid Apple Developer membership. Configure Developer ID signing, notarization and ticket stapling; redesign the DMG window.
 - Windows signing is deferred. Keep a clear signing step that can be enabled later without restructuring the release process.
 - Preserve the Linux AppImage and DEB delivery paths established in slice 01. Inspect final build configuration for the actual architecture and OS matrix rather than assuming new targets.
@@ -67,16 +93,36 @@ Done when: focused behavioural checks cover successful and failed refreshes, res
 
 Done when: Wout has selected the visual direction and the actual DMG and app flows match it. The existing large-backdrop viewing direction remains the product reference.
 
-### 02.5 Configure manual releases and Mac signing
+### 02.5 Automatic nightlies, Stable promotion and Mac signing
 
-- [ ] After transfer, configure a manually triggered GitHub workflow that accepts the intended version and channel and records the exact source revision.
-- [ ] Define unique version ordering for nightly and stable builds. Prevent an older build or nightly publication from replacing the stable update feed. Verify routing explicitly rather than relying on inferred tag names.
-- [ ] Run required checks and build the supported Mac, Windows and Linux artifacts. Assemble release notes, update metadata and integrity information into a draft release. A failed required platform build must not produce a release marked ready.
-- [ ] Configure Developer ID signing, hardened runtime, notarization and ticket stapling for Mac releases using Wout's paid membership. Inspect available credentials first; guide Wout only through account steps he must perform himself. Release builds fail when required signing or notarization fails.
-- [ ] Include the update payload required by the selected updater alongside the Mac DMG. Keep Windows unsigned for now, with signing configuration isolated for later addition.
-- [ ] Verify the redesigned downloaded DMG, Windows installer and Linux packages on the target systems. Test installation and launch without development tools or a UI server.
+Updated by Wout on 29 September 2026: automatic nightlies, and manual promotion of the latest published nightly's exact commit to Stable. This supersedes the earlier manual-only and stable-draft policies. [Releasing](../releasing.md) documents the result.
 
-Done when: the manual workflow can prepare both channels with complete draft artifacts and verified Mac signing/notarization. The repository remains private, and preparation does not automatically publish a public release.
+| Area                  | Required change                                                                                                                                                                    |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Automatic nightlies   | Check every 30 minutes; build when there are new commits and at least six hours have passed since the last published nightly. Keep manual nightly dispatch                         |
+| Stable release source | Rebuild the exact commit of the latest published nightly: resolve its tag to the commit, verify default-branch ancestry and carry that SHA through the entire run                  |
+| Publication           | Publish only after all required checks and packages succeed. A nightly is a prerelease; a manually requested Stable becomes the latest release, not a draft                        |
+| Shared build          | Build the platform-independent JavaScript once and reuse the versioned bundle for Mac, Windows and Linux; retain platform-specific FFmpeg builds, signing and installed-app checks |
+| Version bookkeeping   | Nightlies preview a future stable version. Record the released stable version after publication instead of an automatic minor bump; document overrides, retries and ordering       |
+| Branch testing        | Keep an artifact-only release dry run outside the update feeds; no third user-facing channel                                                                                       |
+
+- [x] Keep ordinary PR/main CI and release verification consistent, with required checks on the exact source being shipped.
+- [x] Resolve the release source before checks or builds. Manual Stable selects the most recently published valid nightly, ignoring drafts and unrelated prereleases, and derives its default version from that nightly. A version override must not change the selected source commit. Resolve annotated tags correctly and reject missing nightlies or commits outside the default branch.
+- [x] Pin every checkout, check, bundle, installer, release note and release target to that resolved SHA. Advancing `main` during a run must not change its contents. A stable promotion rebuilds the same source with a stable version; it does not reuse nightly-labelled binaries.
+- [x] Check nightly eligibility every 30 minutes. Require at least six hours since the previous published nightly and new commits descended from it. Evaluate this after acquiring the nightly concurrency lock. Manual nightly dispatch may bypass the interval. Handle the first nightly, unchanged history and divergent history explicitly.
+- [x] Serialize publications without cancelling active releases or silently dropping requested Stable runs. Keep nightly and stable queues independent, and check duplicate tags and release ordering before publication.
+- [x] Build the shared JavaScript bundle once with the resolved release version. Package it on the existing Mac arm64, Windows x64 and Linux x64 runners. Retain required tests, FFmpeg caching/builds and installed-app checks; do not add other architectures or infrastructure without a project need.
+- [x] Publish only after every required check, platform build, signing check and artifact validation succeeds. Attach installers, updater metadata, checksums, dependency source archives and notes tied to the resolved commit. Mark nightlies as prereleases without replacing latest stable; mark promoted Stable as latest. Define safe recovery from a failed or repeated publication.
+- [x] Record the released stable version only after successful publication, derive the next nightly target without requiring an automatic minor bump, and prevent duplicate or backwards versions when finalization is delayed. Document any repository permissions needed for finalization and its recovery path.
+- [x] Retain a maintainer dry run that exercises packaging and signing without publishing to either update channel. Keep branch artifacts out of normal updater feeds. Limit signing credentials to trusted runs; fork PR checks must not require release secrets.
+- [x] Add focused behavioral tests for source selection, version ordering and publication eligibility: first nightly, six-hour boundary, unchanged/divergent history, drafts and unrelated prereleases, manual Stable promotion while `main` advances, missing nightly, and duplicate versions.
+- [ ] Verify failure gates and cancellation/queue behavior in a dry run.
+- [x] Update `docs/maintainers/releasing.md` and related maintainer guidance for the final workflow, including manual Stable promotion, nightly timing, overrides, dry runs, publication recovery and first-release setup.
+- [x] Preserve Developer ID signing, hardened runtime, notarization and ticket stapling using Wout's paid membership. Walk Wout through any remaining account, local Mac and GitHub Actions setup; guide only the steps he must perform himself. Missing required signing inputs or failed notarization must fail a release build.
+- [x] Include the updater ZIP alongside the Mac DMG. Keep Windows unsigned with an isolated path to enable signing later. Preserve Linux AppImage and DEB delivery.
+- [ ] Verify the redesigned downloaded DMG, Windows installer and Linux packages on target systems. Record the exact build, source SHA and results, including installation and launch without development tools or a UI server.
+
+Done when: automatic nightlies and manual Stable promotion follow the agreed source and publication policy; all release artifacts come from one verified revision; dry runs cannot reach user update feeds; Mac signing/notarization and the supported packages pass verification. Keep the repository private during the slice. Wout controls the first public launch; do not trigger releases or change visibility just to complete this checklist.
 
 ### 02.6 Deliver user-initiated updates and channels
 
@@ -119,7 +165,7 @@ Done when: acceptance evidence supports closing slice 02 and the first public re
 
 ## Scope boundaries
 
-Additional provider types, generic M3U/XMLTV source management, multiple subscriptions, full EPG, movie/series browsing, mobile/TV and external metadata enrichment remain later work. Windows signing, app stores, hosted UI, scheduled nightly publishing and additional desktop architectures are not required here.
+Additional provider types, generic M3U/XMLTV source management, multiple subscriptions, full EPG, movie/series browsing, mobile/TV and external metadata enrichment remain later work. Windows signing, app stores, hosted UI and additional desktop architectures remain outside this slice. Scheduled nightly publishing and manual Stable promotion are now required under 02.5. A tag-triggered Stable shortcut, hosted deployments and a third user-facing channel are not required.
 
 Do not promise every possible codec or feed. Establish a representative sample set, demonstrate improvement on the supported platforms and record remaining limits. Engine choice and platform installation details are investigations; the agreed product behaviour above is settled.
 

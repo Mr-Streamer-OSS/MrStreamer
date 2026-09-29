@@ -5,9 +5,10 @@
 import { type } from "arktype";
 import type { Result } from "./errors.ts";
 import type { CatalogueStatus, Category, LiveChannel } from "./library.ts";
-import type { StreamFailure, StreamSession } from "./playback.ts";
+import { CODECS, type StreamFailure, type StreamSession } from "./playback.ts";
 import { Preferences } from "./preferences.ts";
 import type { SubscriptionSummary } from "./subscription.ts";
+import type { UpdateStatus } from "./updates.ts";
 
 const none = type("undefined");
 
@@ -29,7 +30,11 @@ export const ipcInputs = {
   "library.channels": type({ "categoryId?": "string", "query?": "string", "ids?": "string[]" }),
   "library.channel": type({ channelId: "string" }),
   "library.refresh": none,
-  "playback.open": type({ channelId: "string" }),
+  "playback.open": type({
+    channelId: "string",
+    decoders: type.enumerated(...CODECS).array(),
+    "repair?": "boolean",
+  }),
   "playback.close": type({ sessionId: "string" }),
   "playback.failure": type({ sessionId: "string" }),
   "preferences.get": none,
@@ -37,6 +42,15 @@ export const ipcInputs = {
   // filling in an empty list on every update.
   "preferences.update": Preferences.omit("recentChannelIds").partial(),
   "preferences.recordWatch": type({ channelId: "string" }),
+  "updates.status": none,
+  "updates.setChannel": type({ channel: "'stable' | 'nightly'" }),
+  "updates.check": none,
+  "updates.download": none,
+  "updates.cancel": none,
+  "updates.restart": none,
+  "updates.prepareFresh": none,
+  "updates.keepEverything": none,
+  "updates.startFresh": none,
 } satisfies Record<keyof IpcOutputs, { infer: unknown }>;
 
 /** What each IPC method resolves to when it succeeds. */
@@ -62,6 +76,22 @@ export interface IpcOutputs {
   "preferences.update": Preferences;
   /** Remembers a channel as last and recently watched. */
   "preferences.recordWatch": Preferences;
+  "updates.status": UpdateStatus;
+  /** Chooses Stable or Nightly for the next check; installs and removes nothing. */
+  "updates.setChannel": UpdateStatus;
+  "updates.check": UpdateStatus;
+  /** Downloads the update the last check found. Resolves when it is ready or failed. */
+  "updates.download": UpdateStatus;
+  /** Stops a download in progress. */
+  "updates.cancel": null;
+  /** Quits and installs the downloaded update. Only after the user confirmed the restart. */
+  "updates.restart": null;
+  /** Downloads the newest stable release for a fresh start; erases nothing. */
+  "updates.prepareFresh": UpdateStatus;
+  /** Leaves a fresh start before anything is erased. */
+  "updates.keepEverything": UpdateStatus;
+  /** Erases this device's data and installs Stable. Only after the final confirmation. */
+  "updates.startFresh": null;
 }
 
 export type IpcMethod = keyof IpcOutputs;
@@ -74,8 +104,10 @@ export type IpcArgs<M extends IpcMethod> =
 
 /** Events the main process pushes to the UI. */
 export interface IpcEvents {
-  /** The live catalogue changed after a refresh. */
+  /** A catalogue refresh finished, or failed and kept the previous channels. */
   "library.updated": CatalogueStatus;
+  /** The update or fresh start moved on, for example a download's progress. */
+  "updates.changed": UpdateStatus;
 }
 export type IpcEvent = keyof IpcEvents;
 

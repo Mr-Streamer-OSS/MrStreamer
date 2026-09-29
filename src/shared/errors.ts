@@ -19,6 +19,11 @@ export type AppError =
   /** The system keychain would not store the password, or no longer gives it back. */
   | { readonly kind: "keychain-refused" }
   | { readonly kind: "channel-not-found"; readonly channelId: string }
+  /**
+   * The provider sent no channels, or far fewer than before and not twice in a row. The previous
+   * channel list stays.
+   */
+  | { readonly kind: "incomplete-catalogue"; readonly received: number; readonly previous: number }
   /** An IPC call carried input that failed validation. Indicates a UI bug. */
   | { readonly kind: "invalid-input"; readonly detail: string }
   | { readonly kind: "unexpected"; readonly detail: string };

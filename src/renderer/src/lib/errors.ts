@@ -30,6 +30,10 @@ export function describeError(error: AppError): string {
         : "Your system's keychain would not store your password.";
     case "channel-not-found":
       return "This channel is no longer in the provider's list.";
+    case "incomplete-catalogue":
+      return error.received === 0
+        ? "The provider sent an empty channel list, so the previous list stays."
+        : `The provider sent ${error.received.toLocaleString()} of ${error.previous.toLocaleString()} channels, so the previous list stays.`;
     case "invalid-input":
     case "unexpected":
       return `Something went wrong: ${error.detail}`;

@@ -1,7 +1,9 @@
-# Installers: an arm64 DMG for Apple Silicon Macs (`pnpm dist:mac`, on a Mac), an x64 NSIS installer
-# for Windows 11 (`pnpm dist:win`, on any system; Linux fetches its own Wine for it), and an x64
-# AppImage and deb for Linux (`pnpm dist:linux`, on Linux).
-appId: io.github.stienswout.mrstreamer
+# Installers: an arm64 DMG for Apple silicon Macs (`pnpm dist:mac`, on a Mac), an x64 NSIS installer
+# for Windows 11 (`pnpm dist:win`, on Windows), and an x64 AppImage and deb for Linux
+# (`pnpm dist:linux`, on Linux). The release workflow builds all of them.
+# Fixed from the first release on: macOS updates and Keychain access, and Windows installs, are
+# tied to it. Letters only, so Android and iOS accept the same id.
+appId: app.mrstreamer.player
 productName: Mr. Streamer
 copyright: Copyright © 2026 Wout Stiens
 directories:
@@ -11,12 +13,22 @@ files:
   - out/**/*
   - package.json
 electronLanguages: [en]
+# Every release carries latest*.yml update files, nightly or not: the app picks the release
+# itself, so the files need no channel in their names.
+detectUpdateChannel: false
+# The ffmpeg that converts streams the player cannot decode, built by scripts/build-ffmpeg.sh.
+extraResources:
+  - from: vendor/ffmpeg/${os}-${arch}
+    to: ffmpeg
 # Seals Mac builds with an ad hoc signature, so they open without a Developer ID. See the script.
 afterPack: ./scripts/mac-ad-hoc-sign.ts
 
 mac:
+  # The DMG is the download; the zip is what in-app updates install.
   target:
     - target: dmg
+      arch: [arm64]
+    - target: zip
       arch: [arm64]
   category: public.app-category.entertainment
   icon: build/icon.icns
@@ -27,11 +39,16 @@ mac:
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   artifactName: Mr-Streamer-${version}-mac-${arch}.${ext}
+# The window takes its 660 x 420 size from the background; `pnpm dmg:background` renders it.
 dmg:
   title: Mr. Streamer ${version}
+  background: build/dmg-background.png
+  iconSize: 132
+  iconTextSize: 13
+  sign: true
   contents:
-    - { x: 160, y: 200, type: file }
-    - { x: 480, y: 200, type: link, path: /Applications }
+    - { x: 190, y: 210, type: file }
+    - { x: 470, y: 210, type: link, path: /Applications }
 
 win:
   target:
@@ -53,7 +70,22 @@ linux:
     - target: deb
       arch: [x64]
   category: AudioVideo
+  # Desktop environments match the window to the menu entry by this name.
+  syncDesktopName: true
   icon: build/icon.png
   synopsis: A cinematic player for your existing IPTV subscriptions.
-  maintainer: Wout Stiens <woutstoens@gmail.com>
+  maintainer: Wout Stiens <hello@mrstreamer.app>
   artifactName: Mr-Streamer-${version}-linux-${arch}.${ext}
+deb:
+  # electron-builder's defaults, plus ALSA, which Chromium loads at start and minimal systems lack.
+  depends:
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+    - libsecret-1-0
+    - libasound2t64 | libasound2
