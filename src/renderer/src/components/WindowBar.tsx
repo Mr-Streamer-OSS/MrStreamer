@@ -4,6 +4,7 @@ import { isMac } from "../app/platform.ts";
 import { toDepth, useUi, type View } from "../app/ui-store.ts";
 import { cn } from "../lib/utils.ts";
 import { UpdateIndicator } from "../features/updates/UpdateIndicator.tsx";
+import { WINDOW_BAR } from "../../../shared/window-bar.ts";
 import { Logo } from "./Logo.tsx";
 import { Button } from "./ui/button.tsx";
 
@@ -21,11 +22,13 @@ export function WindowBar({
   const view = useUi((state) => state.view);
   return (
     <header
-      className={cn(
-        "drag flex h-14 flex-none items-center gap-1",
-        isMac ? "pr-4 pl-[5.5rem]" : "pr-[9.5rem] pl-4",
-        className,
-      )}
+      className={cn("drag flex flex-none items-center gap-1", isMac ? "pr-4" : "pl-4", className)}
+      style={{
+        height: WINDOW_BAR.height,
+        ...(isMac
+          ? { paddingLeft: WINDOW_BAR.macInset }
+          : { paddingRight: WINDOW_BAR.windowsInset }),
+      }}
     >
       <span className="mr-4 flex items-center gap-2">
         <Logo className="size-5" />

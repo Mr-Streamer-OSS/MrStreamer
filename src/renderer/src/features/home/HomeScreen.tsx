@@ -14,6 +14,7 @@ import { channelLine } from "../../lib/format.ts";
 import { call } from "../../lib/ipc.ts";
 import { queries, useCategoryMap } from "../../lib/queries.ts";
 import { player } from "../../player/player.ts";
+import { WINDOW_BAR } from "../../../../shared/window-bar.ts";
 
 const NO_IDS: readonly string[] = [];
 
@@ -114,8 +115,10 @@ function Hero({
   const hue = channel ? hueOf(channel.title) : 220;
   return (
     <section
-      className="relative -mt-14 flex h-[58vh] min-h-[22rem] items-end overflow-hidden px-10 pb-12"
+      className="relative flex h-[58vh] min-h-[22rem] items-end overflow-hidden px-10 pb-12"
       style={{
+        // The hero runs under the window bar.
+        marginTop: -WINDOW_BAR.height,
         background: `radial-gradient(ellipse 70% 90% at 78% 35%, hsl(${hue} 45% 20%), transparent 70%), #000`,
       }}
     >

@@ -11,6 +11,7 @@ import { createPlayback, type Playback } from "./services/playback.ts";
 import { createPreferences } from "./services/preferences.ts";
 import { createSubscriptions, type Subscriptions } from "./services/subscription.ts";
 import { createUpdates } from "./services/updates.ts";
+import { WINDOW_BAR } from "../shared/window-bar.ts";
 import { fetchReleases, metadataFileFor } from "./updates/feed.ts";
 
 // Matches `appId` in electron-builder.yml: Windows groups taskbar entries and notifications by it.
@@ -38,10 +39,14 @@ function openWindow(playback: Playback): BrowserWindow {
     // The picture fills the window. macOS keeps its traffic lights top left; Windows draws its
     // window controls top right over a transparent strip.
     ...(isMac
-      ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 16, y: 14 } }
+      ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: WINDOW_BAR.trafficLights }
       : {
           titleBarStyle: "hidden" as const,
-          titleBarOverlay: { color: "#00000000", symbolColor: "#ffffff", height: 40 },
+          titleBarOverlay: {
+            color: "#00000000",
+            symbolColor: "#ffffff",
+            height: WINDOW_BAR.height,
+          },
         }),
     webPreferences: {
       preload: join(import.meta.dirname, "../preload/index.cjs"),
