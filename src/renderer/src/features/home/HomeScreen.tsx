@@ -191,7 +191,9 @@ function Row({
         </div>
         <div className="ml-auto">{action}</div>
       </div>
-      <div className="-mx-10 flex gap-4 overflow-x-auto overscroll-x-contain px-10 pb-2">
+      {/* A scrolling row clips what is drawn outside it, so the padding leaves room for the
+          hover ring. */}
+      <div className="-mx-10 -mt-1 flex gap-4 overflow-x-auto overscroll-x-contain px-10 pt-1 pb-2">
         {children}
       </div>
     </section>
