@@ -12,8 +12,8 @@ export function toDepth(value: number): GuideDepth {
 
 export type View = "home" | "live";
 
-/** The update dialog on screen: the restart question, or one of the two fresh-start steps. */
-type UpdateDialog = "restart" | "fresh" | "erase";
+/** The update dialog on screen: the restart question. */
+type UpdateDialog = "restart";
 
 interface UiState {
   readonly view: View;

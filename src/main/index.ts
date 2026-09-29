@@ -10,7 +10,8 @@ import { createLibrary, type Library } from "./services/library.ts";
 import { createPlayback, type Playback } from "./services/playback.ts";
 import { createPreferences } from "./services/preferences.ts";
 import { createSubscriptions, type Subscriptions } from "./services/subscription.ts";
-import { createUpdates, finishFreshStart } from "./services/updates.ts";
+import { createUpdates } from "./services/updates.ts";
+import { WINDOW_BAR } from "../shared/window-bar.ts";
 import { fetchReleases, metadataFileFor } from "./updates/feed.ts";
 
 // Matches `appId` in electron-builder.yml: Windows groups taskbar entries and notifications by it.
@@ -38,10 +39,14 @@ function openWindow(playback: Playback): BrowserWindow {
     // The picture fills the window. macOS keeps its traffic lights top left; Windows draws its
     // window controls top right over a transparent strip.
     ...(isMac
-      ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 16, y: 14 } }
+      ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: WINDOW_BAR.trafficLights }
       : {
           titleBarStyle: "hidden" as const,
-          titleBarOverlay: { color: "#00000000", symbolColor: "#ffffff", height: 40 },
+          titleBarOverlay: {
+            color: "#00000000",
+            symbolColor: "#ffffff",
+            height: WINDOW_BAR.height,
+          },
         }),
     webPreferences: {
       preload: join(import.meta.dirname, "../preload/index.cjs"),
@@ -82,11 +87,6 @@ async function start(): Promise<void> {
   }
   const dataDir = app.getPath("userData");
   await removeUnfinishedWrites(dataDir);
-  // Before any service reads the data: a fresh start from the last run may have to finish.
-  const freshOutcome = await finishFreshStart(dataDir, app.getVersion(), async () => {
-    await session.defaultSession.clearStorageData();
-    await session.defaultSession.clearCache();
-  });
   const userAgent = `MrStreamer/${app.getVersion()}`;
 
   session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) => {
@@ -117,7 +117,6 @@ async function start(): Promise<void> {
     metadataFile: metadataFileFor(process.platform),
     releases: () => fetchReleases(UPDATE_FEED, REPOSITORY),
     installer: electronInstaller(),
-    freshOutcome,
     onChanged: (status) => {
       if (mainWindow) emit(mainWindow.webContents, "updates.changed", status);
     },
@@ -177,12 +176,6 @@ async function start(): Promise<void> {
       },
       "updates.restart": async () => {
         await updates.restart();
-        return null;
-      },
-      "updates.prepareFresh": () => updates.prepareFresh(),
-      "updates.keepEverything": () => updates.keepEverything(),
-      "updates.startFresh": async () => {
-        await updates.startFresh();
         return null;
       },
     },

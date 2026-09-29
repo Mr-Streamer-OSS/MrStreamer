@@ -10,7 +10,7 @@ Mr. Streamer keeps everything on your computer, in one folder:
 | Windows | `%APPDATA%\Mr. Streamer`                     |
 | Linux   | `~/.config/Mr. Streamer`                     |
 
-It holds your subscription with its encrypted password, your preferences and watch history, and a copy of your channel list. Uninstalling leaves the folder in place, so a reinstall picks up where you left off. Delete the folder to remove everything, or use **Start fresh on Stable** from [Updates and channels](updates.md#going-back-to-stable).
+It holds your subscription with its encrypted password, your preferences and watch history, and a copy of your channel list. Uninstalling leaves the folder in place, so a reinstall picks up where you left off. Delete the folder to remove everything.
 
 Your password is encrypted with a key your system keeps: the macOS Keychain, Windows' user encryption, or the desktop keyring on Linux.
 

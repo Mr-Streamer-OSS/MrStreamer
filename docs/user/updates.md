@@ -24,17 +24,4 @@ The version you download sets your channel on first launch. After that, only you
 
 ## Going back to Stable
 
-There are two ways back from a nightly build.
-
-**Switch to Stable** keeps the nightly you have and all your data. Nightly builds are usually newer than the latest stable release, so Mr. Streamer won't replace yours with an older version. Settings says when that's the case, and you move to Stable with the first stable release that is newer than your nightly.
-
-**Start fresh on Stable** installs the latest stable release now, even when it is older, and erases this computer's Mr. Streamer data:
-
-- your subscription login
-- your preferences
-- your watch history
-- the channel list
-
-It doesn't touch your provider account or Mr. Streamer on your other devices. Afterwards you connect your subscription again.
-
-It runs in two steps. First Mr. Streamer downloads and checks the stable release; nothing is erased yet, and you can stop at any point. When the download is ready, a final confirmation lists what will be erased. After you tick the box and choose **Erase and restart**, Mr. Streamer installs Stable, and Stable erases the data when it first opens. If Stable doesn't install, nothing is erased: Settings says so, and **Try again** repeats it.
+Choose **Stable** under **Updates** in Settings. Mr. Streamer offers the newest stable release right away, even when it is older than your nightly, and installs it like any other update: your login, preferences and watch history stay.

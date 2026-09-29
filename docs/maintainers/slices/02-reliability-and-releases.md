@@ -38,6 +38,7 @@ Decisions changed since scoping, by Wout:
 - Release policy updated again on 29 September: automatic nightlies, and Stable by manual promotion of the latest published nightly's commit. The earlier stable-draft and next-minor-bump behavior is superseded; see 02.5.
 - The first release is 0.0.1.
 - Wout made the repository public on 29 September, before the first release.
+- After the slice, on 29 September: Start fresh on Stable is removed. Choosing Stable on a nightly build offers the newest stable release, older or not, and keeps the data.
 - The app id moved to `app.mrstreamer.player`, on Wout's `mrstreamer.app` domain: a clean start, since nothing was released under the old id. It has no hyphens, so Android and iOS accept it too. The Linux package, executable and Windows install folder are now `mrstreamer`.
 - The development mock provider and other investigation tooling left the source; tests keep a small fake provider.
 - ffmpeg builds inside each release packaging job, not in a separate job.

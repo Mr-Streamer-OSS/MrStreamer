@@ -1,10 +1,6 @@
-import { existsSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { createUpdates, finishFreshStart, type Installer } from "../src/main/services/updates.ts";
+import { createUpdates, type Installer } from "../src/main/services/updates.ts";
 import { fetchReleases, type PublishedRelease } from "../src/main/updates/feed.ts";
-import type { FreshStart } from "../src/shared/updates.ts";
 import { tempDir } from "./support.ts";
 
 const METADATA = "latest-mac.yml";
@@ -60,7 +56,7 @@ function fakeInstaller(
 async function updates(
   installed: string,
   releases: readonly PublishedRelease[],
-  options: { dataDir?: string; installer?: Installer; freshOutcome?: FreshStart } = {},
+  options: { dataDir?: string; installer?: Installer } = {},
 ) {
   const dataDir = options.dataDir ?? (await tempDir());
   const installer = options.installer ?? fakeInstaller().installer;
@@ -70,7 +66,6 @@ async function updates(
     metadataFile: METADATA,
     releases: async () => releases,
     installer,
-    freshOutcome: options.freshOutcome ?? { kind: "idle" },
     onChanged: () => {},
   });
   return { dataDir, service };
@@ -129,15 +124,18 @@ describe("update channels", () => {
     expect((await afterUpdate.service.status()).channel).toBe("nightly");
   });
 
-  it("switches to Stable without downgrading a newer nightly", async () => {
-    const { service } = await updates("0.3.0-nightly.20261002.14", PUBLISHED);
+  it("takes a Nightly user who switches to Stable to the newest stable release, older or not", async () => {
+    const fake = fakeInstaller();
+    const { service } = await updates("0.3.0-nightly.20261002.14", PUBLISHED, {
+      installer: fake.installer,
+    });
 
-    await service.setChannel("stable");
-    const status = await service.check();
+    const status = await service.setChannel("stable");
 
-    expect(status.update).toEqual({ kind: "current" });
-    expect(status.aheadOf).toBe("0.2.1");
     expect(status.channel).toBe("stable");
+    expect(status.update).toEqual({ kind: "available", version: "0.2.1" });
+    expect((await service.download()).update).toEqual({ kind: "ready", version: "0.2.1" });
+    expect(fake.downloads.at(-1)).toMatchObject({ version: "0.2.1", allowDowngrade: true });
   });
 
   it("reports a failed check", async () => {
@@ -148,7 +146,6 @@ describe("update channels", () => {
       metadataFile: METADATA,
       releases: () => Promise.reject(new Error("The release list answered HTTP 404.")),
       installer: fakeInstaller().installer,
-      freshOutcome: { kind: "idle" },
       onChanged: () => {},
     });
 
@@ -225,7 +222,7 @@ describe("in-app updates", () => {
     expect((await service.download()).update).toEqual({ kind: "ready", version: "0.2.1" });
   });
 
-  it("drops a downloaded nightly when the user switches to Stable", async () => {
+  it("drops a downloaded nightly when the user switches to Stable, and offers Stable instead", async () => {
     const fake = fakeInstaller();
     const { service } = await updates("0.3.0-nightly.20261001.10", PUBLISHED, {
       installer: fake.installer,
@@ -233,11 +230,12 @@ describe("in-app updates", () => {
     await service.check();
     await service.download();
 
-    expect((await service.setChannel("stable")).update).toEqual({ kind: "idle" });
+    expect((await service.setChannel("stable")).update).toEqual({
+      kind: "available",
+      version: "0.2.1",
+    });
     await service.restart();
     expect(fake.installs()).toBe(0);
-    // Nothing on Stable is newer than the installed nightly.
-    expect((await service.check()).update).toEqual({ kind: "current" });
   });
 
   it("drops a nightly download that finishes after the switch to Stable", async () => {
@@ -249,10 +247,11 @@ describe("in-app updates", () => {
     const download = service.download();
     await Promise.resolve();
 
-    await service.setChannel("stable");
+    const switched = service.setChannel("stable");
     fake.release();
+    await download;
 
-    expect((await download).update).toEqual({ kind: "idle" });
+    expect((await switched).update).toEqual({ kind: "available", version: "0.2.1" });
     await service.restart();
     expect(fake.installs()).toBe(0);
   });
@@ -314,15 +313,15 @@ describe("update feed", () => {
         metadataFile: METADATA,
         releases: () => fetchReleases("https://api.example.test", "owner/app", fetchImpl),
         installer: fakeInstaller().installer,
-        freshOutcome: { kind: "idle" },
         onChanged: () => {},
       });
 
-    const stableUser = service("0.0.0");
-    await stableUser.setChannel("stable");
-    expect((await stableUser.check()).update).toEqual({ kind: "available", version: "0.0.1" });
-    expect((await service("0.0.2-nightly.20261002.200").prepareFresh()).fresh).toEqual({
-      kind: "ready",
+    expect((await service("0.0.0").setChannel("stable")).update).toEqual({
+      kind: "available",
+      version: "0.0.1",
+    });
+    expect((await service("0.0.2-nightly.20261002.200").setChannel("stable")).update).toEqual({
+      kind: "available",
       version: "0.0.1",
     });
   });
@@ -331,119 +330,5 @@ describe("update feed", () => {
     const releases = await fetchReleases("https://api.example.test", "owner/app", github(null));
 
     expect(releases).toHaveLength(100);
-  });
-});
-
-describe("starting fresh on Stable", () => {
-  async function deviceWithData() {
-    const dataDir = await tempDir();
-    for (const file of ["subscription.json", "preferences.json", "catalogue.json"]) {
-      await writeFile(join(dataDir, file), "{}");
-    }
-    return dataDir;
-  }
-
-  it("downloads the newest stable release, even when it is older, before erasing anything", async () => {
-    const dataDir = await deviceWithData();
-    const fake = fakeInstaller();
-    const { service } = await updates("0.3.0-nightly.20261002.14", PUBLISHED, {
-      dataDir,
-      installer: fake.installer,
-    });
-
-    expect((await service.prepareFresh()).fresh).toEqual({ kind: "ready", version: "0.2.1" });
-    expect(fake.downloads.at(-1)).toMatchObject({ version: "0.2.1", allowDowngrade: true });
-    expect(existsSync(join(dataDir, "subscription.json"))).toBe(true);
-    expect(fake.installs()).toBe(0);
-  });
-
-  it("changes nothing when the download fails or the user keeps everything", async () => {
-    const dataDir = await deviceWithData();
-    const failing = await updates("0.3.0-nightly.20261002.14", PUBLISHED, {
-      dataDir,
-      installer: fakeInstaller({ failures: 1 }).installer,
-    });
-    expect((await failing.service.prepareFresh()).fresh).toMatchObject({ kind: "failed" });
-
-    const keeping = await updates("0.3.0-nightly.20261002.14", PUBLISHED, { dataDir });
-    await keeping.service.prepareFresh();
-    expect((await keeping.service.keepEverything()).fresh).toEqual({ kind: "idle" });
-    expect(existsSync(join(dataDir, "subscription.json"))).toBe(true);
-  });
-
-  it("installs Stable after the final confirmation, and Stable erases the data when it starts", async () => {
-    const dataDir = await deviceWithData();
-    const fake = fakeInstaller();
-    const { service } = await updates("0.3.0-nightly.20261002.14", PUBLISHED, {
-      dataDir,
-      installer: fake.installer,
-    });
-    await service.prepareFresh();
-
-    await service.startFresh();
-
-    expect(fake.installs()).toBe(1);
-    // The nightly quits with its data intact; Stable erases it before reading anything.
-    expect(existsSync(join(dataDir, "subscription.json"))).toBe(true);
-    const eraseBrowserData = vi.fn(async () => {});
-    expect(await finishFreshStart(dataDir, "0.2.1", eraseBrowserData)).toEqual({ kind: "idle" });
-    for (const file of ["subscription.json", "preferences.json", "catalogue.json"]) {
-      expect(existsSync(join(dataDir, file))).toBe(false);
-    }
-    expect(eraseBrowserData).toHaveBeenCalledOnce();
-    expect(JSON.parse(await readFile(join(dataDir, "updates.json"), "utf8"))).toEqual({
-      channel: "stable",
-    });
-  });
-
-  it("keeps the data when the system refuses Stable", async () => {
-    const dataDir = await deviceWithData();
-    const refusal = "The update's signature doesn't match this app.";
-    const { service } = await updates("0.3.0-nightly.20261002.14", PUBLISHED, {
-      dataDir,
-      installer: fakeInstaller({ refuse: refusal }).installer,
-    });
-    await service.prepareFresh();
-
-    await service.startFresh();
-
-    expect((await service.status()).fresh).toEqual({
-      kind: "not-installed",
-      version: "0.2.1",
-      detail: refusal,
-    });
-    const eraseBrowserData = vi.fn(async () => {});
-    expect(await finishFreshStart(dataDir, "0.3.0-nightly.20261002.14", eraseBrowserData)).toEqual({
-      kind: "idle",
-    });
-    expect(existsSync(join(dataDir, "subscription.json"))).toBe(true);
-    expect(eraseBrowserData).not.toHaveBeenCalled();
-  });
-
-  it("keeps the data when an interrupted install leaves the nightly running", async () => {
-    const dataDir = await deviceWithData();
-    // The marker went down, then the nightly started again instead of Stable.
-    await writeFile(join(dataDir, "fresh-start.json"), JSON.stringify({ version: "0.2.1" }));
-
-    const outcome = await finishFreshStart(dataDir, "0.3.0-nightly.20261002.14", async () => {});
-
-    expect(outcome).toEqual({ kind: "not-installed", version: "0.2.1", detail: null });
-    expect(existsSync(join(dataDir, "subscription.json"))).toBe(true);
-    expect(existsSync(join(dataDir, "fresh-start.json"))).toBe(false);
-    const { service } = await updates("0.3.0-nightly.20261002.14", PUBLISHED, {
-      dataDir,
-      freshOutcome: outcome,
-    });
-    expect((await service.status()).fresh).toEqual(outcome);
-  });
-
-  it("finishes an erase a crash interrupted once Stable runs", async () => {
-    const dataDir = await deviceWithData();
-    await writeFile(join(dataDir, "fresh-start.json"), JSON.stringify({ version: "0.2.1" }));
-
-    expect(await finishFreshStart(dataDir, "0.2.1", async () => {})).toEqual({ kind: "idle" });
-
-    expect(existsSync(join(dataDir, "subscription.json"))).toBe(false);
-    expect(existsSync(join(dataDir, "fresh-start.json"))).toBe(false);
   });
 });

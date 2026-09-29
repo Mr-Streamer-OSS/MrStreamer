@@ -22,7 +22,7 @@ test           Vitest suites, the fake provider, codec clips and the packaged-ap
 
 ## Data
 
-Everything lives in Electron's `userData` folder, named after the product, not the app id: see the [user troubleshooting page](../user/troubleshooting.md#where-your-data-is). Each file is written atomically; leftovers of an interrupted write are removed at startup.
+Everything lives in Electron's `userData` folder, named after the product, not the app id: see the [user troubleshooting page](../user/troubleshooting.md#where-your-data-is). Each file is written atomically; leftovers of an interrupted write are removed at startup. Changes to these files must stay readable by the newest stable release: choosing Stable on a nightly installs that release over the nightly, and it reads what the nightly wrote.
 
 | File                | Owner                                                                   |
 | ------------------- | ----------------------------------------------------------------------- |
@@ -30,7 +30,6 @@ Everything lives in Electron's `userData` folder, named after the product, not t
 | `preferences.json`  | `services/preferences.ts`: volume, last channel and category, history   |
 | `catalogue.json`    | `services/library.ts`: the last good catalogue, as the provider sent it |
 | `updates.json`      | `services/updates.ts`: the chosen channel                               |
-| `fresh-start.json`  | `services/updates.ts`: present only while a fresh start is under way    |
 
 ## Catalogue
 
@@ -52,6 +51,5 @@ If the player still fails to decode the picture, the player controller retries o
 Nothing updates on its own; see the [user guide](../user/updates.md) for the behaviour.
 
 - `updates/feed.ts` reads the newest hundred releases from the GitHub API, plus the latest release, which is always the newest stable one however many nightlies came since. A release counts only when its version and pre-release flag name the same channel and it carries this platform's `latest*.yml`. Stable takes the highest stable version, Nightly the highest of both, by version order.
-- `services/updates.ts` holds the channel (set from the build on first launch, then only by the user), the check, download and restart steps, and the fresh start. Switching channels drops a downloaded or downloading update the new channel doesn't receive.
+- `services/updates.ts` holds the channel (set from the build on first launch, then only by the user) and the check, download and restart steps. Switching channels drops a downloaded or downloading update the new channel doesn't receive, then checks. On Stable, a nightly build is offered the newest stable release even when it is older; it installs over the nightly and keeps the data.
 - `platform/installer.ts` wraps electron-updater: generic provider pointed at the chosen release, no automatic download, no install on quit, and a check that the metadata names the chosen version. On macOS, Squirrel checks the update's signature only when installing, so a refused update surfaces as a failed install, not a failed download.
-- A fresh start downloads Stable first. After the final confirmation it writes `fresh-start.json` with the Stable version and installs. Nothing is erased yet: `finishFreshStart` runs before anything reads the data at the next start, and only when that version is the one running does it erase the device data and the browser session. A refused or interrupted install leaves the previous build running with its data. Stable reads the marker the nightly wrote, so its format has to stay readable by later versions.

@@ -3,7 +3,7 @@
 //   the channel details, Backspace returns to the previous channel, digits jump to a number.
 //   In the guide: Up and Down move the highlight, Enter watches (Enter on the playing channel
 //   closes the list), Left opens categories and then the rail, Right and Backspace close a layer,
-//   Escape closes them all.
+//   Escape closes them all, then leaves full screen, then goes Home.
 // Keyboard and pointer share one highlight. A two-finger swipe opens or closes layers.
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Category, LiveChannel } from "../../../../shared/library.ts";
@@ -209,9 +209,11 @@ export function Guide({
           else player.back();
           break;
         case "Escape":
+          // One layer at a time, topmost first, ending on Home.
           if (numberEntry.active()) numberEntry.cancel();
           else if (current > base) act.setDepth(base);
-          else return;
+          else if (document.fullscreenElement) void document.exitFullscreen();
+          else useUi.setState({ view: "home", guideDepth: toDepth(0) });
           break;
         case "ArrowUp":
         case "ArrowDown":
