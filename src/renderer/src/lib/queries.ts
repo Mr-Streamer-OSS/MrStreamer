@@ -58,7 +58,7 @@ export const queries = {
     }),
 };
 
-export function useCategories() {
+function useCategories() {
   return useQuery(queries.categories());
 }
 

@@ -42,7 +42,7 @@ export type PlaybackProblem =
   /** The session could not be opened at all. */
   | { readonly kind: "app"; readonly error: AppError };
 
-export type PlayerPhase =
+type PlayerPhase =
   | { readonly kind: "idle" }
   | { readonly kind: "tuning"; readonly since: number }
   | { readonly kind: "playing"; readonly engine: EngineName }

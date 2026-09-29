@@ -4,9 +4,6 @@ const userAgent = navigator.userAgent;
 export const isMac = userAgent.includes("Mac OS X");
 export const isWindows = userAgent.includes("Windows");
 
-/** Label for the main modifier key in shortcut hints. */
-export const modifierLabel = isMac ? "⌘" : "Ctrl ";
-
 /** True when the platform's main modifier (⌘ on macOS, Ctrl elsewhere) is held. */
 export function hasModifier(event: KeyboardEvent): boolean {
   return isMac ? event.metaKey : event.ctrlKey;

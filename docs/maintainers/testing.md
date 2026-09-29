@@ -10,7 +10,7 @@ The suite checks what the services promise, through their public functions, agai
 | `test/preferences.test.ts`  | History order and limits, restarts, older files                                                       |
 | `test/playback.test.ts`     | The local proxy, one-connection switching, refusals, and what the player receives for each codec clip |
 | `test/updates.test.ts`      | Channels, release routing, user-started downloads, restarts, starting fresh and its recovery          |
-| `test/release.test.ts`      | Version order and release planning                                                                    |
+| `test/release.test.ts`      | Version order, when a nightly is due, which commit a stable release builds, and refused versions      |
 
 `pnpm test` runs them all. The conversion tests need `ffmpeg` and `ffprobe`: they use the ffmpeg on PATH, or `MR_STREAMER_FFMPEG`, and skip without one. CI installs both.
 
@@ -49,4 +49,9 @@ xvfb-run -a node test/e2e/packaged-app.ts "/opt/Mr. Streamer/mr-streamer" -- --n
 
 ## CI
 
-`.github/workflows/ci.yml` runs format, typecheck, tests and build on every pull request and push to `main`. The [release workflow](releasing.md) runs the same checks first, then the packaged-app test on every installed package.
+`.github/workflows/ci.yml` runs on every pull request and push to `main`, in two jobs:
+
+- **Check:** unused files, exports and dependencies (`pnpm knip`), lint (`pnpm lint`), format, typecheck and the production build.
+- **Test:** the suite, with the system ffmpeg for the conversion tests.
+
+The [release workflow](releasing.md) runs both jobs on the exact commit it releases, next to the packaged-app test on every installed package. CI needs no secrets, so pull requests from forks run it too.

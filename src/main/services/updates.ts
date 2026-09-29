@@ -81,8 +81,6 @@ export async function finishFreshStart(dataDir: string, installed: string): Prom
     : { kind: "not-installed", version: marker.version };
 }
 
-export type Updates = ReturnType<typeof createUpdates>;
-
 export function createUpdates(deps: UpdatesDeps) {
   const settingsPath = join(deps.dataDir, SETTINGS_FILE);
   // A development build without a release version counts as the oldest stable.

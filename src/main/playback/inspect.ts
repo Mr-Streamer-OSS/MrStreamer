@@ -6,7 +6,7 @@ import type { Codec } from "../../shared/playback.ts";
 const PACKET = 188;
 const SYNC = 0x47;
 
-export interface Track {
+interface Track {
   readonly pid: number;
   readonly codec: Codec | "unknown";
 }

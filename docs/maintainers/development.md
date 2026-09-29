@@ -5,6 +5,8 @@ Needs Node 24 and pnpm 11. `package.json` lists every script.
 ```sh
 pnpm install
 pnpm dev          # the app with hot reload
+pnpm knip         # unused files, exports and dependencies
+pnpm lint         # oxlint
 pnpm fmt:check    # Prettier
 pnpm typecheck    # main, preload and shared code, then the renderer
 pnpm test         # Vitest
@@ -19,10 +21,10 @@ Streams the player can't decode go through ffmpeg (see [architecture](architectu
 
 Environment variables for testing:
 
-| Variable                  | Effect                                                                                                                                                            |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MR_STREAMER_FFMPEG`      | The ffmpeg to convert streams with, in development and packaged builds. The tests read it too.                                                                    |
-| `MR_STREAMER_UPDATE_FEED` | A GitHub-compatible API to read releases from instead of `https://api.github.com`; see [releasing](releasing.md#testing-updates-before-the-repository-is-public). |
+| Variable                  | Effect                                                                                                                                                 |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `MR_STREAMER_FFMPEG`      | The ffmpeg to convert streams with, in development and packaged builds. The tests read it too.                                                         |
+| `MR_STREAMER_UPDATE_FEED` | A GitHub-compatible API to read releases from instead of `https://api.github.com`; see [releasing](releasing.md#testing-updates-against-another-feed). |
 
 ## Installers
 

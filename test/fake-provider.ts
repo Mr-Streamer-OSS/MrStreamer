@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Writable } from "node:stream";
 
-export interface FakeChannel {
+interface FakeChannel {
   readonly streamId: number;
   readonly num: number;
   readonly name: string;
@@ -19,13 +19,13 @@ export interface FakeChannel {
   readonly fixture: string | null;
 }
 
-export interface FakeCatalogue {
+interface FakeCatalogue {
   readonly categories: readonly { readonly id: string; readonly name: string }[];
   readonly channels: readonly FakeChannel[];
 }
 
 /** Writes a channel's stream to `out` until `signal` aborts or the stream ends. */
-export type StreamSource = (channel: FakeChannel, out: Writable, signal: AbortSignal) => void;
+type StreamSource = (channel: FakeChannel, out: Writable, signal: AbortSignal) => void;
 
 export interface FakeProviderOptions {
   readonly channels?: number;
@@ -57,7 +57,7 @@ export interface FakeProvider {
 }
 
 /** The fixture channels, in the order the test category lists them. */
-export const FIXTURE_CHANNELS: readonly { name: string; fixture: string | null }[] = [
+const FIXTURE_CHANNELS: readonly { name: string; fixture: string | null }[] = [
   { name: "TEST | H.264 + AAC", fixture: "h264-aac.mpegts" },
   { name: "TEST | H.264 + MP2", fixture: "h264-mp2.mpegts" },
   { name: "TEST | H.264 + MP3", fixture: "h264-mp3.mpegts" },
@@ -232,7 +232,7 @@ const liveStreams: StreamSource = (channel, out, signal) => {
 };
 
 /** Builds a catalogue of roughly `size` channels. The same size always gives the same catalogue. */
-export function buildCatalogue(size: number): FakeCatalogue {
+function buildCatalogue(size: number): FakeCatalogue {
   const random = mulberry32(size);
   const pick = (items: readonly string[]): string =>
     items[Math.floor(random() * items.length)] ?? items[0] ?? "";

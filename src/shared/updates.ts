@@ -1,8 +1,6 @@
 // In-app updates and release channels, as the UI sees them.
 import type { Channel } from "./version.ts";
 
-export type { Channel };
-
 /** Where the in-app update stands. Nothing downloads or restarts until the user asks. */
 export type UpdatePhase =
   | { readonly kind: "idle" }

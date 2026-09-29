@@ -1,5 +1,5 @@
-# Checks every pull request and every push to main. The release workflow runs the same checks
-# before it builds anything.
+# Checks every pull request and push to main. The release workflow runs the same jobs on the exact
+# commit it releases.
 name: CI
 
 on:
@@ -7,21 +7,55 @@ on:
   push:
     branches: [main]
   workflow_call:
+    inputs:
+      ref:
+        description: Commit to check
+        type: string
+        required: true
 
 permissions:
   contents: read
 
+# A new push to a pull request replaces its running checks. Release checks get a group of their
+# own, so they never wait for or cancel the checks of a pull request.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ inputs.ref && format('release-{0}', github.run_id) || github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && !inputs.ref }}
 
 jobs:
-  checks:
-    name: Format, types, tests and build
+  check:
+    name: Check
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Unused code
+        run: pnpm knip
+      - name: Lint
+        run: pnpm lint
+      - name: Format
+        run: pnpm fmt:check
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Build
+        run: pnpm build
+
+  test:
+    name: Test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -30,7 +64,5 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # The conversion tests need ffmpeg, and ffprobe to check what the player would receive.
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
-      - run: pnpm fmt:check
-      - run: pnpm typecheck
-      - run: pnpm test
-      - run: pnpm build
+      - name: Test
+        run: pnpm test

@@ -201,7 +201,7 @@ describe("in-app updates", () => {
 });
 
 describe("starting fresh on Stable", () => {
-  async function deviceWithData(installed: string) {
+  async function deviceWithData() {
     const dataDir = await tempDir();
     for (const file of ["subscription.json", "preferences.json", "catalogue.json"]) {
       await writeFile(join(dataDir, file), "{}");
@@ -210,7 +210,7 @@ describe("starting fresh on Stable", () => {
   }
 
   it("downloads the newest stable release, even when it is older, before erasing anything", async () => {
-    const dataDir = await deviceWithData("0.3.0-nightly.20261002.14");
+    const dataDir = await deviceWithData();
     const fake = fakeInstaller();
     const { service } = await updates("0.3.0-nightly.20261002.14", PUBLISHED, {
       dataDir,
@@ -224,7 +224,7 @@ describe("starting fresh on Stable", () => {
   });
 
   it("changes nothing when the download fails or the user keeps everything", async () => {
-    const dataDir = await deviceWithData("0.3.0-nightly.20261002.14");
+    const dataDir = await deviceWithData();
     const failing = await updates("0.3.0-nightly.20261002.14", PUBLISHED, {
       dataDir,
       installer: fakeInstaller({ fail: true }).installer,
@@ -238,7 +238,7 @@ describe("starting fresh on Stable", () => {
   });
 
   it("erases this device's data and installs Stable after the final confirmation", async () => {
-    const dataDir = await deviceWithData("0.3.0-nightly.20261002.14");
+    const dataDir = await deviceWithData();
     const fake = fakeInstaller();
     const { service } = await updates("0.3.0-nightly.20261002.14", PUBLISHED, {
       dataDir,
@@ -260,7 +260,7 @@ describe("starting fresh on Stable", () => {
   });
 
   it("finishes an interrupted erase and reports when Stable did not install", async () => {
-    const dataDir = await deviceWithData("0.3.0-nightly.20261002.14");
+    const dataDir = await deviceWithData();
     // The marker went down, then the app stopped before erasing everything.
     await writeFile(join(dataDir, "fresh-start.json"), JSON.stringify({ version: "0.2.1" }));
 
