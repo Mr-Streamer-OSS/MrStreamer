@@ -3,10 +3,17 @@
   "productName": "Mr. Streamer",
   "version": "0.1.0",
   "description": "A cinematic player for your existing IPTV subscriptions.",
+  "homepage": "https://github.com/Mr-Streamer-OSS/MrStreamer",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Mr-Streamer-OSS/MrStreamer.git"
+  },
+  "bugs": "https://github.com/Mr-Streamer-OSS/MrStreamer/issues",
   "license": "GPL-3.0-only",
   "private": true,
   "type": "module",
   "main": "out/main/index.js",
+  "desktopName": "mr-streamer.desktop",
   "author": "Wout Stiens",
   "scripts": {
     "dev": "electron-vite dev",
@@ -18,9 +25,9 @@
     "fmt:check": "prettier --check .",
     "dist:mac": "electron-vite build && electron-builder --mac --arm64 --publish never",
     "icons:export": "node scripts/export-icons.ts",
-    "mock:provider": "node tools/mock-provider/server.ts",
-    "dist:win": "electron-vite build && node scripts/dist-win.ts",
-    "dist:linux": "electron-vite build && electron-builder --linux --publish never"
+    "dist:win": "electron-vite build && electron-builder --win --x64 --publish never",
+    "dist:linux": "electron-vite build && electron-builder --linux --publish never",
+    "dmg:background": "electron scripts/export-dmg-background.mjs 1 && electron scripts/export-dmg-background.mjs 2"
   },
   "engines": {
     "node": ">=24"
