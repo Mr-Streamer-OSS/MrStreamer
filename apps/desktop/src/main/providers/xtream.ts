@@ -3,12 +3,17 @@ import { type } from "arktype";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import type { LoginInput } from "@mrstreamer/contracts/ipc";
 import type { AccountState, AccountStatus } from "@mrstreamer/contracts/subscription";
+import { jsonRows } from "@mrstreamer/core/json-rows";
 import type {
   LiveCatalogue,
-  LiveProvider,
+  OnDemandCatalogue,
+  Provider,
   ProviderCategory,
   ProviderChannel,
+  ProviderDetails,
+  ProviderEpisode,
   ProviderOptions,
+  ProviderTitle,
 } from "@mrstreamer/core/provider";
 
 export interface XtreamAccount {
@@ -20,6 +25,8 @@ export interface XtreamAccount {
 
 const AUTH_TIMEOUT_MS = 15_000;
 const CATALOGUE_TIMEOUT_MS = 90_000;
+/** One movie's or series' details. */
+const DETAILS_TIMEOUT_MS = 20_000;
 /** The whole guide download. Tens of megabytes on large panels. */
 const GUIDE_TIMEOUT_MS = 5 * 60_000;
 
@@ -61,21 +68,22 @@ export function parseLogin(input: LoginInput): XtreamAccount {
 }
 
 /** Creates a provider for an Xtream account. */
-export function xtreamProvider(account: XtreamAccount, options: ProviderOptions): LiveProvider {
+export function xtreamProvider(account: XtreamAccount, options: ProviderOptions): Provider {
   const fetchImpl = options.fetch ?? fetch;
   const credentials = new URLSearchParams({
     username: account.username,
     password: account.password,
   });
 
-  async function getJson(
+  /** Reads an API answer with `read`, turning network and HTTP failures into typed errors. */
+  async function request<A>(
     params: string,
     timeoutMs: number,
-    signal?: AbortSignal,
-  ): Promise<unknown> {
+    signal: AbortSignal | undefined,
+    read: (response: Response) => Promise<A>,
+  ): Promise<A> {
     const url = `${account.server}/player_api.php?${credentials}${params}`;
     const timeout = AbortSignal.timeout(timeoutMs);
-    let text: string;
     try {
       const response = await fetchImpl(url, {
         headers: { "User-Agent": options.userAgent, Accept: "application/json" },
@@ -85,25 +93,33 @@ export function xtreamProvider(account: XtreamAccount, options: ProviderOptions)
         throw new AppFailure({ kind: "invalid-login" });
       }
       if (!response.ok) throw new AppFailure({ kind: "provider-error", status: response.status });
-      text = await response.text();
+      return await read(response);
     } catch (cause) {
       if (cause instanceof AppFailure || signal?.aborted) throw cause;
+      if (cause instanceof SyntaxError) throw notAnApi(account.server);
       throw new AppFailure({
         kind: "unreachable",
         server: account.server,
         detail: describeNetworkError(cause),
       });
     }
-    try {
-      return JSON.parse(text);
-    } catch {
-      throw new AppFailure({
-        kind: "unreachable",
-        server: account.server,
-        detail: "The server answered, but not like an Xtream API.",
-      });
-    }
   }
+
+  const getJson = (params: string, timeoutMs: number, signal?: AbortSignal): Promise<unknown> =>
+    request(params, timeoutMs, signal, async (response) => JSON.parse(await response.text()));
+
+  /** A long list, read one row at a time so reading it never holds the thread for long. */
+  const getRows = <A>(
+    params: string,
+    signal: AbortSignal | undefined,
+    map: (raw: unknown) => A[],
+  ) =>
+    request(params, CATALOGUE_TIMEOUT_MS, signal, async (response) => {
+      const rows: A[] = [];
+      if (!response.body) return rows;
+      for await (const raw of jsonRows(response.body)) rows.push(...map(raw));
+      return rows;
+    });
 
   return {
     async authenticate(signal) {
@@ -165,6 +181,84 @@ export function xtreamProvider(account: XtreamAccount, options: ProviderOptions)
       return response.body;
     },
 
+    async onDemandCatalogue(signal): Promise<OnDemandCatalogue> {
+      const [movieCategories, seriesCategories, movies, series] = await Promise.all([
+        getJson("&action=get_vod_categories", CATALOGUE_TIMEOUT_MS, signal),
+        getJson("&action=get_series_categories", CATALOGUE_TIMEOUT_MS, signal),
+        getRows("&action=get_vod_streams", signal, toMovie),
+        getRows("&action=get_series", signal, toSeries),
+      ]);
+      if (isRejectedLogin(movieCategories) || isRejectedLogin(seriesCategories)) {
+        throw new AppFailure({ kind: "invalid-login" });
+      }
+      return {
+        movieCategories: rows(movieCategories).flatMap(toCategory),
+        movies,
+        seriesCategories: rows(seriesCategories).flatMap(toCategory),
+        series,
+      };
+    },
+
+    async movieDetails(id, signal) {
+      const body = MovieInfo(
+        await getJson(
+          `&action=get_vod_info&vod_id=${encodeURIComponent(id)}`,
+          DETAILS_TIMEOUT_MS,
+          signal,
+        ),
+      );
+      if (body instanceof type.errors) throw notAnApi(account.server);
+      const info = body.info;
+      return {
+        ...detailsOf(info),
+        duration: seconds(info?.duration_secs) ?? clockSeconds(info?.duration),
+        posterUrl: url(info?.cover_big) ?? url(info?.movie_image),
+        seasons: [],
+        episodes: [],
+        container: body.movie_data?.container_extension?.trim() || null,
+      };
+    },
+
+    async seriesDetails(id, signal) {
+      const body = SeriesInfo(
+        await getJson(
+          `&action=get_series_info&series_id=${encodeURIComponent(id)}`,
+          DETAILS_TIMEOUT_MS,
+          signal,
+        ),
+      );
+      if (body instanceof type.errors) throw notAnApi(account.server);
+      const info = body.info;
+      const episodes = Array.isArray(body.episodes)
+        ? body.episodes.flat()
+        : Object.values(body.episodes ?? {}).flat();
+      return {
+        ...detailsOf(info),
+        duration: minutes(info?.episode_run_time),
+        posterUrl: url(info?.cover),
+        seasons: (body.seasons ?? []).flatMap((season) => {
+          const number = toInteger(season.season_number);
+          if (number === null) return [];
+          return [
+            {
+              number,
+              name: season.name?.trim() || null,
+              posterUrl: url(season.cover_big) ?? url(season.cover),
+            },
+          ];
+        }),
+        episodes: episodes.flatMap(toEpisode),
+        container: null,
+      };
+    },
+
+    titleFile(kind, id, container) {
+      const user = encodeURIComponent(account.username);
+      const pass = encodeURIComponent(account.password);
+      const folder = kind === "movie" ? "movie" : "series";
+      return `${account.server}/${folder}/${user}/${pass}/${encodeURIComponent(id)}.${encodeURIComponent(container)}`;
+    },
+
     liveStream(channelId) {
       const user = encodeURIComponent(account.username);
       const pass = encodeURIComponent(account.password);
@@ -204,6 +298,235 @@ const StreamRow = type({
   "category_ids?": "(string | number)[] | null",
   "epg_channel_id?": "string | null",
 });
+
+const MovieRow = type({
+  stream_id: idLike,
+  "name?": "string | null",
+  "stream_icon?": "string | null",
+  "rating?": loose,
+  "added?": loose,
+  "category_id?": loose,
+  "category_ids?": "(string | number)[] | null",
+  "container_extension?": "string | null",
+  "is_adult?": "number | string | boolean | null",
+});
+
+const SeriesRow = type({
+  series_id: idLike,
+  "name?": "string | null",
+  "cover?": "string | null",
+  "backdrop_path?": "string[] | string | null",
+  "rating?": loose,
+  "last_modified?": loose,
+  "releaseDate?": "string | null",
+  "release_date?": "string | null",
+  "category_id?": loose,
+  "category_ids?": "(string | number)[] | null",
+});
+
+const Info = type({
+  "name?": "string | null",
+  "o_name?": "string | null",
+  "cover?": "string | null",
+  "cover_big?": "string | null",
+  "movie_image?": "string | null",
+  "plot?": "string | null",
+  "description?": "string | null",
+  "genre?": "string | null",
+  "cast?": "string | null",
+  "actors?": "string | null",
+  "director?": "string | null",
+  "releasedate?": "string | null",
+  "releaseDate?": "string | null",
+  "release_date?": "string | null",
+  "backdrop_path?": "string[] | string | null",
+  "duration_secs?": loose,
+  "duration?": "string | null",
+  "episode_run_time?": loose,
+});
+type Info = typeof Info.infer;
+
+// Panels send `info: []` for a title they know nothing more about.
+const InfoOrNothing = Info.or("unknown[]").pipe((info) => (Array.isArray(info) ? undefined : info));
+
+const MovieInfo = type({
+  "info?": InfoOrNothing,
+  "movie_data?": type({ "container_extension?": "string | null" })
+    .or("unknown[]")
+    .pipe((data) => (Array.isArray(data) ? undefined : data)),
+});
+
+const EpisodeRow = type({
+  id: idLike,
+  "episode_num?": loose,
+  "season?": loose,
+  "title?": "string | null",
+  "container_extension?": "string | null",
+  "info?": type({
+    "movie_image?": "string | null",
+    "plot?": "string | null",
+    "duration_secs?": loose,
+    "duration?": "string | null",
+    "air_date?": "string | null",
+    "releasedate?": "string | null",
+  })
+    .or("unknown[]")
+    .pipe((info) => (Array.isArray(info) ? undefined : info)),
+});
+
+const SeriesInfo = type({
+  "info?": InfoOrNothing,
+  "seasons?": type({
+    "season_number?": loose,
+    "name?": "string | null",
+    "cover?": "string | null",
+    "cover_big?": "string | null",
+  })
+    .array()
+    .or("null"),
+  // An object keyed by season number, or on some panels an array of seasons.
+  "episodes?": type({ "[string]": "unknown[]" }).or("unknown[][]").or("null"),
+});
+
+function toMovie(raw: unknown): ProviderTitle[] {
+  const row = MovieRow(raw);
+  if (row instanceof type.errors) return [];
+  const id = String(row.stream_id);
+  return [
+    {
+      id,
+      name: row.name?.trim() || `Movie ${id}`,
+      posterUrl: url(row.stream_icon),
+      backdropUrl: null,
+      rating: rating(row.rating),
+      addedAt: epochSeconds(row.added),
+      releaseDate: null,
+      categoryIds: categoryIdsOf(row),
+      adult: isTruthy(row.is_adult),
+      container: row.container_extension?.trim() || "mp4",
+    },
+  ];
+}
+
+function toSeries(raw: unknown): ProviderTitle[] {
+  const row = SeriesRow(raw);
+  if (row instanceof type.errors) return [];
+  const id = String(row.series_id);
+  return [
+    {
+      id,
+      name: row.name?.trim() || `Series ${id}`,
+      posterUrl: url(row.cover),
+      backdropUrl: url(firstOf(row.backdrop_path)),
+      rating: rating(row.rating),
+      addedAt: epochSeconds(row.last_modified),
+      releaseDate: row.releaseDate?.trim() || row.release_date?.trim() || null,
+      categoryIds: categoryIdsOf(row),
+      adult: false,
+      container: null,
+    },
+  ];
+}
+
+function toEpisode(raw: unknown): ProviderEpisode[] {
+  const row = EpisodeRow(raw);
+  if (row instanceof type.errors) return [];
+  const season = toInteger(row.season);
+  const number = toInteger(row.episode_num);
+  if (season === null || number === null) return [];
+  const id = String(row.id);
+  return [
+    {
+      id,
+      season,
+      number,
+      name: row.title?.trim() || `Episode ${number}`,
+      plot: row.info?.plot?.trim() || null,
+      duration: seconds(row.info?.duration_secs) ?? clockSeconds(row.info?.duration),
+      stillUrl: url(row.info?.movie_image),
+      airDate: row.info?.air_date?.trim() || row.info?.releasedate?.trim() || null,
+      container: row.container_extension?.trim() || "mp4",
+    },
+  ];
+}
+
+/** The fields movies and series share in their details. */
+function detailsOf(
+  info: Info | undefined,
+): Omit<ProviderDetails, "duration" | "posterUrl" | "seasons" | "episodes" | "container"> {
+  return {
+    originalName: info?.o_name?.trim() || null,
+    plot: info?.plot?.trim() || info?.description?.trim() || null,
+    genres: list(info?.genre, /\s*[,/|]\s*/),
+    cast: list(info?.cast || info?.actors, /\s*,\s*/),
+    directors: list(info?.director, /\s*,\s*/),
+    releaseDate:
+      info?.releasedate?.trim() || info?.releaseDate?.trim() || info?.release_date?.trim() || null,
+    backdropUrl: url(firstOf(info?.backdrop_path)),
+  };
+}
+
+function categoryIdsOf(row: {
+  readonly category_id?: string | number | null | undefined;
+  readonly category_ids?: readonly (string | number)[] | null | undefined;
+}): string[] {
+  if (row.category_ids?.length) return row.category_ids.map(String);
+  return row.category_id != null && row.category_id !== "" ? [String(row.category_id)] : [];
+}
+
+/** An http(s) address, or null for empty strings and anything else panels send. */
+function url(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed && /^https?:\/\//i.test(trimmed) ? trimmed : null;
+}
+
+function firstOf(value: readonly string[] | string | null | undefined): string | null {
+  return (typeof value === "string" ? value : value?.[0]) ?? null;
+}
+
+function list(value: string | null | undefined, separator: RegExp): string[] {
+  return (value ?? "")
+    .split(separator)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+/** A rating out of 10; panels send "0" or "" when they have none. */
+function rating(value: string | number | null | undefined): number | null {
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) && number > 0 && number <= 10 ? number : null;
+}
+
+function epochSeconds(value: string | number | null | undefined): number | null {
+  const number = toInteger(value);
+  return number && number > 0 ? number * 1000 : null;
+}
+
+function seconds(value: string | number | null | undefined): number | null {
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.round(number) : null;
+}
+
+function minutes(value: string | number | null | undefined): number | null {
+  const number = seconds(value);
+  return number === null ? null : number * 60;
+}
+
+/** "01:39:11" or "39:11" in seconds. */
+function clockSeconds(value: string | null | undefined): number | null {
+  const parts = value?.trim().split(":").map(Number);
+  if (!parts || parts.length < 2 || parts.some((part) => !Number.isFinite(part))) return null;
+  const total = parts.reduce((sum, part) => sum * 60 + part, 0);
+  return total > 0 ? total : null;
+}
+
+function notAnApi(server: string): AppFailure {
+  return new AppFailure({
+    kind: "unreachable",
+    server,
+    detail: "The server answered, but not like an Xtream API.",
+  });
+}
 
 function toCategory(raw: unknown): ProviderCategory[] {
   const row = CategoryRow(raw);

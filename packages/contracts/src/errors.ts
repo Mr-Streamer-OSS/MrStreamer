@@ -1,4 +1,5 @@
 // Failures the UI knows how to explain. Every IPC call resolves to a value or one of these.
+import type { StreamFailure } from "./playback.ts";
 
 export type AppError =
   /** The login form is missing something, or the server address is not a URL. */
@@ -19,6 +20,10 @@ export type AppError =
   /** The system keychain would not store the password, or no longer gives it back. */
   | { readonly kind: "keychain-refused" }
   | { readonly kind: "channel-not-found"; readonly channelId: string }
+  /** A movie, series or episode the provider no longer lists. */
+  | { readonly kind: "title-not-found"; readonly titleId: string }
+  /** A movie or episode couldn't be opened: the provider refused its file, or it can't play. */
+  | { readonly kind: "stream"; readonly failure: StreamFailure }
   /**
    * The provider sent no channels, or far fewer than before and not twice in a row. The previous
    * channel list stays.

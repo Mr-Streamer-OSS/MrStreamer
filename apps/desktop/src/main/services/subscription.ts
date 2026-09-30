@@ -5,14 +5,14 @@ import type { LoginInput } from "@mrstreamer/contracts/ipc";
 import type { SubscriptionSummary } from "@mrstreamer/contracts/subscription";
 import { diagnosed } from "@mrstreamer/core/diagnostics";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
-import type { LiveProvider, ProviderOptions } from "@mrstreamer/core/provider";
+import type { Provider, ProviderOptions } from "@mrstreamer/core/provider";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Semaphore from "effect/Semaphore";
 import { readJsonFile, removeFile, writeJsonFile } from "../platform/json-file.ts";
 import type { Secrets } from "../platform/secrets.ts";
-import { parseLogin, xtreamProvider } from "../providers/xtream.ts";
+import { parseLogin, xtreamProvider, type XtreamAccount } from "../providers/xtream.ts";
 
 const StoredSubscription = type({
   version: "1",
@@ -32,13 +32,15 @@ type StoredSubscription = typeof StoredSubscription.infer;
 /** The connected subscription as other services use it. `key` changes when the login does. */
 export interface Source {
   readonly key: string;
-  readonly provider: LiveProvider;
+  readonly provider: Provider;
+  /** The login itself, for a worker thread that builds its own copy of the provider. */
+  readonly account: XtreamAccount;
 }
 
 interface Connected {
   readonly stored: StoredSubscription;
   /** Null when the saved password cannot be read any more; the user has to enter it again. */
-  readonly provider: LiveProvider | null;
+  readonly provider: { readonly provider: Provider; readonly account: XtreamAccount } | null;
 }
 
 export interface SubscriptionDeps {
@@ -93,7 +95,10 @@ function make(deps: SubscriptionDeps) {
 
     function connected(stored: StoredSubscription, password: string): Connected {
       const account = { server: stored.server, username: stored.username, password };
-      return { stored, provider: xtreamProvider(account, deps.providerOptions) };
+      return {
+        stored,
+        provider: { provider: xtreamProvider(account, deps.providerOptions), account },
+      };
     }
 
     const save = (stored: StoredSubscription, password: string) =>
@@ -144,7 +149,7 @@ function make(deps: SubscriptionDeps) {
 
       recheck: Effect.gen(function* () {
         const subscription = yield* load;
-        const provider = subscription?.provider;
+        const provider = subscription?.provider?.provider;
         if (!subscription || !provider) return subscription ? summary(subscription) : null;
         const account = yield* Effect.tryPromise({
           try: (signal) => provider.authenticate(signal),
@@ -176,7 +181,7 @@ function make(deps: SubscriptionDeps) {
       source: Effect.map(load, (subscription): Source | null => {
         if (!subscription?.provider) return null;
         const { server, username } = subscription.stored;
-        return { key: `${server}|${username}`, provider: subscription.provider };
+        return { key: `${server}|${username}`, ...subscription.provider };
       }),
     };
   });

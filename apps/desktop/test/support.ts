@@ -2,6 +2,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Worker } from "node:worker_threads";
 import type * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import type * as Layer from "effect/Layer";
@@ -92,6 +93,12 @@ export const testSecrets: Secrets = {
 
 export const userAgent = "MrStreamer/test";
 
+/** The catalogue worker from its source file, as Node runs TypeScript without a build. */
+const catalogueWorker: MainConfig["catalogueWorker"] = (setup) =>
+  new Worker(new URL("../src/main/ondemand/catalogue-worker.ts", import.meta.url), {
+    workerData: setup,
+  });
+
 /** What the app gives `mainLayer`, for tests: the test keychain, no ffmpeg, no releases. */
 export function testConfig(dataDir: string): MainConfig {
   return {
@@ -99,6 +106,7 @@ export function testConfig(dataDir: string): MainConfig {
     secrets: testSecrets,
     userAgent,
     ffmpeg: null,
+    catalogueWorker,
     updates: {
       installed: "0.0.1",
       metadataFile: "latest-linux.yml",

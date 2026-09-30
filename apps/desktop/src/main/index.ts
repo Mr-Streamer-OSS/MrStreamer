@@ -1,6 +1,6 @@
 // Composition root: creates the window and wires the services to IPC.
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { app, BrowserWindow, Menu, safeStorage, session, shell } from "electron";
 import type { IpcEvent, IpcEvents } from "@mrstreamer/contracts/ipc";
 import { Diagnostics } from "@mrstreamer/core/diagnostics";
@@ -16,8 +16,13 @@ import { emit, registerIpc } from "./ipc.ts";
 import { electronInstaller } from "./platform/installer.ts";
 import { removeUnfinishedWrites } from "./platform/json-file.ts";
 import { keychainSecrets } from "./platform/secrets.ts";
+// electron-vite builds the worker as its own file and hands back a function that starts it; the
+// lint plugin reads the source file, which has no default export.
+// oxlint-disable-next-line import/default
+import createCatalogueWorker from "./ondemand/catalogue-worker.ts?nodeWorker";
 import { mainLayer } from "./runtime.ts";
 import { Library } from "./services/library.ts";
+import { OnDemand } from "./services/ondemand.ts";
 import { Playback } from "./services/playback.ts";
 import { Settings } from "./services/preferences.ts";
 import { Subscriptions } from "./services/subscription.ts";
@@ -107,7 +112,9 @@ async function start(): Promise<void> {
       dataDir,
       secrets: keychainSecrets,
       userAgent,
-      ffmpeg: ffmpegPath(),
+      ffmpeg: toolPath("ffmpeg"),
+      ffprobe: toolPath("ffprobe"),
+      catalogueWorker: (setup) => createCatalogueWorker({ workerData: setup }),
       updates: {
         installed: app.getVersion(),
         metadataFile: metadataFileFor(process.platform),
@@ -116,19 +123,29 @@ async function start(): Promise<void> {
       },
     }),
   );
-  const { subscriptions, settings, library, playback, updates, guide, viewing, diagnostics } =
-    await runtime.runPromise(
-      Effect.all({
-        subscriptions: Subscriptions,
-        settings: Settings,
-        library: Library,
-        playback: Playback,
-        updates: Updates,
-        guide: Guide,
-        viewing: ViewingRecord,
-        diagnostics: Diagnostics,
-      }),
-    );
+  const {
+    subscriptions,
+    settings,
+    library,
+    onDemand,
+    playback,
+    updates,
+    guide,
+    viewing,
+    diagnostics,
+  } = await runtime.runPromise(
+    Effect.all({
+      subscriptions: Subscriptions,
+      settings: Settings,
+      library: Library,
+      onDemand: OnDemand,
+      playback: Playback,
+      updates: Updates,
+      guide: Guide,
+      viewing: ViewingRecord,
+      diagnostics: Diagnostics,
+    }),
+  );
 
   /** Sends each change to the window, while there is one. */
   const forward = <A, E extends IpcEvent>(
@@ -144,6 +161,7 @@ async function start(): Promise<void> {
       ),
     );
   forward(library.changes, "library.updated", (status) => status);
+  forward(onDemand.changes, "ondemand.updated", (status) => status);
   forward(guide.changes, "guide.updated", () => null);
   forward(viewing.changes, "viewing.changed", (sequence) => ({ sequence }));
   forward(updates.changes, "updates.changed", (status) => status);
@@ -151,9 +169,9 @@ async function start(): Promise<void> {
   /** Downloads the guide when it is due. A failure keeps the guide in use until the next check. */
   const refreshGuide = guide.refreshIfStale.pipe(warned("[guide] refresh failed"));
 
-  /** A different account: its channels, guide and what was last watched no longer apply. */
+  /** A different account: its channels, titles, guide and what was last watched no longer apply. */
   const forgetAccount = Effect.gen(function* () {
-    yield* Effect.all([library.clear, guide.clear], { concurrency: "unbounded" });
+    yield* Effect.all([library.clear, onDemand.clear, guide.clear], { concurrency: "unbounded" });
     yield* settings.forget;
   });
 
@@ -187,8 +205,22 @@ async function start(): Promise<void> {
       "guide.listings": ({ channelIds }) => guide.listings(channelIds),
       "guide.schedule": ({ channelId }) => guide.schedule(channelId),
       "guide.search": ({ query }) => guide.search(query),
+      "ondemand.status": () => onDemand.status,
+      "ondemand.refresh": () => onDemand.refresh,
+      "ondemand.categories": ({ kind }) => onDemand.categories(kind),
+      "ondemand.titles": (query) => onDemand.page(query),
+      "ondemand.byIds": ({ kind, ids }) => onDemand.byIds(kind, ids),
+      "ondemand.search": ({ query }) => onDemand.search(query),
+      "ondemand.details": ({ kind, id }) => onDemand.details(kind, id),
       "playback.open": ({ channelId, decoders, repair }) =>
         playback.open(channelId, decoders, { repair: repair ?? false }),
+      "playback.openTitle": ({ title, decoders }) =>
+        Effect.gen(function* () {
+          // The live preview's connection goes first, so the provider sees one at a time.
+          yield* playback.closeAll;
+          const file = yield* onDemand.file(title);
+          return yield* playback.openTitle(title, file.url, decoders);
+        }),
       "playback.close": ({ sessionId }) => Effect.as(playback.close(sessionId), null),
       "playback.failure": ({ sessionId }) => playback.failure(sessionId),
       "preferences.get": () => settings.get,
@@ -201,6 +233,11 @@ async function start(): Promise<void> {
           settings.update({ lastChannelId: channelId }),
           viewing.recordWatch(commandId, channelId),
         ),
+      "viewing.recordProgress": ({ commandId, title, position, duration }) =>
+        viewing.recordProgress(commandId, title, position, duration),
+      "viewing.removeFromContinue": ({ commandId, title }) =>
+        viewing.removeFromContinue(commandId, title),
+      "viewing.progress": (filter) => viewing.progress(filter),
       "updates.status": () => updates.status,
       "updates.setChannel": ({ channel }) => updates.setChannel(channel),
       "updates.check": () => updates.check,
@@ -236,20 +273,27 @@ async function start(): Promise<void> {
         if (yield* library.isStale(CATALOGUE_MAX_AGE)) yield* library.refresh;
         return true;
       }).pipe(warned("[startup] background refresh failed"));
-      if (connected !== false) yield* refreshGuide;
+      if (connected === false) return;
+      yield* refreshGuide;
+      // Movies and series last: their lists are the largest and nothing waits for them.
+      if (yield* onDemand.isStale(CATALOGUE_MAX_AGE)) {
+        yield* onDemand.refresh.pipe(warned("[startup] movie and series refresh failed"));
+      }
     }),
   );
 }
 
 /**
- * The ffmpeg that converts streams the player cannot decode: bundled with packaged builds, from
- * PATH during development. MR_STREAMER_FFMPEG points at another build.
+ * The ffmpeg that converts streams the player cannot decode, or the ffprobe that reads movie
+ * files: bundled with packaged builds, from PATH during development. MR_STREAMER_FFMPEG points at
+ * another ffmpeg, with its ffprobe beside it.
  */
-function ffmpegPath(): string | null {
+function toolPath(tool: "ffmpeg" | "ffprobe"): string | null {
+  const executable = isWindows ? `${tool}.exe` : tool;
   const override = process.env["MR_STREAMER_FFMPEG"];
-  if (override) return override;
-  if (!app.isPackaged) return "ffmpeg";
-  const bundled = join(process.resourcesPath, "ffmpeg", isWindows ? "ffmpeg.exe" : "ffmpeg");
+  if (override) return tool === "ffmpeg" ? override : join(dirname(override), executable);
+  if (!app.isPackaged) return tool;
+  const bundled = join(process.resourcesPath, "ffmpeg", executable);
   return existsSync(bundled) ? bundled : null;
 }
 

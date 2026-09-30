@@ -16,7 +16,18 @@ import { Failed } from "./failure.ts";
 export type Outcome = "ok" | "interrupted" | AppError["kind"];
 
 /** The app's steps worth timing: starting, logging in, and fetching or installing things. */
-export type Step = "start" | "connect" | "catalogue" | "guide" | "check" | "download" | "install";
+export type Step =
+  | "start"
+  | "connect"
+  | "catalogue"
+  /** The movie and series lists. */
+  | "titles"
+  /** One movie's or series' details. */
+  | "details"
+  | "guide"
+  | "check"
+  | "download"
+  | "install";
 
 export type Diagnostic =
   /** A step of the app's work and how it ended. */
@@ -26,6 +37,14 @@ export type Diagnostic =
       readonly op: "stream";
       readonly ms: number;
       readonly delivery: "direct" | "converted" | "repaired" | "none";
+      readonly outcome: "ok" | StreamFailure["kind"];
+    }
+  /** A movie or episode the proxy played from a position: what it copied or converted. */
+  | {
+      readonly op: "title";
+      readonly ms: number;
+      readonly video: "copy" | "convert" | "none";
+      readonly audio: "copy" | "convert" | "none";
       readonly outcome: "ok" | StreamFailure["kind"];
     }
   /** An IPC call that failed. */

@@ -12,6 +12,7 @@ import { guideStoreLayer } from "./platform/guide-store.ts";
 import type { Secrets } from "./platform/secrets.ts";
 import { viewingStoreLayer } from "./platform/viewing-store.ts";
 import { Library } from "./services/library.ts";
+import { OnDemand, type OnDemandDeps } from "./services/ondemand.ts";
 import { Playback } from "./services/playback.ts";
 import { Settings } from "./services/preferences.ts";
 import { Subscriptions } from "./services/subscription.ts";
@@ -23,11 +24,15 @@ export interface MainConfig {
   readonly userAgent: string;
   /** The ffmpeg that converts streams, or null when this build has none. */
   readonly ffmpeg: string | null;
+  /** The ffprobe that reads movie files, or null when this build has none. */
+  readonly ffprobe?: string | null;
   readonly updates: Omit<UpdatesDeps, "dataDir">;
+  /** Starts the movie and series catalogue's worker thread. */
+  readonly catalogueWorker: OnDemandDeps["worker"];
 }
 
 export type MainServices =
-  Subscriptions | Settings | Library | Playback | Updates | Guide | ViewingRecord;
+  Subscriptions | Settings | Library | OnDemand | Playback | Updates | Guide | ViewingRecord;
 
 /** Every main-process service, with the app's adapters for their ports. */
 export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
@@ -42,7 +47,12 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
   );
   const services = Layer.mergeAll(
     Library.layer({ dataDir }),
-    Playback.layer({ userAgent: config.userAgent, ffmpeg: config.ffmpeg }),
+    OnDemand.layer({ dataDir, userAgent: config.userAgent, worker: config.catalogueWorker }),
+    Playback.layer({
+      userAgent: config.userAgent,
+      ffmpeg: config.ffmpeg,
+      ffprobe: config.ffprobe ?? null,
+    }),
     Updates.layer({ dataDir, ...config.updates }),
   ).pipe(Layer.provideMerge(accounts));
 

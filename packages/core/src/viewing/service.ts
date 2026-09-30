@@ -1,10 +1,12 @@
-// The viewing record service: favourites and watch history as events, per account. Commands carry
-// an id, so sending one again changes nothing more; the store appends a command's events and the
-// state they add up to in one transaction, and the service tells the UI after the commit.
+// The viewing record service: favourites, watch history and how far movies and episodes got, as
+// events per account. Commands carry an id, so sending one again changes nothing more; the store
+// appends a command's events and the state they add up to in one transaction, and the service
+// tells the UI after the commit.
 //
 // The app supplies three ports: which account is connected, the store, and the lists kept in
 // preferences.json before the record, which the first start imports once.
-import type { Viewing } from "@mrstreamer/contracts/viewing";
+import type { TitleRef } from "@mrstreamer/contracts/ondemand";
+import type { TitleProgress, Viewing } from "@mrstreamer/contracts/viewing";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -29,7 +31,15 @@ export class ViewingAccount extends Context.Service<
 /** An account's state and how far its record has come. */
 export interface StoredViewing {
   readonly state: ViewingState;
+  /** Worked out from the account's title rows; see ./titles.ts. */
+  readonly continueWatching: readonly TitleProgress[];
   readonly sequence: number;
+}
+
+/** Which titles' progress to read: movies by id, and every episode of a series. */
+export interface TitleFilter {
+  readonly movieIds?: readonly string[];
+  readonly seriesId?: string;
 }
 
 /** Where the events and the state they add up to are kept. */
@@ -37,6 +47,11 @@ export class ViewingStore extends Context.Service<
   ViewingStore,
   {
     readonly read: (account: string) => Effect.Effect<StoredViewing, Failed>;
+    /** How far the titles matching `filter` got for `account`. */
+    readonly titles: (
+      account: string,
+      filter: TitleFilter,
+    ) => Effect.Effect<readonly TitleProgress[], Failed>;
     /**
      * In one transaction: unless `commandId` ran before, appends the events `decide` makes from
      * the account's state and stores the state they add up to. Returns the state after.
@@ -83,6 +98,17 @@ export class ViewingRecord extends Context.Service<
       favourite: boolean,
     ): Effect.Effect<Viewing, Failed>;
     recordWatch(commandId: string, channelId: string): Effect.Effect<Viewing, Failed>;
+    /** Remembers how far a movie or episode played. */
+    recordProgress(
+      commandId: string,
+      title: TitleRef,
+      position: number,
+      duration: number,
+    ): Effect.Effect<Viewing, Failed>;
+    /** Takes a movie, or an episode's whole series, out of Continue watching until played again. */
+    removeFromContinue(commandId: string, title: TitleRef): Effect.Effect<Viewing, Failed>;
+    /** How far the matching titles got; empty without an account. */
+    progress(filter: TitleFilter): Effect.Effect<readonly TitleProgress[], Failed>;
     /** The sequence after each committed change. */
     readonly changes: Stream.Stream<number>;
   }
@@ -90,7 +116,7 @@ export class ViewingRecord extends Context.Service<
   static readonly layer = Layer.effect(ViewingRecord, make());
 }
 
-const none: Viewing = { favourites: [], recent: [], sequence: 0 };
+const none: Viewing = { favourites: [], recent: [], continueWatching: [], sequence: 0 };
 
 function make() {
   return Effect.gen(function* () {
@@ -125,6 +151,7 @@ function make() {
     const shown = (stored: StoredViewing): Viewing => ({
       favourites: stored.state.favourites,
       recent: stored.state.recent,
+      continueWatching: stored.continueWatching,
       sequence: stored.sequence,
     });
 
@@ -151,6 +178,15 @@ function make() {
         run(commandId, { kind: "set-favourite", channelId, favourite }),
       recordWatch: (commandId: string, channelId: string) =>
         run(commandId, { kind: "record-watch", channelId }),
+      recordProgress: (commandId: string, title: TitleRef, position: number, duration: number) =>
+        run(commandId, { kind: "record-progress", title, position, duration }),
+      removeFromContinue: (commandId: string, title: TitleRef) =>
+        run(commandId, { kind: "remove-title", title }),
+      progress: (filter: TitleFilter) =>
+        Effect.gen(function* () {
+          const key = yield* account.current;
+          return key ? yield* store.titles(key, filter) : [];
+        }),
       changes: Stream.fromPubSub(changes),
     };
   });

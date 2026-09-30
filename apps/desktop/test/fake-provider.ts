@@ -4,6 +4,11 @@
 // failures" streams the recordings in test/fixtures, one codec combination each, plus an offline
 // channel; every other channel streams an empty MPEG-TS program. About half the channels have a
 // guide id, shared by variants of one channel, and xmltv.php serves their programmes.
+//
+// Movies and series come with their own categories, one of them for adults. Their files redirect
+// to another address, as real panels do, and answer byte ranges; each open file holds a
+// connection slot like a live stream. The "TEST" movies and the "TEST | Formats" series stream the
+// title clips in test/fixtures; every other title streams the MP4 clip.
 import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Writable } from "node:stream";
@@ -47,11 +52,47 @@ export interface FakeProviderOptions {
   readonly live?: boolean;
   /** The guide id the channel list sends for a channel, in place of its own. */
   readonly guideIdOf?: (channel: FakeChannel) => string | null;
+  /** About how many movies and series to list, besides the test titles. */
+  readonly titles?: number;
+}
+
+interface FakeTitle {
+  readonly id: number;
+  readonly name: string;
+  readonly categoryId: string;
+  readonly adult: boolean;
+  readonly rating: number;
+  /** Epoch seconds. */
+  readonly added: number;
+  readonly container: string;
+  /** File in test/fixtures it streams; null answers 404. */
+  readonly fixture: string | null;
+}
+
+interface FakeSeries {
+  readonly id: number;
+  readonly name: string;
+  readonly categoryId: string;
+  readonly added: number;
+  /** Episodes per season, in order. */
+  readonly seasons: readonly (readonly FakeTitle[])[];
+}
+
+interface FakeTitles {
+  readonly movieCategories: readonly { readonly id: string; readonly name: string }[];
+  readonly movies: readonly FakeTitle[];
+  readonly seriesCategories: readonly { readonly id: string; readonly name: string }[];
+  readonly series: readonly FakeSeries[];
 }
 
 export interface FakeProvider {
   readonly url: string;
   readonly catalogue: FakeCatalogue;
+  readonly titles: FakeTitles;
+  /** How many requests for movie and episode files reached the provider, redirects included. */
+  fileRequests(): number;
+  /** Makes movie and series list requests answer with this HTTP status, or restores them. */
+  failTitles(status: number | null): void;
   /** Streams currently holding a connection slot. */
   activeStreams(): number;
   /** Picks the channel list each later request returns, as panel updates would. */
@@ -96,6 +137,15 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
   const slotReleaseMs = options.slotReleaseMs ?? 300;
   const streams = options.streams ?? (options.live ? liveStreams : defaultStreams);
   const catalogue = buildCatalogue(options.channels ?? 300);
+  const titles = buildTitles(options.titles ?? 120);
+  const movieFiles = new Map(titles.movies.map((movie) => [String(movie.id), movie]));
+  const episodeFiles = new Map(
+    titles.series
+      .flatMap((series) => series.seasons.flat())
+      .map((episode) => [String(episode.id), episode]),
+  );
+  let titleFailure: number | null = null;
+  let fileCount = 0;
   let select = (all: readonly FakeChannel[]): readonly FakeChannel[] => all;
   let catalogueFailure: number | null = null;
   const channels = new Map(
@@ -114,6 +164,16 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     if (url.pathname === "/xmltv.php") return guide(url, response);
     const live = /^\/live\/([^/]+)\/([^/]+)\/(\d+)\.ts$/.exec(url.pathname);
     if (live) return stream(live[1] ?? "", live[2] ?? "", live[3] ?? "", request, response);
+    const title = /^\/(movie|series)\/([^/]+)\/([^/]+)\/(\d+)\.(\w+)$/.exec(url.pathname);
+    if (title) return redirectFile(title, response);
+    const file = /^\/files\/(movie|series)\/(\d+)$/.exec(url.pathname);
+    if (file)
+      return serveFile(
+        file[1] === "movie" ? movieFiles : episodeFiles,
+        file[2] ?? "",
+        request,
+        response,
+      );
     response.writeHead(404).end();
   });
 
@@ -141,6 +201,110 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     }
     if (catalogueFailure !== null && action?.startsWith("get_live")) {
       return void response.writeHead(catalogueFailure).end();
+    }
+    if (
+      titleFailure !== null &&
+      (action?.startsWith("get_vod") || action?.startsWith("get_series"))
+    ) {
+      return void response.writeHead(titleFailure).end();
+    }
+    const categoryRows = (categories: FakeTitles["movieCategories"]) =>
+      categories.map((category) => ({
+        category_id: category.id,
+        category_name: category.name,
+        parent_id: 0,
+      }));
+    if (action === "get_vod_categories")
+      return json(response, categoryRows(titles.movieCategories));
+    if (action === "get_series_categories") {
+      return json(response, categoryRows(titles.seriesCategories));
+    }
+    if (action === "get_vod_streams") {
+      return json(
+        response,
+        titles.movies.map((movie) => ({
+          num: movie.id,
+          name: movie.name,
+          stream_type: "movie",
+          stream_id: movie.id,
+          stream_icon: movie.id % 4 === 0 ? "" : `https://image.example/p/${movie.id}.jpg`,
+          // Panels send ratings as strings and "0" for none.
+          rating: movie.rating ? String(movie.rating) : "0",
+          added: String(movie.added),
+          is_adult: movie.adult ? 1 : 0,
+          category_id: movie.categoryId,
+          category_ids: [Number(movie.categoryId)],
+          container_extension: movie.container,
+        })),
+      );
+    }
+    if (action === "get_series") {
+      return json(
+        response,
+        titles.series.map((series) => ({
+          num: series.id,
+          name: series.name,
+          series_id: series.id,
+          cover: `https://image.example/s/${series.id}.jpg`,
+          backdrop_path: series.id % 2 === 0 ? [`https://image.example/b/${series.id}.jpg`] : [],
+          rating: "7.5",
+          last_modified: String(series.added),
+          releaseDate: "2024-03-01",
+          category_id: series.categoryId,
+          category_ids: [Number(series.categoryId)],
+        })),
+      );
+    }
+    if (action === "get_vod_info") {
+      const movie = movieFiles.get(url.searchParams.get("vod_id") ?? "");
+      if (!movie) return json(response, { info: [], movie_data: [] });
+      return json(response, {
+        info: {
+          name: movie.name,
+          o_name: movie.name.replace(/ \(\w+\)$/, ""),
+          plot: `The story of ${movie.name}.`,
+          genre: "Actie, Thriller",
+          cast: "Ada Lovelace, Alan Turing",
+          director: "Grace Hopper",
+          releasedate: "1981-05-23",
+          duration_secs: 6000,
+          duration: "01:40:00",
+          backdrop_path: [`https://image.example/b/m${movie.id}.jpg`],
+          cover_big: `https://image.example/p/${movie.id}.jpg`,
+        },
+        movie_data: { stream_id: movie.id, container_extension: movie.container },
+      });
+    }
+    if (action === "get_series_info") {
+      const series = titles.series.find(
+        (each) => String(each.id) === url.searchParams.get("series_id"),
+      );
+      if (!series) return json(response, { info: [], episodes: [] });
+      // Panels list seasons incompletely: the last season is missing here.
+      return json(response, {
+        seasons: series.seasons.slice(0, -1).map((_episodes, index) => ({
+          season_number: index + 1,
+          name: `Seizoen ${index + 1}`,
+          cover: "",
+        })),
+        info: { name: series.name, plot: `All about ${series.name}.`, episode_run_time: "45" },
+        episodes: Object.fromEntries(
+          series.seasons.map((episodes, index) => [
+            String(index + 1),
+            episodes.map((episode, number) => ({
+              id: String(episode.id),
+              episode_num: number + 1,
+              season: index + 1,
+              title: `${series.name} - S${String(index + 1).padStart(2, "0")}E${String(number + 1).padStart(2, "0")} - Part ${number + 1}`,
+              container_extension: episode.container,
+              info: {
+                duration_secs: 2700,
+                movie_image: `https://image.example/e/${episode.id}.jpg`,
+              },
+            })),
+          ]),
+        ),
+      });
     }
     if (action === "get_live_categories") {
       return json(
@@ -225,6 +389,53 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     streams(channel, response, closed.signal);
   }
 
+  /** Sends a movie or episode request on to where the file is, like a panel's load balancer. */
+  function redirectFile(match: RegExpExecArray, response: ServerResponse): void {
+    fileCount++;
+    const [, folder, user, pass, id] = match;
+    if (
+      decodeURIComponent(user ?? "") !== username ||
+      decodeURIComponent(pass ?? "") !== password
+    ) {
+      return void response.writeHead(401).end();
+    }
+    response.writeHead(302, { Location: `${origin}/files/${folder}/${id}` }).end();
+  }
+
+  /** A title's file, whole or the byte range asked for. An open file holds a connection slot. */
+  function serveFile(
+    files: ReadonlyMap<string, FakeTitle>,
+    id: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): void {
+    fileCount++;
+    const title = files.get(id);
+    if (!title?.fixture) return void response.writeHead(404).end();
+    if (slots >= maxConnections) return void response.writeHead(403).end();
+    const bytes = fixture(title.fixture);
+    const range = /^bytes=(\d+)-(\d*)$/.exec(request.headers.range ?? "");
+    const start = range ? Number(range[1]) : 0;
+    const end = range?.[2] ? Math.min(Number(range[2]), bytes.length - 1) : bytes.length - 1;
+    if (start >= bytes.length) {
+      return void response.writeHead(416, { "Content-Range": `bytes */${bytes.length}` }).end();
+    }
+    slots++;
+    let released = false;
+    request.on("close", () => {
+      if (released) return;
+      released = true;
+      setTimeout(() => slots--, slotReleaseMs);
+    });
+    response.writeHead(range ? 206 : 200, {
+      "Content-Type": title.container === "mkv" ? "video/x-matroska" : "video/mp4",
+      "Accept-Ranges": "bytes",
+      "Content-Length": end - start + 1,
+      ...(range ? { "Content-Range": `bytes ${start}-${end}/${bytes.length}` } : {}),
+    });
+    response.end(bytes.subarray(start, end + 1));
+  }
+
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", resolve);
@@ -236,6 +447,11 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
   return {
     url: origin,
     catalogue,
+    titles,
+    fileRequests: () => fileCount,
+    failTitles(status) {
+      titleFailure = status;
+    },
     activeStreams: () => slots,
     serveChannels(next) {
       select = next;
@@ -383,6 +599,110 @@ function buildCatalogue(size: number): FakeCatalogue {
     }
   }
   return { categories, channels };
+}
+
+/** The movies that stream the title clips, and what each one tests. */
+const TEST_MOVIES: readonly { name: string; container: string; fixture: string | null }[] = [
+  {
+    name: "TEST | Two sound tracks and subtitles (MULTI)",
+    container: "mkv",
+    fixture: "title-h264-eac3-subs.mkv",
+  },
+  { name: "TEST | Index at the end (NL)", container: "mp4", fixture: "title-h264-aac.mp4" },
+  { name: "TEST | Old AVI (NL)", container: "avi", fixture: "title-mpeg4-mp3.avi" },
+  { name: "TEST | Missing file (NL)", container: "mkv", fixture: null },
+];
+
+/** Builds roughly `size` movies and series. The same size always gives the same titles. */
+function buildTitles(size: number): FakeTitles {
+  const random = mulberry32(size + 7);
+  // A fixed moment, so "recently added" orders are the same in every run.
+  const base = 1_790_000_000;
+  const movieCategories = [
+    { id: "501", name: "TEST | FORMATS" },
+    { id: "502", name: "NL | FILMS" },
+    { id: "503", name: "NL | KOMEDIE FILMS" },
+    { id: "504", name: "MULTI | NETFLIX MOVIES" },
+    { id: "505", name: "XXX | FOR ADULTS" },
+  ];
+  const movies: FakeTitle[] = TEST_MOVIES.map((test, index) => ({
+    id: 90_000 + index,
+    name: test.name,
+    categoryId: "501",
+    adult: false,
+    rating: 7,
+    added: base - index,
+    container: test.container,
+    fixture: test.fixture,
+  }));
+  for (let index = 0; movies.length < size; index++) {
+    const category = movieCategories[1 + (index % 4)] ?? movieCategories[1]!;
+    const adult = category.id === "505";
+    const word = WORDS[index % WORDS.length] ?? "Earth";
+    const name = adult
+      ? `Adult Film ${index} (EN)`
+      : `${word} Story ${index} (${category.id === "504" ? "MULTI" : "NL"})`;
+    movies.push({
+      id: 91_000 + index,
+      name: index % 9 === 0 ? name.toUpperCase() : name,
+      categoryId: category.id,
+      adult,
+      rating: Math.round(random() * 90) / 10,
+      added: base - 1000 - Math.floor(random() * 1_000_000),
+      container: index % 3 === 0 ? "mkv" : "mp4",
+      fixture: "title-h264-aac.mp4",
+    });
+  }
+  const seriesCategories = [
+    { id: "601", name: "NL | SERIES" },
+    { id: "602", name: "BE | KINDER SERIES" },
+  ];
+  const episode = (id: number, fixture: string, container: string): FakeTitle => ({
+    id,
+    name: "",
+    categoryId: "601",
+    adult: false,
+    rating: 0,
+    added: base,
+    container,
+    fixture,
+  });
+  const series: FakeSeries[] = [
+    {
+      id: 80_000,
+      name: "TEST | Formats (NL)",
+      categoryId: "601",
+      added: base,
+      seasons: [
+        [
+          episode(81_000, "title-h264-eac3-subs.mkv", "mkv"),
+          episode(81_001, "title-h264-aac.mp4", "mp4"),
+          episode(81_002, "title-h264-aac.mp4", "mp4"),
+        ],
+        [
+          episode(81_010, "title-h264-aac.mp4", "mp4"),
+          episode(81_011, "title-h264-aac.mp4", "mp4"),
+        ],
+      ],
+    },
+  ];
+  for (let index = 0; series.length < Math.max(2, Math.floor(size / 4)); index++) {
+    const word = WORDS[(index * 7) % WORDS.length] ?? "Earth";
+    const id = 80_001 + index;
+    series.push({
+      id,
+      name: `${word} Files ${index} (NL)`,
+      categoryId: index % 2 === 0 ? "601" : "602",
+      added: base - 2000 - Math.floor(random() * 1_000_000),
+      seasons: [
+        [
+          episode(id * 10, "title-h264-aac.mp4", "mp4"),
+          episode(id * 10 + 1, "title-h264-aac.mp4", "mp4"),
+        ],
+      ],
+    });
+  }
+  return { movieCategories, movies, seriesCategories, series };
 }
 
 const REGIONS = ["UK", "NL", "BE", "DE", "FR", "US", "ES", "IT", "PL", "PT"];
