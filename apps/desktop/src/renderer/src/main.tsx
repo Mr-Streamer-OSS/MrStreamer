@@ -3,7 +3,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App.tsx";
 import { TooltipProvider } from "./components/ui/tooltip.tsx";
-import { syncGuideUpdates, syncLibraryUpdates, syncUpdates } from "./lib/queries.ts";
+import { syncGuideUpdates, syncLibraryUpdates, syncUpdates, syncViewing } from "./lib/queries.ts";
 import "./styles.css";
 
 const client = new QueryClient({
@@ -11,6 +11,7 @@ const client = new QueryClient({
 });
 syncLibraryUpdates(client);
 syncGuideUpdates(client);
+syncViewing(client);
 syncUpdates(client);
 
 const root = document.getElementById("root");

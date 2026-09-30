@@ -171,7 +171,9 @@ async function start(
   }
 
   store.setState({ phase: { kind: "playing", engine: engine.name } });
-  void call("preferences.recordWatch", { channelId: channel.id }).catch(() => {});
+  void call("viewing.recordWatch", { commandId: crypto.randomUUID(), channelId: channel.id }).catch(
+    () => {},
+  );
   // A stream that played fine gets the full set of reconnect attempts when it breaks later.
   engine.onFailure((error) => {
     if (mine === selection) void recover(mine, channel, session, error, 0, repair);

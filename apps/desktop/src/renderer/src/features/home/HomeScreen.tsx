@@ -40,8 +40,9 @@ export function HomeScreen({ active }: { active: boolean }) {
   const categories = useQuery(queries.categories());
   const categoryMap = useCategoryMap();
   const list = useUi((state) => state.list);
-  const favouriteIds = preferences.data?.favouriteChannelIds ?? NO_IDS;
-  const recentIds = preferences.data?.recentChannelIds ?? NO_IDS;
+  const viewing = useQuery(queries.viewing());
+  const favouriteIds = viewing.data?.favourites ?? NO_IDS;
+  const recentIds = viewing.data?.recent ?? NO_IDS;
   const favourites = useQuery(queries.channelsById(favouriteIds)).data ?? NO_CHANNELS;
   const recent = useQuery(queries.channelsById(recentIds)).data ?? NO_CHANNELS;
   const categoryId =

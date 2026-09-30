@@ -6,7 +6,9 @@ import { emit, registerIpc } from "./ipc.ts";
 import { removeUnfinishedWrites } from "./platform/json-file.ts";
 import { electronInstaller } from "./platform/installer.ts";
 import { keychainSecrets } from "./platform/secrets.ts";
+import { AppFailure } from "@mrstreamer/contracts/errors";
 import { Guide } from "@mrstreamer/core/guide/service";
+import { ViewingRecord, type ViewingFailed } from "@mrstreamer/core/viewing/service";
 import * as Effect from "effect/Effect";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Stream from "effect/Stream";
@@ -110,12 +112,13 @@ async function start(): Promise<void> {
       if (mainWindow) emit(mainWindow.webContents, "library.updated", status);
     },
   });
+  const preferences = createPreferences(dataDir);
   const runtime = ManagedRuntime.make(
-    mainLayer({ dataDir, source: subscriptions.source, library }),
+    mainLayer({ dataDir, source: subscriptions.source, library, preferences }),
   );
-  const guide = await runtime.runPromise(
+  const { guide, viewing } = await runtime.runPromise(
     Effect.gen(function* () {
-      return yield* Guide;
+      return { guide: yield* Guide, viewing: yield* ViewingRecord };
     }),
   );
   runtime.runFork(
@@ -125,12 +128,21 @@ async function start(): Promise<void> {
       }),
     ),
   );
+  runtime.runFork(
+    Stream.runForEach(viewing.changes, (sequence) =>
+      Effect.sync(() => {
+        if (mainWindow) emit(mainWindow.webContents, "viewing.changed", { sequence });
+      }),
+    ),
+  );
+  /** Runs a viewing record call, failing with the error the UI shows. */
+  const record = <A>(effect: Effect.Effect<A, ViewingFailed>) =>
+    runtime.runPromise(effect.pipe(Effect.mapError((failure) => new AppFailure(failure.error))));
   const playback = createPlayback({
     source: subscriptions.source,
     userAgent,
     ffmpeg: ffmpegPath(),
   });
-  const preferences = createPreferences(dataDir);
   const updates = createUpdates({
     dataDir,
     installed: app.getVersion(),
@@ -181,8 +193,13 @@ async function start(): Promise<void> {
       "playback.failure": ({ sessionId }) => playback.failure(sessionId),
       "preferences.get": () => preferences.get(),
       "preferences.update": (patch) => preferences.update(patch),
-      "preferences.recordWatch": ({ channelId }) => preferences.recordWatch(channelId),
-      "preferences.toggleFavourite": ({ channelId }) => preferences.toggleFavourite(channelId),
+      "viewing.get": () => record(viewing.state),
+      "viewing.setFavourite": ({ commandId, channelId, favourite }) =>
+        record(viewing.setFavourite(commandId, channelId, favourite)),
+      "viewing.recordWatch": async ({ commandId, channelId }) => {
+        await preferences.update({ lastChannelId: channelId });
+        return record(viewing.recordWatch(commandId, channelId));
+      },
       "updates.status": () => updates.status(),
       "updates.setChannel": ({ channel }) => updates.setChannel(channel),
       "updates.check": () => updates.check(),
@@ -205,7 +222,7 @@ async function start(): Promise<void> {
   });
   app.on("will-quit", () => {
     void playback.dispose();
-    // Stops the guide's checks and any download in progress.
+    // Stops the guide's checks and any download in progress, and closes the database.
     void runtime.dispose();
   });
 
@@ -241,7 +258,7 @@ async function refreshInBackground(
 
 /** Downloads the guide when it is due. A failure keeps the guide in use until the next check. */
 async function refreshGuide(
-  runtime: ManagedRuntime.ManagedRuntime<Guide, never>,
+  runtime: ManagedRuntime.ManagedRuntime<Guide | ViewingRecord, never>,
   guide: Guide["Service"],
 ): Promise<void> {
   try {

@@ -10,6 +10,7 @@ import { CODECS, type StreamFailure, type StreamSession } from "./playback.ts";
 import { Preferences } from "./preferences.ts";
 import type { SubscriptionSummary } from "./subscription.ts";
 import type { UpdateStatus } from "./updates.ts";
+import type { Viewing } from "./viewing.ts";
 
 const none = type("undefined");
 
@@ -42,11 +43,11 @@ export const ipcInputs = {
   "playback.close": type({ sessionId: "string" }),
   "playback.failure": type({ sessionId: "string" }),
   "preferences.get": none,
-  // The recent and favourite lists change only through their own methods. Leaving them out also
-  // keeps their defaults from filling in empty lists on every update.
-  "preferences.update": Preferences.omit("recentChannelIds", "favouriteChannelIds").partial(),
-  "preferences.recordWatch": type({ channelId: "string" }),
-  "preferences.toggleFavourite": type({ channelId: "string" }),
+  "preferences.update": Preferences.partial(),
+  "viewing.get": none,
+  // Each change carries an id the UI makes up, so sending it again changes nothing more.
+  "viewing.setFavourite": type({ commandId: "string", channelId: "string", favourite: "boolean" }),
+  "viewing.recordWatch": type({ commandId: "string", channelId: "string" }),
   "updates.status": none,
   "updates.setChannel": type({ channel: "'stable' | 'nightly'" }),
   "updates.check": none,
@@ -82,10 +83,12 @@ export interface IpcOutputs {
   "playback.failure": StreamFailure | null;
   "preferences.get": Preferences;
   "preferences.update": Preferences;
-  /** Remembers a channel as last and recently watched. */
-  "preferences.recordWatch": Preferences;
+  /** Favourites and recently watched channels of the connected account. */
+  "viewing.get": Viewing;
   /** Adds a channel to the favourites, or takes it out. */
-  "preferences.toggleFavourite": Preferences;
+  "viewing.setFavourite": Viewing;
+  /** Remembers a channel as watched, and as the last one. */
+  "viewing.recordWatch": Viewing;
   "updates.status": UpdateStatus;
   /** Chooses Stable or Nightly and checks what it offers; installs and removes nothing. */
   "updates.setChannel": UpdateStatus;
@@ -112,6 +115,8 @@ export interface IpcEvents {
   "library.updated": CatalogueStatus;
   /** A new programme guide is loaded. */
   "guide.updated": null;
+  /** Favourites or recently watched channels changed, up to `sequence`. */
+  "viewing.changed": { readonly sequence: number };
   /** The update moved on, for example a download's progress. */
   "updates.changed": UpdateStatus;
 }

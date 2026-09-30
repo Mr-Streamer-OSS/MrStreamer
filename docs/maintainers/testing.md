@@ -7,7 +7,8 @@ The suite checks what the services promise, through their public functions, agai
 | `apps/desktop/test/subscription.test.ts` | Logins, M3U links, account states, restarts, removal racing a slow account check, keychain loss                                                                                                                                         |
 | `apps/desktop/test/library.test.ts`      | Loading, search, cache after restart, caches saved before guide ids, failed, empty and short refreshes, ids across renames                                                                                                              |
 | `packages/core/test/catalogue.test.ts`   | Display names and region grouping                                                                                                                                                                                                       |
-| `apps/desktop/test/preferences.test.ts`  | History order and limits, favourites order, forgetting on account changes, restarts, older files                                                                                                                                        |
+| `apps/desktop/test/preferences.test.ts`  | Partial updates, forgetting on account changes, restarts, files that still carry favourites and history                                                                                                                                 |
+| `apps/desktop/test/viewing.test.ts`      | Favourites and history order across restarts, commands sent again, accounts, change notices, the one-time import from `preferences.json`, rebuilding from events, a database that can't open                                            |
 | `apps/desktop/test/guide.test.ts`        | Now and next, the rest of the day, untidy XMLTV in small pieces, guide ids shared by unrelated channels, programme search, restarts from disk, six-hour refreshes and failed ones, answering before the first download, account changes |
 | `apps/desktop/test/playback.test.ts`     | The local proxy, one-connection switching, refusals, and what the player receives for each codec clip                                                                                                                                   |
 | `apps/desktop/test/updates.test.ts`      | Channels, release routing, going back to Stable, downloads and retries, channel switches, checks answering late, refused installs, Stable behind a full page of nightlies                                                               |
@@ -56,6 +57,10 @@ xvfb-run -a node apps/desktop/test/e2e/packaged-app.ts "/opt/Mr. Streamer/mrstre
 ## Guide budgets
 
 `node --expose-gc apps/desktop/scripts/measure-guide.ts` generates a guide the size of a large panel's (1,300 guide channels, 70 programmes each, 36 MB) for a 13,000-channel catalogue, streams it through the guide service and reports download and indexing time, the longest main-process stall, reading from disk after a restart, now and next for 60 channels, search, and memory. `--file guide.xml` measures a real XMLTV file instead; keep provider files in `.local/`.
+
+## Viewing record
+
+`node apps/desktop/scripts/measure-viewing.ts [--events 100000]` fills a temporary database with that many events, mostly watches across 13,000 channels and some favourite changes, then reports how long a watch and a favourite take to commit, how long a start takes to open the database, and how long a start takes that rebuilds the lists from every event.
 
 ## CI
 

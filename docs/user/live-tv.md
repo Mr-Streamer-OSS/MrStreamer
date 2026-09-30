@@ -18,6 +18,8 @@ Your subscription may allow a single connection. Home then uses it as soon as it
 - The arrow at the end of a row lists the rest of the day. Click a later programme to read about it.
 - The star adds a channel to your favourites, which keep the order you add them in.
 
+Each subscription keeps its own favourites and watch history. Connecting another one hides them, and they come back when you connect the first one again.
+
 Programme information comes from your provider. Many providers only cover some channels, and some cover none; those channels show their name and category instead. Some providers file unrelated channels under one channel's guide; Mr. Streamer leaves those channels without programmes rather than show the wrong ones. The guide updates every six hours.
 
 ## Watching

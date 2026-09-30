@@ -24,4 +24,6 @@ The version you download sets your channel on first launch. After that, only you
 
 ## Going back to Stable
 
-Choose **Stable** under **Updates** in Settings. Mr. Streamer offers the newest stable release right away, even when it is older than your nightly, and installs it like any other update: your login, preferences and watch history stay.
+Choose **Stable** under **Updates** in Settings. Mr. Streamer offers the newest stable release right away, even when it is older than your nightly, and installs it like any other update: your login and preferences stay.
+
+Stable 0.0.1 doesn't show the favourites and watch history of newer versions. They come back when you return to Nightly; favourites you add in 0.0.1 meanwhile don't carry over.

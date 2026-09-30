@@ -6,19 +6,22 @@ An Electron app in a pnpm workspace. The main process owns everything that touch
 packages/contracts   @mrstreamer/contracts: IPC schemas, library and guide models, errors,
                      versions, updates. Depends on nothing else in the workspace.
 packages/core        @mrstreamer/core: rules that run without Electron, React or the DOM. Catalogue
-                     names and regions, trusted guide ids, the XMLTV reader, update feeds, the
-                     provider port, text folding. Depends on contracts.
+                     names and regions, trusted guide ids, the XMLTV reader, the guide and viewing
+                     record services, update feeds, the provider port, text folding. Depends on
+                     contracts.
 apps/desktop         The app, package name mrstreamer
   src/main           Electron main process
     providers        The Xtream Codes adapter
     services         Subscription, live library, programme guide, playback proxy, preferences,
                      updates
     playback         Stream inspection, the clean start and ffmpeg conversion behind the proxy
-    platform         Keychain-backed secrets, atomic JSON files, the electron-updater installer
+    platform         Keychain-backed secrets, atomic JSON files, the guide and viewing stores, the
+                     electron-updater installer
   src/preload        The typed bridge exposed to the UI
   src/renderer       React UI; player/ holds the playback engines, the player controller, Picture
   src/shared         What main and the renderer share inside the app: window bar sizes
-  scripts            Icons, the DMG background, signing, notarization, ffmpeg builds, guide budgets
+  scripts            Icons, the DMG background, signing, notarization, ffmpeg builds, guide and
+                     viewing record measurements
   test               Service suites, the fake provider, codec clips, packaged-app test, measurements
 scripts              Release planning and CI signing, run from the repository root
 test                 The release planning suite
@@ -30,28 +33,39 @@ Packages export their source files by path, `@mrstreamer/core/catalogue/normaliz
 
 ## Data
 
-Everything lives in Electron's `userData` folder, named after the product, not the app id: see the [user troubleshooting page](../user/troubleshooting.md#where-your-data-is). Each file is written atomically; leftovers of an interrupted write are removed at startup. Changes to these files must stay readable by the newest stable release: choosing Stable on a nightly installs that release over the nightly, and it reads what the nightly wrote. Add fields rather than change a file's version: older readers ignore keys they don't know and keep them when they write.
+Everything lives in Electron's `userData` folder, named after the product, not the app id: see the [user troubleshooting page](../user/troubleshooting.md#where-your-data-is). Each JSON file is written atomically; leftovers of an interrupted write are removed at startup. Changes to these files must stay readable by the newest stable release: choosing Stable on a nightly installs that release over the nightly, and it reads what the nightly wrote. Add fields rather than change a file's version: older readers ignore keys they don't know and keep them when they write. The one agreed exception: Stable 0.0.1 doesn't read `mrstreamer.db`, so it shows no favourites or watch history.
 
-| File                | Owner                                                                                      |
-| ------------------- | ------------------------------------------------------------------------------------------ |
-| `subscription.json` | `services/subscription.ts`; the password is sealed with `safeStorage`                      |
-| `preferences.json`  | `services/preferences.ts`: volume, last channel and category, history, favourites          |
-| `catalogue.json`    | `services/library.ts`: the last good catalogue, as the provider sent it                    |
-| `guide.xml`         | `services/guide.ts`: the last complete XMLTV download, as it arrived                       |
-| `guide.json`        | `services/guide.ts`: which subscription `guide.xml` belongs to, and when it was downloaded |
-| `updates.json`      | `services/updates.ts`: the chosen channel                                                  |
+| File                | Owner                                                                                     |
+| ------------------- | ----------------------------------------------------------------------------------------- |
+| `subscription.json` | `services/subscription.ts`; the password is sealed with `safeStorage`                     |
+| `preferences.json`  | `services/preferences.ts`: volume, mute, last channel and category                        |
+| `mrstreamer.db`     | `platform/viewing-store.ts`: the viewing record, favourites and watch history per account |
+| `catalogue.json`    | `services/library.ts`: the last good catalogue, as the provider sent it                   |
+| `guide.xml`         | `platform/guide-store.ts`: the last complete XMLTV download, as it arrived                |
+| `guide.json`        | `platform/guide-store.ts`: which subscription `guide.xml` belongs to, and when it arrived |
+| `updates.json`      | `services/updates.ts`: the chosen channel                                                 |
 
 ## Catalogue
 
-The library fetches categories and channels, indexes them in memory and caches the provider's raw answer; display names are worked out on load, so naming rules improve without a refetch. A refresh replaces the catalogue only when it looks complete: an empty answer never does, and one with less than half the channels only when a second fetch agrees. A failed refresh keeps the catalogue and reports the failure in the status. Preferences refer to provider ids, so renamed or reordered channels keep their history and favourites.
+The library fetches categories and channels, indexes them in memory and caches the provider's raw answer; display names are worked out on load, so naming rules improve without a refetch. A refresh replaces the catalogue only when it looks complete: an empty answer never does, and one with less than half the channels only when a second fetch agrees. A failed refresh keeps the catalogue and reports the failure in the status. Favourites and history refer to provider ids, so renamed or reordered channels keep them.
 
 Each channel keeps the provider's guide id (`epg_channel_id` on Xtream panels). Quality variants of one channel usually share it, but panels also file unrelated channels under one id: Wout's lists nine Flemish channels under `PlayCrime.be`. `@mrstreamer/core/catalogue/guide-ids` keeps an id for a channel only when the channel's name matches the id, or when every channel sharing it is the same channel under another name or quality. The guide's own channel names don't count: panels copy them from their stream list. On Wout's provider this keeps 1,978 of 2,073 channels with programmes. A cache saved before guide ids existed still loads, and counts as due for a refresh at the next start.
 
 ## Effect services
 
-The main process runs its services on one [Effect](https://effect.website) runtime (`effect` 4, pinned to a release candidate). `apps/desktop/src/main/runtime.ts` assembles them from Layers in `mainLayer`, `index.ts` makes the runtime at start and disposes of it when the app quits, and the IPC handlers run their calls on it. So far the programme guide runs there; the other services still use promises until they move in later slice 3.5 stages.
+The main process runs its services on one [Effect](https://effect.website) runtime (`effect` 4, pinned to a release candidate). `apps/desktop/src/main/runtime.ts` assembles them from Layers in `mainLayer`, `index.ts` makes the runtime at start and disposes of it when the app quits, and the IPC handlers run their calls on it. So far the programme guide and the viewing record run there; the other services still use promises until they move in later slice 3.5 stages.
 
 A service is a `Context.Service` class in `packages/core` with a `layer`. What it needs from the platform, it asks through ports, services of its own that the app supplies: the guide's are `GuideSource` (the subscription and its download), `GuideCatalogue` (guide ids) and `GuideStore` (the saved document, `platform/guide-store.ts`). Expected failures are typed, like `GuideFailed`, and carry the `AppError` the UI shows. Background work runs in the service's scope, so disposing of the runtime stops it. Tests build the same layer with the fake provider and `TestClock`, and move time instead of waiting.
+
+## Viewing record
+
+Favourites and watch history are events, per account: `favourite-added`, `favourite-removed` and `watched`, each with a channel id. `@mrstreamer/core/viewing/record` holds the rules as plain functions: `decide` turns a command into events (none when it asks for what already holds), and `apply` adds an event to the state, favourites in the order added and the twelve most recent channels. `@mrstreamer/core/viewing/service` runs commands for the connected account; without one, the lists are empty and changes fail with `no-subscription`.
+
+`platform/viewing-store.ts` keeps them in `mrstreamer.db` with the built-in `node:sqlite`: every event in order, the state they add up to per account, and the ids of commands already done. A command commits its events, its id and the new state in one transaction, so a command sent again changes nothing more. `STATE_VERSION` rises when `apply` changes; the next start then rebuilds the state from every event, skipping events written by a newer version. If the database can't open, the record's calls fail and the rest of the app carries on.
+
+The first start with the record imports the lists `preferences.json` kept before, in the transaction that sets the import marker, and only then takes them out of the file. Lists wait for an account to import into, and connecting a different account drops them. Once the marker is set, lists found in the file again, as after running Stable 0.0.1, are removed without importing.
+
+The UI reads `viewing.get` and sends `viewing.setFavourite` and `viewing.recordWatch` with a command id it makes up. After each commit the main process sends `viewing.changed` with the new sequence, and the UI reads again when it holds an older one. `apps/desktop/scripts/measure-viewing.ts` measures commits, opening and a rebuild with 100,000 events.
 
 ## Programme guide
 

@@ -2,6 +2,7 @@
 import { queryOptions, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
+import type { Viewing } from "@mrstreamer/contracts/viewing";
 import { call, listen } from "./ipc.ts";
 
 /** Listings move on as programmes end; asking again each minute is enough for progress. */
@@ -14,6 +15,13 @@ export const queries = {
     queryOptions({
       queryKey: ["preferences"],
       queryFn: () => call("preferences.get"),
+      staleTime: Infinity,
+    }),
+  /** Favourites and recently watched channels. Kept current by `syncViewing`. */
+  viewing: () =>
+    queryOptions({
+      queryKey: ["viewing"],
+      queryFn: () => call("viewing.get"),
       staleTime: Infinity,
     }),
   libraryStatus: () =>
@@ -89,12 +97,24 @@ export function useToggleFavourite(): (channelId: string) => void {
   const client = useQueryClient();
   return useCallback(
     (channelId: string) => {
-      void call("preferences.toggleFavourite", { channelId }).then(
-        (preferences) => client.setQueryData(queries.preferences().queryKey, preferences),
+      const favourites = client.getQueryData(queries.viewing().queryKey)?.favourites ?? [];
+      void call("viewing.setFavourite", {
+        commandId: crypto.randomUUID(),
+        channelId,
+        favourite: !favourites.includes(channelId),
+      }).then(
+        (viewing) => keepViewing(client, viewing),
         () => {},
       );
     },
     [client],
+  );
+}
+
+/** Keeps the latest viewing state: an answer can arrive after a later change's event. */
+function keepViewing(client: QueryClient, viewing: Viewing): void {
+  client.setQueryData(queries.viewing().queryKey, (cached) =>
+    cached && cached.sequence > viewing.sequence ? cached : viewing,
   );
 }
 
@@ -108,8 +128,8 @@ export function useLastChannel(): LiveChannel | null {
 
 /** The ids of the favourite channels, in the order they were added. */
 export function useFavouriteIds(): ReadonlySet<string> {
-  const { data } = useQuery(queries.preferences());
-  return useMemo(() => new Set(data?.favouriteChannelIds), [data]);
+  const { data } = useQuery(queries.viewing());
+  return useMemo(() => new Set(data?.favourites), [data]);
 }
 
 function useCategories() {
@@ -133,6 +153,15 @@ export function syncLibraryUpdates(client: QueryClient): () => void {
 export function syncGuideUpdates(client: QueryClient): () => void {
   return listen("guide.updated", () => {
     void client.invalidateQueries({ queryKey: ["guide"] });
+  });
+}
+
+/** Reads favourites and recently watched channels again once the main process has a later change. */
+export function syncViewing(client: QueryClient): () => void {
+  return listen("viewing.changed", ({ sequence }) => {
+    const cached = client.getQueryData(queries.viewing().queryKey);
+    if (cached && cached.sequence >= sequence) return;
+    void client.invalidateQueries({ queryKey: queries.viewing().queryKey });
   });
 }
 
