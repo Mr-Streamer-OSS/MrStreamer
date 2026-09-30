@@ -4,7 +4,7 @@
 // both alike. Shared CI runners vary too much for absolute numbers; the difference between builds
 // measured together is what they can tell.
 //
-//   node test/e2e/compare-builds.ts [--rounds 2] <baseline executable> <candidate executable> [-- app arguments]
+//   node test/e2e/compare-builds.ts [--rounds 3] <baseline executable> <candidate executable> [-- app arguments]
 //
 // Prints a table and, in GitHub Actions, adds it to the run summary and warns about each measure
 // more than 10% worse by more than noise. It reports and never fails: a warning asks for a second look, on the same
@@ -26,7 +26,7 @@ const NOISE = { "%": 1, MB: 10, ms: 20 };
 const Results = type({ "[string]": "number[]" });
 
 const { values: options, positionals } = parseArgs({
-  options: { rounds: { type: "string", default: "2" } },
+  options: { rounds: { type: "string", default: "3" } },
   allowPositionals: true,
 });
 const [baseline, candidate, ...appArgs] = positionals;
@@ -112,9 +112,12 @@ async function warmUp(executable: string): Promise<void> {
   }
 }
 
+/** The middle value, or the mean of the two middle ones: idle measures give one value a run. */
 function median(values: readonly number[]): number {
   const sorted = values.toSorted((a, b) => a - b);
-  return sorted[Math.floor(sorted.length / 2)] ?? 0;
+  const middle = sorted.length / 2;
+  if (sorted.length % 2 === 1) return sorted[Math.floor(middle)] ?? 0;
+  return ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2;
 }
 
 function shown(measure: string, value: number): string {
