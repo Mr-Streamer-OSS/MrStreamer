@@ -5,14 +5,17 @@ import { HomeScreen } from "../features/home/HomeScreen.tsx";
 import { GuidePage } from "../features/live/GuidePage.tsx";
 import { SearchPalette } from "../features/search/SearchPalette.tsx";
 import { SettingsPage } from "../features/settings/SettingsPage.tsx";
-import { UpdateDialogs } from "../features/updates/UpdateDialogs.tsx";
+import { BrowsePage } from "../features/titles/BrowsePage.tsx";
+import { DetailsView } from "../features/titles/DetailsView.tsx";
+import { TitleWatch } from "../features/titles/TitleWatch.tsx";
 import { WatchScreen } from "../features/watch/WatchScreen.tsx";
 import { appError, describeError } from "../lib/errors.ts";
 import { queries, useLastChannel } from "../lib/queries.ts";
 import { cn } from "../lib/utils.ts";
 import { player, usePlayer } from "../player/player.ts";
+import { titlePlayer } from "../player/title-player.ts";
 import { hasModifier } from "./platform.ts";
-import { useUi } from "./ui-store.ts";
+import { useUi, type View } from "./ui-store.ts";
 
 export function App() {
   const subscription = useQuery(queries.subscription());
@@ -44,15 +47,26 @@ export function App() {
 }
 
 /**
- * Home or the Live TV guide, with Watch opening over them. The page stays laid out underneath, so
- * leaving Watch finds it scrolled where it was. Search and settings are available everywhere.
+ * The page (Home, Live TV, Movies or Series), with details, Watch and a playing title opening over
+ * it. The page stays laid out underneath, so leaving any of them finds it scrolled where it was,
+ * and takes no input meanwhile. Search and settings are available everywhere.
  */
 function Shell() {
   const view = useUi((state) => state.view);
   const watching = useUi((state) => state.watching);
-  usePreview(watching);
+  const playingTitle = useUi((state) => state.playingTitle);
+  const details = useUi((state) => state.details);
+  const settingsOpen = useUi((state) => state.settings !== null);
+  const covered = watching || playingTitle;
+  usePreview(covered, view);
   // The login form replaces everything: nothing may keep playing, or holding the connection, behind it.
-  useEffect(() => () => player.suspend(), []);
+  useEffect(
+    () => () => {
+      titlePlayer.close();
+      player.suspend();
+    },
+    [],
+  );
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -66,15 +80,26 @@ function Shell() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  const pageActive = !covered && !details;
   return (
     <>
-      <div className={cn("h-full", watching && "invisible")}>
-        {view === "home" ? <HomeScreen active={!watching} /> : <GuidePage active={!watching} />}
+      <div
+        className={cn("h-full", covered && "invisible")}
+        inert={!pageActive || settingsOpen ? true : undefined}
+      >
+        {view === "home" ? (
+          <HomeScreen active={pageActive} />
+        ) : view === "live" ? (
+          <GuidePage active={pageActive} />
+        ) : (
+          <BrowsePage kind={view === "movies" ? "movie" : "series"} active={pageActive} />
+        )}
       </div>
+      {details && !covered && <DetailsView target={details} />}
       {watching && <WatchScreen />}
+      {playingTitle && <TitleWatch />}
       <SearchPalette />
       <SettingsPage />
-      <UpdateDialogs />
     </>
   );
 }
@@ -84,12 +109,16 @@ function subscribeVisibility(onChange: () => void): () => void {
   return () => document.removeEventListener("visibilitychange", onChange);
 }
 
+/** Pages that show the last channel's muted preview. Movies and Series show artwork instead. */
+const PREVIEWS: Record<View, boolean> = { home: true, live: true, movies: false, series: false };
+
 /**
- * Keeps the last channel playing, muted, behind the pages. A minimised or hidden window stops a
- * muted preview, and showing it again starts the preview again. A preview that failed, as when
- * another device holds the connection, stays failed. Watch is left alone.
+ * Keeps the last channel playing, muted, behind Home and the guide. Movies and Series stop it, and
+ * coming back starts it again, muted. A minimised or hidden window stops a muted preview too, and
+ * showing it again starts the preview again. A preview that failed, as when another device holds
+ * the connection, stays failed. Watch and a playing title are left alone.
  */
-function usePreview(watching: boolean): void {
+function usePreview(covered: boolean, view: View): void {
   const visible = useSyncExternalStore(
     subscribeVisibility,
     () => document.visibilityState === "visible",
@@ -100,9 +129,14 @@ function usePreview(watching: boolean): void {
   const last = useLastChannel();
   const channel = playing ?? last;
   useEffect(() => {
-    if (watching) return;
+    if (covered) return;
+    if (!PREVIEWS[view]) {
+      player.setAudible(false);
+      if (!failed) player.suspend();
+      return;
+    }
     if (!visible) {
       if (!audible && !failed) player.suspend();
     } else if (channel) player.preview(channel);
-  }, [watching, visible, audible, failed, channel]);
+  }, [covered, view, visible, audible, failed, channel]);
 }

@@ -5,6 +5,9 @@ import type { Codec } from "@mrstreamer/contracts/playback";
 import * as Layer from "effect/Layer";
 import { Playback } from "../src/main/services/playback.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
+import { readMp4Start } from "../src/renderer/src/player/mp4.ts";
+import { webvttReader } from "../src/renderer/src/player/webvtt.ts";
+import { fixture } from "./fake-provider.ts";
 import { fakeProvider, promised, runtimeFor, tempDir, testSecrets, userAgent } from "./support.ts";
 
 /** What Chromium on Linux decodes: no HEVC, no AC-3 or E-AC-3. */
@@ -75,6 +78,32 @@ function streamsOf(body: Buffer): { codec_type: string; codec_name: string; chan
 
 // Each run starts ffmpeg, which takes a moment under a busy suite.
 describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
+  it("names HEVC for Media Source Extensions", () => {
+    const remux = spawnSync(
+      FFMPEG,
+      [
+        ...[
+          "-v",
+          "error",
+          "-f",
+          "mpegts",
+          "-i",
+          "pipe:0",
+          "-c",
+          "copy",
+          "-tag:v",
+          "hvc1",
+          "-f",
+          "mp4",
+        ],
+        ...["-movflags", "frag_keyframe+empty_moov+delay_moov+default_base_moof", "pipe:1"],
+      ],
+      { input: fixture("hevc-aac.mpegts"), maxBuffer: 16 * 1024 * 1024 },
+    );
+
+    expect(readMp4Start(remux.stdout).codecs).toMatch(/^hvc1\.1\.6\.L\d+\.[0-9A-F.]+,mp4a\.40\.2$/);
+  });
+
   it("names the tracks a file holds, in their own languages", async () => {
     const { open, dispose } = await titles();
 
@@ -112,6 +141,17 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
     const cues = await (await fetch(run.response.headers.get("x-cues") ?? "")).text();
     expect(cues).toContain("00:12.000 --> 00:14.000\nTwelve seconds");
     expect(cues).not.toContain("First line");
+    // What the player reads from these: the codecs Media Source Extensions needs, and the cues.
+    const start = readMp4Start(run.body);
+    expect(start.codecs).toMatch(/^avc1\.64[0-9a-f]{4},mp4a\.40\.2$/);
+    expect(start.firstFragment).not.toBeNull();
+    const reader = webvttReader();
+    const parsed = [
+      ...reader.push(cues.slice(0, 40)),
+      ...reader.push(cues.slice(40)),
+      ...reader.end(),
+    ];
+    expect(parsed[0]).toEqual({ start: 12, end: 14, text: "Twelve seconds" });
     await dispose();
   });
 

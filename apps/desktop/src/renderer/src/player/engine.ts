@@ -218,7 +218,10 @@ function lifecycle(video: HTMLVideoElement, teardown: () => void) {
           detail: `No picture or sound within ${START_TIMEOUT_MS / 1000} s.`,
         });
       }
-    } else if (!video.paused) {
+    } else if (video.paused) {
+      // Time paused isn't time stalled.
+      lastProgressAt = now;
+    } else {
       const stalled = now - lastProgressAt;
       if (stalled > BROKEN_TIMING_STALL_MS && bufferedAhead(video) >= UNPLAYABLE_BUFFER_S) {
         fail({ kind: "media", detail: "The stream arrives, but its timing is broken." });

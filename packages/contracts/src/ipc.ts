@@ -68,6 +68,7 @@ export const ipcInputs = {
   }),
   "playback.openTitle": type({ title: TitleRef, decoders }),
   "playback.close": type({ sessionId: "string" }),
+  "playback.closeAll": none,
   "playback.failure": type({ sessionId: "string" }),
   "preferences.get": none,
   "preferences.update": Preferences.partial(),
@@ -131,6 +132,8 @@ export interface IpcOutputs {
   /** Opens a movie or episode, and closes any stream that was open before. */
   "playback.openTitle": TitleSession;
   "playback.close": null;
+  /** Closes every stream, including a title still reading its file before its session is known. */
+  "playback.closeAll": null;
   /** Why a session's upstream request failed, or null if it has not failed. */
   "playback.failure": StreamFailure | null;
   "preferences.get": Preferences;

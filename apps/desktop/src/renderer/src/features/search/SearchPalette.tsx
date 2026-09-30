@@ -4,8 +4,10 @@ import { Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { ProgrammeMatch } from "@mrstreamer/contracts/guide";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
-import { useUi } from "../../app/ui-store.ts";
+import type { Title } from "@mrstreamer/contracts/ondemand";
+import { openDetails, useUi } from "../../app/ui-store.ts";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
+import { Artwork } from "../../components/TitleArt.tsx";
 import { useNow } from "../../lib/clock.ts";
 import { clockTime, timeLeft } from "../../lib/format.ts";
 import { queries, useCategoryMap } from "../../lib/queries.ts";
@@ -13,8 +15,8 @@ import { cn } from "../../lib/utils.ts";
 import { watchChannel } from "../live/GuidePage.tsx";
 
 /**
- * Searches channel names across every category, then programmes on now and later today. Opens
- * with ⌘K or Ctrl K.
+ * Searches channel names across every category, then movies and series, then programmes on now
+ * and later today. Opens with ⌘K or Ctrl K.
  */
 export function SearchPalette() {
   const open = useUi((state) => state.searchOpen);
@@ -23,7 +25,7 @@ export function SearchPalette() {
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/70 transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
         <Dialog.Popup className="fixed top-[12vh] left-1/2 z-50 w-[40rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 overflow-hidden rounded-3xl bg-popover shadow-2xl ring-1 ring-white/10 outline-none transition-[opacity,scale] duration-150 data-ending-style:scale-[0.98] data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0">
-          <Dialog.Title className="sr-only">Search channels</Dialog.Title>
+          <Dialog.Title className="sr-only">Search</Dialog.Title>
           <Palette />
         </Dialog.Popup>
       </Dialog.Portal>
@@ -31,20 +33,23 @@ export function SearchPalette() {
   );
 }
 
-/** A search result: a channel, or a programme on the channel that shows it. */
+/** A search result: a channel, a movie or series, or a programme on the channel that shows it. */
 type Result =
   | { readonly kind: "channel"; readonly channel: LiveChannel }
+  | { readonly kind: "title"; readonly title: Title }
   | { readonly kind: "programme"; readonly match: ProgrammeMatch };
 
-/** Channel results listed before the programmes. */
+/** Channel results listed before the rest. */
 const CHANNEL_RESULTS = 20;
+/** Movies, and then series, listed after the channels. */
+const TITLE_RESULTS = 6;
 
 function Palette() {
   const [query, setQuery] = useState("");
   const debounced = useDebounced(query, 120);
   const channels = useQuery(queries.search(debounced));
   const programmes = useQuery(queries.programmes(debounced));
-  const status = useQuery(queries.libraryStatus());
+  const titles = useQuery(queries.titleSearch(debounced));
   const categories = useCategoryMap();
   const now = useNow();
   const [active, setActive] = useState(0);
@@ -55,9 +60,13 @@ function Palette() {
       ...(channels.data ?? [])
         .slice(0, CHANNEL_RESULTS)
         .map((channel): Result => ({ kind: "channel", channel })),
+      ...[
+        ...(titles.data?.movies ?? []).slice(0, TITLE_RESULTS),
+        ...(titles.data?.series ?? []).slice(0, TITLE_RESULTS),
+      ].map((title): Result => ({ kind: "title", title })),
       ...(programmes.data ?? []).map((match): Result => ({ kind: "programme", match })),
     ];
-  }, [debounced, channels.data, programmes.data]);
+  }, [debounced, channels.data, titles.data, programmes.data]);
 
   useEffect(() => {
     setActive(0);
@@ -75,6 +84,7 @@ function Palette() {
     const result = results[index];
     if (!result) return;
     if (result.kind === "channel") watchChannel(result.channel);
+    else if (result.kind === "title") openDetails({ kind: result.title.kind, id: result.title.id });
     else if (result.match.programme.start <= Date.now()) watchChannel(result.match.channel);
     else setOpen((current) => (current === index ? null : index));
   };
@@ -96,7 +106,7 @@ function Palette() {
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={onKey}
-          placeholder={`Search ${status.data?.channelCount.toLocaleString() ?? ""} channels and programmes`}
+          placeholder="Search channels, movies, series and programmes"
           spellCheck={false}
           className="h-16 flex-1 bg-transparent text-lg text-foreground outline-none placeholder:text-muted-foreground/70"
         />
@@ -104,6 +114,35 @@ function Palette() {
       {results.length > 0 && (
         <div ref={list} className="max-h-[28rem] overflow-y-auto overscroll-contain p-2">
           {results.map((result, index) => {
+            if (result.kind === "title") {
+              const { title } = result;
+              return (
+                <button
+                  key={`${title.kind}:${title.id}`}
+                  data-index={index}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => choose(index)}
+                  className={cn(
+                    "flex w-full items-center gap-3.5 rounded-2xl px-3 py-2 text-left hover:bg-white/6",
+                    index === active && "bg-white/10 hover:bg-white/10",
+                  )}
+                >
+                  <span className="block h-12 w-8 flex-none overflow-hidden rounded-md">
+                    <Artwork url={title.posterUrl} name={title.title} className="text-[0.5rem]" />
+                  </span>
+                  <span className="min-w-0 flex-1" title={title.name}>
+                    <span className="block truncate text-[0.9375rem] text-foreground">
+                      {title.title}
+                    </span>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {[title.kind === "movie" ? "Movie" : "Series", title.year, ...title.tags]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                  </span>
+                </button>
+              );
+            }
             const channel = result.kind === "channel" ? result.channel : result.match.channel;
             const programme = result.kind === "programme" ? result.match.programme : null;
             const category = categories.get(channel.categoryIds[0] ?? "");

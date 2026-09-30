@@ -238,6 +238,7 @@ async function start(): Promise<void> {
           return yield* playback.openTitle(title, file.url, decoders);
         }),
       "playback.close": ({ sessionId }) => Effect.as(playback.close(sessionId), null),
+      "playback.closeAll": () => Effect.as(playback.closeAll, null),
       "playback.failure": ({ sessionId }) => playback.failure(sessionId),
       "preferences.get": () => settings.get,
       "preferences.update": (patch) => settings.update(patch),

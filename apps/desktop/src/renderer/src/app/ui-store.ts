@@ -1,10 +1,11 @@
 import { create } from "zustand";
+import type { TitleKind } from "@mrstreamer/contracts/ondemand";
 
-/** The page under everything else: Home or the Live TV guide. Watch opens over it. */
-export type View = "home" | "live";
+/** The page under everything else. Watch, details and playing a title open over it. */
+export type View = "home" | "live" | "movies" | "series";
 
-/** The tabs of the Settings page. */
-export type SettingsTab = "subscription" | "updates" | "about";
+/** The tabs of the Settings page, and the licences About opens. */
+export type SettingsTab = "subscription" | "updates" | "about" | "licences";
 
 /** A list of channels the guide and Watch's channel list show. */
 export type ChannelList =
@@ -13,13 +14,23 @@ export type ChannelList =
   | { readonly kind: "all" }
   | { readonly kind: "category"; readonly id: string };
 
-/** The update dialog on screen: the restart question. */
-type UpdateDialog = "restart";
+/** A movie or series whose details are on screen. */
+export interface DetailsTarget {
+  readonly kind: TitleKind;
+  readonly id: string;
+}
+
+/** The update dialog on screen: the panel under the top bar's Update, or the restart question. */
+type UpdateDialog = "panel" | "restart";
 
 interface UiState {
   readonly view: View;
-  /** Watch covers the page with the picture. Closing it returns to the page as it was. */
+  /** Watch covers the page with a live channel. Closing it returns to the page as it was. */
   readonly watching: boolean;
+  /** A movie or episode plays over everything, until the viewer leaves it. */
+  readonly playingTitle: boolean;
+  /** A movie's or series' details, over the page they were opened from. */
+  readonly details: DetailsTarget | null;
   /** Watch's channel list is open over the picture. */
   readonly channelsOpen: boolean;
   readonly searchOpen: boolean;
@@ -36,6 +47,8 @@ interface UiState {
 export const useUi = create<UiState>(() => ({
   view: "home",
   watching: false,
+  playingTitle: false,
+  details: null,
   channelsOpen: false,
   searchOpen: false,
   settings: null,
@@ -44,9 +57,9 @@ export const useUi = create<UiState>(() => ({
   updateDialog: null,
 }));
 
-/** Shows a page, closing Watch and Settings over it. */
+/** Shows a page, closing Watch, details and Settings over it. */
 export function openView(view: View): void {
-  useUi.setState({ view, watching: false, channelsOpen: false, settings: null });
+  useUi.setState({ view, watching: false, channelsOpen: false, settings: null, details: null });
 }
 
 /** Opens Watch over the current page. */
@@ -57,6 +70,11 @@ export function openWatch(): void {
 /** Closes Watch, back to the page it opened over. */
 export function closeWatch(): void {
   useUi.setState({ watching: false, channelsOpen: false });
+}
+
+/** Shows a movie's or series' details over the page. */
+export function openDetails(target: DetailsTarget): void {
+  useUi.setState({ details: target, searchOpen: false, settings: null, watching: false });
 }
 
 /** Whether two lists are the same. */

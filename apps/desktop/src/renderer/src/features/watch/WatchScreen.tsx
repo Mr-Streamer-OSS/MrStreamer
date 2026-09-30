@@ -214,9 +214,12 @@ export function WatchScreen() {
           return;
       }
       event.preventDefault();
+      // Handled here only: the layer underneath, shown again by this key, must not take it too.
+      event.stopPropagation();
     }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Before tooltips and popovers see the key: a tooltip on screen would keep Escape to itself.
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true });
   }, []);
 
   if (!channel) return null;

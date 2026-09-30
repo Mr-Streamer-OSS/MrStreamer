@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { create } from "zustand";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
+import { useUi } from "../../app/ui-store.ts";
 import { queries } from "../../lib/queries.ts";
 
 /** How long the entry waits for another digit before it tunes. */
@@ -51,6 +52,15 @@ export function NumberEntry({ onChannel }: { onChannel: (channel: LiveChannel) =
     const timer = setTimeout(() => numberEntry.commit(), COMMIT_MS);
     return () => clearTimeout(timer);
   }, [digits]);
+
+  // A number typed before Settings, search or a title opened over this view doesn't act behind it.
+  const covered = useUi(
+    (state) =>
+      state.settings !== null || state.searchOpen || state.details !== null || state.playingTitle,
+  );
+  useEffect(() => {
+    if (covered) numberEntry.cancel();
+  }, [covered]);
 
   useEffect(() => {
     if (!committing || !all.data) return;
