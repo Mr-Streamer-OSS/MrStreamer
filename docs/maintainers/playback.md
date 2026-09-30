@@ -1,6 +1,6 @@
 # Playback evaluation
 
-How the playback design was chosen, measured on real streams. The [architecture](architecture.md#playback) describes the design itself.
+How the playback design was chosen, measured on real streams and files. The [architecture](architecture.md#playback) describes the design itself.
 
 ## Samples
 
@@ -64,7 +64,7 @@ No candidate dropped frames once playing. The app used 700 to 860 MB across its 
 
 Chromium plus a bundled ffmpeg. On the Mac it plays every sample, as mpv does, while keeping hardware decoding, the approved UI and its controls, and it costs no more CPU on the channels that play directly, which are most of them. Converted channels start about half a second later than in mpv, and damaged broadcasts cost a slow retry, where mpv shows them at once. The ffmpeg is a small separate process built from pinned sources for each platform (7 MB), so a crash can't take the app down and it signs and notarizes like the rest of the app.
 
-libmpv stays the option for movies and series, if subtitles and seeking need more than Chromium offers. The `Engine` boundary in `apps/desktop/src/renderer/src/player/engine.ts` leaves room for it.
+libmpv was kept in reserve for movies and series, in case subtitles and seeking needed more than Chromium offers; [Movies and episodes](#movies-and-episodes) records how they turned out without it.
 
 ## Budgets
 
@@ -80,3 +80,27 @@ For Apple silicon Macs, from these measurements, per channel:
 | Memory, all processes                       | 900 MB           |
 
 Windows and Linux budgets follow their measurements on real hardware.
+
+## Movies and episodes
+
+Slice 04 read the on-demand side of the same subscription: 53,422 movies and 10,440 series. Of the movies, 66 % are MKV, 33 % MP4, 1 % AVI, and a few dozen MPEG-TS, MPEG-PS, M4V and FLV. Every file sits behind a redirect to a CDN that answers byte ranges.
+
+ffprobe through a local range proxy read 17 of 20 sampled files; the other three didn't answer:
+
+| Files | What they hold                                                                                                       |
+| ----- | -------------------------------------------------------------------------------------------------------------------- |
+| 6 MKV | H.264, one HEVC; E-AC-3 5.1 or 2.0, up to 13 sound tracks in as many languages; 9 to 39 SubRip subtitles             |
+| 7 MP4 | H.264 with AAC, AC-3 or up to 13 E-AC-3 tracks; one with 32 subtitles; cover art and data tracks next to the picture |
+| 3 AVI | MPEG-4 Part 2 with MP3 or AC-3                                                                                       |
+| 1 TS  | H.264 with AAC                                                                                                       |
+
+Probing took 0.4 to 5.5 s and read 0.1 to 31 MB; the slowest were MP4 files that keep their index at the end.
+
+Two designs were tried in Electron against these formats:
+
+1. **Chromium plays the file.** Fastest: 135 ms to picture for MKV, 267 ms for MP4, 266 ms to seek. But Chromium exposes no sound track list, shows no embedded subtitles, and doesn't play E-AC-3 on Linux or AVI anywhere.
+2. **ffmpeg repackages from the chosen position** into fragmented MP4 for Media Source Extensions, with the chosen sound track, and WebVTT for the chosen subtitles. Picture after 0.6 s from the start and 0.7 to 0.8 s from further in; paused, nothing more is read. Video is copied unless the player can't decode it, so the CPU cost is the sound.
+
+The second shipped, as the one path for every title: track choice and subtitles are the point of the feature, and a second path for the files Chromium plays would double the seeking, track and subtitle work for half a second at start. With the whole design in place, the fake provider's titles start in 1.1 s and seek outside the buffer in 0.9 s ([architecture](architecture.md#movies-and-episodes)). On real hardware, time to picture depends mostly on the provider: its redirect, and the 1 to 3 range requests the probe needs.
+
+libmpv stays the fallback if a format turns up that this can't handle; none has in the sample.

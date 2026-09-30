@@ -1,19 +1,28 @@
 # Updates and channels
 
-Mr. Streamer only updates when you ask it to, and it asks again before restarting. Your login, preferences and watch history stay through every normal update.
+Mr. Streamer looks for updates on its own, a little after it starts and then every four hours. It never downloads or restarts without you: you download an update, and then choose when to restart into it. Your login, preferences, favourites and history stay through every update.
 
-## Update from inside the app
+## When an update is available
 
-1. Open Settings (⌘, on macOS, Ctrl , on Windows and Linux).
-2. Under **Updates**, choose **Check for updates**. If a newer version is available, choose **Update**.
-3. The download runs while you keep watching. Its progress also shows in the top bar.
-4. When it's ready, choose **Restart to update**, then **Restart now**. Choose **Later** to keep watching; the update waits until you restart it from Settings or the top bar.
+**Update** appears at the top right, with a dot. It stays quiet while you watch: it fades with the other controls, and nothing covers the picture.
 
-On Linux, updating the deb package asks for your password, because installing a package needs administrator rights. The AppImage replaces itself without asking.
+1. Click **Update** to see the new version and what changed.
+2. Choose **Download**. It downloads while you keep watching; the top bar shows how far it got, and **Cancel** stops it.
+3. When it's ready, the top bar says **Restart to update**. Choose **Restart** when it suits you: playback stops for a moment while Mr. Streamer restarts on the new version. **Later** keeps it ready until you restart.
+
+**Not now** hides the notice for that version. A newer version shows it again, and Settings keeps offering the one you skipped.
+
+On Linux, installing the deb package asks for your password, because installing a package needs administrator rights. The AppImage replaces itself without asking.
+
+## Updates in Settings
+
+Settings (⌘, on macOS, Ctrl , on Windows and Linux) > **Updates** shows your version and channel, when Mr. Streamer last checked and when it checks next, and the step the update is at, with the same actions as the top bar. **Check now** looks straight away. **What's new** lists the changes in the offered version, each linked to its details.
+
+When a check doesn't work, Settings says why in a few words: you're offline, the update server answered with an error, or GitHub is limiting requests from your network and until when. A check Mr. Streamer made on its own fails quietly and tries again later, sooner at first; an update it found earlier stays available meanwhile.
 
 ## Install a newer version by hand
 
-Download the newer installer from the [Releases page](https://github.com/Mr-Streamer-OSS/MrStreamer/releases) and install it over the old one, as described in the [README](../../README.md#install). Mr. Streamer keeps its data in a folder of its own (see [Troubleshooting](troubleshooting.md#where-your-data-is)), so your login, preferences and history carry over.
+**Download from GitHub** in Settings opens the release. You can also take any installer from the [Releases page](https://github.com/Mr-Streamer-OSS/MrStreamer/releases) and install it over the old one, as the [README](../../README.md#install) describes. Mr. Streamer keeps its data in a folder of its own (see [Troubleshooting](troubleshooting.md#where-your-data-is)), so everything carries over.
 
 ## Stable and Nightly
 
@@ -24,6 +33,6 @@ The version you download sets your channel on first launch. After that, only you
 
 ## Going back to Stable
 
-Choose **Stable** under **Updates** in Settings. Mr. Streamer offers the newest stable release right away, even when it is older than your nightly, and installs it like any other update: your login and preferences stay.
+Choose **Stable** under **Updates** in Settings. Mr. Streamer offers the newest stable release right away, even when it is older than your nightly, and installs it like any other update: your login, preferences, favourites and history stay.
 
-Stable 0.0.1 doesn't show the favourites and watch history of newer versions. They come back when you return to Nightly; favourites you add in 0.0.1 meanwhile don't carry over.
+A stable release older than your nightly may not have everything the nightly has. Stable 0.0.2 has no movies and series; how far you got in them stays saved and is back when you return to Nightly or a stable release that has them.

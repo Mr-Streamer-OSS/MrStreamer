@@ -2,23 +2,23 @@
 
 > For maintainers. The [docs index](../README.md) lists every guide.
 
-Work is planned in slices. The current one is [Slice 3.5: foundation before movies and series](slices/03.5-foundation.md): a monorepo, Effect services and an event log, with no change in viewing behaviour. [Slice 03: live TV discovery and programme guide](slices/03-live-tv-and-guide.md) is on nightly, waiting for Wout's Mac and Windows checks. [Slice 02](slices/02-reliability-and-releases.md) is complete.
-
-The [idea and roadmap](https://r3b736io0gst.postplan.dev) owns the product direction and links the other slices. The [slice 03 options and final scope](https://7pmlwdmw15ie.postplan.dev) is the current design reference; keep it and the repository handoff aligned when scope changes.
+Work is planned in slices. This page is the roadmap; each slice's handoff in [slices/](slices/) keeps its decisions, evidence and open questions. The current one is [Slice 04: movies, series, Home, updates and licences](slices/04-movies-home-updates.md). Slices 03 and 3.5 shipped in Stable 0.0.2.
 
 ## Current sequence
 
 1. Slice 01 delivered the desktop baseline on Mac, Windows and Linux.
-2. Slice 02 is complete: the repository is public at [Mr-Streamer-OSS/MrStreamer](https://github.com/Mr-Streamer-OSS/MrStreamer) and nightlies publish automatically. Stable 0.0.1 was published on 30 September from nightly `.15`'s commit. Wout reports successful Mac and Windows testing.
-3. Slice 03 fixed the late update check and Stable release notes (#5), and added the programme guide, favourites, the muted live Home and desktop navigation (#6, #7). It is on nightly; Wout's Mac and Windows checks are pending. Linux packages are checked headless, and GPU playback measurements remain follow-up evidence.
-4. Slice 3.5 laid the foundation for slice 04 (#8 to #13): the workspace, Effect services, an event log for favourites and history, and a diagnostics log. It is on nightly `.30`; Wout's Mac and Windows checks are pending.
+2. [Slice 02](slices/02-reliability-and-releases.md) is complete: the repository is public at [Mr-Streamer-OSS/MrStreamer](https://github.com/Mr-Streamer-OSS/MrStreamer) and nightlies publish automatically. Stable 0.0.1 was published on 30 September from nightly `.15`'s commit. Wout reports successful Mac and Windows testing.
+3. [Slice 03](slices/03-live-tv-and-guide.md) fixed the late update check and Stable release notes (#5), and added the programme guide, favourites, the muted live Home and desktop navigation (#6, #7).
+4. [Slice 3.5](slices/03.5-foundation.md) laid the foundation for slice 04 (#8 to #15): the workspace, Effect services, an event log for favourites and history, a diagnostics log and build-to-build measurements. Stable 0.0.2, published on 30 September from `f26072f`, carries slices 03 and 3.5.
+5. [Slice 04](slices/04-movies-home-updates.md) adds movies and series with resume and track choice, the new Home with Continue watching, updates found in a static feed every four hours, and third-party notices in the app. It is in review; the feed goes live once Wout enables GitHub Pages.
 
 ## Roadmap adjustments
 
 - Slice 02 delivered playback compatibility, library reliability, Mac signing/notarization, the DMG redesign, automatic nightlies with manual Stable promotion, in-app updates and documentation for public launch. Its clean-state reset was later removed: returning to Stable keeps the data.
 - User documentation and maintainer/agent documentation must have separate entry points. During the active build-out, code contributions are limited to small bug fixes; document this policy for prospective contributors.
 - Additional provider types and multiple subscriptions remain deferred. Their old placement in the slice 02 outline does not authorize implementing them now.
-- Slice 03 covers live TV and the guide, and brought forward the muted live Home, programme-first presentation, desktop navigation and copy cleanup. Slice 04 retains movies and series; slice 05 the wider Home integration and remaining everyday controls.
+- Slice 03 covers live TV and the guide, and brought forward the muted live Home, programme-first presentation, desktop navigation and copy cleanup.
+- Slice 04 covers movies and series, and brought forward the Home overhaul from slice 05, the update feed and the third-party notices. Downloads, trailers, external metadata, new provider types and mobile or TV apps stay out. Slice 05 keeps the remaining everyday controls.
 - Slice 06 consolidates quality checks across Mac, Windows and Linux. Each slice still verifies its own behaviour.
 - Slice 07 covers distribution follow-up for desktop v1. Release automation and updating are delivered in slice 02; the first public release can happen after slice 02 without waiting for slice 07.
 - Slice 08 retains beta feedback and desktop v1 acceptance.

@@ -10,7 +10,7 @@ Mr. Streamer keeps everything on your computer, in one folder:
 | Windows | `%APPDATA%\Mr. Streamer`                     |
 | Linux   | `~/.config/Mr. Streamer`                     |
 
-It holds your subscription with its encrypted password, your preferences, favourites and watch history, copies of your channel list and programme guide, and a diagnostics log. Uninstalling leaves the folder in place, so a reinstall picks up where you left off. Delete the folder to remove everything.
+It holds your subscription with its encrypted password, your preferences, favourites, watch history and how far you got in movies and episodes, copies of your channel list, programme guide and movie and series lists, your update channel, and a diagnostics log. Uninstalling leaves the folder in place, so a reinstall picks up where you left off. Delete the folder to remove everything.
 
 Your password is encrypted with a key your system keeps: the macOS Keychain, Windows' user encryption, or the desktop keyring on Linux.
 
@@ -34,6 +34,13 @@ The Windows installer isn't code-signed yet, so SmartScreen shows "Windows prote
 - **"The provider rejected this username or password":** check the login with your provider, then choose **Edit login** in Settings.
 - **No programme information for a channel:** your provider's guide doesn't cover it. Many providers cover only some channels. When a guide download fails, the last guide stays in use and Mr. Streamer tries again later.
 - **"Channels unavailable":** the provider didn't send the channel list. **Try again**, or check your internet connection. When a refresh fails, Mr. Streamer keeps showing the last channel list it received, and Settings says why the list may be out of date.
+- **Movies or Series stay empty:** the first load of a large list takes a few seconds. If the provider offers no movies or series, the pages say so. A failed refresh keeps the last lists.
+
+## Updates
+
+- **"GitHub is limiting requests":** Mr. Streamer asked GitHub directly, because the update list it normally reads wasn't there, and GitHub allows only so many requests an hour from one network, shared by everyone on it. Mr. Streamer waits until GitHub allows requests again and tries by itself; nothing needs doing.
+- **"You seem to be offline":** check your connection; Mr. Streamer tries again later on its own.
+- **An update didn't install:** Settings shows why. **Try again** downloads it again, or install it by hand from the [Releases page](https://github.com/Mr-Streamer-OSS/MrStreamer/releases).
 
 ## Still stuck
 

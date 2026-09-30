@@ -19,14 +19,16 @@ The repository is a pnpm workspace: the app is `apps/desktop`, shared contracts 
 
 Mr. Streamer needs an Xtream Codes subscription to show anything; use your own. Keep its details out of the repository: the gitignored `.local/` folder is the place for private notes and test access.
 
-Streams the player can't decode go through ffmpeg (see [architecture](architecture.md#playback)). Development builds use the `ffmpeg` on your PATH (`brew install ffmpeg`, `apt install ffmpeg` or `winget install Gyan.FFmpeg`); packaged builds use their bundled copy.
+Streams the player can't decode go through ffmpeg, and every movie and episode goes through ffprobe and ffmpeg (see [architecture](architecture.md#playback)). Development builds use the `ffmpeg` and `ffprobe` on your PATH (`brew install ffmpeg`, `apt install ffmpeg` or `winget install Gyan.FFmpeg`); packaged builds use their bundled copies.
 
 Environment variables for testing:
 
-| Variable                  | Effect                                                                                                                                                 |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `MR_STREAMER_FFMPEG`      | The ffmpeg to convert streams with, in development and packaged builds. The tests read it too.                                                         |
-| `MR_STREAMER_UPDATE_FEED` | A GitHub-compatible API to read releases from instead of `https://api.github.com`; see [releasing](releasing.md#testing-updates-against-another-feed). |
+| Variable                    | Effect                                                                                                                          |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `MR_STREAMER_FFMPEG`        | The ffmpeg to convert streams with, in development and packaged builds; its ffprobe must sit beside it. The tests read it too.  |
+| `MR_STREAMER_UPDATE_FEED`   | The update feed to read instead of the published one; see [releasing](releasing.md#testing-updates-against-another-feed).       |
+| `MR_STREAMER_UPDATE_API`    | A GitHub-compatible API for when the feed is missing, instead of `https://api.github.com`.                                      |
+| `MR_STREAMER_UPDATE_CHECKS` | `off` stops the automatic update checks; checking from Settings still works. The packaged-app test and the measurements set it. |
 
 ## Installers
 
@@ -37,7 +39,7 @@ apps/desktop/scripts/build-ffmpeg.sh mac-arm64   # or linux-x64, win-x64
 pnpm dist:mac                                    # or dist:win, dist:linux; installers land in apps/desktop/dist
 ```
 
-`build-ffmpeg.sh` needs a C compiler, make, nasm, pkg-config, git and curl. On Windows, run it in an MSYS2 MINGW64 shell; on Linux it can also cross-compile the Windows build with mingw-w64. It puts the binary and its licences in `apps/desktop/vendor/ffmpeg/<target>`, which electron-builder copies into the app. Without it, the app still builds, and streams that need converting report that they can't be played.
+`build-ffmpeg.sh` needs a C compiler, make, nasm, pkg-config, git and curl. On Windows, run it in an MSYS2 MINGW64 shell; on Linux it can also cross-compile the Windows build with mingw-w64. It puts `ffmpeg`, `ffprobe` and their licences in `apps/desktop/vendor/ffmpeg/<target>`, which electron-builder copies into the app. Without them, the app still builds, but streams that need converting, and every movie and episode, report that they can't be played.
 
 A Mac build signs with a Developer ID from your keychain when one exists and notarizes when `APPLE_API_KEY`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER` are set; see [signing](signing.md). Without a Developer ID, `apps/desktop/scripts/mac-ad-hoc-sign.ts` seals the app ad hoc, so a downloaded copy opens once through System Settings > Privacy & Security > Open Anyway instead of being called damaged.
 

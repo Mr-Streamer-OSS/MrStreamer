@@ -6,7 +6,7 @@ Outcome: quickly find something to watch now, navigate comfortably with a mouse 
 
 ## Start here
 
-- The approved design, with the research and options it came from, is the [browsing options document](https://7pmlwdmw15ie.postplan.dev). [Architecture](../architecture.md#programme-guide) describes the guide service, the one picture element and input handling; the [Live TV guide](../../user/live-tv.md) describes what users see.
+- The [decisions](#decisions) below record the approved design. [Architecture](../architecture.md#programme-guide) describes the guide service, the one picture element and input handling; the [Live TV guide](../../user/live-tv.md) describes what users see.
 - Baseline: Stable `0.0.1` and nightly `0.0.1-nightly.20260929.15`, both from `263950b`. Stable `0.0.1` is published; its source matches the promoted nightly. Returning to Stable keeps the data, including when the Stable version is older.
 - Wout reported successful slice 02 testing on Mac and Windows on 30 September. That is user-reported acceptance, not independently repeated device evidence.
 
@@ -26,7 +26,7 @@ Recorded 30 Sep 2026.
 
 ## Decisions
 
-Settled with Wout on 30 September, in three rounds. The [options document](https://7pmlwdmw15ie.postplan.dev) shows the layouts.
+Settled with Wout on 30 September, in three rounds, from layouts compared side by side.
 
 - **Guide data:** the provider's XMLTV, one download cached on disk, refreshed after connecting, at startup and when it is over six hours old. No per-channel requests: they covered no channel the XMLTV lacked. Browsing and playback never wait for it.
 - **Guide depth:** now and next on every row, and the rest of today under a row (option L1). No time grid: most channels have no programmes, and a grid adds a second scroll direction.
@@ -80,7 +80,6 @@ Checks on the slice 03 branch:
 - Programme artwork: the provider sends none, so rows use the channel's logo or initials.
 - The ultrawide layout that kept the guide beside the picture is gone; on a wide window the channel list covers the black bar beside the picture instead.
 - Favourites can follow a round trip through Stable 0.0.1 into another account: 0.0.1 keeps unknown preference fields when it switches accounts. Back on a newer build, the old ids may match other channels. Storing the account with the favourites would close it; it needs a nightly, a return to Stable and an account switch.
-- The published slice 03 PostPlan document predates these decisions; this handoff and the options document are current.
 
 ## Scope boundaries
 
@@ -88,9 +87,5 @@ Not in this slice: time grid, reminders, recording, catch-up, multiview, program
 
 ## References
 
-- [Idea and roadmap](https://r3b736io0gst.postplan.dev)
-- [Browsing options and final scope](https://7pmlwdmw15ie.postplan.dev)
-- [Published slice 03, before the decisions](https://80rkun70140p.postplan.dev)
-- [Release review, 30 September](https://ydi3ve2tymca.postplan.dev)
 - [Stable 0.0.1](https://github.com/Mr-Streamer-OSS/MrStreamer/releases/tag/v0.0.1)
 - [#5: late update checks and Stable notes](https://github.com/Mr-Streamer-OSS/MrStreamer/pull/5)
