@@ -2,7 +2,7 @@
 
 > For maintainers. The [docs index](../README.md) lists every guide.
 
-Work is planned in slices. Start with [Slice 03: live TV discovery and programme guide](slices/03-live-tv-and-guide.md), built and waiting for Wout's Mac and Windows checks. Its handoff records the decisions, evidence and known gaps. [Slice 02](slices/02-reliability-and-releases.md) is complete.
+Work is planned in slices. The current one is [Slice 3.5: foundation before movies and series](slices/03.5-foundation.md): a monorepo, Effect services and an event log, with no change in viewing behaviour. [Slice 03: live TV discovery and programme guide](slices/03-live-tv-and-guide.md) is on nightly, waiting for Wout's Mac and Windows checks. [Slice 02](slices/02-reliability-and-releases.md) is complete.
 
 The [idea and roadmap](https://r3b736io0gst.postplan.dev) owns the product direction and links the other slices. The [slice 03 options and final scope](https://7pmlwdmw15ie.postplan.dev) is the current design reference; keep it and the repository handoff aligned when scope changes.
 
@@ -10,7 +10,8 @@ The [idea and roadmap](https://r3b736io0gst.postplan.dev) owns the product direc
 
 1. Slice 01 delivered the desktop baseline on Mac, Windows and Linux.
 2. Slice 02 is complete: the repository is public at [Mr-Streamer-OSS/MrStreamer](https://github.com/Mr-Streamer-OSS/MrStreamer) and nightlies publish automatically. Stable 0.0.1 was published on 30 September from nightly `.15`'s commit. Wout reports successful Mac and Windows testing.
-3. Slice 03 fixed the late update check and Stable release notes (#5), and adds the programme guide, favourites, the muted live Home and desktop navigation. Wout tests it on Mac and Windows before it merges; Linux packages are checked headless, and GPU playback measurements remain follow-up evidence.
+3. Slice 03 fixed the late update check and Stable release notes (#5), and added the programme guide, favourites, the muted live Home and desktop navigation (#6, #7). It is on nightly; Wout's Mac and Windows checks are pending. Linux packages are checked headless, and GPU playback measurements remain follow-up evidence.
+4. Slice 3.5 lays the foundation for slice 04 without changing viewing behaviour.
 
 ## Roadmap adjustments
 

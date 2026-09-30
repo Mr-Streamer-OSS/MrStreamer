@@ -8,11 +8,11 @@
 // stream: muted on Home, with sound in Watch, and no second request to the provider. The app runs with a
 // throwaway profile and remote debugging on a random port; on macOS pass --use-mock-keychain so
 // the test never touches a real keychain.
-import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startFakeProvider } from "../fake-provider.ts";
+import { connect, delay, key, launch, login, waitFor, type Page } from "./app.ts";
 
 const [executable, ...rest] = process.argv.slice(2).filter((arg) => arg !== "--");
 if (!executable) throw new Error("Usage: node test/e2e/packaged-app.ts <app executable> [-- args]");
@@ -21,17 +21,13 @@ const CHANNELS = ["TEST | H.264 + AAC", "TEST | H.264 + MP2"];
 const port = 20000 + Math.floor(Math.random() * 20000);
 const profile = mkdtempSync(join(tmpdir(), "mr-streamer-e2e-"));
 const provider = await startFakeProvider({ channels: 60, live: true });
-const app = spawn(
-  executable,
-  [`--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, ...rest],
-  { stdio: ["ignore", "inherit", "inherit"] },
-);
+const app = launch(executable, rest, { port, profile });
 
 let failed = false;
 try {
-  const page = await connect();
+  const page = await connect(port);
   await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
-  await login(page);
+  await login(page, provider);
   for (const channel of CHANNELS) {
     const result = await play(page, channel);
     console.log(`${result.ok ? "PASS" : "FAIL"} ${channel}: ${result.detail}`);
@@ -51,83 +47,6 @@ try {
   rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
 }
 process.exit(failed ? 1 : 0);
-
-type Page = Awaited<ReturnType<typeof connect>>;
-
-/** A minimal DevTools protocol client for the app's window. */
-async function connect() {
-  let url: string | undefined;
-  for (let attempt = 0; attempt < 150 && !url; attempt++) {
-    await delay(200);
-    try {
-      const targets = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()) as {
-        type: string;
-        webSocketDebuggerUrl: string;
-      }[];
-      url = targets.find((target) => target.type === "page")?.webSocketDebuggerUrl;
-    } catch {}
-  }
-  if (!url) throw new Error("The app opened no window within 30 s.");
-  const socket = new WebSocket(url);
-  await new Promise((resolve, reject) => {
-    socket.addEventListener("open", resolve, { once: true });
-    socket.addEventListener("error", reject, { once: true });
-  });
-  let nextId = 1;
-  const pending = new Map<number, (message: { result?: unknown; error?: unknown }) => void>();
-  socket.addEventListener("message", (event) => {
-    const message = JSON.parse(String(event.data)) as {
-      id?: number;
-      result?: unknown;
-      error?: unknown;
-    };
-    if (message.id !== undefined) pending.get(message.id)?.(message);
-  });
-  const send = (method: string, params: Record<string, unknown> = {}) =>
-    new Promise<{ result?: unknown; error?: unknown }>((resolve) => {
-      const id = nextId++;
-      const timer = setTimeout(() => resolve({ error: `${method} timed out` }), 10_000);
-      pending.set(id, (message) => {
-        clearTimeout(timer);
-        resolve(message);
-      });
-      socket.send(JSON.stringify({ id, method, params }));
-    });
-  return {
-    send,
-    async evaluate<T>(expression: string): Promise<T> {
-      const reply = await send("Runtime.evaluate", {
-        expression,
-        awaitPromise: true,
-        returnByValue: true,
-      });
-      if (reply.error) throw new Error(JSON.stringify(reply.error));
-      return (reply.result as { result: { value: T } }).result.value;
-    },
-    close: () => socket.close(),
-  };
-}
-
-async function login(page: Page): Promise<void> {
-  await waitFor(() =>
-    page.evaluate<boolean>("document.querySelectorAll('form input').length >= 3"),
-  );
-  const fields = [provider.url, "demo", "demo"];
-  await page.evaluate(`(() => {
-    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
-    const fields = ${JSON.stringify(fields)};
-    document.querySelectorAll("form input").forEach((input, index) => {
-      setValue.call(input, fields[index]);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    document.querySelector('form button[type="submit"]').click();
-  })()`);
-  await waitFor(() =>
-    page.evaluate<boolean>(
-      "!!document.querySelector('header') && !document.body.innerText.includes('Loading channels')",
-    ),
-  );
-}
 
 /** Picks a channel through search and waits for picture and sound. */
 async function play(page: Page, channel: string): Promise<{ ok: boolean; detail: string }> {
@@ -189,28 +108,4 @@ async function homeAndBack(page: Page): Promise<{ ok: boolean; detail: string }>
     ok,
     detail: `Home ${home.playing ? "playing" : "stopped"}${home.muted ? " muted" : " with sound"}, Watch ${watch.playing ? "playing" : "stopped"}${watch.muted ? " muted" : " with sound"}, ${extra} more stream requests, ${provider.activeStreams()} open`,
   };
-}
-
-async function key(page: Page, name: string, code: number): Promise<void> {
-  for (const type of ["rawKeyDown", "keyUp"]) {
-    await page.send("Input.dispatchKeyEvent", {
-      type,
-      key: name,
-      code: name,
-      windowsVirtualKeyCode: code,
-    });
-  }
-}
-
-async function waitFor(check: () => Promise<boolean>, timeoutMs = 60_000): Promise<void> {
-  const until = Date.now() + timeoutMs;
-  while (Date.now() < until) {
-    if (await check().catch(() => false)) return;
-    await delay(250);
-  }
-  throw new Error(`Timed out: ${check.toString()}`);
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
