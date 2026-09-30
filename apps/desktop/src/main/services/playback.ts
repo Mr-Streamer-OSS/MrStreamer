@@ -384,6 +384,9 @@ function make(deps: PlaybackDeps) {
         return;
       }
       const upstream = found.response;
+      // The provider answers again, so ffmpeg has the range it asked for again: a break before
+      // this no longer cuts the run short.
+      session.failure = null;
       const forwarded: Record<string, string> = { "Accept-Ranges": "bytes" };
       for (const name of ["content-type", "content-length", "content-range"]) {
         const value = upstream.headers.get(name);
