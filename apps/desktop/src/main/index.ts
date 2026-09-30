@@ -6,7 +6,11 @@ import { emit, registerIpc } from "./ipc.ts";
 import { removeUnfinishedWrites } from "./platform/json-file.ts";
 import { electronInstaller } from "./platform/installer.ts";
 import { keychainSecrets } from "./platform/secrets.ts";
-import { createGuide, type Guide } from "./services/guide.ts";
+import { Guide } from "@mrstreamer/core/guide/service";
+import * as Effect from "effect/Effect";
+import * as ManagedRuntime from "effect/ManagedRuntime";
+import * as Stream from "effect/Stream";
+import { mainLayer } from "./runtime.ts";
 import { createLibrary, type Library } from "./services/library.ts";
 import { createPlayback, type Playback } from "./services/playback.ts";
 import { createPreferences } from "./services/preferences.ts";
@@ -26,8 +30,6 @@ const REPOSITORY = "Mr-Streamer-OSS/MrStreamer";
 
 /** Refresh the channel list in the background when the cached copy is older than this. */
 const CATALOGUE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
-/** How often an open app checks whether the programme guide is due for a download. */
-const GUIDE_CHECK_MS = 15 * 60 * 1000;
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -108,14 +110,21 @@ async function start(): Promise<void> {
       if (mainWindow) emit(mainWindow.webContents, "library.updated", status);
     },
   });
-  const guide = createGuide({
-    dataDir,
-    source: subscriptions.source,
-    channels: () => library.guideChannels(),
-    onUpdated: () => {
-      if (mainWindow) emit(mainWindow.webContents, "guide.updated", null);
-    },
-  });
+  const runtime = ManagedRuntime.make(
+    mainLayer({ dataDir, source: subscriptions.source, library }),
+  );
+  const guide = await runtime.runPromise(
+    Effect.gen(function* () {
+      return yield* Guide;
+    }),
+  );
+  runtime.runFork(
+    Stream.runForEach(guide.changes, () =>
+      Effect.sync(() => {
+        if (mainWindow) emit(mainWindow.webContents, "guide.updated", null);
+      }),
+    ),
+  );
   const playback = createPlayback({
     source: subscriptions.source,
     userAgent,
@@ -142,16 +151,16 @@ async function start(): Promise<void> {
         if (previous?.server !== connected.server || previous.username !== connected.username) {
           // A different account: its channels, and what was last watched, no longer apply.
           playback.closeAll();
-          await Promise.all([library.clear(), guide.clear()]);
+          await Promise.all([library.clear(), runtime.runPromise(guide.clear)]);
           await preferences.forget();
         }
-        void refreshGuide(guide);
+        void refreshGuide(runtime, guide);
         return connected;
       },
       "subscription.remove": async () => {
         playback.closeAll();
         await subscriptions.remove();
-        await Promise.all([library.clear(), guide.clear()]);
+        await Promise.all([library.clear(), runtime.runPromise(guide.clear)]);
         await preferences.forget();
         return null;
       },
@@ -160,9 +169,9 @@ async function start(): Promise<void> {
       "library.channels": (filter) => library.channels(filter),
       "library.channel": ({ channelId }) => library.channel(channelId),
       "library.refresh": () => library.refresh(),
-      "guide.listings": ({ channelIds }) => guide.listings(channelIds),
-      "guide.schedule": ({ channelId }) => guide.schedule(channelId),
-      "guide.search": ({ query }) => guide.search(query),
+      "guide.listings": ({ channelIds }) => runtime.runPromise(guide.listings(channelIds)),
+      "guide.schedule": ({ channelId }) => runtime.runPromise(guide.schedule(channelId)),
+      "guide.search": ({ query }) => runtime.runPromise(guide.search(query)),
       "playback.open": ({ channelId, decoders, repair }) =>
         playback.open(channelId, decoders, { repair: repair ?? false }),
       "playback.close": ({ sessionId }) => {
@@ -196,10 +205,11 @@ async function start(): Promise<void> {
   });
   app.on("will-quit", () => {
     void playback.dispose();
+    // Stops the guide's checks and any download in progress.
+    void runtime.dispose();
   });
 
-  void refreshInBackground(subscriptions, library, guide);
-  setInterval(() => void refreshGuide(guide), GUIDE_CHECK_MS);
+  void refreshInBackground(subscriptions, library, () => refreshGuide(runtime, guide));
 }
 
 /**
@@ -218,7 +228,7 @@ function ffmpegPath(): string | null {
 async function refreshInBackground(
   subscriptions: Subscriptions,
   library: Library,
-  guide: Guide,
+  refreshGuide: () => Promise<void>,
 ): Promise<void> {
   try {
     if (!(await subscriptions.recheck())) return;
@@ -226,13 +236,16 @@ async function refreshInBackground(
   } catch (cause) {
     console.warn("[startup] background refresh failed", cause);
   }
-  await refreshGuide(guide);
+  await refreshGuide();
 }
 
 /** Downloads the guide when it is due. A failure keeps the guide in use until the next check. */
-async function refreshGuide(guide: Guide): Promise<void> {
+async function refreshGuide(
+  runtime: ManagedRuntime.ManagedRuntime<Guide, never>,
+  guide: Guide["Service"],
+): Promise<void> {
   try {
-    await guide.refreshIfStale();
+    await runtime.runPromise(guide.refreshIfStale);
   } catch (cause) {
     console.warn("[guide] refresh failed", cause);
   }

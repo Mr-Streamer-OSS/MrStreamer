@@ -13,9 +13,12 @@ import { monitorEventLoopDelay } from "node:perf_hooks";
 import { Readable } from "node:stream";
 import { parseArgs } from "node:util";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
-import { createGuide } from "../src/main/services/guide.ts";
-import type { GuideChannels } from "../src/main/services/library.ts";
-import type { LiveProvider } from "@mrstreamer/core/provider";
+import type { GuideChannels } from "@mrstreamer/core/guide/programmes";
+import { Guide, GuideCatalogue, GuideSource } from "@mrstreamer/core/guide/service";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as ManagedRuntime from "effect/ManagedRuntime";
+import { guideStoreLayer } from "../src/main/platform/guide-store.ts";
 
 const CHANNELS = 13_000;
 const GUIDE_CHANNELS = 1_300;
@@ -53,22 +56,39 @@ const guideChannels: GuideChannels = {
   channelsOf: (id) => byGuideId.get(id) ?? [],
 };
 
-const provider: Pick<LiveProvider, "liveGuide"> = {
-  async liveGuide() {
-    const file = createReadStream(documentPath, { highWaterMark: CHUNK_BYTES });
-    return Readable.toWeb(file) as ReadableStream<Uint8Array>;
-  },
-};
-
-const source = { key: "measure", provider: provider as LiveProvider };
-const create = () =>
-  createGuide({
-    dataDir,
-    source: async () => source,
-    channels: async () => guideChannels,
-    onUpdated: () => {},
-    now: () => now,
-  });
+/** The guide service as the app runs it, with a subscription that downloads the document. */
+async function create() {
+  const runtime = ManagedRuntime.make(
+    Guide.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.succeed(GuideSource, {
+            current: Effect.succeed({
+              key: "measure",
+              download: async () =>
+                Readable.toWeb(
+                  createReadStream(documentPath, { highWaterMark: CHUNK_BYTES }),
+                ) as ReadableStream<Uint8Array>,
+            }),
+          }),
+          Layer.succeed(GuideCatalogue, { channels: Effect.succeed(guideChannels) }),
+          guideStoreLayer(dataDir),
+        ),
+      ),
+    ),
+  );
+  const guide = await runtime.runPromise(
+    Effect.gen(function* () {
+      return yield* Guide;
+    }),
+  );
+  return {
+    refresh: () => runtime.runPromise(guide.refresh),
+    listings: (ids: readonly string[]) => runtime.runPromise(guide.listings(ids)),
+    search: (query: string) => runtime.runPromise(guide.search(query)),
+    dispose: () => runtime.dispose(),
+  };
+}
 
 const gc = (globalThis as { gc?: () => void }).gc;
 gc?.();
@@ -77,7 +97,7 @@ const stalls = monitorEventLoopDelay({ resolution: 5 });
 
 stalls.enable();
 let started = performance.now();
-const guide = create();
+const guide = await create();
 await guide.refresh();
 const downloadMs = performance.now() - started;
 stalls.disable();
@@ -89,7 +109,7 @@ const heapMb = (process.memoryUsage().heapUsed - heapBefore) / 1e6;
 stalls.reset();
 stalls.enable();
 started = performance.now();
-const restarted = create();
+const restarted = await create();
 await restarted.listings(["0"]);
 const diskMs = performance.now() - started;
 stalls.disable();
@@ -119,6 +139,7 @@ row(
   gc ? `${heapMb.toFixed(0)} MB` : "run with --expose-gc",
   "under 80 MB",
 );
+await Promise.all([guide.dispose(), restarted.dispose()]);
 await rm(dataDir, { recursive: true, force: true });
 
 /** The guide channels a document lists programmes for. */

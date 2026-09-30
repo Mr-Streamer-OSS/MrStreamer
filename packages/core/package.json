@@ -8,7 +8,8 @@
     "./*": "./src/*.ts"
   },
   "dependencies": {
+    "@mrstreamer/contracts": "workspace:*",
     "arktype": "2.2.5",
-    "@mrstreamer/contracts": "workspace:*"
+    "effect": "4.0.0-rc.118"
   }
 }

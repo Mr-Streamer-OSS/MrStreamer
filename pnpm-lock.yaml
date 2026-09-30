@@ -65,6 +65,9 @@ importers:
       class-variance-authority:
         specifier: 0.7.1
         version: 0.7.1
+      effect:
+        specifier: 4.0.0-rc.118
+        version: 4.0.0-rc.118
       electron:
         specifier: 44.4.5
         version: 44.4.5(supports-color@7.2.0)
@@ -122,6 +125,9 @@ importers:
       arktype:
         specifier: 2.2.5
         version: 2.2.5
+      effect:
+        specifier: 4.0.0-rc.118
+        version: 4.0.0-rc.118
 
 packages:
 
@@ -1937,6 +1943,9 @@ packages:
 
   duplexer2@0.1.4:
     resolution: {integrity: sha512-asLFVfWWtJ90ZyOUHMqk7/S2w2guQKxUI2itj3d92ADHhxUSbCMGi1f1cBcJ7xM1To+pE/Khbwo1yuNbMEPKeA==}
+
+  effect@4.0.0-rc.118:
+    resolution: {integrity: sha512-hxhpCd+swzrtu9lnyPpEFre2ODQzJ9qxgyL1oHIEY8NKnW4PxTbM1XzplMZXiAsLD62HO+KJc41Nqxr9T791ZQ==}
 
   ejs@3.1.10:
     resolution: {integrity: sha512-UeJmFfOrAQS8OJWPZ4qtgHyWExa088/MtK5UEyoJGFH67cDEXkZSviOiKRCZ4Xij0zxI3JECgYs3oKx+AizQBA==}
@@ -4488,6 +4497,8 @@ snapshots:
   duplexer2@0.1.4:
     dependencies:
       readable-stream: 2.3.8
+
+  effect@4.0.0-rc.118: {}
 
   ejs@3.1.10:
     dependencies:
