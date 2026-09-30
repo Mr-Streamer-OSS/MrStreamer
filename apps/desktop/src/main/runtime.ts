@@ -13,6 +13,7 @@ import type { Secrets } from "./platform/secrets.ts";
 import { viewingStoreLayer } from "./platform/viewing-store.ts";
 import { Library } from "./services/library.ts";
 import { OnDemand, type OnDemandDeps } from "./services/ondemand.ts";
+import { appNotices, Licences } from "./services/licences.ts";
 import { Playback } from "./services/playback.ts";
 import { Settings } from "./services/preferences.ts";
 import { Subscriptions } from "./services/subscription.ts";
@@ -32,7 +33,15 @@ export interface MainConfig {
 }
 
 export type MainServices =
-  Subscriptions | Settings | Library | OnDemand | Playback | Updates | Guide | ViewingRecord;
+  | Subscriptions
+  | Settings
+  | Library
+  | OnDemand
+  | Playback
+  | Updates
+  | Guide
+  | ViewingRecord
+  | Licences;
 
 /** Every main-process service, with the app's adapters for their ports. */
 export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
@@ -54,6 +63,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
       ffprobe: config.ffprobe ?? null,
     }),
     Updates.layer({ dataDir, ...config.updates }),
+    Licences.layer(appNotices()),
   ).pipe(Layer.provideMerge(accounts));
 
   const guide = Guide.layer.pipe(

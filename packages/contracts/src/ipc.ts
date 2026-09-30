@@ -6,6 +6,7 @@ import { type } from "arktype";
 import type { Result } from "./errors.ts";
 import type { Listing, Programme, ProgrammeMatch } from "./guide.ts";
 import type { CatalogueStatus, Category, LiveChannel } from "./library.ts";
+import type { ThirdPartyNotice } from "./licences.ts";
 import {
   TitleRef,
   TITLE_KINDS,
@@ -88,6 +89,8 @@ export const ipcInputs = {
   "updates.download": none,
   "updates.cancel": none,
   "updates.restart": none,
+  "licences.list": none,
+  "licences.text": type({ id: "string" }),
 } satisfies Record<keyof IpcOutputs, { infer: unknown }>;
 
 /** What each IPC method resolves to when it succeeds. */
@@ -153,6 +156,10 @@ export interface IpcOutputs {
   "updates.cancel": null;
   /** Quits and installs the downloaded update. Only after the user confirmed the restart. */
   "updates.restart": null;
+  /** Third-party components the app ships, with their licences, by name. */
+  "licences.list": readonly ThirdPartyNotice[];
+  /** The full notice of one component from `licences.list`, as plain text. */
+  "licences.text": string;
 }
 
 export type IpcMethod = keyof IpcOutputs;

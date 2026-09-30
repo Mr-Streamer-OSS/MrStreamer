@@ -41,6 +41,19 @@ pnpm dist:mac                                    # or dist:win, dist:linux; inst
 
 A Mac build signs with a Developer ID from your keychain when one exists and notarizes when `APPLE_API_KEY`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER` are set; see [signing](signing.md). Without a Developer ID, `apps/desktop/scripts/mac-ad-hoc-sign.ts` seals the app ad hoc, so a downloaded copy opens once through System Settings > Privacy & Security > Open Anyway instead of being called damaged.
 
+## Third-party notices
+
+Settings > About lists what the installers ship and under which licences. `pnpm build` writes the list to `apps/desktop/out/licences/third-party.json`, which electron-builder packages with the rest of `out/`. `apps/desktop/scripts/licences.ts` takes the packages whose modules ended up in the main, preload and renderer bundles, whether dependencies or devDependencies, reads their LICENSE, NOTICE and COPYING files, and adds what `apps/desktop/licences.config.json` describes:
+
+- `packages`: packages the installers carry without a bundled module. Electron, and Tailwind for the base styles in the CSS.
+- `overrides`: help for a package, with a `why`. `licence` for one that declares none, `files` to show instead of its own, or `standardText` to add the licence's standard text from `apps/desktop/licences/standard`, for a package without a licence file (with the author from its package.json) or with a notice that only refers to its licence.
+- `embedded`: packages built into another package's prebuilt files and not installed, which the source maps reveal, under that package's `name@version`. Upgrading it fails the build until someone checks the entry and renames it.
+- `components`: Chromium, Node.js, FFmpeg and x264. `{app}` is the version being built, `{FFMPEG_VERSION}` and `{X264_COMMIT}` come from `build-ffmpeg.sh`, and the app fills `{chrome}` and `{node}` from the Electron it runs on.
+
+The build fails and lists every problem when a package declares no licence, has no licence file and no override, refers to Apache-2.0 or the GPL without including its text, carries a package that is neither installed nor under `embedded`, or uses a licence missing from `COMPATIBLE` in `scripts/licences.ts`. Read a licence's terms before adding it there.
+
+Chromium's credits, which hold Node.js's licence too, are 20 MB of HTML from Electron's download: next to the executable on Linux and Windows, in the app's Resources on macOS, where `electron-builder.yml` copies them. The main process turns them into plain text when the UI asks for Chromium or Node.js. `pnpm dev` serves the renderer instead of bundling it, so development shows the notices of the last `pnpm build`.
+
 ## Artwork
 
 - App icons come from `apps/desktop/assets/brand/`; `pnpm --filter mrstreamer icons:export` renders `apps/desktop/build/icon.*`.

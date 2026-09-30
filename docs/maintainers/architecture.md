@@ -65,6 +65,7 @@ The main process runs every service on one [Effect](https://effect.website) runt
 | `Updates`       | `services/updates.ts`              | The release channel, checks, downloads and the install |
 | `Guide`         | `@mrstreamer/core/guide/service`   | The programme guide                                    |
 | `ViewingRecord` | `@mrstreamer/core/viewing/service` | Favourites and watch history                           |
+| `Licences`      | `services/licences.ts`             | Third-party notices for Settings > About               |
 
 A service is a `Context.Service` class with a `layer`, and reaches the others through the context rather than callbacks. Services whose rules run without the platform live in `packages/core` and ask for what they need through ports, services of their own that the app supplies: the guide's are `GuideSource` (the subscription and its download), `GuideCatalogue` (guide ids) and `GuideStore` (the saved document, `platform/guide-store.ts`). The others live in the app. Every expected failure is a `Failed` from `@mrstreamer/core/failure`, carrying the `AppError` the UI shows; a provider adapter's `AppFailure` keeps its error, anything else counts as unexpected.
 

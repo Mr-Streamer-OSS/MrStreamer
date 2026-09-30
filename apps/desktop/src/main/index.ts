@@ -23,6 +23,7 @@ import createCatalogueWorker from "./ondemand/catalogue-worker.ts?nodeWorker";
 import { mainLayer } from "./runtime.ts";
 import { Library } from "./services/library.ts";
 import { OnDemand } from "./services/ondemand.ts";
+import { Licences } from "./services/licences.ts";
 import { Playback } from "./services/playback.ts";
 import { Settings } from "./services/preferences.ts";
 import { Subscriptions } from "./services/subscription.ts";
@@ -133,6 +134,7 @@ async function start(): Promise<void> {
     guide,
     viewing,
     diagnostics,
+    licences,
   } = await runtime.runPromise(
     Effect.all({
       subscriptions: Subscriptions,
@@ -144,6 +146,7 @@ async function start(): Promise<void> {
       guide: Guide,
       viewing: ViewingRecord,
       diagnostics: Diagnostics,
+      licences: Licences,
     }),
   );
 
@@ -244,6 +247,8 @@ async function start(): Promise<void> {
       "updates.download": () => updates.download,
       "updates.cancel": () => Effect.as(updates.cancel, null),
       "updates.restart": () => Effect.as(updates.restart, null),
+      "licences.list": () => licences.list,
+      "licences.text": ({ id }) => licences.text(id),
     },
     (sender) => sender === mainWindow?.webContents,
   );
