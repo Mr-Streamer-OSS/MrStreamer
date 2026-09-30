@@ -1,6 +1,11 @@
-# Single-package repo. This file only carries pnpm settings.
+packages:
+  - apps/*
+  - packages/*
 allowBuilds:
   electron: true
   electron-winstaller: false
   esbuild: true
   sharp: true
+# electron-vite and electron-builder look for electron from their own install location.
+publicHoistPattern:
+  - electron

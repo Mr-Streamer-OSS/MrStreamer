@@ -1,5 +1,13 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": ["scripts/*.{ts,mjs}", "test/e2e/*.ts"],
-  "ignoreBinaries": ["ffmpeg", "ffprobe"]
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/*.ts", "test/**/*.test.ts"]
+    },
+    "apps/desktop": {
+      "entry": ["scripts/*.{ts,mjs}", "test/e2e/*.ts"]
+    },
+    "packages/*": {}
+  },
+  "ignoreBinaries": ["ffmpeg", "ffprobe", "electron-builder"]
 }

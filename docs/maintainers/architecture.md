@@ -1,25 +1,32 @@
 # Architecture
 
-An Electron app. The main process owns everything that touches the network, the disk and the system; the renderer shows state and starts actions over a typed IPC contract.
+An Electron app in a pnpm workspace. The main process owns everything that touches the network, the disk and the system; the renderer shows state and starts actions over a typed IPC contract.
 
 ```
-src/shared     Contracts between the UI and the main process: IPC schemas, library model, guide,
-               errors, versions, updates
-src/main       Electron main process
-  providers    Provider adapters that report a catalogue as the provider sends it (Xtream Codes)
-  catalogue    Display names and region grouping, the same rules for every provider
-  services     Subscription, live library, programme guide, playback proxy, preferences, updates
-  guide        Reading XMLTV as it streams in
-  playback     Stream inspection, the clean start and ffmpeg conversion behind the proxy
-  updates      Reading the release list and picking the release to install
-  platform     Keychain-backed secrets, atomic JSON files, the electron-updater installer
-src/preload    The typed bridge exposed to the UI
-src/renderer   React UI; player/ holds the playback engines, the player controller and Picture
-scripts        Builds, signing and release helpers
-test           Vitest suites, the fake provider, codec clips and the packaged-app smoke test
+packages/contracts   @mrstreamer/contracts: IPC schemas, library and guide models, errors,
+                     versions, updates. Depends on nothing else in the workspace.
+packages/core        @mrstreamer/core: rules that run without Electron, React or the DOM. Catalogue
+                     names and regions, trusted guide ids, the XMLTV reader, update feeds, the
+                     provider port, text folding. Depends on contracts.
+apps/desktop         The app, package name mrstreamer
+  src/main           Electron main process
+    providers        The Xtream Codes adapter
+    services         Subscription, live library, programme guide, playback proxy, preferences,
+                     updates
+    playback         Stream inspection, the clean start and ffmpeg conversion behind the proxy
+    platform         Keychain-backed secrets, atomic JSON files, the electron-updater installer
+  src/preload        The typed bridge exposed to the UI
+  src/renderer       React UI; player/ holds the playback engines, the player controller, Picture
+  src/shared         What main and the renderer share inside the app: window bar sizes
+  scripts            Icons, the DMG background, signing, notarization, ffmpeg builds, guide budgets
+  test               Service suites, the fake provider, codec clips, packaged-app test, measurements
+scripts              Release planning and CI signing, run from the repository root
+test                 The release planning suite
 ```
 
-`src/shared/ipc.ts` is the contract: each method has an input schema (ArkType) and a result type, and the main process validates every call before its handler runs. The preload script exposes it as `window.mrStreamer`; the renderer reaches it through `lib/ipc.ts` and React Query hooks in `lib/queries.ts`.
+Packages export their source files by path, `@mrstreamer/core/catalogue/normalize`, and the app bundles them; nothing is built separately. Lint rules keep packages from importing Electron, React or the app, contracts from importing core, and every file from import cycles. `scripts/release-plan.ts` imports `packages/contracts/src/version.ts` by relative path, because release jobs run it before installing packages.
+
+`@mrstreamer/contracts/ipc` is the contract: each method has an input schema (ArkType) and a result type, and the main process validates every call before its handler runs. The preload script exposes it as `window.mrStreamer`; the renderer reaches it through `lib/ipc.ts` and React Query hooks in `lib/queries.ts`.
 
 ## Data
 
@@ -38,15 +45,15 @@ Everything lives in Electron's `userData` folder, named after the product, not t
 
 The library fetches categories and channels, indexes them in memory and caches the provider's raw answer; display names are worked out on load, so naming rules improve without a refetch. A refresh replaces the catalogue only when it looks complete: an empty answer never does, and one with less than half the channels only when a second fetch agrees. A failed refresh keeps the catalogue and reports the failure in the status. Preferences refer to provider ids, so renamed or reordered channels keep their history and favourites.
 
-Each channel keeps the provider's guide id (`epg_channel_id` on Xtream panels). Quality variants of one channel usually share it, but panels also file unrelated channels under one id: Wout's lists nine Flemish channels under `PlayCrime.be`. `catalogue/guide-ids.ts` keeps an id for a channel only when the channel's name matches the id, or when every channel sharing it is the same channel under another name or quality. The guide's own channel names don't count: panels copy them from their stream list. On Wout's provider this keeps 1,978 of 2,073 channels with programmes. A cache saved before guide ids existed still loads, and counts as due for a refresh at the next start.
+Each channel keeps the provider's guide id (`epg_channel_id` on Xtream panels). Quality variants of one channel usually share it, but panels also file unrelated channels under one id: Wout's lists nine Flemish channels under `PlayCrime.be`. `@mrstreamer/core/catalogue/guide-ids` keeps an id for a channel only when the channel's name matches the id, or when every channel sharing it is the same channel under another name or quality. The guide's own channel names don't count: panels copy them from their stream list. On Wout's provider this keeps 1,978 of 2,073 channels with programmes. A cache saved before guide ids existed still loads, and counts as due for a refresh at the next start.
 
 ## Programme guide
 
-`services/guide.ts` downloads the provider's XMLTV (`xmltv.php` on Xtream panels) and keeps it separate from the catalogue and playback: listings are empty until a guide loads, and nothing waits for one. `guide/xmltv.ts` reads the document as it arrives, from the network or from `guide.xml` after a restart. It searches the bytes and decodes one programme at a time, so the strings it keeps don't hold on to the chunks they came in. Programmes that already ended are dropped; a programme without an end runs until the next one, and overlaps are cut. Titles are folded for search as they arrive, and the last step yields to the event loop every 50 channels.
+`services/guide.ts` downloads the provider's XMLTV (`xmltv.php` on Xtream panels) and keeps it separate from the catalogue and playback: listings are empty until a guide loads, and nothing waits for one. `@mrstreamer/core/guide/xmltv` reads the document as it arrives, from the network or from `guide.xml` after a restart. It searches the bytes and decodes one programme at a time, so the strings it keeps don't hold on to the chunks they came in. Programmes that already ended are dropped; a programme without an end runs until the next one, and overlaps are cut. Titles are folded for search as they arrive, and the last step yields to the event loop every 50 channels.
 
 A download replaces the guide only when it completes and lists programmes; otherwise the last guide stays. The main process downloads after connecting a subscription, at startup, and whenever a 15-minute check finds the guide more than six hours old. Switching accounts clears it.
 
-The UI asks `guide.listings` for now and next per channel, `guide.schedule` for one channel's day and `guide.search` for programme titles. Lists ask for listings in pages of 40 as rows come into view, and again each minute. `scripts/measure-guide.ts` measures download, indexing, stalls, lookups and memory against the slice 03 budgets.
+The UI asks `guide.listings` for now and next per channel, `guide.schedule` for one channel's day and `guide.search` for programme titles. Lists ask for listings in pages of 40 as rows come into view, and again each minute. `apps/desktop/scripts/measure-guide.ts` measures download, indexing, stalls, lookups and memory against the slice 03 budgets.
 
 ## Views and the picture
 
@@ -75,6 +82,6 @@ Providers send a burst of buffered seconds when a stream opens. mpegts.js jumps 
 
 Nothing updates on its own; see the [user guide](../user/updates.md) for the behaviour.
 
-- `updates/feed.ts` reads the newest hundred releases from the GitHub API, plus the latest release, which is always the newest stable one however many nightlies came since. A release counts only when its version and pre-release flag name the same channel and it carries this platform's `latest*.yml`. Stable takes the highest stable version, Nightly the highest of both, by version order.
+- `@mrstreamer/core/updates/feed` reads the newest hundred releases from the GitHub API, plus the latest release, which is always the newest stable one however many nightlies came since. A release counts only when its version and pre-release flag name the same channel and it carries this platform's `latest*.yml`. Stable takes the highest stable version, Nightly the highest of both, by version order.
 - `services/updates.ts` holds the channel (set from the build on first launch, then only by the user) and the check, download and restart steps. Switching channels drops a downloaded or downloading update the new channel doesn't receive, then checks. Only the latest check counts: one that answers after a newer check or a channel change changes nothing, and download and restart refuse a version the chosen channel doesn't receive. On Stable, a nightly build is offered the newest stable release even when it is older; it installs over the nightly and keeps the data.
 - `platform/installer.ts` wraps electron-updater: generic provider pointed at the chosen release, no automatic download, no install on quit, and a check that the metadata names the chosen version. On macOS, Squirrel checks the update's signature only when installing, so a refused update surfaces as a failed install, not a failed download.

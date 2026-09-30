@@ -1,0 +1,14 @@
+{
+  "name": "@mrstreamer/core",
+  "private": true,
+  "type": "module",
+  "description": "Rules without Electron, React or the DOM: catalogue names, guide ids, XMLTV, update feeds, the provider port.",
+  "license": "GPL-3.0-only",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "arktype": "2.2.5",
+    "@mrstreamer/contracts": "workspace:*"
+  }
+}

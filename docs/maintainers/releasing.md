@@ -17,8 +17,8 @@ Releases come from `.github/workflows/release.yml`. The app finds them through i
   - the [CI](testing.md#ci) Check and Test jobs
   - `bundle` builds the JavaScript once, with the release version, and hands it to every platform as the `js-bundle` artifact
   - `package` builds each platform on its own runner, from the bundle:
-    - the bundled ffmpeg, cached until `scripts/build-ffmpeg.sh` changes
-    - macOS arm64: the DMG, and the ZIP that in-app updates install. Signed with the Developer ID, notarized and stapled (`scripts/notarize-dmg.ts`), then checked for signature, team, hardened runtime, Gatekeeper and both tickets. Missing secrets or a failed notarization fail the run.
+    - the bundled ffmpeg, cached until `apps/desktop/scripts/build-ffmpeg.sh` changes
+    - macOS arm64: the DMG, and the ZIP that in-app updates install. Signed with the Developer ID, notarized and stapled (`apps/desktop/scripts/notarize-dmg.ts`), then checked for signature, team, hardened runtime, Gatekeeper and both tickets. Missing secrets or a failed notarization fail the run.
     - Windows x64: the NSIS installer, unsigned; see [Windows signing](#windows-signing)
     - Linux x64: the AppImage and deb
     - every `latest*.yml` must name the release version

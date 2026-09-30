@@ -11,7 +11,7 @@ import {
   type Release,
   type Repository,
 } from "../scripts/release-plan.ts";
-import { compareVersions, formatVersion, parseVersion } from "../src/shared/version.ts";
+import { compareVersions, formatVersion, parseVersion } from "../packages/contracts/src/version.ts";
 
 const HOUR = 60 * 60 * 1000;
 const NOW = Date.parse("2026-10-02T12:00:00Z");
