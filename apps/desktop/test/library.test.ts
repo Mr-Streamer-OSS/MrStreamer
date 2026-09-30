@@ -1,28 +1,50 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
-import { createLibrary } from "../src/main/services/library.ts";
-import { createSubscriptions } from "../src/main/services/subscription.ts";
-import { fakeProvider, tempDir, testSecrets, userAgent } from "./support.ts";
+import * as Layer from "effect/Layer";
+import { describe, expect, it } from "vitest";
+import { Library } from "../src/main/services/library.ts";
+import { Subscriptions } from "../src/main/services/subscription.ts";
+import {
+  collect,
+  fakeProvider,
+  promised,
+  runtimeFor,
+  tempDir,
+  testSecrets,
+  userAgent,
+} from "./support.ts";
 
+/**
+ * A library on a connected fake provider, and the statuses it reports. `restart` starts another
+ * on the same data folder.
+ */
 async function connectedLibrary(channels = 300) {
   const provider = await fakeProvider({ channels });
   const dataDir = await tempDir();
-  const subscriptions = createSubscriptions({
-    dataDir,
-    secrets: testSecrets,
-    providerOptions: { userAgent },
-  });
+  const start = async () => {
+    const runtime = runtimeFor(
+      Library.layer({ dataDir, confirmDelay: 0 }).pipe(
+        Layer.provideMerge(
+          Subscriptions.layer({ dataDir, secrets: testSecrets, providerOptions: { userAgent } }),
+        ),
+      ),
+    );
+    const library = await promised(runtime, Library);
+    return {
+      library,
+      subscriptions: await promised(runtime, Subscriptions),
+      updates: await collect(runtime, library.changes),
+    };
+  };
+  const { library, subscriptions, updates } = await start();
   await subscriptions.connect({ server: provider.url, username: "demo", password: "demo" });
-  const onUpdated = vi.fn();
-  const create = () =>
-    createLibrary({ dataDir, source: subscriptions.source, onUpdated, confirmDelayMs: 0 });
-  return { provider, subscriptions, onUpdated, create, dataDir, library: create() };
+  const restart = async () => (await start()).library;
+  return { provider, dataDir, library, updates, restart };
 }
 
 describe("live library", () => {
   it("loads categories and channels from the provider, without separator entries", async () => {
-    const { provider, library, onUpdated } = await connectedLibrary();
+    const { provider, library, updates } = await connectedLibrary();
 
     const categories = await library.categories();
     const all = await library.channels({});
@@ -41,7 +63,7 @@ describe("live library", () => {
       channelCount: 12,
     });
     expect(categories[1]).toMatchObject({ group: "United Kingdom", title: "Entertainment" });
-    expect(onUpdated).toHaveBeenCalledWith({
+    expect(updates).toContainEqual({
       channelCount: all.length,
       fetchedAt: expect.any(Number),
       failure: null,
@@ -87,18 +109,18 @@ describe("live library", () => {
   });
 
   it("serves the cached catalogue after a restart without the provider", async () => {
-    const { provider, create, library } = await connectedLibrary();
+    const { provider, restart, library } = await connectedLibrary();
     const before = await library.channels({});
     await provider.close();
 
-    const restarted = create();
+    const restarted = await restart();
 
     expect(await restarted.channels({})).toEqual(before);
     expect((await restarted.status()).channelCount).toBe(before.length);
   });
 
   it("keeps a catalogue saved before guide ids, and counts it as due for a refresh", async () => {
-    const { provider, library, create, dataDir } = await connectedLibrary();
+    const { provider, library, restart, dataDir } = await connectedLibrary();
     await library.refresh();
     const path = join(dataDir, "catalogue.json");
     const saved = JSON.parse(await readFile(path, "utf8"));
@@ -109,7 +131,7 @@ describe("live library", () => {
     );
     provider.failCatalogue(500);
 
-    const restarted = create();
+    const restarted = await restart();
 
     expect(await restarted.channels({})).toEqual(await library.channels({}));
     expect(await restarted.isStale(60 * 60 * 1000)).toBe(true);
@@ -117,7 +139,7 @@ describe("live library", () => {
   });
 
   it("keeps the last catalogue when a refresh fails", async () => {
-    const { provider, library, onUpdated } = await connectedLibrary();
+    const { provider, library, updates } = await connectedLibrary();
     const before = await library.channels({});
     const { fetchedAt } = await library.status();
 
@@ -132,7 +154,7 @@ describe("live library", () => {
       fetchedAt,
       failure: { kind: "provider-error", status: 503 },
     });
-    expect(onUpdated).toHaveBeenLastCalledWith(await library.status());
+    expect(updates.at(-1)).toEqual(await library.status());
 
     provider.failCatalogue(null);
     await library.refresh();
@@ -152,7 +174,7 @@ describe("live library", () => {
   });
 
   it("keeps the catalogue when the confirming fetch comes back empty", async () => {
-    const { provider, library, create } = await connectedLibrary();
+    const { provider, library, restart } = await connectedLibrary();
     const before = await library.channels({});
     let requests = 0;
     provider.serveChannels((all) => (++requests === 1 ? all.slice(0, 5) : []));
@@ -163,7 +185,7 @@ describe("live library", () => {
 
     expect(await library.channels({})).toEqual(before);
     expect((await library.status()).failure).toMatchObject({ kind: "incomplete-catalogue" });
-    expect(await create().channels({})).toEqual(before);
+    expect(await (await restart()).channels({})).toEqual(before);
   });
 
   it("uses a much shorter channel list only when a second fetch confirms it", async () => {

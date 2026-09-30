@@ -1,20 +1,18 @@
 import { Guide } from "@mrstreamer/core/guide/service";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as TestClock from "effect/testing/TestClock";
-import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { mainLayer } from "../src/main/runtime.ts";
-import { createLibrary } from "../src/main/services/library.ts";
-import { createPreferences } from "../src/main/services/preferences.ts";
-import { createSubscriptions } from "../src/main/services/subscription.ts";
+import { Library } from "../src/main/services/library.ts";
+import { Subscriptions } from "../src/main/services/subscription.ts";
 import {
   fakeGuide,
   type FakeChannel,
   type FakeProvider,
   type FakeProviderOptions,
 } from "./fake-provider.ts";
-import { fakeProvider, tempDir, testSecrets, userAgent } from "./support.ts";
+import { fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 
 const HOUR = 60 * 60 * 1000;
 const QUARTER = HOUR / 4;
@@ -22,44 +20,28 @@ const QUARTER = HOUR / 4;
 const NOW = Date.parse("2026-10-02T20:10:00+02:00");
 
 /**
- * A connected library and guide on the fake provider. The guide runs on its own runtime, as in
- * the app, with a test clock the test moves; `create` starts another, as after a restart.
+ * A connected library and guide on the fake provider. The guide runs on the app's runtime, with a
+ * test clock the test moves; `create` starts another, as after a restart.
  */
 async function connectedGuide(options: FakeProviderOptions = {}) {
   const provider = await fakeProvider(options);
   provider.serveGuide(fakeGuide(provider.catalogue, NOW));
   const dataDir = await tempDir();
-  const subscriptions = createSubscriptions({
-    dataDir,
-    secrets: testSecrets,
-    providerOptions: { userAgent },
-  });
-  await subscriptions.connect({ server: provider.url, username: "demo", password: "demo" });
-  const library = createLibrary({
-    dataDir,
-    source: subscriptions.source,
-    onUpdated: () => {},
-    confirmDelayMs: 0,
-  });
+  let connected = false;
   const create = async () => {
     // The clock reads NOW before the guide starts, so its checks count from there.
     const clock = Layer.effectDiscard(TestClock.setTime(NOW)).pipe(
       Layer.provideMerge(TestClock.layer({ warningDelay: "1 day" })),
     );
-    const runtime = ManagedRuntime.make(
-      mainLayer({
-        dataDir,
-        source: subscriptions.source,
-        library,
-        preferences: createPreferences(dataDir),
-      }).pipe(Layer.provideMerge(clock)),
-    );
-    onTestFinished(() => runtime.dispose());
-    const guide = await runtime.runPromise(
-      Effect.gen(function* () {
-        return yield* Guide;
-      }),
-    );
+    const runtime = runtimeFor(mainLayer(testConfig(dataDir)).pipe(Layer.provideMerge(clock)));
+    if (!connected) {
+      const subscriptions = await runtime.runPromise(Subscriptions);
+      await runtime.runPromise(
+        subscriptions.connect({ server: provider.url, username: "demo", password: "demo" }),
+      );
+      connected = true;
+    }
+    const guide = await runtime.runPromise(Guide);
     const run = <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect);
     return {
       refresh: () => run(guide.refresh),
@@ -68,6 +50,7 @@ async function connectedGuide(options: FakeProviderOptions = {}) {
       schedule: (channelId: string) => run(guide.schedule(channelId)),
       search: (query: string) => run(guide.search(query)),
       clear: () => run(guide.clear),
+      library: await promised(runtime, Library),
       /**
        * Moves the clock on a quarter of an hour at a time, letting each check the guide runs on
        * its own finish before the next.
@@ -80,7 +63,8 @@ async function connectedGuide(options: FakeProviderOptions = {}) {
       },
     };
   };
-  return { provider, library, create, guide: await create(), ...channelsOf(provider) };
+  const guide = await create();
+  return { provider, library: guide.library, create, guide, ...channelsOf(provider) };
 }
 
 /** A channel with a guide id and one without, as the library names them. */

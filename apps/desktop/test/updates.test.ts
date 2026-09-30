@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { createUpdates, type Installer } from "../src/main/services/updates.ts";
 import { fetchReleases, type PublishedRelease } from "@mrstreamer/core/updates/feed";
-import { tempDir } from "./support.ts";
+import { Updates, type Installer, type UpdatesDeps } from "../src/main/services/updates.ts";
+import { promised, runtimeFor, tempDir } from "./support.ts";
 
 const METADATA = "latest-mac.yml";
+
+/** The updates service, as the app starts it. */
+const startUpdates = (deps: UpdatesDeps) => promised(runtimeFor(Updates.layer(deps)), Updates);
 
 function release(
   tag: string,
@@ -60,13 +63,12 @@ async function updates(
 ) {
   const dataDir = options.dataDir ?? (await tempDir());
   const installer = options.installer ?? fakeInstaller().installer;
-  const service = createUpdates({
+  const service = await startUpdates({
     dataDir,
     installed,
     metadataFile: METADATA,
     releases: async () => releases,
     installer,
-    onChanged: () => {},
   });
   return { dataDir, service };
 }
@@ -140,13 +142,12 @@ describe("update channels", () => {
 
   it("reports a failed check", async () => {
     const dataDir = await tempDir();
-    const service = createUpdates({
+    const service = await startUpdates({
       dataDir,
       installed: "0.2.0",
       metadataFile: METADATA,
       releases: () => Promise.reject(new Error("The release list answered HTTP 404.")),
       installer: fakeInstaller().installer,
-      onChanged: () => {},
     });
 
     expect((await service.check()).update).toEqual({
@@ -182,13 +183,27 @@ describe("in-app updates", () => {
       await service.check();
 
       const download = service.download();
-      await Promise.resolve();
-      service.cancel();
+      await vi.waitFor(() => expect(fake.downloads).toHaveLength(1));
+      await service.cancel();
       fake.release();
 
       expect((await download).update).toEqual({ kind: "available", version: "0.2.1" });
     },
   );
+
+  it("downloads once when asked twice at the same time", async () => {
+    const fake = fakeInstaller({ hold: true });
+    const { service } = await updates("0.2.0", PUBLISHED, { installer: fake.installer });
+    await service.check();
+
+    const [first, second] = [service.download(), service.download()];
+    await vi.waitFor(() => expect(fake.downloads).toHaveLength(1));
+    fake.release();
+
+    expect((await first).update).toEqual({ kind: "ready", version: "0.2.1" });
+    expect((await second).update.kind).toBe("downloading");
+    expect(fake.downloads).toHaveLength(1);
+  });
 
   it("reports a failed download, and downloads again on Try again", async () => {
     const fake = fakeInstaller({ failures: 1 });
@@ -245,7 +260,7 @@ describe("in-app updates", () => {
     });
     await service.check();
     const download = service.download();
-    await Promise.resolve();
+    await vi.waitFor(() => expect(fake.downloads).toHaveLength(1));
 
     const switched = service.setChannel("stable");
     fake.release();
@@ -298,13 +313,12 @@ describe("overlapping checks", () => {
   async function service(installed: string) {
     const held = heldReleases();
     const fake = fakeInstaller();
-    const updates = createUpdates({
+    const updates = await startUpdates({
       dataDir: await tempDir(),
       installed,
       metadataFile: METADATA,
       releases: held.releases,
       installer: fake.installer,
-      onChanged: () => {},
     });
     return { held, fake, updates };
   }
@@ -398,20 +412,21 @@ describe("update feed", () => {
     const fetchImpl = github("v0.0.1");
     const dataDir = await tempDir();
     const service = (installed: string) =>
-      createUpdates({
+      startUpdates({
         dataDir,
         installed,
         metadataFile: METADATA,
         releases: () => fetchReleases("https://api.example.test", "owner/app", fetchImpl),
         installer: fakeInstaller().installer,
-        onChanged: () => {},
       });
 
-    expect((await service("0.0.0").setChannel("stable")).update).toEqual({
+    expect((await (await service("0.0.0")).setChannel("stable")).update).toEqual({
       kind: "available",
       version: "0.0.1",
     });
-    expect((await service("0.0.2-nightly.20261002.200").setChannel("stable")).update).toEqual({
+    expect(
+      (await (await service("0.0.2-nightly.20261002.200")).setChannel("stable")).update,
+    ).toEqual({
       kind: "available",
       version: "0.0.1",
     });
