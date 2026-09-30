@@ -11,7 +11,7 @@ The [idea and roadmap](https://r3b736io0gst.postplan.dev) owns the product direc
 1. Slice 01 delivered the desktop baseline on Mac, Windows and Linux.
 2. Slice 02 is complete: the repository is public at [Mr-Streamer-OSS/MrStreamer](https://github.com/Mr-Streamer-OSS/MrStreamer) and nightlies publish automatically. Stable 0.0.1 was published on 30 September from nightly `.15`'s commit. Wout reports successful Mac and Windows testing.
 3. Slice 03 fixed the late update check and Stable release notes (#5), and added the programme guide, favourites, the muted live Home and desktop navigation (#6, #7). It is on nightly; Wout's Mac and Windows checks are pending. Linux packages are checked headless, and GPU playback measurements remain follow-up evidence.
-4. Slice 3.5 lays the foundation for slice 04 without changing viewing behaviour.
+4. Slice 3.5 laid the foundation for slice 04 (#8 to #13): the workspace, Effect services, an event log for favourites and history, and a diagnostics log. It is on nightly `.30`; Wout's Mac and Windows checks are pending.
 
 ## Roadmap adjustments
 
