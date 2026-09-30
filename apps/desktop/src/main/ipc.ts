@@ -53,7 +53,7 @@ export function registerIpc(
       const exit = await run(
         handler(input).pipe(
           Effect.onExit((exit) =>
-            Exit.isSuccess(exit)
+            Exit.isSuccess(exit) || closing(exit)
               ? Effect.void
               : Effect.map(Diagnostics, (diagnostics) =>
                   diagnostics.record({ op: "call", method, outcome: outcomeOf(exit) }),
@@ -64,12 +64,21 @@ export function registerIpc(
       if (Exit.isSuccess(exit)) return { ok: true, value: exit.value };
       const failed = Cause.findErrorOption(exit.cause);
       if (failed._tag === "Some") return { ok: false, error: failed.value.error };
+      if (closing(exit)) return { ok: false, error: { kind: "unexpected", detail: "Closing." } };
       console.error(`[ipc] ${method} failed`, Cause.pretty(exit.cause));
       const cause = Cause.squash(exit.cause);
       const detail = cause instanceof Error ? cause.message : String(cause);
       return { ok: false, error: { kind: "unexpected", detail } };
     });
   }
+}
+
+/**
+ * Whether a call stopped only because the app is quitting: disposing of the runtime interrupts the
+ * calls still running, and nobody waits for their answer.
+ */
+function closing(exit: Exit.Exit<unknown, unknown>): boolean {
+  return Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause);
 }
 
 export function emit<E extends IpcEvent>(
