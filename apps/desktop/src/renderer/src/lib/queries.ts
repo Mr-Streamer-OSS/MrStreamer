@@ -125,14 +125,6 @@ export const queries = {
       staleTime: Infinity,
       placeholderData: (previous) => previous,
     }),
-  /** Titles by id, in the order given. */
-  titlesById: (kind: TitleKind, ids: readonly string[]) =>
-    queryOptions({
-      queryKey: ["ondemand", "ids", kind, ...ids],
-      queryFn: () => call("ondemand.byIds", { kind, ids: [...ids] }),
-      staleTime: Infinity,
-      enabled: ids.length > 0,
-    }),
   titleSearch: (query: string) =>
     queryOptions({
       queryKey: ["ondemand", "search", query],

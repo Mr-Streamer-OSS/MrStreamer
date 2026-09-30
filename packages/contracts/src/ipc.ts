@@ -63,7 +63,6 @@ export const ipcInputs = {
       offset: "number.integer >= 0",
       limit: "1 <= number.integer <= 500",
     }),
-  "ondemand.byIds": () => type({ kind: titleKind(), ids: "string[]" }),
   "ondemand.search": () => type({ query: "string" }),
   "ondemand.details": () => type({ kind: titleKind(), id: "string > 0" }),
   "playback.open": () =>
@@ -130,8 +129,6 @@ export interface IpcOutputs {
   "ondemand.categories": readonly TitleCategory[];
   /** One page of a category, or of every title without those for adults. */
   "ondemand.titles": TitlePage;
-  /** Titles by id, in the order given; ids no longer listed are left out. */
-  "ondemand.byIds": readonly Title[];
   /** Movies and series whose name matches, best first, without titles for adults. */
   "ondemand.search": { readonly movies: readonly Title[]; readonly series: readonly Title[] };
   "ondemand.details": TitleDetails;

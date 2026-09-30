@@ -434,14 +434,16 @@ describe("automatic checks", () => {
   const HOUR = 60 * MINUTE;
 
   /** The service with its schedule on a test clock; `answers` decides each discovery. */
-  async function scheduled(answers: (call: number) => readonly Offer[] | DiscoveryFailed) {
+  async function scheduled(
+    answers: (call: number) => readonly Offer[] | DiscoveryFailed | Promise<readonly Offer[]>,
+  ) {
     let calls = 0;
     const runtime = runtimeFor(
       Updates.layer({
         dataDir: await tempDir(),
         installed: "0.2.0",
         discover: async () => {
-          const answer = answers(calls++);
+          const answer = await answers(calls++);
           if (answer instanceof DiscoveryFailed) throw answer;
           return answer;
         },
@@ -505,6 +507,26 @@ describe("automatic checks", () => {
     await vi.waitFor(() => expect(app.calls()).toBe(3));
   });
 
+  it("keeps a download started while a check was out, however the check ends", async () => {
+    for (const ending of ["found", "failed"] as const) {
+      const late = Promise.withResolvers<readonly Offer[]>();
+      const app = await scheduled((call) => (call === 0 ? PUBLISHED : late.promise));
+      await app.pass(20_000);
+      await vi.waitFor(() => expect(app.calls()).toBe(1));
+      await vi.waitFor(async () => expect(await app.untilNext()).toBeGreaterThan(0));
+      await app.pass(await app.untilNext());
+      await vi.waitFor(() => expect(app.calls()).toBe(2));
+
+      await app.service.download();
+      if (ending === "found") late.resolve(PUBLISHED);
+      else late.reject(new DiscoveryFailed({ kind: "offline" }, []));
+      await vi.waitFor(async () =>
+        expect((await app.service.status()).checked?.at).toBeGreaterThan(20_000),
+      );
+      expect((await app.service.status()).update).toEqual({ kind: "ready", version: "0.2.1" });
+    }
+  });
+
   it("waits until GitHub allows requests again", async () => {
     // The test clock starts at zero; the first check runs at 20 seconds.
     const app = await scheduled(
@@ -529,7 +551,7 @@ describe("finding releases", () => {
       version,
       published: "2026-10-01T10:00:00Z",
       page: `https://github.example.test/releases/tag/v${version}`,
-      files: `https://github.example.test/releases/download/v${version}`,
+      files: `https://github.com/owner/app/releases/download/v${version}`,
       notes: `Notes for ${version}`,
       platforms,
     };
@@ -608,7 +630,7 @@ describe("finding releases", () => {
       "Notes for 0.2.1",
       "Notes for 0.3.0-nightly.20261002.14",
     ]);
-    expect(found[0]?.feedUrl).toBe("https://github.example.test/releases/download/v0.2.1");
+    expect(found[0]?.feedUrl).toBe("https://github.com/owner/app/releases/download/v0.2.1");
     expect(requests).toEqual([FEED_URL]);
   });
 
@@ -644,6 +666,26 @@ describe("finding releases", () => {
       "0.2.1",
       "0.2.0",
     ]);
+  });
+
+  it("asks GitHub when the feed sends downloads anywhere but the repository's releases", async () => {
+    const { fetchImpl, requests } = sources({
+      feed: () =>
+        json({
+          schema: 1,
+          generated: "2026-10-01T10:00:00Z",
+          stable: { ...feedEntry("0.2.1"), files: "https://files.example.test/v0.2.1" },
+          nightly: null,
+        }),
+      page: () => json([githubRelease("v0.2.0")]),
+    });
+
+    const found = await find(fetchImpl)(new AbortController().signal);
+
+    expect(found.map((each) => each.feedUrl)).toEqual([
+      "https://github.example.test/releases/download/v0.2.0",
+    ]);
+    expect(requests).toContain(`${API}/repos/owner/app/releases?per_page=100`);
   });
 
   it("doesn't ask GitHub when offline", async () => {

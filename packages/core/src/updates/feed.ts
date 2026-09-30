@@ -78,6 +78,11 @@ export interface DiscoveryOptions {
   readonly repository: string;
   readonly metadataFile: string;
   readonly userAgent: string;
+  /**
+   * Where the feed may send downloads: the repository's GitHub Releases unless given, so the feed
+   * can't point the app at files from anywhere else. A test feed serving its own files passes "".
+   */
+  readonly filesFrom?: string;
   readonly fetch?: typeof fetch;
   readonly now?: () => number;
 }
@@ -89,6 +94,8 @@ export interface DiscoveryOptions {
 export function discovery(options: DiscoveryOptions): (signal: AbortSignal) => Promise<Offer[]> {
   const fetchImpl = options.fetch ?? fetch;
   const now = options.now ?? Date.now;
+  const filesFrom =
+    options.filesFrom ?? `https://github.com/${options.repository}/releases/download/`;
   let githubBusyUntil = 0;
 
   return async (signal) => {
@@ -98,6 +105,8 @@ export function discovery(options: DiscoveryOptions): (signal: AbortSignal) => P
       return [feed.stable, feed.nightly].flatMap((entry): Offer[] => {
         const version = entry && parseVersion(entry.version);
         if (!entry || !version || !entry.platforms.includes(options.metadataFile)) return [];
+        // Unreadable, like a broken feed, so the check asks GitHub instead.
+        if (!entry.files.startsWith(filesFrom)) throw new Error(`Files from ${entry.files}.`);
         return [{ version, feedUrl: entry.files, notes: entry.notes || null, page: entry.page }];
       });
     });
@@ -173,7 +182,10 @@ export function discovery(options: DiscoveryOptions): (signal: AbortSignal) => P
       async (response) => offersOf([GitHubRelease.assert(await response.json())]),
       `${base}/releases/latest`,
     );
-    // No stable release yet answers 404; the page alone has everything then.
+    // No stable release yet answers 404; the page alone has everything then. Any other failure
+    // fails the check, since the newest stable release may be missing from the page.
+    const none = !latest.ok && latest.failure.kind === "http" && latest.failure.status === 404;
+    if (!latest.ok && !none) return latest;
     const stable = latest.ok ? latest.offers : [];
     const known = new Set(page.offers.map((offer) => offer.feedUrl));
     return {

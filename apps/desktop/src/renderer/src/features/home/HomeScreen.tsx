@@ -18,7 +18,7 @@ import { WindowBar } from "../../components/WindowBar.tsx";
 import { useNow } from "../../lib/clock.ts";
 import { categoryOf, channelLine, clockTime, progressOf, timeLeft } from "../../lib/format.ts";
 import { queries, useCategoryMap, useLastChannel } from "../../lib/queries.ts";
-import { removeFromContinue, usePlayTitle, useContinueWatching } from "../../lib/titles.ts";
+import { removeFromContinue, playTitle, useContinueWatching } from "../../lib/titles.ts";
 import { useRem } from "../../lib/use-rem.ts";
 import { Picture } from "../../player/Picture.tsx";
 import { player, usePlayer } from "../../player/player.ts";
@@ -33,8 +33,6 @@ const NO_TITLES: readonly Title[] = [];
 const TILE_REM = 13;
 const POSTER_REM = 8.5;
 const GAP_REM = 1;
-/** Continue watching loads details for this many titles at most. */
-const CONTINUE_SHOWN = 12;
 
 /** Opens a list in Live TV. */
 function browse(list: ChannelList): void {
@@ -77,8 +75,7 @@ export function HomeScreen({ active }: { active: boolean }) {
   };
   const newMovies = useNewest("movie", posters);
   const newSeries = useNewest("series", posters);
-  const continuing = useContinueWatching(CONTINUE_SHOWN);
-  const play = usePlayTitle();
+  const continuing = useContinueWatching();
   const playing = usePlayer((state) => state.channel);
   const streaming = usePlayer(
     (state) => state.phase.kind !== "idle" && state.phase.kind !== "failed",
@@ -153,7 +150,7 @@ export function HomeScreen({ active }: { active: boolean }) {
                 name={entry.now.name}
                 line={entry.line}
                 done={entry.done}
-                onPlay={() => play(entry.now, entry.from)}
+                onPlay={() => playTitle(entry.now, entry.from)}
                 onRemove={() => removeFromContinue(entry.progress.title)}
               />
             ))}

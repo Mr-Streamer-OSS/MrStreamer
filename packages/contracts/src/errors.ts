@@ -25,10 +25,16 @@ export type AppError =
   /** A movie or episode couldn't be opened: the provider refused its file, or it can't play. */
   | { readonly kind: "stream"; readonly failure: StreamFailure }
   /**
-   * The provider sent no channels, or far fewer than before and not twice in a row. The previous
-   * channel list stays.
+   * The provider sent no channels, or far fewer than before and not twice in a row; or no movies
+   * or no series, where it had some. The previous list stays.
    */
-  | { readonly kind: "incomplete-catalogue"; readonly received: number; readonly previous: number }
+  | {
+      readonly kind: "incomplete-catalogue";
+      readonly received: number;
+      readonly previous: number;
+      /** Which list, when it isn't the channels. */
+      readonly list?: "movies" | "series";
+    }
   /** An IPC call carried input that failed validation. Indicates a UI bug. */
   | { readonly kind: "invalid-input"; readonly detail: string }
   | { readonly kind: "unexpected"; readonly detail: string };

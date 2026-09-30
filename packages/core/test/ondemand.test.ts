@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { jsonRows } from "../src/json-rows.ts";
 import { episodeName, titleName } from "../src/ondemand/names.ts";
-import { continueWatching, isFinished, type TitleRow } from "../src/viewing/titles.ts";
+import { isFinished } from "../src/viewing/finished.ts";
+import { continueWatching, type TitleRow } from "../src/viewing/titles.ts";
 
 describe("title names", () => {
   it.each([
@@ -47,6 +48,27 @@ describe("reading long lists", () => {
       for await (const row of jsonRows(chunks())) read.push(row);
       expect(read).toEqual(rows);
     }
+  });
+
+  it("refuses an error page or a list cut short, and reads null as no rows", async () => {
+    const read = async (document: string) => {
+      const rows: unknown[] = [];
+      const chunks = async function* () {
+        yield new TextEncoder().encode(document);
+      };
+      for await (const row of jsonRows(chunks())) rows.push(row);
+      return rows;
+    };
+    for (const document of [
+      '[{"stream_id":1},{"stream_id":2},{"stream_id":3,"na',
+      "<br />\n<b>Fatal error</b>: Allowed memory size exhausted",
+      "<html><body>Maintenance</body></html>",
+      "",
+    ]) {
+      await expect(read(document)).rejects.toThrow(SyntaxError);
+    }
+    expect(await read(" null\n")).toEqual([]);
+    expect(await read("[]")).toEqual([]);
   });
 });
 

@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { app, BrowserWindow, Menu, safeStorage, session, shell } from "electron";
 import type { IpcEvent, IpcEvents } from "@mrstreamer/contracts/ipc";
 import { Diagnostics } from "@mrstreamer/core/diagnostics";
-import type { Failed } from "@mrstreamer/core/failure";
+import { Failed } from "@mrstreamer/core/failure";
 import { Guide } from "@mrstreamer/core/guide/service";
 import { discovery, metadataFileFor } from "@mrstreamer/core/updates/feed";
 import { ViewingRecord } from "@mrstreamer/core/viewing/service";
@@ -131,6 +131,8 @@ async function start(): Promise<void> {
           repository: REPOSITORY,
           metadataFile: metadataFileFor(process.platform),
           userAgent,
+          // A test feed serves its own files.
+          ...(process.env["MR_STREAMER_UPDATE_FEED"] ? { filesFrom: "" } : {}),
         }),
         installer: electronInstaller(),
         schedule: process.env["MR_STREAMER_UPDATE_CHECKS"] === "off" ? null : DEFAULT_SCHEDULE,
@@ -191,6 +193,13 @@ async function start(): Promise<void> {
     yield* settings.forget;
   });
 
+  /**
+   * Counts what the viewer asked to play or stop. A title waits for the provider before it
+   * opens, so one the viewer left or replaced meanwhile doesn't open after all.
+   */
+  let playbackTurn = 0;
+  const nextTurn = Effect.sync(() => ++playbackTurn);
+
   registerIpc(
     (effect) => runtime.runPromiseExit(effect),
     {
@@ -225,20 +234,25 @@ async function start(): Promise<void> {
       "ondemand.refresh": () => onDemand.refresh,
       "ondemand.categories": ({ kind }) => onDemand.categories(kind),
       "ondemand.titles": (query) => onDemand.page(query),
-      "ondemand.byIds": ({ kind, ids }) => onDemand.byIds(kind, ids),
       "ondemand.search": ({ query }) => onDemand.search(query),
       "ondemand.details": ({ kind, id }) => onDemand.details(kind, id),
       "playback.open": ({ channelId, decoders, repair }) =>
-        playback.open(channelId, decoders, { repair: repair ?? false }),
+        Effect.andThen(nextTurn, playback.open(channelId, decoders, { repair: repair ?? false })),
       "playback.openTitle": ({ title, decoders }) =>
         Effect.gen(function* () {
+          const turn = yield* nextTurn;
           // The live preview's connection goes first, so the provider sees one at a time.
           yield* playback.closeAll;
           const file = yield* onDemand.file(title);
+          if (turn !== playbackTurn) {
+            return yield* new Failed({
+              error: { kind: "unexpected", detail: "Something else played in the meantime." },
+            });
+          }
           return yield* playback.openTitle(title, file.url, decoders);
         }),
       "playback.close": ({ sessionId }) => Effect.as(playback.close(sessionId), null),
-      "playback.closeAll": () => Effect.as(playback.closeAll, null),
+      "playback.closeAll": () => Effect.andThen(nextTurn, Effect.as(playback.closeAll, null)),
       "playback.failure": ({ sessionId }) => playback.failure(sessionId),
       "preferences.get": () => settings.get,
       "preferences.update": (patch) => settings.update(patch),

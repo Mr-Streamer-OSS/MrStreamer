@@ -27,7 +27,7 @@ import {
   resumePoint,
   runtime,
   timeLeftOf,
-  usePlayTitle,
+  playTitle,
 } from "../../lib/titles.ts";
 import { cn } from "../../lib/utils.ts";
 
@@ -40,12 +40,6 @@ export function DetailsView({ target }: { target: DetailsTarget }) {
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 z-20 bg-black/65 transition-opacity duration-200 data-ending-style:opacity-0 data-starting-style:opacity-0" />
         <Dialog.Popup className="fixed inset-x-[max(1.5rem,calc((100vw-68rem)/2))] top-[3.75rem] bottom-0 z-20 overflow-y-auto overscroll-contain rounded-t-3xl bg-[#0b0b0c] shadow-2xl ring-1 ring-white/10 outline-none transition-[opacity,translate] duration-200 data-ending-style:translate-y-4 data-ending-style:opacity-0 data-starting-style:translate-y-4 data-starting-style:opacity-0">
-          <Dialog.Close
-            aria-label="Close"
-            className="absolute top-4 right-4 z-10 grid size-9 place-items-center rounded-full bg-black/60 text-white ring-1 ring-white/20 hover:bg-black/80"
-          >
-            <X className="size-4" />
-          </Dialog.Close>
           {details.data ? (
             <Content details={details.data} />
           ) : (
@@ -54,6 +48,13 @@ export function DetailsView({ target }: { target: DetailsTarget }) {
               {details.error ? describeError(appError(details.error)) : "Loading…"}
             </div>
           )}
+          {/* After the content, so focus starts on its main action rather than on Close. */}
+          <Dialog.Close
+            aria-label="Close"
+            className="absolute top-4 right-4 z-10 grid size-9 place-items-center rounded-full bg-black/60 text-white ring-1 ring-white/20 hover:bg-black/80"
+          >
+            <X className="size-4" />
+          </Dialog.Close>
         </Dialog.Popup>
       </Dialog.Portal>
     </Dialog.Root>
@@ -111,7 +112,6 @@ function Content({ details }: { details: TitleDetails }) {
 
 function MovieActions({ details }: { details: MovieDetails }) {
   const progress = useQuery(queries.progress({ movieIds: [details.title.id] }));
-  const play = usePlayTitle();
   const current = progress.data?.[0];
   const partly = current && !current.finished && current.position > 0;
   const now = movieNow(details.title, details.backdropUrl);
@@ -119,8 +119,8 @@ function MovieActions({ details }: { details: MovieDetails }) {
     <Actions
       progress={partly ? current : undefined}
       primaryLabel={partly ? "Resume" : "Play"}
-      onPrimary={() => play(now, resumePoint(partly ? current : undefined))}
-      onBeginning={partly ? () => play(now, 0) : null}
+      onPrimary={() => playTitle(now, resumePoint(partly ? current : undefined))}
+      onBeginning={partly ? () => playTitle(now, 0) : null}
       onRemove={partly ? () => removeFromContinue(now.title) : null}
     />
   );
@@ -147,7 +147,6 @@ function resumeTarget(
 
 function SeriesActions({ details }: { details: SeriesDetails }) {
   const progress = useQuery(queries.progress({ seriesId: details.title.id }));
-  const play = usePlayTitle();
   const target = resumeTarget(details, progress.data ?? []);
   if (!target) {
     return <p className="mt-6 text-[0.9375rem] text-muted-foreground">No episodes yet.</p>;
@@ -161,8 +160,8 @@ function SeriesActions({ details }: { details: SeriesDetails }) {
     <Actions
       progress={partly}
       primaryLabel={label}
-      onPrimary={() => play(now, resumePoint(partly))}
-      onBeginning={partly ? () => play(now, 0) : null}
+      onPrimary={() => playTitle(now, resumePoint(partly))}
+      onBeginning={partly ? () => playTitle(now, 0) : null}
       onRemove={started ? () => removeFromContinue(now.title) : null}
     />
   );
@@ -190,7 +189,8 @@ function Actions({
         </div>
       )}
       <div className="flex flex-wrap items-center gap-3">
-        <Button variant="primary" size="lg" onClick={onPrimary}>
+        {/* Focused as the details arrive, so Enter plays. */}
+        <Button variant="primary" size="lg" autoFocus onClick={onPrimary}>
           <Play className="fill-current" />
           {primaryLabel}
         </Button>
@@ -212,12 +212,11 @@ function Actions({
 
 function Episodes({ details }: { details: SeriesDetails }) {
   const progress = useQuery(queries.progress({ seriesId: details.title.id }));
-  const play = usePlayTitle();
   const byEpisode = new Map((progress.data ?? []).map((entry) => [entry.title.id, entry]));
   const target = resumeTarget(details, progress.data ?? []);
-  const [season, setSeason] = useState(
-    () => target?.episode.season ?? details.seasons[0]?.number ?? 1,
-  );
+  // The season picked here, else the one being watched once progress has loaded.
+  const [picked, setSeason] = useState<number | null>(null);
+  const season = picked ?? target?.episode.season ?? details.seasons[0]?.number ?? 1;
   const shown = details.seasons.find((each) => each.number === season) ?? details.seasons[0];
   if (!shown) return null;
   return (
@@ -251,7 +250,7 @@ function Episodes({ details }: { details: SeriesDetails }) {
             <button
               key={episode.id}
               onMouseDown={(event) => event.preventDefault()}
-              onClick={() => play(episodeNow(details, episode), resumePoint(partly))}
+              onClick={() => playTitle(episodeNow(details, episode), resumePoint(partly))}
               className={cn(
                 "grid w-full grid-cols-[2.5rem_11rem_minmax(0,1fr)_auto] items-center gap-4 rounded-xl px-2 py-3 text-left hover:bg-white/5",
                 current && "bg-white/[0.04]",

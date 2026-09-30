@@ -8,7 +8,9 @@ const SLICE_MS = 8;
 
 /**
  * The objects of a top-level JSON array or object, in order, as `chunks` arrive. Values that are
- * not objects are skipped. Throws `SyntaxError` when a row is not valid JSON.
+ * not objects are skipped, and `null` gives no rows. Throws `SyntaxError` when the text isn't an
+ * array or object, such as an error page, when it ends before the list closes, or when a row is not
+ * valid JSON.
  */
 export async function* jsonRows(chunks: AsyncIterable<Uint8Array>): AsyncGenerator<unknown> {
   const decoder = new TextDecoder();
@@ -19,6 +21,8 @@ export async function* jsonRows(chunks: AsyncIterable<Uint8Array>): AsyncGenerat
   let depth = 0;
   let inString = false;
   let escaped = false;
+  /** The top-level array or object has opened. */
+  let opened = false;
   let sliceStart = performance.now();
 
   for await (const chunk of chunks) {
@@ -31,6 +35,18 @@ export async function* jsonRows(chunks: AsyncIterable<Uint8Array>): AsyncGenerat
         if (escaped) escaped = false;
         else if (char === BACKSLASH) escaped = true;
         else if (char === QUOTE) inString = false;
+      } else if (!opened && !isSpace(char)) {
+        // Some panels send `null` for an empty list, as the live lists allow.
+        if (text.startsWith("null", index)) {
+          opened = true;
+          index += 3;
+          continue;
+        }
+        if (char !== OPEN_BRACE && char !== OPEN_BRACKET) {
+          throw new SyntaxError("The answer isn't a JSON list.");
+        }
+        opened = true;
+        depth++;
       } else if (char === QUOTE) {
         inString = true;
       } else if (char === OPEN_BRACE || char === OPEN_BRACKET) {
@@ -58,6 +74,12 @@ export async function* jsonRows(chunks: AsyncIterable<Uint8Array>): AsyncGenerat
       }
     }
   }
+  if (!opened || depth > 0) throw new SyntaxError("The list ended before it was complete.");
+}
+
+/** JSON whitespace, and the byte order mark some servers put first. */
+function isSpace(char: number): boolean {
+  return char === 0x20 || char === 0x0a || char === 0x0d || char === 0x09 || char === 0xfeff;
 }
 
 const QUOTE = 0x22;

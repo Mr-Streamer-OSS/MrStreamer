@@ -209,6 +209,8 @@ function make(deps: PlaybackDeps) {
         case "source":
           return serveSource(session, request, response);
         case "title":
+          // A new run starts clean: what went wrong before was dealt with, or happens again.
+          session.failure = null;
           return serveTitle(session, url, response);
         case "report":
           return receiveReport(session, route[3] ?? "", route[4] ?? "", request, response);
@@ -525,14 +527,17 @@ function make(deps: PlaybackDeps) {
       child.stdout.pause();
       child.stdout.off("data", hold);
       for (const chunk of held) response.write(chunk);
-      // A short file can be done before the player is connected.
-      if (outputEnded) response.end();
-      else child.stdout.pipe(response);
+      // A short file can be done before the player is connected. Otherwise the response ends
+      // with ffmpeg below: a run that broke off must not end like the title.
+      if (!outputEnded) child.stdout.pipe(response, { end: false });
       report("ok");
       void exited.then((code) => {
         signal.removeEventListener("abort", stop);
-        if (code === 0 || signal.aborted) return;
-        if (!session.failure) {
+        if (code === 0 && !signal.aborted) {
+          response.end();
+          return;
+        }
+        if (!signal.aborted && !session.failure) {
           session.failure = {
             kind: "unsupported",
             detail: `The file could not be played. ${lastLine(errors, code, child.signalCode)}`,

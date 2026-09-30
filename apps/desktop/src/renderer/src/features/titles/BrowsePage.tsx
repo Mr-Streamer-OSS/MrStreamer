@@ -16,6 +16,7 @@ import { WindowBar } from "../../components/WindowBar.tsx";
 import { appError, describeError } from "../../lib/errors.ts";
 import { useKeyboardMode } from "../../lib/input-mode.ts";
 import { queries } from "../../lib/queries.ts";
+import { useContinueWatching } from "../../lib/titles.ts";
 import { useRem } from "../../lib/use-rem.ts";
 import { cn } from "../../lib/utils.ts";
 
@@ -140,18 +141,8 @@ function useTitles(kind: TitleKind, list: TitleList, sort: TitleSort) {
   const [pages, setPages] = useState<ReadonlySet<number>>(() => new Set([0]));
   const listKey = `${kind}:${list.kind === "category" ? list.id : list.kind}:${sort}`;
   useEffect(() => setPages(new Set([0])), [listKey]);
-  const viewing = useQuery({ ...queries.viewing(), enabled: list.kind === "continue" });
-  const inProgress = useMemo(() => {
-    const ids = (viewing.data?.continueWatching ?? []).flatMap((entry) => {
-      if (kind === "movie") return entry.title.kind === "movie" ? [entry.title.id] : [];
-      return entry.title.kind === "episode" ? [entry.title.seriesId] : [];
-    });
-    return [...new Set(ids)];
-  }, [viewing.data, kind]);
-  const continuing = useQuery({
-    ...queries.titlesById(kind, inProgress),
-    enabled: list.kind === "continue" && inProgress.length > 0,
-  });
+  // The same as Home's row: what's left to play, without titles for adults.
+  const continuing = useContinueWatching();
   const categoryId = list.kind === "category" ? list.id : null;
   const loaded = useQueries({
     queries: [...pages].map((page) => ({
@@ -168,12 +159,14 @@ function useTitles(kind: TitleKind, list: TitleList, sort: TitleSort) {
     );
   }, []);
   if (list.kind === "continue") {
-    const titles = inProgress.length === 0 ? [] : continuing.data;
+    const titles = continuing.entries
+      .map((entry) => entry.title)
+      .filter((title) => title.kind === kind);
     return {
-      total: titles ? titles.length : null,
-      titleAt: (index: number) => titles?.[index],
+      total: continuing.loading ? null : titles.length,
+      titleAt: (index: number) => titles[index],
       load,
-      error: continuing.error ?? viewing.error,
+      error: continuing.error,
     };
   }
   const byPage = new Map([...pages].map((page, index) => [page, loaded[index]?.data]));

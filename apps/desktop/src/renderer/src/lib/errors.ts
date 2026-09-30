@@ -36,6 +36,7 @@ export function describeError(error: AppError): string {
     case "stream":
       return describeStreamFailure(error.failure);
     case "incomplete-catalogue":
+      if (error.list) return `The provider sent no ${error.list}, so the previous list stays.`;
       return error.received === 0
         ? "The provider sent an empty channel list, so the previous list stays."
         : `The provider sent ${error.received.toLocaleString()} of ${error.previous.toLocaleString()} channels, so the previous list stays.`;

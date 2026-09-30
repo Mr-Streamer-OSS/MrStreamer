@@ -344,21 +344,21 @@ function defineTitleSchemas() {
     "releasedate?": "string | null",
     "releaseDate?": "string | null",
     "release_date?": "string | null",
-    "backdrop_path?": "string[] | string | null",
+    "backdrop_path?": "(string | null)[] | string | null",
     "duration_secs?": loose,
-    "duration?": "string | null",
+    "duration?": loose,
     "episode_run_time?": loose,
   });
-  // Panels send `info: []` for a title they know nothing more about.
-  const InfoOrNothing = Info.or("unknown[]").pipe((info) =>
-    Array.isArray(info) ? undefined : info,
+  // Panels send `info: []` or `null` for a title they know nothing more about.
+  const InfoOrNothing = Info.or("unknown[] | null").pipe((info) =>
+    Array.isArray(info) || info === null ? undefined : info,
   );
 
   const MovieInfo = type({
     "info?": InfoOrNothing,
     "movie_data?": type({ "container_extension?": "string | null" })
-      .or("unknown[]")
-      .pipe((data) => (Array.isArray(data) ? undefined : data)),
+      .or("unknown[] | null")
+      .pipe((data) => (Array.isArray(data) || data === null ? undefined : data)),
   });
 
   const EpisodeRow = type({
@@ -371,12 +371,12 @@ function defineTitleSchemas() {
       "movie_image?": "string | null",
       "plot?": "string | null",
       "duration_secs?": loose,
-      "duration?": "string | null",
+      "duration?": loose,
       "air_date?": "string | null",
       "releasedate?": "string | null",
     })
-      .or("unknown[]")
-      .pipe((info) => (Array.isArray(info) ? undefined : info)),
+      .or("unknown[] | null")
+      .pipe((info) => (Array.isArray(info) || info === null ? undefined : info)),
   });
 
   const SeriesInfo = type({
@@ -491,8 +491,8 @@ function url(value: string | null | undefined): string | null {
   return trimmed && /^https?:\/\//i.test(trimmed) ? trimmed : null;
 }
 
-function firstOf(value: readonly string[] | string | null | undefined): string | null {
-  return (typeof value === "string" ? value : value?.[0]) ?? null;
+function firstOf(value: readonly (string | null)[] | string | null | undefined): string | null {
+  return (typeof value === "string" ? value : value?.find((each) => each !== null)) ?? null;
 }
 
 function list(value: string | null | undefined, separator: RegExp): string[] {
@@ -523,10 +523,11 @@ function minutes(value: string | number | null | undefined): number | null {
   return number === null ? null : number * 60;
 }
 
-/** "01:39:11" or "39:11" in seconds. */
-function clockSeconds(value: string | null | undefined): number | null {
-  const parts = value?.trim().split(":").map(Number);
-  if (!parts || parts.length < 2 || parts.some((part) => !Number.isFinite(part))) return null;
+/** "01:39:11" or "39:11" in seconds. A bare number says nothing of its unit, so it counts as none. */
+function clockSeconds(value: string | number | null | undefined): number | null {
+  if (typeof value !== "string") return null;
+  const parts = value.trim().split(":").map(Number);
+  if (parts.length < 2 || parts.some((part) => !Number.isFinite(part))) return null;
   const total = parts.reduce((sum, part) => sum * 60 + part, 0);
   return total > 0 ? total : null;
 }

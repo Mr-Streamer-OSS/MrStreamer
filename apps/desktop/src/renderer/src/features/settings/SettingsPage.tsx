@@ -33,11 +33,12 @@ export function SettingsPage() {
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if (event.key !== "Escape" || event.defaultPrevented || isTyping(event)) return;
+      if (event.key !== "Escape" || event.defaultPrevented) return;
       // A dialog or popup over the page closes itself first.
       if (event.target instanceof Element && event.target.closest('[role="dialog"]')) return;
       const current = useUi.getState().settings;
-      if (!current) return;
+      // Fields keep Escape, except the licences' search, which has nothing to undo.
+      if (!current || (isTyping(event) && current !== "licences")) return;
       // The licences go back to About, the rest to the view underneath.
       useUi.setState({ settings: current === "licences" ? "about" : null });
       // Handled: the view underneath must not take the same Escape.

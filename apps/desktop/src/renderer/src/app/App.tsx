@@ -95,7 +95,8 @@ function Shell() {
           <BrowsePage kind={view === "movies" ? "movie" : "series"} active={pageActive} />
         )}
       </div>
-      {details && !covered && <DetailsView target={details} />}
+      {/* Closed under Settings, whose Escape would otherwise reach the sheet's focus first. */}
+      {details && !covered && !settingsOpen && <DetailsView target={details} />}
       {watching && <WatchScreen />}
       {playingTitle && <TitleWatch />}
       <SearchPalette />

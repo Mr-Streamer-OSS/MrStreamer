@@ -390,7 +390,9 @@ async function carriedIn(files: Iterable<string>, self: string): Promise<Set<str
 
 /** Where `name` is installed for the package in `host`, or null. */
 function installedNear(host: string, name: string): string | null {
-  const modules = host.slice(0, host.lastIndexOf("/node_modules/") + "/node_modules/".length);
+  // Forward slashes, so Windows paths find their node_modules too.
+  const path = host.replaceAll("\\", "/");
+  const modules = path.slice(0, path.lastIndexOf("/node_modules/") + "/node_modules/".length);
   return (
     [join(host, "node_modules", name), join(modules, name)].find((dir) =>
       existsSync(join(dir, "package.json")),

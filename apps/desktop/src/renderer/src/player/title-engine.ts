@@ -7,6 +7,7 @@
 // Reading holds back once enough is buffered ahead. While paused nothing more is read, and the
 // provider's connection sits idle until playback moves on; the controller ends the run after a
 // long pause.
+import { isFinished } from "@mrstreamer/core/viewing/finished";
 import type { EngineError, StreamInfo } from "./engine.ts";
 import { readMp4Start } from "./mp4.ts";
 import { webvttReader } from "./webvtt.ts";
@@ -99,6 +100,11 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
   const openedAt = Date.now();
   const watchdog = setInterval(() => {
     const now = Date.now();
+    // Nothing to show yet: the provider answered and then stalled, paused or not.
+    if (from === null && now - openedAt > START_TIMEOUT_MS) {
+      fail({ kind: "network", detail: `No picture within ${START_TIMEOUT_MS / 1000} s.` });
+      return;
+    }
     if (video.paused || video.seeking || video.currentTime > lastTime + 0.05) {
       lastTime = video.currentTime;
       lastProgressAt = now;
@@ -261,6 +267,13 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
       if (done) break;
       await append(buffer, value);
     }
+    // A run that stops before the title's closing stretch broke off, however cleanly it ended,
+    // and must not play out as the end of the title.
+    const ranges = buffer.buffered;
+    const end = ranges.length > 0 ? ranges.end(ranges.length - 1) : run.start;
+    if (run.duration && !isFinished(end, run.duration)) {
+      throw { kind: "network", detail: "The title stopped arriving." } satisfies EngineError;
+    }
     if (mediaSource.readyState === "open" && !buffer.updating) mediaSource.endOfStream();
   }
 
@@ -272,6 +285,8 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
       const reader = webvttReader();
       const decoder = new TextDecoder();
       const add = (cues: ReturnType<typeof reader.push>) => {
+        // The track is shared with the next run, which may have started already.
+        if (abort.signal.aborted) return;
         for (const cue of cues) {
           subtitles.addCue(new VTTCue(cue.start - origin, cue.end - origin, cue.text));
         }

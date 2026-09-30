@@ -137,7 +137,8 @@ function stopEngine(): void {
 
 /** Ends the run after a long pause; playing again starts one where it stopped. */
 function releaseRun(): void {
-  if (!engine || !video.paused) return;
+  // Not at the end: the element pauses just before it ends, and the end screen stays.
+  if (!engine || !video.paused || store.getState().phase.kind !== "paused") return;
   released = engine.position();
   stopEngine();
   store.setState({ phase: { kind: "paused" }, position: released });
@@ -251,17 +252,18 @@ export const titlePlayer = {
    * Opens a title and plays it from `from` seconds: the resume position, or 0 to start at the
    * beginning. Closes whatever played before, live or on demand.
    */
-  async open(now: NowPlaying, from: number, preferences: Preferences | undefined): Promise<void> {
+  async open(now: NowPlaying, from: number): Promise<void> {
     titlePlayer.close();
     player.suspend();
     const mine = ++generation;
     convertSound = false;
     store.setState({ ...idle, now, phase: { kind: "opening" }, position: from });
     try {
-      const opened = await call("playback.openTitle", {
-        title: now.title,
-        decoders: [...titleDecoders],
-      });
+      // The languages chosen last, fresh: a choice in the title before counts.
+      const [opened, preferences] = await Promise.all([
+        call("playback.openTitle", { title: now.title, decoders: [...titleDecoders] }),
+        call("preferences.get").catch((): Preferences | null => null),
+      ]);
       if (mine !== generation) {
         void call("playback.close", { sessionId: opened.sessionId }).catch(() => {});
         return;

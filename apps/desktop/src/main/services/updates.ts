@@ -215,6 +215,9 @@ function make(deps: UpdatesDeps) {
       ),
     );
 
+    /** A download in progress or ready: a check can't take it away, even one that fails. */
+    const staged = () => update.kind === "downloading" || update.kind === "ready";
+
     /**
      * One check, shared by callers while it runs, and what it found; null when it didn't run or
      * a newer check or channel change voided it. `manual` shows it running and a failure;
@@ -222,8 +225,7 @@ function make(deps: UpdatesDeps) {
      */
     const runCheck = (manual: boolean): Effect.Effect<CheckResult | null> =>
       Effect.gen(function* () {
-        // A staged update stays: a check can't take it away, even one that fails.
-        if (update.kind === "downloading" || update.kind === "ready") return null;
+        if (staged()) return null;
         let running = checking?.channel === channel ? checking : null;
         if (!running) {
           running = { channel, fiber: yield* Effect.forkIn(discover, scope) };
@@ -236,16 +238,22 @@ function make(deps: UpdatesDeps) {
         const result = yield* Fiber.join(running.fiber);
         if (checking !== running) return null;
         checking = null;
-        const at = yield* Clock.currentTimeMillis;
+        checked = {
+          at: yield* Clock.currentTimeMillis,
+          failure: result.ok ? null : result.failure,
+        };
+        // Including one that started while the check ran.
+        if (staged()) {
+          yield* changed;
+          return result;
+        }
         if (!result.ok) {
-          checked = { at, failure: result.failure };
           if (manual || update.kind === "checking") {
             update = { kind: "failed", step: "check", failure: result.failure };
           }
           yield* changed;
           return result;
         }
-        checked = { at, failure: null };
         const newest = newestOn(channel, result.offers);
         // A nightly build on Stable goes to the newest stable release, older or not.
         const offered =

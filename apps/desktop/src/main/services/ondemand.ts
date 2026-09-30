@@ -60,7 +60,6 @@ export class OnDemand extends Context.Service<
     isStale(maxAge: Duration.Input): Effect.Effect<boolean>;
     categories(kind: TitleKind): Effect.Effect<readonly TitleCategory[], Failed>;
     page(query: PageQuery): Effect.Effect<TitlePage, Failed>;
-    byIds(kind: TitleKind, ids: readonly string[]): Effect.Effect<readonly Title[], Failed>;
     search(
       query: string,
     ): Effect.Effect<
@@ -207,9 +206,6 @@ function make(deps: OnDemandDeps) {
         loaded((source) => call("categories", { key: source.key, kind })),
 
       page: (query: PageQuery) => loaded((source) => call("page", { key: source.key, query })),
-
-      byIds: (kind: TitleKind, ids: readonly string[]) =>
-        loaded((source) => call("byIds", { key: source.key, kind, ids })),
 
       search: (query: string) => loaded((source) => call("search", { key: source.key, query })),
 

@@ -73,12 +73,25 @@ function remember(key: string, fetchedAt: number, catalogue: OnDemandCatalogue):
   return loaded;
 }
 
+/** The cache file being read, so the calls a start sends together read it once. */
+let reading: { readonly key: string; readonly done: Promise<Loaded | null> } | null = null;
+
 /** The catalogue for `key` from memory or disk, or null when there is none yet. */
-async function current(key: string): Promise<Loaded | null> {
-  if (loaded?.key === key) return loaded;
-  const file = await readJsonFile(setup.cachePath, CachedCatalogue);
-  if (file?.key !== key) return null;
-  return loaded?.key === key ? loaded : remember(key, file.fetchedAt, file);
+function current(key: string): Promise<Loaded | null> {
+  if (loaded?.key === key) return Promise.resolve(loaded);
+  if (reading?.key === key) return reading.done;
+  const done = (async () => {
+    const file = await readJsonFile(setup.cachePath, CachedCatalogue);
+    // Cleared while reading, when the account went.
+    if (file?.key !== key || reading?.key !== key) return null;
+    return loaded?.key === key ? loaded : remember(key, file.fetchedAt, file);
+  })();
+  reading = { key, done };
+  const settled = () => {
+    if (reading?.done === done) reading = null;
+  };
+  done.then(settled, settled);
+  return done;
 }
 
 /** The catalogue for `key`, or the failure the UI explains when nothing is loaded yet. */
@@ -104,13 +117,17 @@ async function refresh(args: WorkerCalls["refresh"]["args"]): Promise<WorkerStat
     const provider = xtreamProvider(args.account, { userAgent: setup.userAgent });
     const catalogue = await provider.onDemandCatalogue(abort.signal);
     const before = await current(args.key);
-    // An empty answer never replaces lists that had titles.
-    if (catalogue.movies.length + catalogue.series.length === 0 && before) {
-      throw new AppFailure({
-        kind: "incomplete-catalogue",
-        received: 0,
-        previous: before.movies + before.series,
-      });
+    // An empty list never replaces one that had titles: panels answer an overloaded request
+    // with an empty list, and one list can fail while the other arrives.
+    for (const list of ["movies", "series"] as const) {
+      if (catalogue[list].length === 0 && (before?.[list] ?? 0) > 0) {
+        throw new AppFailure({
+          kind: "incomplete-catalogue",
+          received: 0,
+          previous: before?.[list] ?? 0,
+          list,
+        });
+      }
     }
     if (abort.signal.aborted) throw new AppFailure({ kind: "unexpected", detail: "Stopped." });
     const fetchedAt = Date.now();
@@ -150,6 +167,7 @@ const handlers: {
   clear: async () => {
     refreshing?.abort.abort();
     refreshing = null;
+    reading = null;
     loaded = null;
     await removeFile(setup.cachePath);
     return null;

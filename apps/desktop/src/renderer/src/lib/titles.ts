@@ -1,6 +1,6 @@
 // Movies and episodes as the views talk about them: how long, how far, what's next, and playing
 // one. The player itself is in ../player/title-player.ts.
-import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import type { Episode, SeriesDetails, Title, TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { TitleProgress } from "@mrstreamer/contracts/viewing";
 import { useUi } from "../app/ui-store.ts";
@@ -85,12 +85,9 @@ export function movieNow(title: Title, backdropUrl: string | null): NowPlaying {
 }
 
 /** Plays a title over everything, from `from` seconds. */
-export function usePlayTitle(): (now: NowPlaying, from: number) => void {
-  const client = useQueryClient();
-  return (now, from) => {
-    useUi.setState({ playingTitle: true, searchOpen: false, settings: null });
-    void titlePlayer.open(now, from, client.getQueryData(queries.preferences().queryKey));
-  };
+export function playTitle(now: NowPlaying, from: number): void {
+  useUi.setState({ playingTitle: true, searchOpen: false, settings: null });
+  void titlePlayer.open(now, from);
 }
 
 /** Takes a movie, or an episode's series, out of Continue watching. */
@@ -103,6 +100,8 @@ export function removeFromContinue(title: TitleRef): void {
 /** One Continue watching entry, ready to show and play. */
 export interface ContinueEntry {
   readonly key: string;
+  /** The movie, or the series. */
+  readonly title: Title;
   /** What the viewer played last; Remove takes this out. */
   readonly progress: TitleProgress;
   /** What plays: the same title, or the next episode of a finished one. */
@@ -116,16 +115,18 @@ export interface ContinueEntry {
 }
 
 /**
- * Continue watching from the viewing record, with what each tile shows. A finished episode
- * offers the next one; a series with nothing left leaves the list. Titles the provider no
- * longer lists leave it too.
+ * Continue watching from the viewing record, at most `limit`, with what each tile shows. A
+ * finished episode offers the next one; a series with nothing left leaves the list, and so do
+ * titles the provider no longer lists and titles for adults.
  */
-export function useContinueWatching(limit: number): {
+export function useContinueWatching(limit = Infinity): {
   readonly entries: readonly ContinueEntry[];
   readonly loading: boolean;
+  readonly error: Error | null;
 } {
   const viewing = useQuery(queries.viewing());
-  const items = (viewing.data?.continueWatching ?? []).slice(0, limit);
+  // All of them, at most CONTINUE_LIMIT: the limit applies to what is left to show.
+  const items = viewing.data?.continueWatching ?? [];
   const details = useQueries({
     queries: items.map((item) =>
       item.title.kind === "movie"
@@ -136,12 +137,13 @@ export function useContinueWatching(limit: number): {
   const loading = viewing.isPending || details.some((each) => each.isPending);
   const entries = items.flatMap((progress, index): ContinueEntry[] => {
     const found = details[index]?.data;
-    if (!found) return [];
+    if (!found || found.title.adult) return [];
     const title = progress.title;
     if (found.kind === "movie" && title.kind === "movie") {
       return [
         {
           key: `movie:${title.id}`,
+          title: found.title,
           progress,
           now: movieNow(found.title, found.backdropUrl),
           from: resumePoint(progress),
@@ -160,6 +162,7 @@ export function useContinueWatching(limit: number): {
     return [
       {
         key: `series:${found.title.id}`,
+        title: found.title,
         progress,
         now: episodeNow(found, next),
         from: progress.finished ? 0 : resumePoint(progress),
@@ -171,5 +174,5 @@ export function useContinueWatching(limit: number): {
       },
     ];
   });
-  return { entries, loading };
+  return { entries: entries.slice(0, limit), loading, error: viewing.error };
 }

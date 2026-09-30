@@ -127,9 +127,18 @@ function open(path: string): DatabaseSync {
   try {
     db.exec("pragma journal_mode = wal; pragma synchronous = normal;");
     db.exec(SCHEMA);
-    const columns = db.prepare("pragma table_info(events)").all();
-    if (!columns.some((column) => column["name"] === "payload")) {
-      db.exec("alter table events add column payload text");
+    // Records from before movies and series lack the payload column. Checked and added under the
+    // write lock, since two copies of the app can start at once.
+    db.exec("begin immediate");
+    try {
+      const columns = db.prepare("pragma table_info(events)").all();
+      if (!columns.some((column) => column["name"] === "payload")) {
+        db.exec("alter table events add column payload text");
+      }
+      db.exec("commit");
+    } catch (cause) {
+      db.exec("rollback");
+      throw cause;
     }
     const stored = db.prepare("select value from meta where key = 'state-version'").get();
     if (stored?.["value"] !== String(STATE_VERSION)) rebuild(db);

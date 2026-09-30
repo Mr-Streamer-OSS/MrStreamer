@@ -27,7 +27,7 @@ import { Tooltip } from "../../components/ui/tooltip.tsx";
 import { WindowBar } from "../../components/WindowBar.tsx";
 import { describeError } from "../../lib/errors.ts";
 import { queries } from "../../lib/queries.ts";
-import { clock, episodeLabel, episodeNow, nextEpisode, usePlayTitle } from "../../lib/titles.ts";
+import { clock, episodeLabel, episodeNow, nextEpisode, playTitle } from "../../lib/titles.ts";
 import { cn } from "../../lib/utils.ts";
 import { Picture } from "../../player/Picture.tsx";
 import { player, type PlaybackProblem } from "../../player/player.ts";
@@ -52,9 +52,8 @@ export function TitleWatch() {
   const phase = useTitlePlayer((state) => state.phase);
   const [tracksOpen, setTracksOpen] = useState(false);
   const next = useNextEpisode();
-  const play = usePlayTitle();
   const playNext = () => {
-    if (next) play(episodeNow(next.series, next.episode), 0);
+    if (next) playTitle(episodeNow(next.series, next.episode), 0);
   };
 
   // A title plays with sound, at the viewer's volume.

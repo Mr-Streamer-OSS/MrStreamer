@@ -12,6 +12,7 @@ import { useNow } from "../../lib/clock.ts";
 import { clockTime, timeLeft } from "../../lib/format.ts";
 import { queries, useCategoryMap } from "../../lib/queries.ts";
 import { cn } from "../../lib/utils.ts";
+import { titlePlayer } from "../../player/title-player.ts";
 import { watchChannel } from "../live/GuidePage.tsx";
 
 /**
@@ -84,8 +85,14 @@ function Palette() {
     const result = results[index];
     if (!result) return;
     if (result.kind === "channel") watchChannel(result.channel);
-    else if (result.kind === "title") openDetails({ kind: result.title.kind, id: result.title.id });
-    else if (result.match.programme.start <= Date.now()) watchChannel(result.match.channel);
+    else if (result.kind === "title") {
+      // Details show over the page, so a title playing gives way first, saving how far it got.
+      if (useUi.getState().playingTitle) {
+        titlePlayer.close();
+        useUi.setState({ playingTitle: false });
+      }
+      openDetails({ kind: result.title.kind, id: result.title.id });
+    } else if (result.match.programme.start <= Date.now()) watchChannel(result.match.channel);
     else setOpen((current) => (current === index ? null : index));
   };
 
