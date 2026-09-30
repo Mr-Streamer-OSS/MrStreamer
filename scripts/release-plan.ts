@@ -4,6 +4,7 @@
 //   node scripts/release-plan.ts nightly --ref <ref> --sha <commit> --run <number> [--scheduled | --dry-run]
 //   node scripts/release-plan.ts stable --ref <ref> [--version 0.1.0]
 //   node scripts/release-plan.ts check --version <version>   right before publishing
+//   node scripts/release-plan.ts notes --tag <tag> --sha <commit> [--previous-tag <tag>]
 //   node scripts/release-plan.ts record --version <version>  after a stable release, on main
 //
 // Versions: package.json on main holds the newest stable release (0.0.0 before the first).
@@ -13,7 +14,8 @@
 // published nightly, as the version that nightly previewed unless another is given.
 //
 // Reads GitHub with gh, prints the plan as GitHub Actions outputs, and fails with the reason when
-// a release is refused.
+// a release is refused. Release jobs run it with plain node before installing packages, so it
+// imports only node: modules and dependency-free files from src/shared.
 import { execFileSync } from "node:child_process";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
@@ -42,8 +44,19 @@ const HISTORIES = ["ahead", "behind", "identical", "diverged"] as const;
 /** How a head commit relates to a base, as GitHub's compare API reports it. */
 export type History = (typeof HISTORIES)[number];
 
+/** A pull request merged into the default branch. */
+export interface PullRequest {
+  readonly number: number;
+  readonly title: string;
+  /** The author's login. */
+  readonly author: string;
+  readonly url: string;
+}
+
 /** What a plan reads from GitHub. The command line answers through gh, tests from fixtures. */
 export interface Repository {
+  /** The repository's page, such as https://github.com/owner/repo. */
+  readonly url: string;
   readonly defaultBranch: string;
   /** Every release, drafts included. */
   readonly releases: readonly Release[];
@@ -53,6 +66,13 @@ export interface Repository {
   compare(base: string, head: string): Promise<History>;
   /** The commit a tag points at, through annotated tags. */
   commitOf(tag: string): Promise<string>;
+  /**
+   * The commits `head` has and `base` doesn't, oldest first. With no `base`, every commit up to
+   * and including `head`.
+   */
+  commits(base: string | null, head: string): Promise<readonly string[]>;
+  /** The pull requests merged into the default branch that brought `commit` in. */
+  pullRequestsOf(commit: string): Promise<readonly PullRequest[]>;
 }
 
 export interface Plan {
@@ -61,7 +81,10 @@ export interface Plan {
   readonly tag: string;
   /** The commit every job of the run checks out. */
   readonly sha: string;
-  /** Notes list the changes since this release of the same channel. */
+  /**
+   * Notes list the changes since this release of the same channel: the previous stable release
+   * for a stable one, the previous nightly for a nightly. Null for a channel's first release.
+   */
   readonly previousTag: string | null;
 }
 
@@ -177,6 +200,30 @@ export function checkUnreleased(repo: Repository, version: string): void {
   assertUnreleased(releasedVersions(repo), parsed);
 }
 
+/**
+ * The notes of a release: every pull request merged from the previous release of its channel up
+ * to the commit it builds, once each, oldest first. A channel's first release lists everything up
+ * to its commit. Pull requests merged after that commit are left out, even once main has them.
+ */
+export async function releaseNotes(
+  repo: Repository,
+  plan: Pick<Plan, "tag" | "sha" | "previousTag">,
+): Promise<string> {
+  const commits = await repo.commits(plan.previousTag, plan.sha);
+  const pulls = (await Promise.all(commits.map((commit) => repo.pullRequestsOf(commit)))).flat();
+  const listed = new Map(pulls.map((pull) => [pull.number, pull]));
+  const changes = [...listed.values()].map(
+    (pull) => `* ${pull.title} by @${pull.author} in ${pull.url}`,
+  );
+  const changelog = plan.previousTag
+    ? `${repo.url}/compare/${plan.previousTag}...${plan.tag}`
+    : `${repo.url}/commits/${plan.tag}`;
+  return [
+    ...(changes.length > 0 ? ["## What's Changed", ...changes, ""] : []),
+    `**Full Changelog**: ${changelog}`,
+  ].join("\n");
+}
+
 /** The version main records after `released` is published, or null when it already has it or a newer one. */
 export function recordedVersion(current: string, released: string): string | null {
   const now = parseVersion(current);
@@ -284,8 +331,10 @@ function githubRepository(): Repository {
       publishedAt: publishedAt || null,
     };
   });
+  const [defaultBranch = "", url = ""] = api("", "[.default_branch, .html_url] | @tsv").split("\t");
   return {
-    defaultBranch: api("", ".default_branch"),
+    url,
+    defaultBranch,
     releases,
     tags: lines(api("/tags?per_page=100", ".[].name", true)),
     async compare(base, head) {
@@ -299,6 +348,27 @@ function githubRepository(): Repository {
     },
     async commitOf(tag) {
       return api(`/commits/${encodeURIComponent(tag)}`, ".sha");
+    },
+    async commits(base, head) {
+      if (base === null) {
+        return lines(
+          api(`/commits?sha=${encodeURIComponent(head)}&per_page=100`, ".[].sha", true),
+        ).reverse();
+      }
+      return lines(
+        api(
+          `/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}?per_page=100`,
+          ".commits[].sha",
+          true,
+        ),
+      );
+    },
+    async pullRequestsOf(commit) {
+      const merged = `.[] | select(.merged_at != null and .base.ref == "${defaultBranch}") | [.number, .user.login, .html_url, .title] | @tsv`;
+      return lines(api(`/commits/${commit}/pulls`, merged)).map((line): PullRequest => {
+        const [number = "", author = "", url = "", title = ""] = line.split("\t");
+        return { number: Number(number), title, author, url };
+      });
     },
   };
 }
@@ -362,6 +432,8 @@ async function main(): Promise<void> {
       sha: { type: "string" },
       run: { type: "string" },
       version: { type: "string" },
+      tag: { type: "string" },
+      "previous-tag": { type: "string" },
       scheduled: { type: "boolean", default: false },
       "dry-run": { type: "boolean", default: false },
     },
@@ -395,6 +467,15 @@ async function main(): Promise<void> {
       checkUnreleased(githubRepository(), values.version ?? "");
       console.log(`${values.version} is still new.`);
       return;
+    case "notes":
+      console.log(
+        await releaseNotes(githubRepository(), {
+          tag: values.tag ?? "",
+          sha: values.sha ?? "",
+          previousTag: values["previous-tag"] || null,
+        }),
+      );
+      return;
     case "record": {
       const manifest: Record<string, unknown> = JSON.parse(readFileSync("package.json", "utf8"));
       const next = recordedVersion(String(manifest.version), values.version ?? "");
@@ -412,7 +493,7 @@ async function main(): Promise<void> {
       return;
     }
     default:
-      throw new Error(`Unknown command "${command}". Use nightly, stable, check or record.`);
+      throw new Error(`Unknown command "${command}". Use nightly, stable, check, notes or record.`);
   }
 }
 

@@ -4,8 +4,10 @@ import {
   planNightly,
   planStable,
   recordedVersion,
+  releaseNotes,
   type History,
   type NightlyRequest,
+  type PullRequest,
   type Release,
   type Repository,
 } from "../scripts/release-plan.ts";
@@ -28,18 +30,31 @@ function draft(tag: string): Release {
   return { tag, draft: true, prerelease: tag.includes("-"), publishedAt: null };
 }
 
-/** A repository whose releases have tags, as on GitHub. Comparisons and commits it wasn't told about throw. */
+/**
+ * A repository whose releases have tags, as on GitHub. Comparisons and commits it wasn't told
+ * about throw. `history` is main's commits, oldest first, and `pulls` the pull requests merged
+ * with each commit.
+ */
 function repository(
   options: {
     releases?: Release[];
     tags?: string[];
     histories?: Record<string, History>;
     commits?: Record<string, string>;
+    history?: string[];
+    pulls?: Record<string, number[]>;
   } = {},
 ) {
-  const { releases = [], histories = {}, commits = {} } = options;
+  const { releases = [], histories = {}, commits = {}, history = [], pulls = {} } = options;
   const compared: string[] = [];
+  /** The position of a tag's or commit's commit on main. */
+  const position = (ref: string) => {
+    const index = history.indexOf(commits[ref] ?? ref);
+    if (index === -1) throw new Error(`Unknown commit ${ref}`);
+    return index;
+  };
   const repo: Repository = {
+    url: "https://github.com/owner/app",
     defaultBranch: "main",
     releases,
     tags: [
@@ -57,8 +72,28 @@ function repository(
       if (!commit) throw new Error(`Unknown tag ${tag}`);
       return commit;
     },
+    async commits(base, head) {
+      return history.slice(base === null ? 0 : position(base) + 1, position(head) + 1);
+    },
+    async pullRequestsOf(commit) {
+      return (pulls[commit] ?? []).map(pull);
+    },
   };
   return { repo, compared };
+}
+
+function pull(number: number): PullRequest {
+  return {
+    number,
+    title: `Change ${number}`,
+    author: "wout",
+    url: `https://github.com/owner/app/pull/${number}`,
+  };
+}
+
+/** The pull request numbers notes list, in order. */
+function listed(notes: string): number[] {
+  return [...notes.matchAll(/\/pull\/(\d+)$/gm)].map((match) => Number(match[1]));
 }
 
 const scheduled = (overrides: Partial<NightlyRequest> = {}): NightlyRequest => ({
@@ -243,6 +278,73 @@ describe("stable releases", () => {
     await expect(planStable(repo, { ref: MAIN, version: "0.0.0" })).rejects.toThrow(
       "would sort before v0.0.1-nightly.20261002.30",
     );
+  });
+});
+
+describe("release notes", () => {
+  // main: c0 ... c6. Stable 0.1.0 shipped c1; nightlies followed at c3, c4 and c5; c6 landed after.
+  // #13 arrived in two commits.
+  const history = ["c0", "c1", "c2", "c3", "c4", "c5", "c6"];
+  const pulls = { c0: [10], c1: [11], c2: [12], c3: [13], c4: [13, 14], c5: [15], c6: [16] };
+  const nightlies = [
+    published("v0.1.1-nightly.20261001.1", 30),
+    published("v0.1.1-nightly.20261001.2", 20),
+    published("v0.1.1-nightly.20261002.3", 8),
+  ];
+  const commits = {
+    "v0.1.0": "c1",
+    "v0.1.1-nightly.20261001.1": "c3",
+    "v0.1.1-nightly.20261001.2": "c4",
+    "v0.1.1-nightly.20261002.3": "c5",
+    main: "c6",
+  };
+
+  it("list every change since the previous stable release up to the promoted nightly, once each", async () => {
+    const { repo } = repository({
+      releases: [published("v0.1.0", 100, false), ...nightlies],
+      commits,
+      histories: { "c5...main": "ahead" },
+      history,
+      pulls,
+    });
+
+    const plan = await planStable(repo, { ref: MAIN });
+    const notes = await releaseNotes(repo, plan);
+
+    expect(listed(notes)).toEqual([12, 13, 14, 15]);
+    expect(notes).toContain("https://github.com/owner/app/compare/v0.1.0...v0.1.1");
+  });
+
+  it("list everything up to the promoted nightly for the first stable release", async () => {
+    const { repo } = repository({
+      releases: nightlies,
+      commits,
+      histories: { "c5...main": "ahead" },
+      history,
+      pulls,
+    });
+
+    const plan = await planStable(repo, { ref: MAIN });
+    const notes = await releaseNotes(repo, plan);
+
+    expect(plan.previousTag).toBeNull();
+    expect(listed(notes)).toEqual([10, 11, 12, 13, 14, 15]);
+    expect(notes).toContain("https://github.com/owner/app/commits/v0.1.1");
+  });
+
+  it("list only a nightly's own changes", async () => {
+    const { repo } = repository({
+      releases: [published("v0.1.0", 100, false), ...nightlies],
+      commits,
+      histories: { "v0.1.1-nightly.20261002.3...c6": "ahead" },
+      history,
+      pulls,
+    });
+
+    const plan = await planNightly(repo, scheduled({ sha: "c6", recorded: "0.1.0" }));
+    if ("skip" in plan) throw new Error(plan.skip);
+
+    expect(listed(await releaseNotes(repo, plan))).toEqual([16]);
   });
 });
 
