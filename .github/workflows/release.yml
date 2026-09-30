@@ -292,6 +292,8 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: write
+      # The notes list the pull requests behind each commit.
+      pull-requests: read
     env:
       GH_TOKEN: ${{ github.token }}
       CHANNEL: ${{ needs.plan.outputs.channel }}
@@ -334,8 +336,7 @@ jobs:
             echo
             echo "Download the DMG on Mac, the setup .exe on Windows, and the AppImage or .deb on Linux. SHA256SUMS.txt lists every file's checksum."
             echo
-            gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$TAG" -f target_commitish="$SHA" \
-              ${PREVIOUS_TAG:+-f previous_tag_name="$PREVIOUS_TAG"} --jq .body
+            node scripts/release-plan.ts notes --tag "$TAG" --sha "$SHA" --previous-tag "$PREVIOUS_TAG"
           } > notes.md
       # A failed or repeated attempt can leave a draft with this tag. Users never saw it.
       - name: Remove an unfinished attempt

@@ -68,21 +68,41 @@ export function createUpdates(deps: UpdatesDeps) {
     nightly: null,
   };
   let channel: Promise<Channel> | null = null;
+  /** The channel once known, for the checks that cannot wait for `channel`. */
+  let chosen: Channel | null = null;
   let update: UpdatePhase = { kind: "idle" };
   let target: Candidate | null = null;
+  /** The check whose result still counts; a newer check or a channel change voids it. */
+  let checking: object | null = null;
   /** The download in flight; there is one installer. */
   let downloading: AbortController | null = null;
   /** The download whose outcome still counts; a channel change can void it. */
   let attempt: object | null = null;
 
   function getChannel(): Promise<Channel> {
-    channel ??= readJsonFile(settingsPath, Settings).then(async (stored) => {
-      if (stored) return stored.channel;
-      const first = channelOf(installed);
-      await writeJsonFile(settingsPath, { channel: first });
-      return first;
-    });
+    channel ??= readJsonFile(settingsPath, Settings)
+      .then(async (stored) => {
+        if (stored) return stored.channel;
+        const first = channelOf(installed);
+        await writeJsonFile(settingsPath, { channel: first });
+        return first;
+      })
+      // A channel the user picked while the file loaded wins.
+      .then((read) => (chosen ??= read));
     return channel;
+  }
+
+  /** Whether the chosen channel still receives `version`, checked before downloading or installing it. */
+  function wanted(version: string): boolean {
+    return chosen !== null && receives(chosen, version);
+  }
+
+  /** Forgets an update the chosen channel no longer receives. */
+  function drop(): Promise<UpdateStatus> {
+    target = null;
+    update = { kind: "idle" };
+    changed();
+    return status();
   }
 
   async function status(): Promise<UpdateStatus> {
@@ -97,26 +117,37 @@ export function createUpdates(deps: UpdatesDeps) {
     return cause instanceof Error ? cause.message : String(cause);
   }
 
-  /** Looks for the release the chosen channel offers this build. */
+  /**
+   * Looks for the release the chosen channel offers this build. Only the latest check counts: one
+   * that finishes after a newer check or a channel change leaves the state alone.
+   */
   async function check(): Promise<UpdateStatus> {
     if (update.kind === "downloading" || update.kind === "ready") return status();
+    const mine = {};
+    checking = mine;
     update = { kind: "checking" };
     changed();
+    let found: Candidate | null = null;
+    let outcome: UpdatePhase;
     try {
-      const chosen = await getChannel();
-      const newest = newestOn(chosen, candidates(await deps.releases(), deps.metadataFile));
+      const on = await getChannel();
+      const newest = newestOn(on, candidates(await deps.releases(), deps.metadataFile));
       // A nightly build on Stable goes to the newest stable release, older or not.
       const offered =
         newest &&
         (compareVersions(newest.version, installed) > 0 ||
-          (chosen === "stable" && installed.nightly !== null));
-      target = offered ? newest : null;
-      update = target
-        ? { kind: "available", version: formatVersion(target.version) }
+          (on === "stable" && installed.nightly !== null));
+      found = offered ? newest : null;
+      outcome = found
+        ? { kind: "available", version: formatVersion(found.version) }
         : { kind: "current" };
     } catch (cause) {
-      update = { kind: "failed", step: "check", detail: reason(cause) };
+      outcome = { kind: "failed", step: "check", detail: reason(cause) };
     }
+    if (checking !== mine) return status();
+    checking = null;
+    target = found;
+    update = outcome;
     changed();
     return status();
   }
@@ -132,6 +163,8 @@ export function createUpdates(deps: UpdatesDeps) {
      */
     async setChannel(next: Channel): Promise<UpdateStatus> {
       channel = Promise.resolve(next);
+      chosen = next;
+      checking = null;
       const staged = update.kind === "downloading" || update.kind === "ready" ? update : null;
       if (!staged || !receives(next, staged.version)) {
         if (staged?.kind === "downloading") downloading?.abort();
@@ -153,6 +186,7 @@ export function createUpdates(deps: UpdatesDeps) {
       if ((update.kind !== "available" && !retry) || !target || downloading) return status();
       const release = target;
       const version = formatVersion(release.version);
+      if (!wanted(version)) return drop();
       const controller = new AbortController();
       const mine = {};
       downloading = controller;
@@ -199,6 +233,10 @@ export function createUpdates(deps: UpdatesDeps) {
     /** Installs the downloaded update. The user has confirmed the restart. */
     async restart(): Promise<void> {
       if (update.kind !== "ready") return;
+      if (!wanted(update.version)) {
+        await drop();
+        return;
+      }
       try {
         await deps.installer.install();
       } catch (cause) {

@@ -271,6 +271,97 @@ describe("in-app updates", () => {
   });
 });
 
+describe("overlapping checks", () => {
+  /** Release lists answered one request at a time, in whatever order the test chooses. */
+  function heldReleases() {
+    const requests: {
+      resolve: (releases: readonly PublishedRelease[]) => void;
+      reject: (error: Error) => void;
+    }[] = [];
+    return {
+      releases: () =>
+        new Promise<readonly PublishedRelease[]>((resolve, reject) =>
+          requests.push({ resolve, reject }),
+        ),
+      /** The `index`th release request, once the service has made it. */
+      request: (index: number) =>
+        vi.waitFor(() => {
+          const request = requests[index];
+          if (!request) throw new Error(`No release request ${index} yet.`);
+          return request;
+        }),
+    };
+  }
+
+  const LATEST = [release("v0.0.1"), release("v0.0.2"), release("v0.0.3-nightly.20260930.1")];
+
+  async function service(installed: string) {
+    const held = heldReleases();
+    const fake = fakeInstaller();
+    const updates = createUpdates({
+      dataDir: await tempDir(),
+      installed,
+      metadataFile: METADATA,
+      releases: held.releases,
+      installer: fake.installer,
+      onChanged: () => {},
+    });
+    return { held, fake, updates };
+  }
+
+  it("ignores a Nightly check that answers after the switch to Stable, and never installs its nightly", async () => {
+    const { held, fake, updates } = await service("0.0.1");
+    const nightly = updates.setChannel("nightly");
+    const nightlyRequest = await held.request(0);
+    const stable = updates.setChannel("stable");
+
+    (await held.request(1)).resolve(LATEST);
+    expect((await stable).update).toEqual({ kind: "available", version: "0.0.2" });
+    nightlyRequest.resolve(LATEST);
+    expect(await nightly).toMatchObject({
+      channel: "stable",
+      update: { kind: "available", version: "0.0.2" },
+    });
+
+    await updates.download();
+    await updates.restart();
+    expect(fake.downloads.map((download) => download.version)).toEqual(["0.0.2"]);
+    expect(fake.installs()).toBe(1);
+  });
+
+  it("doesn't let an older check that fails late hide a newer result", async () => {
+    const { held, updates } = await service("0.0.1");
+    const first = updates.check();
+    const firstRequest = await held.request(0);
+    const second = updates.setChannel("stable");
+
+    (await held.request(1)).resolve(LATEST);
+    await second;
+    firstRequest.reject(new Error("The release list answered HTTP 502."));
+    await first;
+
+    expect((await updates.status()).update).toEqual({ kind: "available", version: "0.0.2" });
+  });
+
+  it("offers nothing from a check that answers after a newer one found nothing", async () => {
+    const { held, fake, updates } = await service("0.0.2");
+    const nightly = updates.setChannel("nightly");
+    const nightlyRequest = await held.request(0);
+    const stable = updates.setChannel("stable");
+
+    (await held.request(1)).resolve(LATEST);
+    await stable;
+    nightlyRequest.resolve(LATEST);
+    await nightly;
+
+    expect((await updates.status()).update).toEqual({ kind: "current" });
+    await updates.download();
+    await updates.restart();
+    expect(fake.downloads).toEqual([]);
+    expect(fake.installs()).toBe(0);
+  });
+});
+
 describe("update feed", () => {
   /** A GitHub-like API: 100 newer nightlies fill the first page, Stable is further back. */
   function github(stable: string | null) {

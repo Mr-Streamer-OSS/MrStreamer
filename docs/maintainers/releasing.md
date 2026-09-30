@@ -25,7 +25,7 @@ Releases come from `.github/workflows/release.yml`. The app finds them through i
     - the [packaged-app test](testing.md#packaged-app) runs on the installed DMG, setup, deb and AppImage
 - Publishes only when every check and platform succeeded:
   - checks that each platform's installers and update metadata are present
-  - attaches them with the FFmpeg and x264 sources the GPL requires, `SHA256SUMS.txt`, and notes listing the changes since the previous release of the same channel
+  - attaches them with the FFmpeg and x264 sources the GPL requires, `SHA256SUMS.txt`, and the [notes](#release-notes)
   - checks again that the tag is unused and the version sorts after every release it competes with, since the other queue may have published meanwhile
   - uploads into a draft, which the app can't see, then publishes it; publishing creates the tag on the planned commit
 - Nightlies are pre-releases and never marked latest. Stable releases are marked latest.
@@ -58,6 +58,16 @@ Releases come from `.github/workflows/release.yml`. The app finds them through i
 
 The plan refuses a stable release when no nightly is published, when `main` doesn't contain the nightly's commit, or when the version is already released or would sort before the nightly.
 
+## Release notes
+
+`release-plan.ts notes` lists every pull request merged between the previous release of the same channel and the commit the run builds, each once, oldest first:
+
+- Stable: from the previous stable release to the promoted nightly's commit, covering every nightly in between. Pull requests merged to `main` after that commit are left out.
+- Nightly: from the previous nightly to its own commit.
+- A channel's first release lists everything up to its commit.
+
+Commits pushed without a pull request, such as the version commit, aren't listed.
+
 ## Dry runs
 
 Add the label **release dry run** to a pull request from a branch of this repository. The run builds, signs, notarizes and tests the pull request's head commit like a nightly, keeps the files as workflow artifacts for 14 days and publishes nothing, so no update channel can offer the build. It takes the label off at once; add it again to test a later commit. The plan also logs what a scheduled nightly and a stable release would do on `main` at that moment.
@@ -74,7 +84,7 @@ Forks get no signing secrets, so their pull requests can't run it.
 
 ## Permissions
 
-- The publish job creates releases with the workflow token (`contents: write`).
+- The publish job creates releases with the workflow token (`contents: write`) and reads the pull requests behind each commit for the notes (`pull-requests: read`).
 - The finalize job pushes to `main` with the same token (`contents: write`). `main` has no branch protection or rulesets. If one is added, let GitHub Actions bypass it or give finalize a GitHub App token, or the push is refused.
 - Pushes by the workflow token start no workflows, so the version commit doesn't run CI.
 - The plan job removes the dry-run label (`pull-requests: write`).
