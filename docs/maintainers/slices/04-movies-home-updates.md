@@ -51,6 +51,14 @@ Findings from reviewing the foundation, each reproduced or read in the code befo
 - Leaving Watch in the middle of a channel switch could leave a muted stream reconnecting. Channel digits being typed survived a view covering them. The stall watchdog counted a pause as a stall. All fixed.
 - Nothing else was reopened: the slice 3.5 findings stay resolved.
 
+The pre-PR audit of this branch, four reviewers by area, found and this slice fixed:
+
+- A title run that broke off partway, the provider dropping the connection and then refusing it, played out as the end of the title and marked it watched. Reproduced in Electron with a 36-minute file: after the break the old build showed Finished at 2 minutes. Now the player reconnects; in that test the provider refused again, the app said so, and the position was kept.
+- A cut-off or non-JSON movie or series list could replace the cached one with an empty or partial list. Such answers now fail the refresh, and an empty list never replaces one that had titles.
+- A late automatic check could turn a download in progress or ready back into "available".
+- Continue watching showed titles for adults, cut the list before dropping series that had run out, and the Series list kept them. A chosen audio or subtitle language didn't reach the next title. A series' details opened on season 1 before its progress loaded.
+- Smaller: a failure stayed on a title session after it recovered; a stalled start could wait forever; the release timer could fire on the end screen; an open overtaken by a later one could close it; details parsing rejected `null` fields; two copies starting together could fail the database migration; the GitHub fallback ignored a failed latest-release request; the feed could point downloads anywhere; Escape and focus details in the details sheet, Settings and the licences search; the notices script on Windows paths.
+
 ## Progress
 
 One pull request, one commit per stage:
