@@ -6,7 +6,7 @@ import type { IpcEvent, IpcEvents } from "@mrstreamer/contracts/ipc";
 import { Diagnostics } from "@mrstreamer/core/diagnostics";
 import type { Failed } from "@mrstreamer/core/failure";
 import { Guide } from "@mrstreamer/core/guide/service";
-import { fetchReleases, metadataFileFor } from "@mrstreamer/core/updates/feed";
+import { discovery, metadataFileFor } from "@mrstreamer/core/updates/feed";
 import { ViewingRecord } from "@mrstreamer/core/viewing/service";
 import * as Effect from "effect/Effect";
 import * as ManagedRuntime from "effect/ManagedRuntime";
@@ -27,15 +27,22 @@ import { Licences } from "./services/licences.ts";
 import { Playback } from "./services/playback.ts";
 import { Settings } from "./services/preferences.ts";
 import { Subscriptions } from "./services/subscription.ts";
-import { Updates } from "./services/updates.ts";
+import { DEFAULT_SCHEDULE, Updates } from "./services/updates.ts";
 
 // Matches `appId` in electron-builder.yml: Windows groups taskbar entries and notifications by it.
 const APP_ID = "app.mrstreamer.player";
 const isMac = process.platform === "darwin";
 const isWindows = process.platform === "win32";
 
-/** Where updates come from: GitHub's release list, or a test feed that answers the same way. */
-const UPDATE_FEED = process.env["MR_STREAMER_UPDATE_FEED"] ?? "https://api.github.com";
+/**
+ * Where updates are found: the feed the release workflow publishes, and GitHub's API when the
+ * feed is missing. Tests point both at local servers; MR_STREAMER_UPDATE_CHECKS=off stops the
+ * automatic checks, as the packaged-app test and measurements do.
+ */
+const UPDATE_FEED =
+  process.env["MR_STREAMER_UPDATE_FEED"] ??
+  "https://mr-streamer-oss.github.io/MrStreamer/updates.json";
+const UPDATE_API = process.env["MR_STREAMER_UPDATE_API"] ?? "https://api.github.com";
 const REPOSITORY = "Mr-Streamer-OSS/MrStreamer";
 
 /** Refresh the channel list in the background when the cached copy is older than this. */
@@ -118,9 +125,15 @@ async function start(): Promise<void> {
       catalogueWorker: (setup) => createCatalogueWorker({ workerData: setup }),
       updates: {
         installed: app.getVersion(),
-        metadataFile: metadataFileFor(process.platform),
-        releases: () => fetchReleases(UPDATE_FEED, REPOSITORY),
+        discover: discovery({
+          feedUrl: UPDATE_FEED,
+          api: UPDATE_API,
+          repository: REPOSITORY,
+          metadataFile: metadataFileFor(process.platform),
+          userAgent,
+        }),
         installer: electronInstaller(),
+        schedule: process.env["MR_STREAMER_UPDATE_CHECKS"] === "off" ? null : DEFAULT_SCHEDULE,
       },
     }),
   );
@@ -247,6 +260,7 @@ async function start(): Promise<void> {
       "updates.download": () => updates.download,
       "updates.cancel": () => Effect.as(updates.cancel, null),
       "updates.restart": () => Effect.as(updates.restart, null),
+      "updates.dismiss": ({ version }) => updates.dismiss(version),
       "licences.list": () => licences.list,
       "licences.text": ({ id }) => licences.text(id),
     },

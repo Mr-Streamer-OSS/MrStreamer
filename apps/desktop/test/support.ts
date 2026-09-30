@@ -109,8 +109,7 @@ export function testConfig(dataDir: string): MainConfig {
     catalogueWorker,
     updates: {
       installed: "0.0.1",
-      metadataFile: "latest-linux.yml",
-      releases: async () => [],
+      discover: async () => [],
       installer: { download: async () => {}, install: async () => {} },
     },
   };

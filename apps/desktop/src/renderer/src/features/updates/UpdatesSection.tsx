@@ -3,7 +3,7 @@
 import { Radio } from "@base-ui/react/radio";
 import { RadioGroup } from "@base-ui/react/radio-group";
 import type { ReactNode } from "react";
-import type { UpdateStatus } from "@mrstreamer/contracts/updates";
+import type { CheckFailure, UpdateStatus } from "@mrstreamer/contracts/updates";
 import type { Channel } from "@mrstreamer/contracts/version";
 import { useUi } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
@@ -94,7 +94,10 @@ function UpdateState({ status }: { status: UpdateStatus }) {
       );
     case "failed":
       return (
-        <Row note={`${FAILED_STEP[update.step]} ${update.detail}`} error>
+        <Row
+          note={`${FAILED_STEP[update.step]} ${update.step === "check" ? describeCheckFailure(update.failure) : update.detail}`}
+          error
+        >
           <Button
             onClick={() => run(update.step === "check" ? "updates.check" : "updates.download")}
           >
@@ -102,6 +105,22 @@ function UpdateState({ status }: { status: UpdateStatus }) {
           </Button>
         </Row>
       );
+  }
+}
+
+/** Why a check found nothing, in a few words. */
+function describeCheckFailure(failure: CheckFailure): string {
+  switch (failure.kind) {
+    case "offline":
+      return "You seem to be offline.";
+    case "busy":
+      return failure.until
+        ? `GitHub is limiting requests until ${new Date(failure.until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`
+        : "GitHub is limiting requests for now.";
+    case "http":
+      return `The update server answered HTTP ${failure.status}.`;
+    case "invalid":
+      return "The update server sent something unexpected.";
   }
 }
 

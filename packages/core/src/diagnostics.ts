@@ -47,6 +47,18 @@ export type Diagnostic =
       readonly audio: "copy" | "convert" | "none";
       readonly outcome: "ok" | StreamFailure["kind"];
     }
+  /**
+   * What an update source answered when a check failed: its status and GitHub's rate-limit
+   * headers, which tell a limit from a refusal. Never the address or the body.
+   */
+  | {
+      readonly op: "update-source";
+      readonly source: "feed" | "github";
+      readonly status: number | null;
+      readonly remaining: number | null;
+      readonly reset: number | null;
+      readonly retryAfter: number | null;
+    }
   /** An IPC call that failed. */
   | { readonly op: "call"; readonly method: IpcMethod; readonly outcome: Outcome };
 

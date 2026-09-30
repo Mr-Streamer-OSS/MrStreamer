@@ -12,7 +12,11 @@ export function launch(
   return spawn(
     executable,
     [`--remote-debugging-port=${options.port}`, `--user-data-dir=${options.profile}`, ...args],
-    { stdio: ["ignore", "inherit", "inherit"] },
+    // No automatic update checks: they would reach the network in the middle of a measurement.
+    {
+      stdio: ["ignore", "inherit", "inherit"],
+      env: { ...process.env, MR_STREAMER_UPDATE_CHECKS: "off" },
+    },
   );
 }
 

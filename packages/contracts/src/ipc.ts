@@ -89,6 +89,7 @@ export const ipcInputs = {
   "updates.download": none,
   "updates.cancel": none,
   "updates.restart": none,
+  "updates.dismiss": type({ version: "string" }),
   "licences.list": none,
   "licences.text": type({ id: "string" }),
 } satisfies Record<keyof IpcOutputs, { infer: unknown }>;
@@ -156,6 +157,8 @@ export interface IpcOutputs {
   "updates.cancel": null;
   /** Quits and installs the downloaded update. Only after the user confirmed the restart. */
   "updates.restart": null;
+  /** Closes the notice for a version; Settings keeps offering it. */
+  "updates.dismiss": UpdateStatus;
   /** Third-party components the app ships, with their licences, by name. */
   "licences.list": readonly ThirdPartyNotice[];
   /** The full notice of one component from `licences.list`, as plain text. */
