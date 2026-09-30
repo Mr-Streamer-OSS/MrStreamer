@@ -21,32 +21,36 @@ export interface TitleProbe {
   readonly subtitles: readonly SubtitleFacts[];
 }
 
-const Stream = type({
-  index: "number",
-  "codec_type?": "string",
-  "codec_name?": "string",
-  "pix_fmt?": "string",
-  "channels?": "number",
-  "tags?": type({ "language?": "string", "title?": "string" }),
-  "disposition?": type({
-    "default?": "number",
-    "forced?": "number",
-    "attached_pic?": "number",
-    "hearing_impaired?": "number",
-  }),
-});
-type Stream = typeof Stream.infer;
-
-const Probe = type({
-  "streams?": Stream.array(),
-  "format?": type({ "duration?": "string", "start_time?": "string" }),
-});
+/** ffprobe's JSON, built on the first probe rather than while the app starts. */
+function defineProbe() {
+  const Stream = type({
+    index: "number",
+    "codec_type?": "string",
+    "codec_name?": "string",
+    "pix_fmt?": "string",
+    "channels?": "number",
+    "tags?": type({ "language?": "string", "title?": "string" }),
+    "disposition?": type({
+      "default?": "number",
+      "forced?": "number",
+      "attached_pic?": "number",
+      "hearing_impaired?": "number",
+    }),
+  });
+  return type({
+    "streams?": Stream.array(),
+    "format?": type({ "duration?": "string", "start_time?": "string" }),
+  });
+}
+let Probe: ReturnType<typeof defineProbe> | null = null;
+type Stream = NonNullable<ReturnType<typeof defineProbe>["infer"]["streams"]>[number];
 
 /** Subtitle codecs stored as text, which convert to WebVTT. The rest are pictures. */
 const TEXT_SUBTITLES = new Set(["subrip", "srt", "ass", "ssa", "mov_text", "webvtt", "text"]);
 
 /** What ffprobe's JSON says about a file, or null when it isn't ffprobe's JSON. */
 export function readProbe(json: unknown): TitleProbe | null {
+  Probe ??= defineProbe();
   const probe = Probe(json);
   if (probe instanceof type.errors) return null;
   const streams = probe.streams ?? [];

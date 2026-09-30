@@ -200,7 +200,7 @@ export function xtreamProvider(account: XtreamAccount, options: ProviderOptions)
     },
 
     async movieDetails(id, signal) {
-      const body = MovieInfo(
+      const body = titleSchemas().MovieInfo(
         await getJson(
           `&action=get_vod_info&vod_id=${encodeURIComponent(id)}`,
           DETAILS_TIMEOUT_MS,
@@ -220,7 +220,7 @@ export function xtreamProvider(account: XtreamAccount, options: ProviderOptions)
     },
 
     async seriesDetails(id, signal) {
-      const body = SeriesInfo(
+      const body = titleSchemas().SeriesInfo(
         await getJson(
           `&action=get_series_info&series_id=${encodeURIComponent(id)}`,
           DETAILS_TIMEOUT_MS,
@@ -299,97 +299,108 @@ const StreamRow = type({
   "epg_channel_id?": "string | null",
 });
 
-const MovieRow = type({
-  stream_id: idLike,
-  "name?": "string | null",
-  "stream_icon?": "string | null",
-  "rating?": loose,
-  "added?": loose,
-  "category_id?": loose,
-  "category_ids?": "(string | number)[] | null",
-  "container_extension?": "string | null",
-  "is_adult?": "number | string | boolean | null",
-});
+/**
+ * The movie and series schemas, built on first use: the catalogue worker needs them for the lists,
+ * the main process only once a title's details open, never while it starts.
+ */
+function defineTitleSchemas() {
+  const MovieRow = type({
+    stream_id: idLike,
+    "name?": "string | null",
+    "stream_icon?": "string | null",
+    "rating?": loose,
+    "added?": loose,
+    "category_id?": loose,
+    "category_ids?": "(string | number)[] | null",
+    "container_extension?": "string | null",
+    "is_adult?": "number | string | boolean | null",
+  });
 
-const SeriesRow = type({
-  series_id: idLike,
-  "name?": "string | null",
-  "cover?": "string | null",
-  "backdrop_path?": "string[] | string | null",
-  "rating?": loose,
-  "last_modified?": loose,
-  "releaseDate?": "string | null",
-  "release_date?": "string | null",
-  "category_id?": loose,
-  "category_ids?": "(string | number)[] | null",
-});
-
-const Info = type({
-  "name?": "string | null",
-  "o_name?": "string | null",
-  "cover?": "string | null",
-  "cover_big?": "string | null",
-  "movie_image?": "string | null",
-  "plot?": "string | null",
-  "description?": "string | null",
-  "genre?": "string | null",
-  "cast?": "string | null",
-  "actors?": "string | null",
-  "director?": "string | null",
-  "releasedate?": "string | null",
-  "releaseDate?": "string | null",
-  "release_date?": "string | null",
-  "backdrop_path?": "string[] | string | null",
-  "duration_secs?": loose,
-  "duration?": "string | null",
-  "episode_run_time?": loose,
-});
-type Info = typeof Info.infer;
-
-// Panels send `info: []` for a title they know nothing more about.
-const InfoOrNothing = Info.or("unknown[]").pipe((info) => (Array.isArray(info) ? undefined : info));
-
-const MovieInfo = type({
-  "info?": InfoOrNothing,
-  "movie_data?": type({ "container_extension?": "string | null" })
-    .or("unknown[]")
-    .pipe((data) => (Array.isArray(data) ? undefined : data)),
-});
-
-const EpisodeRow = type({
-  id: idLike,
-  "episode_num?": loose,
-  "season?": loose,
-  "title?": "string | null",
-  "container_extension?": "string | null",
-  "info?": type({
-    "movie_image?": "string | null",
-    "plot?": "string | null",
-    "duration_secs?": loose,
-    "duration?": "string | null",
-    "air_date?": "string | null",
-    "releasedate?": "string | null",
-  })
-    .or("unknown[]")
-    .pipe((info) => (Array.isArray(info) ? undefined : info)),
-});
-
-const SeriesInfo = type({
-  "info?": InfoOrNothing,
-  "seasons?": type({
-    "season_number?": loose,
+  const SeriesRow = type({
+    series_id: idLike,
     "name?": "string | null",
     "cover?": "string | null",
+    "backdrop_path?": "string[] | string | null",
+    "rating?": loose,
+    "last_modified?": loose,
+    "releaseDate?": "string | null",
+    "release_date?": "string | null",
+    "category_id?": loose,
+    "category_ids?": "(string | number)[] | null",
+  });
+
+  const Info = type({
+    "name?": "string | null",
+    "o_name?": "string | null",
+    "cover?": "string | null",
     "cover_big?": "string | null",
-  })
-    .array()
-    .or("null"),
-  // An object keyed by season number, or on some panels an array of seasons.
-  "episodes?": type({ "[string]": "unknown[]" }).or("unknown[][]").or("null"),
-});
+    "movie_image?": "string | null",
+    "plot?": "string | null",
+    "description?": "string | null",
+    "genre?": "string | null",
+    "cast?": "string | null",
+    "actors?": "string | null",
+    "director?": "string | null",
+    "releasedate?": "string | null",
+    "releaseDate?": "string | null",
+    "release_date?": "string | null",
+    "backdrop_path?": "string[] | string | null",
+    "duration_secs?": loose,
+    "duration?": "string | null",
+    "episode_run_time?": loose,
+  });
+  // Panels send `info: []` for a title they know nothing more about.
+  const InfoOrNothing = Info.or("unknown[]").pipe((info) =>
+    Array.isArray(info) ? undefined : info,
+  );
+
+  const MovieInfo = type({
+    "info?": InfoOrNothing,
+    "movie_data?": type({ "container_extension?": "string | null" })
+      .or("unknown[]")
+      .pipe((data) => (Array.isArray(data) ? undefined : data)),
+  });
+
+  const EpisodeRow = type({
+    id: idLike,
+    "episode_num?": loose,
+    "season?": loose,
+    "title?": "string | null",
+    "container_extension?": "string | null",
+    "info?": type({
+      "movie_image?": "string | null",
+      "plot?": "string | null",
+      "duration_secs?": loose,
+      "duration?": "string | null",
+      "air_date?": "string | null",
+      "releasedate?": "string | null",
+    })
+      .or("unknown[]")
+      .pipe((info) => (Array.isArray(info) ? undefined : info)),
+  });
+
+  const SeriesInfo = type({
+    "info?": InfoOrNothing,
+    "seasons?": type({
+      "season_number?": loose,
+      "name?": "string | null",
+      "cover?": "string | null",
+      "cover_big?": "string | null",
+    })
+      .array()
+      .or("null"),
+    // An object keyed by season number, or on some panels an array of seasons.
+    "episodes?": type({ "[string]": "unknown[]" }).or("unknown[][]").or("null"),
+  });
+
+  return { MovieRow, SeriesRow, Info, MovieInfo, EpisodeRow, SeriesInfo };
+}
+let definedTitleSchemas: ReturnType<typeof defineTitleSchemas> | null = null;
+const titleSchemas = () => (definedTitleSchemas ??= defineTitleSchemas());
+type Info = ReturnType<typeof titleSchemas>["Info"]["infer"];
 
 function toMovie(raw: unknown): ProviderTitle[] {
-  const row = MovieRow(raw);
+  const row = titleSchemas().MovieRow(raw);
   if (row instanceof type.errors) return [];
   const id = String(row.stream_id);
   return [
@@ -409,7 +420,7 @@ function toMovie(raw: unknown): ProviderTitle[] {
 }
 
 function toSeries(raw: unknown): ProviderTitle[] {
-  const row = SeriesRow(raw);
+  const row = titleSchemas().SeriesRow(raw);
   if (row instanceof type.errors) return [];
   const id = String(row.series_id);
   return [
@@ -429,7 +440,7 @@ function toSeries(raw: unknown): ProviderTitle[] {
 }
 
 function toEpisode(raw: unknown): ProviderEpisode[] {
-  const row = EpisodeRow(raw);
+  const row = titleSchemas().EpisodeRow(raw);
   if (row instanceof type.errors) return [];
   const season = toInteger(row.season);
   const number = toInteger(row.episode_num);

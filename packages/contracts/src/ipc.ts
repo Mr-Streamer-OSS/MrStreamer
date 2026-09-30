@@ -23,77 +23,85 @@ import type { SubscriptionSummary } from "./subscription.ts";
 import type { UpdateStatus } from "./updates.ts";
 import type { TitleProgress, Viewing } from "./viewing.ts";
 
-const none = type("undefined");
-const titleKind = type.enumerated(...TITLE_KINDS);
-const decoders = type.enumerated(...CODECS).array();
+// Every schema is built on its method's first call: defining them all would add to every start,
+// and most methods aren't called while the app starts.
+const none = () => type("undefined");
+const titleKind = () => type.enumerated(...TITLE_KINDS);
+const decoders = () => type.enumerated(...CODECS).array();
 
 /** Login details as typed by the user. `server` may also hold a pasted M3U link. */
-export const LoginInput = type({
-  server: "string > 0",
-  username: "string",
-  password: "string",
-});
-export type LoginInput = typeof LoginInput.infer;
+const loginInput = () =>
+  type({
+    server: "string > 0",
+    username: "string",
+    password: "string",
+  });
+export type LoginInput = IpcInput<"subscription.connect">;
 
 /** Input schema for every IPC method. The main process validates each call before handling it. */
 export const ipcInputs = {
   "subscription.get": none,
-  "subscription.connect": LoginInput,
+  "subscription.connect": loginInput,
   "subscription.remove": none,
   "library.status": none,
   "library.categories": none,
-  "library.channels": type({ "categoryId?": "string", "query?": "string", "ids?": "string[]" }),
-  "library.channel": type({ channelId: "string" }),
+  "library.channels": () =>
+    type({ "categoryId?": "string", "query?": "string", "ids?": "string[]" }),
+  "library.channel": () => type({ channelId: "string" }),
   "library.refresh": none,
-  "guide.listings": type({ channelIds: "string[]" }),
-  "guide.schedule": type({ channelId: "string" }),
-  "guide.search": type({ query: "string" }),
+  "guide.listings": () => type({ channelIds: "string[]" }),
+  "guide.schedule": () => type({ channelId: "string" }),
+  "guide.search": () => type({ query: "string" }),
   "ondemand.status": none,
   "ondemand.refresh": none,
-  "ondemand.categories": type({ kind: titleKind }),
-  "ondemand.titles": type({
-    kind: titleKind,
-    "categoryId?": "string",
-    sort: type.enumerated(...TITLE_SORTS),
-    offset: "number.integer >= 0",
-    limit: "1 <= number.integer <= 500",
-  }),
-  "ondemand.byIds": type({ kind: titleKind, ids: "string[]" }),
-  "ondemand.search": type({ query: "string" }),
-  "ondemand.details": type({ kind: titleKind, id: "string > 0" }),
-  "playback.open": type({
-    channelId: "string",
-    decoders,
-    "repair?": "boolean",
-  }),
-  "playback.openTitle": type({ title: TitleRef, decoders }),
-  "playback.close": type({ sessionId: "string" }),
+  "ondemand.categories": () => type({ kind: titleKind() }),
+  "ondemand.titles": () =>
+    type({
+      kind: titleKind(),
+      "categoryId?": "string",
+      sort: type.enumerated(...TITLE_SORTS),
+      offset: "number.integer >= 0",
+      limit: "1 <= number.integer <= 500",
+    }),
+  "ondemand.byIds": () => type({ kind: titleKind(), ids: "string[]" }),
+  "ondemand.search": () => type({ query: "string" }),
+  "ondemand.details": () => type({ kind: titleKind(), id: "string > 0" }),
+  "playback.open": () =>
+    type({
+      channelId: "string",
+      decoders: decoders(),
+      "repair?": "boolean",
+    }),
+  "playback.openTitle": () => type({ title: TitleRef, decoders: decoders() }),
+  "playback.close": () => type({ sessionId: "string" }),
   "playback.closeAll": none,
-  "playback.failure": type({ sessionId: "string" }),
+  "playback.failure": () => type({ sessionId: "string" }),
   "preferences.get": none,
-  "preferences.update": Preferences.partial(),
+  "preferences.update": () => Preferences.partial(),
   "viewing.get": none,
   // Each change carries an id the UI makes up, so sending it again changes nothing more.
-  "viewing.setFavourite": type({ commandId: "string", channelId: "string", favourite: "boolean" }),
-  "viewing.recordWatch": type({ commandId: "string", channelId: "string" }),
-  "viewing.recordProgress": type({
-    commandId: "string",
-    title: TitleRef,
-    position: "number >= 0",
-    duration: "number > 0",
-  }),
-  "viewing.removeFromContinue": type({ commandId: "string", title: TitleRef }),
-  "viewing.progress": type({ "movieIds?": "string[]", "seriesId?": "string" }),
+  "viewing.setFavourite": () =>
+    type({ commandId: "string", channelId: "string", favourite: "boolean" }),
+  "viewing.recordWatch": () => type({ commandId: "string", channelId: "string" }),
+  "viewing.recordProgress": () =>
+    type({
+      commandId: "string",
+      title: TitleRef,
+      position: "number >= 0",
+      duration: "number > 0",
+    }),
+  "viewing.removeFromContinue": () => type({ commandId: "string", title: TitleRef }),
+  "viewing.progress": () => type({ "movieIds?": "string[]", "seriesId?": "string" }),
   "updates.status": none,
-  "updates.setChannel": type({ channel: "'stable' | 'nightly'" }),
+  "updates.setChannel": () => type({ channel: "'stable' | 'nightly'" }),
   "updates.check": none,
   "updates.download": none,
   "updates.cancel": none,
   "updates.restart": none,
-  "updates.dismiss": type({ version: "string" }),
+  "updates.dismiss": () => type({ version: "string" }),
   "licences.list": none,
-  "licences.text": type({ id: "string" }),
-} satisfies Record<keyof IpcOutputs, { infer: unknown }>;
+  "licences.text": () => type({ id: "string" }),
+} satisfies Record<keyof IpcOutputs, () => { infer: unknown }>;
 
 /** What each IPC method resolves to when it succeeds. */
 export interface IpcOutputs {
@@ -169,7 +177,7 @@ export interface IpcOutputs {
 }
 
 export type IpcMethod = keyof IpcOutputs;
-export type IpcInput<M extends IpcMethod> = (typeof ipcInputs)[M]["infer"];
+export type IpcInput<M extends IpcMethod> = ReturnType<(typeof ipcInputs)[M]>["infer"];
 export type IpcOutput<M extends IpcMethod> = IpcOutputs[M];
 
 /** Methods without input can be called with no argument. */
