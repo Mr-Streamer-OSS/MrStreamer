@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { type } from "arktype";
 import type { LoginInput } from "@mrstreamer/contracts/ipc";
 import type { SubscriptionSummary } from "@mrstreamer/contracts/subscription";
+import { diagnosed } from "@mrstreamer/core/diagnostics";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
 import type { LiveProvider, ProviderOptions } from "@mrstreamer/core/provider";
 import * as Context from "effect/Context";
@@ -139,7 +140,7 @@ function make(deps: SubscriptionDeps) {
               return yield* save(stored, account.password);
             }),
           );
-        }),
+        }).pipe(diagnosed("connect")),
 
       recheck: Effect.gen(function* () {
         const subscription = yield* load;

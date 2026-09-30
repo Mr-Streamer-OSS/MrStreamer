@@ -23,6 +23,7 @@ import {
   type Candidate,
   type PublishedRelease,
 } from "@mrstreamer/core/updates/feed";
+import { diagnosed } from "@mrstreamer/core/diagnostics";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -170,6 +171,7 @@ function make(deps: UpdatesDeps) {
         try: () => deps.releases(),
         catch: (cause) => cause,
       }).pipe(
+        diagnosed("check"),
         Effect.map((releases) => {
           const newest = newestOn(on, candidates(releases, deps.metadataFile));
           // A nightly build on Stable goes to the newest stable release, older or not.
@@ -254,7 +256,7 @@ function make(deps: UpdatesDeps) {
                 signal,
               ),
             catch: (cause) => cause,
-          }),
+          }).pipe(diagnosed("download")),
           scope,
         );
         downloading = fiber;
@@ -283,7 +285,7 @@ function make(deps: UpdatesDeps) {
         const installing = yield* Effect.tryPromise({
           try: () => deps.installer.install(),
           catch: (cause) => cause,
-        }).pipe(Effect.result);
+        }).pipe(diagnosed("install"), Effect.result);
         if (installing._tag === "Failure") {
           update = { kind: "failed", step: "install", detail: reason(installing.failure) };
           yield* changed;

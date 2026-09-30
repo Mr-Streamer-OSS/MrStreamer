@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { app, BrowserWindow, Menu, safeStorage, session, shell } from "electron";
 import type { IpcEvent, IpcEvents } from "@mrstreamer/contracts/ipc";
+import { Diagnostics } from "@mrstreamer/core/diagnostics";
 import type { Failed } from "@mrstreamer/core/failure";
 import { Guide } from "@mrstreamer/core/guide/service";
 import { fetchReleases, metadataFileFor } from "@mrstreamer/core/updates/feed";
@@ -115,7 +116,7 @@ async function start(): Promise<void> {
       },
     }),
   );
-  const { subscriptions, settings, library, playback, updates, guide, viewing } =
+  const { subscriptions, settings, library, playback, updates, guide, viewing, diagnostics } =
     await runtime.runPromise(
       Effect.all({
         subscriptions: Subscriptions,
@@ -125,6 +126,7 @@ async function start(): Promise<void> {
         updates: Updates,
         guide: Guide,
         viewing: ViewingRecord,
+        diagnostics: Diagnostics,
       }),
     );
 
@@ -211,6 +213,10 @@ async function start(): Promise<void> {
 
   const closeStreams = () => void runtime.runFork(playback.closeAll);
   mainWindow = openWindow(closeStreams);
+  // How long the app took to show its window, from the start of the process.
+  mainWindow.once("ready-to-show", () =>
+    diagnostics.record({ op: "start", ms: Math.round(performance.now()), outcome: "ok" }),
+  );
   app.on("activate", () => {
     mainWindow ??= openWindow(closeStreams);
   });

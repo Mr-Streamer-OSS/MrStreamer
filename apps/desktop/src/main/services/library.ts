@@ -5,6 +5,7 @@ import type { AppError } from "@mrstreamer/contracts/errors";
 import type { CatalogueStatus, Category, LiveChannel } from "@mrstreamer/contracts/library";
 import { trustedGuideIds } from "@mrstreamer/core/catalogue/guide-ids";
 import { normalizeCatalogue } from "@mrstreamer/core/catalogue/normalize";
+import { diagnosed } from "@mrstreamer/core/diagnostics";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
 import type { GuideChannels } from "@mrstreamer/core/guide/programmes";
 import type { LiveCatalogue } from "@mrstreamer/core/provider";
@@ -172,6 +173,7 @@ function make(options: LibraryOptions) {
         yield* PubSub.publish(updates, status);
         return status;
       }).pipe(
+        diagnosed("catalogue"),
         Effect.tapError((failed) =>
           Effect.gen(function* () {
             failure = { key: source.key, error: failed.error };
