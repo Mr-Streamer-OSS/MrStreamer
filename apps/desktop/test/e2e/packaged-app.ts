@@ -1,11 +1,14 @@
 // Smoke test for a built app: connects it to the fake provider through the login form, then plays
 // a stream the player decodes directly and one the bundled ffmpeg has to convert. Then it leaves
-// Watch for Home and comes back, which must keep the one stream rather than open another.
+// Watch for Home and comes back, which must keep the one stream rather than open another. Last, it
+// plays a movie from Movies, which the bundled ffprobe reads and ffmpeg repackages, skips ahead and
+// leaves it.
 //
 //   node test/e2e/packaged-app.ts <app executable> [-- extra app arguments]
 //
-// Passes when both channels show a moving picture with decoded sound, and Home and Watch share the
-// stream: muted on Home, with sound in Watch, and no second request to the provider. The app runs with a
+// Passes when both channels show a moving picture with decoded sound, Home and Watch share the
+// stream: muted on Home, with sound in Watch, and no second request to the provider, and the movie
+// plays with sound, skips 10 seconds and lets go of its connection when left. The app runs with a
 // throwaway profile and remote debugging on a random port; on macOS pass --use-mock-keychain so
 // the test never touches a real keychain.
 import { mkdtempSync, rmSync } from "node:fs";
@@ -36,6 +39,9 @@ try {
   const shared = await homeAndBack(page);
   console.log(`${shared.ok ? "PASS" : "FAIL"} Home and Watch share one stream: ${shared.detail}`);
   failed ||= !shared.ok;
+  const movie = await playMovie(page);
+  console.log(`${movie.ok ? "PASS" : "FAIL"} A movie plays, skips and lets go: ${movie.detail}`);
+  failed ||= !movie.ok;
   page.close();
 } catch (error) {
   console.error(`FAIL ${String(error)}`);
@@ -107,5 +113,51 @@ async function homeAndBack(page: Page): Promise<{ ok: boolean; detail: string }>
   return {
     ok,
     detail: `Home ${home.playing ? "playing" : "stopped"}${home.muted ? " muted" : " with sound"}, Watch ${watch.playing ? "playing" : "stopped"}${watch.muted ? " muted" : " with sound"}, ${extra} more stream requests, ${provider.activeStreams()} open`,
+  };
+}
+
+/** Plays the test movie with two sound tracks from Movies, skips ahead, then leaves it. */
+async function playMovie(page: Page): Promise<{ ok: boolean; detail: string }> {
+  await key(page, "Escape", 27);
+  await page.evaluate(
+    `[...document.querySelectorAll("header button")].find((b) => b.textContent.trim() === "Movies").click()`,
+  );
+  const poster = `[...document.querySelectorAll("button[title]")].find((b) => b.title.includes("Two sound tracks"))`;
+  await waitFor(() => page.evaluate<boolean>(`!!${poster}`), 60_000);
+  await page.evaluate(`${poster}.click()`);
+  const play = `[...document.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent.trim() === "Play")`;
+  await waitFor(() => page.evaluate<boolean>(`!!${play}`), 20_000);
+  await page.evaluate(`${play}.click()`);
+  const state = () =>
+    page.evaluate<{ time: number; width: number; audio: number }>(`(() => {
+      const video = document.querySelector("video");
+      return {
+        time: video?.currentTime ?? 0,
+        width: video?.videoWidth ?? 0,
+        audio: video?.webkitAudioDecodedByteCount ?? 0,
+      };
+    })()`);
+  let started = { time: 0, width: 0, audio: 0 };
+  const until = Date.now() + 30_000;
+  while (Date.now() < until && !(started.time >= 1 && started.width > 0 && started.audio > 0)) {
+    await delay(250);
+    started = await state();
+  }
+  if (started.time < 1 || started.audio === 0) {
+    return {
+      ok: false,
+      detail: `clock ${started.time.toFixed(2)} s, sound ${started.audio} bytes`,
+    };
+  }
+  await key(page, "ArrowRight", 39);
+  await delay(1500);
+  const skipped = await state();
+  await key(page, "Escape", 27);
+  await delay(1500);
+  const open = provider.activeStreams();
+  const ok = skipped.time >= started.time + 9 && open === 0;
+  return {
+    ok,
+    detail: `played to ${started.time.toFixed(1)} s with ${started.audio} bytes of sound, skipped to ${skipped.time.toFixed(1)} s, ${open} connections open after leaving`,
   };
 }
