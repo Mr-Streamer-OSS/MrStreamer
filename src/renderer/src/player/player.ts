@@ -1,7 +1,11 @@
-// The player controller: owns the video element, the open stream session and the playback state.
+// The player controller: owns the one video element, the open stream session and the playback state.
 //
 // Every `play` call starts a new selection. Anything that resolves for an older selection is
 // dropped, so a slow channel can never replace the one the viewer picked after it.
+//
+// The video element outlives every view: Home's backdrop, the guide's preview and Watch each show
+// it in turn (see Picture.tsx), so moving between them never reopens the stream. Only Watch plays
+// sound unless the viewer unmutes elsewhere; `audible` is that choice, `muted` the viewer's own.
 import { createStore, useStore } from "zustand";
 import type { AppError } from "../../../shared/errors.ts";
 import type { LiveChannel } from "../../../shared/library.ts";
@@ -56,6 +60,10 @@ export interface PlayerState {
   readonly previous: LiveChannel | null;
   readonly volume: number;
   readonly muted: boolean;
+  /** Whether the view on screen plays sound: Watch does, previews only once unmuted. */
+  readonly audible: boolean;
+  /** The viewer pressed Stop, so previews don't start the stream again on their own. */
+  readonly stopped: boolean;
 }
 
 const store = createStore<PlayerState>(() => ({
@@ -64,6 +72,8 @@ const store = createStore<PlayerState>(() => ({
   previous: null,
   volume: 1,
   muted: false,
+  audible: false,
+  stopped: false,
 }));
 
 /** Reads player state in a component. */
@@ -71,8 +81,15 @@ export function usePlayer<T>(selector: (state: PlayerState) => T): T {
   return useStore(store, selector);
 }
 
-let video: HTMLVideoElement | null = null;
+const video = document.createElement("video");
+video.playsInline = true;
+video.className = "size-full";
 let selection = 0;
+/**
+ * The current selection is a preview: a failure leaves it stopped instead of reconnecting, so a
+ * connection another device holds is not fought over.
+ */
+let quiet = false;
 let current: { readonly sessionId: string; readonly engine: Engine } | null = null;
 let volumeSave: ReturnType<typeof setTimeout> | null = null;
 let zapTimer: ReturnType<typeof setTimeout> | null = null;
@@ -96,8 +113,14 @@ function release(): void {
  * Opens and plays a stream. `repair` has the main process re-encode the picture, which conceals
  * a damaged broadcast the way standalone players do; it costs CPU, so it is the second try.
  */
-async function start(channel: LiveChannel, attempt: number, repair = false): Promise<void> {
+async function start(
+  channel: LiveChannel,
+  attempt: number,
+  repair = false,
+  preview = false,
+): Promise<void> {
   const mine = ++selection;
+  if (attempt === 0) quiet = preview;
   if (attempt === 0 && tuned?.id !== channel.id) {
     if (tuned) store.setState({ previous: tuned });
     tuned = channel;
@@ -125,7 +148,7 @@ async function start(channel: LiveChannel, attempt: number, repair = false): Pro
       });
     return;
   }
-  if (mine !== selection || !video) {
+  if (mine !== selection) {
     void call("playback.close", { sessionId: session.sessionId }).catch(() => {});
     if (mine === selection) store.setState({ phase: { kind: "idle" } });
     return;
@@ -182,6 +205,11 @@ async function recover(
   );
   if (mine !== selection) return;
   const problem = classify(upstream, error);
+  if (quiet) {
+    release();
+    store.setState({ phase: { kind: "failed", problem } });
+    return;
+  }
   if (problem.kind === "unsupported" && upstream === null && !repaired) {
     release();
     await start(channel, attempt, true);
@@ -223,10 +251,9 @@ function classify(upstream: StreamFailure | null, error: EngineError): PlaybackP
 }
 
 function applyVolume(): void {
-  if (!video) return;
-  const { volume, muted } = store.getState();
+  const { volume, muted, audible } = store.getState();
   video.volume = volume;
-  video.muted = muted;
+  video.muted = muted || !audible;
 }
 
 function saveVolume(): void {
@@ -238,13 +265,8 @@ function saveVolume(): void {
 }
 
 export const player = {
-  /** Hands the controller the video element. Passing null stops playback. */
-  attach(element: HTMLVideoElement | null): void {
-    if (element === video) return;
-    if (!element) player.stop();
-    video = element;
-    applyVolume();
-  },
+  /** The video element every view shows the picture in. */
+  element: video,
 
   /** Restores the saved volume. Call once before the first `play`. */
   hydrate(preferences: { volume: number; muted: boolean }): void {
@@ -254,7 +276,51 @@ export const player = {
 
   play(channel: LiveChannel): void {
     cancelZap();
+    store.setState({ stopped: false });
     void start(channel, 0);
+  },
+
+  /**
+   * Plays a channel to watch it, keeping the stream when a preview already shows it. From then on
+   * a failure reconnects as usual.
+   */
+  watch(channel: LiveChannel): void {
+    const { channel: current, phase } = store.getState();
+    const open =
+      phase.kind === "playing" || phase.kind === "tuning" || phase.kind === "reconnecting";
+    if (current?.id === channel.id && open && !zapTimer) {
+      quiet = false;
+      store.setState({ stopped: false });
+      return;
+    }
+    player.play(channel);
+  },
+
+  /** Starts a muted preview of a channel, unless it already plays or the viewer stopped playback. */
+  preview(channel: LiveChannel): void {
+    const { channel: current, phase, stopped } = store.getState();
+    if (stopped || (current?.id === channel.id && phase.kind !== "idle")) return;
+    cancelZap();
+    void start(channel, 0, false, true);
+  },
+
+  /** Stops a preview while nobody can see it. Unlike `stop`, the next preview starts it again. */
+  suspend(): void {
+    cancelZap();
+    selection++;
+    release();
+    store.setState({ phase: { kind: "idle" } });
+  },
+
+  /**
+   * Whether the view on screen plays sound. A stream nobody listens to is a preview again, so
+   * leaving Watch stops it from reconnecting against another device.
+   */
+  setAudible(audible: boolean): void {
+    quiet = !audible;
+    if (store.getState().audible === audible) return;
+    store.setState({ audible });
+    applyVolume();
   },
 
   /**
@@ -265,7 +331,7 @@ export const player = {
     cancelZap();
     selection++;
     release();
-    store.setState({ channel, phase: { kind: "tuning", since: Date.now() } });
+    store.setState({ channel, phase: { kind: "tuning", since: Date.now() }, stopped: false });
     zapTimer = setTimeout(() => {
       zapTimer = null;
       void start(channel, 0);
@@ -285,27 +351,34 @@ export const player = {
   },
 
   stop(): void {
-    cancelZap();
-    selection++;
-    release();
-    store.setState({ phase: { kind: "idle" } });
+    player.suspend();
+    store.setState({ stopped: true });
   },
 
   /** Stops and forgets the selected channel, for when the subscription changes. */
   reset(): void {
-    player.stop();
+    player.suspend();
     tuned = null;
-    store.setState({ channel: null, previous: null });
+    store.setState({ channel: null, previous: null, stopped: false });
   },
 
   setVolume(volume: number): void {
-    store.setState({ volume: Math.min(1, Math.max(0, volume)), muted: false });
+    store.setState({ volume: Math.min(1, Math.max(0, volume)), muted: false, audible: true });
     applyVolume();
     saveVolume();
   },
 
+  /**
+   * The speaker: mutes or unmutes. Unmuting a preview makes it audible without touching the
+   * viewer's own mute setting.
+   */
   toggleMute(): void {
-    store.setState((state) => ({ muted: !state.muted }));
+    const { muted, audible } = store.getState();
+    if (!audible) {
+      store.setState({ audible: true, muted: false });
+    } else {
+      store.setState({ muted: !muted });
+    }
     applyVolume();
     saveVolume();
   },

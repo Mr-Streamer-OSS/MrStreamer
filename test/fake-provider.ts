@@ -2,7 +2,8 @@
 // prefixed names, separator entries, numbers sent as strings and missing logos. It allows one
 // connection at a time by default, like most subscriptions. The category "TEST | Formats and
 // failures" streams the recordings in test/fixtures, one codec combination each, plus an offline
-// channel; every other channel streams an empty MPEG-TS program.
+// channel; every other channel streams an empty MPEG-TS program. About half the channels have a
+// guide id, shared by variants of one channel, and xmltv.php serves their programmes.
 import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Writable } from "node:stream";
@@ -17,6 +18,8 @@ interface FakeChannel {
   readonly offline: boolean;
   /** File in test/fixtures that the channel streams. */
   readonly fixture: string | null;
+  /** The channel's id in the guide, or null. */
+  readonly guideId: string | null;
 }
 
 interface FakeCatalogue {
@@ -53,6 +56,16 @@ export interface FakeProvider {
   serveChannels(select: (all: readonly FakeChannel[]) => readonly FakeChannel[]): void;
   /** Makes catalogue requests answer with this HTTP status, or restores them with null. */
   failCatalogue(status: number | null): void;
+  /**
+   * Replaces what xmltv.php answers: a document, an HTTP status, or "hold" to never answer. By
+   * default it serves `fakeGuide` around the time of each request. `pieceBytes` sends the document
+   * in writes of that size, so tags split across network chunks.
+   */
+  serveGuide(answer: string | number | "hold" | null, options?: { pieceBytes?: number }): void;
+  /** How many times xmltv.php was requested. */
+  guideRequests(): number;
+  /** How many stream requests reached the provider. */
+  streamRequests(): number;
   close(): Promise<void>;
 }
 
@@ -88,10 +101,15 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
   );
   let slots = 0;
   let origin = "";
+  let guideAnswer: string | number | "hold" | null = null;
+  let guidePieceBytes = 0;
+  let guideCount = 0;
+  let streamCount = 0;
 
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", origin);
     if (url.pathname === "/player_api.php") return api(url, response);
+    if (url.pathname === "/xmltv.php") return guide(url, response);
     const live = /^\/live\/([^/]+)\/([^/]+)\/(\d+)\.ts$/.exec(url.pathname);
     if (live) return stream(live[1] ?? "", live[2] ?? "", live[3] ?? "", request, response);
     response.writeHead(404).end();
@@ -144,10 +162,37 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
           stream_icon: channel.hasLogo ? `${origin}/logos/${channel.streamId}.svg` : "",
           category_id: channel.categoryId,
           category_ids: [Number(channel.categoryId)],
+          // Panels send null or "" for channels without a guide.
+          epg_channel_id: channel.guideId ?? (channel.streamId % 2 === 0 ? "" : null),
         })),
       );
     }
     json(response, []);
+  }
+
+  function guide(url: URL, response: ServerResponse): void {
+    guideCount++;
+    if (
+      url.searchParams.get("username") !== username ||
+      url.searchParams.get("password") !== password
+    ) {
+      return void response.writeHead(401).end();
+    }
+    if (guideAnswer === "hold") return;
+    if (typeof guideAnswer === "number") return void response.writeHead(guideAnswer).end();
+    const document = guideAnswer ?? fakeGuide(catalogue, Date.now());
+    response.writeHead(200, { "Content-Type": "application/xml; charset=utf-8" });
+    if (!guidePieceBytes) return void response.end(document);
+    const bytes = Buffer.from(document, "utf8");
+    const size = guidePieceBytes;
+    let offset = 0;
+    const next = () => {
+      if (offset >= bytes.length) return void response.end();
+      response.write(bytes.subarray(offset, offset + size));
+      offset += size;
+      setImmediate(next);
+    };
+    next();
   }
 
   function stream(
@@ -161,6 +206,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     if (decodeURIComponent(user) !== username || decodeURIComponent(pass) !== password) {
       return void response.writeHead(401).end();
     }
+    streamCount++;
     if (!channel || channel.offline) return void response.writeHead(404).end();
     if (slots >= maxConnections) return void response.writeHead(403).end();
 
@@ -193,12 +239,54 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     failCatalogue(status) {
       catalogueFailure = status;
     },
+    serveGuide(answer, options = {}) {
+      guideAnswer = answer;
+      guidePieceBytes = options.pieceBytes ?? 0;
+    },
+    guideRequests: () => guideCount,
+    streamRequests: () => streamCount,
     close: () =>
       new Promise((resolve) => {
         server.closeAllConnections();
         server.close(() => resolve());
       }),
   };
+}
+
+/** Thirty minutes, the length of every fake programme. */
+const SLOT_MS = 30 * 60 * 1000;
+
+/**
+ * An XMLTV document for the catalogue's guide channels: half-hour programmes from two hours before
+ * `around` to a day after it, written with a +02:00 offset as European panels do. Titles repeat per
+ * channel with the slot number, "Earth News 3", and every third has no description.
+ */
+export function fakeGuide(catalogue: FakeCatalogue, around: number): string {
+  const first = Math.floor(around / SLOT_MS) * SLOT_MS - 4 * SLOT_MS;
+  const ids = [...new Set(catalogue.channels.flatMap((channel) => channel.guideId ?? []))];
+  const parts = ['<?xml version="1.0" encoding="utf-8" ?><tv generator-info-name="fake">'];
+  for (const id of ids)
+    parts.push(`<channel id="${id}"><display-name>${id}</display-name></channel>`);
+  for (const [index, id] of ids.entries()) {
+    const word = WORDS[index % WORDS.length] ?? "Earth";
+    for (let slot = 0; slot < 52; slot++) {
+      const start = first + slot * SLOT_MS;
+      const description =
+        slot % 3 === 0 ? "" : `<desc>Episode ${slot} of ${word} &amp; friends.</desc>`;
+      parts.push(
+        `<programme start="${xmltvTime(start)}" stop="${xmltvTime(start + SLOT_MS)}" channel="${id}">` +
+          `<title lang="en">${word} News ${slot}</title>${description}</programme>`,
+      );
+    }
+  }
+  parts.push("</tv>");
+  return parts.join("\n");
+}
+
+/** "20261002140000 +0200" */
+function xmltvTime(time: number): string {
+  const local = new Date(time + 2 * 60 * 60 * 1000).toISOString();
+  return `${local.slice(0, 19).replace(/[-T:]/g, "")} +0200`;
 }
 
 /** Reads a recording from test/fixtures. */
@@ -246,6 +334,8 @@ function buildCatalogue(size: number): FakeCatalogue {
     hasLogo: false,
     offline: test.fixture === null,
     fixture: test.fixture,
+    // The first test channel has a guide, so a packaged app shows programmes on Home.
+    guideId: index === 0 ? "aac.test" : null,
   }));
 
   const groups = REGIONS.flatMap((region) => GENRES.map((genre) => `${region} | ${genre}`));
@@ -263,19 +353,28 @@ function buildCatalogue(size: number): FakeCatalogue {
       hasLogo: false,
       offline: true,
       fixture: null,
+      guideId: null,
     });
     for (let i = 0; i < perGroup && channels.length < size; i++) {
       const style = random();
-      const base = `${pick(WORDS)}${pick(SUFFIXES)}${pick(QUALITY)}`.toUpperCase();
+      const word = pick(WORDS);
+      const suffix = pick(SUFFIXES);
+      const base = `${word}${suffix}${pick(QUALITY)}`.toUpperCase();
       const name = style < 0.4 ? `${region}: ${base}` : style < 0.6 ? `${region} | ${base}` : base;
+      const streamId = 2000 + channels.length;
       channels.push({
-        streamId: 2000 + channels.length,
+        streamId,
         num: channels.length + 1,
         name,
         categoryId,
         hasLogo: random() < 0.7,
         offline: false,
         fixture: null,
+        // Quality variants of one channel share its guide id, as on real panels.
+        guideId:
+          streamId % 2 === 0
+            ? `${word}${suffix}.${region}`.replaceAll(" ", "").toLowerCase()
+            : null,
       });
     }
   }

@@ -31,7 +31,7 @@ export function ConnectScreen({ existing }: { existing: SubscriptionSummary | nu
         existing?.server === connected.server && existing.username === connected.username;
       if (!sameAccount) {
         player.reset();
-        useUi.setState({ categoryId: null, guideDepth: 0 });
+        useUi.setState({ list: { kind: "all" }, view: "home", watching: false });
       }
       useUi.setState({ editingLogin: false });
       await client.resetQueries();

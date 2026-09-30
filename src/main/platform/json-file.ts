@@ -44,7 +44,7 @@ export async function writeJsonFile(path: string, value: unknown): Promise<void>
 /** Deletes what writes interrupted by a crash or power loss left behind in `dir`. */
 export async function removeUnfinishedWrites(dir: string): Promise<void> {
   const names = await readdir(dir).catch(() => []);
-  const unfinished = names.filter((name) => /\.json\.[0-9a-f-]{36}\.tmp$/.test(name));
+  const unfinished = names.filter((name) => /\.(json|xml)\.[0-9a-f-]{36}\.tmp$/.test(name));
   await Promise.all(unfinished.map((name) => rm(join(dir, name), { force: true })));
 }
 

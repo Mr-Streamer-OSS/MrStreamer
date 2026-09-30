@@ -3,17 +3,18 @@
 An Electron app. The main process owns everything that touches the network, the disk and the system; the renderer shows state and starts actions over a typed IPC contract.
 
 ```
-src/shared     Contracts between the UI and the main process: IPC schemas, library model, errors,
-               versions, updates
+src/shared     Contracts between the UI and the main process: IPC schemas, library model, guide,
+               errors, versions, updates
 src/main       Electron main process
   providers    Provider adapters that report a catalogue as the provider sends it (Xtream Codes)
   catalogue    Display names and region grouping, the same rules for every provider
-  services     Subscription, live library, playback proxy, preferences, updates
+  services     Subscription, live library, programme guide, playback proxy, preferences, updates
+  guide        Reading XMLTV as it streams in
   playback     Stream inspection, the clean start and ffmpeg conversion behind the proxy
   updates      Reading the release list and picking the release to install
   platform     Keychain-backed secrets, atomic JSON files, the electron-updater installer
 src/preload    The typed bridge exposed to the UI
-src/renderer   React UI; player/ holds the playback engines and the player controller
+src/renderer   React UI; player/ holds the playback engines, the player controller and Picture
 scripts        Builds, signing and release helpers
 test           Vitest suites, the fake provider, codec clips and the packaged-app smoke test
 ```
@@ -22,18 +23,40 @@ test           Vitest suites, the fake provider, codec clips and the packaged-ap
 
 ## Data
 
-Everything lives in Electron's `userData` folder, named after the product, not the app id: see the [user troubleshooting page](../user/troubleshooting.md#where-your-data-is). Each file is written atomically; leftovers of an interrupted write are removed at startup. Changes to these files must stay readable by the newest stable release: choosing Stable on a nightly installs that release over the nightly, and it reads what the nightly wrote.
+Everything lives in Electron's `userData` folder, named after the product, not the app id: see the [user troubleshooting page](../user/troubleshooting.md#where-your-data-is). Each file is written atomically; leftovers of an interrupted write are removed at startup. Changes to these files must stay readable by the newest stable release: choosing Stable on a nightly installs that release over the nightly, and it reads what the nightly wrote. Add fields rather than change a file's version: older readers ignore keys they don't know and keep them when they write.
 
-| File                | Owner                                                                   |
-| ------------------- | ----------------------------------------------------------------------- |
-| `subscription.json` | `services/subscription.ts`; the password is sealed with `safeStorage`   |
-| `preferences.json`  | `services/preferences.ts`: volume, last channel and category, history   |
-| `catalogue.json`    | `services/library.ts`: the last good catalogue, as the provider sent it |
-| `updates.json`      | `services/updates.ts`: the chosen channel                               |
+| File                | Owner                                                                                      |
+| ------------------- | ------------------------------------------------------------------------------------------ |
+| `subscription.json` | `services/subscription.ts`; the password is sealed with `safeStorage`                      |
+| `preferences.json`  | `services/preferences.ts`: volume, last channel and category, history, favourites          |
+| `catalogue.json`    | `services/library.ts`: the last good catalogue, as the provider sent it                    |
+| `guide.xml`         | `services/guide.ts`: the last complete XMLTV download, as it arrived                       |
+| `guide.json`        | `services/guide.ts`: which subscription `guide.xml` belongs to, and when it was downloaded |
+| `updates.json`      | `services/updates.ts`: the chosen channel                                                  |
 
 ## Catalogue
 
-The library fetches categories and channels, indexes them in memory and caches the provider's raw answer; display names are worked out on load, so naming rules improve without a refetch. A refresh replaces the catalogue only when it looks complete: an empty answer never does, and one with less than half the channels only when a second fetch agrees. A failed refresh keeps the catalogue and reports the failure in the status. Preferences refer to provider ids, so renamed or reordered channels keep their history.
+The library fetches categories and channels, indexes them in memory and caches the provider's raw answer; display names are worked out on load, so naming rules improve without a refetch. A refresh replaces the catalogue only when it looks complete: an empty answer never does, and one with less than half the channels only when a second fetch agrees. A failed refresh keeps the catalogue and reports the failure in the status. Preferences refer to provider ids, so renamed or reordered channels keep their history and favourites.
+
+Each channel keeps the provider's guide id (`epg_channel_id` on Xtream panels). Quality variants of one channel usually share it. A cache saved before guide ids existed still loads, and counts as due for a refresh at the next start.
+
+## Programme guide
+
+`services/guide.ts` downloads the provider's XMLTV (`xmltv.php` on Xtream panels) and keeps it separate from the catalogue and playback: listings are empty until a guide loads, and nothing waits for one. `guide/xmltv.ts` reads the document as it arrives, from the network or from `guide.xml` after a restart. It searches the bytes and decodes one programme at a time, so the strings it keeps don't hold on to the chunks they came in. Programmes that already ended are dropped; a programme without an end runs until the next one, and overlaps are cut. Titles are folded for search as they arrive, and the last step yields to the event loop every 50 channels.
+
+A download replaces the guide only when it completes and lists programmes; otherwise the last guide stays. The main process downloads after connecting a subscription, at startup, and whenever a 15-minute check finds the guide more than six hours old. Switching accounts clears it.
+
+The UI asks `guide.listings` for now and next per channel, `guide.schedule` for one channel's day and `guide.search` for programme titles. Lists ask for listings in pages of 40 as rows come into view, and again each minute. `scripts/measure-guide.ts` measures download, indexing, stalls, lookups and memory against the slice 03 budgets.
+
+## Views and the picture
+
+The window shows a page, Home or the Live TV guide, and Watch opens over it. The page stays laid out underneath, hidden, so leaving Watch finds it scrolled where it was.
+
+There is one `<video>` element, created by the player controller (`player/player.ts`). Home's backdrop, the guide's preview and Watch each render a `Picture` (`player/Picture.tsx`); the active one holds the element, moved with `moveBefore` so it keeps playing. Moving between views never reopens the stream or opens a second provider connection. The packaged-app test checks this through the fake provider's stream count.
+
+Sound follows the view: Watch plays at the viewer's volume, and pages keep the stream muted unless the speaker is pressed (`audible` in the player state). Pages start a muted preview of the last channel. A preview never reconnects after a failure, so a connection another device holds isn't fought over, and it stops while the window is hidden and restarts when it shows. Stop in Watch keeps previews from starting it again.
+
+Lists keep one keyboard selection, separate from the pointer. Only the keyboard moves it or scrolls a list to it; the pointer only hovers, and the selection shows only while the keyboard was used last (`lib/input-mode.ts`). Wheel and trackpad gestures only scroll. Key handlers register once and read the current render through a ref: a handler registered again on every render can miss a key, because a state change in another keydown listener renders between listeners.
 
 ## Playback
 

@@ -1,3 +1,5 @@
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createLibrary } from "../src/main/services/library.ts";
 import { createSubscriptions } from "../src/main/services/subscription.ts";
@@ -15,7 +17,7 @@ async function connectedLibrary(channels = 300) {
   const onUpdated = vi.fn();
   const create = () =>
     createLibrary({ dataDir, source: subscriptions.source, onUpdated, confirmDelayMs: 0 });
-  return { provider, subscriptions, onUpdated, create, library: create() };
+  return { provider, subscriptions, onUpdated, create, dataDir, library: create() };
 }
 
 describe("live library", () => {
@@ -93,6 +95,25 @@ describe("live library", () => {
 
     expect(await restarted.channels({})).toEqual(before);
     expect((await restarted.status()).channelCount).toBe(before.length);
+  });
+
+  it("keeps a catalogue saved before guide ids, and counts it as due for a refresh", async () => {
+    const { provider, library, create, dataDir } = await connectedLibrary();
+    await library.refresh();
+    const path = join(dataDir, "catalogue.json");
+    const saved = JSON.parse(await readFile(path, "utf8"));
+    // What a version without guide ids wrote: the same file, without the key.
+    await writeFile(
+      path,
+      JSON.stringify(saved, (key, value) => (key === "guideId" ? undefined : value)),
+    );
+    provider.failCatalogue(500);
+
+    const restarted = create();
+
+    expect(await restarted.channels({})).toEqual(await library.channels({}));
+    expect(await restarted.isStale(60 * 60 * 1000)).toBe(true);
+    expect(await library.isStale(60 * 60 * 1000)).toBe(false);
   });
 
   it("keeps the last catalogue when a refresh fails", async () => {

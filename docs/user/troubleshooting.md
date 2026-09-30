@@ -10,7 +10,7 @@ Mr. Streamer keeps everything on your computer, in one folder:
 | Windows | `%APPDATA%\Mr. Streamer`                     |
 | Linux   | `~/.config/Mr. Streamer`                     |
 
-It holds your subscription with its encrypted password, your preferences and watch history, and a copy of your channel list. Uninstalling leaves the folder in place, so a reinstall picks up where you left off. Delete the folder to remove everything.
+It holds your subscription with its encrypted password, your preferences, favourites and watch history, and copies of your channel list and programme guide. Uninstalling leaves the folder in place, so a reinstall picks up where you left off. Delete the folder to remove everything.
 
 Your password is encrypted with a key your system keeps: the macOS Keychain, Windows' user encryption, or the desktop keyring on Linux.
 
@@ -32,6 +32,7 @@ The Windows installer isn't code-signed yet, so SmartScreen shows "Windows prote
 ## Channels or login stop working
 
 - **"The provider rejected this username or password":** check the login with your provider, then choose **Edit login** in Settings.
+- **No programme information for a channel:** your provider's guide doesn't cover it. Many providers cover only some channels. When a guide download fails, the last guide stays in use and Mr. Streamer tries again later.
 - **"Channels unavailable":** the provider didn't send the channel list. **Try again**, or check your internet connection. When a refresh fails, Mr. Streamer keeps showing the last channel list it received, and Settings says why the list may be out of date.
 
 ## Still stuck

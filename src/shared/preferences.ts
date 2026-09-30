@@ -11,6 +11,8 @@ export const Preferences = type({
   lastCategoryId: "string | null",
   /** Most recent first. Files written before this field existed read as an empty list. */
   recentChannelIds: ["string[]", "=", () => []],
+  /** In the order they were added. */
+  favouriteChannelIds: ["string[]", "=", () => []],
 });
 export type Preferences = typeof Preferences.infer;
 
@@ -20,4 +22,5 @@ export const defaultPreferences: Preferences = {
   lastChannelId: null,
   lastCategoryId: null,
   recentChannelIds: [],
+  favouriteChannelIds: [],
 };

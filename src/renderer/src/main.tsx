@@ -3,13 +3,14 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App.tsx";
 import { TooltipProvider } from "./components/ui/tooltip.tsx";
-import { syncLibraryUpdates, syncUpdates } from "./lib/queries.ts";
+import { syncGuideUpdates, syncLibraryUpdates, syncUpdates } from "./lib/queries.ts";
 import "./styles.css";
 
 const client = new QueryClient({
   defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
 });
 syncLibraryUpdates(client);
+syncGuideUpdates(client);
 syncUpdates(client);
 
 const root = document.getElementById("root");

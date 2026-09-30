@@ -29,6 +29,27 @@ export function createPreferences(dataDir: string) {
       return change((previous) => ({ ...previous, ...patch }));
     },
 
+    /** Forgets what was watched and starred, for when the subscription changes or goes. */
+    forget(): Promise<Preferences> {
+      return change((previous) => ({
+        ...previous,
+        lastChannelId: null,
+        lastCategoryId: null,
+        recentChannelIds: [],
+        favouriteChannelIds: [],
+      }));
+    },
+
+    /** Adds a channel to the end of the favourites, or takes it out. */
+    toggleFavourite(channelId: string): Promise<Preferences> {
+      return change((previous) => ({
+        ...previous,
+        favouriteChannelIds: previous.favouriteChannelIds.includes(channelId)
+          ? previous.favouriteChannelIds.filter((id) => id !== channelId)
+          : [...previous.favouriteChannelIds, channelId],
+      }));
+    },
+
     /** Makes a channel the last watched one and moves it to the front of the recent list. */
     recordWatch(channelId: string): Promise<Preferences> {
       return change((previous) => ({

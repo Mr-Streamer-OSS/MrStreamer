@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import {
   ChevronDown,
   ChevronUp,
@@ -6,14 +7,18 @@ import {
   Minimize,
   Play,
   Square,
+  Star,
   Undo2,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Category, LiveChannel } from "../../../../shared/library.ts";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
+import { Progress } from "../../components/Progress.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { Tooltip } from "../../components/ui/tooltip.tsx";
-import { channelLine, techLine } from "../../lib/format.ts";
+import { useNow } from "../../lib/clock.ts";
+import { channelLine, clockTime, progressOf, techLine, timeLeft } from "../../lib/format.ts";
+import { queries, useFavouriteIds, useToggleFavourite } from "../../lib/queries.ts";
 import { cn } from "../../lib/utils.ts";
 import { player, usePlayer } from "../../player/player.ts";
 import { VolumeControl } from "./VolumeControl.tsx";
@@ -23,13 +28,12 @@ interface NowPlayingProps {
   categories: ReadonlyMap<string, Category>;
   fullscreen: boolean;
   onToggleFullscreen: () => void;
-  onOpenGuide: () => void;
-  onWatch: () => void;
-  /** Switches to the channel above (-1) or below (1) in the current category. */
+  onOpenChannels: () => void;
+  /** Switches to the channel above (-1) or below (1) in the current list. */
   onSwitch: (direction: -1 | 1) => void;
 }
 
-/** Channel details and playback controls along the bottom of the picture. Fades out when idle. */
+/** What's on and the playback controls along the bottom of the picture. Fades out when idle. */
 export function NowPlayingBar({ visible, ...props }: NowPlayingProps & { visible: boolean }) {
   return (
     <div
@@ -39,68 +43,58 @@ export function NowPlayingBar({ visible, ...props }: NowPlayingProps & { visible
       )}
     >
       <Details {...props} />
-      <Controls {...props} className="ml-auto" />
+      <Controls {...props} />
     </div>
   );
 }
 
-/** The same details and controls, standing in the bar beside the picture on wide windows. */
-export function NowPlayingPanel({ width, ...props }: NowPlayingProps & { width: number }) {
-  return (
-    <aside
-      className="no-drag absolute inset-y-0 right-0 z-10 flex flex-col justify-center gap-8 px-10"
-      style={{ width }}
-    >
-      <Details {...props} large />
-      <div className="flex flex-col items-start gap-4">
-        <Controls {...props} volume={false} className="flex-wrap" />
-        <VolumeControl />
-      </div>
-    </aside>
-  );
-}
-
-function Details({ channel, categories, large = false }: NowPlayingProps & { large?: boolean }) {
+/** Programme first: its title, time left and what's next. The channel stands in without a guide. */
+function Details({ channel, categories }: NowPlayingProps) {
   const playing = usePlayer(
     (state) => state.phase.kind === "playing" && state.channel?.id === channel.id,
   );
+  const listing = useQuery(queries.listings([channel.id])).data?.[channel.id];
+  const now = useNow();
   const tech = useTechLine(playing);
-  const extra = [...channel.tags, tech].filter(Boolean).join(" · ");
+  const current = listing?.now ?? null;
+  const next = listing?.next ?? null;
+  const line = current
+    ? [channel.title, `Until ${clockTime(current.stop, now)}`, timeLeft(current, now)]
+    : [channelLine(channel, categories), ...channel.tags];
   return (
-    <div className={cn("flex min-w-0 gap-5", large ? "flex-col items-start" : "items-center")}>
-      <ChannelLogo channel={channel} className={large ? "h-16 w-24" : "h-12 w-18"} />
+    <div className="flex min-w-0 items-center gap-5">
+      <ChannelLogo channel={channel} className="h-12 w-18" />
       <div className="min-w-0">
-        <div className="truncate text-sm text-muted-foreground">
-          {channelLine(channel, categories)}
-          {playing && <span className="text-white"> · Live</span>}
+        <div className="truncate text-3xl font-semibold tracking-tight">
+          {current?.title ?? channel.title}
         </div>
-        <div
-          className={cn(
-            "truncate font-semibold tracking-tight",
-            large ? "mt-1 text-4xl" : "text-3xl",
-          )}
-        >
-          {channel.title}
+        <div className="mt-1 truncate text-sm text-foreground/85">
+          {[...line, tech].filter(Boolean).join(" · ")}
         </div>
-        {extra && <div className="mt-1.5 truncate text-xs text-muted-foreground">{extra}</div>}
+        {current && <Progress value={progressOf(current, now)} className="mt-2 w-64" />}
+        {next && (
+          <div className="mt-1.5 truncate text-sm text-muted-foreground">
+            {clockTime(next.start, now)} {next.title}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 function Controls({
+  channel,
   fullscreen,
   onToggleFullscreen,
-  onOpenGuide,
-  onWatch,
+  onOpenChannels,
   onSwitch,
-  className,
-  volume = true,
-}: NowPlayingProps & { className?: string; volume?: boolean }) {
+}: NowPlayingProps) {
   const active = usePlayer((state) => state.phase.kind !== "idle" && state.phase.kind !== "failed");
   const previous = usePlayer((state) => state.previous);
+  const favourite = useFavouriteIds().has(channel.id);
+  const toggleFavourite = useToggleFavourite();
   return (
-    <div className={cn("flex items-center gap-3", className)}>
+    <div className="ml-auto flex flex-none items-center gap-3">
       <div className="flex items-center gap-1.5">
         <Tooltip label="Channel up">
           <Button variant="media" size="icon" aria-label="Channel up" onClick={() => onSwitch(-1)}>
@@ -125,8 +119,19 @@ function Controls({
         </Tooltip>
       </div>
       <Tooltip label="Channels">
-        <Button variant="media" size="icon" aria-label="Channels" onClick={onOpenGuide}>
+        <Button variant="media" size="icon" aria-label="Channels" onClick={onOpenChannels}>
           <List />
+        </Button>
+      </Tooltip>
+      <Tooltip label={favourite ? "Remove from favourites" : "Add to favourites"}>
+        <Button
+          variant="media"
+          size="icon"
+          aria-label={favourite ? "Remove from favourites" : "Add to favourites"}
+          aria-pressed={favourite}
+          onClick={() => toggleFavourite(channel.id)}
+        >
+          <Star className={cn(favourite && "fill-current")} />
         </Button>
       </Tooltip>
       {active ? (
@@ -137,12 +142,17 @@ function Controls({
         </Tooltip>
       ) : (
         <Tooltip label="Watch">
-          <Button variant="primary" size="icon" aria-label="Watch" onClick={onWatch}>
+          <Button
+            variant="primary"
+            size="icon"
+            aria-label="Watch"
+            onClick={() => player.play(channel)}
+          >
             <Play className="size-4 translate-x-px fill-current" />
           </Button>
         </Tooltip>
       )}
-      {volume && <VolumeControl />}
+      <VolumeControl />
       <Tooltip label={fullscreen ? "Exit full screen" : "Full screen"}>
         <Button variant="media" size="icon" aria-label="Full screen" onClick={onToggleFullscreen}>
           {fullscreen ? <Minimize /> : <Maximize />}

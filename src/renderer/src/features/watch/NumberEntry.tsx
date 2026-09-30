@@ -3,8 +3,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { create } from "zustand";
+import type { LiveChannel } from "../../../../shared/library.ts";
 import { queries } from "../../lib/queries.ts";
-import { player } from "../../player/player.ts";
 
 /** How long the entry waits for another digit before it tunes. */
 const COMMIT_MS = 1200;
@@ -36,11 +36,15 @@ export const numberEntry = {
   },
 };
 
-export function NumberEntry() {
+/** Shows the typed number and hands over the channel it names, once typing stops. */
+export function NumberEntry({ onChannel }: { onChannel: (channel: LiveChannel) => void }) {
   const digits = useDigits((state) => state.digits);
   const committing = useDigits((state) => state.committing);
   const all = useQuery({ ...queries.channels(null), enabled: digits.length > 0 });
   const match = digits ? all.data?.find((channel) => channel.number === Number(digits)) : undefined;
+
+  // Digits typed in one view don't carry into the next.
+  useEffect(() => () => numberEntry.cancel(), []);
 
   useEffect(() => {
     if (!digits) return;
@@ -50,13 +54,13 @@ export function NumberEntry() {
 
   useEffect(() => {
     if (!committing || !all.data) return;
-    if (match) player.play(match);
+    if (match) onChannel(match);
     numberEntry.cancel();
-  }, [committing, match, all.data]);
+  }, [committing, match, all.data, onChannel]);
 
   if (!digits) return null;
   return (
-    <div className="pointer-events-none absolute top-12 right-12 z-40 min-w-[9rem] rounded-3xl bg-black/80 px-6 py-4 text-right ring-1 ring-white/10">
+    <div className="pointer-events-none fixed top-12 right-12 z-40 min-w-[9rem] rounded-3xl bg-black/80 px-6 py-4 text-right ring-1 ring-white/10">
       <div className="text-5xl font-semibold tracking-tight tabular-nums">{digits}</div>
       <div className="mt-1 max-w-[16rem] truncate text-sm text-muted-foreground">
         {match ? match.title : all.data ? "No channel" : ""}
