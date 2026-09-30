@@ -106,7 +106,10 @@ export function discovery(options: DiscoveryOptions): (signal: AbortSignal) => P
         const version = entry && parseVersion(entry.version);
         if (!entry || !version || !entry.platforms.includes(options.metadataFile)) return [];
         // Unreadable, like a broken feed, so the check asks GitHub instead.
-        if (!entry.files.startsWith(filesFrom)) throw new Error(`Files from ${entry.files}.`);
+        // Resolved first, so dot segments can't climb out of the folder.
+        if (!new URL(entry.files).href.startsWith(filesFrom)) {
+          throw new Error(`Files from ${entry.files}.`);
+        }
         return [{ version, feedUrl: entry.files, notes: entry.notes || null, page: entry.page }];
       });
     });

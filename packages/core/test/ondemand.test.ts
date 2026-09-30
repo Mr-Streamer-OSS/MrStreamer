@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { jsonRows } from "../src/json-rows.ts";
 import { episodeName, titleName } from "../src/ondemand/names.ts";
-import { isFinished } from "../src/viewing/finished.ts";
-import { continueWatching, type TitleRow } from "../src/viewing/titles.ts";
+import { continueWatching, isFinished, type TitleRow } from "../src/viewing/titles.ts";
 
 describe("title names", () => {
   it.each([

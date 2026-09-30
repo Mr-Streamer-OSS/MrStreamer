@@ -53,7 +53,7 @@ Findings from reviewing the foundation, each reproduced or read in the code befo
 
 The pre-PR audit of this branch, four reviewers by area, found and this slice fixed:
 
-- A title run that broke off partway, the provider dropping the connection and then refusing it, played out as the end of the title and marked it watched. Reproduced in Electron with a 36-minute file: after the break the old build showed Finished at 2 minutes. Now the player reconnects; in that test the provider refused again, the app said so, and the position was kept.
+- A title run that broke off partway, the provider dropping the connection and then refusing it, played out as the end of the title and marked it watched. Reproduced in Electron with a 36-minute file: after the break the old build showed Finished at 2 minutes. Now the proxy, which saw the provider break off, ends the run as broken and the player reconnects; in that test the provider refused again, and the app said so without marking the movie watched. A first fix guessed from the title's length, and a second review showed it could fail the real end of files whose streams stop short of their stated length.
 - A cut-off or non-JSON movie or series list could replace the cached one with an empty or partial list. Such answers now fail the refresh, and an empty list never replaces one that had titles.
 - A late automatic check could turn a download in progress or ready back into "available".
 - Continue watching showed titles for adults, cut the list before dropping series that had run out, and the Series list kept them. A chosen audio or subtitle language didn't reach the next title. A series' details opened on season 1 before its progress loaded.

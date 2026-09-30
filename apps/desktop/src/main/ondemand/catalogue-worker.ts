@@ -73,6 +73,9 @@ function remember(key: string, fetchedAt: number, catalogue: OnDemandCatalogue):
   return loaded;
 }
 
+/** Lists that came back empty once, by subscription: a second time in a row, they count. */
+const emptyBefore = new Set<string>();
+
 /** The cache file being read, so the calls a start sends together read it once. */
 let reading: { readonly key: string; readonly done: Promise<Loaded | null> } | null = null;
 
@@ -117,17 +120,23 @@ async function refresh(args: WorkerCalls["refresh"]["args"]): Promise<WorkerStat
     const provider = xtreamProvider(args.account, { userAgent: setup.userAgent });
     const catalogue = await provider.onDemandCatalogue(abort.signal);
     const before = await current(args.key);
-    // An empty list never replaces one that had titles: panels answer an overloaded request
-    // with an empty list, and one list can fail while the other arrives.
+    // An empty list doesn't replace one that had titles, unless it comes twice in a row, as for
+    // channels: panels answer an overloaded request with an empty list, and one list can fail
+    // while the other arrives.
     for (const list of ["movies", "series"] as const) {
-      if (catalogue[list].length === 0 && (before?.[list] ?? 0) > 0) {
-        throw new AppFailure({
-          kind: "incomplete-catalogue",
-          received: 0,
-          previous: before?.[list] ?? 0,
-          list,
-        });
+      const mark = `${args.key}:${list}`;
+      const lost = catalogue[list].length === 0 && (before?.[list] ?? 0) > 0;
+      if (!lost || emptyBefore.has(mark)) {
+        emptyBefore.delete(mark);
+        continue;
       }
+      emptyBefore.add(mark);
+      throw new AppFailure({
+        kind: "incomplete-catalogue",
+        received: 0,
+        previous: before?.[list] ?? 0,
+        list,
+      });
     }
     if (abort.signal.aborted) throw new AppFailure({ kind: "unexpected", detail: "Stopped." });
     const fetchedAt = Date.now();
@@ -169,6 +178,7 @@ const handlers: {
     refreshing = null;
     reading = null;
     loaded = null;
+    emptyBefore.clear();
     await removeFile(setup.cachePath);
     return null;
   },

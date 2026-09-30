@@ -25,8 +25,8 @@ export type AppError =
   /** A movie or episode couldn't be opened: the provider refused its file, or it can't play. */
   | { readonly kind: "stream"; readonly failure: StreamFailure }
   /**
-   * The provider sent no channels, or far fewer than before and not twice in a row; or no movies
-   * or no series, where it had some. The previous list stays.
+   * The provider sent no channels, or far fewer than before; or no movies or no series, where it
+   * had some. Not twice in a row: the second time counts. The previous list stays.
    */
   | {
       readonly kind: "incomplete-catalogue";

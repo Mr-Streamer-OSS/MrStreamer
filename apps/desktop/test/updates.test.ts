@@ -669,23 +669,28 @@ describe("finding releases", () => {
   });
 
   it("asks GitHub when the feed sends downloads anywhere but the repository's releases", async () => {
-    const { fetchImpl, requests } = sources({
-      feed: () =>
-        json({
-          schema: 1,
-          generated: "2026-10-01T10:00:00Z",
-          stable: { ...feedEntry("0.2.1"), files: "https://files.example.test/v0.2.1" },
-          nightly: null,
-        }),
-      page: () => json([githubRelease("v0.2.0")]),
-    });
+    for (const files of [
+      "https://files.example.test/v0.2.1",
+      "https://github.com/owner/app/releases/download/../../../../other/app/releases/download/v0.2.1",
+    ]) {
+      const { fetchImpl, requests } = sources({
+        feed: () =>
+          json({
+            schema: 1,
+            generated: "2026-10-01T10:00:00Z",
+            stable: { ...feedEntry("0.2.1"), files },
+            nightly: null,
+          }),
+        page: () => json([githubRelease("v0.2.0")]),
+      });
 
-    const found = await find(fetchImpl)(new AbortController().signal);
+      const found = await find(fetchImpl)(new AbortController().signal);
 
-    expect(found.map((each) => each.feedUrl)).toEqual([
-      "https://github.example.test/releases/download/v0.2.0",
-    ]);
-    expect(requests).toContain(`${API}/repos/owner/app/releases?per_page=100`);
+      expect(found.map((each) => each.feedUrl)).toEqual([
+        "https://github.example.test/releases/download/v0.2.0",
+      ]);
+      expect(requests).toContain(`${API}/repos/owner/app/releases?per_page=100`);
+    }
   });
 
   it("doesn't ask GitHub when offline", async () => {

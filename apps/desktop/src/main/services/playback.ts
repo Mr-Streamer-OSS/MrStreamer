@@ -395,7 +395,13 @@ function make(deps: PlaybackDeps) {
         return;
       }
       const body = Readable.from(upstream.body);
-      body.on("error", () => response.destroy());
+      body.on("error", () => {
+        // The provider broke off; ffmpeg may still end its run as if the file had.
+        if (!signal.aborted) {
+          session.failure ??= { kind: "network", detail: "The provider's file broke off." };
+        }
+        response.destroy();
+      });
       signal.addEventListener("abort", () => body.destroy(), { once: true });
       body.pipe(response);
     }
@@ -533,7 +539,8 @@ function make(deps: PlaybackDeps) {
       report("ok");
       void exited.then((code) => {
         signal.removeEventListener("abort", stop);
-        if (code === 0 && !signal.aborted) {
+        // ffmpeg exits cleanly after its input broke off too; the source knows better.
+        if (code === 0 && !signal.aborted && !session.failure) {
           response.end();
           return;
         }

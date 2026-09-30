@@ -7,7 +7,6 @@
 // Reading holds back once enough is buffered ahead. While paused nothing more is read, and the
 // provider's connection sits idle until playback moves on; the controller ends the run after a
 // long pause.
-import { isFinished } from "@mrstreamer/core/viewing/finished";
 import type { EngineError, StreamInfo } from "./engine.ts";
 import { readMp4Start } from "./mp4.ts";
 import { webvttReader } from "./webvtt.ts";
@@ -16,6 +15,8 @@ import { webvttReader } from "./webvtt.ts";
 const AHEAD_S = { stop: 60, resume: 40 } as const;
 /** No picture within this long counts as a failed start. */
 const START_TIMEOUT_MS = 30_000;
+/** How long a run may send nothing at all. */
+const NOTHING_TIMEOUT_MS = 45_000;
 /** A clock that stands still this long while playing, with nothing buffered, counts as broken. */
 const STALL_TIMEOUT_MS = 20_000;
 /** The start of a run is read into memory until its codecs are known; more is not a movie. */
@@ -100,9 +101,10 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
   const openedAt = Date.now();
   const watchdog = setInterval(() => {
     const now = Date.now();
-    // Nothing to show yet: the provider answered and then stalled, paused or not.
-    if (from === null && now - openedAt > START_TIMEOUT_MS) {
-      fail({ kind: "network", detail: `No picture within ${START_TIMEOUT_MS / 1000} s.` });
+    // Nothing to show yet, paused or not: the provider answered and then stalled. Later than
+    // the proxy's own wait for a run's start, whose answer says more.
+    if (from === null && now - openedAt > NOTHING_TIMEOUT_MS) {
+      fail({ kind: "network", detail: `No picture within ${NOTHING_TIMEOUT_MS / 1000} s.` });
       return;
     }
     if (video.paused || video.seeking || video.currentTime > lastTime + 0.05) {
@@ -266,13 +268,6 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
       const { value, done } = await reader.read();
       if (done) break;
       await append(buffer, value);
-    }
-    // A run that stops before the title's closing stretch broke off, however cleanly it ended,
-    // and must not play out as the end of the title.
-    const ranges = buffer.buffered;
-    const end = ranges.length > 0 ? ranges.end(ranges.length - 1) : run.start;
-    if (run.duration && !isFinished(end, run.duration)) {
-      throw { kind: "network", detail: "The title stopped arriving." } satisfies EngineError;
     }
     if (mediaSource.readyState === "open" && !buffer.updating) mediaSource.endOfStream();
   }

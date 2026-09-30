@@ -1,17 +1,27 @@
-// How far movies and episodes got, as rules without storage: what a checkpoint changes and what
-// Continue watching shows; finished.ts says when a title counts as finished. The viewing store
-// keeps one row per title and account and runs these on it.
+// How far movies and episodes got, as rules without storage: what a checkpoint changes, when a
+// title counts as finished, and what Continue watching shows. The viewing store keeps one row per
+// title and account and runs these on it.
 import { titleKey, type TitleRef } from "@mrstreamer/contracts/ondemand";
 import { CONTINUE_LIMIT, type TitleProgress } from "@mrstreamer/contracts/viewing";
-import { isFinished } from "./finished.ts";
 
 /** A title counts as started, and shows in Continue watching, after this many seconds. */
 export const STARTED_SECONDS = 120;
+
+/** The share at the end that counts as the credits: watching into it finishes the title. */
+const CREDITS_SHARE = 0.05;
+/** Short titles still leave this much at the end. */
+const MIN_CREDITS_SECONDS = 30;
 
 /** What the store keeps per title and account. */
 export interface TitleRow extends TitleProgress {
   /** Taken out of Continue watching; playing it again brings it back. */
   readonly hidden: boolean;
+}
+
+/** Whether a position is in the credits, or past the end. */
+export function isFinished(position: number, duration: number): boolean {
+  const credits = Math.max(duration * CREDITS_SHARE, MIN_CREDITS_SECONDS);
+  return duration > 0 && position >= duration - credits;
 }
 
 /** The row after a checkpoint at `position`. Playing a title again shows it again. */
