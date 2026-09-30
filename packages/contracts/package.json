@@ -1,0 +1,13 @@
+{
+  "name": "@mrstreamer/contracts",
+  "private": true,
+  "type": "module",
+  "description": "The shapes the desktop app and its services share: IPC, library, guide, errors, versions.",
+  "license": "GPL-3.0-only",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "arktype": "2.2.5"
+  }
+}

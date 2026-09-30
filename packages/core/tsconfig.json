@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // No DOM: the rules here run without a browser. Node types stay for Buffer and fetch.
+    "lib": ["ES2024"],
+    "types": ["node"]
+  },
+  "include": ["src", "test"]
+}

@@ -1,6 +1,52 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["import"],
   "rules": {
-    "unicorn/no-useless-spread": "off"
-  }
+    "unicorn/no-useless-spread": "off",
+    "import/no-cycle": "error"
+  },
+  "overrides": [
+    {
+      "files": ["packages/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "electron",
+                "message": "Packages run without Electron: pass a capability in."
+              },
+              { "name": "react", "message": "Packages run without React." },
+              { "name": "react-dom", "message": "Packages run without the DOM." },
+              { "name": "mrstreamer", "message": "Packages don't depend on the app." }
+            ],
+            "patterns": [
+              { "group": ["**/apps/**"], "message": "Packages don't depend on the app." }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["packages/contracts/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              { "name": "electron", "message": "Contracts are plain data." },
+              { "name": "react", "message": "Contracts are plain data." }
+            ],
+            "patterns": [
+              {
+                "group": ["@mrstreamer/core", "@mrstreamer/core/*", "**/apps/**", "**/core/**"],
+                "message": "Contracts depend on nothing else in the workspace."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
 }

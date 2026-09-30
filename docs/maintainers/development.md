@@ -10,8 +10,10 @@ pnpm lint         # oxlint
 pnpm fmt:check    # Prettier
 pnpm typecheck    # main, preload and shared code, then the renderer
 pnpm test         # Vitest
-pnpm build        # production bundles in out/
+pnpm build        # production bundles in apps/desktop/out/
 ```
+
+The repository is a pnpm workspace: the app is `apps/desktop`, shared contracts and rules are in `packages/`; [architecture](architecture.md) shows the layout. The scripts above run from the root. If `pnpm dev` reports that Electron failed to install, as a fresh install from pnpm's store can leave it, run `node node_modules/electron/install.js`.
 
 ## Running the app
 
@@ -31,15 +33,15 @@ Environment variables for testing:
 Each installer builds on its own system; the [release workflow](releasing.md) builds all of them. The bundled ffmpeg comes first:
 
 ```sh
-scripts/build-ffmpeg.sh mac-arm64   # or linux-x64, win-x64
-pnpm dist:mac                       # or dist:win, dist:linux
+apps/desktop/scripts/build-ffmpeg.sh mac-arm64   # or linux-x64, win-x64
+pnpm dist:mac                                    # or dist:win, dist:linux; installers land in apps/desktop/dist
 ```
 
-`scripts/build-ffmpeg.sh` needs a C compiler, make, nasm, pkg-config, git and curl. On Windows, run it in an MSYS2 MINGW64 shell; on Linux it can also cross-compile the Windows build with mingw-w64. It puts the binary and its licences in `vendor/ffmpeg/<target>`, which electron-builder copies into the app. Without it, the app still builds, and streams that need converting report that they can't be played.
+`build-ffmpeg.sh` needs a C compiler, make, nasm, pkg-config, git and curl. On Windows, run it in an MSYS2 MINGW64 shell; on Linux it can also cross-compile the Windows build with mingw-w64. It puts the binary and its licences in `apps/desktop/vendor/ffmpeg/<target>`, which electron-builder copies into the app. Without it, the app still builds, and streams that need converting report that they can't be played.
 
-A Mac build signs with a Developer ID from your keychain when one exists and notarizes when `APPLE_API_KEY`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER` are set; see [signing](signing.md). Without a Developer ID, `scripts/mac-ad-hoc-sign.ts` seals the app ad hoc, so a downloaded copy opens once through System Settings > Privacy & Security > Open Anyway instead of being called damaged.
+A Mac build signs with a Developer ID from your keychain when one exists and notarizes when `APPLE_API_KEY`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER` are set; see [signing](signing.md). Without a Developer ID, `apps/desktop/scripts/mac-ad-hoc-sign.ts` seals the app ad hoc, so a downloaded copy opens once through System Settings > Privacy & Security > Open Anyway instead of being called damaged.
 
 ## Artwork
 
-- App icons come from `assets/brand/`; `pnpm icons:export` renders `build/icon.*`.
-- The DMG window background is `build/dmg-background.png` and its `@2x` twin; `pnpm dmg:background` renders them on a Mac, so the text uses the system font.
+- App icons come from `apps/desktop/assets/brand/`; `pnpm --filter mrstreamer icons:export` renders `apps/desktop/build/icon.*`.
+- The DMG window background is `apps/desktop/build/dmg-background.png` and its `@2x` twin; `pnpm --filter mrstreamer dmg:background` renders them on a Mac, so the text uses the system font.

@@ -64,7 +64,7 @@ No candidate dropped frames once playing. The app used 700 to 860 MB across its 
 
 Chromium plus a bundled ffmpeg. On the Mac it plays every sample, as mpv does, while keeping hardware decoding, the approved UI and its controls, and it costs no more CPU on the channels that play directly, which are most of them. Converted channels start about half a second later than in mpv, and damaged broadcasts cost a slow retry, where mpv shows them at once. The ffmpeg is a small separate process built from pinned sources for each platform (7 MB), so a crash can't take the app down and it signs and notarizes like the rest of the app.
 
-libmpv stays the option for movies and series, if subtitles and seeking need more than Chromium offers. The `Engine` boundary in `src/renderer/src/player/engine.ts` leaves room for it.
+libmpv stays the option for movies and series, if subtitles and seeking need more than Chromium offers. The `Engine` boundary in `apps/desktop/src/renderer/src/player/engine.ts` leaves room for it.
 
 ## Budgets
 

@@ -7,18 +7,20 @@
 //   node scripts/release-plan.ts notes --tag <tag> --sha <commit> [--previous-tag <tag>]
 //   node scripts/release-plan.ts record --version <version>  after a stable release, on main
 //
-// Versions: package.json on main holds the newest stable release (0.0.0 before the first).
-// Nightlies preview the next patch, 0.0.2-nightly.20261002.14, counting from package.json or the
+// Versions: the app's package.json (apps/desktop/package.json) on main holds the newest stable
+// release (0.0.0 before the first). Nightlies preview the next patch, 0.0.2-nightly.20261002.14,
+// counting from that package.json or the
 // newest stable release, whichever is newer, so a stable release that main has not recorded yet
 // never makes later nightlies sort below it. A stable release rebuilds the commit of the latest
 // published nightly, as the version that nightly previewed unless another is given.
 //
 // Reads GitHub with gh, prints the plan as GitHub Actions outputs, and fails with the reason when
 // a release is refused. Release jobs run it with plain node before installing packages, so it
-// imports only node: modules and dependency-free files from src/shared.
+// imports only node: modules and dependency-free files, by relative path rather than package name.
 import { execFileSync } from "node:child_process";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
+
 import {
   channelOf,
   compareVersions,
@@ -26,7 +28,10 @@ import {
   parseVersion,
   type Channel,
   type Version,
-} from "../src/shared/version.ts";
+} from "../packages/contracts/src/version.ts";
+
+/** The app's manifest, whose version records the newest stable release. */
+const MANIFEST = "apps/desktop/package.json";
 
 /** A scheduled nightly waits at least this long after the previous one. */
 export const NIGHTLY_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -444,7 +449,7 @@ async function main(): Promise<void> {
   switch (command) {
     case "nightly": {
       const repo = githubRepository();
-      const recorded: unknown = JSON.parse(readFileSync("package.json", "utf8")).version;
+      const recorded: unknown = JSON.parse(readFileSync(MANIFEST, "utf8")).version;
       const request: NightlyRequest = {
         ref,
         sha: values.sha ?? "",
@@ -477,18 +482,15 @@ async function main(): Promise<void> {
       );
       return;
     case "record": {
-      const manifest: Record<string, unknown> = JSON.parse(readFileSync("package.json", "utf8"));
+      const manifest: Record<string, unknown> = JSON.parse(readFileSync(MANIFEST, "utf8"));
       const next = recordedVersion(String(manifest.version), values.version ?? "");
       if (next) {
-        writeFileSync(
-          "package.json",
-          `${JSON.stringify({ ...manifest, version: next }, null, 2)}\n`,
-        );
+        writeFileSync(MANIFEST, `${JSON.stringify({ ...manifest, version: next }, null, 2)}\n`);
       }
       console.log(
         next
-          ? `package.json now records ${next}.`
-          : `package.json already records ${manifest.version}.`,
+          ? `${MANIFEST} now records ${next}.`
+          : `${MANIFEST} already records ${manifest.version}.`,
       );
       return;
     }

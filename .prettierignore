@@ -2,6 +2,6 @@ out/
 dist/
 pnpm-lock.yaml
 LICENSE
-assets/brand/
+apps/desktop/assets/brand/
 .local/
-test/fixtures/
+apps/desktop/test/fixtures/

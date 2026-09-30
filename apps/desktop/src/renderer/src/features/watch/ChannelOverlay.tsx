@@ -1,0 +1,235 @@
+// Watch's channel list over the left of the picture: the current list with what's on now. Its
+// title swaps in the list picker, so another category is one click away without leaving Watch.
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { ChevronDown, Star, X } from "lucide-react";
+import { useEffect, useRef } from "react";
+import type { Listing } from "@mrstreamer/contracts/guide";
+import type { LiveChannel } from "@mrstreamer/contracts/library";
+import type { ChannelList } from "../../app/ui-store.ts";
+import { ChannelLogo } from "../../components/ChannelLogo.tsx";
+import { Progress } from "../../components/Progress.tsx";
+import { Button } from "../../components/ui/button.tsx";
+import { useNow } from "../../lib/clock.ts";
+import { categoryOf, progressOf, timeLeft } from "../../lib/format.ts";
+import { useCategoryMap, useFavouriteIds, useToggleFavourite } from "../../lib/queries.ts";
+import { useRem } from "../../lib/use-rem.ts";
+import { cn } from "../../lib/utils.ts";
+import { ListPicker } from "../live/ListPicker.tsx";
+import { listTitle, useVisibleListings, type ListEntry } from "../live/lists.ts";
+
+const ROW_REM = 3.75;
+
+export function ChannelOverlay({
+  list,
+  channels,
+  playingId,
+  picking,
+  selected,
+  entries,
+  entry,
+  onPlay,
+  onPick,
+  onToggleGroup,
+  onTogglePicking,
+  onClose,
+}: {
+  list: ChannelList;
+  channels: readonly LiveChannel[];
+  playingId: string | null;
+  /** The list picker shows instead of the channels. */
+  picking: boolean;
+  /** The keyboard selection among the channels, or null. */
+  selected: number | null;
+  entries: readonly ListEntry[];
+  /** The keyboard selection in the picker, or null. */
+  entry: number | null;
+  onPlay: (channel: LiveChannel) => void;
+  onPick: (list: ChannelList) => void;
+  onToggleGroup: (group: string) => void;
+  onTogglePicking: () => void;
+  onClose: () => void;
+}) {
+  const categories = useCategoryMap();
+  return (
+    <div className="no-drag absolute inset-y-0 left-0 z-20 flex">
+      <div className="flex h-full w-[26rem] flex-col bg-black pt-16">
+        <header className="flex items-center gap-2 px-5 pb-3">
+          <button
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={onTogglePicking}
+            className="flex min-w-0 items-center gap-1.5 rounded-lg px-2 py-1 text-xl font-semibold tracking-tight hover:bg-white/8"
+          >
+            <span className="truncate">{listTitle(list, categories)}</span>
+            <ChevronDown className={cn("size-4 flex-none", picking && "rotate-180")} />
+          </button>
+          <span className="flex-1" />
+          <Button variant="ghost" size="icon-sm" aria-label="Close" onClick={onClose}>
+            <X />
+          </Button>
+        </header>
+        {picking ? (
+          <ListPicker
+            entries={entries}
+            selected={list}
+            highlight={entry}
+            onPick={onPick}
+            onToggle={onToggleGroup}
+            className="min-h-0 flex-1 px-3 pb-6"
+          />
+        ) : (
+          <Channels
+            channels={channels}
+            playingId={playingId}
+            selected={selected}
+            categories={categories}
+            onPlay={onPlay}
+          />
+        )}
+      </div>
+      <div className="h-full w-24 bg-gradient-to-r from-black to-transparent" />
+    </div>
+  );
+}
+
+function Channels({
+  channels,
+  playingId,
+  selected,
+  categories,
+  onPlay,
+}: {
+  channels: readonly LiveChannel[];
+  playingId: string | null;
+  selected: number | null;
+  categories: ReturnType<typeof useCategoryMap>;
+  onPlay: (channel: LiveChannel) => void;
+}) {
+  const scroller = useRef<HTMLDivElement>(null);
+  const rem = useRem();
+  const now = useNow();
+  const favourites = useFavouriteIds();
+  const toggleFavourite = useToggleFavourite();
+  const virtualizer = useVirtualizer({
+    count: channels.length,
+    getScrollElement: () => scroller.current,
+    estimateSize: () => ROW_REM * rem,
+    overscan: 8,
+  });
+  useEffect(() => {
+    virtualizer.measure();
+  }, [rem, virtualizer]);
+  // Opens on the playing channel.
+  useEffect(() => {
+    const index = channels.findIndex((channel) => channel.id === playingId);
+    if (index > 0) virtualizer.scrollToIndex(index, { align: "center" });
+  }, [channels.length > 0]);
+  // Only the keyboard scrolls the list.
+  useEffect(() => {
+    if (selected !== null) virtualizer.scrollToIndex(selected, { align: "auto" });
+  }, [selected, virtualizer]);
+
+  const items = virtualizer.getVirtualItems();
+  const listings = useVisibleListings(
+    channels,
+    items.map((item) => item.index),
+  );
+  return (
+    <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-6">
+      <div className="relative" style={{ height: virtualizer.getTotalSize() }}>
+        {items.map((item) => {
+          const channel = channels[item.index];
+          if (!channel) return null;
+          return (
+            <Row
+              key={channel.id}
+              channel={channel}
+              listing={listings.get(channel.id) ?? null}
+              category={categoryOf(channel, categories)}
+              now={now}
+              playing={channel.id === playingId}
+              selected={item.index === selected}
+              favourite={favourites.has(channel.id)}
+              top={item.start}
+              height={item.size - 4}
+              onPlay={() => onPlay(channel)}
+              onToggleFavourite={() => toggleFavourite(channel.id)}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function Row({
+  channel,
+  listing,
+  category,
+  now,
+  playing,
+  selected,
+  favourite,
+  top,
+  height,
+  onPlay,
+  onToggleFavourite,
+}: {
+  channel: LiveChannel;
+  listing: Listing | null;
+  category: string;
+  now: number;
+  playing: boolean;
+  selected: boolean;
+  favourite: boolean;
+  top: number;
+  height: number;
+  onPlay: () => void;
+  onToggleFavourite: () => void;
+}) {
+  const current = listing?.now ?? null;
+  return (
+    <div
+      role="button"
+      tabIndex={-1}
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={onPlay}
+      className={cn(
+        "group absolute inset-x-0 flex items-center gap-3.5 rounded-2xl px-3 hover:bg-white/8",
+        playing && "bg-white/6",
+        selected && "ring-2 ring-white/70 ring-inset",
+      )}
+      style={{ top, height }}
+    >
+      <span className="w-9 flex-none text-right text-xs text-muted-foreground tabular-nums">
+        {channel.number ?? ""}
+      </span>
+      <ChannelLogo channel={channel} className="h-8 w-12" />
+      <span className="min-w-0 flex-1" title={channel.name}>
+        <span
+          className={cn("block truncate text-[0.9375rem]", playing && "font-semibold text-white")}
+        >
+          {current?.title ?? channel.title}
+        </span>
+        <span className="block truncate text-xs text-muted-foreground">
+          {current ? `${channel.title} · ${timeLeft(current, now)}` : category}
+        </span>
+        {current && <Progress value={progressOf(current, now)} className="mt-1 w-28" />}
+      </span>
+      {playing && <span className="size-2 flex-none rounded-full bg-white" aria-label="Playing" />}
+      <button
+        aria-label={favourite ? "Remove from favourites" : "Add to favourites"}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={(event) => {
+          event.stopPropagation();
+          onToggleFavourite();
+        }}
+        className={cn(
+          "grid size-8 flex-none place-items-center rounded-full text-muted-foreground hover:bg-white/10 hover:text-white",
+          !favourite && !selected && "opacity-0 group-hover:opacity-100",
+        )}
+      >
+        <Star className={cn("size-4", favourite && "fill-current")} />
+      </button>
+    </div>
+  );
+}
