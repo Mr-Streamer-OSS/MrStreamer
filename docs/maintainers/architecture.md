@@ -35,7 +35,7 @@ test                 The release planning suite
 
 Packages export their source files by path, `@mrstreamer/core/catalogue/normalize`, and the app bundles them; nothing is built separately. Lint rules keep packages from importing Electron, React or the app, contracts from importing core, and every file from import cycles. `scripts/release-plan.ts` imports `packages/contracts/src/version.ts` and `update-feed.ts` by relative path, because release jobs run it before installing packages.
 
-`@mrstreamer/contracts/ipc` is the contract: each method has an input schema (ArkType) and a result type, and the main process validates every call before its handler runs. The preload script exposes it as `window.mrStreamer`; the renderer reaches it through `lib/ipc.ts` and React Query hooks in `lib/queries.ts`.
+`@mrstreamer/contracts/ipc` is the contract: each method has an input schema (ArkType) and a result type, and the main process validates every call before its handler runs. ArkType compiles a schema when it's defined, which adds to every start, so schemas the start doesn't need are built on first use: each IPC input on its method's first call. The preload script exposes it as `window.mrStreamer`; the renderer reaches it through `lib/ipc.ts` and React Query hooks in `lib/queries.ts`.
 
 ## Data
 

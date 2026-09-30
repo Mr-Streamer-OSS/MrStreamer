@@ -8,7 +8,7 @@ Outcome: movies and series from the subscription, with resume, seasons, tracks a
 
 - What users see: [Movies and series](../../user/movies-and-series.md), [Home](../../user/live-tv.md#home), [Updates](../../user/updates.md) and [What plays](../../user/playback.md).
 - How it works: [architecture](../architecture.md#movies-and-series) for the on-demand catalogue, [movies and episodes](../architecture.md#movies-and-episodes) for playback, [viewing record](../architecture.md#viewing-record), [updates](../architecture.md#updates) and [licences](../architecture.md#licences). The [playback evaluation](../playback.md#movies-and-episodes) records the real provider's formats and why every title goes through ffmpeg. [Releasing](../releasing.md#update-feed) covers the feed.
-- Baseline: `main` at `6f6bf5e`, slice 3.5 with the build comparison (#15). Stable 0.0.2 (`f26072f`) is the published build before this slice.
+- Baseline: `main` at `a9d169c`, slice 3.5 with the build comparison (#15) and the 0.0.2 version. Stable 0.0.2 (`f26072f`) is the published build before this slice.
 
 ## Decisions
 
@@ -53,15 +53,17 @@ Findings from reviewing the foundation, each reproduced or read in the code befo
 
 ## Progress
 
-| Stage                         | State                                                                                                                |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Release queue and update feed | Done (`f496672`). One release queue, the tested nightly as input, `updates.json` on GitHub Pages after each release. |
-| Titles, progress and playback | Done (`16c9e69`). Provider on-demand API, catalogue worker, title sessions, title events in the viewing record.      |
-| ffmpeg and ffprobe            | Done (`0f27e22`). The bundled build reads files over HTTP and carries ffprobe.                                       |
-| Notices                       | Done (`244ea7c`). Generated at build time, shown in Settings > About.                                                |
-| Update checks                 | Done (`1dfd19e`). The feed, the schedule, backoff, dismissals and a quiet notice.                                    |
-| Screens                       | Done (`b60af20`). Home, Movies, Series, details, watching a title, Updates settings, About.                          |
-| Docs and verification         | Done in the last commit. README and every guide rewritten; this handoff.                                             |
+One pull request, one commit per stage:
+
+| Stage                         | State                                                                                                         |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Release queue and update feed | Done. One release queue, Stable naming the tested nightly, `updates.json` on GitHub Pages after each release. |
+| Titles, progress and playback | Done. Provider on-demand API, catalogue worker, title sessions, title events in the viewing record.           |
+| ffmpeg and ffprobe            | Done. The bundled build reads files over HTTP and carries ffprobe.                                            |
+| Notices                       | Done. Generated at build time, shown in Settings > About.                                                     |
+| Update checks                 | Done. The feed, the schedule, backoff, dismissals and a quiet notice.                                         |
+| Screens                       | Done. Home, Movies, Series, details, watching a title, Updates settings, About.                               |
+| Docs and verification         | Done. A movie in the packaged-app test; README and every guide rewritten.                                     |
 
 ## Evidence
 
@@ -73,9 +75,29 @@ On the real subscription, from the workbench: the catalogue downloaded in 8 s an
 
 Against the fake provider in Electron: a title starts in about 1.1 s and seeks outside the buffer in 0.9 s; starting 10 minutes into a 36-minute file read 57 MB, and nothing more while paused. Driving the development build: Continue watching showed a series as "Next: S1 E2" and a movie with its time left; the series sheet offered "Play S1 E2"; Next episode went from E2 to E3; Back returned to the sheet; leaving held no stream and no file open. About listed 55 notices.
 
+### Against Stable 0.0.2
+
+`apps/desktop/test/e2e/compare-builds.ts` on the workbench VPS, the deb under Xvfb, three rounds alternating with the Stable 0.0.2 deb, before the schema change below:
+
+| Measure                           | 0.0.2    | This slice | Change |
+| --------------------------------- | -------- | ---------- | ------ |
+| Cold start to Home                | 2,180 ms | 2,438 ms   | +12%   |
+| Time to picture                   | 1,361 ms | 1,428 ms   | +5%    |
+| Channel switch                    | 1,508 ms | 1,411 ms   | -6%    |
+| Guide open                        | 64 ms    | 79 ms      | +24%   |
+| Guide list of 13,000              | 62 ms    | 53 ms      | -14%   |
+| Search, typed to programmes shown | 328 ms   | 277 ms     | -16%   |
+| Idle CPU on Home, preview playing | 73%      | 82%        | +13%   |
+| Idle CPU on Home, stopped         | 1.4%     | 1.8%       | +0.4   |
+| Memory on Home, preview playing   | 915 MB   | 938 MB     | +3%    |
+| Memory on Home, stopped           | 790 MB   | 825 MB     | +4%    |
+| Installed size                    | 286 MB   | 295 MB     | +3%    |
+
+Guide open is 15 ms slower, within this machine's noise. Idle CPU with the preview varies more than the change: this slice's runs spread from 56 to 93 %, 0.0.2's from 64 to 98 %. The cold start held across runs. Profiles put it in the main process before the window opens, where ArkType compiled about 40 new schemas from this slice as their modules loaded. Now the IPC inputs, the provider's movie and series schemas and ffprobe's are built on first use. In the quietest profiles the main process then reaches `start()` at 584 to 632 ms, against 637 ms for 0.0.2 and 719 ms before the change. Wall-clock cold starts on this machine vary by more than that, so the dry run's measurement on macOS decides. The extra 9 MB installed is ffprobe.
+
 ## Known gaps
 
-- Mac and Windows: installers come from the release dry run on the pull request. Wout's checks on both are pending: browsing and playing movies and episodes with his provider, tracks, resume, the update notice and About.
+- Mac and Windows: installers come from the release dry run on the pull request. Wout's checks on both are pending: browsing and playing movies and episodes with Wout's provider, tracks, resume, the update notice and About.
 - GPU evidence: none on Linux or Windows. Pictures the player can't decode, such as HEVC where the system has no decoder or MPEG-4 Part 2, become H.264 in software; 4K HEVC on such a machine will cost a lot of CPU.
 - The feed goes live only once Wout enables GitHub Pages (Settings > Pages > Source: GitHub Actions) and the first release after merging runs; until then the app asks GitHub's API, as before. The feed's address is still open, above.
 - Picture subtitles (PGS, VobSub) are listed but can't be shown.
