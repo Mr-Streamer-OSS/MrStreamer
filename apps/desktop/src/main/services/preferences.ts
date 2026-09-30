@@ -4,12 +4,12 @@ import { readJsonFile, writeJsonFile } from "../platform/json-file.ts";
 
 /**
  * preferences.json as stored. Files from before the viewing record also carry its two lists; they
- * stay in the file until the record has imported them.
+ * stay in the file until the record has imported them. Keys of newer versions are kept.
  */
 const Stored = Preferences.merge({
   "favouriteChannelIds?": "string[]",
   "recentChannelIds?": "string[]",
-}).onUndeclaredKey("delete");
+});
 type Stored = typeof Stored.infer;
 
 /** Viewing preferences stored in the app's data folder. Updates are applied and written in call order. */

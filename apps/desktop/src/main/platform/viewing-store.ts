@@ -69,12 +69,18 @@ export function viewingStoreLayer(dataDir: string): Layer.Layer<ViewingStore> {
 
 function open(path: string): DatabaseSync {
   mkdirSync(join(path, ".."), { recursive: true });
-  const db = new DatabaseSync(path);
-  db.exec("pragma journal_mode = wal; pragma synchronous = normal;");
-  db.exec(SCHEMA);
-  const stored = db.prepare("select value from meta where key = 'state-version'").get();
-  if (stored?.["value"] !== String(STATE_VERSION)) rebuild(db);
-  return db;
+  // A second copy of the app may hold the write lock for a moment.
+  const db = new DatabaseSync(path, { timeout: 1000 });
+  try {
+    db.exec("pragma journal_mode = wal; pragma synchronous = normal;");
+    db.exec(SCHEMA);
+    const stored = db.prepare("select value from meta where key = 'state-version'").get();
+    if (stored?.["value"] !== String(STATE_VERSION)) rebuild(db);
+    return db;
+  } catch (cause) {
+    db.close();
+    throw cause;
+  }
 }
 
 /** Folds every event into the state again, per account, in order. */

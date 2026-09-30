@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type } from "arktype";
 import { describe, expect, it } from "vitest";
@@ -31,6 +31,25 @@ describe("preferences", () => {
       volume: 0.4,
       lastChannelId: null,
       lastCategoryId: null,
+    });
+  });
+
+  it("keeps what a newer version wrote when it saves", async () => {
+    const dataDir = await tempDir();
+    const newer = {
+      volume: 1,
+      muted: false,
+      lastChannelId: null,
+      lastCategoryId: null,
+      subtitles: "nl",
+    };
+    await writeFile(join(dataDir, "preferences.json"), JSON.stringify(newer));
+
+    await createPreferences(dataDir).update({ volume: 0.5 });
+
+    expect(JSON.parse(await readFile(join(dataDir, "preferences.json"), "utf8"))).toEqual({
+      ...newer,
+      volume: 0.5,
     });
   });
 
