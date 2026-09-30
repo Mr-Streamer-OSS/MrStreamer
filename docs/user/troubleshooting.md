@@ -10,7 +10,7 @@ Mr. Streamer keeps everything on your computer, in one folder:
 | Windows | `%APPDATA%\Mr. Streamer`                     |
 | Linux   | `~/.config/Mr. Streamer`                     |
 
-It holds your subscription with its encrypted password, your preferences, favourites and watch history, and copies of your channel list and programme guide. Uninstalling leaves the folder in place, so a reinstall picks up where you left off. Delete the folder to remove everything.
+It holds your subscription with its encrypted password, your preferences, favourites and watch history, copies of your channel list and programme guide, and a diagnostics log. Uninstalling leaves the folder in place, so a reinstall picks up where you left off. Delete the folder to remove everything.
 
 Your password is encrypted with a key your system keeps: the macOS Keychain, Windows' user encryption, or the desktop keyring on Linux.
 
@@ -38,3 +38,5 @@ The Windows installer isn't code-signed yet, so SmartScreen shows "Windows prote
 ## Still stuck
 
 [Open an issue](https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose) with your system, the Mr. Streamer version from Settings, and what happened. Leave out your server address, username and password.
+
+`diagnostics.log` in the same folder helps too: what Mr. Streamer did, how long it took and what failed. It holds no addresses, logins or channel names, and never leaves your computer unless you attach it.

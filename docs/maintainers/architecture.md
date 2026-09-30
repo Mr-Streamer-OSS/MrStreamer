@@ -44,6 +44,7 @@ Everything lives in Electron's `userData` folder, named after the product, not t
 | `guide.xml`         | `platform/guide-store.ts`: the last complete XMLTV download, as it arrived                |
 | `guide.json`        | `platform/guide-store.ts`: which subscription `guide.xml` belongs to, and when it arrived |
 | `updates.json`      | `services/updates.ts`: the chosen channel                                                 |
+| `diagnostics.log`   | `platform/diagnostics-log.ts`: what the app did; `diagnostics.1.log` is the one before    |
 
 ## Catalogue
 
@@ -68,6 +69,10 @@ The main process runs every service on one [Effect](https://effect.website) runt
 A service is a `Context.Service` class with a `layer`, and reaches the others through the context rather than callbacks. Services whose rules run without the platform live in `packages/core` and ask for what they need through ports, services of their own that the app supplies: the guide's are `GuideSource` (the subscription and its download), `GuideCatalogue` (guide ids) and `GuideStore` (the saved document, `platform/guide-store.ts`). The others live in the app. Every expected failure is a `Failed` from `@mrstreamer/core/failure`, carrying the `AppError` the UI shows; a provider adapter's `AppFailure` keeps its error, anything else counts as unexpected.
 
 Background work, downloads and stream sessions run in their service's scope. Quitting closes open streams at once, so no ffmpeg or provider connection outlives the app, then disposes of the runtime without holding the quit: an update's restart goes through the same path. Tests build the same layers with the fake provider; `apps/desktop/test/support.ts` makes a runtime per test and calls services with promises, and guide tests move a `TestClock` instead of waiting.
+
+## Diagnostics
+
+`@mrstreamer/core/diagnostics` defines what the app notes about its own work, as a typed union: steps with their duration and outcome (start, login, catalogue and guide downloads, update checks, downloads and installs), each stream the proxy served (direct, converted, repaired or refused, and how long it took to start), and failed IPC calls. Entries hold only names, numbers and failure kinds, so an address, login or channel name can't reach them; `diagnosed(step)` times an Effect and records how it ended. `Diagnostics` is a context reference that records nothing by default. The app provides `platform/diagnostics-log.ts`, which appends JSON lines to `diagnostics.log` and starts a new file at 512 KB, keeping the one before. Nothing is sent anywhere.
 
 ## Viewing record
 

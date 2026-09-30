@@ -16,6 +16,7 @@ import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
+import { diagnosed } from "../diagnostics.ts";
 import { Failed, failedWith } from "../failure.ts";
 import {
   indexProgrammes,
@@ -177,7 +178,7 @@ function make() {
         if (generation !== started || now?.key !== subscription.key) return;
         loaded = { key: subscription.key, fetchedAt, ...index };
         yield* PubSub.publish(updates, undefined);
-      });
+      }).pipe(diagnosed("guide"));
 
     const refresh = Effect.gen(function* () {
       const subscription = yield* source.current;

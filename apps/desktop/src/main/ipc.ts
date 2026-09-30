@@ -9,9 +9,10 @@ import {
   type IpcMethod,
   type IpcOutput,
 } from "@mrstreamer/contracts/ipc";
+import { Diagnostics, outcomeOf } from "@mrstreamer/core/diagnostics";
 import type { Failed } from "@mrstreamer/core/failure";
 import * as Cause from "effect/Cause";
-import type * as Effect from "effect/Effect";
+import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 
 /** One handler per IPC method. A handler fails with `Failed` to answer with a specific error. */
@@ -22,6 +23,7 @@ export type IpcHandlers = {
 /**
  * Registers every IPC method. Input is validated against its schema before the handler runs on
  * `run`, the main runtime, and any failure resolves to a typed error instead of a rejected promise.
+ * Failed calls go to the diagnostics.
  */
 export function registerIpc(
   run: <A>(effect: Effect.Effect<A, Failed>) => Promise<Exit.Exit<A, Failed>>,
@@ -48,7 +50,17 @@ export function registerIpc(
           error: { kind: "invalid-input", detail: `${method}: ${input.summary}` },
         };
       }
-      const exit = await run(handler(input));
+      const exit = await run(
+        handler(input).pipe(
+          Effect.onExit((exit) =>
+            Exit.isSuccess(exit)
+              ? Effect.void
+              : Effect.map(Diagnostics, (diagnostics) =>
+                  diagnostics.record({ op: "call", method, outcome: outcomeOf(exit) }),
+                ),
+          ),
+        ),
+      );
       if (Exit.isSuccess(exit)) return { ok: true, value: exit.value };
       const failed = Cause.findErrorOption(exit.cause);
       if (failed._tag === "Some") return { ok: false, error: failed.value.error };

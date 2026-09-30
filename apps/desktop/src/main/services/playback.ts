@@ -20,6 +20,7 @@ import type {
   StreamFormat,
   StreamSession,
 } from "@mrstreamer/contracts/playback";
+import { Diagnostics } from "@mrstreamer/core/diagnostics";
 import { Failed } from "@mrstreamer/core/failure";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -93,6 +94,7 @@ export class Playback extends Context.Service<
 function make(deps: PlaybackDeps) {
   return Effect.gen(function* () {
     const subscriptions = yield* Subscriptions;
+    const diagnostics = yield* Diagnostics;
     const scope = yield* Effect.scope;
     const fetchImpl = deps.fetch ?? fetch;
     const sessions = new Map<string, Session>();
@@ -128,6 +130,19 @@ function make(deps: PlaybackDeps) {
         return;
       }
 
+      const started = performance.now();
+      /** Notes how the stream reached the player, or why it didn't. */
+      const report = (
+        delivery: "direct" | "converted" | "repaired" | "none",
+        outcome: "ok" | StreamFailure["kind"],
+      ) =>
+        diagnostics.record({
+          op: "stream",
+          ms: Math.round(performance.now() - started),
+          delivery,
+          outcome,
+        });
+
       session.active?.abort();
       const active = new AbortController();
       session.active = active;
@@ -141,6 +156,7 @@ function make(deps: PlaybackDeps) {
       }
       if (!upstream.ok) {
         session.failure = upstream.failure;
+        report("none", upstream.failure.kind);
         response.writeHead("status" in upstream.failure ? upstream.failure.status : 502).end();
         return;
       }
@@ -157,27 +173,35 @@ function make(deps: PlaybackDeps) {
         video && video.codec !== "unknown" && CLEAN_START_CODECS.has(video.codec)
           ? cleanStart(replay(start, reader), createCleanStart(video.pid, video.codec))
           : replay(start, reader);
-      const body = Readable.from(chunks);
-      body.on("error", (cause) => {
-        if (!signal.aborted) session.failure = { kind: "network", detail: String(cause) };
-        response.destroy();
-      });
-
       const conversion = start.layout
         ? planConversion(start.layout, session.decoders, { repair: session.repair })
         : null;
+      const delivery = !conversion ? "direct" : session.repair ? "repaired" : "converted";
+      const body = Readable.from(chunks);
+      body.on("error", (cause) => {
+        if (!signal.aborted) {
+          session.failure = { kind: "network", detail: String(cause) };
+          report(delivery, "network");
+        }
+        response.destroy();
+      });
+
       if (!conversion) {
         response.writeHead(200, { "Content-Type": upstream.contentType ?? "video/mp2t" });
         body.pipe(response);
+        report("direct", "ok");
         return;
       }
       if (!deps.ffmpeg) {
         session.failure = { kind: "unsupported", detail: describeLayout(start.layout) };
         body.destroy();
         response.writeHead(415).end();
+        report("none", "unsupported");
         return;
       }
-      convert(deps.ffmpeg, conversion, body, response, session, signal);
+      convert(deps.ffmpeg, conversion, body, response, session, signal, (outcome) =>
+        report(delivery, outcome),
+      );
     }
 
     /** Pipes the stream through ffmpeg. A conversion that fails counts as an unsupported stream. */
@@ -188,6 +212,7 @@ function make(deps: PlaybackDeps) {
       response: ServerResponse,
       session: Session,
       signal: AbortSignal,
+      report: (outcome: "ok" | "unsupported") => void,
     ): void {
       const child = spawn(ffmpeg, ffmpegArguments(conversion), { stdio: ["pipe", "pipe", "pipe"] });
       let errors = "";
@@ -197,7 +222,10 @@ function make(deps: PlaybackDeps) {
       const stop = () => child.kill("SIGKILL");
       signal.addEventListener("abort", stop, { once: true });
       child.on("error", (cause) => {
-        if (!signal.aborted) session.failure = { kind: "unsupported", detail: String(cause) };
+        if (!signal.aborted) {
+          session.failure = { kind: "unsupported", detail: String(cause) };
+          report("unsupported");
+        }
         response.destroy();
       });
       // "close" comes after ffmpeg's output has been read, so a stream that ends normally reaches
@@ -212,6 +240,7 @@ function make(deps: PlaybackDeps) {
             kind: "unsupported",
             detail: `The stream could not be converted. ${detail}`,
           };
+          report("unsupported");
         }
         response.destroy();
       });
@@ -220,6 +249,7 @@ function make(deps: PlaybackDeps) {
       body.pipe(child.stdin);
       response.writeHead(200, { "Content-Type": "video/mp2t" });
       child.stdout.pipe(response);
+      report("ok");
     }
 
     /** Opens the upstream request, retrying briefly when the provider refuses. */
