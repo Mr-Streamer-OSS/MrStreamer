@@ -6,6 +6,7 @@ import * as TestClock from "effect/testing/TestClock";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { mainLayer } from "../src/main/runtime.ts";
 import { createLibrary } from "../src/main/services/library.ts";
+import { createPreferences } from "../src/main/services/preferences.ts";
 import { createSubscriptions } from "../src/main/services/subscription.ts";
 import {
   fakeGuide,
@@ -46,7 +47,12 @@ async function connectedGuide(options: FakeProviderOptions = {}) {
       Layer.provideMerge(TestClock.layer({ warningDelay: "1 day" })),
     );
     const runtime = ManagedRuntime.make(
-      mainLayer({ dataDir, source: subscriptions.source, library }).pipe(Layer.provideMerge(clock)),
+      mainLayer({
+        dataDir,
+        source: subscriptions.source,
+        library,
+        preferences: createPreferences(dataDir),
+      }).pipe(Layer.provideMerge(clock)),
     );
     onTestFinished(() => runtime.dispose());
     const guide = await runtime.runPromise(

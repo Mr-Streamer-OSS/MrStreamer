@@ -18,12 +18,12 @@ export function useListChannels(list: ChannelList): {
   readonly channels: readonly LiveChannel[] | undefined;
   readonly error: unknown;
 } {
-  const preferences = useQuery(queries.preferences());
+  const viewing = useQuery(queries.viewing());
   const ids =
     list.kind === "favourites"
-      ? (preferences.data?.favouriteChannelIds ?? NO_IDS)
+      ? (viewing.data?.favourites ?? NO_IDS)
       : list.kind === "recent"
-        ? (preferences.data?.recentChannelIds ?? NO_IDS)
+        ? (viewing.data?.recent ?? NO_IDS)
         : NO_IDS;
   const byIds = useQuery(queries.channelsById(ids));
   const listed = list.kind === "favourites" || list.kind === "recent";
@@ -32,7 +32,7 @@ export function useListChannels(list: ChannelList): {
     enabled: !listed,
   });
   if (!listed) return { channels: byCategory.data, error: byCategory.error };
-  if (!preferences.data) return { channels: undefined, error: preferences.error };
+  if (!viewing.data) return { channels: undefined, error: viewing.error };
   return { channels: ids.length === 0 ? NO_CHANNELS : byIds.data, error: byIds.error };
 }
 
@@ -81,7 +81,7 @@ export type ListEntry =
  */
 export function useListEntries(open: ReadonlySet<string>): readonly ListEntry[] {
   const categories = useQuery(queries.categories());
-  const preferences = useQuery(queries.preferences());
+  const viewing = useQuery(queries.viewing());
   const status = useQuery(queries.libraryStatus());
   return useMemo(() => {
     const entries: ListEntry[] = [
@@ -89,14 +89,14 @@ export function useListEntries(open: ReadonlySet<string>): readonly ListEntry[] 
         kind: "list",
         list: { kind: "favourites" },
         title: "Favourites",
-        count: preferences.data?.favouriteChannelIds.length ?? 0,
+        count: viewing.data?.favourites.length ?? 0,
         nested: false,
       },
       {
         kind: "list",
         list: { kind: "recent" },
         title: "Recently watched",
-        count: preferences.data?.recentChannelIds.length ?? 0,
+        count: viewing.data?.recent.length ?? 0,
         nested: false,
       },
       {
@@ -138,7 +138,7 @@ export function useListEntries(open: ReadonlySet<string>): readonly ListEntry[] 
       if (expanded) entries.push(...members.map((member) => categoryEntry(member, true)));
     }
     return entries;
-  }, [categories.data, preferences.data, status.data, open]);
+  }, [categories.data, viewing.data, status.data, open]);
 }
 
 /** The country a list's category sits under, so the picker can open it. */
