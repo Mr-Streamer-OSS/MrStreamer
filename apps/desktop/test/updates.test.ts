@@ -463,7 +463,12 @@ describe("automatic checks", () => {
       await runtime.runPromise(TestClock.adjust(ms));
       await new Promise((resolve) => setTimeout(resolve, 20));
     };
-    return { service, pass, calls: () => calls };
+    /** How long until the planned check, which falls anywhere in the four hours' spread. */
+    const untilNext = async () => {
+      const planned = (await service.status()).nextCheckAt ?? 0;
+      return planned - (await runtime.runPromise(Clock.currentTimeMillis));
+    };
+    return { service, pass, untilNext, calls: () => calls };
   }
 
   it("checks after starting and every four hours, without showing it", async () => {
@@ -486,7 +491,10 @@ describe("automatic checks", () => {
       call === 0 ? PUBLISHED : new DiscoveryFailed({ kind: "offline" }, []),
     );
     await app.pass(20_000);
-    await app.pass(4.4 * HOUR + MINUTE);
+    await vi.waitFor(() => expect(app.calls()).toBe(1));
+    // Exactly to the next check: going past it could also pass the sooner retry after it.
+    await vi.waitFor(async () => expect(await app.untilNext()).toBeGreaterThan(4 * HOUR - MINUTE));
+    await app.pass(await app.untilNext());
     await vi.waitFor(() => expect(app.calls()).toBe(2));
 
     await vi.waitFor(async () =>
