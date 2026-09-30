@@ -1,7 +1,8 @@
-// Measures two builds on one machine and reports how the second compares with the first. Runs
-// measure-app.ts on each in turn, swapping the order every round, so a machine that slows down or
-// speeds up during the runs affects both alike. Shared CI runners vary too much for absolute
-// numbers; the difference between builds measured together is what they can tell.
+// Measures two builds on one machine and reports how the second compares with the first. Starts
+// each once to warm the machine and its disk cache, then runs measure-app.ts on each in turn,
+// swapping the order every round, so a machine that slows down or speeds up during the runs affects
+// both alike. Shared CI runners vary too much for absolute numbers; the difference between builds
+// measured together is what they can tell.
 //
 //   node test/e2e/compare-builds.ts [--rounds 2] <baseline executable> <candidate executable> [-- app arguments]
 //
@@ -9,11 +10,13 @@
 // more than 10% worse. It reports and never fails: a warning asks for a second look, on the same
 // runner or on real hardware, before anyone calls it a regression.
 import { execFileSync } from "node:child_process";
+import { once } from "node:events";
 import { appendFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { type } from "arktype";
+import { connect, delay, launch } from "./app.ts";
 
 /** How much worse a median may get before the report warns. */
 const BUDGET = 0.1;
@@ -33,6 +36,9 @@ if (!baseline || !candidate) {
 const rounds = Number(options.rounds);
 const builds = { baseline, candidate };
 type Build = keyof typeof builds;
+
+// The first launch on a machine is slower, whichever build it is: pay for it outside the runs.
+for (const executable of [baseline, candidate]) await warmUp(executable);
 
 const folder = mkdtempSync(join(tmpdir(), "mr-streamer-compare-"));
 const runs: Record<Build, Record<string, number[]>[]> = { baseline: [], candidate: [] };
@@ -61,7 +67,7 @@ try {
   rmSync(folder, { recursive: true, force: true });
 }
 
-const lines = [`| Measure | Last nightly | This build | Change |`, `| --- | --- | --- | --- |`];
+const lines = [`| Measure | Baseline | This build | Change |`, `| --- | --- | --- | --- |`];
 const worse: string[] = [];
 for (const measure of Object.keys(runs.baseline[0] ?? {})) {
   const before = median(runs.baseline.flatMap((run) => run[measure] ?? []));
@@ -82,10 +88,27 @@ const summary = process.env["GITHUB_STEP_SUMMARY"];
 if (summary) {
   appendFileSync(
     summary,
-    `### Measured against the last nightly (${process.platform})\n\nMedians of ${rounds} runs of each build on this runner, alternated. Changes over ${BUDGET * 100}% are bold; runners vary, so measure again before calling one a regression.\n\n${table}\n`,
+    `### This build against the baseline (${process.platform})\n\nMedians of ${rounds} runs of each build on this runner, alternated, after starting each once. Changes over ${BUDGET * 100}% are bold; runners vary, so measure again before calling one a regression.\n\n${table}\n`,
   );
 }
 for (const line of worse) console.log(`::warning title=More than ${BUDGET * 100}% worse::${line}`);
+
+/** Starts a build with a throwaway profile, waits for its window, and quits it. */
+async function warmUp(executable: string): Promise<void> {
+  const profile = mkdtempSync(join(tmpdir(), "mr-streamer-warm-"));
+  const port = 20000 + Math.floor(Math.random() * 20000);
+  const app = launch(executable, appArgs, { port, profile });
+  try {
+    (await connect(port)).close();
+    await delay(3000);
+  } finally {
+    const exited = once(app, "exit");
+    app.kill("SIGTERM");
+    await Promise.race([exited, delay(10_000)]);
+    app.kill("SIGKILL");
+    rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
+  }
+}
 
 function median(values: readonly number[]): number {
   const sorted = values.toSorted((a, b) => a - b);
