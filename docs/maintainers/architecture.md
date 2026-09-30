@@ -38,7 +38,7 @@ Everything lives in Electron's `userData` folder, named after the product, not t
 
 The library fetches categories and channels, indexes them in memory and caches the provider's raw answer; display names are worked out on load, so naming rules improve without a refetch. A refresh replaces the catalogue only when it looks complete: an empty answer never does, and one with less than half the channels only when a second fetch agrees. A failed refresh keeps the catalogue and reports the failure in the status. Preferences refer to provider ids, so renamed or reordered channels keep their history and favourites.
 
-Each channel keeps the provider's guide id (`epg_channel_id` on Xtream panels). Quality variants of one channel usually share it. A cache saved before guide ids existed still loads, and counts as due for a refresh at the next start.
+Each channel keeps the provider's guide id (`epg_channel_id` on Xtream panels). Quality variants of one channel usually share it, but panels also file unrelated channels under one id: Wout's lists nine Flemish channels under `PlayCrime.be`. `catalogue/guide-ids.ts` keeps an id for a channel only when the channel's name matches the id, or when every channel sharing it is the same channel under another name or quality. The guide's own channel names don't count: panels copy them from their stream list. On Wout's provider this keeps 1,978 of 2,073 channels with programmes. A cache saved before guide ids existed still loads, and counts as due for a refresh at the next start.
 
 ## Programme guide
 
@@ -67,7 +67,9 @@ The UI never sees provider URLs; they contain the login. `playback.open` returns
 3. **Starts clean** (`playback/clean-start.ts`): for H.264 and HEVC, drops video before the first keyframe and the leading frames that display before it, so a stream joined mid-sequence starts on a decodable picture.
 4. **Delivers**: straight through when nothing converts, otherwise through the bundled ffmpeg reading stdin, so the upstream URL never reaches a command line.
 
-If the player still fails to decode the picture, the player controller retries once with `repair`, which re-encodes the picture and conceals broadcast damage. The [playback evaluation](playback.md) records why this design won over a bundled engine such as libmpv.
+If the player still fails to decode the picture, the player controller retries once with `repair`, which re-encodes the picture and conceals broadcast damage.
+
+Providers send a burst of buffered seconds when a stream opens. mpegts.js jumps forward when the picture falls more than 8 s behind the newest data, keeping 3 s of buffer, instead of playing faster to catch up: a 1.2× rate was audible and visible for half a minute after every start. The [playback evaluation](playback.md) records why this design won over a bundled engine such as libmpv.
 
 ## Updates
 

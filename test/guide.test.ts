@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import { createGuide } from "../src/main/services/guide.ts";
 import { createLibrary } from "../src/main/services/library.ts";
 import { createSubscriptions } from "../src/main/services/subscription.ts";
-import { fakeGuide, type FakeProvider } from "./fake-provider.ts";
+import {
+  fakeGuide,
+  type FakeChannel,
+  type FakeProvider,
+  type FakeProviderOptions,
+} from "./fake-provider.ts";
 import { fakeProvider, tempDir, testSecrets, userAgent } from "./support.ts";
 
 const HOUR = 60 * 60 * 1000;
@@ -10,8 +15,8 @@ const HOUR = 60 * 60 * 1000;
 const NOW = Date.parse("2026-10-02T20:10:00+02:00");
 
 /** A connected library and guide on the fake provider, with a clock the test moves. */
-async function connectedGuide() {
-  const provider = await fakeProvider();
+async function connectedGuide(options: FakeProviderOptions = {}) {
+  const provider = await fakeProvider(options);
   provider.serveGuide(fakeGuide(provider.catalogue, NOW));
   const dataDir = await tempDir();
   const subscriptions = createSubscriptions({
@@ -201,6 +206,46 @@ describe("programme guide", () => {
     expect(await library.channel(guided)).toMatchObject({ id: guided });
     await provider.close();
     await download;
+  });
+
+  it("shows a guide id only on the channels it names", async () => {
+    // Panels file unrelated channels under one guide id. Here two variants of one channel and an
+    // unrelated channel send the variants' id, and three unrelated channels send an id none of them
+    // is: only the variants get programmes.
+    let files = new Map<number, string>();
+    const { provider, guide } = await connectedGuide({
+      guideIdOf: (channel) => files.get(channel.streamId) ?? null,
+    });
+    const regular = provider.catalogue.channels.filter(
+      (channel) => channel.streamId >= 2000 && !channel.offline,
+    );
+    const base = (channel: FakeChannel) =>
+      channel.name.replace(/^[A-Z]{2}(: | \| )/, "").replace(/ (HD|FHD|4K|SD)$/, "");
+    const variants = regular.filter((channel, _, all) =>
+      all.some((other) => other !== channel && base(other) === base(channel)),
+    );
+    const [first] = variants;
+    if (!first) throw new Error("The fake catalogue has no variants of one channel.");
+    const same = variants.filter((channel) => base(channel) === base(first));
+    const others = regular.filter((channel) => !base(channel).includes(base(first).split(" ")[0]!));
+    const [stranger, ...crime] = others.slice(0, 4);
+    const named = `${base(first).replaceAll(" ", "")}.be`;
+    files = new Map([
+      ...same.map((channel): [number, string] => [channel.streamId, named]),
+      [stranger!.streamId, named],
+      ...crime.map((channel): [number, string] => [channel.streamId, "PlayCrime.be"]),
+    ]);
+    const slot = (id: string, title: string) =>
+      `<programme start="20261002200000 +0200" stop="20261002210000 +0200" channel="${id}"><title>${title}</title></programme>`;
+    provider.serveGuide(`<tv>${slot(named, "Theirs")}${slot("PlayCrime.be", "Crime")}</tv>`);
+    await guide.refresh();
+
+    const ids = [...same, stranger!, ...crime].map((channel) => String(channel.streamId));
+    const listings = await guide.listings(ids);
+
+    expect(Object.keys(listings).toSorted()).toEqual(
+      same.map((channel) => String(channel.streamId)).toSorted(),
+    );
   });
 
   it("forgets the guide when the subscription goes", async () => {

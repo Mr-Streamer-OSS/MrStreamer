@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Writable } from "node:stream";
 
-interface FakeChannel {
+export interface FakeChannel {
   readonly streamId: number;
   readonly num: number;
   readonly name: string;
@@ -45,6 +45,8 @@ export interface FakeProviderOptions {
    * channel, instead of sending them at once and closing.
    */
   readonly live?: boolean;
+  /** The guide id the channel list sends for a channel, in place of its own. */
+  readonly guideIdOf?: (channel: FakeChannel) => string | null;
 }
 
 export interface FakeProvider {
@@ -163,7 +165,9 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
           category_id: channel.categoryId,
           category_ids: [Number(channel.categoryId)],
           // Panels send null or "" for channels without a guide.
-          epg_channel_id: channel.guideId ?? (channel.streamId % 2 === 0 ? "" : null),
+          epg_channel_id:
+            (options.guideIdOf ?? ((each) => each.guideId))(channel) ??
+            (channel.streamId % 2 === 0 ? "" : null),
         })),
       );
     }
