@@ -2,18 +2,26 @@
 // channels, about 2,000 of them with a guide, and a continuous 720p stream from ffmpeg on every
 // test channel. Prints medians for slice comparisons; see docs/maintainers/testing.md.
 //
-//   node test/e2e/measure-app.ts <app executable> [-- extra app arguments]
+//   node test/e2e/measure-app.ts [--json results.json] <app executable> [-- extra app arguments]
 //
-// Needs ffmpeg on PATH (or MR_STREAMER_FFMPEG). On macOS pass --use-mock-keychain.
+// `--json` also writes every run of every measure, for compare-builds.ts. Needs ffmpeg on PATH
+// (or MR_STREAMER_FFMPEG). On macOS pass --use-mock-keychain.
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { parseArgs } from "node:util";
 import { fakeGuide, startFakeProvider } from "../fake-provider.ts";
 import { connect, delay, key, launch, login, waitFor, type Page } from "./app.ts";
 
-const [executable, ...rest] = process.argv.slice(2).filter((arg) => arg !== "--");
-if (!executable) throw new Error("Usage: node test/e2e/measure-app.ts <app executable> [-- args]");
+const { values: options, positionals } = parseArgs({
+  options: { json: { type: "string" } },
+  allowPositionals: true,
+});
+const [executable, ...rest] = positionals;
+if (!executable) {
+  throw new Error("Usage: node test/e2e/measure-app.ts [--json file] <app executable> [-- args]");
+}
 
 const ffmpeg = process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg";
 const RUNS = 3;
@@ -153,6 +161,7 @@ try {
 
   record("installed size (MB)", installedSize(executable));
   report();
+  if (options.json) writeFileSync(options.json, JSON.stringify(Object.fromEntries(results)));
 } finally {
   app?.kill("SIGKILL");
   await provider.close();
