@@ -49,6 +49,10 @@ xvfb-run -a node test/e2e/packaged-app.ts "/opt/Mr. Streamer/mrstreamer" -- --no
 
 `--use-mock-keychain` keeps a macOS run away from the real Keychain. Without FUSE, run an AppImage with `APPIMAGE_EXTRACT_AND_RUN=1` in the environment. A development build runs it too, after `pnpm build`: `xvfb-run -a node test/e2e/packaged-app.ts node_modules/electron/dist/electron -- --no-sandbox "$PWD"`.
 
+## App measurements
+
+`node test/e2e/measure-app.ts <app executable> [-- app arguments]` drives a built app against the fake provider at the size of a large subscription: 13,000 channels, about 2,000 with a guide, and a continuous 720p stream that ffmpeg encodes as it plays. It prints medians for cold start, time to picture, channel switch, opening the guide, search, idle CPU and memory on Home with and without the muted preview, and the installed size. Slice handoffs record its numbers for comparison. It shares its DevTools client and login with the packaged-app test (`test/e2e/app.ts`).
+
 ## Guide budgets
 
 `node --expose-gc scripts/measure-guide.ts` generates a guide the size of a large panel's (1,300 guide channels, 70 programmes each, 36 MB) for a 13,000-channel catalogue, streams it through the guide service and reports download and indexing time, the longest main-process stall, reading from disk after a restart, now and next for 60 channels, search, and memory. `--file guide.xml` measures a real XMLTV file instead; keep provider files in `.local/`.
