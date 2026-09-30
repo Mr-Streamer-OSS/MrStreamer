@@ -6,6 +6,7 @@ import type { CatalogueStatus, Category, LiveChannel } from "@mrstreamer/contrac
 import { normalize } from "@mrstreamer/core/text";
 import { trustedGuideIds } from "@mrstreamer/core/catalogue/guide-ids";
 import { normalizeCatalogue } from "@mrstreamer/core/catalogue/normalize";
+import type { GuideChannels } from "@mrstreamer/core/guide/programmes";
 import { readJsonFile, removeFile, writeJsonFile } from "../platform/json-file.ts";
 import type { LiveCatalogue, LiveProvider } from "@mrstreamer/core/provider";
 
@@ -77,13 +78,6 @@ interface IndexedCatalogue {
   /** Normalised names, index-aligned with `channels`. */
   readonly searchNames: readonly string[];
   readonly guide: GuideChannels;
-}
-
-/** How catalogue channels map to the provider's programme guide. */
-export interface GuideChannels {
-  guideIdOf(channelId: string): string | null;
-  /** The channels showing a guide channel, in catalogue order. */
-  channelsOf(guideId: string): readonly LiveChannel[];
 }
 
 export type Library = ReturnType<typeof createLibrary>;

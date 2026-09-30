@@ -1,0 +1,181 @@
+// The programme guide in memory: programmes per guide channel, and the lookups the UI asks for.
+// Built from an XMLTV document as it streams in, dropping programmes that already ended.
+import type { Listing, Programme, ProgrammeMatch } from "@mrstreamer/contracts/guide";
+import type { LiveChannel } from "@mrstreamer/contracts/library";
+import { normalize } from "../text.ts";
+import { xmltvReader, type XmltvProgramme } from "./xmltv.ts";
+
+/** How many programmes a search returns. */
+const SEARCH_LIMIT = 50;
+/** Indexing pauses for other work after this many guide channels. */
+const YIELD_EVERY_CHANNELS = 50;
+
+/** How catalogue channels map to the guide. */
+export interface GuideChannels {
+  guideIdOf(channelId: string): string | null;
+  /** The channels showing a guide channel, in catalogue order. */
+  channelsOf(guideId: string): readonly LiveChannel[];
+}
+
+interface Titled {
+  readonly guideId: string;
+  /** The title as search compares it. */
+  readonly folded: string;
+  readonly programme: Programme;
+}
+
+export interface ProgrammeIndex {
+  /** Programmes per guide channel, in time order and without overlaps. */
+  readonly byChannel: ReadonlyMap<string, readonly Programme[]>;
+  readonly titles: readonly Titled[];
+}
+
+/**
+ * Indexes an XMLTV document, leaving out programmes that ended before `since`. Reads it chunk by
+ * chunk and pauses between channels at the end, so no step holds the process for long. Fails when
+ * the document lists no programmes at all.
+ */
+export async function indexProgrammes(
+  document: AsyncIterable<Uint8Array>,
+  since: number,
+): Promise<ProgrammeIndex> {
+  const reader = xmltvReader();
+  const raw = new Map<string, XmltvProgramme[]>();
+  // Titles folded for search as they arrive, once per distinct title, to keep the last step short.
+  const folded = new Map<string, string>();
+  let read = 0;
+  for await (const chunk of document) {
+    for (const entry of reader.push(chunk)) {
+      read++;
+      if (entry.stop !== null && entry.stop <= since) continue;
+      const list = raw.get(entry.channel);
+      if (list) list.push(entry);
+      else raw.set(entry.channel, [entry]);
+      if (!folded.has(entry.title)) folded.set(entry.title, normalize(entry.title));
+    }
+  }
+  if (read === 0) throw new EmptyGuide();
+  const byChannel = new Map<string, readonly Programme[]>();
+  const titles: Titled[] = [];
+  let done = 0;
+  for (const [guideId, entries] of raw) {
+    // Lets other work in between, every so many channels.
+    if (++done % YIELD_EVERY_CHANNELS === 0) await new Promise((resolve) => setTimeout(resolve, 0));
+    const programmes = timeline(entries).filter((programme) => programme.stop > since);
+    if (programmes.length === 0) continue;
+    byChannel.set(guideId, programmes);
+    for (const programme of programmes) {
+      titles.push({ guideId, folded: folded.get(programme.title) ?? "", programme });
+    }
+  }
+  return { byChannel, titles };
+}
+
+/** A document without a single programme, which never replaces a guide. */
+export class EmptyGuide extends Error {
+  constructor() {
+    super("The guide lists no programmes.");
+  }
+}
+
+/** What each channel shows now and next at `at`. Channels without guide data are left out. */
+export function listingsAt(
+  index: ProgrammeIndex,
+  channels: GuideChannels,
+  channelIds: readonly string[],
+  at: number,
+): Record<string, Listing> {
+  const result: Record<string, Listing> = {};
+  for (const channelId of channelIds) {
+    const programmes = programmesOf(index, channels, channelId);
+    const from = firstUnfinished(programmes, at);
+    const first = programmes[from];
+    if (!first) continue;
+    result[channelId] =
+      first.start <= at
+        ? { now: first, next: programmes[from + 1] ?? null }
+        : { now: null, next: first };
+  }
+  return result;
+}
+
+/** The channel's programme on now and everything after it that the guide knows. */
+export function scheduleAt(
+  index: ProgrammeIndex,
+  channels: GuideChannels,
+  channelId: string,
+  at: number,
+): readonly Programme[] {
+  const programmes = programmesOf(index, channels, channelId);
+  return programmes.slice(firstUnfinished(programmes, at));
+}
+
+/**
+ * Programmes on now or later whose title has every word of `query`, on the first channel in the
+ * catalogue that shows them. On now comes first, then by start time.
+ */
+export function searchAt(
+  index: ProgrammeIndex,
+  channels: GuideChannels,
+  query: string,
+  at: number,
+): readonly ProgrammeMatch[] {
+  const words = normalize(query).split(" ").filter(Boolean);
+  if (words.length === 0) return [];
+  const matches: ProgrammeMatch[] = [];
+  for (const { guideId, folded, programme } of index.titles) {
+    if (programme.stop <= at || !words.every((word) => folded.includes(word))) continue;
+    const channel = channels.channelsOf(guideId)[0];
+    if (channel) matches.push({ channel, programme });
+  }
+  const onNow = (match: ProgrammeMatch) => (match.programme.start <= at ? 0 : 1);
+  matches.sort((a, b) => onNow(a) - onNow(b) || a.programme.start - b.programme.start);
+  return matches.slice(0, SEARCH_LIMIT);
+}
+
+function programmesOf(
+  index: ProgrammeIndex,
+  channels: GuideChannels,
+  channelId: string,
+): readonly Programme[] {
+  const guideId = channels.guideIdOf(channelId);
+  return (guideId && index.byChannel.get(guideId)) || [];
+}
+
+/** The position of the first programme that hasn't ended at `at`. */
+function firstUnfinished(programmes: readonly Programme[], at: number): number {
+  let low = 0;
+  let high = programmes.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if ((programmes[middle]?.stop ?? 0) <= at) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
+/**
+ * One channel's programmes in time order, without overlaps: a programme without an end runs until
+ * the next one starts, a programme that starts before the previous one ends cuts it short, and
+ * duplicates of a start time count once.
+ */
+function timeline(entries: readonly XmltvProgramme[]): Programme[] {
+  const sorted = entries.toSorted((a, b) => a.start - b.start);
+  const result: Programme[] = [];
+  for (const [position, entry] of sorted.entries()) {
+    const previous = result.at(-1);
+    if (previous?.start === entry.start) continue;
+    if (previous && previous.stop > entry.start) {
+      result[result.length - 1] = { ...previous, stop: entry.start };
+    }
+    const stop = entry.stop ?? sorted[position + 1]?.start;
+    if (stop === undefined || stop <= entry.start) continue;
+    result.push({
+      start: entry.start,
+      stop,
+      title: entry.title,
+      description: entry.description,
+    });
+  }
+  return result;
+}

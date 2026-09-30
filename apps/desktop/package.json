@@ -38,6 +38,7 @@
     "@vitejs/plugin-react": "5.2.0",
     "arktype": "2.2.5",
     "class-variance-authority": "0.7.1",
+    "effect": "4.0.0-rc.118",
     "electron": "44.4.5",
     "electron-builder": "26.15.3",
     "electron-updater": "6.8.10",

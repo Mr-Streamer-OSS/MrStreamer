@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { createGuide } from "../src/main/services/guide.ts";
+import { Guide } from "@mrstreamer/core/guide/service";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as ManagedRuntime from "effect/ManagedRuntime";
+import * as TestClock from "effect/testing/TestClock";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { mainLayer } from "../src/main/runtime.ts";
 import { createLibrary } from "../src/main/services/library.ts";
 import { createSubscriptions } from "../src/main/services/subscription.ts";
 import {
@@ -11,10 +16,14 @@ import {
 import { fakeProvider, tempDir, testSecrets, userAgent } from "./support.ts";
 
 const HOUR = 60 * 60 * 1000;
+const QUARTER = HOUR / 4;
 /** 20:10 in the fake guide's +02:00. */
 const NOW = Date.parse("2026-10-02T20:10:00+02:00");
 
-/** A connected library and guide on the fake provider, with a clock the test moves. */
+/**
+ * A connected library and guide on the fake provider. The guide runs on its own runtime, as in
+ * the app, with a test clock the test moves; `create` starts another, as after a restart.
+ */
 async function connectedGuide(options: FakeProviderOptions = {}) {
   const provider = await fakeProvider(options);
   provider.serveGuide(fakeGuide(provider.catalogue, NOW));
@@ -31,16 +40,41 @@ async function connectedGuide(options: FakeProviderOptions = {}) {
     onUpdated: () => {},
     confirmDelayMs: 0,
   });
-  const clock = { now: NOW };
-  const create = () =>
-    createGuide({
-      dataDir,
-      source: subscriptions.source,
-      channels: () => library.guideChannels(),
-      onUpdated: () => {},
-      now: () => clock.now,
-    });
-  return { provider, library, clock, create, guide: create(), ...channelsOf(provider) };
+  const create = async () => {
+    // The clock reads NOW before the guide starts, so its checks count from there.
+    const clock = Layer.effectDiscard(TestClock.setTime(NOW)).pipe(
+      Layer.provideMerge(TestClock.layer({ warningDelay: "1 day" })),
+    );
+    const runtime = ManagedRuntime.make(
+      mainLayer({ dataDir, source: subscriptions.source, library }).pipe(Layer.provideMerge(clock)),
+    );
+    onTestFinished(() => runtime.dispose());
+    const guide = await runtime.runPromise(
+      Effect.gen(function* () {
+        return yield* Guide;
+      }),
+    );
+    const run = <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect);
+    return {
+      refresh: () => run(guide.refresh),
+      refreshIfStale: () => run(guide.refreshIfStale),
+      listings: (channelIds: readonly string[]) => run(guide.listings(channelIds)),
+      schedule: (channelId: string) => run(guide.schedule(channelId)),
+      search: (query: string) => run(guide.search(query)),
+      clear: () => run(guide.clear),
+      /**
+       * Moves the clock on a quarter of an hour at a time, letting each check the guide runs on
+       * its own finish before the next.
+       */
+      advance: async (ms: number) => {
+        for (let passed = 0; passed < ms; passed += QUARTER) {
+          await run(TestClock.adjust(Math.min(QUARTER, ms - passed)));
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      },
+    };
+  };
+  return { provider, library, create, guide: await create(), ...channelsOf(provider) };
 }
 
 /** A channel with a guide id and one without, as the library names them. */
@@ -167,7 +201,7 @@ describe("programme guide", () => {
     await guide.refresh();
     provider.serveGuide(500);
 
-    const restarted = create();
+    const restarted = await create();
     await restarted.refreshIfStale();
 
     expect(provider.guideRequests()).toBe(1);
@@ -175,15 +209,15 @@ describe("programme guide", () => {
   });
 
   it("downloads again after six hours, and keeps the guide when that fails", async () => {
-    const { provider, guide, clock, guided } = await connectedGuide();
+    const { provider, guide, guided } = await connectedGuide();
     await guide.refresh();
 
-    clock.now += 5 * HOUR;
+    await guide.advance(5 * HOUR);
     await guide.refreshIfStale();
     expect(provider.guideRequests()).toBe(1);
 
-    clock.now += HOUR;
     provider.serveGuide(502);
+    await guide.advance(HOUR);
     await expect(guide.refreshIfStale()).rejects.toMatchObject({
       error: { kind: "provider-error", status: 502 },
     });
@@ -192,8 +226,18 @@ describe("programme guide", () => {
       error: { detail: "The guide lists no programmes." },
     });
 
-    expect(provider.guideRequests()).toBe(3);
     expect((await guide.listings([guided]))[guided]?.now?.start).toBe(at("02:00") + 24 * HOUR);
+  });
+
+  it("checks on its own and downloads once the guide is six hours old", async () => {
+    const { provider, guide } = await connectedGuide();
+    await guide.refresh();
+
+    await guide.advance(6 * HOUR - QUARTER);
+    expect(provider.guideRequests()).toBe(1);
+    await guide.advance(QUARTER);
+
+    await vi.waitFor(() => expect(provider.guideRequests()).toBe(2));
   });
 
   it("answers without listings while the first download is still running", async () => {
@@ -206,6 +250,22 @@ describe("programme guide", () => {
     expect(await library.channel(guided)).toMatchObject({ id: guided });
     await provider.close();
     await download;
+  });
+
+  it("stops a download when the subscription goes, and keeps nothing from it", async () => {
+    const { provider, guide, create, guided } = await connectedGuide();
+    provider.serveGuide(fakeGuide(provider.catalogue, NOW), { pieceBytes: 64 });
+    const download = guide.refresh().then(
+      () => "finished",
+      () => "stopped",
+    );
+    await vi.waitFor(() => expect(provider.guideRequests()).toBe(1));
+
+    await guide.clear();
+
+    expect(await download).toBe("stopped");
+    expect(await guide.listings([guided])).toEqual({});
+    expect(await (await create()).listings([guided])).toEqual({});
   });
 
   it("shows a guide id only on the channels it names", async () => {
@@ -255,6 +315,6 @@ describe("programme guide", () => {
     await guide.clear();
 
     expect(await guide.listings([guided])).toEqual({});
-    expect(await create().listings([guided])).toEqual({});
+    expect(await (await create()).listings([guided])).toEqual({});
   });
 });
