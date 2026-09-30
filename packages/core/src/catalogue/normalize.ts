@@ -212,7 +212,7 @@ function channelTitle(
  * they read as words: a few common ones, and those with two vowels (ONE, UNE, RAI). Words without
  * vowels stay capitals at any length (MSNBC).
  */
-function recase(text: string): string {
+export function recase(text: string): string {
   if (!/\p{Lu}/u.test(text) || /\p{Ll}/u.test(text)) return text;
   return text.replace(/\p{L}[\p{L}']*/gu, (word, offset: number) => {
     // "13TH" reads "13th".

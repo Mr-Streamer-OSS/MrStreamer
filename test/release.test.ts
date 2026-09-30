@@ -8,26 +8,37 @@ import {
   type History,
   type NightlyRequest,
   type PullRequest,
-  type Release,
   type Repository,
 } from "../scripts/release-plan.ts";
 import { compareVersions, formatVersion, parseVersion } from "../packages/contracts/src/version.ts";
+import {
+  buildFeed,
+  mergeFeeds,
+  readFeed,
+  type GitHubRelease,
+  type UpdateFeed,
+} from "../packages/contracts/src/update-feed.ts";
 
 const HOUR = 60 * 60 * 1000;
 const NOW = Date.parse("2026-10-02T12:00:00Z");
 const MAIN = "refs/heads/main";
+const REPOSITORY = "https://github.com/owner/app";
 
-function published(tag: string, hoursAgo: number, prerelease = tag.includes("-")): Release {
+/** A published release with every platform's files. */
+function published(tag: string, hoursAgo: number, prerelease = tag.includes("-")): GitHubRelease {
   return {
     tag,
     draft: false,
     prerelease,
     publishedAt: new Date(NOW - hoursAgo * HOUR).toISOString(),
+    page: `${REPOSITORY}/releases/tag/${tag}`,
+    notes: `Notes for ${tag}`,
+    assets: [`Mr-Streamer-${tag}.dmg`, "latest-mac.yml", "latest.yml", "latest-linux.yml"],
   };
 }
 
-function draft(tag: string): Release {
-  return { tag, draft: true, prerelease: tag.includes("-"), publishedAt: null };
+function draft(tag: string): GitHubRelease {
+  return { ...published(tag, 0), draft: true, publishedAt: null };
 }
 
 /**
@@ -37,7 +48,7 @@ function draft(tag: string): Release {
  */
 function repository(
   options: {
-    releases?: Release[];
+    releases?: GitHubRelease[];
     tags?: string[];
     histories?: Record<string, History>;
     commits?: Record<string, string>;
@@ -54,7 +65,7 @@ function repository(
     return index;
   };
   const repo: Repository = {
-    url: "https://github.com/owner/app",
+    url: REPOSITORY,
     defaultBranch: "main",
     releases,
     tags: [
@@ -195,12 +206,19 @@ describe("nightly versions", () => {
     ).toMatchObject({ version: "0.1.1-nightly.20261002.40" });
   });
 
-  it("count from a stable release main has not recorded yet", async () => {
-    const { repo } = repository({ releases: [published("v0.0.1", 1)] });
+  it("count from a stable release main has not recorded yet, such as one published while they waited in the queue", async () => {
+    // The run started before the stable release, so its commit still records 0.0.1.
+    const { repo } = repository({
+      releases: [
+        published("v0.0.1", 50, false),
+        published("v0.0.2-nightly.20261002.30", 8),
+        published("v0.0.2", 1, false),
+      ],
+    });
 
     expect(
-      await planNightly(repo, scheduled({ recorded: "0.0.0", scheduled: false })),
-    ).toMatchObject({ version: "0.0.2-nightly.20261002.40" });
+      await planNightly(repo, scheduled({ recorded: "0.0.1", scheduled: false })),
+    ).toMatchObject({ version: "0.0.3-nightly.20261002.40" });
   });
 
   it("are refused when the tag exists or would sort before a released nightly", async () => {
@@ -221,11 +239,11 @@ describe("nightly versions", () => {
 describe("stable releases", () => {
   const older = "v0.0.1-nightly.20261001.20";
   const latest = "v0.0.1-nightly.20261002.30";
-  const promotion = (releases: Release[] = []) =>
+  const promotion = (releases: GitHubRelease[] = []) =>
     repository({
       releases: [published(older, 30), published(latest, 8), ...releases],
-      commits: { [latest]: "nightly-commit", main: "newer-commit" },
-      histories: { "nightly-commit...main": "ahead" },
+      commits: { [older]: "older-commit", [latest]: "nightly-commit", main: "newer-commit" },
+      histories: { "older-commit...main": "ahead", "nightly-commit...main": "ahead" },
     });
 
   it("rebuild the commit of the latest nightly while main moves on", async () => {
@@ -237,7 +255,40 @@ describe("stable releases", () => {
       tag: "v0.0.1",
       sha: "nightly-commit",
       previousTag: null,
+      leftOut: [],
     });
+  });
+
+  it("promote the tested nightly when given, by version or tag, and name the later ones", async () => {
+    const { repo } = promotion();
+
+    for (const nightly of ["0.0.1-nightly.20261001.20", older]) {
+      expect(await planStable(repo, { ref: MAIN, nightly })).toMatchObject({
+        version: "0.0.1",
+        sha: "older-commit",
+        leftOut: [latest],
+      });
+    }
+  });
+
+  it("refuse a given nightly that is a draft, unknown, stable or not on main", async () => {
+    const { repo } = repository({
+      releases: [
+        published("v0.0.0", 50, false),
+        published(latest, 8),
+        draft("v0.0.1-nightly.20261002.31"),
+      ],
+      commits: { [latest]: "rewritten" },
+      histories: { "rewritten...main": "diverged" },
+    });
+    const pinned = (nightly: string) => planStable(repo, { ref: MAIN, nightly });
+
+    await expect(pinned("0.0.1-nightly.20261002.31")).rejects.toThrow("not a published nightly");
+    await expect(pinned("0.0.1-nightly.20261002.99")).rejects.toThrow(
+      "No release is tagged v0.0.1-nightly.20261002.99",
+    );
+    await expect(pinned("v0.0.0")).rejects.toThrow("not a nightly version");
+    await expect(pinned(latest)).rejects.toThrow("main does not contain");
   });
 
   it("keep the nightly's commit when given another version", async () => {
@@ -277,6 +328,14 @@ describe("stable releases", () => {
     await expect(planStable(repo, { ref: MAIN })).rejects.toThrow("v0.0.1 already exists");
     await expect(planStable(repo, { ref: MAIN, version: "0.0.0" })).rejects.toThrow(
       "would sort before v0.0.1-nightly.20261002.30",
+    );
+  });
+
+  it("are refused for a nightly from before the newest stable release, whatever the version", async () => {
+    const { repo } = promotion([published("v0.0.1", 2, false)]);
+
+    await expect(planStable(repo, { ref: MAIN, nightly: older, version: "0.1.0" })).rejects.toThrow(
+      `${older} came before v0.0.1`,
     );
   });
 });
@@ -362,6 +421,117 @@ describe("publishing", () => {
     expect(recordedVersion("0.0.0", "0.0.1")).toBe("0.0.1");
     expect(recordedVersion("0.0.1", "0.0.1")).toBeNull();
     expect(recordedVersion("0.1.0", "0.0.2")).toBeNull();
+  });
+});
+
+describe("update feed", () => {
+  const GENERATED = "2026-10-02T12:00:00.000Z";
+  const feedOf = (releases: GitHubRelease[]) => buildFeed(REPOSITORY, releases, GENERATED);
+  /** The versions a feed offers on Stable and Nightly. */
+  const offered = (feed: UpdateFeed) => [feed.stable?.version, feed.nightly?.version];
+
+  it("offers the highest stable release on Stable, and the highest of all on Nightly", () => {
+    const releases = [
+      published("v0.0.1", 50, false),
+      published("v0.0.2-nightly.20261001.20", 30),
+      published("v0.0.2", 20, false),
+    ];
+
+    expect(offered(feedOf(releases))).toEqual(["0.0.2", "0.0.2"]);
+    expect(offered(feedOf([...releases, published("v0.0.3-nightly.20261002.30", 2)]))).toEqual([
+      "0.0.2",
+      "0.0.3-nightly.20261002.30",
+    ]);
+    expect(offered(feedOf([]))).toEqual([undefined, undefined]);
+  });
+
+  it("points at each release's page, download folder and notes", () => {
+    expect(feedOf([published("v0.0.2", 20, false)])).toEqual({
+      schema: 1,
+      generated: GENERATED,
+      stable: {
+        version: "0.0.2",
+        published: new Date(NOW - 20 * HOUR).toISOString(),
+        page: "https://github.com/owner/app/releases/tag/v0.0.2",
+        files: "https://github.com/owner/app/releases/download/v0.0.2",
+        notes: "Notes for v0.0.2",
+        platforms: ["latest-mac.yml", "latest.yml", "latest-linux.yml"],
+      },
+      nightly: expect.objectContaining({ version: "0.0.2" }),
+    });
+  });
+
+  it("leaves out drafts, mismatched pre-release flags and releases missing a platform", () => {
+    const feed = feedOf([
+      published("v0.0.1", 50, false),
+      draft("v0.0.9"),
+      published("v0.0.8", 1, true),
+      published("v0.0.8-nightly.20261002.8", 1, false),
+      { ...published("v0.0.7", 1, false), assets: ["latest-mac.yml", "latest.yml"] },
+      published("v0.1.0-beta.1", 1),
+    ]);
+
+    expect(offered(feed)).toEqual(["0.0.1", "0.0.1"]);
+  });
+
+  it("orders by version, never by date", () => {
+    const feed = feedOf([
+      published("v0.0.10", 30, false),
+      published("v0.0.9", 1, false),
+      published("v0.0.11-nightly.20261002.40", 5),
+      published("v0.0.11-nightly.20261002.39", 1),
+    ]);
+
+    expect(offered(feed)).toEqual(["0.0.10", "0.0.11-nightly.20261002.40"]);
+  });
+
+  it("never moves a channel to a lower version than the deployed feed names", () => {
+    const deployed = feedOf([
+      published("v0.0.3", 5, false),
+      published("v0.0.4-nightly.20261002.9", 1),
+    ]);
+
+    expect(offered(mergeFeeds(deployed, feedOf([published("v0.0.2", 20, false)])))).toEqual([
+      "0.0.3",
+      "0.0.4-nightly.20261002.9",
+    ]);
+    expect(offered(mergeFeeds(deployed, feedOf([])))).toEqual([
+      "0.0.3",
+      "0.0.4-nightly.20261002.9",
+    ]);
+  });
+
+  it("takes newer releases and the latest details of the same one", () => {
+    const deployed = feedOf([{ ...published("v0.0.2", 20, false), notes: "Draft notes" }]);
+    const listed = feedOf([
+      published("v0.0.2", 20, false),
+      published("v0.0.3-nightly.20261002.9", 1),
+    ]);
+
+    expect(mergeFeeds(deployed, listed)).toEqual(listed);
+    expect(mergeFeeds(null, listed)).toEqual(listed);
+  });
+
+  it("moves back when allowed, to withdraw a deleted release", () => {
+    const deployed = feedOf([published("v0.0.3", 5, false)]);
+    const listed = feedOf([published("v0.0.2", 20, false)]);
+
+    expect(mergeFeeds(deployed, listed, { allowRegress: true })).toEqual(listed);
+  });
+
+  it("reads back the feed it writes, and nothing else", () => {
+    const feed = feedOf([
+      published("v0.0.2", 20, false),
+      published("v0.0.3-nightly.20261002.9", 1),
+    ]);
+    const json: Record<string, unknown> = JSON.parse(JSON.stringify(feed));
+
+    expect(readFeed(json)).toEqual(feed);
+    expect(() => readFeed({ ...json, schema: 2 })).toThrow("schema 1");
+    expect(() => readFeed({ ...json, stable: feed.nightly })).toThrow("stable release has version");
+    expect(() => readFeed({ ...json, nightly: { ...feed.nightly, files: undefined } })).toThrow(
+      "nightly release is malformed",
+    );
   });
 });
 

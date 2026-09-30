@@ -2,6 +2,7 @@
 import { queryOptions, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
+import type { TitleKind, TitleSort } from "@mrstreamer/contracts/ondemand";
 import type { Viewing } from "@mrstreamer/contracts/viewing";
 import { call, listen } from "./ipc.ts";
 
@@ -90,6 +91,76 @@ export const queries = {
       staleTime: LISTINGS_REFRESH_MS,
       enabled: query.trim().length > 0,
     }),
+  /** How many movies and series there are, and when they were fetched. */
+  onDemandStatus: () =>
+    queryOptions({
+      queryKey: ["ondemand", "status"],
+      queryFn: () => call("ondemand.status"),
+      staleTime: Infinity,
+    }),
+  titleCategories: (kind: TitleKind) =>
+    queryOptions({
+      queryKey: ["ondemand", "categories", kind],
+      queryFn: () => call("ondemand.categories", { kind }),
+      staleTime: Infinity,
+    }),
+  /** One page of a category, or of every title of the kind without those for adults. */
+  titles: (
+    kind: TitleKind,
+    categoryId: string | null,
+    sort: TitleSort,
+    offset: number,
+    limit: number,
+  ) =>
+    queryOptions({
+      queryKey: ["ondemand", "titles", kind, categoryId, sort, offset, limit],
+      queryFn: () =>
+        call("ondemand.titles", {
+          kind,
+          sort,
+          offset,
+          limit,
+          ...(categoryId === null ? {} : { categoryId }),
+        }),
+      staleTime: Infinity,
+      placeholderData: (previous) => previous,
+    }),
+  titleSearch: (query: string) =>
+    queryOptions({
+      queryKey: ["ondemand", "search", query],
+      queryFn: () => call("ondemand.search", { query }),
+      staleTime: Infinity,
+      enabled: query.trim().length > 0,
+    }),
+  details: (kind: TitleKind, id: string) =>
+    queryOptions({
+      queryKey: ["ondemand", "details", kind, id],
+      queryFn: () => call("ondemand.details", { kind, id }),
+      staleTime: 30 * 60_000,
+    }),
+  /** How far movies, or every episode of a series, got. Kept current by `syncViewing`. */
+  progress: (filter: { readonly movieIds?: readonly string[]; readonly seriesId?: string }) =>
+    queryOptions({
+      queryKey: ["viewing", "progress", filter.seriesId ?? null, ...(filter.movieIds ?? [])],
+      queryFn: () =>
+        call("viewing.progress", {
+          ...(filter.movieIds ? { movieIds: [...filter.movieIds] } : {}),
+          ...(filter.seriesId ? { seriesId: filter.seriesId } : {}),
+        }),
+      staleTime: Infinity,
+    }),
+  licences: () =>
+    queryOptions({
+      queryKey: ["licences"],
+      queryFn: () => call("licences.list"),
+      staleTime: Infinity,
+    }),
+  licenceText: (id: string) =>
+    queryOptions({
+      queryKey: ["licences", id],
+      queryFn: () => call("licences.text", { id }),
+      staleTime: Infinity,
+    }),
 };
 
 /** Stars or unstars a channel. The favourites list updates as soon as the main process has it. */
@@ -149,6 +220,13 @@ export function syncLibraryUpdates(client: QueryClient): () => void {
   });
 }
 
+/** Reads movies and series again once the main process has fetched new lists. */
+export function syncOnDemand(client: QueryClient): () => void {
+  return listen("ondemand.updated", () => {
+    void client.invalidateQueries({ queryKey: ["ondemand"] });
+  });
+}
+
 /** Asks for programmes again once the main process has a new guide. */
 export function syncGuideUpdates(client: QueryClient): () => void {
   return listen("guide.updated", () => {
@@ -156,11 +234,15 @@ export function syncGuideUpdates(client: QueryClient): () => void {
   });
 }
 
-/** Reads favourites and recently watched channels again once the main process has a later change. */
+/**
+ * Reads favourites, recently watched channels and progress again once the main process has a
+ * later change.
+ */
 export function syncViewing(client: QueryClient): () => void {
   return listen("viewing.changed", ({ sequence }) => {
     const cached = client.getQueryData(queries.viewing().queryKey);
     if (cached && cached.sequence >= sequence) return;
+    // The prefix covers the progress queries too.
     void client.invalidateQueries({ queryKey: queries.viewing().queryKey });
   });
 }

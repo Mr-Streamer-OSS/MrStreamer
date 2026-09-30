@@ -1,0 +1,7 @@
+x264, commit {X264_COMMIT}
+Copyright (C) x264 project
+
+The ffmpeg program in Mr. Streamer is linked with x264, which is licensed under the GNU General Public License, version 2 or later. The licence follows.
+
+Its exact source is attached to this release:
+https://github.com/Mr-Streamer-OSS/MrStreamer/releases/download/v{app}/x264-{X264_COMMIT}.tar.gz

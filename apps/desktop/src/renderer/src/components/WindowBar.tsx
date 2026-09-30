@@ -1,29 +1,52 @@
-import { ChevronLeft, House, Search, Settings, Tv } from "lucide-react";
-import type { ReactNode } from "react";
+import { ChevronLeft, Search, Settings } from "lucide-react";
 import { isMac } from "../app/platform.ts";
 import { closeWatch, openView, useUi, type View } from "../app/ui-store.ts";
+import { UpdateNotice } from "../features/updates/UpdateNotice.tsx";
 import { cn } from "../lib/utils.ts";
-import { UpdateIndicator } from "../features/updates/UpdateIndicator.tsx";
 import { WINDOW_BAR } from "../../../shared/window-bar.ts";
 import { Logo } from "./Logo.tsx";
 import { Button } from "./ui/button.tsx";
 
+const VIEWS: readonly { readonly view: View; readonly label: string }[] = [
+  { view: "home", label: "Home" },
+  { view: "live", label: "Live TV" },
+  { view: "movies", label: "Movies" },
+  { view: "series", label: "Series" },
+];
+
+/** The page's name, for the way back to it. */
+function viewLabel(view: View): string {
+  return VIEWS.find((entry) => entry.view === view)?.label ?? "Home";
+}
+
 /**
- * The top of the window: brand, Home and Live TV, search and settings. It is also the window's
- * drag area; macOS draws its traffic lights on the left and Windows its controls on the right.
- * Over Watch, a back button to the page underneath takes the place of Home and Live TV.
+ * The top of the window: brand, the pages, search and settings. It is also the window's drag
+ * area; macOS draws its traffic lights on the left and Windows its controls on the right. Over
+ * Settings, Watch or a title's details, Back to the page underneath takes the pages' place.
+ * `back` overrides where Back goes and what it says, as a playing title does.
  */
 export function WindowBar({
   className,
   overlay = false,
+  back,
 }: {
   className?: string;
   overlay?: boolean;
+  back?: { readonly label: string; readonly onBack: () => void };
 }) {
   const view = useUi((state) => state.view);
   const watching = useUi((state) => state.watching);
   const settingsOpen = useUi((state) => state.settings !== null);
-  const current = settingsOpen ? null : view;
+  const detailsOpen = useUi((state) => state.details !== null);
+  const way =
+    back ??
+    (settingsOpen
+      ? { label: viewLabel(view), onBack: () => useUi.setState({ settings: null }) }
+      : watching
+        ? { label: viewLabel(view), onBack: closeWatch }
+        : detailsOpen
+          ? { label: viewLabel(view), onBack: () => useUi.setState({ details: null }) }
+          : null);
   return (
     <header
       className={cn("drag flex flex-none items-center gap-1", isMac ? "pr-4" : "pl-4", className)}
@@ -38,31 +61,31 @@ export function WindowBar({
         <Logo className="size-5" />
         <b className="text-[0.9375rem] tracking-tight">mr. streamer</b>
       </span>
-      {watching && !settingsOpen ? (
-        <Button variant="media" size="sm" onClick={closeWatch}>
+      {way ? (
+        <Button variant={overlay ? "media" : "secondary"} size="sm" onClick={way.onBack}>
           <ChevronLeft />
-          {view === "home" ? "Home" : "Live TV"}
+          {way.label}
         </Button>
       ) : (
-        <>
-          <NavButton
-            view="home"
-            current={current}
-            overlay={overlay}
-            icon={<House />}
-            label="Home"
-          />
-          <NavButton
-            view="live"
-            current={current}
-            overlay={overlay}
-            icon={<Tv />}
-            label="Live TV"
-          />
-        </>
+        VIEWS.map((entry) => (
+          <button
+            key={entry.view}
+            aria-current={entry.view === view ? "page" : undefined}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => openView(entry.view)}
+            className={cn(
+              "h-8 rounded-full px-3 text-[0.875rem] transition-colors",
+              entry.view === view
+                ? "font-semibold text-white"
+                : "text-muted-foreground hover:text-white",
+            )}
+          >
+            {entry.label}
+          </button>
+        ))
       )}
       <div className="ml-auto flex items-center gap-1.5">
-        <UpdateIndicator overlay={overlay} />
+        <UpdateNotice overlay={overlay} />
         <Button
           variant={overlay ? "media" : "ghost"}
           size="icon-sm"
@@ -82,33 +105,5 @@ export function WindowBar({
         </Button>
       </div>
     </header>
-  );
-}
-
-function NavButton({
-  view,
-  current,
-  overlay,
-  icon,
-  label,
-}: {
-  view: View;
-  /** The view on screen; null while Settings covers it. */
-  current: View | null;
-  overlay: boolean;
-  icon: ReactNode;
-  label: string;
-}) {
-  const active = view === current;
-  return (
-    <Button
-      variant={active ? "secondary" : overlay ? "media" : "ghost"}
-      size="sm"
-      className={cn(active && "text-white")}
-      onClick={() => openView(view)}
-    >
-      {icon}
-      {label}
-    </Button>
   );
 }

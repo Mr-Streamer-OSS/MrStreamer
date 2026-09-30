@@ -1,22 +1,46 @@
 // The viewing record's rules: which events a command produces, and what the events add up to.
 // Both are plain functions of their input. They never read the clock, fetch or make ids; the
 // service supplies time and ids, and the store keeps the events and the state they add up to.
+// How far movies and episodes got follows the rules in ./titles.ts, one row per title.
+import type { TitleRef } from "@mrstreamer/contracts/ondemand";
 import { RECENT_LIMIT } from "@mrstreamer/contracts/viewing";
 
 /** The version events are written with. Readers skip events from a newer version. */
 export const EVENT_VERSION = 1;
-/** Rises when `apply` changes, so stored state is rebuilt from the events. */
+/** Rises when `apply` or the rules in ./titles.ts change, so stored state is rebuilt from the events. */
 export const STATE_VERSION = 1;
 
-/** What happened, by meaning: not which button was pressed. */
+/**
+ * What happened, by meaning: not which button was pressed. Builds from before movies and series
+ * skip the title events, as they skip any type they don't know.
+ */
 export type ViewingEvent =
   | { readonly type: "favourite-added"; readonly channelId: string }
   | { readonly type: "favourite-removed"; readonly channelId: string }
-  | { readonly type: "watched"; readonly channelId: string };
+  | { readonly type: "watched"; readonly channelId: string }
+  /** A movie or episode played up to `position` of `duration` seconds. */
+  | {
+      readonly type: "title-progress";
+      readonly title: TitleRef;
+      readonly position: number;
+      readonly duration: number;
+    }
+  /** Taken out of Continue watching: the movie, or the whole series of an episode. */
+  | { readonly type: "title-removed"; readonly title: TitleRef };
+
+export type ChannelEvent = Extract<ViewingEvent, { readonly channelId: string }>;
+export type TitleEvent = Extract<ViewingEvent, { readonly title: TitleRef }>;
 
 export type ViewingCommand =
   | { readonly kind: "set-favourite"; readonly channelId: string; readonly favourite: boolean }
-  | { readonly kind: "record-watch"; readonly channelId: string };
+  | { readonly kind: "record-watch"; readonly channelId: string }
+  | {
+      readonly kind: "record-progress";
+      readonly title: TitleRef;
+      readonly position: number;
+      readonly duration: number;
+    }
+  | { readonly kind: "remove-title"; readonly title: TitleRef };
 
 /** One account's favourites and recently watched channels. */
 export interface ViewingState {
@@ -43,11 +67,27 @@ export function decide(state: ViewingState, command: ViewingCommand): ViewingEve
     }
     case "record-watch":
       return [{ type: "watched", channelId: command.channelId }];
+    case "record-progress":
+      return [
+        {
+          type: "title-progress",
+          title: command.title,
+          position: command.position,
+          duration: command.duration,
+        },
+      ];
+    case "remove-title":
+      return [{ type: "title-removed", title: command.title }];
   }
 }
 
-/** The state after `event`. */
-export function apply(state: ViewingState, event: ViewingEvent): ViewingState {
+/** Whether an event is about a movie or episode, rather than a channel. */
+export function isTitleEvent(event: ViewingEvent): event is TitleEvent {
+  return "title" in event;
+}
+
+/** The state after a channel event. Title events change title rows instead; see ./titles.ts. */
+export function apply(state: ViewingState, event: ChannelEvent): ViewingState {
   switch (event.type) {
     case "favourite-added":
       return state.favourites.includes(event.channelId)

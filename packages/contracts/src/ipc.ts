@@ -6,55 +6,101 @@ import { type } from "arktype";
 import type { Result } from "./errors.ts";
 import type { Listing, Programme, ProgrammeMatch } from "./guide.ts";
 import type { CatalogueStatus, Category, LiveChannel } from "./library.ts";
-import { CODECS, type StreamFailure, type StreamSession } from "./playback.ts";
+import type { ThirdPartyNotice } from "./licences.ts";
+import {
+  TitleRef,
+  TITLE_KINDS,
+  TITLE_SORTS,
+  type OnDemandStatus,
+  type Title,
+  type TitleCategory,
+  type TitleDetails,
+  type TitlePage,
+} from "./ondemand.ts";
+import { CODECS, type StreamFailure, type StreamSession, type TitleSession } from "./playback.ts";
 import { Preferences } from "./preferences.ts";
 import type { SubscriptionSummary } from "./subscription.ts";
 import type { UpdateStatus } from "./updates.ts";
-import type { Viewing } from "./viewing.ts";
+import type { TitleProgress, Viewing } from "./viewing.ts";
 
-const none = type("undefined");
+// Every schema is built on its method's first call: defining them all would add to every start,
+// and most methods aren't called while the app starts.
+const none = () => type("undefined");
+const titleKind = () => type.enumerated(...TITLE_KINDS);
+const decoders = () => type.enumerated(...CODECS).array();
 
 /** Login details as typed by the user. `server` may also hold a pasted M3U link. */
-export const LoginInput = type({
-  server: "string > 0",
-  username: "string",
-  password: "string",
-});
-export type LoginInput = typeof LoginInput.infer;
+const loginInput = () =>
+  type({
+    server: "string > 0",
+    username: "string",
+    password: "string",
+  });
+export type LoginInput = IpcInput<"subscription.connect">;
 
 /** Input schema for every IPC method. The main process validates each call before handling it. */
 export const ipcInputs = {
   "subscription.get": none,
-  "subscription.connect": LoginInput,
+  "subscription.connect": loginInput,
   "subscription.remove": none,
   "library.status": none,
   "library.categories": none,
-  "library.channels": type({ "categoryId?": "string", "query?": "string", "ids?": "string[]" }),
-  "library.channel": type({ channelId: "string" }),
+  "library.channels": () =>
+    type({ "categoryId?": "string", "query?": "string", "ids?": "string[]" }),
+  "library.channel": () => type({ channelId: "string" }),
   "library.refresh": none,
-  "guide.listings": type({ channelIds: "string[]" }),
-  "guide.schedule": type({ channelId: "string" }),
-  "guide.search": type({ query: "string" }),
-  "playback.open": type({
-    channelId: "string",
-    decoders: type.enumerated(...CODECS).array(),
-    "repair?": "boolean",
-  }),
-  "playback.close": type({ sessionId: "string" }),
-  "playback.failure": type({ sessionId: "string" }),
+  "guide.listings": () => type({ channelIds: "string[]" }),
+  "guide.schedule": () => type({ channelId: "string" }),
+  "guide.search": () => type({ query: "string" }),
+  "ondemand.status": none,
+  "ondemand.refresh": none,
+  "ondemand.categories": () => type({ kind: titleKind() }),
+  "ondemand.titles": () =>
+    type({
+      kind: titleKind(),
+      "categoryId?": "string",
+      sort: type.enumerated(...TITLE_SORTS),
+      offset: "number.integer >= 0",
+      limit: "1 <= number.integer <= 500",
+    }),
+  "ondemand.search": () => type({ query: "string" }),
+  "ondemand.details": () => type({ kind: titleKind(), id: "string > 0" }),
+  "playback.open": () =>
+    type({
+      channelId: "string",
+      decoders: decoders(),
+      "repair?": "boolean",
+    }),
+  "playback.openTitle": () => type({ title: TitleRef, decoders: decoders() }),
+  "playback.close": () => type({ sessionId: "string" }),
+  "playback.closeAll": none,
+  "playback.failure": () => type({ sessionId: "string" }),
   "preferences.get": none,
-  "preferences.update": Preferences.partial(),
+  "preferences.update": () => Preferences.partial(),
   "viewing.get": none,
   // Each change carries an id the UI makes up, so sending it again changes nothing more.
-  "viewing.setFavourite": type({ commandId: "string", channelId: "string", favourite: "boolean" }),
-  "viewing.recordWatch": type({ commandId: "string", channelId: "string" }),
+  "viewing.setFavourite": () =>
+    type({ commandId: "string", channelId: "string", favourite: "boolean" }),
+  "viewing.recordWatch": () => type({ commandId: "string", channelId: "string" }),
+  "viewing.recordProgress": () =>
+    type({
+      commandId: "string",
+      title: TitleRef,
+      position: "number >= 0",
+      duration: "number > 0",
+    }),
+  "viewing.removeFromContinue": () => type({ commandId: "string", title: TitleRef }),
+  "viewing.progress": () => type({ "movieIds?": "string[]", "seriesId?": "string" }),
   "updates.status": none,
-  "updates.setChannel": type({ channel: "'stable' | 'nightly'" }),
+  "updates.setChannel": () => type({ channel: "'stable' | 'nightly'" }),
   "updates.check": none,
   "updates.download": none,
   "updates.cancel": none,
   "updates.restart": none,
-} satisfies Record<keyof IpcOutputs, { infer: unknown }>;
+  "updates.dismiss": () => type({ version: "string" }),
+  "licences.list": none,
+  "licences.text": () => type({ id: "string" }),
+} satisfies Record<keyof IpcOutputs, () => { infer: unknown }>;
 
 /** What each IPC method resolves to when it succeeds. */
 export interface IpcOutputs {
@@ -76,9 +122,23 @@ export interface IpcOutputs {
   "guide.schedule": readonly Programme[];
   /** Programmes on now or later whose title matches, on now first. */
   "guide.search": readonly ProgrammeMatch[];
+  "ondemand.status": OnDemandStatus;
+  /** Fetches the movie and series lists again. */
+  "ondemand.refresh": OnDemandStatus;
+  /** A kind's categories, in the provider's order. Fetches the lists first when there are none. */
+  "ondemand.categories": readonly TitleCategory[];
+  /** One page of a category, or of every title without those for adults. */
+  "ondemand.titles": TitlePage;
+  /** Movies and series whose name matches, best first, without titles for adults. */
+  "ondemand.search": { readonly movies: readonly Title[]; readonly series: readonly Title[] };
+  "ondemand.details": TitleDetails;
   /** Opens a stream for a channel and closes any stream that was open before. */
   "playback.open": StreamSession;
+  /** Opens a movie or episode, and closes any stream that was open before. */
+  "playback.openTitle": TitleSession;
   "playback.close": null;
+  /** Closes every stream, including a title still reading its file before its session is known. */
+  "playback.closeAll": null;
   /** Why a session's upstream request failed, or null if it has not failed. */
   "playback.failure": StreamFailure | null;
   "preferences.get": Preferences;
@@ -89,6 +149,12 @@ export interface IpcOutputs {
   "viewing.setFavourite": Viewing;
   /** Remembers a channel as watched, and as the last one. */
   "viewing.recordWatch": Viewing;
+  /** Remembers how far a movie or episode played. */
+  "viewing.recordProgress": Viewing;
+  /** Takes a movie, or an episode's series, out of Continue watching until it plays again. */
+  "viewing.removeFromContinue": Viewing;
+  /** How far the given movies, or every episode of a series, got. */
+  "viewing.progress": readonly TitleProgress[];
   "updates.status": UpdateStatus;
   /** Chooses Stable or Nightly and checks what it offers; installs and removes nothing. */
   "updates.setChannel": UpdateStatus;
@@ -99,10 +165,16 @@ export interface IpcOutputs {
   "updates.cancel": null;
   /** Quits and installs the downloaded update. Only after the user confirmed the restart. */
   "updates.restart": null;
+  /** Closes the notice for a version; Settings keeps offering it. */
+  "updates.dismiss": UpdateStatus;
+  /** Third-party components the app ships, with their licences, by name. */
+  "licences.list": readonly ThirdPartyNotice[];
+  /** The full notice of one component from `licences.list`, as plain text. */
+  "licences.text": string;
 }
 
 export type IpcMethod = keyof IpcOutputs;
-export type IpcInput<M extends IpcMethod> = (typeof ipcInputs)[M]["infer"];
+export type IpcInput<M extends IpcMethod> = ReturnType<(typeof ipcInputs)[M]>["infer"];
 export type IpcOutput<M extends IpcMethod> = IpcOutputs[M];
 
 /** Methods without input can be called with no argument. */
@@ -115,6 +187,8 @@ export interface IpcEvents {
   "library.updated": CatalogueStatus;
   /** A new programme guide is loaded. */
   "guide.updated": null;
+  /** The movie and series lists were fetched again, or the fetch failed and kept them. */
+  "ondemand.updated": OnDemandStatus;
   /** Favourites or recently watched channels changed, up to `sequence`. */
   "viewing.changed": { readonly sequence: number };
   /** The update moved on, for example a download's progress. */

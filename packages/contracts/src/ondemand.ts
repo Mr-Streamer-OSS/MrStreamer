@@ -1,0 +1,126 @@
+// Movies and series as the UI sees them, independent of the provider that supplied them.
+import { type } from "arktype";
+import type { AppError } from "./errors.ts";
+
+export const TITLE_KINDS = ["movie", "series"] as const;
+export type TitleKind = (typeof TITLE_KINDS)[number];
+
+/** A movie or a series in a catalogue list. Series and movies share it, so lists show both alike. */
+export interface Title {
+  readonly kind: TitleKind;
+  /** Stable within one subscription. */
+  readonly id: string;
+  /** The provider's name, for search: "Blow 2001 (NL)". */
+  readonly name: string;
+  /** The name to show: "Blow". */
+  readonly title: string;
+  /** Markers from the name: language ("NL", "MULTI") and quality ("4K"). */
+  readonly tags: readonly string[];
+  readonly year: number | null;
+  /** Portrait artwork. */
+  readonly posterUrl: string | null;
+  /** Landscape artwork, when the list has it. Movies get theirs with the details. */
+  readonly backdropUrl: string | null;
+  /** Out of 10, or null when the provider has none. */
+  readonly rating: number | null;
+  /** When the provider added the movie, or last changed the series: epoch milliseconds. */
+  readonly addedAt: number | null;
+  readonly categoryIds: readonly string[];
+  /** The provider marks it, or its category, as for adults. */
+  readonly adult: boolean;
+}
+
+export interface TitleCategory {
+  readonly id: string;
+  /** The provider's name: "NL | NETFLIX FILMS". */
+  readonly name: string;
+  /** The country or region it is grouped under: "Netherlands". Null when it stands on its own. */
+  readonly group: string | null;
+  /** The name to show, within its group if it has one: "Netflix Films". */
+  readonly title: string;
+  readonly count: number;
+  readonly adult: boolean;
+}
+
+interface DetailsBase {
+  readonly title: Title;
+  readonly originalTitle: string | null;
+  readonly plot: string | null;
+  readonly genres: readonly string[];
+  readonly cast: readonly string[];
+  readonly directors: readonly string[];
+  /** "1981-05-23", as the provider wrote it. */
+  readonly releaseDate: string | null;
+  /** Seconds. For a series, the usual length of an episode. */
+  readonly duration: number | null;
+  readonly backdropUrl: string | null;
+}
+
+export interface MovieDetails extends DetailsBase {
+  readonly kind: "movie";
+}
+
+export interface SeriesDetails extends DetailsBase {
+  readonly kind: "series";
+  /** In order, each with its episodes in order. Seasons without episodes are left out. */
+  readonly seasons: readonly Season[];
+}
+
+export type TitleDetails = MovieDetails | SeriesDetails;
+
+export interface Season {
+  readonly number: number;
+  /** "Season 2", or the provider's own name for it. */
+  readonly name: string;
+  readonly posterUrl: string | null;
+  readonly episodes: readonly Episode[];
+}
+
+export interface Episode {
+  readonly id: string;
+  readonly seriesId: string;
+  readonly season: number;
+  readonly number: number;
+  /** The episode's own name, without the series and numbers the provider puts in front. */
+  readonly title: string;
+  readonly plot: string | null;
+  /** Seconds. */
+  readonly duration: number | null;
+  readonly stillUrl: string | null;
+  readonly airDate: string | null;
+}
+
+/** When the movie and series lists were last fetched, and how big they are. */
+export interface OnDemandStatus {
+  readonly movies: number;
+  readonly series: number;
+  /** Epoch milliseconds, or null before the first successful fetch. */
+  readonly fetchedAt: number | null;
+  /** Why the latest refresh failed, when it did. The lists from `fetchedAt` stay in use. */
+  readonly failure: AppError | null;
+}
+
+/** What a list is ordered by: newest first, by name, or best rated first. */
+export const TITLE_SORTS = ["added", "title", "rating"] as const;
+export type TitleSort = (typeof TITLE_SORTS)[number];
+
+/** One page of a list, and how long the whole list is. */
+export interface TitlePage {
+  readonly total: number;
+  readonly titles: readonly Title[];
+}
+
+/** Something that plays on demand: a movie, or one episode of a series. */
+export const TitleRef = type({ kind: "'movie'", id: "string > 0" }, "|", {
+  kind: "'episode'",
+  id: "string > 0",
+  seriesId: "string > 0",
+  season: "number.integer >= 0",
+  episode: "number.integer >= 0",
+});
+export type TitleRef = typeof TitleRef.infer;
+
+/** "movie:123" or "episode:456": one key per thing that plays, within a subscription. */
+export function titleKey(ref: TitleRef): string {
+  return `${ref.kind}:${ref.id}`;
+}

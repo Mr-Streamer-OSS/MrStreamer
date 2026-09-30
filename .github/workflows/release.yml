@@ -2,12 +2,13 @@
 #
 # - Nightly: checked every 30 minutes, built when main has new commits and the last nightly is at
 #   least six hours old. Started by hand, it builds main right away.
-# - Stable: by hand. Rebuilds the commit of the latest published nightly with a stable version,
-#   publishes it as the latest release, then records the version on main.
+# - Stable: by hand. Rebuilds the commit of the tested nightly, or the latest published one, with a
+#   stable version, publishes it as the latest release, then records the version on main.
 # - Dry run: labelling a pull request "release dry run" builds, signs and tests its head commit
 #   once, keeps the files as workflow artifacts and publishes nothing.
 # - Nightlies and dry runs also measure the build against the last nightly on macOS and Linux and
 #   report the difference in the run summary, without holding anything up.
+# - After publishing, update-feed.yml points the app's update feed at the new release.
 #
 # Every job checks out the commit the plan resolved, so main moving during a run changes nothing.
 name: Release
@@ -24,7 +25,11 @@ on:
         options: [nightly, stable]
         default: nightly
       version:
-        description: Stable version, such as 0.1.0. Empty releases the version the latest nightly previewed.
+        description: Stable version, such as 0.1.0. Empty releases the version the nightly previewed.
+        type: string
+        required: false
+      nightly:
+        description: Stable only. The tested nightly to promote, such as 0.0.2-nightly.20260930.30. Empty promotes the latest.
         type: string
         required: false
   pull_request:
@@ -33,13 +38,16 @@ on:
 permissions:
   contents: read
 
-# One queue for nightlies, one for stable releases and one per pull request's dry runs. A run waits
-# for the one ahead of it and is never cancelled, so a requested stable release is never dropped.
-# A scheduled nightly decides whether it is due once its turn comes.
+# Nightlies and stable releases share one queue, and each pull request's dry runs have their own. A
+# run waits for the one ahead of it and is never cancelled, so a requested stable release is never
+# dropped. Sharing the queue keeps a nightly from being planned while a stable release builds: it
+# would preview the same version from newer code, and its users would then be offered the stable
+# release and move back to older code. A scheduled nightly decides whether it is due once its turn
+# comes.
 concurrency:
   group: >-
     release-${{ github.event_name == 'pull_request' && format('dry-run-{0}', github.event.pull_request.number)
-    || inputs.channel == 'stable' && 'stable' || 'nightly' }}
+    || 'main' }}
   cancel-in-progress: false
   queue: max
 
@@ -80,6 +88,7 @@ jobs:
         env:
           CHANNEL: ${{ inputs.channel }}
           VERSION: ${{ inputs.version }}
+          NIGHTLY: ${{ inputs.nightly }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           RUN: ${{ github.run_number }}
         run: |
@@ -89,7 +98,7 @@ jobs:
             pull_request/*)
               node scripts/release-plan.ts nightly --ref "$GITHUB_REF" --sha "$HEAD_SHA" --run "$RUN" --dry-run ;;
             workflow_dispatch/stable)
-              node scripts/release-plan.ts stable --ref "$GITHUB_REF" --version "$VERSION" ;;
+              node scripts/release-plan.ts stable --ref "$GITHUB_REF" --version "$VERSION" --nightly "$NIGHTLY" ;;
             workflow_dispatch/nightly)
               node scripts/release-plan.ts nightly --ref "$GITHUB_REF" --sha "$GITHUB_SHA" --run "$RUN" ;;
           esac
@@ -427,6 +436,20 @@ jobs:
           else
             gh release edit "$TAG" --draft=false --latest
           fi
+
+  # Points the app's update feed at the release. A job that calls a workflow can't take
+  # continue-on-error, so the input sets it on the called job: the release is out by now, and a
+  # failure there, such as before Pages is enabled, shows on that job without failing the run.
+  feed:
+    name: Update feed
+    needs: publish
+    uses: ./.github/workflows/update-feed.yml
+    with:
+      continue-on-error: true
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
 
   finalize:
     name: Record the stable version on main

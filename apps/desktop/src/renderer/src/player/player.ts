@@ -96,6 +96,16 @@ let zapTimer: ReturnType<typeof setTimeout> | null = null;
 /** The channel the last stream was opened for. It becomes `previous` when another channel tunes. */
 let tuned: LiveChannel | null = null;
 
+/**
+ * Hears when the viewer starts a live channel, so a movie or episode playing in the same element
+ * closes first. Previews don't count: they never replace what the viewer chose.
+ */
+let liveStarts: (() => void) | null = null;
+
+export function onLiveStart(listener: () => void): void {
+  liveStarts = listener;
+}
+
 function cancelZap(): void {
   if (zapTimer) clearTimeout(zapTimer);
   zapTimer = null;
@@ -120,7 +130,9 @@ async function start(
   preview = false,
 ): Promise<void> {
   const mine = ++selection;
-  if (attempt === 0) quiet = preview;
+  // A stream nobody listens to, such as one a channel switch opens just after leaving Watch, is
+  // a preview: it doesn't reconnect against another device.
+  if (attempt === 0) quiet = preview || !store.getState().audible;
   if (attempt === 0 && tuned?.id !== channel.id) {
     if (tuned) store.setState({ previous: tuned });
     tuned = channel;
@@ -277,6 +289,7 @@ export const player = {
   },
 
   play(channel: LiveChannel): void {
+    liveStarts?.();
     cancelZap();
     store.setState({ stopped: false });
     void start(channel, 0);
@@ -291,6 +304,7 @@ export const player = {
     const open =
       phase.kind === "playing" || phase.kind === "tuning" || phase.kind === "reconnecting";
     if (current?.id === channel.id && open && !zapTimer) {
+      liveStarts?.();
       quiet = false;
       store.setState({ stopped: false });
       return;
@@ -330,9 +344,13 @@ export const player = {
    * opens once the viewer stops switching for a moment.
    */
   zap(channel: LiveChannel): void {
+    liveStarts?.();
     cancelZap();
     selection++;
     release();
+    // The channel on screen before this one is where Back goes, even while switching.
+    if (tuned && tuned.id !== channel.id) store.setState({ previous: tuned });
+    tuned = channel;
     store.setState({ channel, phase: { kind: "tuning", since: Date.now() }, stopped: false });
     zapTimer = setTimeout(() => {
       zapTimer = null;
@@ -383,6 +401,11 @@ export const player = {
     }
     applyVolume();
     saveVolume();
+  },
+
+  /** The player's state now, for key handlers that read it once. */
+  state(): PlayerState {
+    return store.getState();
   },
 
   /** The selected channel, playing or not. */

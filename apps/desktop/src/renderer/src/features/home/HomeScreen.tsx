@@ -1,20 +1,24 @@
-// The start page: the channel you watched last, playing muted in the large backdrop with what's on,
-// then favourites, recently watched and your category, a few rows of each. Everything scrolls one
-// way, down; each section's All opens the full list in Live TV.
+// The start page: the channel you watched last, playing muted in the backdrop with what's on, then
+// one row each of what you were watching, favourite and recent channels, new movies, new series
+// and your category. Rows show only what exists. Everything scrolls one way, down; each row's All
+// opens the whole list in Live TV, Movies or Series.
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, Play, Volume2, VolumeX } from "lucide-react";
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Listing } from "@mrstreamer/contracts/guide";
 import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
-import { openView, useUi, type ChannelList } from "../../app/ui-store.ts";
+import type { Title, TitleKind } from "@mrstreamer/contracts/ondemand";
+import { openDetails, openView, useUi, type ChannelList } from "../../app/ui-store.ts";
 import { CatalogueNotice, catalogueState } from "../../components/CatalogueNotice.tsx";
 import { ChannelLogo, hueOf } from "../../components/ChannelLogo.tsx";
 import { Progress } from "../../components/Progress.tsx";
+import { PosterTile, StillTile } from "../../components/TitleArt.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { WindowBar } from "../../components/WindowBar.tsx";
 import { useNow } from "../../lib/clock.ts";
 import { categoryOf, channelLine, clockTime, progressOf, timeLeft } from "../../lib/format.ts";
 import { queries, useCategoryMap, useLastChannel } from "../../lib/queries.ts";
+import { removeFromContinue, playTitle, useContinueWatching } from "../../lib/titles.ts";
 import { useRem } from "../../lib/use-rem.ts";
 import { Picture } from "../../player/Picture.tsx";
 import { player, usePlayer } from "../../player/player.ts";
@@ -24,9 +28,10 @@ import { showList } from "../live/lists.ts";
 
 const NO_IDS: readonly string[] = [];
 const NO_CHANNELS: readonly LiveChannel[] = [];
-/** Sections show at most this many rows of tiles. */
-const ROWS = 2;
+const NO_TITLES: readonly Title[] = [];
+/** Tile widths: channels and stills at 16:9, posters at 2:3. */
 const TILE_REM = 13;
+const POSTER_REM = 8.5;
 const GAP_REM = 1;
 
 /** Opens a list in Live TV. */
@@ -57,13 +62,20 @@ export function HomeScreen({ active }: { active: boolean }) {
     NO_CHANNELS;
   const status = useQuery(queries.libraryStatus());
 
-  const [grid, columns] = useColumns();
-  const perSection = columns * ROWS;
+  const [grid, width] = useWidth();
+  const rem = useRem();
+  const fit = (tileRem: number) =>
+    Math.max(1, Math.floor((width + GAP_REM * rem) / (tileRem * rem + GAP_REM * rem)));
+  const columns = fit(TILE_REM);
+  const posters = fit(POSTER_REM);
   const shown = {
-    favourites: favourites.slice(0, perSection),
-    recent: recent.slice(0, perSection),
-    category: inCategory.slice(0, perSection),
+    favourites: favourites.slice(0, columns),
+    recent: recent.slice(0, columns),
+    category: inCategory.slice(0, columns),
   };
+  const newMovies = useNewest("movie", posters);
+  const newSeries = useNewest("series", posters);
+  const continuing = useContinueWatching();
   const playing = usePlayer((state) => state.channel);
   const streaming = usePlayer(
     (state) => state.phase.kind !== "idle" && state.phase.kind !== "failed",
@@ -109,6 +121,15 @@ export function HomeScreen({ active }: { active: boolean }) {
         categories={categoryMap}
       />
     ));
+  const titles = (list: readonly Title[]) =>
+    list.map((title) => (
+      <PosterTile
+        key={title.id}
+        title={title}
+        onOpen={() => openDetails({ kind: title.kind, id: title.id })}
+      />
+    ));
+  const entries = continuing.entries.slice(0, columns);
   return (
     <div className="h-full overflow-y-auto">
       <WindowBar className="sticky top-0 z-20 bg-black" />
@@ -119,12 +140,28 @@ export function HomeScreen({ active }: { active: boolean }) {
         listing={hero ? listings[hero.id] : undefined}
         categories={categoryMap}
       />
-      <div ref={grid} className="space-y-10 px-10 pt-2 pb-16">
+      <div ref={grid} className="space-y-9 px-10 pt-2 pb-16">
+        {entries.length > 0 && (
+          <Section title="Continue watching" tileRem={TILE_REM}>
+            {entries.map((entry) => (
+              <StillTile
+                key={entry.key}
+                artworkUrl={entry.artworkUrl}
+                name={entry.now.name}
+                line={entry.line}
+                done={entry.done}
+                onPlay={() => playTitle(entry.now, entry.from)}
+                onRemove={() => removeFromContinue(entry.progress.title)}
+              />
+            ))}
+          </Section>
+        )}
         {shown.favourites.length > 0 && (
           <Section
             title="Favourites"
             count={favourites.length}
             onAll={() => browse({ kind: "favourites" })}
+            tileRem={TILE_REM}
           >
             {tiles(shown.favourites)}
           </Section>
@@ -134,8 +171,19 @@ export function HomeScreen({ active }: { active: boolean }) {
             title="Recently watched"
             count={recent.length}
             onAll={() => browse({ kind: "recent" })}
+            tileRem={TILE_REM}
           >
             {tiles(shown.recent)}
+          </Section>
+        )}
+        {newMovies.length > 0 && (
+          <Section title="New movies" onAll={() => openView("movies")} tileRem={POSTER_REM}>
+            {titles(newMovies)}
+          </Section>
+        )}
+        {newSeries.length > 0 && (
+          <Section title="New series" onAll={() => openView("series")} tileRem={POSTER_REM}>
+            {titles(newSeries)}
           </Section>
         )}
         {shown.category.length > 0 && (
@@ -143,6 +191,7 @@ export function HomeScreen({ active }: { active: boolean }) {
             title={category?.title ?? "All channels"}
             count={category?.channelCount ?? status.data?.channelCount ?? inCategory.length}
             onAll={() => browse(categoryList)}
+            tileRem={TILE_REM}
           >
             {tiles(shown.category)}
           </Section>
@@ -152,8 +201,14 @@ export function HomeScreen({ active }: { active: boolean }) {
   );
 }
 
-/** How many tiles fit across the sections, measured on the element the returned ref is given. */
-function useColumns(): [ref: (element: HTMLDivElement | null) => void, columns: number] {
+/** The newest titles of a kind, without those for adults. */
+function useNewest(kind: TitleKind, count: number): readonly Title[] {
+  const page = useQuery(queries.titles(kind, null, "added", 0, Math.max(count, 1)));
+  return page.data?.titles.slice(0, count) ?? NO_TITLES;
+}
+
+/** The width inside the sections' padding, measured on the element the returned ref is given. */
+function useWidth(): [ref: (element: HTMLDivElement | null) => void, width: number] {
   const rem = useRem();
   const [width, setWidth] = useState(0);
   const observer = useRef<ResizeObserver | null>(null);
@@ -165,9 +220,7 @@ function useColumns(): [ref: (element: HTMLDivElement | null) => void, columns: 
     observer.current.observe(element);
   }, []);
   // The sections' side padding is 2.5rem each.
-  const inner = width - 5 * rem;
-  const gap = GAP_REM * rem;
-  return [ref, Math.max(1, Math.floor((inner + gap) / (TILE_REM * rem + gap)))];
+  return [ref, Math.max(0, width - 5 * rem)];
 }
 
 function Hero({
@@ -191,7 +244,7 @@ function Hero({
   const current = listing?.now ?? null;
   return (
     <section
-      className="relative flex h-[62vh] min-h-[24rem] items-end overflow-hidden px-10 pb-12"
+      className="relative flex h-[54vh] min-h-[22rem] items-end overflow-hidden px-10 pb-10"
       style={{
         // The backdrop runs under the window bar.
         marginTop: -WINDOW_BAR.height,
@@ -260,29 +313,34 @@ function Section({
   title,
   count,
   onAll,
+  tileRem,
   children,
 }: {
   title: string;
-  count: number;
-  onAll: () => void;
+  count?: number;
+  onAll?: () => void;
+  /** The narrowest a tile gets; as many fit across as the window allows, in one row. */
+  tileRem: number;
   children: ReactNode;
 }) {
   return (
     <section>
-      <div className="mb-4 flex items-baseline gap-3">
+      <div className="mb-3.5 flex items-baseline gap-3">
         <h2 className="text-xl font-semibold tracking-tight">{title}</h2>
-        <button
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={onAll}
-          className="flex items-center gap-0.5 text-sm text-muted-foreground hover:text-white"
-        >
-          All {count.toLocaleString()}
-          <ChevronRight className="size-3.5" />
-        </button>
+        {onAll && (
+          <button
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={onAll}
+            className="flex items-center gap-0.5 text-sm text-muted-foreground hover:text-white"
+          >
+            All{count === undefined ? "" : ` ${count.toLocaleString()}`}
+            <ChevronRight className="size-3.5" />
+          </button>
+        )}
       </div>
       <div
-        className="grid gap-x-4 gap-y-6"
-        style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${TILE_REM}rem, 1fr))` }}
+        className="grid gap-x-4"
+        style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${tileRem}rem, 1fr))` }}
       >
         {children}
       </div>

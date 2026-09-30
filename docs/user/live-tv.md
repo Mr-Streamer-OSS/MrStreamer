@@ -4,11 +4,11 @@
 
 Home plays the channel you watched last, muted, behind what's on it now: the programme, how long it has left and what comes next. **Watch** opens it full window with sound, on the same stream, so it doesn't start again. The speaker button turns the sound on without leaving Home.
 
-Below come your favourites, the channels you watched recently and your current category, each showing what's on. **All** opens the full list in Live TV, and **All channels** opens every channel.
+Below come one row each of what you were watching (see [Movies and series](movies-and-series.md)), your favourite channels, the channels you watched recently, new movies, new series and your current category. **All** opens the whole list in Live TV, Movies or Series, and **All channels** opens every channel.
 
 Until you've watched something, the backdrop shows a channel without playing it.
 
-Your subscription may allow a single connection. Home then uses it as soon as it opens, so if another device is already watching, the backdrop stays still instead of taking the connection over. Minimising Mr. Streamer, or hiding it behind other windows, stops the muted backdrop; it starts again when you come back.
+Your subscription may allow a single connection. Home then uses it as soon as it opens, so if another device is already watching, the backdrop stays still instead of taking the connection over. Minimising Mr. Streamer, hiding it behind other windows, or going to Movies or Series stops the muted backdrop; it starts again when you come back.
 
 ## The guide
 
@@ -28,7 +28,7 @@ While watching, the channel list opens over the left of the picture with the lis
 
 ## Search
 
-⌘K (Ctrl K on Windows and Linux) searches every channel, and the programmes on now and later today. Pick a channel, or a programme that's on, to watch it. Pick a later programme to read about it.
+⌘K (Ctrl K on Windows and Linux) searches every channel, movies and series, and the programmes on now and later today. Pick a channel, or a programme that's on, to watch it. Pick a later programme to read about it, or a movie or series to see its details.
 
 ## Keys
 

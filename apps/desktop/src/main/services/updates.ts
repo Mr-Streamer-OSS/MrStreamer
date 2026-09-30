@@ -1,14 +1,22 @@
 // In-app updates and the release channel.
 //
-// Nothing happens on its own: the user checks, downloads and confirms the restart. The first run
-// stores the build's own channel; after that only the user changes it, so a Nightly user who
-// installs a stable build stays on Nightly.
+// The app checks on its own after starting and every four hours, quietly: an automatic check that
+// fails keeps what the last one found and tries again later, backing off, and waits for GitHub
+// when GitHub asks. The user can check at any time. Nothing downloads or installs on its own: the
+// user downloads, then confirms the restart, and a download never restarts the app.
 //
-// Switching a nightly build to Stable offers the newest stable release even when it is older,
-// and installs it over the nightly like any update: this device's data stays.
+// The first run stores the build's own channel; after that only the user changes it, so a Nightly
+// user who installs a stable build stays on Nightly. Switching a nightly build to Stable offers
+// the newest stable release even when it is older, and installs it over the nightly like any
+// update: this device's data stays.
 import { join } from "node:path";
 import { type } from "arktype";
-import type { UpdatePhase, UpdateStatus } from "@mrstreamer/contracts/updates";
+import type {
+  CheckFailure,
+  UpdateOffer,
+  UpdatePhase,
+  UpdateStatus,
+} from "@mrstreamer/contracts/updates";
 import {
   channelOf,
   compareVersions,
@@ -17,20 +25,18 @@ import {
   type Channel,
   type Version,
 } from "@mrstreamer/contracts/version";
-import {
-  candidates,
-  newestOn,
-  type Candidate,
-  type PublishedRelease,
-} from "@mrstreamer/core/updates/feed";
-import { diagnosed } from "@mrstreamer/core/diagnostics";
+import { diagnosed, Diagnostics } from "@mrstreamer/core/diagnostics";
+import { DiscoveryFailed, newestOn, type Offer } from "@mrstreamer/core/updates/feed";
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
+import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import { readJsonFile, writeJsonFile } from "../platform/json-file.ts";
 
@@ -53,14 +59,29 @@ export interface Installer {
   install(): Promise<void>;
 }
 
+/** When automatic checks run. */
+export interface CheckSchedule {
+  /** After the app starts. */
+  readonly first: Duration.Input;
+  /** Between checks that worked. */
+  readonly every: Duration.Input;
+}
+
+/** After starting, then every four hours. */
+export const DEFAULT_SCHEDULE: CheckSchedule = { first: "20 seconds", every: "4 hours" };
+
+/** Waits after automatic checks that failed in a row, the last one repeating. */
+const RETRY_AFTER = ["15 minutes", "30 minutes", "1 hour", "2 hours", "4 hours"] as const;
+
 export interface UpdatesDeps {
   readonly dataDir: string;
   /** The running build's version. */
   readonly installed: string;
-  /** The update metadata this platform installs from, such as latest-mac.yml. */
-  readonly metadataFile: string;
-  readonly releases: () => Promise<readonly PublishedRelease[]>;
+  /** Finds releases this platform can install. Rejects with `DiscoveryFailed`. */
+  readonly discover: (signal: AbortSignal) => Promise<readonly Offer[]>;
   readonly installer: Installer;
+  /** When automatic checks run; null for none, as in most tests. */
+  readonly schedule?: CheckSchedule | null;
 }
 
 export class Updates extends Context.Service<
@@ -68,8 +89,9 @@ export class Updates extends Context.Service<
   {
     readonly status: Effect.Effect<UpdateStatus>;
     /**
-     * Looks for the release the chosen channel offers this build. Only the latest check counts:
-     * one that finishes after a newer check or a channel change leaves the state alone.
+     * Looks for the release the chosen channel offers this build, now, and says why when that
+     * fails. A check already running is shared. Only the latest check counts: one that finishes
+     * after a newer check or a channel change leaves the state alone.
      */
     readonly check: Effect.Effect<UpdateStatus>;
     /**
@@ -87,6 +109,8 @@ export class Updates extends Context.Service<
     readonly cancel: Effect.Effect<void>;
     /** Installs the downloaded update. The user has confirmed the restart. */
     readonly restart: Effect.Effect<void>;
+    /** Closes the notice for `version`. Settings keeps offering it; a newer version notifies. */
+    dismiss(version: string): Effect.Effect<UpdateStatus>;
     /** The status after every change, such as a download's progress. */
     readonly changes: Stream.Stream<UpdateStatus>;
   }
@@ -95,7 +119,8 @@ export class Updates extends Context.Service<
 }
 
 const SETTINGS_FILE = "updates.json";
-const ChannelFile = type({ channel: "'stable' | 'nightly'" });
+/** updates.json: the channel, and the version whose notice was closed. */
+const SettingsFile = type({ channel: "'stable' | 'nightly'", "dismissed?": "string | null" });
 
 /** Whether a channel receives `version`: Nightly receives everything, Stable only stable releases. */
 function receives(channel: Channel, version: string): boolean {
@@ -105,8 +130,11 @@ function receives(channel: Channel, version: string): boolean {
 function make(deps: UpdatesDeps) {
   return Effect.gen(function* () {
     const scope = yield* Effect.scope;
+    const diagnostics = yield* Diagnostics;
     const updates = yield* PubSub.unbounded<UpdateStatus>();
     const settingsPath = join(deps.dataDir, SETTINGS_FILE);
+    /** Writes updates.json one at a time, with what memory holds then, so the last change wins. */
+    const writeOne = (yield* Semaphore.make(1)).withPermits(1);
     // A development build without a release version counts as the oldest stable.
     const installed: Version = parseVersion(deps.installed) ?? {
       major: 0,
@@ -114,98 +142,166 @@ function make(deps: UpdatesDeps) {
       patch: 0,
       nightly: null,
     };
-    let channel: Promise<Channel> | null = null;
-    /** The channel once known, for the checks that cannot wait for `channel`. */
-    let chosen: Channel | null = null;
+
+    const stored = yield* Effect.promise(() => readJsonFile(settingsPath, SettingsFile));
+    let channel: Channel = stored?.channel ?? channelOf(installed);
+    let dismissed: string | null = stored?.dismissed ?? null;
     let update: UpdatePhase = { kind: "idle" };
-    let target: Candidate | null = null;
+    /** The release the last check found for the channel, whether or not it is newer. */
+    let target: Offer | null = null;
+    let checked: UpdateStatus["checked"] = null;
+    let nextCheckAt: number | null = null;
     /** The check whose result still counts; a newer check or a channel change voids it. */
-    let checking: object | null = null;
+    let checking: { readonly channel: Channel; readonly fiber: Fiber.Fiber<CheckResult> } | null =
+      null;
     /** The download in flight; there is one installer. */
     let downloading: Fiber.Fiber<void, unknown> | null = null;
     /** The download whose outcome still counts; a channel change can void it. */
     let attempt: object | null = null;
 
-    const getChannel = Effect.promise(() => {
-      channel ??= readJsonFile(settingsPath, ChannelFile)
-        .then(async (stored) => {
-          if (stored) return stored.channel;
-          const first = channelOf(installed);
-          await writeJsonFile(settingsPath, { channel: first });
-          return first;
-        })
-        // A channel the user picked while the file loaded wins.
-        .then((read) => (chosen ??= read));
-      return channel;
-    });
+    const save = writeOne(
+      Effect.promise(() => writeJsonFile(settingsPath, { channel, dismissed })),
+    );
+    if (!stored) yield* save;
 
     /** Whether the chosen channel still receives `version`, checked before downloading or installing it. */
-    function wanted(version: string): boolean {
-      return chosen !== null && receives(chosen, version);
-    }
+    const wanted = (version: string) => receives(channel, version);
 
-    const status = Effect.map(getChannel, (on): UpdateStatus => ({
+    const snapshot = (): UpdateStatus => ({
       version: deps.installed,
-      channel: on,
+      channel,
       update,
-    }));
-
-    const changed = Effect.flatMap(status, (now) => PubSub.publish(updates, now));
+      offer: offerOf(target, update),
+      checked,
+      nextCheckAt,
+      dismissed,
+    });
+    const status = Effect.sync(snapshot);
+    const changed = Effect.suspend(() => PubSub.publish(updates, snapshot()));
 
     /** Forgets an update the chosen channel no longer receives. */
     const drop = Effect.gen(function* () {
       target = null;
       update = { kind: "idle" };
       yield* changed;
-      return yield* status;
+      return snapshot();
     });
 
-    const check = Effect.gen(function* () {
-      if (update.kind === "downloading" || update.kind === "ready") return yield* status;
-      const mine = {};
-      checking = mine;
-      update = { kind: "checking" };
-      yield* changed;
-      const on = yield* getChannel;
-      const found = yield* Effect.tryPromise({
-        try: () => deps.releases(),
-        catch: (cause) => cause,
-      }).pipe(
-        diagnosed("check"),
-        Effect.map((releases) => {
-          const newest = newestOn(on, candidates(releases, deps.metadataFile));
-          // A nightly build on Stable goes to the newest stable release, older or not.
-          const offered =
-            newest &&
-            (compareVersions(newest.version, installed) > 0 ||
-              (on === "stable" && installed.nightly !== null));
-          return offered ? newest : null;
+    /** Asks the sources for releases; what it found, or why not. */
+    const discover = Effect.tryPromise({
+      try: (signal) => deps.discover(signal),
+      catch: (cause) => cause,
+    }).pipe(
+      diagnosed("check"),
+      Effect.tapError((cause) =>
+        Effect.sync(() => {
+          if (cause instanceof DiscoveryFailed) {
+            for (const answer of cause.answers)
+              diagnostics.record({ op: "update-source", ...answer });
+          }
         }),
-        Effect.result,
-      );
-      if (checking !== mine) return yield* status;
-      checking = null;
-      if (found._tag === "Failure") {
-        target = null;
-        update = { kind: "failed", step: "check", detail: reason(found.failure) };
-      } else {
-        target = found.success;
-        update = found.success
-          ? { kind: "available", version: formatVersion(found.success.version) }
+      ),
+      Effect.result,
+      Effect.map((found): CheckResult =>
+        found._tag === "Success"
+          ? { ok: true, offers: found.success }
+          : {
+              ok: false,
+              failure:
+                found.failure instanceof DiscoveryFailed
+                  ? found.failure.failure
+                  : { kind: "offline" },
+            },
+      ),
+    );
+
+    /** A download in progress or ready: a check can't take it away, even one that fails. */
+    const staged = () => update.kind === "downloading" || update.kind === "ready";
+
+    /**
+     * One check, shared by callers while it runs, and what it found; null when it didn't run or
+     * a newer check or channel change voided it. `manual` shows it running and a failure;
+     * automatic checks change nothing the user sees until they find something.
+     */
+    const runCheck = (manual: boolean): Effect.Effect<CheckResult | null> =>
+      Effect.gen(function* () {
+        if (staged()) return null;
+        let running = checking?.channel === channel ? checking : null;
+        if (!running) {
+          running = { channel, fiber: yield* Effect.forkIn(discover, scope) };
+          checking = running;
+        }
+        if (manual) {
+          update = { kind: "checking" };
+          yield* changed;
+        }
+        const result = yield* Fiber.join(running.fiber);
+        if (checking !== running) return null;
+        checking = null;
+        checked = {
+          at: yield* Clock.currentTimeMillis,
+          failure: result.ok ? null : result.failure,
+        };
+        // Including one that started while the check ran.
+        if (staged()) {
+          yield* changed;
+          return result;
+        }
+        if (!result.ok) {
+          if (manual || update.kind === "checking") {
+            update = { kind: "failed", step: "check", failure: result.failure };
+          }
+          yield* changed;
+          return result;
+        }
+        const newest = newestOn(channel, result.offers);
+        // A nightly build on Stable goes to the newest stable release, older or not.
+        const offered =
+          newest &&
+          (compareVersions(newest.version, installed) > 0 ||
+            (channel === "stable" && installed.nightly !== null));
+        target = offered ? newest : null;
+        update = target
+          ? { kind: "available", version: formatVersion(target.version) }
           : { kind: "current" };
-      }
-      yield* changed;
-      return yield* status;
-    });
+        yield* changed;
+        return result;
+      });
+
+    /** Checks after starting, then every four hours; after failures sooner, and never before GitHub allows. */
+    const automatic = (schedule: CheckSchedule) =>
+      Effect.gen(function* () {
+        let wait = Duration.toMillis(schedule.first);
+        let failures = 0;
+        for (;;) {
+          nextCheckAt = (yield* Clock.currentTimeMillis) + wait;
+          yield* changed;
+          yield* Effect.sleep(Duration.millis(wait));
+          nextCheckAt = null;
+          const result = yield* runCheck(false);
+          const now = yield* Clock.currentTimeMillis;
+          const failure = result && !result.ok ? result.failure : null;
+          if (!failure) {
+            failures = 0;
+            // Up to a tenth later, so many installs don't all ask at once.
+            wait = Duration.toMillis(schedule.every) * (1 + Math.random() / 10);
+            continue;
+          }
+          const retry = RETRY_AFTER[Math.min(failures, RETRY_AFTER.length - 1)] ?? "4 hours";
+          failures++;
+          const allowed = failure.kind === "busy" && failure.until ? failure.until - now : 0;
+          wait = Math.max(Duration.toMillis(retry), allowed + 60_000);
+        }
+      });
+    if (deps.schedule) yield* Effect.forkIn(automatic(deps.schedule), scope);
 
     return {
       status,
-      check,
+      check: Effect.as(runCheck(true), undefined).pipe(Effect.andThen(status)),
 
       setChannel: (next: Channel) =>
         Effect.gen(function* () {
-          channel = Promise.resolve(next);
-          chosen = next;
+          channel = next;
           checking = null;
           const staged = update.kind === "downloading" || update.kind === "ready" ? update : null;
           if (!staged || !receives(next, staged.version)) {
@@ -214,16 +310,15 @@ function make(deps: UpdatesDeps) {
             update = { kind: "idle" };
             if (downloading) yield* Fiber.interrupt(downloading);
           }
-          yield* Effect.promise(() => writeJsonFile(settingsPath, { channel: next }));
+          yield* save;
           yield* changed;
-          return yield* check;
+          yield* runCheck(true);
+          return snapshot();
         }),
 
       download: Effect.gen(function* () {
         const retry = update.kind === "failed" && update.step !== "check";
-        if ((update.kind !== "available" && !retry) || !target || downloading) {
-          return yield* status;
-        }
+        if ((update.kind !== "available" && !retry) || !target || downloading) return snapshot();
         const release = target;
         const version = formatVersion(release.version);
         if (!wanted(version)) return yield* drop;
@@ -245,13 +340,7 @@ function make(deps: UpdatesDeps) {
                 (percent) => {
                   if (attempt !== mine || signal.aborted) return;
                   update = { kind: "downloading", version, percent };
-                  if (chosen) {
-                    PubSub.publishUnsafe(updates, {
-                      version: deps.installed,
-                      channel: chosen,
-                      update,
-                    });
-                  }
+                  PubSub.publishUnsafe(updates, snapshot());
                 },
                 signal,
               ),
@@ -263,22 +352,29 @@ function make(deps: UpdatesDeps) {
         yield* changed;
         const exit = yield* Fiber.await(fiber);
         if (downloading === fiber) downloading = null;
-        if (attempt !== mine) return yield* status;
+        if (attempt !== mine) return snapshot();
         attempt = null;
         // A download that finishes after it was cancelled doesn't count either.
         if (Exit.isSuccess(exit)) update = { kind: "ready", version };
         else if (Cause.hasInterrupts(exit.cause)) update = { kind: "available", version };
-        else
-          update = { kind: "failed", step: "download", detail: reason(Cause.squash(exit.cause)) };
+        else {
+          update = {
+            kind: "failed",
+            step: "download",
+            version,
+            detail: reason(Cause.squash(exit.cause)),
+          };
+        }
         yield* changed;
-        return yield* status;
+        return snapshot();
       }),
 
       cancel: Effect.suspend(() => (downloading ? Fiber.interrupt(downloading) : Effect.void)),
 
       restart: Effect.gen(function* () {
         if (update.kind !== "ready") return;
-        if (!wanted(update.version)) {
+        const version = update.version;
+        if (!wanted(version)) {
           yield* drop;
           return;
         }
@@ -287,14 +383,32 @@ function make(deps: UpdatesDeps) {
           catch: (cause) => cause,
         }).pipe(diagnosed("install"), Effect.result);
         if (installing._tag === "Failure") {
-          update = { kind: "failed", step: "install", detail: reason(installing.failure) };
+          update = { kind: "failed", step: "install", version, detail: reason(installing.failure) };
           yield* changed;
         }
       }),
 
+      dismiss: (version: string) =>
+        Effect.gen(function* () {
+          dismissed = version;
+          yield* save;
+          yield* changed;
+          return snapshot();
+        }),
+
       changes: Stream.fromPubSub(updates),
     };
   });
+}
+
+type CheckResult =
+  | { readonly ok: true; readonly offers: readonly Offer[] }
+  | { readonly ok: false; readonly failure: CheckFailure };
+
+/** The offered release's notes and page, while there is an update to show them for. */
+function offerOf(target: Offer | null, update: UpdatePhase): UpdateOffer | null {
+  if (!target || update.kind === "current" || update.kind === "idle") return null;
+  return { version: formatVersion(target.version), notes: target.notes, page: target.page };
 }
 
 function reason(cause: unknown): string {

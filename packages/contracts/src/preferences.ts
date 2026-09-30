@@ -9,6 +9,10 @@ export const Preferences = type({
   muted: "boolean",
   lastChannelId: "string | null",
   lastCategoryId: "string | null",
+  /** The sound language picked last for a movie or episode: "nl". Absent until one is picked. */
+  "audioLanguage?": "string | null",
+  /** The subtitle language picked last, or "off" once subtitles were turned off. */
+  "subtitleLanguage?": "string | null",
 });
 export type Preferences = typeof Preferences.infer;
 

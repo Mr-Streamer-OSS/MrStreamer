@@ -62,6 +62,25 @@ describe("electron-updater installer", () => {
     expect(updater.downloads[0]?.cancelled).toBe(true);
   });
 
+  it("starts the next download only once a cancelled one has wound down", async () => {
+    const updater = new FakeUpdater();
+    updater.metadata.resolve();
+    const installer = electronInstaller(updater);
+    const first = new AbortController();
+    const dropped = installer.download(TARGET, () => {}, first.signal);
+    await expect.poll(() => updater.downloads.length).toBe(1);
+
+    first.abort();
+    const next = installer.download(TARGET, () => {}, new AbortController().signal);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(updater.downloads).toHaveLength(1);
+
+    updater.transfer.resolve();
+    await expect(dropped).rejects.toThrow();
+    await next;
+    expect(updater.downloads).toHaveLength(2);
+  });
+
   it("reports an install the system refuses", async () => {
     const updater = new FakeUpdater();
     updater.refusal = new Error("Code signature did not pass validation.");

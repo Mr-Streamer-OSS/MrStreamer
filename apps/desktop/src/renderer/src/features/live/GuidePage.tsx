@@ -97,7 +97,15 @@ export function GuidePage({ active }: { active: boolean }) {
       const ui = useUi.getState();
       if (event.defaultPrevented || isTyping(event) || hasModifier(event) || event.isComposing)
         return;
-      if (ui.searchOpen || ui.settings || ui.updateDialog || ui.watching || ui.view !== "live")
+      if (
+        ui.searchOpen ||
+        ui.settings ||
+        ui.updateDialog ||
+        ui.watching ||
+        ui.playingTitle ||
+        ui.details ||
+        ui.view !== "live"
+      )
         return;
       const now = state.current;
       const { toggle, toggleFavourite } = now;

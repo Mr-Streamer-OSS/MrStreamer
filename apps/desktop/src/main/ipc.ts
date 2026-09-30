@@ -33,8 +33,10 @@ export function registerIpc(
   for (const method of Object.keys(ipcInputs) as IpcMethod[]) {
     // TypeScript cannot pair `ipcInputs[method]` with `handlers[method]` inside a loop over all
     // methods, so the loop uses erased types. `IpcHandlers` keeps each handler fully typed.
-    const validate: (data: unknown) => unknown = ipcInputs[method];
+    const schema: () => (data: unknown) => unknown = ipcInputs[method];
     const handler = handlers[method] as (input: unknown) => Effect.Effect<unknown, Failed>;
+    // Built on the method's first call, not while the app starts.
+    let validate: ((data: unknown) => unknown) | null = null;
 
     ipcMain.handle(method, async (event, raw: unknown): Promise<Result<unknown>> => {
       if (!isTrusted(event.sender)) {
@@ -43,6 +45,7 @@ export function registerIpc(
           error: { kind: "unexpected", detail: "IPC call from an unknown window." },
         };
       }
+      validate ??= schema();
       const input = validate(raw);
       if (input instanceof type.errors) {
         return {

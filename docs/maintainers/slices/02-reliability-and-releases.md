@@ -177,8 +177,7 @@ Do not promise every possible codec or feed. Establish a representative sample s
 
 ## References
 
-- [Idea and roadmap](https://r3b736io0gst.postplan.dev)
-- [Slice 01 scope and current acceptance](https://qj40mqi2sr5l.postplan.dev)
+- [Planning and roadmap](../README.md)
 - [Mr-Streamer-OSS organization](https://github.com/Mr-Streamer-OSS)
 - [Apple Developer ID distribution](https://developer.apple.com/developer-id/)
 - [electron-builder update targets and metadata](https://www.electron.build/v26/docs/features/auto-update/)

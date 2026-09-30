@@ -1,0 +1,93 @@
+{
+  "packages": {
+    "electron": "Every installer carries Electron itself.",
+    "tailwindcss": "Its base styles are in the renderer's CSS."
+  },
+  "overrides": {
+    "hls.js": {
+      "why": "Its LICENSE refers to Apache-2.0 without the licence text, which recipients must get.",
+      "standardText": true
+    },
+    "lazy-val": {
+      "why": "electron-updater uses it, and it publishes no licence file.",
+      "standardText": true
+    },
+    "lucide-react": {
+      "why": "Icons derived from Feather are MIT, as its LICENSE says; the app uses some.",
+      "licence": "ISC AND MIT"
+    }
+  },
+  "embedded": {
+    "hls.js@1.7.3": [
+      {
+        "name": "eventemitter3",
+        "version": "5.0.4",
+        "licence": "MIT",
+        "source": "https://github.com/primus/eventemitter3",
+        "files": ["licences/hls.js/eventemitter3-LICENSE"]
+      },
+      {
+        "name": "url-toolkit",
+        "version": "2.2.5",
+        "licence": "Apache-2.0",
+        "source": "https://github.com/tjenkinson/url-toolkit",
+        "files": ["licences/hls.js/url-toolkit-LICENSE"]
+      },
+      {
+        "name": "@svta/cml-cmcd",
+        "version": "2.4.0",
+        "licence": "Apache-2.0",
+        "source": "https://github.com/streaming-video-technology-alliance/common-media-library",
+        "files": ["licences/hls.js/cml-cmcd-LICENSE"]
+      },
+      {
+        "name": "@svta/cml-id3",
+        "version": "1.0.6",
+        "licence": "Apache-2.0",
+        "source": "https://github.com/streaming-video-technology-alliance/common-media-library",
+        "files": ["licences/hls.js/cml-id3-LICENSE"]
+      },
+      {
+        "name": "@svta/cml-structured-field-values",
+        "version": "1.1.3",
+        "licence": "Apache-2.0",
+        "source": "https://github.com/streaming-video-technology-alliance/common-media-library",
+        "files": ["licences/hls.js/cml-structured-field-values-LICENSE"]
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Chromium",
+      "version": "{chrome}",
+      "licence": "BSD-3-Clause",
+      "source": "https://source.chromium.org/chromium/chromium/src/+/refs/tags/{chrome}",
+      "homepage": "https://www.chromium.org",
+      "credits": "*"
+    },
+    {
+      "name": "Node.js",
+      "version": "{node}",
+      "licence": "MIT",
+      "source": "https://github.com/nodejs/node/tree/v{node}",
+      "homepage": "https://nodejs.org",
+      "credits": "Node.js"
+    },
+    {
+      "name": "FFmpeg",
+      "version": "{FFMPEG_VERSION}",
+      "licence": "GPL-2.0-or-later",
+      "source": "https://github.com/Mr-Streamer-OSS/MrStreamer/releases/download/v{app}/ffmpeg-{FFMPEG_VERSION}.tar.xz",
+      "homepage": "https://ffmpeg.org",
+      "files": ["licences/ffmpeg/FFmpeg.txt", "licences/ffmpeg/COPYING.GPLv2"]
+    },
+    {
+      "name": "x264",
+      "version": "{X264_COMMIT}",
+      "licence": "GPL-2.0-or-later",
+      "source": "https://github.com/Mr-Streamer-OSS/MrStreamer/releases/download/v{app}/x264-{X264_COMMIT}.tar.gz",
+      "homepage": "https://www.videolan.org/developers/x264.html",
+      "files": ["licences/ffmpeg/x264.txt", "licences/ffmpeg/x264-COPYING"]
+    }
+  ]
+}

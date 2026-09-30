@@ -1,4 +1,5 @@
 import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
+import type { StreamFailure } from "@mrstreamer/contracts/playback";
 import { isMac } from "../app/platform.ts";
 
 /** The typed error behind a failed call, or an `unexpected` error for anything else. */
@@ -30,13 +31,34 @@ export function describeError(error: AppError): string {
         : "Your system's keychain would not store your password.";
     case "channel-not-found":
       return "This channel is no longer in the provider's list.";
+    case "title-not-found":
+      return "The provider no longer lists this title.";
+    case "stream":
+      return describeStreamFailure(error.failure);
     case "incomplete-catalogue":
+      if (error.list) return `The provider sent no ${error.list}, so the previous list stays.`;
       return error.received === 0
         ? "The provider sent an empty channel list, so the previous list stays."
         : `The provider sent ${error.received.toLocaleString()} of ${error.previous.toLocaleString()} channels, so the previous list stays.`;
     case "invalid-input":
     case "unexpected":
       return `Something went wrong: ${error.detail}`;
+  }
+}
+
+/** Why a movie or episode didn't open. */
+function describeStreamFailure(failure: StreamFailure): string {
+  switch (failure.kind) {
+    case "refused":
+      return "The provider refused this title. Another device may be using your connection.";
+    case "unavailable":
+      return "The provider has no file for this title right now.";
+    case "provider-error":
+      return `The provider answered with an error (HTTP ${failure.status}).`;
+    case "network":
+      return `The connection to the provider failed. ${failure.detail}`;
+    case "unsupported":
+      return `Mr. Streamer can't play this file. ${failure.detail}`;
   }
 }
 

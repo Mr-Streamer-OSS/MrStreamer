@@ -1,6 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
-import { fetchReleases, type PublishedRelease } from "@mrstreamer/core/updates/feed";
-import { Updates, type Installer, type UpdatesDeps } from "../src/main/services/updates.ts";
+import type { UpdateFeed } from "@mrstreamer/contracts/update-feed";
+import { parseVersion } from "@mrstreamer/contracts/version";
+import { discovery, DiscoveryFailed, type Offer } from "@mrstreamer/core/updates/feed";
+import * as Clock from "effect/Clock";
+import * as Layer from "effect/Layer";
+import * as TestClock from "effect/testing/TestClock";
+import {
+  DEFAULT_SCHEDULE,
+  Updates,
+  type Installer,
+  type UpdatesDeps,
+} from "../src/main/services/updates.ts";
 import { promised, runtimeFor, tempDir } from "./support.ts";
 
 const METADATA = "latest-mac.yml";
@@ -8,16 +18,15 @@ const METADATA = "latest-mac.yml";
 /** The updates service, as the app starts it. */
 const startUpdates = (deps: UpdatesDeps) => promised(runtimeFor(Updates.layer(deps)), Updates);
 
-function release(
-  tag: string,
-  options: { prerelease?: boolean; draft?: boolean } = {},
-): PublishedRelease {
-  const prerelease = options.prerelease ?? tag.includes("-nightly.");
+/** A release the sources found, by tag. */
+function offer(tag: string): Offer {
+  const version = parseVersion(tag);
+  if (!version) throw new Error(`Not a version: ${tag}`);
   return {
-    tag,
-    prerelease,
-    draft: options.draft ?? false,
-    assets: [{ name: METADATA, url: `https://example.test/download/${tag}/${METADATA}` }],
+    version,
+    feedUrl: `https://example.test/download/${tag}`,
+    notes: `Notes for ${tag}`,
+    page: `https://example.test/releases/${tag}`,
   };
 }
 
@@ -58,7 +67,7 @@ function fakeInstaller(
 
 async function updates(
   installed: string,
-  releases: readonly PublishedRelease[],
+  offers: readonly Offer[],
   options: { dataDir?: string; installer?: Installer } = {},
 ) {
   const dataDir = options.dataDir ?? (await tempDir());
@@ -66,18 +75,17 @@ async function updates(
   const service = await startUpdates({
     dataDir,
     installed,
-    metadataFile: METADATA,
-    releases: async () => releases,
+    discover: async () => offers,
     installer,
   });
   return { dataDir, service };
 }
 
 const PUBLISHED = [
-  release("v0.2.0"),
-  release("v0.2.1"),
-  release("v0.3.0-nightly.20261001.10"),
-  release("v0.3.0-nightly.20261002.14"),
+  offer("v0.2.0"),
+  offer("v0.2.1"),
+  offer("v0.3.0-nightly.20261001.10"),
+  offer("v0.3.0-nightly.20261002.14"),
 ];
 
 describe("update channels", () => {
@@ -88,33 +96,23 @@ describe("update channels", () => {
     );
   });
 
-  it("offers Stable users the newest stable release only", async () => {
+  it("offers Stable users the newest stable release only, with its notes and page", async () => {
     const { service } = await updates("0.2.0", PUBLISHED);
 
-    expect((await service.check()).update).toEqual({ kind: "available", version: "0.2.1" });
+    const status = await service.check();
+
+    expect(status.update).toEqual({ kind: "available", version: "0.2.1" });
+    expect(status.offer).toEqual({
+      version: "0.2.1",
+      notes: "Notes for v0.2.1",
+      page: "https://example.test/releases/v0.2.1",
+    });
   });
 
   it("offers Nightly users the newest build of either channel", async () => {
-    const { service } = await updates("0.3.0-nightly.20261001.10", [
-      ...PUBLISHED,
-      release("v0.3.0"),
-    ]);
+    const { service } = await updates("0.3.0-nightly.20261001.10", [...PUBLISHED, offer("v0.3.0")]);
 
     expect((await service.check()).update).toEqual({ kind: "available", version: "0.3.0" });
-  });
-
-  it("orders by version, not by publication, and ignores releases whose flag and version disagree", async () => {
-    const { service } = await updates("0.2.0", [
-      release("v0.2.1"),
-      // Published later, but older.
-      release("v0.2.0"),
-      // A stable version marked as a pre-release, and a nightly marked as stable.
-      release("v0.9.0", { prerelease: true }),
-      release("v0.8.0-nightly.20261003.1", { prerelease: false }),
-      release("v0.7.0", { draft: true }),
-    ]);
-
-    expect((await service.check()).update).toEqual({ kind: "available", version: "0.2.1" });
   });
 
   it("keeps a Nightly user on Nightly after installing a stable release", async () => {
@@ -140,20 +138,50 @@ describe("update channels", () => {
     expect(fake.downloads.at(-1)).toMatchObject({ version: "0.2.1", allowDowngrade: true });
   });
 
-  it("reports a failed check", async () => {
-    const dataDir = await tempDir();
+  it("says why a check the user asked for failed", async () => {
     const service = await startUpdates({
-      dataDir,
+      dataDir: await tempDir(),
       installed: "0.2.0",
-      metadataFile: METADATA,
-      releases: () => Promise.reject(new Error("The release list answered HTTP 404.")),
+      discover: () => Promise.reject(new DiscoveryFailed({ kind: "http", status: 502 }, [])),
       installer: fakeInstaller().installer,
     });
 
-    expect((await service.check()).update).toEqual({
+    const status = await service.check();
+
+    expect(status.update).toEqual({
       kind: "failed",
       step: "check",
-      detail: "The release list answered HTTP 404.",
+      failure: { kind: "http", status: 502 },
+    });
+    expect(status.checked).toMatchObject({ failure: { kind: "http", status: 502 } });
+  });
+
+  it("keeps the channel the user picked last, however fast they switch", async () => {
+    const dataDir = await tempDir();
+    const { service } = await updates("0.2.0", PUBLISHED, { dataDir });
+
+    await Promise.all([
+      service.setChannel("nightly"),
+      service.setChannel("stable"),
+      service.setChannel("nightly"),
+    ]);
+
+    expect((await (await updates("0.2.0", [], { dataDir })).service.status()).channel).toBe(
+      "nightly",
+    );
+  });
+
+  it("remembers a closed notice per version, across restarts", async () => {
+    const dataDir = await tempDir();
+    const { service } = await updates("0.2.0", PUBLISHED, { dataDir });
+    await service.check();
+
+    await service.dismiss("0.2.1");
+
+    const restarted = (await updates("0.2.0", PUBLISHED, { dataDir })).service;
+    expect(await restarted.check()).toMatchObject({
+      dismissed: "0.2.1",
+      update: { kind: "available", version: "0.2.1" },
     });
   });
 });
@@ -213,6 +241,7 @@ describe("in-app updates", () => {
     expect((await service.download()).update).toEqual({
       kind: "failed",
       step: "download",
+      version: "0.2.1",
       detail: "The download broke off.",
     });
     expect((await service.download()).update).toEqual({ kind: "ready", version: "0.2.1" });
@@ -232,9 +261,28 @@ describe("in-app updates", () => {
     expect((await service.status()).update).toEqual({
       kind: "failed",
       step: "install",
+      version: "0.2.1",
       detail: refusal,
     });
     expect((await service.download()).update).toEqual({ kind: "ready", version: "0.2.1" });
+  });
+
+  it("keeps a downloaded update through a check that fails", async () => {
+    let fail = false;
+    const service = await startUpdates({
+      dataDir: await tempDir(),
+      installed: "0.2.0",
+      discover: async () => {
+        if (fail) throw new DiscoveryFailed({ kind: "offline" }, []);
+        return PUBLISHED;
+      },
+      installer: fakeInstaller().installer,
+    });
+    await service.check();
+    await service.download();
+    fail = true;
+
+    expect((await service.check()).update).toEqual({ kind: "ready", version: "0.2.1" });
   });
 
   it("drops a downloaded nightly when the user switches to Stable, and offers Stable instead", async () => {
@@ -272,10 +320,7 @@ describe("in-app updates", () => {
   });
 
   it("keeps a downloaded stable release when a Nightly user switches to Stable", async () => {
-    const { service } = await updates("0.3.0-nightly.20261001.10", [
-      ...PUBLISHED,
-      release("v0.3.0"),
-    ]);
+    const { service } = await updates("0.3.0-nightly.20261001.10", [...PUBLISHED, offer("v0.3.0")]);
     await service.check();
     await service.download();
 
@@ -287,41 +332,49 @@ describe("in-app updates", () => {
 });
 
 describe("overlapping checks", () => {
-  /** Release lists answered one request at a time, in whatever order the test chooses. */
-  function heldReleases() {
+  /** Discoveries answered one at a time, in whatever order the test chooses. */
+  function heldDiscovery() {
     const requests: {
-      resolve: (releases: readonly PublishedRelease[]) => void;
+      resolve: (offers: readonly Offer[]) => void;
       reject: (error: Error) => void;
     }[] = [];
     return {
-      releases: () =>
-        new Promise<readonly PublishedRelease[]>((resolve, reject) =>
-          requests.push({ resolve, reject }),
-        ),
-      /** The `index`th release request, once the service has made it. */
+      discover: () =>
+        new Promise<readonly Offer[]>((resolve, reject) => requests.push({ resolve, reject })),
+      count: () => requests.length,
+      /** The `index`th request, once the service has made it. */
       request: (index: number) =>
         vi.waitFor(() => {
           const request = requests[index];
-          if (!request) throw new Error(`No release request ${index} yet.`);
+          if (!request) throw new Error(`No request ${index} yet.`);
           return request;
         }),
     };
   }
 
-  const LATEST = [release("v0.0.1"), release("v0.0.2"), release("v0.0.3-nightly.20260930.1")];
+  const LATEST = [offer("v0.0.1"), offer("v0.0.2"), offer("v0.0.3-nightly.20260930.1")];
 
   async function service(installed: string) {
-    const held = heldReleases();
+    const held = heldDiscovery();
     const fake = fakeInstaller();
     const updates = await startUpdates({
       dataDir: await tempDir(),
       installed,
-      metadataFile: METADATA,
-      releases: held.releases,
+      discover: held.discover,
       installer: fake.installer,
     });
     return { held, fake, updates };
   }
+
+  it("asks once when checks overlap", async () => {
+    const { held, updates } = await service("0.0.1");
+
+    const checks = [updates.check(), updates.check(), updates.check()];
+    (await held.request(0)).resolve(LATEST);
+    await Promise.all(checks);
+
+    expect(held.count()).toBe(1);
+  });
 
   it("ignores a Nightly check that answers after the switch to Stable, and never installs its nightly", async () => {
     const { held, fake, updates } = await service("0.0.1");
@@ -351,7 +404,7 @@ describe("overlapping checks", () => {
 
     (await held.request(1)).resolve(LATEST);
     await second;
-    firstRequest.reject(new Error("The release list answered HTTP 502."));
+    firstRequest.reject(new DiscoveryFailed({ kind: "http", status: 502 }, []));
     await first;
 
     expect((await updates.status()).update).toEqual({ kind: "available", version: "0.0.2" });
@@ -376,65 +429,316 @@ describe("overlapping checks", () => {
   });
 });
 
-describe("update feed", () => {
-  /** A GitHub-like API: 100 newer nightlies fill the first page, Stable is further back. */
-  function github(stable: string | null) {
-    const asRelease = (tag: string) => ({
+describe("automatic checks", () => {
+  const MINUTE = 60_000;
+  const HOUR = 60 * MINUTE;
+
+  /** The service with its schedule on a test clock; `answers` decides each discovery. */
+  async function scheduled(
+    answers: (call: number) => readonly Offer[] | DiscoveryFailed | Promise<readonly Offer[]>,
+  ) {
+    let calls = 0;
+    const runtime = runtimeFor(
+      Updates.layer({
+        dataDir: await tempDir(),
+        installed: "0.2.0",
+        discover: async () => {
+          const answer = await answers(calls++);
+          if (answer instanceof DiscoveryFailed) throw answer;
+          return answer;
+        },
+        installer: fakeInstaller().installer,
+        schedule: DEFAULT_SCHEDULE,
+      }).pipe(Layer.provideMerge(TestClock.layer({ warningDelay: "1 day" }))),
+    );
+    const service = await promised(runtime, Updates);
+    /**
+     * Moves the clock once the schedule waits for its next check, as only a waiting check moves
+     * with it, and lets the check it starts finish.
+     */
+    const pass = async (ms: number) => {
+      await vi.waitFor(async () => {
+        const planned = (await service.status()).nextCheckAt ?? 0;
+        expect(planned).toBeGreaterThan(await runtime.runPromise(Clock.currentTimeMillis));
+      });
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      await runtime.runPromise(TestClock.adjust(ms));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    };
+    /** How long until the planned check, which falls anywhere in the four hours' spread. */
+    const untilNext = async () => {
+      const planned = (await service.status()).nextCheckAt ?? 0;
+      return planned - (await runtime.runPromise(Clock.currentTimeMillis));
+    };
+    return { service, pass, untilNext, calls: () => calls };
+  }
+
+  it("checks after starting and every four hours, without showing it", async () => {
+    const app = await scheduled(() => PUBLISHED);
+
+    expect(app.calls()).toBe(0);
+    await app.pass(20_000);
+    await vi.waitFor(() => expect(app.calls()).toBe(1));
+    expect((await app.service.status()).update).toEqual({ kind: "available", version: "0.2.1" });
+
+    await app.pass(4 * HOUR - MINUTE);
+    expect(app.calls()).toBe(1);
+    // Up to a tenth later, so installs spread out.
+    await app.pass(0.4 * HOUR + MINUTE);
+    await vi.waitFor(() => expect(app.calls()).toBe(2));
+  });
+
+  it("keeps what it found when a later check fails, and tries again sooner", async () => {
+    const app = await scheduled((call) =>
+      call === 0 ? PUBLISHED : new DiscoveryFailed({ kind: "offline" }, []),
+    );
+    await app.pass(20_000);
+    await vi.waitFor(() => expect(app.calls()).toBe(1));
+    // Exactly to the next check: going past it could also pass the sooner retry after it.
+    await vi.waitFor(async () => expect(await app.untilNext()).toBeGreaterThan(4 * HOUR - MINUTE));
+    await app.pass(await app.untilNext());
+    await vi.waitFor(() => expect(app.calls()).toBe(2));
+
+    await vi.waitFor(async () =>
+      expect((await app.service.status()).checked).toMatchObject({ failure: { kind: "offline" } }),
+    );
+    expect((await app.service.status()).update).toEqual({ kind: "available", version: "0.2.1" });
+    await app.pass(15 * MINUTE);
+    await vi.waitFor(() => expect(app.calls()).toBe(3));
+  });
+
+  it("keeps a download started while a check was out, however the check ends", async () => {
+    for (const ending of ["found", "failed"] as const) {
+      const late = Promise.withResolvers<readonly Offer[]>();
+      const app = await scheduled((call) => (call === 0 ? PUBLISHED : late.promise));
+      await app.pass(20_000);
+      await vi.waitFor(() => expect(app.calls()).toBe(1));
+      await vi.waitFor(async () => expect(await app.untilNext()).toBeGreaterThan(0));
+      await app.pass(await app.untilNext());
+      await vi.waitFor(() => expect(app.calls()).toBe(2));
+
+      await app.service.download();
+      if (ending === "found") late.resolve(PUBLISHED);
+      else late.reject(new DiscoveryFailed({ kind: "offline" }, []));
+      await vi.waitFor(async () =>
+        expect((await app.service.status()).checked?.at).toBeGreaterThan(20_000),
+      );
+      expect((await app.service.status()).update).toEqual({ kind: "ready", version: "0.2.1" });
+    }
+  });
+
+  it("waits until GitHub allows requests again", async () => {
+    // The test clock starts at zero; the first check runs at 20 seconds.
+    const app = await scheduled(
+      () => new DiscoveryFailed({ kind: "busy", until: 20_000 + 3 * HOUR }, []),
+    );
+    await app.pass(20_000);
+    expect((await app.service.status()).update).toEqual({ kind: "idle" });
+
+    await app.pass(2 * HOUR);
+    expect(app.calls()).toBe(1);
+    await app.pass(1 * HOUR + 2 * MINUTE);
+    await vi.waitFor(() => expect(app.calls()).toBe(2));
+  });
+});
+
+describe("finding releases", () => {
+  const FEED_URL = "https://feed.example.test/updates.json";
+  const API = "https://api.example.test";
+
+  function feedEntry(version: string, platforms = [METADATA]): UpdateFeed["stable"] {
+    return {
+      version,
+      published: "2026-10-01T10:00:00Z",
+      page: `https://github.example.test/releases/tag/v${version}`,
+      files: `https://github.com/owner/app/releases/download/v${version}`,
+      notes: `Notes for ${version}`,
+      platforms,
+    };
+  }
+
+  function githubRelease(tag: string, options: { prerelease?: boolean; draft?: boolean } = {}) {
+    return {
       tag_name: tag,
-      prerelease: tag.includes("-nightly."),
-      draft: false,
+      prerelease: options.prerelease ?? tag.includes("-nightly."),
+      draft: options.draft ?? false,
+      body: `Notes for ${tag}`,
+      html_url: `https://github.example.test/releases/tag/${tag}`,
       assets: [
         {
           name: METADATA,
-          browser_download_url: `https://example.test/download/${tag}/${METADATA}`,
+          browser_download_url: `https://github.example.test/releases/download/${tag}/${METADATA}`,
         },
       ],
-    });
-    const nightlies = Array.from({ length: 100 }, (_, run) =>
-      asRelease(`v0.0.2-nightly.20261002.${200 - run}`),
-    );
-    const json = (body: unknown, status = 200) =>
-      new Response(JSON.stringify(body), {
-        status,
-        headers: { "content-type": "application/json" },
-      });
-    return vi.fn(async (input: string | URL | Request) => {
-      const url = String(input);
-      if (url.endsWith("/releases/latest")) {
-        return stable ? json(asRelease(stable)) : json({ message: "Not Found" }, 404);
-      }
-      if (url.includes("page=2")) return json(stable ? [asRelease(stable)] : []);
-      return json(nightlies);
-    });
+    };
   }
 
-  it("finds Stable behind a full page of newer nightlies", async () => {
-    const fetchImpl = github("v0.0.1");
-    const dataDir = await tempDir();
-    const service = (installed: string) =>
-      startUpdates({
-        dataDir,
-        installed,
-        metadataFile: METADATA,
-        releases: () => fetchReleases("https://api.example.test", "owner/app", fetchImpl),
-        installer: fakeInstaller().installer,
-      });
+  const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "content-type": "application/json", ...headers },
+    });
 
-    expect((await (await service("0.0.0")).setChannel("stable")).update).toEqual({
-      kind: "available",
-      version: "0.0.1",
+  /** Answers the feed and GitHub's two release lists as each test sets them. */
+  function sources(answer: {
+    feed: () => Response | Promise<Response>;
+    page?: () => Response;
+    latest?: () => Response;
+  }) {
+    const requests: string[] = [];
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      requests.push(url);
+      if (url === FEED_URL) return answer.feed();
+      if (url.endsWith("/releases/latest")) return answer.latest?.() ?? json({}, 404);
+      return answer.page?.() ?? json([]);
     });
-    expect(
-      (await (await service("0.0.2-nightly.20261002.200")).setChannel("stable")).update,
-    ).toEqual({
-      kind: "available",
-      version: "0.0.1",
+    return { fetchImpl, requests };
+  }
+
+  const find = (fetchImpl: typeof fetch, now?: () => number) =>
+    discovery({
+      feedUrl: FEED_URL,
+      api: API,
+      repository: "owner/app",
+      metadataFile: METADATA,
+      userAgent: "MrStreamer/test",
+      fetch: fetchImpl,
+      ...(now ? { now } : {}),
     });
+
+  const versions = async (found: Promise<Offer[]>) =>
+    (await found).map(
+      (each) =>
+        `${each.version.major}.${each.version.minor}.${each.version.patch}${each.version.nightly ? "-nightly" : ""}`,
+    );
+
+  it("reads both channels from the feed with one request", async () => {
+    const { fetchImpl, requests } = sources({
+      feed: () =>
+        json({
+          schema: 1,
+          generated: "2026-10-01T10:00:00Z",
+          stable: feedEntry("0.2.1"),
+          nightly: feedEntry("0.3.0-nightly.20261002.14"),
+        }),
+    });
+
+    const found = await find(fetchImpl)(new AbortController().signal);
+
+    expect(found.map((each) => each.notes)).toEqual([
+      "Notes for 0.2.1",
+      "Notes for 0.3.0-nightly.20261002.14",
+    ]);
+    expect(found[0]?.feedUrl).toBe("https://github.com/owner/app/releases/download/v0.2.1");
+    expect(requests).toEqual([FEED_URL]);
   });
 
-  it("works before the first stable release", async () => {
-    const releases = await fetchReleases("https://api.example.test", "owner/app", github(null));
+  it("skips a feed entry without this platform's update metadata", async () => {
+    const { fetchImpl } = sources({
+      feed: () =>
+        json({
+          schema: 1,
+          generated: "2026-10-01T10:00:00Z",
+          stable: feedEntry("0.2.1", ["latest.yml"]),
+          nightly: null,
+        }),
+    });
 
-    expect(releases).toHaveLength(100);
+    expect(await find(fetchImpl)(new AbortController().signal)).toEqual([]);
+  });
+
+  it("asks GitHub when the feed isn't there yet, and keeps its rules", async () => {
+    const { fetchImpl } = sources({
+      feed: () => json({ message: "Not Found" }, 404),
+      page: () =>
+        json([
+          githubRelease("v0.2.1"),
+          // A stable version marked as a pre-release, a nightly marked as stable, and a draft.
+          githubRelease("v0.9.0", { prerelease: true }),
+          githubRelease("v0.8.0-nightly.20261003.1", { prerelease: false }),
+          githubRelease("v0.7.0", { draft: true }),
+        ]),
+      latest: () => json(githubRelease("v0.2.0")),
+    });
+
+    expect(await versions(find(fetchImpl)(new AbortController().signal))).toEqual([
+      "0.2.1",
+      "0.2.0",
+    ]);
+  });
+
+  it("asks GitHub when the feed sends downloads anywhere but the repository's releases", async () => {
+    for (const files of [
+      "https://files.example.test/v0.2.1",
+      "https://github.com/owner/app/releases/download/../../../../other/app/releases/download/v0.2.1",
+    ]) {
+      const { fetchImpl, requests } = sources({
+        feed: () =>
+          json({
+            schema: 1,
+            generated: "2026-10-01T10:00:00Z",
+            stable: { ...feedEntry("0.2.1"), files },
+            nightly: null,
+          }),
+        page: () => json([githubRelease("v0.2.0")]),
+      });
+
+      const found = await find(fetchImpl)(new AbortController().signal);
+
+      expect(found.map((each) => each.feedUrl)).toEqual([
+        "https://github.example.test/releases/download/v0.2.0",
+      ]);
+      expect(requests).toContain(`${API}/repos/owner/app/releases?per_page=100`);
+    }
+  });
+
+  it("doesn't ask GitHub when offline", async () => {
+    const { fetchImpl, requests } = sources({
+      feed: () => Promise.reject(new TypeError("fetch failed")),
+    });
+
+    await expect(find(fetchImpl)(new AbortController().signal)).rejects.toMatchObject({
+      failure: { kind: "offline" },
+    });
+    expect(requests).toEqual([FEED_URL]);
+  });
+
+  it("tells GitHub's limit from a refusal, and leaves GitHub alone until the limit resets", async () => {
+    let now = Date.parse("2026-10-01T10:00:00Z");
+    const reset = Math.floor(now / 1000) + 1800;
+    const { fetchImpl, requests } = sources({
+      feed: () => json({}, 503),
+      page: () =>
+        json({ message: "API rate limit exceeded" }, 403, {
+          "x-ratelimit-remaining": "0",
+          "x-ratelimit-reset": String(reset),
+        }),
+    });
+    const discover = find(fetchImpl, () => now);
+
+    const first = await discover(new AbortController().signal).catch((cause: unknown) => cause);
+    expect(first).toMatchObject({ failure: { kind: "busy", until: reset * 1000 } });
+    expect((first as DiscoveryFailed).answers).toEqual([
+      { source: "feed", status: 503, remaining: null, reset: null, retryAfter: null },
+      { source: "github", status: 403, remaining: 0, reset, retryAfter: null },
+    ]);
+
+    now += 10 * 60_000;
+    await expect(discover(new AbortController().signal)).rejects.toMatchObject({
+      failure: { kind: "busy" },
+    });
+    expect(requests.filter((url) => url.startsWith(API))).toHaveLength(1);
+  });
+
+  it("reports GitHub's other refusals as HTTP errors", async () => {
+    const { fetchImpl } = sources({
+      feed: () => json({}, 404),
+      page: () => json({ message: "Forbidden" }, 403),
+    });
+
+    await expect(find(fetchImpl)(new AbortController().signal)).rejects.toMatchObject({
+      failure: { kind: "http", status: 403 },
+    });
   });
 });

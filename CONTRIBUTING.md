@@ -18,7 +18,7 @@ Pull requests outside that scope will be closed, so please don't invest time in 
 
 1. Open an issue first, or comment on an existing one, so we agree on the fix before you write it.
 2. Keep the change small and limited to the bug.
-3. Run `pnpm lint`, `pnpm fmt:check`, `pnpm typecheck` and `pnpm test` before opening the pull request. The [development runbook](docs/maintainers/development.md) explains the setup.
+3. Run `pnpm knip`, `pnpm lint`, `pnpm fmt:check`, `pnpm typecheck` and `pnpm test` before opening the pull request. The [development runbook](docs/maintainers/development.md) explains the setup.
 4. Describe the bug and how you checked the fix in the pull request.
 
 By contributing, you agree that your contribution is licensed under the [GPL-3.0](LICENSE).

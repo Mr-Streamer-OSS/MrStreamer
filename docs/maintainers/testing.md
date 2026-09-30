@@ -2,25 +2,31 @@
 
 The suite checks what the services promise, through their public functions, against a fake provider. It stays small: each test describes a behaviour a user or the release process depends on.
 
-| File                                     | Covers                                                                                                                                                                                                                                  |
-| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/desktop/test/subscription.test.ts` | Logins, M3U links, account states, restarts, removal racing a slow account check, keychain loss                                                                                                                                         |
-| `apps/desktop/test/library.test.ts`      | Loading, search, cache after restart, caches saved before guide ids, failed, empty and short refreshes, ids across renames                                                                                                              |
-| `packages/core/test/catalogue.test.ts`   | Display names and region grouping                                                                                                                                                                                                       |
-| `apps/desktop/test/preferences.test.ts`  | Partial updates, forgetting on account changes, restarts, keys of newer versions, files that still carry favourites and history                                                                                                         |
-| `apps/desktop/test/diagnostics.test.ts`  | What the log records for a session, without addresses, logins or channel names; rotation                                                                                                                                                |
-| `apps/desktop/test/viewing.test.ts`      | Favourites and history order across restarts, commands sent again, accounts, change notices, the one-time import from `preferences.json`, rebuilding from events, a database that can't open                                            |
-| `apps/desktop/test/guide.test.ts`        | Now and next, the rest of the day, untidy XMLTV in small pieces, guide ids shared by unrelated channels, programme search, restarts from disk, six-hour refreshes and failed ones, answering before the first download, account changes |
-| `apps/desktop/test/playback.test.ts`     | The local proxy, one-connection switching, quitting, refusals, and what the player receives for each codec clip                                                                                                                         |
-| `apps/desktop/test/updates.test.ts`      | Channels, release routing, going back to Stable, downloads and retries, channel switches, checks answering late, refused installs, Stable behind a full page of nightlies                                                               |
-| `apps/desktop/test/installer.test.ts`    | The electron-updater adapter: cancelling at every step, refused installs                                                                                                                                                                |
-| `test/release.test.ts`                   | Version order, when a nightly is due, which commit a stable release builds, release notes, and refused versions                                                                                                                         |
+| File                                     | Covers                                                                                                                                                                                                                                                                                                |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/desktop/test/subscription.test.ts` | Logins, M3U links, account states, restarts, removal racing a slow account check, keychain loss                                                                                                                                                                                                       |
+| `apps/desktop/test/library.test.ts`      | Loading, search, cache after restart, caches saved before guide ids, failed, empty and short refreshes, ids across renames                                                                                                                                                                            |
+| `packages/core/test/catalogue.test.ts`   | Display names and region grouping                                                                                                                                                                                                                                                                     |
+| `apps/desktop/test/ondemand.test.ts`     | Movie and series lists: first use, newest first, adult titles only in their own category, search, seasons built from episodes, restarts, failed refreshes, account changes                                                                                                                            |
+| `packages/core/test/ondemand.test.ts`    | Title and episode names, long lists read row by row, when a title counts as finished, one Continue watching entry per series                                                                                                                                                                          |
+| `apps/desktop/test/preferences.test.ts`  | Partial updates, forgetting on account changes, restarts, keys of newer versions, files that still carry favourites and history                                                                                                                                                                       |
+| `apps/desktop/test/diagnostics.test.ts`  | What the log records for a session, without addresses, logins or channel names; rotation                                                                                                                                                                                                              |
+| `apps/desktop/test/viewing.test.ts`      | Favourites and history order across restarts, commands sent again, accounts, change notices, the one-time import from `preferences.json`, rebuilding from events, records from before movies and series, how far movies and episodes got, removing from Continue watching, a database that can't open |
+| `apps/desktop/test/guide.test.ts`        | Now and next, the rest of the day, untidy XMLTV in small pieces, guide ids shared by unrelated channels, programme search, restarts from disk, six-hour refreshes and failed ones, answering before the first download, account changes                                                               |
+| `apps/desktop/test/playback.test.ts`     | The local proxy, one-connection switching, quitting, refusals, and what the player receives for each codec clip                                                                                                                                                                                       |
+| `apps/desktop/test/titles.test.ts`       | Movies and episodes: track names, playing from a position with cues on the file's clock, copied and converted sound and picture, the chosen track, MP4 read by byte ranges, missing files, one connection while seeking                                                                               |
+| `apps/desktop/test/updates.test.ts`      | Channels, release routing, going back to Stable, closed notices, downloads and retries, channel switches, checks answering late, the four-hourly schedule and its backoff, the feed, GitHub as the fallback and its limits                                                                            |
+| `apps/desktop/test/installer.test.ts`    | The electron-updater adapter: cancelling at every step, one download at a time, refused installs                                                                                                                                                                                                      |
+| `apps/desktop/test/licences.test.ts`     | Third-party notices: which packages the bundles hold, NOTICE files, what fails the build, prebuilt files, components, reading notices and Chromium's credits                                                                                                                                          |
+| `test/release.test.ts`                   | Version order, when a nightly is due, which commit a stable release builds, release notes, refused versions, and the update feed                                                                                                                                                                      |
 
-`pnpm test` runs them all. The conversion tests need `ffmpeg` and `ffprobe`: they use the ffmpeg on PATH, or `MR_STREAMER_FFMPEG`, and skip without one. CI installs both.
+`pnpm test` runs them all. The conversion and title tests need `ffmpeg` and `ffprobe`: they use the ones on PATH, or `MR_STREAMER_FFMPEG` and the ffprobe beside it, and skip without them. CI installs both.
 
 ## Fake provider and codec clips
 
 `apps/desktop/test/fake-provider.ts` answers like an Xtream Codes panel, with the untidiness of real ones: prefixed names, separator entries, numbers sent as strings, missing logos, one connection at a time. Tests can make catalogue requests fail or change the channels it lists. About half its channels have a guide id, shared by variants of one channel, and `xmltv.php` serves half-hour programmes around the current time. Tests can replace that document, fail it, hold it open or send it in pieces of a few bytes, and count guide and stream requests. Its "TEST | Formats and failures" category streams the clips in `test/fixtures`, plus an offline channel.
+
+It lists 120 movies and series by default, in their own categories, one of them for adults. Their files redirect to another address and answer byte ranges, and each open file holds a connection slot. The "TEST" movies and the "TEST | Formats" series play the title clips, and one test movie has no file; the rest play the MP4 clip. Tests can fail the lists and count file requests.
 
 The clips in `apps/desktop/test/fixtures` are generated, never recorded from a real channel. Three seconds of test picture and tone, 128 × 72:
 
@@ -39,9 +45,33 @@ ffmpeg -f lavfi -i smptebars=size=128x72:rate=25 -f lavfi -i sine=frequency=440:
 | `h264-open-gop-joined`              | Four seconds of `testsrc2` with `-x264-params keyint=25:min-keyint=25:open-gop=1:bframes=3:scenecut=0`, cut 45% in on a 188-byte boundary, like joining a broadcast mid-sequence |
 | `h264-damaged`                      | `h264-aac` with the payload of two video packets a third of the way in overwritten, like lost packets                                                                            |
 
+Three title clips stand in for movies and episodes, with the same test picture and tone:
+
+| Clip                       | What it holds                                                                                                                                                         |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `title-h264-eac3-subs.mkv` | 20 s, a keyframe every 5 s; E-AC-3 5.1 in English and a Spanish AAC commentary at 660 Hz; English SubRip subtitles at 2, 12 and 17 s, and forced Spanish ones at 12 s |
+| `title-h264-aac.mp4`       | 12 s, AAC marked Dutch, English `mov_text` subtitles, and the index at the end, as ffmpeg writes MP4 by default                                                       |
+| `title-mpeg4-mp3.avi`      | 6 s of MPEG-4 Part 2 with MP3: a picture the player doesn't decode                                                                                                    |
+
+```sh
+# en.srt: "First line" 2-4 s, "Twelve seconds" 12-14 s, "Seventeen" 17-19 s; es.srt: "Doce" 12-14 s
+ffmpeg -f lavfi -i testsrc2=size=128x72:rate=25 -f lavfi -i sine=frequency=440:sample_rate=48000 \
+  -f lavfi -i sine=frequency=660:sample_rate=48000 -i en.srt -i es.srt -t 20 \
+  -map 0:v -map 1:a -map 2:a -map 3 -map 4 -c:v libx264 -preset medium -crf 32 -pix_fmt yuv420p \
+  -g 125 -keyint_min 125 -sc_threshold 0 -c:a:0 eac3 -ac:a:0 6 -b:a:0 96k -c:a:1 aac -ac:a:1 2 -b:a:1 32k \
+  -c:s srt -metadata:s:a:0 language=eng -metadata:s:a:1 language=spa -metadata:s:a:1 title=Commentary \
+  -disposition:a:0 default -disposition:a:1 0 -metadata:s:s:0 language=eng -metadata:s:s:1 language=spa \
+  -disposition:s:0 0 -disposition:s:1 forced title-h264-eac3-subs.mkv
+ffmpeg -f lavfi -i testsrc2=size=128x72:rate=25 -f lavfi -i sine=frequency=440:sample_rate=48000 -i en.srt -t 12 \
+  -map 0:v -map 1:a -map 2 -c:v libx264 -preset medium -crf 32 -pix_fmt yuv420p -g 50 -c:a aac -ac 2 -b:a 32k \
+  -c:s mov_text -metadata:s:a:0 language=nld -metadata:s:s:0 language=eng title-h264-aac.mp4
+ffmpeg -f lavfi -i testsrc2=size=128x72:rate=25 -f lavfi -i sine=frequency=440:sample_rate=48000 -t 6 \
+  -c:v mpeg4 -q:v 8 -g 50 -c:a libmp3lame -b:a 32k -ac 2 title-mpeg4-mp3.avi
+```
+
 ## Packaged app
 
-`apps/desktop/test/e2e/packaged-app.ts` starts a built app with a throwaway profile, connects it to the fake provider through the login form, and plays a channel that passes straight through and one the bundled ffmpeg converts. Then it leaves Watch for Home and watches again from there. It passes when both channels show a moving picture with decoded sound, and Home plays the same stream muted while Watch plays it with sound, without another request to the provider.
+`apps/desktop/test/e2e/packaged-app.ts` starts a built app with a throwaway profile, connects it to the fake provider through the login form, and plays a channel that passes straight through and one the bundled ffmpeg converts. Then it leaves Watch for Home and watches again from there. Last, it opens a movie from Movies, which the bundled ffprobe reads and ffmpeg repackages, skips 10 seconds ahead and leaves. It passes when both channels show a moving picture with decoded sound, Home plays the same stream muted while Watch plays it with sound, without another request to the provider, and the movie plays with sound, skips and holds no connection once left.
 
 ```sh
 node apps/desktop/test/e2e/packaged-app.ts "/Applications/Mr. Streamer.app/Contents/MacOS/Mr. Streamer" -- --use-mock-keychain

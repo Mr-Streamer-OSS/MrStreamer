@@ -1,18 +1,21 @@
 // Plans releases for the release workflow: the commit a run builds, its version and tag, and
-// whether a scheduled nightly is due. docs/maintainers/releasing.md describes the policy.
+// whether a scheduled nightly is due. After publishing, it writes the update feed the app reads.
+// docs/maintainers/releasing.md describes the policy.
 //
 //   node scripts/release-plan.ts nightly --ref <ref> --sha <commit> --run <number> [--scheduled | --dry-run]
-//   node scripts/release-plan.ts stable --ref <ref> [--version 0.1.0]
+//   node scripts/release-plan.ts stable --ref <ref> [--version 0.1.0] [--nightly <tested nightly>]
 //   node scripts/release-plan.ts check --version <version>   right before publishing
 //   node scripts/release-plan.ts notes --tag <tag> --sha <commit> [--previous-tag <tag>]
 //   node scripts/release-plan.ts record --version <version>  after a stable release, on main
+//   node scripts/release-plan.ts feed --out <file> [--current <url>] [--allow-regress]
 //
 // Versions: the app's package.json (apps/desktop/package.json) on main holds the newest stable
 // release (0.0.0 before the first). Nightlies preview the next patch, 0.0.2-nightly.20261002.14,
 // counting from that package.json or the
 // newest stable release, whichever is newer, so a stable release that main has not recorded yet
-// never makes later nightlies sort below it. A stable release rebuilds the commit of the latest
-// published nightly, as the version that nightly previewed unless another is given.
+// never makes later nightlies sort below it. A stable release rebuilds the commit of the nightly
+// it is given, or else the latest published one, as the version that nightly previewed unless
+// another is given.
 //
 // Reads GitHub with gh, prints the plan as GitHub Actions outputs, and fails with the reason when
 // a release is refused. Release jobs run it with plain node before installing packages, so it
@@ -29,20 +32,19 @@ import {
   type Channel,
   type Version,
 } from "../packages/contracts/src/version.ts";
+import {
+  buildFeed,
+  mergeFeeds,
+  readFeed,
+  type GitHubRelease,
+  type UpdateFeed,
+} from "../packages/contracts/src/update-feed.ts";
 
 /** The app's manifest, whose version records the newest stable release. */
 const MANIFEST = "apps/desktop/package.json";
 
 /** A scheduled nightly waits at least this long after the previous one. */
 export const NIGHTLY_INTERVAL_MS = 6 * 60 * 60 * 1000;
-
-export interface Release {
-  readonly tag: string;
-  readonly draft: boolean;
-  readonly prerelease: boolean;
-  /** ISO time; null while a draft. */
-  readonly publishedAt: string | null;
-}
 
 const HISTORIES = ["ahead", "behind", "identical", "diverged"] as const;
 
@@ -64,7 +66,7 @@ export interface Repository {
   readonly url: string;
   readonly defaultBranch: string;
   /** Every release, drafts included. */
-  readonly releases: readonly Release[];
+  readonly releases: readonly GitHubRelease[];
   /** Every tag, with or without a release. */
   readonly tags: readonly string[];
   /** How `head` relates to `base`: "ahead" when head contains base and more. */
@@ -91,6 +93,11 @@ export interface Plan {
    * for a stable one, the previous nightly for a nightly. Null for a channel's first release.
    */
   readonly previousTag: string | null;
+  /**
+   * For a stable release: the published nightlies that sort after the nightly it promotes. Their
+   * users are offered this release, which lacks their changes, until the next nightly.
+   */
+  readonly leftOut?: readonly string[];
 }
 
 export interface Skip {
@@ -118,6 +125,8 @@ export interface StableRequest {
   readonly ref: string;
   /** Replaces the version the nightly previewed; the commit stays the nightly's. */
   readonly version?: string | undefined;
+  /** The tested nightly to promote, by version or tag. The latest published nightly when absent. */
+  readonly nightly?: string | undefined;
 }
 
 export async function planNightly(repo: Repository, request: NightlyRequest): Promise<Plan | Skip> {
@@ -153,7 +162,9 @@ export async function planNightly(repo: Repository, request: NightlyRequest): Pr
 
 export async function planStable(repo: Repository, request: StableRequest): Promise<Plan> {
   assertDefaultBranch(repo, request.ref, "stable");
-  const nightly = latestNightly(repo.releases);
+  const nightly = request.nightly
+    ? pinnedNightly(repo.releases, request.nightly)
+    : latestNightly(repo.releases);
   if (!nightly) {
     throw new Error("No published nightly. A stable release promotes the latest nightly.");
   }
@@ -184,20 +195,34 @@ export async function planStable(repo: Repository, request: StableRequest): Prom
     })
     .sort(compareVersions)
     .at(-1);
+  // Nightlies count from the newest stable release, so one sorting before it was planned before
+  // that release was out and can hold older code than stable users have.
+  if (previousStable && compareVersions(previewed, previousStable) < 0) {
+    throw new Error(
+      `${nightly.tag} came before ${tagOf(previousStable)}, so it can hold older code. Promote a nightly built after it.`,
+    );
+  }
+  const leftOut = repo.releases
+    .filter(isPublishedNightly)
+    .map((release) => parseVersion(release.tag)!)
+    .filter((other) => compareVersions(other, previewed) > 0 && compareVersions(other, version) < 0)
+    .sort(compareVersions)
+    .map(tagOf);
   return {
     channel: "stable",
     version: formatVersion(version),
     tag: tagOf(version),
     sha,
     previousTag: previousStable ? tagOf(previousStable) : null,
+    leftOut,
   };
 }
 
 /**
  * Throws unless `version` is still unused and sorts after every release it competes with: a
  * stable release after every stable release, a nightly after every release. Runs again right
- * before publishing, as the other queue may have published in the meantime. Drafts don't count:
- * users never see them and they have no tag.
+ * before publishing, in case a release appeared in the meantime. Drafts don't count: users never
+ * see them and they have no tag.
  */
 export function checkUnreleased(repo: Repository, version: string): void {
   const parsed = parseVersion(version);
@@ -237,17 +262,38 @@ export function recordedVersion(current: string, released: string): string | nul
   return now && compareVersions(now, next) >= 0 ? null : formatVersion(next);
 }
 
-/** The newest published nightly. Drafts and pre-releases without a nightly version don't count. */
-function latestNightly(releases: readonly Release[]): Release | undefined {
+/** Drafts and pre-releases without a nightly version aren't published nightlies. */
+function isPublishedNightly(release: GitHubRelease): boolean {
+  return (
+    !release.draft &&
+    release.prerelease &&
+    release.publishedAt !== null &&
+    Boolean(parseVersion(release.tag)?.nightly)
+  );
+}
+
+/** The newest published nightly. */
+function latestNightly(releases: readonly GitHubRelease[]): GitHubRelease | undefined {
   return releases
-    .filter(
-      (release) =>
-        !release.draft &&
-        release.prerelease &&
-        release.publishedAt !== null &&
-        parseVersion(release.tag)?.nightly,
-    )
+    .filter(isPublishedNightly)
     .sort((a, b) => Date.parse(b.publishedAt!) - Date.parse(a.publishedAt!))[0];
+}
+
+/** The published nightly `text` names, by version or tag, such as 0.0.2-nightly.20260930.30. */
+function pinnedNightly(releases: readonly GitHubRelease[], text: string): GitHubRelease {
+  const version = parseVersion(text);
+  if (!version?.nightly) {
+    throw new Error(`"${text}" is not a nightly version, such as 0.0.2-nightly.20260930.30.`);
+  }
+  const tag = tagOf(version);
+  const named = releases.filter((release) => release.tag === tag);
+  const nightly = named.find(isPublishedNightly);
+  if (nightly) return nightly;
+  throw new Error(
+    named.length === 0
+      ? `No release is tagged ${tag}.`
+      : `${tag} is not a published nightly: it is a draft or not a pre-release.`,
+  );
 }
 
 /** Why a scheduled nightly should not build `sha` now, or null when it should. */
@@ -321,21 +367,14 @@ function githubRepository(): Repository {
     ).trim();
   const lines = (text: string) => text.split("\n").filter(Boolean);
 
+  // One release a line, as JSON: notes span lines.
   const releases = lines(
     api(
       "/releases?per_page=100",
-      '.[] | [.tag_name, .draft, .prerelease, .published_at // ""] | @tsv',
+      '.[] | {tag: .tag_name, draft, prerelease, publishedAt: .published_at, page: .html_url, notes: (.body // ""), assets: [.assets[].name]} | @json',
       true,
     ),
-  ).map((line): Release => {
-    const [tag = "", draft, prerelease, publishedAt] = line.split("\t");
-    return {
-      tag,
-      draft: draft === "true",
-      prerelease: prerelease === "true",
-      publishedAt: publishedAt || null,
-    };
-  });
+  ).map((line): GitHubRelease => JSON.parse(line));
   const [defaultBranch = "", url = ""] = api("", "[.default_branch, .html_url] | @tsv").split("\t");
   return {
     url,
@@ -400,6 +439,11 @@ function outputPlan(plan: Plan | Skip): void {
   summary(
     `${plan.channel === "stable" ? "Stable" : "Nightly"} ${plan.version} from \`${plan.sha}\``,
   );
+  if (plan.leftOut && plan.leftOut.length > 0) {
+    console.log(
+      `::warning::${plan.leftOut.join(", ")} came after the nightly this release promotes. Their users are offered ${plan.version} too, without their changes, until the next nightly.`,
+    );
+  }
   output({
     skip: "false",
     channel: plan.channel,
@@ -429,6 +473,55 @@ async function reportChannels(repo: Repository, request: NightlyRequest): Promis
   console.log(`A scheduled nightly now ${nightly}\nA stable release now ${stable}`);
 }
 
+/**
+ * The feed deployed at `url`, or null when there is none yet: no address, 404 or unreachable, as
+ * before Pages is enabled. Any other failure throws, so a feed is never published without it.
+ */
+async function deployedFeed(url: string | undefined): Promise<UpdateFeed | null> {
+  if (!url) {
+    console.log("No deployed feed given: the releases alone decide.");
+    return null;
+  }
+  // Pages' cache can serve a copy up to ten minutes old; a query it hasn't seen reads the latest.
+  const latest = new URL(url);
+  latest.searchParams.set("at", String(Date.now()));
+  const response = await fetch(latest, { signal: AbortSignal.timeout(20_000) }).catch(
+    (error: unknown) => {
+      console.log(
+        `::warning::${url} is unreachable, so the releases alone decide. ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    },
+  );
+  if (!response) return null;
+  if (response.status === 404) {
+    console.log(`Nothing is deployed at ${url} yet: the releases alone decide.`);
+    return null;
+  }
+  if (!response.ok) throw new Error(`${url} answered HTTP ${response.status}.`);
+  try {
+    return readFeed(await response.json());
+  } catch (error) {
+    throw new Error(
+      `${url} holds no feed this script can read. ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+/** One line per channel: the release the feed names, and what it replaced or kept. */
+function describeFeed(current: UpdateFeed | null, listed: UpdateFeed, feed: UpdateFeed): string[] {
+  return (["stable", "nightly"] as const).map((channel) => {
+    const label = channel === "stable" ? "Stable" : "Nightly";
+    const named = feed[channel]?.version ?? "none";
+    const released = listed[channel]?.version ?? "none";
+    const was = current && (current[channel]?.version ?? "none");
+    if (named !== released) {
+      return `${label}: ${named}, kept from the deployed feed over ${released} from the releases`;
+    }
+    return was && was !== named ? `${label}: ${named}, was ${was}` : `${label}: ${named}`;
+  });
+}
+
 async function main(): Promise<void> {
   const { positionals, values } = parseArgs({
     allowPositionals: true,
@@ -439,8 +532,12 @@ async function main(): Promise<void> {
       version: { type: "string" },
       tag: { type: "string" },
       "previous-tag": { type: "string" },
+      nightly: { type: "string" },
+      current: { type: "string" },
+      out: { type: "string" },
       scheduled: { type: "boolean", default: false },
       "dry-run": { type: "boolean", default: false },
+      "allow-regress": { type: "boolean", default: false },
     },
   });
   const [command] = positionals;
@@ -465,7 +562,11 @@ async function main(): Promise<void> {
     }
     case "stable":
       outputPlan(
-        await planStable(githubRepository(), { ref, version: values.version || undefined }),
+        await planStable(githubRepository(), {
+          ref,
+          version: values.version || undefined,
+          nightly: values.nightly || undefined,
+        }),
       );
       return;
     case "check":
@@ -494,8 +595,22 @@ async function main(): Promise<void> {
       );
       return;
     }
+    case "feed": {
+      if (!values.out) throw new Error("Name the file to write with --out.");
+      const repo = githubRepository();
+      const current = await deployedFeed(values.current);
+      const listed = buildFeed(repo.url, repo.releases, new Date().toISOString());
+      const feed = mergeFeeds(current, listed, { allowRegress: values["allow-regress"] });
+      writeFileSync(values.out, `${JSON.stringify(feed, null, 2)}\n`);
+      const lines = describeFeed(current, listed, feed);
+      console.log(lines.join("\n"));
+      summary(lines.map((line) => `- ${line}`).join("\n"));
+      return;
+    }
     default:
-      throw new Error(`Unknown command "${command}". Use nightly, stable, check, notes or record.`);
+      throw new Error(
+        `Unknown command "${command}". Use nightly, stable, check, notes, record or feed.`,
+      );
   }
 }
 

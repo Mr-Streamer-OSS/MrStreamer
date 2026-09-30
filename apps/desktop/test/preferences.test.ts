@@ -14,7 +14,7 @@ describe("preferences", () => {
     const dataDir = await tempDir();
     await (await settingsIn(dataDir)).update({ lastChannelId: "818", lastCategoryId: "7" });
 
-    const patch = ipcInputs["preferences.update"]({ volume: 0.3, muted: true });
+    const patch = ipcInputs["preferences.update"]()({ volume: 0.3, muted: true });
     if (patch instanceof type.errors) throw new Error(patch.summary);
     await (await settingsIn(dataDir)).update(patch);
 

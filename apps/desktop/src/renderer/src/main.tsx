@@ -3,13 +3,20 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App.tsx";
 import { TooltipProvider } from "./components/ui/tooltip.tsx";
-import { syncGuideUpdates, syncLibraryUpdates, syncUpdates, syncViewing } from "./lib/queries.ts";
+import {
+  syncGuideUpdates,
+  syncLibraryUpdates,
+  syncOnDemand,
+  syncUpdates,
+  syncViewing,
+} from "./lib/queries.ts";
 import "./styles.css";
 
 const client = new QueryClient({
   defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
 });
 syncLibraryUpdates(client);
+syncOnDemand(client);
 syncGuideUpdates(client);
 syncViewing(client);
 syncUpdates(client);

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import type { TitleRef } from "@mrstreamer/contracts/ondemand";
 import { ViewingRecord } from "@mrstreamer/core/viewing/service";
 import { describe, expect, it } from "vitest";
 import { mainLayer } from "../src/main/runtime.ts";
@@ -54,6 +55,10 @@ async function viewingApp() {
         viewing.setFavourite(commandId, channelId, favourite),
       recordWatch: (channelId: string, commandId: string = randomUUID()) =>
         viewing.recordWatch(commandId, channelId),
+      played: (title: TitleRef, position: number, duration: number) =>
+        viewing.recordProgress(randomUUID(), title, position, duration),
+      remove: (title: TitleRef) => viewing.removeFromContinue(randomUUID(), title),
+      progress: viewing.progress,
       /** The sequences the UI is told about from now on. */
       changes: () => collect(runtime, viewing.changes),
     };
@@ -128,7 +133,12 @@ describe("viewing record", () => {
     expect((await viewing.state()).favourites).toEqual(["a"]);
 
     await app.disconnect();
-    expect(await viewing.state()).toEqual({ favourites: [], recent: [], sequence: 0 });
+    expect(await viewing.state()).toEqual({
+      favourites: [],
+      recent: [],
+      continueWatching: [],
+      sequence: 0,
+    });
     await expect(viewing.setFavourite("c", true)).rejects.toMatchObject({
       error: { kind: "no-subscription" },
     });
@@ -185,24 +195,135 @@ describe("viewing record", () => {
     expect(await restarted.state()).toMatchObject({ favourites: ["f1"], recent: ["r1"] });
   });
 
-  it("rebuilds the lists from the events when the stored state is gone", async () => {
+  it("rebuilds the lists and titles from the events when the stored state is gone", async () => {
     const app = await viewingApp();
     await app.connect(0);
     const viewing = await app.start();
     for (const id of ["a", "b", "c"]) await viewing.setFavourite(id, true);
     await viewing.setFavourite("b", false);
     for (const id of ["a", "b", "a"]) await viewing.recordWatch(id);
+    await viewing.played(movie("m1"), 600, 6000);
+    await viewing.played(episode("e1", "s1", 1, 1), 2700, 2700);
+    await viewing.played(movie("m2"), 900, 6000);
+    await viewing.remove(movie("m2"));
     const before = await viewing.state();
+    const series = await viewing.progress({ seriesId: "s1" });
     await app.connect(1);
     await viewing.setFavourite("z", true);
     await app.connect(0);
 
     // What a change to the rules does: the state is dropped and the version no longer matches.
     const db = new DatabaseSync(join(app.dataDir, "mrstreamer.db"));
-    db.exec("delete from state; delete from meta where key = 'state-version';");
+    db.exec("delete from state; delete from titles; delete from meta where key = 'state-version';");
     db.close();
 
-    expect(await (await app.start()).state()).toEqual(before);
+    const restarted = await app.start();
+    expect(await restarted.state()).toEqual(before);
+    expect(await restarted.progress({ seriesId: "s1" })).toEqual(series);
+  });
+
+  it("opens a record written before movies and series, and keeps its lists", async () => {
+    const app = await viewingApp();
+    await app.connect(0);
+    const viewing = await app.start();
+    await viewing.setFavourite("a", true);
+    const before = await viewing.state();
+    await app.disconnect();
+    await app.connect(0);
+
+    // The database as the first builds with a viewing record wrote it: no payload, no titles.
+    const db = new DatabaseSync(join(app.dataDir, "mrstreamer.db"));
+    db.exec("drop table titles; alter table events drop column payload;");
+    db.close();
+
+    const restarted = await app.start();
+    expect(await restarted.state()).toEqual(before);
+    const played = await restarted.played(movie("m1"), 600, 6000);
+    expect(played.continueWatching.map((entry) => entry.title)).toEqual([movie("m1")]);
+  });
+});
+
+function movie(id: string): TitleRef {
+  return { kind: "movie", id };
+}
+
+function episode(id: string, seriesId: string, season: number, number: number): TitleRef {
+  return { kind: "episode", id, seriesId, season, episode: number };
+}
+
+describe("how far movies and episodes got", () => {
+  it("lists movies started and not finished, and the latest episode of each series", async () => {
+    const app = await viewingApp();
+    await app.connect(0);
+    const viewing = await app.start();
+
+    await viewing.played(movie("barely"), 60, 6000);
+    await viewing.played(movie("halfway"), 3000, 6000);
+    await viewing.played(movie("credits"), 5800, 6000);
+    await viewing.played(episode("e1", "s1", 1, 1), 2650, 2700);
+    await viewing.played(episode("e2", "s1", 1, 2), 30, 2700);
+    await viewing.played(episode("p1", "pilot", 1, 1), 20, 2700);
+    const state = await viewing.played(movie("halfway"), 3100, 6000);
+
+    // The movie played last comes first; a series stays with its next episode even when that one
+    // has barely started, and a pilot watched for seconds doesn't count yet.
+    expect(
+      state.continueWatching.map(({ title, position, finished }) => [title, position, finished]),
+    ).toEqual([
+      [movie("halfway"), 3100, false],
+      [episode("e2", "s1", 1, 2), 30, false],
+    ]);
+    expect(await viewing.progress({ movieIds: ["credits", "unknown"] })).toMatchObject([
+      { title: movie("credits"), finished: true },
+    ]);
+    expect(
+      (await viewing.progress({ seriesId: "s1" })).map((entry) => entry.title.id).sort(),
+    ).toEqual(["e1", "e2"]);
+    expect((await (await app.start()).state()).continueWatching).toEqual(state.continueWatching);
+  });
+
+  it("keeps a finished episode in Continue watching, so its series offers the next one", async () => {
+    const app = await viewingApp();
+    await app.connect(0);
+    const viewing = await app.start();
+
+    const state = await viewing.played(episode("e3", "s1", 2, 3), 2690, 2700);
+
+    expect(state.continueWatching).toMatchObject([
+      { title: episode("e3", "s1", 2, 3), finished: true },
+    ]);
+  });
+
+  it("takes a movie or a whole series out of Continue watching until it plays again", async () => {
+    const app = await viewingApp();
+    await app.connect(0);
+    const viewing = await app.start();
+    await viewing.played(movie("m1"), 600, 6000);
+    await viewing.played(episode("e1", "s1", 1, 1), 600, 2700);
+    await viewing.played(episode("e2", "s1", 1, 2), 600, 2700);
+
+    await viewing.remove(movie("m1"));
+    const removed = await viewing.remove(episode("e1", "s1", 1, 1));
+    expect(removed.continueWatching).toEqual([]);
+
+    const again = await viewing.played(episode("e1", "s1", 1, 1), 700, 2700);
+    expect(again.continueWatching.map((entry) => entry.title)).toEqual([episode("e1", "s1", 1, 1)]);
+    // Progress stays readable for the details page while a title is out of the list.
+    expect(await viewing.progress({ movieIds: ["m1"] })).toMatchObject([{ position: 600 }]);
+  });
+
+  it("keeps each account's progress to itself", async () => {
+    const app = await viewingApp();
+    await app.connect(0);
+    const viewing = await app.start();
+    await viewing.played(movie("m1"), 600, 6000);
+
+    await app.connect(1);
+    expect((await viewing.state()).continueWatching).toEqual([]);
+    expect(await viewing.progress({ movieIds: ["m1"] })).toEqual([]);
+
+    await app.connect(0);
+    expect(await viewing.progress({ movieIds: ["m1"] })).toMatchObject([{ position: 600 }]);
   });
 
   it("fails its calls, and keeps the lists in preferences.json, when the database can't open", async () => {

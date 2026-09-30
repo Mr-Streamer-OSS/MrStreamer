@@ -12,6 +12,7 @@ import { queries } from "../../lib/queries.ts";
 import { player } from "../../player/player.ts";
 import { cn } from "../../lib/utils.ts";
 import { UpdatesSection } from "../updates/UpdatesSection.tsx";
+import { Licences } from "./Licences.tsx";
 import { useUpdates } from "../updates/use-updates.ts";
 
 const TABS: readonly { value: SettingsTab; label: string }[] = [
@@ -24,18 +25,22 @@ const REPOSITORY_URL = "https://github.com/Mr-Streamer-OSS/MrStreamer";
 
 /**
  * Settings, a page over the current view, so a channel keeps playing underneath. Opens with ⌘,
- * or Ctrl , on the tab its opener asks for; Escape goes back.
+ * or Ctrl , on the tab its opener asks for. Back in the top bar, or Escape, returns to the view;
+ * a dialog over the page closes first.
  */
 export function SettingsPage() {
   const tab = useUi((state) => state.settings);
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if (event.key !== "Escape" || event.defaultPrevented || isTyping(event)) return;
-      // A dialog over the page closes itself first.
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      // A dialog or popup over the page closes itself first.
       if (event.target instanceof Element && event.target.closest('[role="dialog"]')) return;
-      if (!useUi.getState().settings) return;
-      useUi.setState({ settings: null });
+      const current = useUi.getState().settings;
+      // Fields keep Escape, except the licences' search, which has nothing to undo.
+      if (!current || (isTyping(event) && current !== "licences")) return;
+      // The licences go back to About, the rest to the view underneath.
+      useUi.setState({ settings: current === "licences" ? "about" : null });
       // Handled: the view underneath must not take the same Escape.
       event.preventDefault();
     }
@@ -44,6 +49,7 @@ export function SettingsPage() {
   }, []);
 
   if (!tab) return null;
+  const shownTab = tab === "licences" ? "about" : tab;
   return (
     <div className="fixed inset-0 z-40 flex flex-col bg-black">
       <WindowBar className="bg-black" />
@@ -53,11 +59,11 @@ export function SettingsPage() {
           {TABS.map((entry) => (
             <button
               key={entry.value}
-              aria-current={entry.value === tab ? "page" : undefined}
+              aria-current={entry.value === shownTab ? "page" : undefined}
               onClick={() => useUi.setState({ settings: entry.value })}
               className={cn(
                 "mb-0.5 block w-full rounded-lg px-3 py-2 text-left text-[0.9375rem] transition-colors",
-                entry.value === tab
+                entry.value === shownTab
                   ? "bg-white/10 text-white"
                   : "text-muted-foreground hover:bg-white/5 hover:text-white",
               )}
@@ -65,25 +71,31 @@ export function SettingsPage() {
               {entry.label}
             </button>
           ))}
-          <p className="mt-6 px-3 text-xs text-muted-foreground">Esc to go back</p>
         </nav>
-        <main className="min-w-0 flex-1 overflow-y-auto px-10 pt-6 pb-10">
-          <div className="max-w-[40rem]">
-            {tab === "subscription" && <Subscription />}
-            {tab === "updates" && <UpdatesSection />}
-            {tab === "about" && <About />}
-          </div>
-        </main>
+        {tab === "licences" ? (
+          <Licences />
+        ) : (
+          <main className="min-w-0 flex-1 overflow-y-auto px-10 pt-6 pb-10">
+            <div className="max-w-[40rem]">
+              {tab === "subscription" && <Subscription />}
+              {tab === "updates" && <UpdatesSection />}
+              {tab === "about" && <About />}
+            </div>
+          </main>
+        )}
       </div>
     </div>
   );
 }
 
-/** The installed version, where the project lives, and how to report a bug. */
+/** The installed version, where the project lives, its licences and how to report a bug. */
 function About() {
   const { status } = useUpdates();
   const rows: [string, ReactNode][] = [
-    ["Version", status?.version ?? ""],
+    [
+      "Version",
+      status ? `${status.version} · ${status.channel === "nightly" ? "Nightly" : "Stable"}` : "",
+    ],
     ["Website", <Link href="https://mrstreamer.app">mrstreamer.app</Link>],
     [
       "Source",
@@ -91,7 +103,16 @@ function About() {
         <Link href={REPOSITORY_URL}>GitHub</Link> · GPL-3.0
       </>,
     ],
-    ["Includes", "FFmpeg and x264, under the GPL"],
+    [
+      "Licences",
+      <button
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => useUi.setState({ settings: "licences" })}
+        className="underline underline-offset-4"
+      >
+        Open-source licences
+      </button>,
+    ],
   ];
   return (
     <section>

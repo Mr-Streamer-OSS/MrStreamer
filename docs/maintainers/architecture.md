@@ -3,54 +3,69 @@
 An Electron app in a pnpm workspace. The main process owns everything that touches the network, the disk and the system; the renderer shows state and starts actions over a typed IPC contract.
 
 ```
-packages/contracts   @mrstreamer/contracts: IPC schemas, library and guide models, errors,
-                     versions, updates. Depends on nothing else in the workspace.
+packages/contracts   @mrstreamer/contracts: IPC schemas, library, guide and movie and series
+                     models, errors, versions, updates, the update feed, licences. Depends on
+                     nothing else in the workspace.
 packages/core        @mrstreamer/core: rules that run without Electron, React or the DOM. Catalogue
                      names and regions, trusted guide ids, the XMLTV reader, the guide and viewing
-                     record services, update feeds, the provider port, text folding. Depends on
-                     contracts.
+                     record services, movie and series names, their catalogue and tracks, update
+                     discovery, the provider port, reading long JSON lists, text folding. Depends
+                     on contracts.
 apps/desktop         The app, package name mrstreamer
   src/main           Electron main process
     providers        The Xtream Codes adapter
-    services         Subscriptions, library, playback proxy, settings (preferences.json),
-                     updates
-    playback         Stream inspection, the clean start and ffmpeg conversion behind the proxy
+    services         Subscriptions, library, movies and series, playback proxy, settings
+                     (preferences.json), updates, licences
+    ondemand         The worker thread that holds the movie and series catalogue
+    playback         Stream inspection, the clean start and ffmpeg conversion behind the proxy;
+                     probing and ffmpeg runs for movies and episodes
     platform         Keychain-backed secrets, atomic JSON files, the guide and viewing stores, the
-                     electron-updater installer
+                     electron-updater installer, the diagnostics log
   src/preload        The typed bridge exposed to the UI
-  src/renderer       React UI; player/ holds the playback engines, the player controller, Picture
+  src/renderer       React UI; player/ holds the playback engines, the live and title player
+                     controllers, Picture
   src/shared         What main and the renderer share inside the app: window bar sizes
-  scripts            Icons, the DMG background, signing, notarization, ffmpeg builds, guide and
-                     viewing record measurements
-  test               Service suites, the fake provider, codec clips, packaged-app test, measurements
-scripts              Release planning and CI signing, run from the repository root
+  scripts            Icons, the DMG background, signing, notarization, ffmpeg builds, third-party
+                     notices, guide and viewing record measurements
+  test               Service suites, the fake provider, codec and title clips, packaged-app test,
+                     measurements
+scripts              Release planning, the update feed and CI signing, run from the repository root
 test                 The release planning suite
 ```
 
-Packages export their source files by path, `@mrstreamer/core/catalogue/normalize`, and the app bundles them; nothing is built separately. Lint rules keep packages from importing Electron, React or the app, contracts from importing core, and every file from import cycles. `scripts/release-plan.ts` imports `packages/contracts/src/version.ts` by relative path, because release jobs run it before installing packages.
+Packages export their source files by path, `@mrstreamer/core/catalogue/normalize`, and the app bundles them; nothing is built separately. Lint rules keep packages from importing Electron, React or the app, contracts from importing core, and every file from import cycles. `scripts/release-plan.ts` imports `packages/contracts/src/version.ts` and `update-feed.ts` by relative path, because release jobs run it before installing packages.
 
-`@mrstreamer/contracts/ipc` is the contract: each method has an input schema (ArkType) and a result type, and the main process validates every call before its handler runs. The preload script exposes it as `window.mrStreamer`; the renderer reaches it through `lib/ipc.ts` and React Query hooks in `lib/queries.ts`.
+`@mrstreamer/contracts/ipc` is the contract: each method has an input schema (ArkType) and a result type, and the main process validates every call before its handler runs. ArkType compiles a schema when it's defined, which adds to every start, so schemas the start doesn't need are built on first use: each IPC input on its method's first call. The preload script exposes it as `window.mrStreamer`; the renderer reaches it through `lib/ipc.ts` and React Query hooks in `lib/queries.ts`.
 
 ## Data
 
-Everything lives in Electron's `userData` folder, named after the product, not the app id: see the [user troubleshooting page](../user/troubleshooting.md#where-your-data-is). Each JSON file is written atomically; leftovers of an interrupted write are removed at startup. Changes to these files must stay readable by the newest stable release: choosing Stable on a nightly installs that release over the nightly, and it reads what the nightly wrote. Add fields rather than change a file's version: older readers ignore keys they don't know and keep them when they write. The one agreed exception: Stable 0.0.1 doesn't read `mrstreamer.db`, so it shows no favourites or watch history.
+Everything lives in Electron's `userData` folder, named after the product, not the app id: see the [user troubleshooting page](../user/troubleshooting.md#where-your-data-is). Each JSON file is written atomically; leftovers of an interrupted write are removed at startup. Changes to these files must stay readable by the newest stable release: choosing Stable on a nightly installs that release over the nightly, and it reads what the nightly wrote. Add fields rather than change a file's version: older readers ignore keys they don't know and keep them when they write. New files are fine: older releases don't look for them. The one agreed exception: Stable 0.0.1 doesn't read `mrstreamer.db`, so it shows no favourites or watch history; Stable 0.0.2 reads it and skips what it doesn't know (see [Viewing record](#viewing-record)).
 
-| File                | Owner                                                                                     |
-| ------------------- | ----------------------------------------------------------------------------------------- |
-| `subscription.json` | `services/subscription.ts`; the password is sealed with `safeStorage`                     |
-| `preferences.json`  | `services/preferences.ts`: volume, mute, last channel and category                        |
-| `mrstreamer.db`     | `platform/viewing-store.ts`: the viewing record, favourites and watch history per account |
-| `catalogue.json`    | `services/library.ts`: the last good catalogue, as the provider sent it                   |
-| `guide.xml`         | `platform/guide-store.ts`: the last complete XMLTV download, as it arrived                |
-| `guide.json`        | `platform/guide-store.ts`: which subscription `guide.xml` belongs to, and when it arrived |
-| `updates.json`      | `services/updates.ts`: the chosen channel                                                 |
-| `diagnostics.log`   | `platform/diagnostics-log.ts`: what the app did; `diagnostics.1.log` is the one before    |
+| File                | Owner                                                                                                            |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `subscription.json` | `services/subscription.ts`; the password is sealed with `safeStorage`                                            |
+| `preferences.json`  | `services/preferences.ts`: volume, mute, last channel and category, the sound and subtitle languages picked last |
+| `mrstreamer.db`     | `platform/viewing-store.ts`: the viewing record, favourites, watch history and title progress per account        |
+| `catalogue.json`    | `services/library.ts`: the last good catalogue, as the provider sent it                                          |
+| `ondemand.json`     | `ondemand/catalogue-worker.ts`: the last good movie and series lists, as the provider sent them                  |
+| `guide.xml`         | `platform/guide-store.ts`: the last complete XMLTV download, as it arrived                                       |
+| `guide.json`        | `platform/guide-store.ts`: which subscription `guide.xml` belongs to, and when it arrived                        |
+| `updates.json`      | `services/updates.ts`: the chosen channel, and the version whose notice was closed                               |
+| `diagnostics.log`   | `platform/diagnostics-log.ts`: what the app did; `diagnostics.1.log` is the one before                           |
 
 ## Catalogue
 
 The library fetches categories and channels, indexes them in memory and caches the provider's raw answer; display names are worked out on load, so naming rules improve without a refetch. A refresh replaces the catalogue only when it looks complete: an empty answer never does, and one with less than half the channels only when a second fetch agrees. A failed refresh keeps the catalogue and reports the failure in the status. Favourites and history refer to provider ids, so renamed or reordered channels keep them.
 
 Each channel keeps the provider's guide id (`epg_channel_id` on Xtream panels). Quality variants of one channel usually share it, but panels also file unrelated channels under one id: Wout's lists nine Flemish channels under `PlayCrime.be`. `@mrstreamer/core/catalogue/guide-ids` keeps an id for a channel only when the channel's name matches the id, or when every channel sharing it is the same channel under another name or quality. The guide's own channel names don't count: panels copy them from their stream list. On Wout's provider this keeps 1,978 of 2,073 channels with programmes. A cache saved before guide ids existed still loads, and counts as due for a refresh at the next start.
+
+## Movies and series
+
+`services/ondemand.ts` (`OnDemand`) owns movies and series. Their lists are large: 53,000 movies (21 MB of JSON) and 10,000 series on Wout's provider. Reading, indexing and sorting them on the main thread stalled it for 100 to 300 ms, so the catalogue lives in a worker thread, `ondemand/catalogue-worker.ts`, started on first use (electron-vite bundles it through `?nodeWorker`; tests start the source file). The worker fetches both lists with its own copy of the Xtream adapter, reading each a row at a time (`@mrstreamer/core/json-rows`), keeps them in `ondemand.json` as the provider sent them, and answers the main process's small calls: pages of a category or of every title, sorted by date added, name or rating; titles by id; search; a movie's file type. Every call names the subscription it is for, so an answer never mixes accounts. Display names are worked out on load (`@mrstreamer/core/ondemand/names`: "Blow 2001 (NL)" is "Blow 2001" with the tag NL), and categories group by country the way live ones do.
+
+Titles the provider marks for adults, or that sit in a category named for adults, appear only inside their category: pages of every title and search leave them out. An empty answer never replaces lists that had titles. The lists refresh at startup after the live catalogue and the guide when they are older than 12 hours, and when first needed.
+
+Details come from the provider when a title opens (`get_vod_info`, `get_series_info`) and stay in memory for the last 200 titles. `@mrstreamer/core/ondemand/details` builds a series' seasons from its episodes, because panels list seasons incompletely or not at all, and puts specials last. `OnDemand.file` names the provider file a movie or episode streams from; the URL holds the login and never leaves the main process.
 
 ## Effect services
 
@@ -61,10 +76,12 @@ The main process runs every service on one [Effect](https://effect.website) runt
 | `Subscriptions` | `services/subscription.ts`         | The login, its sealed password, the provider behind it |
 | `Settings`      | `services/preferences.ts`          | `preferences.json`                                     |
 | `Library`       | `services/library.ts`              | The catalogue, its cache and refreshes                 |
+| `OnDemand`      | `services/ondemand.ts`             | Movies and series, through the catalogue worker        |
 | `Playback`      | `services/playback.ts`             | Stream sessions and the loopback proxy                 |
 | `Updates`       | `services/updates.ts`              | The release channel, checks, downloads and the install |
 | `Guide`         | `@mrstreamer/core/guide/service`   | The programme guide                                    |
-| `ViewingRecord` | `@mrstreamer/core/viewing/service` | Favourites and watch history                           |
+| `ViewingRecord` | `@mrstreamer/core/viewing/service` | Favourites, watch history and title progress           |
+| `Licences`      | `services/licences.ts`             | Third-party notices for Settings > About               |
 
 A service is a `Context.Service` class with a `layer`, and reaches the others through the context rather than callbacks. Services whose rules run without the platform live in `packages/core` and ask for what they need through ports, services of their own that the app supplies: the guide's are `GuideSource` (the subscription and its download), `GuideCatalogue` (guide ids) and `GuideStore` (the saved document, `platform/guide-store.ts`). The others live in the app. Every expected failure is a `Failed` from `@mrstreamer/core/failure`, carrying the `AppError` the UI shows; a provider adapter's `AppFailure` keeps its error, anything else counts as unexpected.
 
@@ -72,17 +89,19 @@ Background work, downloads and stream sessions run in their service's scope. Qui
 
 ## Diagnostics
 
-`@mrstreamer/core/diagnostics` defines what the app notes about its own work, as a typed union: steps with their duration and outcome (start, login, catalogue and guide downloads, update checks, downloads and installs), each stream the proxy served (direct, converted, repaired or refused, and how long it took to start), and failed IPC calls. Entries hold only names, numbers and failure kinds, so an address, login or channel name can't reach them; `diagnosed(step)` times an Effect and records how it ended. `Diagnostics` is a context reference that records nothing by default. The app provides `platform/diagnostics-log.ts`, which appends JSON lines to `diagnostics.log` and starts a new file at 512 KB, keeping the one before. Nothing is sent anywhere.
+`@mrstreamer/core/diagnostics` defines what the app notes about its own work, as a typed union: steps with their duration and outcome (start, login, catalogue, movie and series list and guide downloads, a title's details, update checks, downloads and installs), each stream the proxy served (direct, converted, repaired or refused, and how long it took to start), each movie or episode run (whether the picture and sound were copied or converted), what an update source answered when a check failed (the HTTP status and GitHub's rate-limit headers), and failed IPC calls. Entries hold only names, numbers and failure kinds, so an address, login or channel name can't reach them; `diagnosed(step)` times an Effect and records how it ended. `Diagnostics` is a context reference that records nothing by default. The app provides `platform/diagnostics-log.ts`, which appends JSON lines to `diagnostics.log` and starts a new file at 512 KB, keeping the one before. Nothing is sent anywhere.
 
 ## Viewing record
 
-Favourites and watch history are events, per account: `favourite-added`, `favourite-removed` and `watched`, each with a channel id. `@mrstreamer/core/viewing/record` holds the rules as plain functions: `decide` turns a command into events (none when it asks for what already holds), and `apply` adds an event to the state, favourites in the order added and the twelve most recent channels. `@mrstreamer/core/viewing/service` runs commands for the connected account; without one, the lists are empty and changes fail with `no-subscription`.
+Favourites, watch history and how far movies and episodes got are events, per account: `favourite-added`, `favourite-removed` and `watched` with a channel id, `title-progress` with a title, its position and length, and `title-removed` when a title leaves Continue watching. `@mrstreamer/core/viewing/record` holds the rules as plain functions: `decide` turns a command into events (none when it asks for what already holds), and `apply` adds a channel event to the state, favourites in the order added and the twelve most recent channels. `@mrstreamer/core/viewing/titles` holds the title rules: a checkpoint's row, when a title counts as finished (its last 5 %, at least 30 s), and Continue watching: movies past two minutes and not finished, and each series at the episode played last, finished or not, so the UI can offer the next one. `@mrstreamer/core/viewing/service` runs commands for the connected account; without one, the lists are empty and changes fail with `no-subscription`.
 
-`platform/viewing-store.ts` keeps them in `mrstreamer.db` with the built-in `node:sqlite`: every event in order, the state they add up to per account, and the ids of commands already done. A command commits its events, its id and the new state in one transaction, so a command sent again changes nothing more. `STATE_VERSION` rises when `apply` changes; the next start then rebuilds the state from every event, skipping events written by a newer version. If the database can't open, the record's calls fail and the rest of the app carries on.
+`platform/viewing-store.ts` keeps them in `mrstreamer.db` with the built-in `node:sqlite`: every event in order, the state they add up to per account, one row per title and account in `titles`, and the ids of commands already done. Title events carry their details as JSON in the events table's `payload` column. A command commits its events, its id and the new state in one transaction, so a command sent again changes nothing more. `STATE_VERSION` rises when `apply` or the title rules change; the next start then rebuilds the state and the titles from every event, skipping events written by a newer version. If the database can't open, the record's calls fail and the rest of the app carries on.
+
+Older builds share the file, as when someone returns to Stable 0.0.2: they skip event types they don't know, leave `titles` alone and insert their events without a payload, so going back and forth loses nothing. The UI checkpoints a title's progress every minute while it plays and at each pause, seek, track change, the end, leaving and hiding the window; never per frame. A 45-minute episode adds about 50 events.
 
 The first start with the record imports the lists `preferences.json` kept before, in the transaction that sets the import marker, and only then takes them out of the file. Lists wait for an account to import into, and connecting a different account drops them. Once the marker is set, lists found in the file again, as after running Stable 0.0.1, are removed without importing.
 
-The UI reads `viewing.get` and sends `viewing.setFavourite` and `viewing.recordWatch` with a command id it makes up. After each commit the main process sends `viewing.changed` with the new sequence, and the UI reads again when it holds an older one. `apps/desktop/scripts/measure-viewing.ts` measures commits, opening and a rebuild with 100,000 events.
+The UI reads `viewing.get` and sends `viewing.setFavourite`, `viewing.recordWatch`, `viewing.recordProgress` and `viewing.removeFromContinue` with a command id it makes up; `viewing.progress` reads the rows of some movies or of one series. After each commit the main process sends `viewing.changed` with the new sequence, and the UI reads again when it holds an older one. `apps/desktop/scripts/measure-viewing.ts` measures commits, opening and a rebuild with 100,000 events.
 
 ## Programme guide
 
@@ -94,13 +113,15 @@ The UI asks `guide.listings` for now and next per channel, `guide.schedule` for 
 
 ## Views and the picture
 
-The window shows a page, Home or the Live TV guide, and Watch opens over it. The page stays laid out underneath, hidden, so leaving Watch finds it scrolled where it was.
+The window shows a page, Home, Live TV, Movies or Series. A title's details open in a sheet over the page; Watch, for a channel, and a playing movie or episode open over everything. The page stays laid out underneath, hidden and `inert`, so leaving any of them finds it scrolled where it was and a key or Tab never reaches it meanwhile.
 
-There is one `<video>` element, created by the player controller (`player/player.ts`). Home's backdrop, the guide's preview and Watch each render a `Picture` (`player/Picture.tsx`); the active one holds the element, moved with `moveBefore` so it keeps playing. Moving between views never reopens the stream or opens a second provider connection. The packaged-app test checks this through the fake provider's stream count.
+There is one `<video>` element, created by the live player controller (`player/player.ts`). Home's backdrop, the guide's preview, Watch and a playing title each render a `Picture` (`player/Picture.tsx`); the active one holds the element, moved with `moveBefore` so it keeps playing. Moving between views never reopens the stream or opens a second provider connection. The packaged-app test checks this through the fake provider's stream count.
 
-Sound follows the view: Watch plays at the viewer's volume, and pages keep the stream muted unless the speaker is pressed (`audible` in the player state). Pages start a muted preview of the last channel. A preview never reconnects after a failure, so a connection another device holds isn't fought over, and it stops while the window is hidden and restarts when it shows. Stop in Watch keeps previews from starting it again.
+Sound follows the view: Watch and a playing title play at the viewer's volume, and pages keep the stream muted unless the speaker is pressed (`audible` in the player state). Home and Live TV start a muted preview of the last channel; Movies and Series stop it, and coming back starts it again, muted. A preview never reconnects after a failure, so a connection another device holds isn't fought over, and it stops while the window is hidden and restarts when it shows. Stop in Watch keeps previews from starting it again.
 
-Lists keep one keyboard selection, separate from the pointer. Only the keyboard moves it or scrolls a list to it; the pointer only hovers, and the selection shows only while the keyboard was used last (`lib/input-mode.ts`). Wheel and trackpad gestures only scroll. Key handlers register once and read the current render through a ref: a handler registered again on every render can miss a key, because a state change in another keydown listener renders between listeners.
+`player/title-player.ts` controls movies and episodes in the same element. Opening a title suspends the live stream; starting a live channel closes the title. It picks the tracks (`@mrstreamer/core/ondemand/tracks`: the remembered language, or the file's default sound and forced subtitles in its language), seeks within what is buffered or starts a new run, ends the run after five minutes paused and resumes from there, retries a copied sound track once as converted when it doesn't start, and saves progress as above. Leaving a title while its file is still being probed closes that session too, so no provider request outlives it.
+
+Lists keep one keyboard selection, separate from the pointer. Only the keyboard moves it or scrolls a list to it; the pointer only hovers, and the selection shows only while the keyboard was used last (`lib/input-mode.ts`). Wheel and trackpad gestures only scroll. Key handlers register once and read the current render through a ref: a handler registered again on every render can miss a key, because a state change in another keydown listener renders between listeners. Watch and a playing title listen in the capture phase and stop the keys they handle, so a tooltip can't keep Escape to itself and an Escape that leaves a layer doesn't also close the one it uncovers.
 
 ## Playback
 
@@ -115,10 +136,27 @@ If the player still fails to decode the picture, the player controller retries o
 
 Providers send a burst of buffered seconds when a stream opens. mpegts.js jumps forward when the picture falls more than 8 s behind the newest data, keeping 3 s of buffer, instead of playing faster to catch up: a 1.2× rate was audible and visible for half a minute after every start. The [playback evaluation](playback.md) records why this design won over a bundled engine such as libmpv.
 
+### Movies and episodes
+
+Providers keep movies and episodes as files behind a redirect, and answer byte ranges: two thirds MKV (H.264, sometimes HEVC, with E-AC-3 sound in several languages and dozens of SubRip subtitles), a third MP4, and a few AVI, MPEG-TS and MPEG-PS. Chromium's own player can't pick among their sound tracks or show their subtitles, and doesn't decode E-AC-3 on Linux, so every title goes through ffmpeg (`playback/title.ts`, `services/playback.ts`):
+
+1. **Probe.** `playback.openTitle` closes any open stream, opens a title session and runs the bundled ffprobe on the proxy's `/source/<token>`, which forwards ranges to the provider one upstream request at a time; a new one, such as a seek, ends the one before, and a refusal is retried after 0.15, 0.4, 1 and 2 s, since panels take a moment to free the connection just closed. The session answers with the tracks, labelled in their own language (`@mrstreamer/core/ondemand/tracks`), and the length.
+2. **Run.** Each request to `/title/<token>.mp4?start=&audio=&subtitle=` runs ffmpeg from that position with those tracks and replaces the run before. Video the player decodes is copied, the rest becomes H.264; sound likewise becomes stereo AAC. Copied video starts at the keyframe before the position, so ffmpeg keeps the file's timestamps (`-copyts`) and PUTs a one-packet `framecrc` report of the first video packet back to the proxy, which reads the keyframe's time from its first line and answers with `x-start`. The fragmented MP4 goes to the player; text subtitles become WebVTT, PUT to the proxy and streamed to the player on the file's clock, with `x-origin` for where that clock starts. `delay_moov` lets ffmpeg describe copied AC-3 and E-AC-3, and a start at zero doesn't seek, which skips seconds of some AVI and FLV files.
+3. **Play.** `player/title-engine.ts` feeds the fragments to Media Source Extensions with the timestamp offset that puts the first fragment at `x-start`, so the element's clock is the title's: the position is `currentTime`, a skip into what is buffered only moves `currentTime`, and cues from `webvtt.ts` go straight onto a text track. `player/mp4.ts` reads the codec string MSE needs from the first boxes. Reading stops once 60 s are buffered ahead and starts again below 40 s; while paused nothing more is read and the provider's connection idles until playback moves on. When the provider breaks off a file, ffmpeg can still end its run as if the file had ended; the proxy saw the break, so it ends the run's response as broken, and the player reconnects instead of playing out to a false end.
+
+Measured with Electron 44 against the fake provider: a run starts in about 1.1 s and a seek outside the buffer in 0.9 s; starting 10 minutes into a file read 57 MB, probe and a minute ahead included, and nothing more while paused. [Playback evaluation](playback.md#movies-and-episodes) records how this design was chosen.
+
 ## Updates
 
-Nothing updates on its own; see the [user guide](../user/updates.md) for the behaviour.
+The app never downloads or installs on its own; see the [user guide](../user/updates.md) for the behaviour.
 
-- `@mrstreamer/core/updates/feed` reads the newest hundred releases from the GitHub API, plus the latest release, which is always the newest stable one however many nightlies came since. A release counts only when its version and pre-release flag name the same channel and it carries this platform's `latest*.yml`. Stable takes the highest stable version, Nightly the highest of both, by version order.
-- `services/updates.ts` holds the channel (set from the build on first launch, then only by the user) and the check, download and restart steps. Switching channels drops a downloaded or downloading update the new channel doesn't receive, then checks. Only the latest check counts: one that answers after a newer check or a channel change changes nothing, and download and restart refuse a version the chosen channel doesn't receive. On Stable, a nightly build is offered the newest stable release even when it is older; it installs over the nightly and keeps the data.
-- `platform/installer.ts` wraps electron-updater: generic provider pointed at the chosen release, no automatic download, no install on quit, and a check that the metadata names the chosen version. On macOS, Squirrel checks the update's signature only when installing, so a refused update surfaces as a failed install, not a failed download.
+- **Discovery** (`@mrstreamer/core/updates/feed`): one request reads the feed the release workflow publishes to GitHub Pages, `updates.json`, naming the newest complete release of each channel (see [releasing](releasing.md#update-feed)). Only when the feed is missing or broken does it ask GitHub's API instead, two unauthenticated requests that share GitHub's limit of 60 an hour per network address: not when offline, and not while GitHub said it limits requests from this network (a 403 or 429 with no requests remaining, or a Retry-After), until the time it named. A failed check says why (offline, busy until a time, an HTTP status, or an unreadable answer), and the diagnostics log records each source's status and rate-limit headers. The 403s users reported match that limit; the log now tells a limit from other refusals. The app ships no GitHub credentials.
+- **Rules:** a release counts only when its version and channel agree and it carries this platform's `latest*.yml`. The feed's download folder must be the repository's GitHub Releases, so the feed can't send the app to files anywhere else; a feed that tries counts as broken. Stable takes the highest stable version, Nightly the highest of both, by version order.
+- **Schedule** (`services/updates.ts`): a check 20 seconds after starting, then every four hours plus up to a tenth, so installs spread out. An automatic check that fails keeps what the last one found and tries again after 15 minutes, backing off to four hours, and never before GitHub allows it. Checks that overlap share one request. A check never runs while a download is in progress or ready, and one that answers after a download started leaves it alone, so a check can't drop a staged update.
+- **The service** holds the channel (set from the build on first launch, then only by the user), the offered release with its notes and page, when it last checked and checks next, the version whose notice was closed, and the download and restart steps. Switching channels drops a downloaded or downloading update the new channel doesn't receive, then checks. Only the latest check counts: one that answers after a newer check or a channel change changes nothing, and download and restart refuse a version the chosen channel doesn't receive. On Stable, a nightly build is offered the newest stable release even when it is older; it installs over the nightly and keeps the data. `updates.json` is written one change at a time, so the last choice wins.
+- **The UI:** the top bar's notice (`features/updates/UpdateNotice.tsx`) and Settings > Updates read the same status and call the same actions.
+- **The installer** (`platform/installer.ts`) wraps electron-updater: generic provider pointed at the chosen release, no automatic download, no install on quit, a check that the metadata names the chosen version, and one download at a time, so a new one waits for a cancelled one to stop. On macOS, Squirrel checks the update's signature only when installing, so a refused update surfaces as a failed install, not a failed download.
+
+## Licences
+
+`scripts/licences.ts` writes `out/licences/third-party.json` during the build from the packages the bundles actually contain, plus Electron, Chromium, Node.js, FFmpeg and x264; [development](development.md#third-party-notices) describes it. `services/licences.ts` reads it for Settings > About, and turns Chromium's credits page into text on request.

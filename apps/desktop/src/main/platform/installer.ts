@@ -25,34 +25,44 @@ export function electronInstaller(updater: Updater = electronUpdater.autoUpdater
   updater.autoDownload = false;
   updater.autoInstallOnAppQuit = false;
   updater.logger = null;
+  /**
+   * The download before, until it has stopped. electron-updater shares one check and one
+   * download at a time, so a new download waits for a cancelled one to wind down instead of
+   * joining it and staging the release the user dropped.
+   */
+  let previous: Promise<unknown> = Promise.resolve();
+
+  const downloadOne: Installer["download"] = async (target, onProgress, signal) => {
+    // Listening from the start, so a cancel during any step stops the download.
+    const token = new electronUpdater.CancellationToken();
+    const cancel = () => token.cancel();
+    signal.addEventListener("abort", cancel, { once: true });
+    const progress = (info: { percent: number }) => onProgress(Math.floor(info.percent));
+    try {
+      signal.throwIfAborted();
+      updater.allowDowngrade = target.allowDowngrade;
+      updater.setFeedURL({ provider: "generic", url: target.feedUrl });
+      const result = await updater.checkForUpdates();
+      signal.throwIfAborted();
+      // The metadata has to describe the release the service chose, not whatever sits there.
+      const offered = result?.updateInfo.version;
+      if (offered !== target.version) {
+        throw new Error(`The release offers ${offered ?? "nothing"} instead of ${target.version}.`);
+      }
+      updater.on("download-progress", progress);
+      await updater.downloadUpdate(token);
+      signal.throwIfAborted();
+    } finally {
+      updater.off("download-progress", progress);
+      signal.removeEventListener("abort", cancel);
+    }
+  };
 
   return {
-    async download(target, onProgress, signal) {
-      // Listening from the start, so a cancel during any step stops the download.
-      const token = new electronUpdater.CancellationToken();
-      const cancel = () => token.cancel();
-      signal.addEventListener("abort", cancel, { once: true });
-      const progress = (info: { percent: number }) => onProgress(Math.floor(info.percent));
-      try {
-        signal.throwIfAborted();
-        updater.allowDowngrade = target.allowDowngrade;
-        updater.setFeedURL({ provider: "generic", url: target.feedUrl });
-        const result = await updater.checkForUpdates();
-        signal.throwIfAborted();
-        // The metadata has to describe the release the service chose, not whatever sits there.
-        const offered = result?.updateInfo.version;
-        if (offered !== target.version) {
-          throw new Error(
-            `The release offers ${offered ?? "nothing"} instead of ${target.version}.`,
-          );
-        }
-        updater.on("download-progress", progress);
-        await updater.downloadUpdate(token);
-        signal.throwIfAborted();
-      } finally {
-        updater.off("download-progress", progress);
-        signal.removeEventListener("abort", cancel);
-      }
+    download(target, onProgress, signal) {
+      const next = previous.then(() => downloadOne(target, onProgress, signal));
+      previous = next.catch(() => {});
+      return next;
     },
 
     install() {
