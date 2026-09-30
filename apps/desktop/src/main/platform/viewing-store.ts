@@ -14,7 +14,8 @@ import {
   type ViewingEvent,
   type ViewingState,
 } from "@mrstreamer/core/viewing/record";
-import { ViewingFailed, ViewingStore, type StoredViewing } from "@mrstreamer/core/viewing/service";
+import { Failed } from "@mrstreamer/core/failure";
+import { ViewingStore, type StoredViewing } from "@mrstreamer/core/viewing/service";
 import { type } from "arktype";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -201,15 +202,15 @@ function transaction<A>(db: DatabaseSync, run: () => A): A {
   }
 }
 
-function attempt<A>(run: () => A): Effect.Effect<A, ViewingFailed> {
+function attempt<A>(run: () => A): Effect.Effect<A, Failed> {
   return Effect.try({
     try: run,
-    catch: (cause) => new ViewingFailed({ error: { kind: "unexpected", detail: String(cause) } }),
+    catch: (cause) => new Failed({ error: { kind: "unexpected", detail: String(cause) } }),
   });
 }
 
 /** A store for when the database can't open: every call reports why. */
 function unavailable(detail: string): ViewingStore["Service"] {
-  const fail = Effect.fail(new ViewingFailed({ error: { kind: "unexpected", detail } }));
+  const fail = Effect.fail(new Failed({ error: { kind: "unexpected", detail } }));
   return { read: () => fail, commit: () => fail, importOnce: () => fail };
 }

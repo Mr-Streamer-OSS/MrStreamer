@@ -4,15 +4,14 @@
 //
 // The app supplies three ports: which account is connected, the store, and the lists kept in
 // preferences.json before the record, which the first start imports once.
-import type { AppError } from "@mrstreamer/contracts/errors";
 import type { Viewing } from "@mrstreamer/contracts/viewing";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
+import { Failed } from "../failure.ts";
 import {
   decide,
   importEvents,
@@ -20,11 +19,6 @@ import {
   type ViewingEvent,
   type ViewingState,
 } from "./record.ts";
-
-/** A viewing record failure, carrying the error the UI shows for it. */
-export class ViewingFailed extends Data.TaggedError("ViewingFailed")<{
-  readonly error: AppError;
-}> {}
 
 /** Which account is connected: the subscription's key, or null. */
 export class ViewingAccount extends Context.Service<
@@ -42,7 +36,7 @@ export interface StoredViewing {
 export class ViewingStore extends Context.Service<
   ViewingStore,
   {
-    readonly read: (account: string) => Effect.Effect<StoredViewing, ViewingFailed>;
+    readonly read: (account: string) => Effect.Effect<StoredViewing, Failed>;
     /**
      * In one transaction: unless `commandId` ran before, appends the events `decide` makes from
      * the account's state and stores the state they add up to. Returns the state after.
@@ -52,7 +46,7 @@ export class ViewingStore extends Context.Service<
       readonly commandId: string;
       readonly at: number;
       readonly decide: (state: ViewingState) => readonly ViewingEvent[];
-    }) => Effect.Effect<StoredViewing, ViewingFailed>;
+    }) => Effect.Effect<StoredViewing, Failed>;
     /**
      * In one transaction with the import marker: appends `events` for `account`. Does nothing,
      * and returns false, once the marker is set.
@@ -61,7 +55,7 @@ export class ViewingStore extends Context.Service<
       readonly account: string | null;
       readonly at: number;
       readonly events: readonly ViewingEvent[];
-    }) => Effect.Effect<boolean, ViewingFailed>;
+    }) => Effect.Effect<boolean, Failed>;
   }
 >()("mrstreamer/ViewingStore") {}
 
@@ -82,13 +76,13 @@ export class ViewingRecord extends Context.Service<
   ViewingRecord,
   {
     /** The connected account's favourites and recent channels; empty without an account. */
-    readonly state: Effect.Effect<Viewing, ViewingFailed>;
+    readonly state: Effect.Effect<Viewing, Failed>;
     setFavourite(
       commandId: string,
       channelId: string,
       favourite: boolean,
-    ): Effect.Effect<Viewing, ViewingFailed>;
-    recordWatch(commandId: string, channelId: string): Effect.Effect<Viewing, ViewingFailed>;
+    ): Effect.Effect<Viewing, Failed>;
+    recordWatch(commandId: string, channelId: string): Effect.Effect<Viewing, Failed>;
     /** The sequence after each committed change. */
     readonly changes: Stream.Stream<number>;
   }
@@ -120,7 +114,7 @@ function make() {
       });
       yield* legacy.drop;
     }).pipe(
-      Effect.catchTag("ViewingFailed", (failure) =>
+      Effect.catchTag("Failed", (failure) =>
         Effect.logWarning("[viewing] import failed; trying again next start", failure.error),
       ),
       Effect.catchDefect((defect) =>
@@ -137,7 +131,7 @@ function make() {
     const run = (commandId: string, command: ViewingCommand) =>
       Effect.gen(function* () {
         const key = yield* account.current;
-        if (!key) return yield* new ViewingFailed({ error: { kind: "no-subscription" } });
+        if (!key) return yield* new Failed({ error: { kind: "no-subscription" } });
         const stored = yield* store.commit({
           account: key,
           commandId,

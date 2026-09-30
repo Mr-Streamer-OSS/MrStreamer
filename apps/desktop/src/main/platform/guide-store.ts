@@ -5,7 +5,8 @@ import { randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { mkdir, open, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { GuideFailed, GuideStore } from "@mrstreamer/core/guide/service";
+import { Failed } from "@mrstreamer/core/failure";
+import { GuideStore } from "@mrstreamer/core/guide/service";
 import { type } from "arktype";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -46,7 +47,7 @@ export function guideStoreLayer(dataDir: string): Layer.Layer<GuideStore> {
             },
           };
         },
-        catch: (cause) => new GuideFailed({ error: { kind: "unexpected", detail: String(cause) } }),
+        catch: (cause) => new Failed({ error: { kind: "unexpected", detail: String(cause) } }),
       }),
     clear: Effect.promise(async () => {
       await Promise.all([removeFile(documentPath), removeFile(metaPath)]);

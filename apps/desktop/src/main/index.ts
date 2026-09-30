@@ -2,24 +2,25 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { app, BrowserWindow, Menu, safeStorage, session, shell } from "electron";
-import { emit, registerIpc } from "./ipc.ts";
-import { removeUnfinishedWrites } from "./platform/json-file.ts";
-import { electronInstaller } from "./platform/installer.ts";
-import { keychainSecrets } from "./platform/secrets.ts";
-import { AppFailure } from "@mrstreamer/contracts/errors";
+import type { IpcEvent, IpcEvents } from "@mrstreamer/contracts/ipc";
+import type { Failed } from "@mrstreamer/core/failure";
 import { Guide } from "@mrstreamer/core/guide/service";
-import { ViewingRecord, type ViewingFailed } from "@mrstreamer/core/viewing/service";
+import { fetchReleases, metadataFileFor } from "@mrstreamer/core/updates/feed";
+import { ViewingRecord } from "@mrstreamer/core/viewing/service";
 import * as Effect from "effect/Effect";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Stream from "effect/Stream";
-import { mainLayer } from "./runtime.ts";
-import { createLibrary, type Library } from "./services/library.ts";
-import { createPlayback, type Playback } from "./services/playback.ts";
-import { createPreferences } from "./services/preferences.ts";
-import { createSubscriptions, type Subscriptions } from "./services/subscription.ts";
-import { createUpdates } from "./services/updates.ts";
 import { WINDOW_BAR } from "../shared/window-bar.ts";
-import { fetchReleases, metadataFileFor } from "@mrstreamer/core/updates/feed";
+import { emit, registerIpc } from "./ipc.ts";
+import { electronInstaller } from "./platform/installer.ts";
+import { removeUnfinishedWrites } from "./platform/json-file.ts";
+import { keychainSecrets } from "./platform/secrets.ts";
+import { mainLayer } from "./runtime.ts";
+import { Library } from "./services/library.ts";
+import { Playback } from "./services/playback.ts";
+import { Settings } from "./services/preferences.ts";
+import { Subscriptions } from "./services/subscription.ts";
+import { Updates } from "./services/updates.ts";
 
 // Matches `appId` in electron-builder.yml: Windows groups taskbar entries and notifications by it.
 const APP_ID = "app.mrstreamer.player";
@@ -31,11 +32,11 @@ const UPDATE_FEED = process.env["MR_STREAMER_UPDATE_FEED"] ?? "https://api.githu
 const REPOSITORY = "Mr-Streamer-OSS/MrStreamer";
 
 /** Refresh the channel list in the background when the cached copy is older than this. */
-const CATALOGUE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+const CATALOGUE_MAX_AGE = "12 hours";
 
 let mainWindow: BrowserWindow | null = null;
 
-function openWindow(playback: Playback): BrowserWindow {
+function openWindow(closeStreams: () => void): BrowserWindow {
   const window = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -65,7 +66,7 @@ function openWindow(playback: Playback): BrowserWindow {
   window.once("ready-to-show", () => window.show());
   window.on("closed", () => {
     // Nothing can be watching once the window is gone, so release the provider connection.
-    playback.closeAll();
+    closeStreams();
     if (mainWindow === window) mainWindow = null;
   });
   window.webContents.setWindowOpenHandler(({ url }) => {
@@ -100,133 +101,138 @@ async function start(): Promise<void> {
     callback(permission === "fullscreen");
   });
 
-  const subscriptions = createSubscriptions({
-    dataDir,
-    secrets: keychainSecrets,
-    providerOptions: { userAgent },
-  });
-  const library = createLibrary({
-    dataDir,
-    source: subscriptions.source,
-    onUpdated: (status) => {
-      if (mainWindow) emit(mainWindow.webContents, "library.updated", status);
-    },
-  });
-  const preferences = createPreferences(dataDir);
   const runtime = ManagedRuntime.make(
-    mainLayer({ dataDir, source: subscriptions.source, library, preferences }),
-  );
-  const { guide, viewing } = await runtime.runPromise(
-    Effect.gen(function* () {
-      return { guide: yield* Guide, viewing: yield* ViewingRecord };
+    mainLayer({
+      dataDir,
+      secrets: keychainSecrets,
+      userAgent,
+      ffmpeg: ffmpegPath(),
+      updates: {
+        installed: app.getVersion(),
+        metadataFile: metadataFileFor(process.platform),
+        releases: () => fetchReleases(UPDATE_FEED, REPOSITORY),
+        installer: electronInstaller(),
+      },
     }),
   );
-  runtime.runFork(
-    Stream.runForEach(guide.changes, () =>
-      Effect.sync(() => {
-        if (mainWindow) emit(mainWindow.webContents, "guide.updated", null);
+  const { subscriptions, settings, library, playback, updates, guide, viewing } =
+    await runtime.runPromise(
+      Effect.all({
+        subscriptions: Subscriptions,
+        settings: Settings,
+        library: Library,
+        playback: Playback,
+        updates: Updates,
+        guide: Guide,
+        viewing: ViewingRecord,
       }),
-    ),
-  );
-  runtime.runFork(
-    Stream.runForEach(viewing.changes, (sequence) =>
-      Effect.sync(() => {
-        if (mainWindow) emit(mainWindow.webContents, "viewing.changed", { sequence });
-      }),
-    ),
-  );
-  /** Runs a viewing record call, failing with the error the UI shows. */
-  const record = <A>(effect: Effect.Effect<A, ViewingFailed>) =>
-    runtime.runPromise(effect.pipe(Effect.mapError((failure) => new AppFailure(failure.error))));
-  const playback = createPlayback({
-    source: subscriptions.source,
-    userAgent,
-    ffmpeg: ffmpegPath(),
-  });
-  const updates = createUpdates({
-    dataDir,
-    installed: app.getVersion(),
-    metadataFile: metadataFileFor(process.platform),
-    releases: () => fetchReleases(UPDATE_FEED, REPOSITORY),
-    installer: electronInstaller(),
-    onChanged: (status) => {
-      if (mainWindow) emit(mainWindow.webContents, "updates.changed", status);
-    },
+    );
+
+  /** Sends each change to the window, while there is one. */
+  const forward = <A, E extends IpcEvent>(
+    changes: Stream.Stream<A>,
+    event: E,
+    payload: (change: A) => IpcEvents[E],
+  ) =>
+    runtime.runFork(
+      Stream.runForEach(changes, (change) =>
+        Effect.sync(() => {
+          if (mainWindow) emit(mainWindow.webContents, event, payload(change));
+        }),
+      ),
+    );
+  forward(library.changes, "library.updated", (status) => status);
+  forward(guide.changes, "guide.updated", () => null);
+  forward(viewing.changes, "viewing.changed", (sequence) => ({ sequence }));
+  forward(updates.changes, "updates.changed", (status) => status);
+
+  /** Downloads the guide when it is due. A failure keeps the guide in use until the next check. */
+  const refreshGuide = guide.refreshIfStale.pipe(warned("[guide] refresh failed"));
+
+  /** A different account: its channels, guide and what was last watched no longer apply. */
+  const forgetAccount = Effect.gen(function* () {
+    yield* Effect.all([library.clear, guide.clear], { concurrency: "unbounded" });
+    yield* settings.forget;
   });
 
   registerIpc(
+    (effect) => runtime.runPromiseExit(effect),
     {
-      "subscription.get": () => subscriptions.get(),
-      "subscription.connect": async (login) => {
-        const previous = await subscriptions.get();
-        const connected = await subscriptions.connect(login);
-        if (previous?.server !== connected.server || previous.username !== connected.username) {
-          // A different account: its channels, and what was last watched, no longer apply.
-          playback.closeAll();
-          await Promise.all([library.clear(), runtime.runPromise(guide.clear)]);
-          await preferences.forget();
-        }
-        void refreshGuide(runtime, guide);
-        return connected;
-      },
-      "subscription.remove": async () => {
-        playback.closeAll();
-        await subscriptions.remove();
-        await Promise.all([library.clear(), runtime.runPromise(guide.clear)]);
-        await preferences.forget();
-        return null;
-      },
-      "library.status": () => library.status(),
-      "library.categories": () => library.categories(),
+      "subscription.get": () => subscriptions.get,
+      "subscription.connect": (login) =>
+        Effect.gen(function* () {
+          const previous = yield* subscriptions.get;
+          const connected = yield* subscriptions.connect(login);
+          if (previous?.server !== connected.server || previous.username !== connected.username) {
+            yield* playback.closeAll;
+            yield* forgetAccount;
+          }
+          yield* Effect.forkDetach(refreshGuide);
+          return connected;
+        }),
+      "subscription.remove": () =>
+        Effect.gen(function* () {
+          yield* playback.closeAll;
+          yield* subscriptions.remove;
+          yield* forgetAccount;
+          return null;
+        }),
+      "library.status": () => library.status,
+      "library.categories": () => library.categories,
       "library.channels": (filter) => library.channels(filter),
       "library.channel": ({ channelId }) => library.channel(channelId),
-      "library.refresh": () => library.refresh(),
-      "guide.listings": ({ channelIds }) => runtime.runPromise(guide.listings(channelIds)),
-      "guide.schedule": ({ channelId }) => runtime.runPromise(guide.schedule(channelId)),
-      "guide.search": ({ query }) => runtime.runPromise(guide.search(query)),
+      "library.refresh": () => library.refresh,
+      "guide.listings": ({ channelIds }) => guide.listings(channelIds),
+      "guide.schedule": ({ channelId }) => guide.schedule(channelId),
+      "guide.search": ({ query }) => guide.search(query),
       "playback.open": ({ channelId, decoders, repair }) =>
         playback.open(channelId, decoders, { repair: repair ?? false }),
-      "playback.close": ({ sessionId }) => {
-        playback.close(sessionId);
-        return null;
-      },
+      "playback.close": ({ sessionId }) => Effect.as(playback.close(sessionId), null),
       "playback.failure": ({ sessionId }) => playback.failure(sessionId),
-      "preferences.get": () => preferences.get(),
-      "preferences.update": (patch) => preferences.update(patch),
-      "viewing.get": () => record(viewing.state),
+      "preferences.get": () => settings.get,
+      "preferences.update": (patch) => settings.update(patch),
+      "viewing.get": () => viewing.state,
       "viewing.setFavourite": ({ commandId, channelId, favourite }) =>
-        record(viewing.setFavourite(commandId, channelId, favourite)),
-      "viewing.recordWatch": async ({ commandId, channelId }) => {
-        await preferences.update({ lastChannelId: channelId });
-        return record(viewing.recordWatch(commandId, channelId));
-      },
-      "updates.status": () => updates.status(),
+        viewing.setFavourite(commandId, channelId, favourite),
+      "viewing.recordWatch": ({ commandId, channelId }) =>
+        Effect.andThen(
+          settings.update({ lastChannelId: channelId }),
+          viewing.recordWatch(commandId, channelId),
+        ),
+      "updates.status": () => updates.status,
       "updates.setChannel": ({ channel }) => updates.setChannel(channel),
-      "updates.check": () => updates.check(),
-      "updates.download": () => updates.download(),
-      "updates.cancel": () => {
-        updates.cancel();
-        return null;
-      },
-      "updates.restart": async () => {
-        await updates.restart();
-        return null;
-      },
+      "updates.check": () => updates.check,
+      "updates.download": () => updates.download,
+      "updates.cancel": () => Effect.as(updates.cancel, null),
+      "updates.restart": () => Effect.as(updates.restart, null),
     },
     (sender) => sender === mainWindow?.webContents,
   );
 
-  mainWindow = openWindow(playback);
+  const closeStreams = () => void runtime.runFork(playback.closeAll);
+  mainWindow = openWindow(closeStreams);
   app.on("activate", () => {
-    mainWindow ??= openWindow(playback);
+    mainWindow ??= openWindow(closeStreams);
   });
   app.on("will-quit", () => {
-    void playback.dispose();
-    // Stops the guide's checks and any download in progress, and closes the database.
+    // Streams close right away, so no ffmpeg or provider connection outlives the app. The rest
+    // of the runtime, background work and the database, closes as the app exits; holding the
+    // quit for it would get in the way of an update's restart.
+    runtime.runSyncExit(playback.closeAll);
     void runtime.dispose();
   });
 
-  void refreshInBackground(subscriptions, library, () => refreshGuide(runtime, guide));
+  // Keeps account status, the channel list and the guide current without making the UI wait.
+  runtime.runFork(
+    Effect.gen(function* () {
+      const connected = yield* Effect.gen(function* () {
+        if (!(yield* subscriptions.recheck)) return false;
+        if (yield* library.isStale(CATALOGUE_MAX_AGE)) yield* library.refresh;
+        return true;
+      }).pipe(warned("[startup] background refresh failed"));
+      if (connected !== false) yield* refreshGuide;
+    }),
+  );
 }
 
 /**
@@ -241,31 +247,13 @@ function ffmpegPath(): string | null {
   return existsSync(bundled) ? bundled : null;
 }
 
-/** Keeps account status, the channel list and the guide current without making the UI wait. */
-async function refreshInBackground(
-  subscriptions: Subscriptions,
-  library: Library,
-  refreshGuide: () => Promise<void>,
-): Promise<void> {
-  try {
-    if (!(await subscriptions.recheck())) return;
-    if (await library.isStale(CATALOGUE_MAX_AGE_MS)) await library.refresh();
-  } catch (cause) {
-    console.warn("[startup] background refresh failed", cause);
-  }
-  await refreshGuide();
-}
-
-/** Downloads the guide when it is due. A failure keeps the guide in use until the next check. */
-async function refreshGuide(
-  runtime: ManagedRuntime.ManagedRuntime<Guide | ViewingRecord, never>,
-  guide: Guide["Service"],
-): Promise<void> {
-  try {
-    await runtime.runPromise(guide.refreshIfStale);
-  } catch (cause) {
-    console.warn("[guide] refresh failed", cause);
-  }
+/** Logs a failure as a warning instead of failing. */
+function warned(label: string) {
+  return <A>(effect: Effect.Effect<A, Failed>) =>
+    effect.pipe(
+      Effect.catchTag("Failed", (failed) => Effect.logWarning(label, failed.error)),
+      Effect.catchDefect((defect) => Effect.logWarning(label, defect)),
+    );
 }
 
 app.on("window-all-closed", () => {

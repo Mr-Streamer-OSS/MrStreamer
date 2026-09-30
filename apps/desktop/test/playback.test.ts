@@ -1,10 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Codec } from "@mrstreamer/contracts/playback";
-import { createPlayback } from "../src/main/services/playback.ts";
-import { createSubscriptions } from "../src/main/services/subscription.ts";
+import * as Layer from "effect/Layer";
+import { Playback } from "../src/main/services/playback.ts";
+import { Subscriptions } from "../src/main/services/subscription.ts";
 import { fixture, type FakeProvider } from "./fake-provider.ts";
-import { fakeProvider, tempDir, testSecrets, userAgent } from "./support.ts";
+import { fakeProvider, promised, runtimeFor, tempDir, testSecrets, userAgent } from "./support.ts";
 
 /** What Chromium on Linux decodes: no HEVC, no AC-3, no MP2. */
 const LINUX: readonly Codec[] = ["h264", "aac", "mp3", "opus"];
@@ -15,22 +16,26 @@ const MAC: readonly Codec[] = ["h264", "hevc", "hevc-10bit", "aac", "mp3", "opus
 const FFMPEG = process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg";
 const hasFfmpeg = spawnSync(FFMPEG, ["-version"]).status === 0;
 
+/** Playback on a connected fake provider. `dispose` ends it, as quitting the app does. */
 async function connectedPlayback(options: { slotReleaseMs?: number; ffmpeg?: boolean } = {}) {
   const provider = await fakeProvider({
     maxConnections: 1,
     slotReleaseMs: options.slotReleaseMs ?? 300,
   });
-  const subscriptions = createSubscriptions({
-    dataDir: await tempDir(),
-    secrets: testSecrets,
-    providerOptions: { userAgent },
-  });
+  const runtime = runtimeFor(
+    Playback.layer({ userAgent, ffmpeg: options.ffmpeg ? FFMPEG : null }).pipe(
+      Layer.provideMerge(
+        Subscriptions.layer({
+          dataDir: await tempDir(),
+          secrets: testSecrets,
+          providerOptions: { userAgent },
+        }),
+      ),
+    ),
+  );
+  const subscriptions = await promised(runtime, Subscriptions);
   await subscriptions.connect({ server: provider.url, username: "demo", password: "demo" });
-  const playback = createPlayback({
-    source: subscriptions.source,
-    userAgent,
-    ffmpeg: options.ffmpeg ? FFMPEG : null,
-  });
+  const playback = { ...(await promised(runtime, Playback)), dispose: () => runtime.dispose() };
   return { provider, playback };
 }
 
@@ -115,6 +120,19 @@ describe("playback", () => {
     await playback.dispose();
   });
 
+  it("releases the provider connection when the app quits", async () => {
+    const { provider, playback } = await connectedPlayback({ slotReleaseMs: 0 });
+
+    const session = await playback.open(liveChannels(provider)[0] ?? "", LINUX);
+    const stream = await firstBytes(session.url);
+    expect(provider.activeStreams()).toBe(1);
+
+    await playback.dispose();
+
+    await vi.waitFor(() => expect(provider.activeStreams()).toBe(0));
+    stream.stop();
+  });
+
   it("explains a channel that is off air", async () => {
     const { provider, playback } = await connectedPlayback();
 
@@ -122,7 +140,7 @@ describe("playback", () => {
     const stream = await firstBytes(session.url);
 
     expect(stream.status).toBe(404);
-    expect(playback.failure(session.sessionId)).toEqual({ kind: "unavailable", status: 404 });
+    expect(await playback.failure(session.sessionId)).toEqual({ kind: "unavailable", status: 404 });
     await playback.dispose();
   });
 
@@ -140,7 +158,7 @@ describe("playback", () => {
     const stream = await firstBytes(session.url);
 
     expect(stream.status).toBe(403);
-    expect(playback.failure(session.sessionId)).toEqual({ kind: "refused", status: 403 });
+    expect(await playback.failure(session.sessionId)).toEqual({ kind: "refused", status: 403 });
     elsewhere.abort();
     await playback.dispose();
   });
@@ -162,7 +180,7 @@ describe("playback", () => {
     const response = await fetch(session.url);
 
     expect(response.status).toBe(415);
-    expect(playback.failure(session.sessionId)).toEqual({
+    expect(await playback.failure(session.sessionId)).toEqual({
       kind: "unsupported",
       detail: "This stream carries h264 video and mp2 sound.",
     });

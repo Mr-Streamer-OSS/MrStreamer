@@ -12,7 +12,7 @@ packages/core        @mrstreamer/core: rules that run without Electron, React or
 apps/desktop         The app, package name mrstreamer
   src/main           Electron main process
     providers        The Xtream Codes adapter
-    services         Subscription, live library, programme guide, playback proxy, preferences,
+    services         Subscriptions, library, playback proxy, settings (preferences.json),
                      updates
     playback         Stream inspection, the clean start and ffmpeg conversion behind the proxy
     platform         Keychain-backed secrets, atomic JSON files, the guide and viewing stores, the
@@ -53,9 +53,21 @@ Each channel keeps the provider's guide id (`epg_channel_id` on Xtream panels). 
 
 ## Effect services
 
-The main process runs its services on one [Effect](https://effect.website) runtime (`effect` 4, pinned to a release candidate). `apps/desktop/src/main/runtime.ts` assembles them from Layers in `mainLayer`, `index.ts` makes the runtime at start and disposes of it when the app quits, and the IPC handlers run their calls on it. So far the programme guide and the viewing record run there; the other services still use promises until they move in later slice 3.5 stages.
+The main process runs every service on one [Effect](https://effect.website) runtime (`effect` 4, pinned to a release candidate). `apps/desktop/src/main/runtime.ts` assembles them from Layers in `mainLayer`. `index.ts` makes the runtime at start, forwards each service's changes to the window, and registers the IPC handlers: each returns an Effect, and `ipc.ts` runs it on the runtime.
 
-A service is a `Context.Service` class in `packages/core` with a `layer`. What it needs from the platform, it asks through ports, services of its own that the app supplies: the guide's are `GuideSource` (the subscription and its download), `GuideCatalogue` (guide ids) and `GuideStore` (the saved document, `platform/guide-store.ts`). Expected failures are typed, like `GuideFailed`, and carry the `AppError` the UI shows. Background work runs in the service's scope, so disposing of the runtime stops it. Tests build the same layer with the fake provider and `TestClock`, and move time instead of waiting.
+| Service         | Where                              | Owns                                                   |
+| --------------- | ---------------------------------- | ------------------------------------------------------ |
+| `Subscriptions` | `services/subscription.ts`         | The login, its sealed password, the provider behind it |
+| `Settings`      | `services/preferences.ts`          | `preferences.json`                                     |
+| `Library`       | `services/library.ts`              | The catalogue, its cache and refreshes                 |
+| `Playback`      | `services/playback.ts`             | Stream sessions and the loopback proxy                 |
+| `Updates`       | `services/updates.ts`              | The release channel, checks, downloads and the install |
+| `Guide`         | `@mrstreamer/core/guide/service`   | The programme guide                                    |
+| `ViewingRecord` | `@mrstreamer/core/viewing/service` | Favourites and watch history                           |
+
+A service is a `Context.Service` class with a `layer`, and reaches the others through the context rather than callbacks. Services whose rules run without the platform live in `packages/core` and ask for what they need through ports, services of their own that the app supplies: the guide's are `GuideSource` (the subscription and its download), `GuideCatalogue` (guide ids) and `GuideStore` (the saved document, `platform/guide-store.ts`). The others live in the app. Every expected failure is a `Failed` from `@mrstreamer/core/failure`, carrying the `AppError` the UI shows; a provider adapter's `AppFailure` keeps its error, anything else counts as unexpected.
+
+Background work, downloads and stream sessions run in their service's scope. Quitting closes open streams at once, so no ffmpeg or provider connection outlives the app, then disposes of the runtime without holding the quit: an update's restart goes through the same path. Tests build the same layers with the fake provider; `apps/desktop/test/support.ts` makes a runtime per test and calls services with promises, and guide tests move a `TestClock` instead of waiting.
 
 ## Viewing record
 
@@ -87,7 +99,7 @@ Lists keep one keyboard selection, separate from the pointer. Only the keyboard 
 
 ## Playback
 
-The UI never sees provider URLs; they contain the login. `playback.open` returns a `127.0.0.1` URL with a random token, and only one session is open at a time, because many subscriptions allow one connection. When the player requests the URL, the proxy connects upstream and then, before sending anything:
+The UI never sees provider URLs; they contain the login. `playback.open` returns a `127.0.0.1` URL with a random token, and only one session is open at a time, because many subscriptions allow one connection. Each session is a scope: closing it, by stopping, switching or quitting, aborts its upstream requests and ends their ffmpeg process. When the player requests the URL, the proxy connects upstream and then, before sending anything:
 
 1. **Inspects** the stream (`playback/inspect.ts`): the program tables name each track's codec; the first frames settle what the tables leave open (MP2 or MP3, 8 or 10-bit HEVC, AAC channel layout). It reads at most 2 MB or 2.5 s and stops as soon as the delivery is settled.
 2. **Plans** (`playback/convert.ts`): the renderer reports which codecs its player decodes (`player/decoders.ts`, from `MediaSource.isTypeSupported`). Tracks it decodes are copied; the rest convert: sound to stereo AAC, video to H.264 with deinterlacing, 4K reduced to 1080p.

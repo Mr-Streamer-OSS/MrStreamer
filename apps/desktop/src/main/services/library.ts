@@ -1,14 +1,24 @@
 // The live catalogue: fetched from the provider, cached on disk, queried by the UI over IPC.
 import { join } from "node:path";
 import { type } from "arktype";
-import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
+import type { AppError } from "@mrstreamer/contracts/errors";
 import type { CatalogueStatus, Category, LiveChannel } from "@mrstreamer/contracts/library";
-import { normalize } from "@mrstreamer/core/text";
 import { trustedGuideIds } from "@mrstreamer/core/catalogue/guide-ids";
 import { normalizeCatalogue } from "@mrstreamer/core/catalogue/normalize";
+import { Failed, failedWith } from "@mrstreamer/core/failure";
 import type { GuideChannels } from "@mrstreamer/core/guide/programmes";
+import type { LiveCatalogue } from "@mrstreamer/core/provider";
+import { normalize } from "@mrstreamer/core/text";
+import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as Layer from "effect/Layer";
+import * as PubSub from "effect/PubSub";
+import * as Stream from "effect/Stream";
 import { readJsonFile, removeFile, writeJsonFile } from "../platform/json-file.ts";
-import type { LiveCatalogue, LiveProvider } from "@mrstreamer/core/provider";
+import { Subscriptions, type Source } from "./subscription.ts";
 
 /** How many results a search returns. Enough to scroll, small enough to send per keystroke. */
 const SEARCH_LIMIT = 200;
@@ -17,7 +27,7 @@ const SEARCH_LIMIT = 200;
  * incomplete. It replaces the catalogue only when a second fetch confirms it.
  */
 const SHRINK_CONFIRM_SHARE = 0.5;
-const SHRINK_CONFIRM_DELAY_MS = 3000;
+const SHRINK_CONFIRM_DELAY: Duration.Input = "3 seconds";
 
 // The cache stores the catalogue as the provider sent it, and display names are worked out on
 // load, so improved naming rules apply without fetching again. The newest stable release reads it
@@ -50,21 +60,6 @@ interface CatalogueFile extends LiveCatalogue {
   readonly fetchedAt: number;
 }
 
-/** The connected subscription as the library needs it. `key` changes when the login does. */
-export interface CatalogueSource {
-  readonly key: string;
-  readonly provider: LiveProvider;
-}
-
-export interface LibraryDeps {
-  readonly dataDir: string;
-  readonly source: () => Promise<CatalogueSource | null>;
-  /** Called after every refresh, successful or not. */
-  readonly onUpdated: (status: CatalogueStatus) => void;
-  /** Waits before a confirming fetch. Tests make it instant. */
-  readonly confirmDelayMs?: number;
-}
-
 interface IndexedCatalogue {
   readonly key: string;
   readonly fetchedAt: number;
@@ -80,161 +75,223 @@ interface IndexedCatalogue {
   readonly guide: GuideChannels;
 }
 
-export type Library = ReturnType<typeof createLibrary>;
+export interface LibraryOptions {
+  readonly dataDir: string;
+  /** Waits before a confirming fetch. Tests make it instant. */
+  readonly confirmDelay?: Duration.Input;
+}
 
-export function createLibrary(deps: LibraryDeps) {
-  const cachePath = join(deps.dataDir, "catalogue.json");
-  let catalogue: IndexedCatalogue | null = null;
-  let refreshing: { readonly key: string; readonly run: Promise<CatalogueStatus> } | null = null;
-  /** Why the latest refresh of this subscription failed, until one succeeds. */
-  let failure: { readonly key: string; readonly error: AppError } | null = null;
-
-  async function requireSource(): Promise<CatalogueSource> {
-    const source = await deps.source();
-    if (!source) throw new AppFailure({ kind: "no-subscription" });
-    return source;
+export class Library extends Context.Service<
+  Library,
+  {
+    /** Fetches the catalogue from the provider. Concurrent calls for one subscription share a fetch. */
+    readonly refresh: Effect.Effect<CatalogueStatus, Failed>;
+    /** Whether the catalogue should be fetched again: missing, older than `maxAge`, or outdated. */
+    isStale(maxAge: Duration.Input): Effect.Effect<boolean>;
+    /** The channels of the current catalogue by guide id, for the programme guide. */
+    readonly guideChannels: Effect.Effect<GuideChannels, Failed>;
+    readonly status: Effect.Effect<CatalogueStatus>;
+    readonly categories: Effect.Effect<readonly Category[], Failed>;
+    /**
+     * All channels in a category, the best matches for a query across the catalogue, or the
+     * channels with the given ids in that order.
+     */
+    channels(filter: {
+      readonly categoryId?: string;
+      readonly query?: string;
+      readonly ids?: readonly string[];
+    }): Effect.Effect<readonly LiveChannel[], Failed>;
+    channel(channelId: string): Effect.Effect<LiveChannel, Failed>;
+    /** Forgets the cached catalogue, for when the subscription changes or goes. */
+    readonly clear: Effect.Effect<void>;
+    /** The status after every refresh, successful or not. */
+    readonly changes: Stream.Stream<CatalogueStatus>;
   }
+>()("mrstreamer/Library") {
+  static readonly layer = (options: LibraryOptions) => Layer.effect(Library, make(options));
+}
 
-  /** The catalogue for the current subscription from memory or disk. Never hits the network. */
-  async function cached(key: string): Promise<IndexedCatalogue | null> {
-    if (catalogue?.key === key) return catalogue;
-    const file = await readJsonFile(cachePath, CachedCatalogue);
-    if (file?.key !== key) return null;
-    if (catalogue?.key !== key) catalogue = index(file, file.outdated);
-    return catalogue;
-  }
+function make(options: LibraryOptions) {
+  return Effect.gen(function* () {
+    const subscriptions = yield* Subscriptions;
+    const scope = yield* Effect.scope;
+    const updates = yield* PubSub.unbounded<CatalogueStatus>();
+    const cachePath = join(options.dataDir, "catalogue.json");
+    let catalogue: IndexedCatalogue | null = null;
+    let refreshing: {
+      readonly key: string;
+      readonly token: object;
+      readonly fiber: Fiber.Fiber<CatalogueStatus, Failed>;
+    } | null = null;
+    /** Why the latest refresh of this subscription failed, until one succeeds. */
+    let failure: { readonly key: string; readonly error: AppError } | null = null;
 
-  /** The catalogue for the current subscription, fetching it first if nothing is cached. */
-  async function current(): Promise<IndexedCatalogue> {
-    const source = await requireSource();
-    const existing = await cached(source.key);
-    if (existing) return existing;
-    await refresh();
-    if (catalogue?.key !== source.key) {
-      throw new AppFailure({
-        kind: "unexpected",
-        detail: "The subscription changed while loading channels.",
+    const requireSource = Effect.flatMap(subscriptions.source, (source) =>
+      source
+        ? Effect.succeed(source)
+        : Effect.fail(new Failed({ error: { kind: "no-subscription" } })),
+    );
+
+    /** The catalogue for the current subscription from memory or disk. Never hits the network. */
+    const cached = (key: string) =>
+      Effect.gen(function* () {
+        if (catalogue?.key === key) return catalogue;
+        const file = yield* Effect.promise(() => readJsonFile(cachePath, CachedCatalogue));
+        if (file?.key !== key) return null;
+        if (catalogue?.key !== key) catalogue = index(file, file.outdated);
+        return catalogue;
       });
-    }
-    return catalogue;
-  }
 
-  /** Fetches the catalogue from the provider. Concurrent calls for one subscription share a request. */
-  async function refresh(): Promise<CatalogueStatus> {
-    const source = await requireSource();
-    if (refreshing?.key === source.key) return refreshing.run;
+    /** The catalogue for the current subscription, fetching it first if nothing is cached. */
+    const current = Effect.gen(function* () {
+      const source = yield* requireSource;
+      const existing = yield* cached(source.key);
+      if (existing) return existing;
+      yield* refresh;
+      if (catalogue?.key !== source.key) return yield* switched;
+      return catalogue;
+    });
 
-    const run = (async () => {
-      try {
-        const fetched = await complete(source, await cached(source.key));
+    const fetchAndStore = (source: Source) =>
+      Effect.gen(function* () {
+        const fetched = yield* complete(source, yield* cached(source.key));
         // Drop the result if the user switched subscriptions while it downloaded.
-        if ((await deps.source())?.key !== source.key) {
-          throw new AppFailure({
-            kind: "unexpected",
-            detail: "The subscription changed while loading channels.",
-          });
-        }
+        if ((yield* subscriptions.source)?.key !== source.key) return yield* switched;
         const file: CatalogueFile = {
           version: 4,
           key: source.key,
-          fetchedAt: Date.now(),
+          fetchedAt: yield* Clock.currentTimeMillis,
           categories: fetched.categories,
           channels: fetched.channels,
         };
         // Written before it is used: the next start must not find an older catalogue on disk.
-        await writeJsonFile(cachePath, file);
+        yield* Effect.promise(() => writeJsonFile(cachePath, file));
         catalogue = index(file, false);
         failure = null;
-      } catch (cause) {
-        if (cause instanceof AppFailure) failure = { key: source.key, error: cause.error };
-        deps.onUpdated(statusOf(await cached(source.key), failure?.error ?? null));
-        throw cause;
-      }
-      const status = statusOf(catalogue, null);
-      deps.onUpdated(status);
-      return status;
-    })().finally(() => {
-      if (refreshing?.run === run) refreshing = null;
-    });
-    refreshing = { key: source.key, run };
-    return run;
-  }
-
-  /**
-   * Fetches the catalogue and checks it against the one in use. An empty list never replaces
-   * channels, and a much shorter one only when a second fetch returns the same.
-   */
-  async function complete(
-    source: CatalogueSource,
-    previous: IndexedCatalogue | null,
-  ): Promise<LiveCatalogue> {
-    const fetched = await source.provider.liveCatalogue();
-    const before = previous?.channels.length ?? 0;
-    const received = fetched.channels.length;
-    if (before === 0 || received >= before * SHRINK_CONFIRM_SHARE) return fetched;
-    if (received > 0) {
-      await new Promise((resolve) =>
-        setTimeout(resolve, deps.confirmDelayMs ?? SHRINK_CONFIRM_DELAY_MS),
+        const status = statusOf(catalogue, null);
+        yield* PubSub.publish(updates, status);
+        return status;
+      }).pipe(
+        Effect.tapError((failed) =>
+          Effect.gen(function* () {
+            failure = { key: source.key, error: failed.error };
+            yield* PubSub.publish(updates, statusOf(yield* cached(source.key), failed.error));
+          }),
+        ),
       );
-      const again = await source.provider.liveCatalogue();
-      const difference = Math.abs(again.channels.length - received);
-      if (again.channels.length > 0 && difference <= Math.max(10, received * 0.05)) return again;
-    }
-    throw new AppFailure({ kind: "incomplete-catalogue", received, previous: before });
-  }
 
-  return {
-    refresh,
+    const refresh: Effect.Effect<CatalogueStatus, Failed> = Effect.gen(function* () {
+      const source = yield* requireSource;
+      let running = refreshing?.key === source.key ? refreshing : null;
+      if (!running) {
+        const token = {};
+        const fiber = yield* Effect.forkIn(
+          fetchAndStore(source).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                if (refreshing?.token === token) refreshing = null;
+              }),
+            ),
+          ),
+          scope,
+        );
+        running = { key: source.key, token, fiber };
+        refreshing = running;
+      }
+      return yield* Fiber.join(running.fiber);
+    });
 
-    /** Whether the catalogue should be fetched again: missing, older than `maxAgeMs`, or outdated. */
-    async isStale(maxAgeMs: number): Promise<boolean> {
-      const source = await deps.source();
-      const existing = source ? await cached(source.key) : null;
-      return !existing || existing.outdated || Date.now() - existing.fetchedAt > maxAgeMs;
-    },
+    /**
+     * Fetches the catalogue and checks it against the one in use. An empty list never replaces
+     * channels, and a much shorter one only when a second fetch returns the same.
+     */
+    const complete = (source: Source, previous: IndexedCatalogue | null) =>
+      Effect.gen(function* () {
+        const fetch = Effect.tryPromise({
+          try: (signal) => source.provider.liveCatalogue(signal),
+          catch: failedWith,
+        });
+        const fetched = yield* fetch;
+        const before = previous?.channels.length ?? 0;
+        const received = fetched.channels.length;
+        if (before === 0 || received >= before * SHRINK_CONFIRM_SHARE) return fetched;
+        if (received > 0) {
+          yield* Effect.sleep(options.confirmDelay ?? SHRINK_CONFIRM_DELAY);
+          const again = yield* fetch;
+          const difference = Math.abs(again.channels.length - received);
+          if (again.channels.length > 0 && difference <= Math.max(10, received * 0.05)) {
+            return again;
+          }
+        }
+        return yield* new Failed({
+          error: { kind: "incomplete-catalogue", received, previous: before },
+        });
+      });
 
-    /** The channels of the current catalogue by guide id, for the programme guide. */
-    async guideChannels(): Promise<GuideChannels> {
-      return (await current()).guide;
-    },
+    return {
+      refresh,
 
-    async status(): Promise<CatalogueStatus> {
-      const source = await deps.source();
-      if (!source) return statusOf(null, null);
-      return statusOf(await cached(source.key), failure?.key === source.key ? failure.error : null);
-    },
+      isStale: (maxAge: Duration.Input) =>
+        Effect.gen(function* () {
+          const source = yield* subscriptions.source;
+          const existing = source ? yield* cached(source.key) : null;
+          const now = yield* Clock.currentTimeMillis;
+          return (
+            !existing || existing.outdated || now - existing.fetchedAt > Duration.toMillis(maxAge)
+          );
+        }),
 
-    async categories(): Promise<readonly Category[]> {
-      return (await current()).categories;
-    },
+      guideChannels: Effect.map(current, (found) => found.guide),
 
-    /** Channels in one category, all channels, or search matches across the catalogue when `query` is set. */
-    async channels(filter: {
-      categoryId?: string;
-      query?: string;
-      ids?: readonly string[];
-    }): Promise<readonly LiveChannel[]> {
-      const { channels, byCategory, byId, searchNames } = await current();
-      if (filter.ids) return filter.ids.flatMap((id) => byId.get(id) ?? []);
-      const query = normalize(filter.query ?? "");
-      if (query) return search(channels, searchNames, query);
-      return filter.categoryId === undefined ? channels : (byCategory.get(filter.categoryId) ?? []);
-    },
+      status: Effect.gen(function* () {
+        const source = yield* subscriptions.source;
+        if (!source) return statusOf(null, null);
+        return statusOf(
+          yield* cached(source.key),
+          failure?.key === source.key ? failure.error : null,
+        );
+      }),
 
-    async channel(channelId: string): Promise<LiveChannel> {
-      const channel = (await current()).byId.get(channelId);
-      if (!channel) throw new AppFailure({ kind: "channel-not-found", channelId });
-      return channel;
-    },
+      categories: Effect.map(current, (found) => found.categories),
 
-    /** Forgets the cached catalogue, for when the subscription is removed. */
-    async clear(): Promise<void> {
-      catalogue = null;
-      failure = null;
-      await removeFile(cachePath);
-    },
-  };
+      channels: (filter: {
+        readonly categoryId?: string;
+        readonly query?: string;
+        readonly ids?: readonly string[];
+      }) =>
+        Effect.map(current, ({ channels, byCategory, byId, searchNames }) => {
+          if (filter.ids) return filter.ids.flatMap((id) => byId.get(id) ?? []);
+          const query = normalize(filter.query ?? "");
+          if (query) return search(channels, searchNames, query);
+          return filter.categoryId === undefined
+            ? channels
+            : (byCategory.get(filter.categoryId) ?? []);
+        }),
+
+      channel: (channelId: string) =>
+        Effect.flatMap(current, ({ byId }) => {
+          const channel = byId.get(channelId);
+          return channel
+            ? Effect.succeed(channel)
+            : Effect.fail(new Failed({ error: { kind: "channel-not-found", channelId } }));
+        }),
+
+      clear: Effect.gen(function* () {
+        catalogue = null;
+        failure = null;
+        yield* Effect.promise(() => removeFile(cachePath));
+      }),
+
+      changes: Stream.fromPubSub(updates),
+    };
+  });
 }
+
+const switched = Effect.fail(
+  new Failed({
+    error: { kind: "unexpected", detail: "The subscription changed while loading channels." },
+  }),
+);
 
 function statusOf(catalogue: IndexedCatalogue | null, failure: AppError | null): CatalogueStatus {
   return {

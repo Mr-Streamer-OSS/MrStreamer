@@ -2,19 +2,22 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
-import { createSubscriptions } from "../src/main/services/subscription.ts";
+import { Failed } from "@mrstreamer/core/failure";
 import type { Secrets } from "../src/main/platform/secrets.ts";
-import { fakeProvider, tempDir, testSecrets, userAgent } from "./support.ts";
+import { Subscriptions } from "../src/main/services/subscription.ts";
+import { fakeProvider, promised, runtimeFor, tempDir, testSecrets, userAgent } from "./support.ts";
 
+/** The subscription service on a data folder; `create` starts another, as after a restart. */
 async function subscriptions(fetchImpl: typeof fetch = fetch) {
   const dataDir = await tempDir();
-  const create = () =>
-    createSubscriptions({
-      dataDir,
-      secrets: testSecrets,
-      providerOptions: { userAgent, fetch: fetchImpl },
-    });
-  return { dataDir, create, service: create() };
+  const create = (secrets: Secrets = testSecrets) =>
+    promised(
+      runtimeFor(
+        Subscriptions.layer({ dataDir, secrets, providerOptions: { userAgent, fetch: fetchImpl } }),
+      ),
+      Subscriptions,
+    );
+  return { dataDir, create, service: await create() };
 }
 
 /** A fetch that can hold the provider's answer to the next request until the test releases it. */
@@ -44,8 +47,7 @@ async function failure(promise: Promise<unknown>): Promise<AppError> {
     () => null,
     (cause: unknown) => cause,
   );
-  if (!(error instanceof AppFailure))
-    throw new Error(`Expected an AppFailure, got ${String(error)}`);
+  if (!(error instanceof Failed)) throw new Error(`Expected a failure, got ${String(error)}`);
   return error.error;
 }
 
@@ -133,7 +135,7 @@ describe("subscriptions", () => {
       password: "s3cret-pass",
     });
 
-    const restarted = create();
+    const restarted = await create();
 
     expect(await restarted.get()).toMatchObject({ server: provider.url, username: "demo" });
     expect(await restarted.recheck()).toMatchObject({ account: { state: "active" } });
@@ -154,7 +156,7 @@ describe("subscriptions", () => {
 
     expect(await check).toBeNull();
     expect(await service.get()).toBeNull();
-    expect(await create().get()).toBeNull();
+    expect(await (await create()).get()).toBeNull();
   });
 
   it("keeps a newer login when an account check answers afterwards", async () => {
@@ -171,19 +173,17 @@ describe("subscriptions", () => {
     await check;
 
     expect(await service.get()).toMatchObject({ server: second.url });
-    expect(await create().get()).toMatchObject({ server: second.url });
+    expect(await (await create()).get()).toMatchObject({ server: second.url });
   });
 
   it("asks for the password again when the keychain no longer opens it", async () => {
     const provider = await fakeProvider();
-    const dataDir = await tempDir();
+    const { create, service } = await subscriptions();
     const login = { server: provider.url, username: "demo", password: "demo" };
-    const create = (secrets: Secrets) =>
-      createSubscriptions({ dataDir, secrets, providerOptions: { userAgent } });
-    await create(testSecrets).connect(login);
+    await service.connect(login);
 
     // What a new app signature or a reset keychain looks like to the app.
-    const locked = create({
+    const locked = await create({
       seal: testSecrets.seal,
       open: () => {
         throw new AppFailure({ kind: "keychain-refused" });
@@ -204,6 +204,6 @@ describe("subscriptions", () => {
     await service.remove();
 
     expect(await service.get()).toBeNull();
-    expect(await create().get()).toBeNull();
+    expect(await (await create()).get()).toBeNull();
   });
 });

@@ -3,15 +3,20 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { ViewingRecord } from "@mrstreamer/core/viewing/service";
-import * as Effect from "effect/Effect";
-import * as ManagedRuntime from "effect/ManagedRuntime";
-import * as Stream from "effect/Stream";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { describe, expect, it } from "vitest";
 import { mainLayer } from "../src/main/runtime.ts";
-import { createLibrary } from "../src/main/services/library.ts";
-import { createPreferences } from "../src/main/services/preferences.ts";
-import { createSubscriptions } from "../src/main/services/subscription.ts";
-import { fakeProvider, tempDir, testSecrets, userAgent } from "./support.ts";
+import { Subscriptions } from "../src/main/services/subscription.ts";
+import {
+  collect,
+  fakeProvider,
+  promised,
+  runtimeFor,
+  tempDir,
+  testConfig,
+  testSecrets,
+  userAgent,
+  type Promised,
+} from "./support.ts";
 
 /**
  * The viewing record as the app runs it, on two fake providers to switch accounts between. `start`
@@ -20,61 +25,50 @@ import { fakeProvider, tempDir, testSecrets, userAgent } from "./support.ts";
 async function viewingApp() {
   const dataDir = await tempDir();
   const providers = [await fakeProvider(), await fakeProvider()] as const;
-  const subscriptions = createSubscriptions({
-    dataDir,
-    secrets: testSecrets,
-    providerOptions: { userAgent },
-  });
-  const library = createLibrary({
-    dataDir,
-    source: subscriptions.source,
-    onUpdated: () => {},
-    confirmDelayMs: 0,
-  });
-  let running: { dispose(): Promise<void> } | null = null;
+  let running: {
+    readonly dispose: () => Promise<void>;
+    readonly subscriptions: Promised<Subscriptions["Service"]>;
+  } | null = null;
+
+  /** The running app's subscriptions, or a login made before it starts. */
+  const subscriptions = async () =>
+    running?.subscriptions ??
+    promised(
+      runtimeFor(
+        Subscriptions.layer({ dataDir, secrets: testSecrets, providerOptions: { userAgent } }),
+      ),
+      Subscriptions,
+    );
 
   const start = async () => {
     await running?.dispose();
-    const runtime = ManagedRuntime.make(
-      mainLayer({
-        dataDir,
-        source: subscriptions.source,
-        library,
-        preferences: createPreferences(dataDir),
-      }),
-    );
-    running = runtime;
-    onTestFinished(() => runtime.dispose());
-    const viewing = await runtime.runPromise(
-      Effect.gen(function* () {
-        return yield* ViewingRecord;
-      }),
-    );
-    const run = <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect);
+    const runtime = runtimeFor(mainLayer(testConfig(dataDir)));
+    running = {
+      dispose: () => runtime.dispose(),
+      subscriptions: await promised(runtime, Subscriptions),
+    };
+    const viewing = await promised(runtime, ViewingRecord);
     return {
-      state: () => run(viewing.state),
+      state: viewing.state,
       setFavourite: (channelId: string, favourite: boolean, commandId: string = randomUUID()) =>
-        run(viewing.setFavourite(commandId, channelId, favourite)),
+        viewing.setFavourite(commandId, channelId, favourite),
       recordWatch: (channelId: string, commandId: string = randomUUID()) =>
-        run(viewing.recordWatch(commandId, channelId)),
+        viewing.recordWatch(commandId, channelId),
       /** The sequences the UI is told about from now on. */
-      changes: async () => {
-        const seen: number[] = [];
-        runtime.runFork(
-          Stream.runForEach(viewing.changes, (sequence) => Effect.sync(() => seen.push(sequence))),
-        );
-        await new Promise((resolve) => setTimeout(resolve, 10));
-        return seen;
-      },
+      changes: () => collect(runtime, viewing.changes),
     };
   };
 
   return {
     dataDir,
     start,
-    connect: (account: 0 | 1) =>
-      subscriptions.connect({ server: providers[account].url, username: "demo", password: "demo" }),
-    disconnect: () => subscriptions.remove(),
+    connect: async (account: 0 | 1) =>
+      (await subscriptions()).connect({
+        server: providers[account].url,
+        username: "demo",
+        password: "demo",
+      }),
+    disconnect: async () => (await subscriptions()).remove(),
     writePreferences: async (file: object) => {
       await mkdir(dataDir, { recursive: true });
       await writeFile(join(dataDir, "preferences.json"), JSON.stringify(file));

@@ -1,6 +1,6 @@
 import { ipcMain, type WebContents } from "electron";
 import { type } from "arktype";
-import { AppFailure, type Result } from "@mrstreamer/contracts/errors";
+import type { Result } from "@mrstreamer/contracts/errors";
 import {
   ipcInputs,
   type IpcEvent,
@@ -9,17 +9,22 @@ import {
   type IpcMethod,
   type IpcOutput,
 } from "@mrstreamer/contracts/ipc";
+import type { Failed } from "@mrstreamer/core/failure";
+import * as Cause from "effect/Cause";
+import type * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 
-/** One handler per IPC method. Handlers throw `AppFailure` to fail with a specific error. */
+/** One handler per IPC method. A handler fails with `Failed` to answer with a specific error. */
 export type IpcHandlers = {
-  readonly [M in IpcMethod]: (input: IpcInput<M>) => Promise<IpcOutput<M>> | IpcOutput<M>;
+  readonly [M in IpcMethod]: (input: IpcInput<M>) => Effect.Effect<IpcOutput<M>, Failed>;
 };
 
 /**
- * Registers every IPC method. Input is validated against its schema before the handler runs,
- * and any failure resolves to a typed error instead of a rejected promise.
+ * Registers every IPC method. Input is validated against its schema before the handler runs on
+ * `run`, the main runtime, and any failure resolves to a typed error instead of a rejected promise.
  */
 export function registerIpc(
+  run: <A>(effect: Effect.Effect<A, Failed>) => Promise<Exit.Exit<A, Failed>>,
   handlers: IpcHandlers,
   isTrusted: (sender: WebContents) => boolean,
 ): void {
@@ -27,7 +32,7 @@ export function registerIpc(
     // TypeScript cannot pair `ipcInputs[method]` with `handlers[method]` inside a loop over all
     // methods, so the loop uses erased types. `IpcHandlers` keeps each handler fully typed.
     const validate: (data: unknown) => unknown = ipcInputs[method];
-    const handler = handlers[method] as (input: unknown) => unknown;
+    const handler = handlers[method] as (input: unknown) => Effect.Effect<unknown, Failed>;
 
     ipcMain.handle(method, async (event, raw: unknown): Promise<Result<unknown>> => {
       if (!isTrusted(event.sender)) {
@@ -43,14 +48,14 @@ export function registerIpc(
           error: { kind: "invalid-input", detail: `${method}: ${input.summary}` },
         };
       }
-      try {
-        return { ok: true, value: await handler(input) };
-      } catch (cause) {
-        if (cause instanceof AppFailure) return { ok: false, error: cause.error };
-        console.error(`[ipc] ${method} failed`, cause);
-        const detail = cause instanceof Error ? cause.message : String(cause);
-        return { ok: false, error: { kind: "unexpected", detail } };
-      }
+      const exit = await run(handler(input));
+      if (Exit.isSuccess(exit)) return { ok: true, value: exit.value };
+      const failed = Cause.findErrorOption(exit.cause);
+      if (failed._tag === "Some") return { ok: false, error: failed.value.error };
+      console.error(`[ipc] ${method} failed`, Cause.pretty(exit.cause));
+      const cause = Cause.squash(exit.cause);
+      const detail = cause instanceof Error ? cause.message : String(cause);
+      return { ok: false, error: { kind: "unexpected", detail } };
     });
   }
 }

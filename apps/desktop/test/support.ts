@@ -2,8 +2,14 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import type * as Layer from "effect/Layer";
+import * as ManagedRuntime from "effect/ManagedRuntime";
+import * as Stream from "effect/Stream";
 import { afterEach } from "vitest";
 import type { Secrets } from "../src/main/platform/secrets.ts";
+import type { MainConfig } from "../src/main/runtime.ts";
 import { startFakeProvider, type FakeProvider, type FakeProviderOptions } from "./fake-provider.ts";
 
 const cleanups: (() => Promise<void>)[] = [];
@@ -24,6 +30,60 @@ export async function tempDir(): Promise<string> {
   return dir;
 }
 
+/** A runtime for `layer`, closed when the test ends, before its data folder is removed. */
+export function runtimeFor<R>(layer: Layer.Layer<R>): ManagedRuntime.ManagedRuntime<R, never> {
+  const runtime = ManagedRuntime.make(layer);
+  cleanups.push(() => runtime.dispose());
+  return runtime;
+}
+
+/** A service's calls as promises: an Effect becomes a function, a function returns a promise. */
+export type Promised<S> = {
+  readonly [K in keyof S]: S[K] extends Effect.Effect<infer A, infer _E>
+    ? () => Promise<A>
+    : S[K] extends (...args: infer P) => Effect.Effect<infer A, infer _E>
+      ? (...args: P) => Promise<A>
+      : S[K];
+};
+
+/**
+ * The service `key` from `runtime`, called with promises as the IPC handlers call it. A failure
+ * rejects with the service's `Failed`.
+ */
+export async function promised<I, S extends object>(
+  runtime: ManagedRuntime.ManagedRuntime<I, never>,
+  key: Context.Key<I, S>,
+): Promise<Promised<S>> {
+  const service = await runtime.runPromise(key);
+  // A service's effects need nothing more from the context: they run on `runtime` for its clock.
+  const run = (effect: Effect.Effect<unknown, unknown, unknown>) =>
+    runtime.runPromise(effect as Effect.Effect<unknown, unknown, never>);
+  const calls = Object.entries(service).map(([name, member]: [string, unknown]) => {
+    if (Effect.isEffect(member)) return [name, () => run(member)];
+    if (typeof member !== "function") return [name, member];
+    return [
+      name,
+      (...args: unknown[]) => {
+        const result: unknown = member(...args);
+        return Effect.isEffect(result) ? run(result) : result;
+      },
+    ];
+  });
+  return Object.fromEntries(calls) as Promised<S>;
+}
+
+/** Everything `stream` emits from now on, as it arrives. */
+export async function collect<A, R>(
+  runtime: ManagedRuntime.ManagedRuntime<R, never>,
+  stream: Stream.Stream<A>,
+): Promise<A[]> {
+  const seen: A[] = [];
+  runtime.runFork(Stream.runForEach(stream, (item) => Effect.sync(() => seen.push(item))));
+  // Lets the subscription start before the test goes on.
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  return seen;
+}
+
 /** Reversible stand-in for the Keychain. Sealed values never contain the plain text. */
 export const testSecrets: Secrets = {
   seal: (plain) => Buffer.from(plain, "utf8").toString("base64").split("").reverse().join(""),
@@ -31,3 +91,19 @@ export const testSecrets: Secrets = {
 };
 
 export const userAgent = "MrStreamer/test";
+
+/** What the app gives `mainLayer`, for tests: the test keychain, no ffmpeg, no releases. */
+export function testConfig(dataDir: string): MainConfig {
+  return {
+    dataDir,
+    secrets: testSecrets,
+    userAgent,
+    ffmpeg: null,
+    updates: {
+      installed: "0.0.1",
+      metadataFile: "latest-linux.yml",
+      releases: async () => [],
+      installer: { download: async () => {}, install: async () => {} },
+    },
+  };
+}

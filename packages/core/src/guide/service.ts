@@ -6,11 +6,9 @@
 // The app supplies three ports: the subscription and its download, the catalogue's guide ids, and
 // a store for the document as it arrived. Downloads run in the service's scope, so `clear` and
 // shutdown stop them, and a load or download that finishes after a `clear` changes nothing.
-import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
 import type { Listing, Programme, ProgrammeMatch } from "@mrstreamer/contracts/guide";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -18,6 +16,7 @@ import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
+import { Failed, failedWith } from "../failure.ts";
 import {
   indexProgrammes,
   listingsAt,
@@ -31,9 +30,6 @@ import {
 const MAX_AGE_MS = 6 * 60 * 60 * 1000;
 /** How often the service checks whether the guide is due. */
 const CHECK_EVERY = "15 minutes";
-
-/** A guide failure, carrying the error the UI shows for it. */
-export class GuideFailed extends Data.TaggedError("GuideFailed")<{ readonly error: AppError }> {}
 
 /** The subscription whose guide to keep: its identity and its XMLTV download. */
 export interface GuideSubscription {
@@ -51,7 +47,7 @@ export class GuideSource extends Context.Service<
 /** The current catalogue's channels by guide id. */
 export class GuideCatalogue extends Context.Service<
   GuideCatalogue,
-  { readonly channels: Effect.Effect<GuideChannels, GuideFailed> }
+  { readonly channels: Effect.Effect<GuideChannels, Failed> }
 >()("mrstreamer/GuideCatalogue") {}
 
 /** A document being saved as it downloads. Nothing replaces the saved one until `commit`. */
@@ -69,7 +65,7 @@ export class GuideStore extends Context.Service<
     readonly read: (
       key: string,
     ) => Effect.Effect<{ fetchedAt: number; document: AsyncIterable<Uint8Array> } | null>;
-    readonly save: (key: string, fetchedAt: number) => Effect.Effect<GuideDraft, GuideFailed>;
+    readonly save: (key: string, fetchedAt: number) => Effect.Effect<GuideDraft, Failed>;
     readonly clear: Effect.Effect<void>;
   }
 >()("mrstreamer/GuideStore") {}
@@ -89,9 +85,9 @@ export class Guide extends Context.Service<
     /** Programmes on now or later whose title matches, on now first. */
     search(query: string): Effect.Effect<readonly ProgrammeMatch[]>;
     /** Downloads the guide. Concurrent calls share a download; a failure keeps the guide. */
-    readonly refresh: Effect.Effect<void, GuideFailed>;
+    readonly refresh: Effect.Effect<void, Failed>;
     /** Downloads the guide when there is none or it is six hours old. */
-    readonly refreshIfStale: Effect.Effect<void, GuideFailed>;
+    readonly refreshIfStale: Effect.Effect<void, Failed>;
     /** Forgets the guide and stops a download, for when the account changes or goes. */
     readonly clear: Effect.Effect<void>;
     /** Emits whenever a new guide is loaded. */
@@ -114,10 +110,10 @@ function make() {
     /** Rises on every `clear`, so work that started before it doesn't apply its result. */
     let generation = 0;
     /** The fiber of each download, for its own cleanup to recognise it. */
-    const fiberOf = new WeakMap<object, Fiber.Fiber<void, GuideFailed>>();
+    const fiberOf = new WeakMap<object, Fiber.Fiber<void, Failed>>();
     let downloading: {
       readonly key: string;
-      readonly fiber: Fiber.Fiber<void, GuideFailed>;
+      readonly fiber: Fiber.Fiber<void, Failed>;
     } | null = null;
 
     /** The guide of the current subscription: from memory, or read from the store once. */
@@ -145,9 +141,9 @@ function make() {
         const since = yield* Clock.currentTimeMillis;
         const index = yield* Effect.tryPromise({
           try: () => indexProgrammes(saved.document, since),
-          catch: failed,
+          catch: failedWith,
         }).pipe(
-          Effect.catchTag("GuideFailed", (failure) =>
+          Effect.catchTag("Failed", (failure) =>
             Effect.logWarning("[guide] ignoring the guide on disk", failure.error).pipe(
               Effect.as(null),
             ),
@@ -169,7 +165,7 @@ function make() {
             Effect.tryPromise({
               try: async (signal) =>
                 indexProgrammes(saving(await subscription.download(signal), draft), fetchedAt),
-              catch: failed,
+              catch: failedWith,
             }),
           (draft, exit) =>
             Effect.promise(async () => {
@@ -185,7 +181,7 @@ function make() {
 
     const refresh = Effect.gen(function* () {
       const subscription = yield* source.current;
-      if (!subscription) return yield* new GuideFailed({ error: { kind: "no-subscription" } });
+      if (!subscription) return yield* new Failed({ error: { kind: "no-subscription" } });
       let running = downloading?.key === subscription.key ? downloading : null;
       if (!running) {
         const token = {};
@@ -216,7 +212,7 @@ function make() {
     // Checks now and then; the app asks for the first download itself, after its own start.
     yield* Effect.forkScoped(
       refreshIfStale.pipe(
-        Effect.catchTag("GuideFailed", (failure) =>
+        Effect.catchTag("Failed", (failure) =>
           Effect.logWarning("[guide] refresh failed", failure.error),
         ),
         Effect.catchDefect((defect) => Effect.logWarning("[guide] refresh failed", defect)),
@@ -230,7 +226,7 @@ function make() {
       const guide = yield* current;
       if (!guide) return null;
       const channels = yield* catalogue.channels.pipe(
-        Effect.catchTag("GuideFailed", () => Effect.succeed(null)),
+        Effect.catchTag("Failed", () => Effect.succeed(null)),
       );
       if (!channels) return null;
       return { guide, channels, at: yield* Clock.currentTimeMillis };
@@ -268,13 +264,6 @@ function make() {
       changes: Stream.fromPubSub(updates),
     };
   });
-}
-
-/** The error the UI shows for a failure. */
-function failed(cause: unknown): GuideFailed {
-  if (cause instanceof AppFailure) return new GuideFailed({ error: cause.error });
-  const detail = cause instanceof Error ? cause.message : String(cause);
-  return new GuideFailed({ error: { kind: "unexpected", detail } });
 }
 
 /** Passes the download on while saving it, as it came, to `draft`. */
