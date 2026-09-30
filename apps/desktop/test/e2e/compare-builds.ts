@@ -7,7 +7,7 @@
 //   node test/e2e/compare-builds.ts [--rounds 2] <baseline executable> <candidate executable> [-- app arguments]
 //
 // Prints a table and, in GitHub Actions, adds it to the run summary and warns about each measure
-// more than 10% worse. It reports and never fails: a warning asks for a second look, on the same
+// more than 10% worse by more than noise. It reports and never fails: a warning asks for a second look, on the same
 // runner or on real hardware, before anyone calls it a regression.
 import { execFileSync } from "node:child_process";
 import { once } from "node:events";
@@ -20,6 +20,8 @@ import { connect, delay, launch } from "./app.ts";
 
 /** How much worse a median may get before the report warns. */
 const BUDGET = 0.1;
+/** Differences smaller than this are noise, whatever share they are: a point of CPU, 10 MB, 20 ms. */
+const NOISE = { "%": 1, MB: 10, ms: 20 };
 /** What measure-app.ts writes with `--json`: every run of every measure. */
 const Results = type({ "[string]": "number[]" });
 
@@ -73,7 +75,7 @@ for (const measure of Object.keys(runs.baseline[0] ?? {})) {
   const before = median(runs.baseline.flatMap((run) => run[measure] ?? []));
   const after = median(runs.candidate.flatMap((run) => run[measure] ?? []));
   const change = before > 0 ? (after - before) / before : 0;
-  const over = change > BUDGET;
+  const over = change > BUDGET && after - before > NOISE[unitOf(measure)];
   if (over)
     worse.push(`${measure}: ${shown(measure, before)} before, ${shown(measure, after)} now`);
   const percent = `${change >= 0 ? "+" : ""}${Math.round(change * 100)}%`;
@@ -88,7 +90,7 @@ const summary = process.env["GITHUB_STEP_SUMMARY"];
 if (summary) {
   appendFileSync(
     summary,
-    `### This build against the baseline (${process.platform})\n\nMedians of ${rounds} runs of each build on this runner, alternated, after starting each once. Changes over ${BUDGET * 100}% are bold; runners vary, so measure again before calling one a regression.\n\n${table}\n`,
+    `### This build against the baseline (${process.platform})\n\nMedians of ${rounds} runs of each build on this runner, alternated, after starting each once. Changes over ${BUDGET * 100}% and beyond noise are bold; runners vary, so measure again before calling one a regression.\n\n${table}\n`,
   );
 }
 for (const line of worse) console.log(`::warning title=More than ${BUDGET * 100}% worse::${line}`);
@@ -116,5 +118,13 @@ function median(values: readonly number[]): number {
 }
 
 function shown(measure: string, value: number): string {
-  return `${Math.round(value * 10) / 10}${measure.includes("(") ? "" : " ms"}`;
+  const unit = unitOf(measure);
+  return `${Math.round(value * 10) / 10}${unit === "ms" ? " ms" : ""}`;
+}
+
+/** The unit a measure is in: named in brackets, or milliseconds. */
+function unitOf(measure: string): keyof typeof NOISE {
+  if (measure.includes("(%)")) return "%";
+  if (measure.includes("(MB)")) return "MB";
+  return "ms";
 }
