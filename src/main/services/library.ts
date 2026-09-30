@@ -18,7 +18,9 @@ const SHRINK_CONFIRM_SHARE = 0.5;
 const SHRINK_CONFIRM_DELAY_MS = 3000;
 
 // The cache stores the catalogue as the provider sent it, and display names are worked out on
-// load, so improved naming rules apply without fetching again.
+// load, so improved naming rules apply without fetching again. The newest stable release reads it
+// too (see docs/maintainers/architecture.md), so fields are added without a new version: a file
+// written before guide ids still loads, and counts as outdated.
 const CachedCatalogue = type({
   version: "4",
   /** Which subscription produced this catalogue. */
@@ -31,8 +33,13 @@ const CachedCatalogue = type({
     number: "number | null",
     logoUrl: "string | null",
     categoryIds: "string[]",
+    "guideId?": "string | null",
   }).array(),
-});
+}).pipe((file) => ({
+  ...file,
+  channels: file.channels.map((channel) => ({ ...channel, guideId: channel.guideId ?? null })),
+  outdated: file.channels.some((channel) => channel.guideId === undefined),
+}));
 
 /** What the disk cache holds. */
 interface CatalogueFile extends LiveCatalogue {
@@ -59,6 +66,8 @@ export interface LibraryDeps {
 interface IndexedCatalogue {
   readonly key: string;
   readonly fetchedAt: number;
+  /** Written by a version that didn't keep guide ids. */
+  readonly outdated: boolean;
   readonly categories: readonly Category[];
   readonly channels: readonly LiveChannel[];
   readonly byId: ReadonlyMap<string, LiveChannel>;
@@ -66,6 +75,14 @@ interface IndexedCatalogue {
   readonly byCategory: ReadonlyMap<string, readonly LiveChannel[]>;
   /** Normalised names, index-aligned with `channels`. */
   readonly searchNames: readonly string[];
+  readonly guide: GuideChannels;
+}
+
+/** How catalogue channels map to the provider's programme guide. */
+export interface GuideChannels {
+  guideIdOf(channelId: string): string | null;
+  /** The channels showing a guide channel, in catalogue order. */
+  channelsOf(guideId: string): readonly LiveChannel[];
 }
 
 export type Library = ReturnType<typeof createLibrary>;
@@ -88,7 +105,7 @@ export function createLibrary(deps: LibraryDeps) {
     if (catalogue?.key === key) return catalogue;
     const file = await readJsonFile(cachePath, CachedCatalogue);
     if (file?.key !== key) return null;
-    if (catalogue?.key !== key) catalogue = index(file);
+    if (catalogue?.key !== key) catalogue = index(file, file.outdated);
     return catalogue;
   }
 
@@ -131,7 +148,7 @@ export function createLibrary(deps: LibraryDeps) {
         };
         // Written before it is used: the next start must not find an older catalogue on disk.
         await writeJsonFile(cachePath, file);
-        catalogue = index(file);
+        catalogue = index(file, false);
         failure = null;
       } catch (cause) {
         if (cause instanceof AppFailure) failure = { key: source.key, error: cause.error };
@@ -173,6 +190,18 @@ export function createLibrary(deps: LibraryDeps) {
 
   return {
     refresh,
+
+    /** Whether the catalogue should be fetched again: missing, older than `maxAgeMs`, or outdated. */
+    async isStale(maxAgeMs: number): Promise<boolean> {
+      const source = await deps.source();
+      const existing = source ? await cached(source.key) : null;
+      return !existing || existing.outdated || Date.now() - existing.fetchedAt > maxAgeMs;
+    },
+
+    /** The channels of the current catalogue by guide id, for the programme guide. */
+    async guideChannels(): Promise<GuideChannels> {
+      return (await current()).guide;
+    },
 
     async status(): Promise<CatalogueStatus> {
       const source = await deps.source();
@@ -220,7 +249,7 @@ function statusOf(catalogue: IndexedCatalogue | null, failure: AppError | null):
   };
 }
 
-function index(file: CatalogueFile): IndexedCatalogue {
+function index(file: CatalogueFile, outdated: boolean): IndexedCatalogue {
   const { categories, channels } = normalizeCatalogue(file);
   const byCategory = new Map<string, LiveChannel[]>();
   const byId = new Map<string, LiveChannel>();
@@ -232,9 +261,20 @@ function index(file: CatalogueFile): IndexedCatalogue {
       else byCategory.set(categoryId, [channel]);
     }
   }
+  const guideIds = new Map<string, string>();
+  const byGuideId = new Map<string, LiveChannel[]>();
+  for (const { id, guideId } of file.channels) {
+    const channel = byId.get(id);
+    if (!guideId || !channel) continue;
+    guideIds.set(id, guideId);
+    const list = byGuideId.get(guideId);
+    if (list) list.push(channel);
+    else byGuideId.set(guideId, [channel]);
+  }
   return {
     key: file.key,
     fetchedAt: file.fetchedAt,
+    outdated,
     categories: categories
       .map((category) => ({ ...category, channelCount: byCategory.get(category.id)?.length ?? 0 }))
       .filter((category) => category.channelCount > 0),
@@ -242,6 +282,10 @@ function index(file: CatalogueFile): IndexedCatalogue {
     byId,
     byCategory,
     searchNames: channels.map((channel) => normalize(channel.name)),
+    guide: {
+      guideIdOf: (channelId) => guideIds.get(channelId) ?? null,
+      channelsOf: (guideId) => byGuideId.get(guideId) ?? [],
+    },
   };
 }
 

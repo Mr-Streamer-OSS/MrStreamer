@@ -4,6 +4,7 @@
 // The main process refuses to start unless every method has a handler (see src/main/ipc.ts).
 import { type } from "arktype";
 import type { Result } from "./errors.ts";
+import type { Listing, Programme, ProgrammeMatch } from "./guide.ts";
 import type { CatalogueStatus, Category, LiveChannel } from "./library.ts";
 import { CODECS, type StreamFailure, type StreamSession } from "./playback.ts";
 import { Preferences } from "./preferences.ts";
@@ -30,6 +31,9 @@ export const ipcInputs = {
   "library.channels": type({ "categoryId?": "string", "query?": "string", "ids?": "string[]" }),
   "library.channel": type({ channelId: "string" }),
   "library.refresh": none,
+  "guide.listings": type({ channelIds: "string[]" }),
+  "guide.schedule": type({ channelId: "string" }),
+  "guide.search": type({ query: "string" }),
   "playback.open": type({
     channelId: "string",
     decoders: type.enumerated(...CODECS).array(),
@@ -38,10 +42,11 @@ export const ipcInputs = {
   "playback.close": type({ sessionId: "string" }),
   "playback.failure": type({ sessionId: "string" }),
   "preferences.get": none,
-  // The recent list changes only through recordWatch. Leaving it out also keeps its default from
-  // filling in an empty list on every update.
-  "preferences.update": Preferences.omit("recentChannelIds").partial(),
+  // The recent and favourite lists change only through their own methods. Leaving them out also
+  // keeps their defaults from filling in empty lists on every update.
+  "preferences.update": Preferences.omit("recentChannelIds", "favouriteChannelIds").partial(),
   "preferences.recordWatch": type({ channelId: "string" }),
+  "preferences.toggleFavourite": type({ channelId: "string" }),
   "updates.status": none,
   "updates.setChannel": type({ channel: "'stable' | 'nightly'" }),
   "updates.check": none,
@@ -64,6 +69,12 @@ export interface IpcOutputs {
   "library.channels": readonly LiveChannel[];
   "library.channel": LiveChannel;
   "library.refresh": CatalogueStatus;
+  /** Now and next per channel id, for the channels the guide covers. */
+  "guide.listings": Readonly<Record<string, Listing>>;
+  /** The channel's programme on now and the rest the guide knows, in time order. */
+  "guide.schedule": readonly Programme[];
+  /** Programmes on now or later whose title matches, on now first. */
+  "guide.search": readonly ProgrammeMatch[];
   /** Opens a stream for a channel and closes any stream that was open before. */
   "playback.open": StreamSession;
   "playback.close": null;
@@ -73,6 +84,8 @@ export interface IpcOutputs {
   "preferences.update": Preferences;
   /** Remembers a channel as last and recently watched. */
   "preferences.recordWatch": Preferences;
+  /** Adds a channel to the favourites, or takes it out. */
+  "preferences.toggleFavourite": Preferences;
   "updates.status": UpdateStatus;
   /** Chooses Stable or Nightly and checks what it offers; installs and removes nothing. */
   "updates.setChannel": UpdateStatus;
@@ -97,6 +110,8 @@ export type IpcArgs<M extends IpcMethod> =
 export interface IpcEvents {
   /** A catalogue refresh finished, or failed and kept the previous channels. */
   "library.updated": CatalogueStatus;
+  /** A new programme guide is loaded. */
+  "guide.updated": null;
   /** The update moved on, for example a download's progress. */
   "updates.changed": UpdateStatus;
 }

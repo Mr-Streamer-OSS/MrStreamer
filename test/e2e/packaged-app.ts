@@ -1,9 +1,11 @@
 // Smoke test for a built app: connects it to the fake provider through the login form, then plays
-// a stream the player decodes directly and one the bundled ffmpeg has to convert.
+// a stream the player decodes directly and one the bundled ffmpeg has to convert. Then it leaves
+// Watch for Home and comes back, which must keep the one stream rather than open another.
 //
 //   node test/e2e/packaged-app.ts <app executable> [-- extra app arguments]
 //
-// Passes when both channels show a moving picture with decoded sound. The app runs with a
+// Passes when both channels show a moving picture with decoded sound, and Home and Watch share the
+// stream: muted on Home, with sound in Watch, and no second request to the provider. The app runs with a
 // throwaway profile and remote debugging on a random port; on macOS pass --use-mock-keychain so
 // the test never touches a real keychain.
 import { spawn } from "node:child_process";
@@ -35,6 +37,9 @@ try {
     console.log(`${result.ok ? "PASS" : "FAIL"} ${channel}: ${result.detail}`);
     failed ||= !result.ok;
   }
+  const shared = await homeAndBack(page);
+  console.log(`${shared.ok ? "PASS" : "FAIL"} Home and Watch share one stream: ${shared.detail}`);
+  failed ||= !shared.ok;
   page.close();
 } catch (error) {
   console.error(`FAIL ${String(error)}`);
@@ -130,14 +135,7 @@ async function play(page: Page, channel: string): Promise<{ ok: boolean; detail:
   await delay(500);
   await page.send("Input.insertText", { text: channel });
   await delay(800);
-  for (const type of ["rawKeyDown", "keyUp"]) {
-    await page.send("Input.dispatchKeyEvent", {
-      type,
-      key: "Enter",
-      code: "Enter",
-      windowsVirtualKeyCode: 13,
-    });
-  }
+  await key(page, "Enter", 13);
   const until = Date.now() + 25_000;
   let last = { time: 0, width: 0, audio: 0, title: "" };
   while (Date.now() < until) {
@@ -162,6 +160,46 @@ async function play(page: Page, channel: string): Promise<{ ok: boolean; detail:
     ok: false,
     detail: `clock ${last.time.toFixed(2)} s, width ${last.width}, sound ${last.audio} bytes, "${last.title}"`,
   };
+}
+
+/** Leaves Watch for Home, where the stream plays on muted, then watches it again from there. */
+async function homeAndBack(page: Page): Promise<{ ok: boolean; detail: string }> {
+  const requests = provider.streamRequests();
+  const state = () =>
+    page.evaluate<{ watching: boolean; muted: boolean; playing: boolean }>(`(() => {
+      const video = document.querySelector("video");
+      return {
+        watching: !!document.querySelector('[data-view="watch"]'),
+        muted: !!video?.muted,
+        playing: !!video && video.isConnected && !video.paused,
+      };
+    })()`);
+  await key(page, "Escape", 27);
+  await waitFor(async () => !(await state()).watching, 10_000);
+  const home = await state();
+  await page.evaluate(
+    `[...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Watch").click()`,
+  );
+  await waitFor(async () => (await state()).watching, 10_000);
+  await delay(1000);
+  const watch = await state();
+  const extra = provider.streamRequests() - requests;
+  const ok = home.playing && home.muted && watch.playing && !watch.muted && extra === 0;
+  return {
+    ok,
+    detail: `Home ${home.playing ? "playing" : "stopped"}${home.muted ? " muted" : " with sound"}, Watch ${watch.playing ? "playing" : "stopped"}${watch.muted ? " muted" : " with sound"}, ${extra} more stream requests, ${provider.activeStreams()} open`,
+  };
+}
+
+async function key(page: Page, name: string, code: number): Promise<void> {
+  for (const type of ["rawKeyDown", "keyUp"]) {
+    await page.send("Input.dispatchKeyEvent", {
+      type,
+      key: name,
+      code: name,
+      windowsVirtualKeyCode: code,
+    });
+  }
 }
 
 async function waitFor(check: () => Promise<boolean>, timeoutMs = 60_000): Promise<void> {

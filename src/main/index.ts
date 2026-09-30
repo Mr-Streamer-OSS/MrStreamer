@@ -6,6 +6,7 @@ import { emit, registerIpc } from "./ipc.ts";
 import { removeUnfinishedWrites } from "./platform/json-file.ts";
 import { electronInstaller } from "./platform/installer.ts";
 import { keychainSecrets } from "./platform/secrets.ts";
+import { createGuide, type Guide } from "./services/guide.ts";
 import { createLibrary, type Library } from "./services/library.ts";
 import { createPlayback, type Playback } from "./services/playback.ts";
 import { createPreferences } from "./services/preferences.ts";
@@ -25,6 +26,8 @@ const REPOSITORY = "Mr-Streamer-OSS/MrStreamer";
 
 /** Refresh the channel list in the background when the cached copy is older than this. */
 const CATALOGUE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+/** How often an open app checks whether the programme guide is due for a download. */
+const GUIDE_CHECK_MS = 15 * 60 * 1000;
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -105,6 +108,14 @@ async function start(): Promise<void> {
       if (mainWindow) emit(mainWindow.webContents, "library.updated", status);
     },
   });
+  const guide = createGuide({
+    dataDir,
+    source: subscriptions.source,
+    channels: () => library.guideChannels(),
+    onUpdated: () => {
+      if (mainWindow) emit(mainWindow.webContents, "guide.updated", null);
+    },
+  });
   const playback = createPlayback({
     source: subscriptions.source,
     userAgent,
@@ -131,24 +142,17 @@ async function start(): Promise<void> {
         if (previous?.server !== connected.server || previous.username !== connected.username) {
           // A different account: its channels, and what was last watched, no longer apply.
           playback.closeAll();
-          await library.clear();
-          await preferences.update({
-            lastChannelId: null,
-            lastCategoryId: null,
-            recentChannelIds: [],
-          });
+          await Promise.all([library.clear(), guide.clear()]);
+          await preferences.forget();
         }
+        void refreshGuide(guide);
         return connected;
       },
       "subscription.remove": async () => {
         playback.closeAll();
         await subscriptions.remove();
-        await library.clear();
-        await preferences.update({
-          lastChannelId: null,
-          lastCategoryId: null,
-          recentChannelIds: [],
-        });
+        await Promise.all([library.clear(), guide.clear()]);
+        await preferences.forget();
         return null;
       },
       "library.status": () => library.status(),
@@ -156,6 +160,9 @@ async function start(): Promise<void> {
       "library.channels": (filter) => library.channels(filter),
       "library.channel": ({ channelId }) => library.channel(channelId),
       "library.refresh": () => library.refresh(),
+      "guide.listings": ({ channelIds }) => guide.listings(channelIds),
+      "guide.schedule": ({ channelId }) => guide.schedule(channelId),
+      "guide.search": ({ query }) => guide.search(query),
       "playback.open": ({ channelId, decoders, repair }) =>
         playback.open(channelId, decoders, { repair: repair ?? false }),
       "playback.close": ({ sessionId }) => {
@@ -166,6 +173,7 @@ async function start(): Promise<void> {
       "preferences.get": () => preferences.get(),
       "preferences.update": (patch) => preferences.update(patch),
       "preferences.recordWatch": ({ channelId }) => preferences.recordWatch(channelId),
+      "preferences.toggleFavourite": ({ channelId }) => preferences.toggleFavourite(channelId),
       "updates.status": () => updates.status(),
       "updates.setChannel": ({ channel }) => updates.setChannel(channel),
       "updates.check": () => updates.check(),
@@ -190,7 +198,8 @@ async function start(): Promise<void> {
     void playback.dispose();
   });
 
-  void refreshInBackground(subscriptions, library);
+  void refreshInBackground(subscriptions, library, guide);
+  setInterval(() => void refreshGuide(guide), GUIDE_CHECK_MS);
 }
 
 /**
@@ -205,15 +214,27 @@ function ffmpegPath(): string | null {
   return existsSync(bundled) ? bundled : null;
 }
 
-/** Keeps account status and the channel list current without making the UI wait. */
-async function refreshInBackground(subscriptions: Subscriptions, library: Library): Promise<void> {
+/** Keeps account status, the channel list and the guide current without making the UI wait. */
+async function refreshInBackground(
+  subscriptions: Subscriptions,
+  library: Library,
+  guide: Guide,
+): Promise<void> {
   try {
     if (!(await subscriptions.recheck())) return;
-    const { fetchedAt } = await library.status();
-    if (fetchedAt === null || Date.now() - fetchedAt > CATALOGUE_MAX_AGE_MS)
-      await library.refresh();
+    if (await library.isStale(CATALOGUE_MAX_AGE_MS)) await library.refresh();
   } catch (cause) {
     console.warn("[startup] background refresh failed", cause);
+  }
+  await refreshGuide(guide);
+}
+
+/** Downloads the guide when it is due. A failure keeps the guide in use until the next check. */
+async function refreshGuide(guide: Guide): Promise<void> {
+  try {
+    await guide.refreshIfStale();
+  } catch (cause) {
+    console.warn("[guide] refresh failed", cause);
   }
 }
 

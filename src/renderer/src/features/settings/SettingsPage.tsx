@@ -141,7 +141,7 @@ function Subscription() {
     mutationFn: () => call("subscription.remove"),
     onSuccess: async () => {
       player.reset();
-      useUi.setState({ settings: null, categoryId: null, guideDepth: 0 });
+      useUi.setState({ settings: null, list: { kind: "all" }, view: "home", watching: false });
       await client.resetQueries();
     },
   });

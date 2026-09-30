@@ -16,6 +16,8 @@ export interface ProviderChannel {
   readonly number: number | null;
   readonly logoUrl: string | null;
   readonly categoryIds: readonly string[];
+  /** The channel's id in the provider's programme guide, when it has one. */
+  readonly guideId: string | null;
 }
 
 /**
@@ -36,6 +38,8 @@ export interface LiveProvider {
   liveCatalogue(signal?: AbortSignal): Promise<LiveCatalogue>;
   /** Upstream stream location for a channel. Contains credentials, so it stays in the main process. */
   liveStream(channelId: string): { readonly url: string; readonly format: StreamFormat };
+  /** The provider's programme guide, an XMLTV document, as it downloads. */
+  liveGuide(signal?: AbortSignal): Promise<ReadableStream<Uint8Array>>;
 }
 
 /** Options every adapter shares. `fetch` is injectable so tests can run against a local server. */

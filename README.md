@@ -26,8 +26,8 @@ Get the latest release from the [Releases page](https://github.com/Mr-Streamer-O
 ## Use
 
 1. Enter your provider's server address, username and password, or paste the M3U link your provider sent. Mr. Streamer checks the login and loads your channels.
-2. Pick a channel from Home, browse Live TV by country and category, or search every channel with ⌘K (Ctrl K on Windows and Linux).
-3. While watching, the arrow keys switch channels and open the guide, number keys jump to a channel number, F toggles full screen and M mutes. Backspace returns to the previous channel.
+2. Home plays your last channel, muted, with what's on now. Live TV lists every channel with what's on now and next, by favourites, country and category. ⌘K (Ctrl K on Windows and Linux) searches channels and programmes.
+3. While watching, the arrow keys switch channels and open the channel list, number keys jump to a channel number, F toggles full screen and M mutes. Backspace returns to the previous channel. [Live TV](docs/user/live-tv.md) lists every key.
 
 Settings (⌘, or Ctrl ,) shows your subscription, refreshes the channel list and holds updates.
 
@@ -39,6 +39,7 @@ There are two channels: **Stable** for tested releases, and **Nightly** for the 
 
 ## Help
 
+- [Live TV](docs/user/live-tv.md): Home, the guide, favourites, search and keys
 - [Updates and channels](docs/user/updates.md)
 - [What plays](docs/user/playback.md), including formats that are converted and known limits
 - [Troubleshooting](docs/user/troubleshooting.md): login and keychain, installation warnings, where your data is stored

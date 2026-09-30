@@ -15,6 +15,7 @@ function catalogue(
       number: index + 1,
       logoUrl: null,
       categoryIds: [String(category)],
+      guideId: null,
     })),
   };
 }

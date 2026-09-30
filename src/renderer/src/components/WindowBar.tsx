@@ -1,7 +1,7 @@
-import { House, Search, Settings, Tv } from "lucide-react";
+import { ChevronLeft, House, Search, Settings, Tv } from "lucide-react";
 import type { ReactNode } from "react";
 import { isMac } from "../app/platform.ts";
-import { toDepth, useUi, type View } from "../app/ui-store.ts";
+import { closeWatch, openView, useUi, type View } from "../app/ui-store.ts";
 import { cn } from "../lib/utils.ts";
 import { UpdateIndicator } from "../features/updates/UpdateIndicator.tsx";
 import { WINDOW_BAR } from "../../../shared/window-bar.ts";
@@ -11,6 +11,7 @@ import { Button } from "./ui/button.tsx";
 /**
  * The top of the window: brand, Home and Live TV, search and settings. It is also the window's
  * drag area; macOS draws its traffic lights on the left and Windows its controls on the right.
+ * Over Watch, a back button to the page underneath takes the place of Home and Live TV.
  */
 export function WindowBar({
   className,
@@ -20,6 +21,7 @@ export function WindowBar({
   overlay?: boolean;
 }) {
   const view = useUi((state) => state.view);
+  const watching = useUi((state) => state.watching);
   const settingsOpen = useUi((state) => state.settings !== null);
   const current = settingsOpen ? null : view;
   return (
@@ -36,8 +38,29 @@ export function WindowBar({
         <Logo className="size-5" />
         <b className="text-[0.9375rem] tracking-tight">mr. streamer</b>
       </span>
-      <NavButton view="home" current={current} overlay={overlay} icon={<House />} label="Home" />
-      <NavButton view="live" current={current} overlay={overlay} icon={<Tv />} label="Live TV" />
+      {watching && !settingsOpen ? (
+        <Button variant="media" size="sm" onClick={closeWatch}>
+          <ChevronLeft />
+          {view === "home" ? "Home" : "Live TV"}
+        </Button>
+      ) : (
+        <>
+          <NavButton
+            view="home"
+            current={current}
+            overlay={overlay}
+            icon={<House />}
+            label="Home"
+          />
+          <NavButton
+            view="live"
+            current={current}
+            overlay={overlay}
+            icon={<Tv />}
+            label="Live TV"
+          />
+        </>
+      )}
       <div className="ml-auto flex items-center gap-1.5">
         <UpdateIndicator overlay={overlay} />
         <Button
@@ -82,7 +105,7 @@ function NavButton({
       variant={active ? "secondary" : overlay ? "media" : "ghost"}
       size="sm"
       className={cn(active && "text-white")}
-      onClick={() => useUi.setState({ view, guideDepth: toDepth(0), settings: null })}
+      onClick={() => openView(view)}
     >
       {icon}
       {label}

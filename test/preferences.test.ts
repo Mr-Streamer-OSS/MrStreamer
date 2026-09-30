@@ -20,15 +20,45 @@ describe("preferences", () => {
     expect(new Set(latest.recentChannelIds).size).toBe(12);
   });
 
-  it("keeps the recently watched list when the UI changes the volume", async () => {
+  it("keeps the recently watched and favourite lists when the UI changes the volume", async () => {
     const preferences = createPreferences(await tempDir());
     await preferences.recordWatch("818");
+    await preferences.toggleFavourite("818");
 
     const patch = ipcInputs["preferences.update"]({ volume: 0.3, muted: false });
     if (patch instanceof type.errors) throw new Error(patch.summary);
     const updated = await preferences.update(patch);
 
-    expect(updated).toMatchObject({ volume: 0.3, lastChannelId: "818", recentChannelIds: ["818"] });
+    expect(updated).toMatchObject({
+      volume: 0.3,
+      lastChannelId: "818",
+      recentChannelIds: ["818"],
+      favouriteChannelIds: ["818"],
+    });
+  });
+
+  it("keeps favourites in the order they were added, across restarts", async () => {
+    const dataDir = await tempDir();
+    const preferences = createPreferences(dataDir);
+
+    for (const id of ["a", "b", "c", "b", "d"]) await preferences.toggleFavourite(id);
+
+    expect((await createPreferences(dataDir).get()).favouriteChannelIds).toEqual(["a", "c", "d"]);
+  });
+
+  it("forgets history and favourites, but not the volume, when the subscription changes", async () => {
+    const preferences = createPreferences(await tempDir());
+    await preferences.update({ volume: 0.4, lastCategoryId: "7" });
+    await preferences.recordWatch("818");
+    await preferences.toggleFavourite("818");
+
+    expect(await preferences.forget()).toMatchObject({
+      volume: 0.4,
+      lastChannelId: null,
+      lastCategoryId: null,
+      recentChannelIds: [],
+      favouriteChannelIds: [],
+    });
   });
 
   it("survives a restart", async () => {
@@ -43,7 +73,7 @@ describe("preferences", () => {
     });
   });
 
-  it("reads files saved before the recent list existed", async () => {
+  it("reads files saved before the recent and favourite lists existed", async () => {
     const dataDir = await tempDir();
     await writeFile(
       join(dataDir, "preferences.json"),
@@ -56,6 +86,7 @@ describe("preferences", () => {
       lastChannelId: "5",
       lastCategoryId: null,
       recentChannelIds: [],
+      favouriteChannelIds: [],
     });
   });
 });

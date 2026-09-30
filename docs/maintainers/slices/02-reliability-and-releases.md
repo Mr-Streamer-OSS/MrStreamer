@@ -1,6 +1,6 @@
 # Slice 02: reliable playback and releases
 
-Status: complete on 29 September 2026. Built in pull request #1 (`53437e3`) and the reliability fixes in #2. The first nightly, `0.0.1-nightly.20260929.12`, is published; Stable 0.0.1 follows once Wout has tested the next nightly. [Known gaps](#known-gaps) lists what this slice leaves open.
+Status: complete on 29 September 2026. Built in pull request #1 (`53437e3`) and the reliability fixes in #2. The first nightly, `0.0.1-nightly.20260929.12`, was published that day, and Stable 0.0.1 on 30 September from nightly `.15`'s commit (`263950b`). [Known gaps](#known-gaps) lists what this slice left open; [slice 03](03-live-tv-and-guide.md) carries on.
 
 Outcome: play a broader, verified set of the selected subscription's streams on Mac, Windows and Linux; preserve usable data through refreshes and normal upgrades; prepare nightly or stable releases; update from inside the app or through a downloaded installer.
 
@@ -22,13 +22,13 @@ Recorded 29 Sep 2026. Measurements and their method are in the [playback evaluat
 | 02.4 Visuals              | Done. Option B for the DMG and the update flow.                                                                                                                                                                                                                |
 | 02.5 Releases and signing | Done. Signing, notarization and stapling pass in every release run. Nightly eligibility, Stable promotion, the shared bundle and version records are built and tested; dry runs passed on all three platforms, and queued runs waited without being cancelled. |
 | 02.6 Updates              | Done. In-app update and data preservation verified on Linux (AppImage, and the deb in a container). #2 made retries, cancelling at every step and channel switches reliable, and finds Stable behind any number of nightlies.                                  |
-| 02.7 Back to Stable       | Done. Start fresh verified on Linux (AppImage). Since #2, Stable erases the data when it first starts, so a refused or interrupted install keeps it.                                                                                                           |
+| 02.7 Back to Stable       | Done. Start fresh verified on Linux (AppImage). Since #2, Stable erases the data when it first starts, so a refused or interrupted install keeps it. Removed after the slice (#3): choosing Stable keeps the data.                                             |
 | 02.8 Docs                 | Done. README, user guides, maintainer guides, CONTRIBUTING, security contact, PR and issue templates.                                                                                                                                                          |
 | 02.9 Acceptance           | Done. Wout checked the Mac and Windows installs; the first nightly passed every release check.                                                                                                                                                                 |
 
 ### Known gaps
 
-- Updating from `0.0.1-nightly.20260929.12` to the next nightly through the real feed on Mac and Windows: Wout tests it once that nightly is out, before Stable 0.0.1.
+- Updating from `0.0.1-nightly.20260929.12` to the next nightly through the real feed on Mac and Windows: Wout reported on 30 September that his Mac and Windows testing worked (user-reported).
 - Playback measurements on a Windows PC and on a Linux desktop with a GPU; the evaluation has Mac numbers only.
 - A damaged broadcast takes about 12 s to start while it's re-encoded; the user guide states it.
 - Movie and episode samples were not part of the engine evaluation; libmpv stays the option when their slice needs it.

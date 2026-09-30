@@ -20,6 +20,8 @@ export interface XtreamAccount {
 
 const AUTH_TIMEOUT_MS = 15_000;
 const CATALOGUE_TIMEOUT_MS = 90_000;
+/** The whole guide download. Tens of megabytes on large panels. */
+const GUIDE_TIMEOUT_MS = 5 * 60_000;
 
 /**
  * Turns what the user typed into an account. The server field also accepts a pasted M3U link
@@ -138,6 +140,31 @@ export function xtreamProvider(account: XtreamAccount, options: ProviderOptions)
       };
     },
 
+    async liveGuide(signal) {
+      const timeout = AbortSignal.timeout(GUIDE_TIMEOUT_MS);
+      let response: Response;
+      try {
+        response = await fetchImpl(`${account.server}/xmltv.php?${credentials}`, {
+          headers: { "User-Agent": options.userAgent, Accept: "application/xml" },
+          signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+        });
+      } catch (cause) {
+        if (signal?.aborted) throw cause;
+        throw new AppFailure({
+          kind: "unreachable",
+          server: account.server,
+          detail: describeNetworkError(cause),
+        });
+      }
+      if (response.status === 401 || response.status === 403) {
+        throw new AppFailure({ kind: "invalid-login" });
+      }
+      if (!response.ok || !response.body) {
+        throw new AppFailure({ kind: "provider-error", status: response.status });
+      }
+      return response.body;
+    },
+
     liveStream(channelId) {
       const user = encodeURIComponent(account.username);
       const pass = encodeURIComponent(account.password);
@@ -175,6 +202,7 @@ const StreamRow = type({
   "stream_icon?": "string | null",
   "category_id?": loose,
   "category_ids?": "(string | number)[] | null",
+  "epg_channel_id?": "string | null",
 });
 
 function toCategory(raw: unknown): ProviderCategory[] {
@@ -200,6 +228,7 @@ function toChannel(raw: unknown): ProviderChannel[] {
       number: toInteger(row.num),
       logoUrl: row.stream_icon && /^https?:\/\//i.test(row.stream_icon) ? row.stream_icon : null,
       categoryIds,
+      guideId: row.epg_channel_id?.trim() || null,
     },
   ];
 }

@@ -3,6 +3,7 @@
 ## Using Mr. Streamer
 
 - [Install](../README.md#install)
+- [Live TV](./user/live-tv.md)
 - [Updates and channels](./user/updates.md)
 - [What plays](./user/playback.md)
 - [Troubleshooting](./user/troubleshooting.md)

@@ -1,8 +1,11 @@
 // React Query bindings for the IPC contract. Components read data through these hooks only.
-import { queryOptions, useQuery, type QueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
-import type { Category } from "../../../shared/library.ts";
+import { queryOptions, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useCallback, useMemo } from "react";
+import type { Category, LiveChannel } from "../../../shared/library.ts";
 import { call, listen } from "./ipc.ts";
+
+/** Listings move on as programmes end; asking again each minute is enough for progress. */
+const LISTINGS_REFRESH_MS = 60_000;
 
 export const queries = {
   subscription: () =>
@@ -56,7 +59,58 @@ export const queries = {
       staleTime: Infinity,
       enabled: query.trim().length > 0,
     }),
+  /** Now and next for the given channels. Channels without guide data are missing. */
+  listings: (channelIds: readonly string[]) =>
+    queryOptions({
+      queryKey: ["guide", "listings", ...channelIds],
+      queryFn: () => call("guide.listings", { channelIds: [...channelIds] }),
+      enabled: channelIds.length > 0,
+      staleTime: LISTINGS_REFRESH_MS / 2,
+      refetchInterval: LISTINGS_REFRESH_MS,
+      placeholderData: (previous) => previous,
+    }),
+  schedule: (channelId: string) =>
+    queryOptions({
+      queryKey: ["guide", "schedule", channelId],
+      queryFn: () => call("guide.schedule", { channelId }),
+      staleTime: LISTINGS_REFRESH_MS,
+    }),
+  programmes: (query: string) =>
+    queryOptions({
+      queryKey: ["guide", "search", query],
+      queryFn: () => call("guide.search", { query }),
+      staleTime: LISTINGS_REFRESH_MS,
+      enabled: query.trim().length > 0,
+    }),
 };
+
+/** Stars or unstars a channel. The favourites list updates as soon as the main process has it. */
+export function useToggleFavourite(): (channelId: string) => void {
+  const client = useQueryClient();
+  return useCallback(
+    (channelId: string) => {
+      void call("preferences.toggleFavourite", { channelId }).then(
+        (preferences) => client.setQueryData(queries.preferences().queryKey, preferences),
+        () => {},
+      );
+    },
+    [client],
+  );
+}
+
+/** The last watched channel, or null before the first or once the catalogue no longer has it. */
+export function useLastChannel(): LiveChannel | null {
+  const { data: preferences } = useQuery(queries.preferences());
+  const channelId = preferences?.lastChannelId ?? null;
+  const { data } = useQuery({ ...queries.channel(channelId ?? ""), enabled: channelId !== null });
+  return (channelId !== null && data) || null;
+}
+
+/** The ids of the favourite channels, in the order they were added. */
+export function useFavouriteIds(): ReadonlySet<string> {
+  const { data } = useQuery(queries.preferences());
+  return useMemo(() => new Set(data?.favouriteChannelIds), [data]);
+}
 
 function useCategories() {
   return useQuery(queries.categories());
@@ -72,6 +126,13 @@ export function useCategoryMap(): ReadonlyMap<string, Category> {
 export function syncLibraryUpdates(client: QueryClient): () => void {
   return listen("library.updated", () => {
     void client.invalidateQueries({ queryKey: ["library"] });
+  });
+}
+
+/** Asks for programmes again once the main process has a new guide. */
+export function syncGuideUpdates(client: QueryClient): () => void {
+  return listen("guide.updated", () => {
+    void client.invalidateQueries({ queryKey: ["guide"] });
   });
 }
 

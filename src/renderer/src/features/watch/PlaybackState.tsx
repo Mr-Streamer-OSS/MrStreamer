@@ -1,5 +1,5 @@
 // What the picture area says when there is no picture: idle, tuning, reconnecting or failed.
-import { List, Play, RotateCw, SkipForward } from "lucide-react";
+import { Play, RotateCw, SkipForward } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import type { LiveChannel } from "../../../../shared/library.ts";
 import { useUi } from "../../app/ui-store.ts";
@@ -18,32 +18,16 @@ export function PlaybackState({
   channel,
   onWatch,
   onNext,
-  onOpenGuide,
 }: {
-  /** The selected or last watched channel. */
-  channel: LiveChannel | null;
+  channel: LiveChannel;
   onWatch: () => void;
   onNext: () => void;
-  onOpenGuide: () => void;
 }) {
   const phase = usePlayer((state) => state.phase);
   if (phase.kind === "playing") return null;
 
   let message: Message;
-  if (!channel) {
-    message = {
-      title: "Pick a channel",
-      body: "Browse by country and category, or search every channel.",
-      actions: (
-        <>
-          <Button variant="primary" size="lg" onClick={onOpenGuide}>
-            <List />
-            Browse channels
-          </Button>
-        </>
-      ),
-    };
-  } else if (phase.kind === "idle") {
+  if (phase.kind === "idle") {
     message = {
       title: channel.title,
       actions: (
@@ -81,7 +65,7 @@ export function PlaybackState({
 
   return (
     <div className="pointer-events-auto flex max-w-[34rem] flex-col items-center px-8 text-center">
-      {channel && <ChannelLogo channel={channel} className="mb-6 h-14 w-20" />}
+      <ChannelLogo channel={channel} className="mb-6 h-14 w-20" />
       <h2 className="text-3xl font-semibold tracking-tight text-balance">{message.title}</h2>
       {message.body && (
         <p className="mt-3 text-[0.9375rem] leading-relaxed text-muted-foreground">

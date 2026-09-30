@@ -2,22 +2,23 @@
 
 The suite checks what the services promise, through their public functions, against a fake provider. It stays small: each test describes a behaviour a user or the release process depends on.
 
-| File                        | Covers                                                                                                                                                                    |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test/subscription.test.ts` | Logins, M3U links, account states, restarts, removal racing a slow account check, keychain loss                                                                           |
-| `test/library.test.ts`      | Loading, search, cache after restart, failed, empty and short refreshes, ids across renames                                                                               |
-| `test/catalogue.test.ts`    | Display names and region grouping                                                                                                                                         |
-| `test/preferences.test.ts`  | History order and limits, restarts, older files                                                                                                                           |
-| `test/playback.test.ts`     | The local proxy, one-connection switching, refusals, and what the player receives for each codec clip                                                                     |
-| `test/updates.test.ts`      | Channels, release routing, going back to Stable, downloads and retries, channel switches, checks answering late, refused installs, Stable behind a full page of nightlies |
-| `test/installer.test.ts`    | The electron-updater adapter: cancelling at every step, refused installs                                                                                                  |
-| `test/release.test.ts`      | Version order, when a nightly is due, which commit a stable release builds, release notes, and refused versions                                                           |
+| File                        | Covers                                                                                                                                                                                          |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test/subscription.test.ts` | Logins, M3U links, account states, restarts, removal racing a slow account check, keychain loss                                                                                                 |
+| `test/library.test.ts`      | Loading, search, cache after restart, caches saved before guide ids, failed, empty and short refreshes, ids across renames                                                                      |
+| `test/catalogue.test.ts`    | Display names and region grouping                                                                                                                                                               |
+| `test/preferences.test.ts`  | History order and limits, favourites order, forgetting on account changes, restarts, older files                                                                                                |
+| `test/guide.test.ts`        | Now and next, the rest of the day, untidy XMLTV in small pieces, programme search, restarts from disk, six-hour refreshes and failed ones, answering before the first download, account changes |
+| `test/playback.test.ts`     | The local proxy, one-connection switching, refusals, and what the player receives for each codec clip                                                                                           |
+| `test/updates.test.ts`      | Channels, release routing, going back to Stable, downloads and retries, channel switches, checks answering late, refused installs, Stable behind a full page of nightlies                       |
+| `test/installer.test.ts`    | The electron-updater adapter: cancelling at every step, refused installs                                                                                                                        |
+| `test/release.test.ts`      | Version order, when a nightly is due, which commit a stable release builds, release notes, and refused versions                                                                                 |
 
 `pnpm test` runs them all. The conversion tests need `ffmpeg` and `ffprobe`: they use the ffmpeg on PATH, or `MR_STREAMER_FFMPEG`, and skip without one. CI installs both.
 
 ## Fake provider and codec clips
 
-`test/fake-provider.ts` answers like an Xtream Codes panel, with the untidiness of real ones: prefixed names, separator entries, numbers sent as strings, missing logos, one connection at a time. Tests can make catalogue requests fail or change the channels it lists. Its "TEST | Formats and failures" category streams the clips in `test/fixtures`, plus an offline channel.
+`test/fake-provider.ts` answers like an Xtream Codes panel, with the untidiness of real ones: prefixed names, separator entries, numbers sent as strings, missing logos, one connection at a time. Tests can make catalogue requests fail or change the channels it lists. About half its channels have a guide id, shared by variants of one channel, and `xmltv.php` serves half-hour programmes around the current time. Tests can replace that document, fail it, hold it open or send it in pieces of a few bytes, and count guide and stream requests. Its "TEST | Formats and failures" category streams the clips in `test/fixtures`, plus an offline channel.
 
 The clips are generated, never recorded from a real channel. Three seconds of test picture and tone, 128 × 72:
 
@@ -38,7 +39,7 @@ ffmpeg -f lavfi -i smptebars=size=128x72:rate=25 -f lavfi -i sine=frequency=440:
 
 ## Packaged app
 
-`test/e2e/packaged-app.ts` starts a built app with a throwaway profile, connects it to the fake provider through the login form, and plays a channel that passes straight through and one the bundled ffmpeg converts. It passes when both show a moving picture with decoded sound.
+`test/e2e/packaged-app.ts` starts a built app with a throwaway profile, connects it to the fake provider through the login form, and plays a channel that passes straight through and one the bundled ffmpeg converts. Then it leaves Watch for Home and watches again from there. It passes when both channels show a moving picture with decoded sound, and Home plays the same stream muted while Watch plays it with sound, without another request to the provider.
 
 ```sh
 node test/e2e/packaged-app.ts "/Applications/Mr. Streamer.app/Contents/MacOS/Mr. Streamer" -- --use-mock-keychain
@@ -46,7 +47,11 @@ node test/e2e/packaged-app.ts "$LOCALAPPDATA\Programs\mrstreamer\Mr. Streamer.ex
 xvfb-run -a node test/e2e/packaged-app.ts "/opt/Mr. Streamer/mrstreamer" -- --no-sandbox
 ```
 
-`--use-mock-keychain` keeps a macOS run away from the real Keychain.
+`--use-mock-keychain` keeps a macOS run away from the real Keychain. Without FUSE, run an AppImage with `APPIMAGE_EXTRACT_AND_RUN=1` in the environment. A development build runs it too, after `pnpm build`: `xvfb-run -a node test/e2e/packaged-app.ts node_modules/electron/dist/electron -- --no-sandbox "$PWD"`.
+
+## Guide budgets
+
+`node --expose-gc scripts/measure-guide.ts` generates a guide the size of a large panel's (1,300 guide channels, 70 programmes each, 36 MB) for a 13,000-channel catalogue, streams it through the guide service and reports download and indexing time, the longest main-process stall, reading from disk after a restart, now and next for 60 channels, search, and memory. `--file guide.xml` measures a real XMLTV file instead; keep provider files in `.local/`.
 
 ## CI
 
