@@ -225,9 +225,9 @@ function make(deps: UpdatesDeps) {
         const release = target;
         const version = formatVersion(release.version);
         if (!wanted(version)) return yield* drop;
-        const on = yield* getChannel;
         const mine = {};
         attempt = mine;
+        // Set before anything waits, so a second download finds this one.
         update = { kind: "downloading", version, percent: 0 };
         // In the service's scope, so quitting stops it too. Known before the UI hears of it, so
         // a cancel always finds it.
@@ -243,7 +243,13 @@ function make(deps: UpdatesDeps) {
                 (percent) => {
                   if (attempt !== mine || signal.aborted) return;
                   update = { kind: "downloading", version, percent };
-                  PubSub.publishUnsafe(updates, { version: deps.installed, channel: on, update });
+                  if (chosen) {
+                    PubSub.publishUnsafe(updates, {
+                      version: deps.installed,
+                      channel: chosen,
+                      update,
+                    });
+                  }
                 },
                 signal,
               ),

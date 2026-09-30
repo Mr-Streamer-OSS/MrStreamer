@@ -191,6 +191,20 @@ describe("in-app updates", () => {
     },
   );
 
+  it("downloads once when asked twice at the same time", async () => {
+    const fake = fakeInstaller({ hold: true });
+    const { service } = await updates("0.2.0", PUBLISHED, { installer: fake.installer });
+    await service.check();
+
+    const [first, second] = [service.download(), service.download()];
+    await vi.waitFor(() => expect(fake.downloads).toHaveLength(1));
+    fake.release();
+
+    expect((await first).update).toEqual({ kind: "ready", version: "0.2.1" });
+    expect((await second).update.kind).toBe("downloading");
+    expect(fake.downloads).toHaveLength(1);
+  });
+
   it("reports a failed download, and downloads again on Try again", async () => {
     const fake = fakeInstaller({ failures: 1 });
     const { service } = await updates("0.2.0", PUBLISHED, { installer: fake.installer });

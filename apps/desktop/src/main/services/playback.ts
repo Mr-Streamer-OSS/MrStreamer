@@ -26,6 +26,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
+import * as Semaphore from "effect/Semaphore";
 import { createCleanStart } from "../playback/clean-start.ts";
 import { ffmpegArguments, planConversion, type Conversion } from "../playback/convert.ts";
 import { createInspector, type Inspection, type StreamLayout } from "../playback/inspect.ts";
@@ -95,6 +96,8 @@ function make(deps: PlaybackDeps) {
     const scope = yield* Effect.scope;
     const fetchImpl = deps.fetch ?? fetch;
     const sessions = new Map<string, Session>();
+    /** Opens one at a time, so switching fast never leaves two sessions open. */
+    const openOne = (yield* Semaphore.make(1)).withPermits(1);
     const { port } = yield* Effect.acquireRelease(
       Effect.promise(() => listen((request, response) => void serve(request, response))),
       ({ server }) =>
@@ -272,44 +275,46 @@ function make(deps: PlaybackDeps) {
         decoders: readonly Codec[],
         options: { readonly repair?: boolean } = {},
       ) =>
-        Effect.gen(function* () {
-          const source = yield* subscriptions.source;
-          if (!source) return yield* new Failed({ error: { kind: "no-subscription" } });
-          yield* closeAll;
+        openOne(
+          Effect.gen(function* () {
+            const source = yield* subscriptions.source;
+            if (!source) return yield* new Failed({ error: { kind: "no-subscription" } });
+            yield* closeAll;
 
-          const upstream = source.provider.liveStream(channelId);
-          const id = randomUUID();
-          const closed = new AbortController();
-          const sessionScope = yield* Scope.fork(scope);
-          yield* Scope.addFinalizer(
-            sessionScope,
-            Effect.sync(() => {
-              closed.abort();
-              sessions.delete(id);
-            }),
-          );
-          const session: Session = {
-            id,
-            token: randomBytes(18).toString("base64url"),
-            channelId,
-            upstreamUrl: upstream.url,
-            format: upstream.format,
-            decoders: new Set(decoders),
-            repair: options.repair ?? false,
-            closed,
-            scope: sessionScope,
-            active: null,
-            failure: null,
-          };
-          sessions.set(id, session);
-          const extension = upstream.format === "mpegts" ? "ts" : "m3u8";
-          return {
-            sessionId: id,
-            channelId,
-            url: `http://127.0.0.1:${port}/stream/${session.token}.${extension}`,
-            format: upstream.format,
-          };
-        }),
+            const upstream = source.provider.liveStream(channelId);
+            const id = randomUUID();
+            const closed = new AbortController();
+            const sessionScope = yield* Scope.fork(scope);
+            yield* Scope.addFinalizer(
+              sessionScope,
+              Effect.sync(() => {
+                closed.abort();
+                sessions.delete(id);
+              }),
+            );
+            const session: Session = {
+              id,
+              token: randomBytes(18).toString("base64url"),
+              channelId,
+              upstreamUrl: upstream.url,
+              format: upstream.format,
+              decoders: new Set(decoders),
+              repair: options.repair ?? false,
+              closed,
+              scope: sessionScope,
+              active: null,
+              failure: null,
+            };
+            sessions.set(id, session);
+            const extension = upstream.format === "mpegts" ? "ts" : "m3u8";
+            return {
+              sessionId: id,
+              channelId,
+              url: `http://127.0.0.1:${port}/stream/${session.token}.${extension}`,
+              format: upstream.format,
+            };
+          }),
+        ),
 
       close: (sessionId: string) =>
         Effect.suspend(() => {
