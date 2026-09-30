@@ -4,6 +4,7 @@ import { type } from "arktype";
 import { AppFailure, type AppError } from "../../shared/errors.ts";
 import type { CatalogueStatus, Category, LiveChannel } from "../../shared/library.ts";
 import { normalize } from "../../shared/text.ts";
+import { trustedGuideIds } from "../catalogue/guide-ids.ts";
 import { normalizeCatalogue } from "../catalogue/normalize.ts";
 import { readJsonFile, removeFile, writeJsonFile } from "../platform/json-file.ts";
 import type { LiveCatalogue, LiveProvider } from "../providers/provider.ts";
@@ -261,12 +262,16 @@ function index(file: CatalogueFile, outdated: boolean): IndexedCatalogue {
       else byCategory.set(categoryId, [channel]);
     }
   }
-  const guideIds = new Map<string, string>();
+  const guideIds = trustedGuideIds(
+    file.channels.flatMap(({ id, guideId }) => {
+      const channel = byId.get(id);
+      return channel && guideId ? [{ channel, guideId }] : [];
+    }),
+  );
   const byGuideId = new Map<string, LiveChannel[]>();
-  for (const { id, guideId } of file.channels) {
+  for (const [id, guideId] of guideIds) {
     const channel = byId.get(id);
-    if (!guideId || !channel) continue;
-    guideIds.set(id, guideId);
+    if (!channel) continue;
     const list = byGuideId.get(guideId);
     if (list) list.push(channel);
     else byGuideId.set(guideId, [channel]);

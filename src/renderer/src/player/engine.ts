@@ -4,6 +4,10 @@ import Hls from "hls.js";
 import mpegts from "mpegts.js";
 import type { StreamFormat } from "../../../shared/playback.ts";
 
+/** The picture may run this far behind the newest data before it jumps forward. */
+const LIVE_MAX_LATENCY_S = 8;
+/** How much buffer a jump forward keeps, against the next network hiccup. */
+const LIVE_KEEP_BUFFER_S = 3;
 /** No picture or sound within this long counts as a failed start. */
 const START_TIMEOUT_MS = 20_000;
 /** A clock that stands still this long after playback started counts as a broken stream. */
@@ -72,10 +76,12 @@ function mpegtsEngine(video: HTMLVideoElement, url: string): Engine {
       enableWorker: true,
       lazyLoad: false,
       autoCleanupSourceBuffer: true,
-      // Speed up slightly when the buffer drifts far behind live, instead of letting delay pile up.
-      liveSync: true,
-      liveSyncMaxLatency: 10,
-      liveSyncTargetLatency: 5,
+      // Providers send a burst of buffered seconds when a stream opens, and a stall can leave the
+      // picture behind live. Jump forward when that exceeds the maximum, keeping some buffer,
+      // rather than play faster: a faster rate is audible and visible for half a minute.
+      liveBufferLatencyChasing: true,
+      liveBufferLatencyMaxLatency: LIVE_MAX_LATENCY_S,
+      liveBufferLatencyMinRemain: LIVE_KEEP_BUFFER_S,
     },
   );
   const life = lifecycle(video, () => {
