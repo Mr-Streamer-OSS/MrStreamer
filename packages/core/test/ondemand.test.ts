@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { byIds, indexCatalogue, search } from "../src/ondemand/catalogue.ts";
 import { collections } from "../src/ondemand/collections.ts";
+import { movieDetails } from "../src/ondemand/details.ts";
+import { versionLabels } from "../src/ondemand/languages.ts";
 import { episodeName, titleName } from "../src/ondemand/names.ts";
 import { channelSubtitle } from "../src/ondemand/tracks.ts";
 import { continueWatching, isFinished, type TitleRow } from "../src/viewing/titles.ts";
@@ -245,5 +247,79 @@ describe("subtitles a channel starts with", () => {
     const tracks = { audio: [sound("en")], subtitles: [subtitles("nl", true), subtitles("nl")] };
 
     expect(channelSubtitle(tracks, "nl")?.forced).toBe(false);
+  });
+});
+
+describe("version labels", () => {
+  it("says what sets each version of a film apart, as its marks put it", () => {
+    const names = [
+      "Night Harbour 4K (EN)",
+      "Night Harbour 1080p (NL AUDIO)",
+      "Night Harbour (DE-DUBBED)",
+      "Night Harbour 720p (MULTI)",
+      "Night Harbour (NL)",
+      "Night Harbour (AR)",
+      "Night Harbour",
+    ];
+
+    expect(versionLabels(names.map((name) => titleName(name)))).toEqual([
+      "English · 4K",
+      "Nederlands audio · 1080p",
+      "Deutsch audio",
+      "Multi-language · 720p",
+      "Nederlands",
+      "AR",
+      "Standard",
+    ]);
+  });
+
+  it("numbers versions with the same marks", () => {
+    expect(versionLabels([{ tags: ["NL"] }, { tags: ["NL"] }, { tags: [] }])).toEqual([
+      "Nederlands",
+      "Nederlands 2",
+      "Standard",
+    ]);
+  });
+});
+
+describe("details", () => {
+  it.each([
+    ["the version's own name, marks and all", "Blow 1080p (NL AUDIO)", null],
+    ["the shown name in capitals", "BLOW", null],
+    ["another name", "Blow: Het Verhaal", "Blow: Het Verhaal"],
+  ])("leave out the provider's original name when it is %s", (_, originalName, shown) => {
+    const title = {
+      kind: "movie" as const,
+      id: "1",
+      name: "Blow 2001 (NL AUDIO)",
+      title: "Blow",
+      originalTitle: null,
+      tags: ["NL AUDIO"],
+      year: 2001,
+      posterUrl: null,
+      backdropUrl: null,
+      rating: null,
+      addedAt: null,
+      adult: false,
+      tmdbId: null,
+      genres: [],
+      versions: [{ id: "1", tags: ["NL AUDIO"] }],
+    };
+    const provider = {
+      originalName,
+      plot: null,
+      genres: [],
+      cast: [],
+      directors: [],
+      releaseDate: null,
+      duration: null,
+      posterUrl: null,
+      backdropUrl: null,
+      seasons: [],
+      episodes: [],
+      container: null,
+    };
+
+    expect(movieDetails(title, provider).originalTitle).toBe(shown);
   });
 });

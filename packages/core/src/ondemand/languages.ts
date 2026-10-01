@@ -90,3 +90,40 @@ export function suitability(tags: readonly string[], language: string): number {
 export function suits(fit: number, madeIn: string | null | undefined, language: string): boolean {
   return fit >= 3 || (fit >= 1 && (!madeIn || madeIn === language));
 }
+
+/** Marks for every language at once, as a version's menu names them. */
+const MULTI_NAMES: Readonly<Record<string, string>> = {
+  MULTI: "Multi-language",
+  "MULTI AUDIO": "Multi-language",
+  MULTISUB: "Multi-language subtitles",
+  "MULTI SUB": "Multi-language subtitles",
+  VO: "Original language",
+};
+
+/**
+ * What sets a version apart, from its marks, as the provider wrote them: "Nederlands · 4K",
+ * "Deutsch audio", "Multi-language · 720p". Without a mark, "Standard". Versions with the same
+ * marks are numbered, "Nederlands 2", so each can be told apart.
+ */
+export function versionLabels(versions: readonly { readonly tags: readonly string[] }[]): string[] {
+  const labels = versions.map(({ tags }) => {
+    const parts = tags.map((tag) => {
+      const mark = tag.toUpperCase();
+      const multi = MULTI_NAMES[mark];
+      if (multi) return multi;
+      const space = mark.search(WORD_END);
+      const language = LANGUAGE_MARKS.get(space < 0 ? mark : mark.slice(0, space));
+      if (!language) return tag;
+      return space >= 0 && DUBBED.test(mark.slice(space))
+        ? `${language.name} audio`
+        : language.name;
+    });
+    return parts.join(" · ") || "Standard";
+  });
+  const seen = new Map<string, number>();
+  return labels.map((label) => {
+    const count = (seen.get(label) ?? 0) + 1;
+    seen.set(label, count);
+    return count === 1 ? label : `${label} ${count}`;
+  });
+}

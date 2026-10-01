@@ -22,6 +22,11 @@ export const Preferences = type({
   "tmdbKey?": "string",
   /** Titles the provider marks for adults show, in their own tab. Off when absent. */
   "adultTitles?": "boolean",
+  /**
+   * The version the viewer picked for a movie or series, by kind and TMDB id: "movie:603" to the
+   * version's id. Titles without one play the version that suits them best.
+   */
+  "titleVersions?": "Record<string, string>",
 });
 export type Preferences = typeof Preferences.infer;
 

@@ -25,6 +25,7 @@ import { queries } from "../../lib/queries.ts";
 import { call } from "../../lib/ipc.ts";
 import {
   movieNow,
+  pickedVersion,
   playTitle,
   removeFromContinue,
   useContinueWatching,
@@ -337,6 +338,7 @@ function Featured({ title, resume }: { title: Title; resume: ContinueEntry | nul
     .filter(Boolean)
     .join(" · ");
   const resumeEntry = useResume();
+  const picked = pickedVersion(title, useQuery(queries.preferences()).data);
   return (
     <section className="relative mb-9 aspect-[21/8] max-h-[26rem] w-full overflow-hidden rounded-2xl">
       <Artwork url={title.backdropUrl} name={title.title} size="full" plain />
@@ -350,7 +352,9 @@ function Featured({ title, resume }: { title: Title; resume: ContinueEntry | nul
               variant="primary"
               size="lg"
               onClick={() =>
-                resume ? resumeEntry(resume) : playTitle(movieNow(title, title.backdropUrl), 0)
+                resume
+                  ? resumeEntry(resume)
+                  : playTitle(movieNow({ ...title, id: picked ?? title.id }, title.backdropUrl), 0)
               }
             >
               <Play className="fill-current" />

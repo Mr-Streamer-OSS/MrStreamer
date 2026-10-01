@@ -1,18 +1,23 @@
 // A movie's or series' details, in a sheet over the page it was opened from, which stays in view
 // behind it. Resume is the main action for anything partly watched, and From the beginning plays
-// at once, without asking. A series opens on the season being watched, and marks the episode.
+// at once, without asking. A title with several versions plays the one picked with the arrow
+// beside Play, else the one that suits best; the sheet shows that version, so a series lists its
+// episodes. A series opens on the season being watched, and marks the episode.
 import { Dialog } from "@base-ui/react/dialog";
-import { useQuery } from "@tanstack/react-query";
-import { Check, Play, RotateCcw, X } from "lucide-react";
-import { useState } from "react";
+import { Menu } from "@base-ui/react/menu";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { Check, ChevronDown, Play, RotateCcw, X } from "lucide-react";
+import { useState, type ReactNode } from "react";
 import type {
   Episode,
   MovieDetails,
   SeriesDetails,
+  Title,
   TitleDetails,
   TitleRef,
 } from "@mrstreamer/contracts/ondemand";
 import type { TitleProgress } from "@mrstreamer/contracts/viewing";
+import { versionLabels } from "@mrstreamer/core/ondemand/languages";
 import { useUi, type DetailsTarget } from "../../app/ui-store.ts";
 import { Progress } from "../../components/Progress.tsx";
 import { Artwork } from "../../components/TitleArt.tsx";
@@ -20,29 +25,62 @@ import { Button } from "../../components/ui/button.tsx";
 import { appError, describeError } from "../../lib/errors.ts";
 import { queries } from "../../lib/queries.ts";
 import {
+  automaticVersion,
   episodeLabel,
   episodeNow,
   movieNow,
   nextEpisode,
+  pickedVersion,
   removeFromContinue,
   resumePoint,
   runtime,
   timeLeftOf,
   playTitle,
+  usePickVersion,
 } from "../../lib/titles.ts";
 import { cn } from "../../lib/utils.ts";
 
 const close = () => useUi.setState({ details: null });
 
+/** Which version plays, and how the arrow beside Play offers the others. */
+interface Versions {
+  /** The title from the lists, with every version; null when they don't have it. */
+  readonly title: Title | null;
+  readonly playing: string;
+  readonly picked: string | null;
+}
+
 export function DetailsView({ target }: { target: DetailsTarget }) {
-  const details = useQuery(queries.details(target.kind, target.id));
+  // Which version plays comes from the lists, the progress and the picks, all read without the
+  // network, so only that version's details are asked for.
+  const listed = useQuery(queries.titles(target.kind, [target.id]));
+  const title = listed.data?.[0] ?? null;
+  const ids = title?.versions.map((version) => version.id) ?? [];
+  const progress = useQuery({
+    ...queries.progress(target.kind === "movie" ? { movieIds: ids } : { seriesIds: ids }),
+    enabled: ids.length > 0,
+  });
+  const preferences = useQuery(queries.preferences());
+  const picked = title ? pickedVersion(title, preferences.data) : null;
+  const playing = picked ?? (title ? automaticVersion(title, progress.data ?? []) : target.id);
+  const known = !listed.isPending && (!title || !progress.isPending) && !preferences.isPending;
+  // Another version's details replace these once they arrive; nothing plays from them meanwhile.
+  const details = useQuery({
+    ...queries.details(target.kind, playing),
+    enabled: known,
+    placeholderData: keepPreviousData,
+  });
   return (
     <Dialog.Root open onOpenChange={(open) => !open && close()}>
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 z-20 bg-black/65 transition-opacity duration-200 data-ending-style:opacity-0 data-starting-style:opacity-0" />
         <Dialog.Popup className="fixed inset-x-[max(1.5rem,calc((100vw-68rem)/2))] top-[3.75rem] bottom-0 z-20 overflow-y-auto overscroll-contain rounded-t-3xl bg-[#0b0b0c] shadow-2xl ring-1 ring-white/10 outline-none transition-[opacity,translate] duration-200 data-ending-style:translate-y-4 data-ending-style:opacity-0 data-starting-style:translate-y-4 data-starting-style:opacity-0">
           {details.data ? (
-            <Content details={details.data} />
+            <Content
+              details={details.data}
+              versions={{ title, playing, picked }}
+              switching={details.isPlaceholderData}
+            />
           ) : (
             <div className="p-10 text-[0.9375rem] text-muted-foreground">
               <Dialog.Title className="sr-only">Details</Dialog.Title>
@@ -62,7 +100,16 @@ export function DetailsView({ target }: { target: DetailsTarget }) {
   );
 }
 
-function Content({ details }: { details: TitleDetails }) {
+function Content({
+  details,
+  versions,
+  switching,
+}: {
+  details: TitleDetails;
+  versions: Versions;
+  /** Another version's details are on their way. */
+  switching: boolean;
+}) {
   const { title } = details;
   const facts = [
     title.year,
@@ -72,10 +119,9 @@ function Content({ details }: { details: TitleDetails }) {
       : null,
     details.genres.slice(0, 3).join(", ") || null,
     title.rating ? `★ ${title.rating.toFixed(1)}` : null,
-    ...title.tags,
   ].filter(Boolean);
   return (
-    <>
+    <div inert={switching || undefined}>
       <div className="relative h-[clamp(12rem,32vh,22rem)] overflow-hidden rounded-t-3xl">
         <Artwork
           url={details.backdropUrl ?? title.posterUrl}
@@ -94,9 +140,9 @@ function Content({ details }: { details: TitleDetails }) {
         )}
         <div className="mt-2 text-[0.9375rem] text-muted-foreground">{facts.join(" · ")}</div>
         {details.kind === "movie" ? (
-          <MovieActions details={details} />
+          <MovieActions details={details} versions={versions} />
         ) : (
-          <SeriesActions details={details} />
+          <SeriesActions details={details} versions={versions} />
         )}
         {details.plot && (
           <p className="mt-6 max-w-[48rem] text-[0.9375rem] leading-relaxed text-foreground/85">
@@ -118,26 +164,24 @@ function Content({ details }: { details: TitleDetails }) {
         )}
         {details.kind === "series" && <Episodes details={details} />}
       </div>
-    </>
+    </div>
   );
 }
 
-function MovieActions({ details }: { details: MovieDetails }) {
+function MovieActions({ details, versions }: { details: MovieDetails; versions: Versions }) {
   const progress = useQuery(
     queries.progress({ movieIds: details.title.versions.map((version) => version.id) }),
   );
-  // The version watched last, which Resume carries on in.
+  // Progress counts across versions: Resume carries on from there in the version that plays.
   const current = progress.data?.toSorted((a, b) => b.at - a.at)[0];
   const partly = current && !current.finished && current.position > 0;
-  const now = movieNow(details.title, details.backdropUrl);
-  const resumed = partly
-    ? movieNow({ ...details.title, id: current.title.id }, details.backdropUrl)
-    : now;
+  const now = movieNow({ ...details.title, id: versions.playing }, details.backdropUrl);
   return (
     <Actions
+      versions={versions}
       progress={partly ? current : undefined}
       primaryLabel={partly ? "Resume" : "Play"}
-      onPrimary={() => playTitle(resumed, resumePoint(partly ? current : undefined))}
+      onPrimary={() => playTitle(now, resumePoint(partly ? current : undefined))}
       onBeginning={partly ? () => playTitle(now, 0) : null}
       onRemove={
         partly
@@ -192,7 +236,7 @@ function seriesPlayed(progress: readonly TitleProgress[]): TitleRef[] {
   return [...bySeries.values()];
 }
 
-function SeriesActions({ details }: { details: SeriesDetails }) {
+function SeriesActions({ details, versions }: { details: SeriesDetails; versions: Versions }) {
   const progress = useQuery(
     queries.progress({ seriesIds: details.title.versions.map((version) => version.id) }),
   );
@@ -207,6 +251,7 @@ function SeriesActions({ details }: { details: SeriesDetails }) {
   const started = (progress.data?.length ?? 0) > 0;
   return (
     <Actions
+      versions={versions}
       progress={partly}
       primaryLabel={label}
       onPrimary={() => playTitle(now, resumePoint(partly))}
@@ -217,18 +262,25 @@ function SeriesActions({ details }: { details: SeriesDetails }) {
 }
 
 function Actions({
+  versions,
   progress,
   primaryLabel,
   onPrimary,
   onBeginning,
   onRemove,
 }: {
+  versions: Versions;
   progress: TitleProgress | undefined;
   primaryLabel: string;
   onPrimary: () => void;
   onBeginning: (() => void) | null;
   onRemove: (() => void) | null;
 }) {
+  const { title, playing } = versions;
+  const all = title?.versions ?? [];
+  const labels = versionLabels(all);
+  const label = labels[all.findIndex((version) => version.id === playing)];
+  const several = title !== null && all.length > 1;
   return (
     <div className="mt-6">
       {progress && (
@@ -238,11 +290,24 @@ function Actions({
         </div>
       )}
       <div className="flex flex-wrap items-center gap-3">
-        {/* Focused as the details arrive, so Enter plays. */}
-        <Button variant="primary" size="lg" autoFocus onClick={onPrimary}>
-          <Play className="fill-current" />
-          {primaryLabel}
-        </Button>
+        <div className="flex">
+          {/* Focused as the details arrive, so Enter plays. */}
+          <Button
+            variant="primary"
+            size="lg"
+            autoFocus
+            onClick={onPrimary}
+            className={cn(several && "rounded-r-none pr-5")}
+          >
+            <Play className="fill-current" />
+            {primaryLabel}
+          </Button>
+          {several && (
+            <VersionMenu title={title} picked={versions.picked} labels={labels}>
+              <ChevronDown />
+            </VersionMenu>
+          )}
+        </div>
         {onBeginning && (
           <Button variant="secondary" size="lg" onClick={onBeginning}>
             <RotateCcw />
@@ -255,7 +320,76 @@ function Actions({
           </Button>
         )}
       </div>
+      {/* What plays: "English · 4K". A version without marks says nothing. */}
+      {label && (several || label !== "Standard") && (
+        <div className="mt-3 text-[0.8125rem] text-muted-foreground">{label}</div>
+      )}
     </div>
+  );
+}
+
+const AUTOMATIC = "automatic";
+
+/** The arrow beside Play: Automatic, or one version, remembered for the title. */
+function VersionMenu({
+  title,
+  picked,
+  labels,
+  children,
+}: {
+  title: Title;
+  picked: string | null;
+  labels: readonly string[];
+  children: ReactNode;
+}) {
+  const pick = usePickVersion();
+  return (
+    <Menu.Root>
+      <Menu.Trigger
+        render={
+          <Button
+            variant="primary"
+            size="lg"
+            aria-label="Versions"
+            className="rounded-l-none border-l border-black/20 px-3"
+          />
+        }
+      >
+        {children}
+      </Menu.Trigger>
+      <Menu.Portal>
+        <Menu.Positioner side="bottom" align="start" sideOffset={8} className="z-[60]">
+          <Menu.Popup className="max-h-[60vh] w-[18rem] overflow-y-auto rounded-2xl bg-popover p-2 text-[0.9375rem] shadow-2xl ring-1 ring-white/12 outline-none transition-[opacity,scale] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
+            <Menu.RadioGroup
+              value={picked ?? AUTOMATIC}
+              onValueChange={(value: string) => pick(title, value === AUTOMATIC ? null : value)}
+            >
+              <VersionItem value={AUTOMATIC}>Automatic</VersionItem>
+              {title.versions.map((version, index) => (
+                <VersionItem key={version.id} value={version.id}>
+                  {labels[index]}
+                </VersionItem>
+              ))}
+            </Menu.RadioGroup>
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
+  );
+}
+
+function VersionItem({ value, children }: { value: string; children: ReactNode }) {
+  return (
+    <Menu.RadioItem
+      value={value}
+      closeOnClick
+      className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-foreground/80 outline-none data-checked:text-white data-highlighted:bg-white/6"
+    >
+      <span className="grid size-1.5 flex-none">
+        <Menu.RadioItemIndicator className="size-1.5 rounded-full bg-white" />
+      </span>
+      <span className="min-w-0">{children}</span>
+    </Menu.RadioItem>
   );
 }
 

@@ -26,15 +26,19 @@ describe("preferences", () => {
     });
   });
 
-  it("forgets what was watched last, but not the volume, when the subscription changes", async () => {
+  it("forgets what was watched last and the versions picked, but not the volume, when the subscription changes", async () => {
     const preferences = await settingsIn(await tempDir());
-    await preferences.update({ volume: 0.4, lastChannelId: "818", lastCategoryId: "7" });
-
-    expect(await preferences.forget()).toMatchObject({
+    await preferences.update({
       volume: 0.4,
-      lastChannelId: null,
-      lastCategoryId: null,
+      lastChannelId: "818",
+      lastCategoryId: "7",
+      titleVersions: { "movie:603": "4012" },
     });
+
+    const kept = await preferences.forget();
+
+    expect(kept).toMatchObject({ volume: 0.4, lastChannelId: null, lastCategoryId: null });
+    expect(kept.titleVersions).toBeUndefined();
   });
 
   it("keeps what a newer version wrote when it saves", async () => {
