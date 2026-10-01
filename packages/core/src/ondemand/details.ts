@@ -11,7 +11,7 @@ import type {
 } from "@mrstreamer/contracts/ondemand";
 import { GENRES, tmdbImage, type TitleAbout } from "../metadata/tmdb.ts";
 import type { ProviderDetails } from "../provider.ts";
-import { episodeName } from "./names.ts";
+import { episodeName, titleName } from "./names.ts";
 
 export function movieDetails(
   title: Title,
@@ -72,10 +72,9 @@ function shared(title: Title, details: ProviderDetails, about: TitleAbout | null
       posterUrl: poster ?? title.posterUrl ?? details.posterUrl,
       backdropUrl: backdrop ?? details.backdropUrl ?? title.backdropUrl,
     },
-    // TMDB's original name first; the provider's often repeats the shown one.
-    originalTitle:
-      title.originalTitle ??
-      (details.originalName && details.originalName !== title.title ? details.originalName : null),
+    // TMDB's original name first. The provider's often repeats the version's own name, marks and
+    // all, "Blow 2001 (NL AUDIO)": without them it is mostly the shown one.
+    originalTitle: title.originalTitle ?? providerOriginal(details.originalName, title.title),
     plot: about?.overview ?? details.plot,
     genres: genres.length > 0 ? genres : details.genres,
     cast: about?.cast.length
@@ -91,4 +90,9 @@ function shared(title: Title, details: ProviderDetails, about: TitleAbout | null
     duration: details.duration ?? (about?.runtime ? about.runtime * 60 : null),
     backdropUrl: backdrop ?? details.backdropUrl ?? title.backdropUrl,
   };
+}
+
+function providerOriginal(name: string | null, shown: string): string | null {
+  const original = name ? titleName(name).title : null;
+  return original && original.toLowerCase() !== shown.toLowerCase() ? original : null;
 }

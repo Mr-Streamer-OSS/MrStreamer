@@ -1,7 +1,8 @@
-// Movies and episodes as the views talk about them: how long, how far, what's next, and playing
-// one. The player itself is in ../player/title-player.ts.
+// Movies and episodes as the views talk about them: how long, how far, what's next, which version
+// plays, and playing one. The player itself is in ../player/title-player.ts.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Episode, SeriesDetails, Title, TitleRef } from "@mrstreamer/contracts/ondemand";
+import type { Preferences } from "@mrstreamer/contracts/preferences";
 import type { TitleProgress } from "@mrstreamer/contracts/viewing";
 import { openDetails, useUi } from "../app/ui-store.ts";
 import { titlePlayer, type NowPlaying } from "../player/title-player.ts";
@@ -81,6 +82,46 @@ export function movieNow(title: Title, backdropUrl: string | null): NowPlaying {
     name: title.title,
     detail: title.year ? String(title.year) : null,
     artworkUrl: backdropUrl ?? title.posterUrl,
+  };
+}
+
+/**
+ * The version the viewer picked for `title`, while the provider still lists it; null plays the
+ * one that suits best. Picks are remembered by kind and TMDB id: only titles with an id gather
+ * several versions.
+ */
+export function pickedVersion(title: Title, preferences: Preferences | undefined): string | null {
+  const id = title.tmdbId && preferences?.titleVersions?.[`${title.kind}:${title.tmdbId}`];
+  return id && title.versions.some((version) => version.id === id) ? id : null;
+}
+
+/**
+ * The version that plays unless the viewer picks one: the one a movie stopped in partway, the
+ * one a series was watched in last, else the one that suits best.
+ */
+export function automaticVersion(title: Title, progress: readonly TitleProgress[]): string {
+  const latest = progress.toSorted((a, b) => b.at - a.at)[0];
+  if (latest?.title.kind === "episode") return latest.title.seriesId;
+  return latest && !latest.finished && latest.position > 0 ? latest.title.id : title.id;
+}
+
+/** Remembers the version to play for `title`, or forgets the pick for null. */
+export function usePickVersion(): (title: Title, id: string | null) => void {
+  const client = useQueryClient();
+  return (title, id) => {
+    if (!title.tmdbId) return;
+    const key = `${title.kind}:${title.tmdbId}`;
+    const { queryKey } = queries.preferences();
+    // The picks as saved, so one never replaces the others.
+    void client
+      .ensureQueryData(queries.preferences())
+      .then(async (previous) => {
+        const { [key]: _old, ...others } = previous.titleVersions ?? {};
+        const titleVersions = id === null ? others : { ...others, [key]: id };
+        client.setQueryData(queryKey, { ...previous, titleVersions });
+        client.setQueryData(queryKey, await call("preferences.update", { titleVersions }));
+      })
+      .catch(() => client.invalidateQueries({ queryKey }));
   };
 }
 
@@ -196,18 +237,24 @@ export function useContinueWatching(limit = Infinity): {
 /**
  * Plays a Continue watching entry: a movie at once, where it stopped; an episode, or the one after
  * a finished one, once the series' details arrive, since only they list the episodes. A series
- * with nothing after the finished episode opens its details instead.
+ * with nothing after the finished episode opens its details instead. Both play the version picked
+ * for the title, when there is one.
  */
 export function useResume(): (entry: ContinueEntry) => void {
   const client = useQueryClient();
+  const preferences = useQuery(queries.preferences()).data;
   return ({ title, progress }) => {
     const ref = progress.title;
+    // A version picked since plays instead, from the same point.
+    const picked = pickedVersion(title, preferences);
     if (ref.kind === "movie") {
-      playTitle(movieNow({ ...title, id: ref.id }, title.backdropUrl), resumePoint(progress));
+      const id = picked ?? ref.id;
+      playTitle(movieNow({ ...title, id }, title.backdropUrl), resumePoint(progress));
       return;
     }
-    const open = () => openDetails({ kind: "series", id: ref.seriesId });
-    void client.fetchQuery(queries.details("series", ref.seriesId)).then((found) => {
+    const seriesId = picked ?? ref.seriesId;
+    const open = () => openDetails({ kind: "series", id: seriesId });
+    void client.fetchQuery(queries.details("series", seriesId)).then((found) => {
       if (found.kind !== "series") return open();
       const episodes = found.seasons.flatMap((season) => season.episodes);
       const current =

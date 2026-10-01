@@ -1,5 +1,5 @@
-// Viewing settings in preferences.json: volume, mute, and the last channel and category. Changes
-// apply and write one at a time, in call order.
+// Viewing settings in preferences.json: volume, mute, the last channel and category, languages and
+// the versions picked for titles. Changes apply and write one at a time, in call order.
 import { join } from "node:path";
 import { defaultPreferences, Preferences } from "@mrstreamer/contracts/preferences";
 import * as Context from "effect/Context";
@@ -24,8 +24,8 @@ export class Settings extends Context.Service<
     readonly get: Effect.Effect<Preferences>;
     update(patch: Partial<Preferences>): Effect.Effect<Preferences>;
     /**
-     * Forgets what was watched last, for when the subscription changes or goes. Lists not yet
-     * imported go too: they belong to the account before.
+     * Forgets what was watched last and the versions picked, for when the subscription changes or
+     * goes. Lists not yet imported go too: they belong to the account before.
      */
     readonly forget: Effect.Effect<Preferences>;
     /** The favourites and recent channels of a file from before the viewing record, or null. */
@@ -66,11 +66,11 @@ function make(dataDir: string) {
     return {
       get: one.withPermits(1)(Effect.map(stored, withoutLists)),
       update: (patch: Partial<Preferences>) => change((previous) => ({ ...previous, ...patch })),
-      forget: change((previous) => ({
-        ...withoutLists(previous),
-        lastChannelId: null,
-        lastCategoryId: null,
-      })),
+      forget: change((previous) => {
+        // The versions picked are the account's: its provider names them.
+        const { titleVersions: _versions, ...kept } = withoutLists(previous);
+        return { ...kept, lastChannelId: null, lastCategoryId: null };
+      }),
       legacyLists: one.withPermits(1)(
         Effect.map(stored, ({ favouriteChannelIds, recentChannelIds }) =>
           favouriteChannelIds || recentChannelIds

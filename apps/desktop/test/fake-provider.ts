@@ -9,7 +9,8 @@
 // marked for adults in an ordinary category. Their files redirect
 // to another address, as real panels do, and answer byte ranges; each open file holds a
 // connection slot like a live stream. The "TEST" movies and the "TEST | Formats" series stream the
-// title clips in test/fixtures; every other title streams the MP4 clip.
+// title clips in test/fixtures; every other title streams the MP4 clip. One TEST movie comes in
+// two versions sharing a TMDB id, as providers list a film once per language.
 import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Writable } from "node:stream";
@@ -68,6 +69,8 @@ interface FakeTitle {
   readonly container: string;
   /** File in test/fixtures it streams; null answers 404. */
   readonly fixture: string | null;
+  /** The TMDB id it shares with another version of the film, when it is one. */
+  readonly tmdb?: string;
 }
 
 interface FakeSeries {
@@ -252,7 +255,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
           container_extension: movie.container,
           // TMDB ids, as the standard list field: 10,000 more than the stream id, and "0" for a
           // few, as panels write for none.
-          tmdb: movie.id % 7 === 0 ? "0" : String(movie.id + 10_000),
+          tmdb: movie.tmdb ?? (movie.id % 7 === 0 ? "0" : String(movie.id + 10_000)),
         })),
       );
     }
@@ -623,8 +626,16 @@ function buildCatalogue(size: number): FakeCatalogue {
   return { categories, channels };
 }
 
-/** The movies that stream the title clips, and what each one tests. */
-const TEST_MOVIES: readonly { name: string; container: string; fixture: string | null }[] = [
+/**
+ * The movies that stream the title clips, and what each one tests. `versionOf` makes one another
+ * version of an earlier film, by the index of that film here: they share its TMDB id.
+ */
+const TEST_MOVIES: readonly {
+  name: string;
+  container: string;
+  fixture: string | null;
+  versionOf?: number;
+}[] = [
   {
     name: "TEST | Two sound tracks and subtitles (MULTI)",
     container: "mkv",
@@ -639,6 +650,13 @@ const TEST_MOVIES: readonly { name: string; container: string; fixture: string |
     fixture: "title-h264-picture-subs.mkv",
   },
   { name: "TEST | Broadcast recording (NL)", container: "ts", fixture: "h264-subtitles.mpegts" },
+  // Dubbed, so an English viewer gets the version above, with this one to pick.
+  {
+    name: "TEST | Two sound tracks and subtitles 1080p (NL AUDIO)",
+    container: "mp4",
+    fixture: "title-h264-aac.mp4",
+    versionOf: 0,
+  },
 ];
 
 /** Builds roughly `size` movies and series. The same size always gives the same titles. */
@@ -662,6 +680,7 @@ function buildTitles(size: number): FakeTitles {
     added: base - index,
     container: test.container,
     fixture: test.fixture,
+    ...(test.versionOf === undefined ? {} : { tmdb: String(90_000 + test.versionOf + 10_000) }),
   }));
   for (let index = 0; movies.length < size; index++) {
     const category = movieCategories[1 + (index % 4)] ?? movieCategories[1]!;
