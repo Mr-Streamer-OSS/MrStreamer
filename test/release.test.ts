@@ -1,6 +1,9 @@
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
 import {
   checkUnreleased,
+  deployedFeed,
   planNightly,
   planStable,
   recordedVersion,
@@ -517,6 +520,28 @@ describe("update feed", () => {
     const listed = feedOf([published("v0.0.2", 20, false)]);
 
     expect(mergeFeeds(deployed, listed, { allowRegress: true })).toEqual(listed);
+  });
+
+  it("reads the deployed feed, and stops when it can't tell whether one exists", async () => {
+    const feed = feedOf([published("v0.0.3", 5, false)]);
+    const server = createServer((request, response) => {
+      const path = new URL(request.url ?? "/", "http://localhost").pathname;
+      if (path === "/updates.json") response.end(JSON.stringify(feed));
+      else response.writeHead(path === "/missing.json" ? 404 : 503).end();
+    });
+    await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
+    const site = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      expect(await deployedFeed(`${site}/updates.json`)).toEqual(feed);
+      // Nothing deployed yet: the releases alone decide.
+      expect(await deployedFeed(`${site}/missing.json`)).toBeNull();
+      expect(await deployedFeed(undefined)).toBeNull();
+      await expect(deployedFeed(`${site}/busy.json`)).rejects.toThrow("HTTP 503");
+    } finally {
+      await new Promise((closed) => server.close(closed));
+    }
+    // Unreachable says nothing about what is deployed, so nothing is published.
+    await expect(deployedFeed(`${site}/updates.json`)).rejects.toThrow("unreachable");
   });
 
   it("reads back the feed it writes, and nothing else", () => {

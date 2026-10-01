@@ -112,7 +112,7 @@ The app looks for updates in `updates.json` at the root of the repository's GitH
 
 `.github/workflows/update-feed.yml` writes the feed with `release-plan.ts feed` and deploys it, with an empty `.nojekyll`, after every published nightly and stable release. Dry runs publish nothing. Publications wait in a queue of their own and are never cancelled, so each reads the releases after the one before it deployed.
 
-The feed never goes back. When the releases name a lower version than the deployed feed, that channel keeps the deployed release, so a late or stale publication can't take users back. Only a run by hand with **allow-regress** moves a channel down.
+The feed never goes back. When the releases name a lower version than the deployed feed, that channel keeps the deployed release, so a late or stale publication can't take users back. Only a run by hand with **allow-regress** moves a channel down. A publication that can't read the deployed feed or look up the Pages site stops instead of publishing from the releases alone; only a 404 for either counts as nothing deployed yet.
 
 A failed publication shows on the release run's **Update feed** job but doesn't fail the run, since the release is out by then. Fix the cause, then regenerate the feed.
 
@@ -142,7 +142,7 @@ Forks get no signing secrets, so their pull requests can't run it.
 - **Publishing failed:** re-run the failed jobs. A broken attempt leaves at most a draft, which the next attempt deletes first.
 - **The version was taken meanwhile:** publishing refuses. The next nightly plans a new version; start a stable release again, with another version if needed.
 - **Finalize failed:** re-run it. It only moves `package.json` forward, so running it late or twice is harmless, and until it succeeds nightlies count from the published stable release.
-- **The feed wasn't updated:** the release run passed, and its **Update feed** job shows why. Fix that, such as [enabling Pages](#enabling-pages), then [regenerate the feed](#regenerating-the-feed).
+- **The feed wasn't updated:** the release run passed, and its **Update feed** job shows why. Fix that, such as [enabling Pages](#enabling-pages), then [regenerate the feed](#regenerating-the-feed). When the job couldn't reach the deployed feed or the Pages API, regenerating once GitHub answers again is enough.
 - **A bad release is out:** publish a fixed one. To stop offering it sooner, delete the release, then regenerate the feed with **allow-regress**. Deleting alone isn't enough: the feed never goes back by itself, so it keeps offering the release, whose files are gone. Neither downgrades anyone who installed it.
 
 ## Permissions
