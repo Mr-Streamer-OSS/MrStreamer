@@ -19,3 +19,11 @@ export interface ProgrammeMatch {
   readonly channel: LiveChannel;
   readonly programme: Programme;
 }
+
+/** The guide as Settings shows it: how many channels it covers, and since when. */
+export interface GuideStatus {
+  /** Channels of the catalogue with programmes in the guide. */
+  readonly channels: number;
+  /** Epoch milliseconds of the download, or null before one. */
+  readonly fetchedAt: number | null;
+}

@@ -240,6 +240,7 @@ async function start(): Promise<void> {
           yield* forgetAccount;
           return null;
         }),
+      "subscription.recheck": () => subscriptions.recheck,
       "library.status": () => library.status,
       "library.categories": () => library.categories,
       "library.channels": (filter) => library.channels(filter),
@@ -248,6 +249,8 @@ async function start(): Promise<void> {
       "guide.listings": ({ channelIds }) => guide.listings(channelIds),
       "guide.schedule": ({ channelId }) => guide.schedule(channelId),
       "guide.search": ({ query }) => guide.search(query),
+      "guide.status": () => guide.status,
+      "guide.refresh": () => Effect.andThen(guide.refresh, guide.status),
       "ondemand.status": () => onDemand.status,
       "ondemand.refresh": () => onDemand.refresh,
       "ondemand.search": ({ query }) => onDemand.search(query),

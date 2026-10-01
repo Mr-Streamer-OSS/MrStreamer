@@ -1,19 +1,13 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { RotateCw } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
-import type { SubscriptionSummary } from "@mrstreamer/contracts/subscription";
+import { useEffect, type ReactNode } from "react";
 import { isTyping } from "../../app/platform.ts";
-import { resetForAccount, useUi, type SettingsTab } from "../../app/ui-store.ts";
+import { useUi, type SettingsTab } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { WindowBar } from "../../components/WindowBar.tsx";
-import { appError, describeError, formatDate } from "../../lib/errors.ts";
-import { call } from "../../lib/ipc.ts";
-import { queries } from "../../lib/queries.ts";
-import { player } from "../../player/player.ts";
 import { cn } from "../../lib/utils.ts";
 import tmdbLogo from "../../assets/tmdb.svg";
-import { Licences } from "./Licences.tsx";
 import { GeneralSection } from "./GeneralSection.tsx";
+import { Licences } from "./Licences.tsx";
+import { SubscriptionSection } from "./SubscriptionSection.tsx";
 import { useUpdates } from "../updates/use-updates.ts";
 
 const TABS: readonly { value: SettingsTab; label: string }[] = [
@@ -79,7 +73,7 @@ export function SettingsPage() {
           <main className="min-w-0 flex-1 overflow-y-auto px-10 pt-6 pb-10">
             <div className="max-w-[40rem]">
               {tab === "general" && <GeneralSection />}
-              {tab === "subscription" && <Subscription />}
+              {tab === "subscription" && <SubscriptionSection />}
               {tab === "about" && <About />}
             </div>
           </main>
@@ -158,108 +152,4 @@ function Rows({ rows }: { rows: readonly (readonly [string, ReactNode])[] }) {
       ))}
     </dl>
   );
-}
-
-function Subscription() {
-  const client = useQueryClient();
-  const subscription = useQuery(queries.subscription());
-  const status = useQuery(queries.libraryStatus());
-  const [confirmRemove, setConfirmRemove] = useState(false);
-
-  const refresh = useMutation({
-    mutationFn: () => call("library.refresh"),
-    onSuccess: () => client.invalidateQueries({ queryKey: ["library"] }),
-  });
-  const remove = useMutation({
-    mutationFn: () => call("subscription.remove"),
-    onSuccess: async () => {
-      player.reset();
-      resetForAccount();
-      useUi.setState({ settings: null });
-      await client.resetQueries();
-    },
-  });
-
-  if (!subscription.data) return null;
-  const { account } = subscription.data;
-  const rows: [string, ReactNode][] = [
-    ["Server", subscription.data.server],
-    ["Username", subscription.data.username],
-    ["Status", accountLine(account.state, account.expiresAt)],
-    [
-      "Connections",
-      account.maxConnections ? `${account.maxConnections} at a time` : "Not reported",
-    ],
-    [
-      "Channels",
-      status.data?.fetchedAt
-        ? `${status.data.channelCount.toLocaleString()} · updated ${relativeTime(status.data.fetchedAt)}`
-        : "Not loaded yet",
-    ],
-  ];
-  // A failed refresh keeps the previous channels, but says why the list may be out of date.
-  const failed = refresh.error ?? remove.error;
-  const error = failed ? appError(failed) : (status.data?.failure ?? null);
-
-  return (
-    <section>
-      <Rows rows={rows} />
-
-      {error && <p className="mb-4 text-sm text-destructive">{describeError(error)}</p>}
-
-      {confirmRemove ? (
-        <div className="rounded-2xl bg-white/5 p-5">
-          <p className="mb-4 text-[0.9375rem]">
-            Remove the login and channel list from this device?
-          </p>
-          <div className="flex gap-3">
-            <Button
-              variant="destructive"
-              disabled={remove.isPending}
-              onClick={() => remove.mutate()}
-            >
-              Remove
-            </Button>
-            <Button variant="ghost" onClick={() => setConfirmRemove(false)}>
-              Keep
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <div className="flex flex-wrap gap-3">
-          <Button
-            variant="primary"
-            onClick={() => useUi.setState({ editingLogin: true, settings: null })}
-          >
-            Edit login
-          </Button>
-          <Button variant="secondary" disabled={refresh.isPending} onClick={() => refresh.mutate()}>
-            <RotateCw />
-            {refresh.isPending ? "Refreshing…" : "Refresh channels"}
-          </Button>
-          <Button variant="ghost" onClick={() => setConfirmRemove(true)}>
-            Remove
-          </Button>
-        </div>
-      )}
-    </section>
-  );
-}
-
-function accountLine(
-  state: SubscriptionSummary["account"]["state"],
-  expiresAt: string | null,
-): string {
-  if (state === "active") return expiresAt ? `Active until ${formatDate(expiresAt)}` : "Active";
-  if (state === "unknown") return expiresAt ? `Expires ${formatDate(expiresAt)}` : "Unknown";
-  return state[0]?.toUpperCase() + state.slice(1);
-}
-
-function relativeTime(epochMs: number): string {
-  const minutes = Math.round((Date.now() - epochMs) / 60_000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} h ago`;
-  return formatDate(new Date(epochMs).toISOString());
 }
