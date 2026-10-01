@@ -7,8 +7,10 @@
 // Reading holds back once enough is buffered ahead. While paused nothing more is read, and the
 // provider's connection sits idle until playback moves on; the controller ends the run after a
 // long pause.
+import { subtitleDecoder, type SubtitleCodec } from "@mrstreamer/core/subtitles/decoder";
 import type { EngineError, StreamInfo } from "./engine.ts";
 import { readMp4Start } from "./mp4.ts";
+import { clearSubtitles, subtitlePresenter, subtitleTrack } from "./subtitles.ts";
 import { webvttReader } from "./webvtt.ts";
 
 /** Stop reading once this much is buffered ahead, and read again below the second value. */
@@ -28,6 +30,8 @@ export interface TitleRun {
   readonly start: number;
   readonly audio: number | null;
   readonly subtitle: number | null;
+  /** The teletext page or caption channel to show, for a track that holds several. */
+  readonly page: number | null;
   /** Converts the sound even when the player decodes it: the second try after a failed start. */
   readonly convertSound: boolean;
   /** Seconds, so the element's timeline covers the whole title. */
@@ -50,28 +54,12 @@ export interface TitleEngine {
   destroy(): void;
 }
 
-/** The track subtitles show on, one per element, reused by every run. */
-const subtitleTracks = new WeakMap<HTMLVideoElement, TextTrack>();
-
-function subtitlesOf(video: HTMLVideoElement): TextTrack {
-  let track = subtitleTracks.get(video);
-  if (!track) {
-    track = video.addTextTrack("subtitles", "Subtitles");
-    subtitleTracks.set(video, track);
-  }
-  return track;
-}
-
-function clearCues(track: TextTrack): void {
-  for (const cue of [...(track.cues ?? [])]) track.removeCue(cue);
-}
-
 export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine {
   const abort = new AbortController();
   const mediaSource = new MediaSource();
   const objectUrl = URL.createObjectURL(mediaSource);
-  const subtitles = subtitlesOf(video);
-  clearCues(subtitles);
+  const subtitles = subtitleTrack(video);
+  clearSubtitles(video);
   subtitles.mode = run.subtitle === null ? "disabled" : "showing";
   let buffer: SourceBuffer | null = null;
   let codecs: string | null = null;
@@ -222,6 +210,9 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     const origin = Number(response.headers.get("x-origin")) || 0;
     const cues = response.headers.get("x-cues");
     if (cues) void readCues(cues, origin);
+    const packets = response.headers.get("x-packets");
+    const codec = response.headers.get("x-packets-codec");
+    if (packets && isCodec(codec)) void readPackets(packets, codec, origin);
 
     const reader = response.body.getReader();
     abort.signal.addEventListener("abort", () => void reader.cancel().catch(() => {}), {
@@ -294,6 +285,35 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     }
   }
 
+  /**
+   * Streams the run's subtitle packets, a JSON line each, through the decoder for their codec,
+   * and shows what they draw on the title's clock.
+   */
+  async function readPackets(url: string, codec: SubtitleCodec, origin: number): Promise<void> {
+    try {
+      const response = await fetch(url, { signal: abort.signal });
+      if (!response.body) return;
+      const decoder = subtitleDecoder(codec, run.page);
+      const presenter = subtitlePresenter(video, origin);
+      const text = new TextDecoder();
+      let pending = "";
+      for await (const chunk of response.body) {
+        pending += text.decode(chunk, { stream: true });
+        const lines = pending.split("\n");
+        pending = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line || abort.signal.aborted) continue;
+          const packet = JSON.parse(line) as { at: number; data: string };
+          const data = Uint8Array.from(atob(packet.data), (char) => char.charCodeAt(0));
+          const change = decoder.push(data, packet.at);
+          if (change) presenter.show(change);
+        }
+      }
+    } catch {
+      // Stopped with the run, or the packets broke off: the picture carries on without them.
+    }
+  }
+
   video.src = objectUrl;
   play().catch((error: unknown) => {
     if (abort.signal.aborted) return;
@@ -342,7 +362,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
       stopWatching();
       abort.abort();
       if (!settled) reject({ kind: "network", detail: "Stopped." } satisfies EngineError);
-      clearCues(subtitles);
+      clearSubtitles(video);
       subtitles.mode = "disabled";
       video.pause();
       video.removeAttribute("src");
@@ -350,4 +370,10 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
       URL.revokeObjectURL(objectUrl);
     },
   };
+}
+
+const CODECS: readonly SubtitleCodec[] = ["pgs", "dvb", "teletext", "captions"];
+
+function isCodec(value: string | null): value is SubtitleCodec {
+  return CODECS.some((codec) => codec === value);
 }

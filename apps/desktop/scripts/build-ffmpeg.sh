@@ -12,9 +12,10 @@
 # Sources are pinned: FFmpeg by SHA-256, x264 by commit. The result lands in vendor/ffmpeg/<target>
 # with the licences and the exact configuration, where electron-builder picks it up. The build
 # keeps only what playback uses: live MPEG-TS in and out on pipes; Matroska, MP4, AVI, FLV and
-# MPEG-PS files read over loopback HTTP and written as fragmented MP4, WebVTT cues and a framecrc
-# report of the first video packet; the decoders for the codecs these carry; the AAC, x264 and
-# WebVTT encoders; and the deinterlace and scale filters.
+# MPEG-PS files read over loopback HTTP and written as fragmented MP4, WebVTT cues, subtitle
+# packets beside them and a framecrc report of the first video packet; the decoders for the
+# codecs these carry; the AAC, x264, WebVTT and DVB subtitle encoders; and the deinterlace and
+# scale filters.
 set -euo pipefail
 
 target=${1:?usage: scripts/build-ffmpeg.sh mac-arm64|linux-x64|win-x64}
@@ -82,18 +83,23 @@ features=(
   --enable-protocol=pipe,file,http,tcp
   # mpegvideo recognises the MPEG-2 picture in an MPEG-PS file; it reads no files itself.
   --enable-demuxer=mpegts,matroska,mov,avi,flv,mpegps,mpegvideo
-  --enable-muxer=mpegts,mp4,webvtt,framecrc
+  # sup writes PGS subtitles as they are stored, beside the picture.
+  --enable-muxer=mpegts,mp4,webvtt,framecrc,sup
   --enable-parser=h264,hevc,mpegvideo,mpeg4video,mpegaudio,aac,aac_latm,ac3,dca,mlp,flac,vorbis
-  --enable-parser=opus
+  --enable-parser=opus,dvbsub,dvdsub
   --enable-decoder=h264,hevc,mpeg1video,mpeg2video,mpeg4,msmpeg4v3,h263,flv
   --enable-decoder=mp2,mp2float,mp3,mp3float,aac,aac_latm,ac3,eac3,dca,truehd,mlp,flac,vorbis,opus
   --enable-decoder=pcm_u8,pcm_s16le,pcm_s16be,pcm_s24le,pcm_s24be,pcm_s32le,pcm_f32le,pcm_dvd
   --enable-decoder=pcm_bluray
-  # Text subtitles, which the WebVTT encoder rewrites. Picture subtitles can't become WebVTT.
-  --enable-decoder=subrip,srt,ass,ssa,movtext,webvtt,text
-  --enable-encoder=aac,libx264,webvtt
+  # Text subtitles and CEA-608 tracks, which the WebVTT encoder rewrites. DVD and DivX pictures
+  # become DVB subtitles, which the app draws, as it does PGS, DVB and teletext.
+  --enable-decoder=subrip,srt,ass,ssa,movtext,webvtt,text,ccaption,dvdsub,xsub
+  --enable-encoder=aac,libx264,webvtt,dvbsub
   # extract_extradata finds the parameter sets an MP4 needs in a picture copied from MPEG-TS.
-  --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb,aac_adtstoasc,extract_extradata
+  # filter_units keeps only a picture's SEI units, which carry its closed captions; the two
+  # metadata filters bring the H.264 and HEVC readers it needs.
+  --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb,aac_adtstoasc,extract_extradata,filter_units
+  --enable-bsf=h264_metadata,hevc_metadata
   --enable-filter=yadif,scale,format,aresample,aformat,anull,null
 )
 configure=(

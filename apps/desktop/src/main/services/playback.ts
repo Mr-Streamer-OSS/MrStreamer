@@ -18,7 +18,7 @@
 import { execFile, spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { Readable } from "node:stream";
+import { Readable, Transform } from "node:stream";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
 import type {
   ChannelTracks,
@@ -40,7 +40,11 @@ import * as Semaphore from "effect/Semaphore";
 import { createCleanStart } from "../playback/clean-start.ts";
 import { ffmpegArguments, planConversion, type Conversion } from "../playback/convert.ts";
 import { createInspector, type Inspection, type StreamLayout } from "../playback/inspect.ts";
+import { CAPTION_PID, createCaptionCopy } from "../playback/caption-stream.ts";
 import { createAudioChoice } from "../playback/program-table.ts";
+import { captionsInPicture } from "@mrstreamer/core/subtitles/captions";
+import { pgsSegments } from "@mrstreamer/core/subtitles/pgs";
+import { pesReader, type PesPacket } from "@mrstreamer/core/subtitles/transport";
 import {
   firstPacketTime,
   PROBE_ARGUMENTS,
@@ -95,6 +99,8 @@ interface LiveSession extends SessionBase {
   readonly audio: number | null;
   /** The tracks the stream carries, once it has been inspected. */
   layout: StreamLayout | null;
+  /** The caption channels found in the pictures so far, 1 and 3. */
+  captions: readonly number[];
 }
 
 interface TitleSessionState extends SessionBase {
@@ -112,6 +118,11 @@ type Session = LiveSession | TitleSessionState;
 /** What an ffmpeg run sends the proxy besides the picture. */
 interface RunReports {
   readonly cues: TextRelay;
+  /**
+   * Subtitle packets the player decodes itself, a JSON line each: `{"at":12.3,"data":"<base64>"}`,
+   * `at` in seconds on the file's clock.
+   */
+  readonly packets: TextRelay;
   readonly start: TextRelay;
 }
 
@@ -191,6 +202,14 @@ function make(deps: PlaybackDeps) {
     const base = `http://127.0.0.1:${port}`;
     /** Probes by file, so reopening a title doesn't read its file again. Oldest first. */
     const probes = new Map<string, TitleProbe>();
+    /**
+     * How each run's subtitle packets arrive: PGS as stored, or in a transport stream, where a
+     * picture's SEI units carry captions.
+     */
+    const reportedPackets = new WeakMap<
+      TextRelay,
+      { readonly container: "mpegts" | "sup"; readonly captions: "h264" | "hevc" | null }
+    >();
 
     async function serve(request: IncomingMessage, response: ServerResponse): Promise<void> {
       response.setHeader("Access-Control-Allow-Origin", "*");
@@ -201,9 +220,9 @@ function make(deps: PlaybackDeps) {
       }
       const url = new URL(request.url ?? "/", base);
       // /stream/<token>.ts, /source/<token>, /title/<token>.mp4, /report/<token>/<run>/<what>,
-      // /cues/<token>/<run>
+      // /cues/<token>/<run>, /packets/<token>/<run>
       const route =
-        /^\/(stream|source|title|report|cues)\/([\w-]+)(?:\.\w+)?(?:\/([\w-]+))?(?:\/(cues|start))?$/.exec(
+        /^\/(stream|source|title|report|cues|packets)\/([\w-]+)(?:\.\w+)?(?:\/([\w-]+))?(?:\/(cues|packets|start))?$/.exec(
           url.pathname,
         );
       const session = route && [...sessions.values()].find((each) => each.token === route[2]);
@@ -227,7 +246,13 @@ function make(deps: PlaybackDeps) {
         case "report":
           return receiveReport(session, route[3] ?? "", route[4] ?? "", request, response);
         case "cues":
-          return sendCues(session, route[3] ?? "", response);
+          return sendRelay(session.runs.get(route[3] ?? "")?.cues, "text/vtt", response);
+        case "packets":
+          return sendRelay(
+            session.runs.get(route[3] ?? "")?.packets,
+            "application/x-ndjson",
+            response,
+          );
         default:
           response.writeHead(410).end();
       }
@@ -281,6 +306,7 @@ function make(deps: PlaybackDeps) {
       }
       const { layout } = start;
       session.layout = layout;
+      session.captions = [];
       const video = layout?.video;
       const cleaned =
         video && video.codec !== "unknown" && CLEAN_START_CODECS.has(video.codec)
@@ -294,10 +320,16 @@ function make(deps: PlaybackDeps) {
         : null;
       // The player plays the first sound track its table lists; ffmpeg keeps only the chosen one.
       const chosen = layout?.audio.find((track) => track.pid === session.audio);
-      const chunks =
+      const chosenFirst =
         layout && chosen && chosen !== layout.audio[0] && !conversion
           ? filtered(cleaned, createAudioChoice(layout.programPid, chosen.pid))
           : cleaned;
+      // Captions inside the pictures get a stream of their own, after any conversion.
+      const captionCopy = () =>
+        createCaptionCopy((channels) => {
+          session.captions = channels;
+        });
+      const chunks = conversion ? chosenFirst : filtered(chosenFirst, captionCopy());
       const delivery = !conversion ? "direct" : session.repair ? "repaired" : "converted";
       const body = Readable.from(chunks);
       body.on("error", (cause) => {
@@ -321,7 +353,7 @@ function make(deps: PlaybackDeps) {
         report("none", "unsupported");
         return;
       }
-      convert(deps.ffmpeg, conversion, body, response, session, signal, (outcome) =>
+      convert(deps.ffmpeg, conversion, body, response, session, signal, captionCopy(), (outcome) =>
         report(delivery, outcome),
       );
     }
@@ -334,6 +366,7 @@ function make(deps: PlaybackDeps) {
       response: ServerResponse,
       session: LiveSession,
       signal: AbortSignal,
+      output: { push(chunk: Uint8Array): Uint8Array },
       report: (outcome: "ok" | "unsupported") => void,
     ): void {
       const child = spawn(ffmpeg, ffmpegArguments(conversion), { stdio: ["pipe", "pipe", "pipe"] });
@@ -370,7 +403,15 @@ function make(deps: PlaybackDeps) {
       child.stdin.on("error", () => {});
       body.pipe(child.stdin);
       response.writeHead(200, { "Content-Type": "video/mp2t" });
-      child.stdout.pipe(response);
+      child.stdout
+        .pipe(
+          new Transform({
+            transform(chunk: Buffer, _encoding, done) {
+              done(null, output.push(chunk));
+            },
+          }),
+        )
+        .pipe(response);
       report("ok");
     }
 
@@ -464,7 +505,11 @@ function make(deps: PlaybackDeps) {
         return;
       }
       const runId = randomBytes(9).toString("base64url");
-      const reports: RunReports = { cues: textRelay(), start: textRelay() };
+      const reports: RunReports = {
+        cues: textRelay(),
+        packets: textRelay(),
+        start: textRelay(),
+      };
       // The run before is over; its cues may still be read until now, as a short run can end
       // before the player asks for them.
       session.runs.clear();
@@ -473,7 +518,17 @@ function make(deps: PlaybackDeps) {
       const plan = titlePlan(probe, run, session.decoders, {
         source: `${base}/source/${session.token}`,
         cues: reportUrl("cues"),
+        packets: reportUrl("packets"),
         start: reportUrl("start"),
+      });
+      reportedPackets.set(reports.packets, {
+        container: plan.packets ?? "mpegts",
+        captions:
+          plan.subtitle && "packets" in plan.subtitle && plan.subtitle.packets === "captions"
+            ? probe.video?.name === "hevc"
+              ? "hevc"
+              : "h264"
+            : null,
       });
       const report = (outcome: "ok" | StreamFailure["kind"]) =>
         diagnostics.record({
@@ -551,10 +606,16 @@ function make(deps: PlaybackDeps) {
 
       response.writeHead(200, {
         "Content-Type": "video/mp4",
-        "Access-Control-Expose-Headers": "x-start, x-origin, x-cues",
+        "Access-Control-Expose-Headers": "x-start, x-origin, x-cues, x-packets, x-packets-codec",
         "x-start": String(Math.max(0, pictureStart - probe.origin)),
         "x-origin": String(probe.origin),
-        "x-cues": plan.subtitle ? `${base}/cues/${session.token}/${runId}` : "",
+        "x-cues":
+          plan.subtitle && "cues" in plan.subtitle ? `${base}/cues/${session.token}/${runId}` : "",
+        "x-packets":
+          plan.subtitle && "packets" in plan.subtitle
+            ? `${base}/packets/${session.token}/${runId}`
+            : "",
+        "x-packets-codec": plan.subtitle && "packets" in plan.subtitle ? plan.subtitle.packets : "",
       });
       child.stdout.pause();
       child.stdout.off("data", hold);
@@ -580,7 +641,10 @@ function make(deps: PlaybackDeps) {
       });
     }
 
-    /** What ffmpeg sends back about a run: its subtitle cues, or where its picture starts. */
+    /**
+     * What ffmpeg sends back about a run: its subtitle cues, its subtitle packets, or where its
+     * picture starts.
+     */
     function receiveReport(
       session: TitleSessionState,
       runId: string,
@@ -589,28 +653,67 @@ function make(deps: PlaybackDeps) {
       response: ServerResponse,
     ): void {
       const reports = session.runs.get(runId);
-      const relay = what === "cues" ? reports?.cues : what === "start" ? reports?.start : undefined;
+      const relay =
+        what === "cues"
+          ? reports?.cues
+          : what === "packets"
+            ? reports?.packets
+            : what === "start"
+              ? reports?.start
+              : undefined;
       if (!relay) {
         response.writeHead(410).end();
         return;
       }
-      request.setEncoding("utf8");
-      request.on("data", (text: string) => relay.write(text));
-      request.on("end", () => {
+      const finish = () => {
         relay.end();
         response.writeHead(204).end();
-      });
+      };
       request.on("error", () => relay.end());
+      if (what !== "packets") {
+        request.setEncoding("utf8");
+        request.on("data", (text: string) => relay.write(text));
+        request.on("end", finish);
+        return;
+      }
+      // Packets arrive as a transport stream, or as PGS as it is stored, and go on as lines.
+      const send = (at: number, data: Uint8Array) => {
+        if (data.length > 0) {
+          relay.write(`${JSON.stringify({ at, data: Buffer.from(data).toString("base64") })}\n`);
+        }
+      };
+      const kind = reportedPackets.get(relay);
+      if (kind?.container === "sup") {
+        const segments = pgsSegments();
+        request.on("data", (chunk: Buffer) => {
+          for (const { at, set } of segments.push(chunk)) send(at, set);
+        });
+        request.on("end", finish);
+        return;
+      }
+      const reader = pesReader();
+      const captions = kind?.captions ?? null;
+      const forward = (packets: readonly PesPacket[]) => {
+        for (const packet of packets) {
+          if (packet.pts === null) continue;
+          const data = captions ? captionsInPicture(packet.payload, captions) : packet.payload;
+          send(packet.pts / 90_000, data);
+        }
+      };
+      request.on("data", (chunk: Buffer) => forward(reader.push(chunk)));
+      request.on("end", () => {
+        forward(reader.end());
+        finish();
+      });
     }
 
-    /** A run's subtitle cues, as WebVTT, as ffmpeg sends them. */
-    function sendCues(session: TitleSessionState, runId: string, response: ServerResponse): void {
-      const relay = session.runs.get(runId)?.cues;
+    /** A run's subtitle cues or packets, as ffmpeg sends them. */
+    function sendRelay(relay: TextRelay | undefined, type: string, response: ServerResponse): void {
       if (!relay) {
         response.writeHead(410).end();
         return;
       }
-      response.writeHead(200, { "Content-Type": "text/vtt; charset=utf-8" });
+      response.writeHead(200, { "Content-Type": `${type}; charset=utf-8` });
       const unsubscribe = relay.subscribe(
         (text) => response.write(text),
         () => response.end(),
@@ -742,6 +845,7 @@ function make(deps: PlaybackDeps) {
               repair: options.repair ?? false,
               audio: options.audio ?? null,
               layout: null,
+              captions: [],
               closed,
               scope: sessionScope,
               active: null,
@@ -820,7 +924,9 @@ function make(deps: PlaybackDeps) {
       tracks: (sessionId: string) =>
         Effect.sync(() => {
           const session = sessions.get(sessionId);
-          return session?.kind === "live" && session.layout ? channelTracks(session.layout) : null;
+          return session?.kind === "live" && session.layout
+            ? channelTracks(session.layout, session.captions)
+            : null;
         }),
     };
   });
@@ -997,8 +1103,8 @@ async function* filtered(
   }
 }
 
-/** The tracks a channel's program table names, as the UI lists them. */
-function channelTracks(layout: StreamLayout): ChannelTracks {
+/** The tracks a channel's program table names, and its captions, as the UI lists them. */
+function channelTracks(layout: StreamLayout, captions: readonly number[]): ChannelTracks {
   return {
     audio: audioTracks(
       layout.audio.map((track, index) => ({
@@ -1010,8 +1116,8 @@ function channelTracks(layout: StreamLayout): ChannelTracks {
         description: track.description,
       })),
     ),
-    subtitles: subtitleTracks(
-      layout.subtitles.map((track) => ({
+    subtitles: subtitleTracks([
+      ...layout.subtitles.map((track) => ({
         id: track.pid,
         page: track.page,
         format: track.format,
@@ -1021,7 +1127,17 @@ function channelTracks(layout: StreamLayout): ChannelTracks {
         forced: false,
         hearingImpaired: track.hearingImpaired,
       })),
-    ),
+      ...captions.map((channel) => ({
+        id: CAPTION_PID,
+        page: channel,
+        format: "captions" as const,
+        language: null,
+        name: null,
+        default: false,
+        forced: false,
+        hearingImpaired: false,
+      })),
+    ]),
   };
 }
 

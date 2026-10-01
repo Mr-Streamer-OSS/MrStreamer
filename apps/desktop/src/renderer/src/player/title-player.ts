@@ -21,6 +21,7 @@ import { call } from "../lib/ipc.ts";
 import { titleDecoders } from "./decoders.ts";
 import type { EngineError } from "./engine.ts";
 import { onLiveStart, player, type PlaybackProblem } from "./player.ts";
+import { clearSubtitles } from "./subtitles.ts";
 import { titleEngine, type TitleEngine } from "./title-engine.ts";
 
 /** How often progress is saved while a title plays. */
@@ -30,8 +31,13 @@ const RELEASE_AFTER_PAUSE_MS = 5 * 60_000;
 /** Waits before each new run after the connection broke. Its length is the attempt limit. */
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000];
 
-/** The subtitle formats the player shows; the others are listed but can't be chosen. */
-export const SHOWN_SUBTITLES: ReadonlySet<SubtitleFormat> = new Set(["text"]);
+/** The subtitle formats the player shows: all of them. */
+const SHOWN_SUBTITLES: ReadonlySet<SubtitleFormat> = new Set([
+  "text",
+  "picture",
+  "teletext",
+  "captions",
+]);
 
 /** What the view shows about the open title. */
 export interface NowPlaying {
@@ -172,6 +178,7 @@ async function run(start: number, attempt = 0): Promise<void> {
     start,
     audio: audioId,
     subtitle: subtitle?.id ?? null,
+    page: subtitle?.page ?? null,
     convertSound,
     duration,
   });
@@ -385,7 +392,7 @@ export const titlePlayer = {
     }).catch(() => {});
     // Turning subtitles off is instant; showing others needs their cues from a new run.
     if (!track) {
-      for (const each of video.textTracks) if (each.label === "Subtitles") each.mode = "disabled";
+      clearSubtitles(video);
       return;
     }
     save();

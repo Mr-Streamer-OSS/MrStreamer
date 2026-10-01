@@ -28,8 +28,8 @@ Providers keep movies and episodes as files, mostly MKV and MP4 and a few AVI. M
 | HEVC (H.265) video                                       | Plays as it is on macOS; converted to H.264 where there's no HEVC decoder |
 | MPEG-4 Part 2 (Xvid) or MPEG-2 video                     | Converted to H.264                                                        |
 | SubRip, ASS or MP4 text subtitles                        | Shown under the picture                                                   |
-| Subtitles stored as pictures (Blu-ray, DVD, DVB)         | Listed as unavailable for now                                             |
-| Teletext subtitles and closed captions                   | Listed as unavailable for now                                             |
+| Subtitles stored as pictures (Blu-ray, DVD, DVB)         | Drawn over the picture                                                    |
+| Teletext subtitles and closed captions                   | Shown under the picture, like text subtitles                              |
 
 A movie starts about a second after you choose it. Skipping into what's already loaded is instant; skipping further away starts it again from there, which takes about a second too.
 
@@ -37,7 +37,7 @@ A movie starts about a second after you choose it. Skipping into what's already 
 
 - Live channels show no subtitles or teletext, and play their first sound track.
 - Surround sound that needs converting plays as stereo.
-- Picture-based subtitles in movies and episodes can't be shown.
+- After you skip in a movie or episode, picture subtitles, teletext and captions already on screen at that moment show again from the next line.
 - Converting an HEVC or Xvid picture uses much more of your computer's processor than playing it as it is.
 - A damaged broadcast can take more than ten seconds to start, while Mr. Streamer retries it with the picture re-encoded.
 - Interlaced channels that play directly, common in European HD broadcasts, aren't deinterlaced; fast motion can show fine horizontal lines.

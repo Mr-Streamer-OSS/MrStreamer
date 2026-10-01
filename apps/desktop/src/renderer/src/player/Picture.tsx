@@ -3,6 +3,7 @@
 // which keeps a playing element playing, so changing views never interrupts the stream.
 import { useLayoutEffect, useRef, type HTMLAttributes } from "react";
 import { player } from "./player.ts";
+import { subtitleCanvas } from "./subtitles.ts";
 
 /** Holds the element while no Picture is active, so it never leaves the document. */
 let parking: HTMLDivElement | null = null;
@@ -47,9 +48,13 @@ export function Picture({
     const video = player.element;
     video.style.objectFit = fit;
     move(container, video);
+    // Pictures drawn as subtitles stay over the picture.
+    move(container, subtitleCanvas);
     // Runs before React removes this element, so the video leaves while still in the document.
     return () => {
-      if (video.parentElement === container) move(parkingSpot(), video);
+      if (video.parentElement !== container) return;
+      move(parkingSpot(), video);
+      move(parkingSpot(), subtitleCanvas);
     };
   }, [active, fit]);
   return <div ref={box} {...props} />;

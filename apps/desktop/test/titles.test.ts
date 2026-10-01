@@ -5,6 +5,8 @@ import type { Codec } from "@mrstreamer/contracts/playback";
 import * as Layer from "effect/Layer";
 import { Playback } from "../src/main/services/playback.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
+import { subtitleDecoder, type SubtitleCodec } from "@mrstreamer/core/subtitles/decoder";
+import type { SubtitleChange } from "@mrstreamer/core/subtitles/screen";
 import { readMp4Start } from "../src/renderer/src/player/mp4.ts";
 import { webvttReader } from "../src/renderer/src/player/webvtt.ts";
 import { fixture } from "./fake-provider.ts";
@@ -56,6 +58,31 @@ async function play(url: string) {
   const response = await fetch(url);
   const body = Buffer.from(await response.arrayBuffer());
   return { response, body, streams: streamsOf(body) };
+}
+
+/** The subtitle packets of a run, decoded as the player decodes them, on the file's clock. */
+async function decodedPackets(
+  response: Response,
+  page: number | null,
+): Promise<{ codec: string | null; changes: SubtitleChange[] }> {
+  const codec = response.headers.get("x-packets-codec");
+  const lines = (await (await fetch(response.headers.get("x-packets") ?? "")).text())
+    .split("\n")
+    .filter(Boolean);
+  const decoder = subtitleDecoder(codec as SubtitleCodec, page);
+  const changes = lines.flatMap((line) => {
+    const { at, data } = JSON.parse(line) as { at: number; data: string };
+    return decoder.push(Buffer.from(data, "base64"), at) ?? [];
+  });
+  return { codec, changes };
+}
+
+/** Each change as its time and what it shows: text, or how many pictures. */
+function shown(changes: readonly SubtitleChange[]): [number, string | number][] {
+  return changes.map((change) => [
+    Math.round(change.at * 100) / 100,
+    change.screen.kind === "text" ? change.screen.lines.join(" ") : change.screen.pictures.length,
+  ]);
 }
 
 function streamsOf(body: Buffer): { codec_type: string; codec_name: string; channels?: number }[] {
@@ -145,6 +172,58 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
     const session = await open(name);
 
     expect(session.subtitles).toEqual(expected.map((track) => expect.objectContaining(track)));
+    await dispose();
+  });
+
+  it("sends picture subtitles beside the picture: PGS as stored, DVD pictures as DVB", async () => {
+    const { open, dispose } = await titles();
+    const session = await open("TEST | Picture subtitles");
+
+    const pgs = await play(`${session.url}?start=0&subtitle=2`);
+    expect(pgs.response.headers.get("x-cues")).toBe("");
+    // Shown from 2 to 4 s and from 8 to 10 s, on the file's clock, which starts at 0.021 s.
+    const english = await decodedPackets(pgs.response, null);
+    expect(english.codec).toBe("pgs");
+    expect(shown(english.changes)).toEqual([
+      [2.02, 1],
+      [4.02, 0],
+      [8.02, 1],
+      [10.02, 0],
+    ]);
+    const dvd = await play(`${session.url}?start=0&subtitle=3`);
+    const dutch = await decodedPackets(dvd.response, null);
+    expect(dutch.codec).toBe("dvb");
+    expect(shown(dutch.changes)).toEqual([
+      [8.02, 1],
+      [10.01, 0],
+    ]);
+    await dispose();
+  });
+
+  it("sends a recording's teletext page and captions beside the picture", async () => {
+    const { open, dispose } = await titles();
+    const session = await open("TEST | Broadcast recording");
+
+    const teletext = await decodedPackets(
+      (await play(`${session.url}?start=0&subtitle=4`)).response,
+      888,
+    );
+    expect(teletext.codec).toBe("teletext");
+    expect(shown(teletext.changes)).toEqual([
+      [2.4, "TELETEKST 888"],
+      [4.4, ""],
+    ]);
+    const captions = await decodedPackets(
+      (await play(`${session.url}?start=0&subtitle=0`)).response,
+      1,
+    );
+    expect(captions.codec).toBe("captions");
+    expect(shown(captions.changes)).toEqual([
+      [2.32, "HELLO CAPTIONS"],
+      [4.4, ""],
+    ]);
+    const dvb = await decodedPackets((await play(`${session.url}?start=0&subtitle=3`)).response, 1);
+    expect(shown(dvb.changes)[0]).toEqual([1.9, 1]);
     await dispose();
   });
 

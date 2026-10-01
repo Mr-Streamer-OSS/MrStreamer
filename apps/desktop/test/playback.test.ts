@@ -4,6 +4,8 @@ import type { Codec } from "@mrstreamer/contracts/playback";
 import * as Layer from "effect/Layer";
 import { Playback } from "../src/main/services/playback.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
+import { captionDecoder } from "@mrstreamer/core/subtitles/captions";
+import { pesReader } from "@mrstreamer/core/subtitles/transport";
 import { fixture, type FakeProvider } from "./fake-provider.ts";
 import { fakeProvider, promised, runtimeFor, tempDir, testSecrets, userAgent } from "./support.ts";
 
@@ -228,8 +230,38 @@ describe("playback", () => {
           format: "teletext",
           label: "Nederlands · Teletext",
         }),
+        // Found in the pictures as they passed.
+        expect.objectContaining({ id: 0x1ff0, page: 1, format: "captions", label: "Captions" }),
       ],
     });
+    await playback.dispose();
+  });
+
+  it("copies captions out of the pictures into a stream the player reads, in display order", async () => {
+    const { provider, playback } = await connectedPlayback();
+    const session = await playback.open(
+      channelNamed(provider, "TEST | Subtitles and two sound tracks"),
+      LINUX,
+    );
+
+    const received = Buffer.from(await (await fetch(session.url)).arrayBuffer());
+
+    const reader = pesReader();
+    const decoder = captionDecoder(1);
+    const changes = [...reader.push(received), ...reader.end()].flatMap((packet) =>
+      packet.pid === 0x1ff0 && packet.pts !== null
+        ? (decoder.push(packet.payload, packet.pts / 90_000) ?? [])
+        : [],
+    );
+    expect(
+      changes.map((change) => [
+        Math.round(change.at * 100) / 100,
+        change.screen.kind === "text" ? change.screen.lines : null,
+      ]),
+    ).toEqual([
+      [2.32, ["HELLO CAPTIONS"]],
+      [4.4, []],
+    ]);
     await playback.dispose();
   });
 

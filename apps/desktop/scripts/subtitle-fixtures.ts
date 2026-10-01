@@ -38,7 +38,16 @@ function writeTitle(): void {
   );
   writeFileSync(dutch, pgs(640, 360, [{ text: "ACHT", from: 8, to: 10 }]));
   ffmpeg(
-    ...["-i", join(fixtures, "title-h264-aac.mp4"), "-i", english, "-i", dutch],
+    // PGS doesn't say how long a picture shows; the DVD subtitles made from it do.
+    ...[
+      "-i",
+      join(fixtures, "title-h264-aac.mp4"),
+      "-i",
+      english,
+      "-fix_sub_duration",
+      "-i",
+      dutch,
+    ],
     ...["-map", "0:v", "-map", "0:a", "-map", "1", "-map", "2"],
     ...["-c:v", "copy", "-c:a", "copy", "-c:s:0", "copy", "-c:s:1", "dvdsub"],
     ...["-metadata:s:s:0", "language=eng", "-metadata:s:s:1", "language=nld"],
