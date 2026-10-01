@@ -122,7 +122,10 @@ function remember(key: string, fetchedAt: number, catalogue: OnDemandCatalogue):
     index: null,
     collections: new Map(),
   };
-  metadata.want(wantedOf(catalogue));
+  // After the call that loaded it has answered, unless another catalogue took its place.
+  setTimeout(() => {
+    if (loaded?.catalogue === catalogue) metadata.want(wantedOf(catalogue));
+  }, 0);
   return loaded;
 }
 

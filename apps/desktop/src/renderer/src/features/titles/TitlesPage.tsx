@@ -16,7 +16,7 @@ import type {
   TitleKind,
 } from "@mrstreamer/contracts/ondemand";
 import { isTyping } from "../../app/platform.ts";
-import { openDetails, useUi } from "../../app/ui-store.ts";
+import { openDetails, openView, useUi } from "../../app/ui-store.ts";
 import { Artwork, PosterTile, StillTile } from "../../components/TitleArt.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { WindowBar } from "../../components/WindowBar.tsx";
@@ -35,6 +35,12 @@ const usePlace = create<
   movie: { tab: "for-you", collection: null, sort: "added" },
   series: { tab: "for-you", collection: null, sort: "added" },
 }));
+
+/** Opens Movies or Series on one collection, with Back to the tab it was on: Home's All. */
+export function openCollection(kind: TitleKind, collection: CollectionId): void {
+  usePlace.setState((state) => ({ [kind]: { ...state[kind], collection, sort: "added" } }));
+  openView(kind === "movie" ? "movies" : "series");
+}
 
 const POSTER_REM = 8.5;
 const STILL_REM = 13;

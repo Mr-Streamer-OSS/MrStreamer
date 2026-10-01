@@ -30,12 +30,25 @@ export interface IndexedCatalogue {
   readonly series: IndexedKind;
 }
 
-/** The catalogue for a viewer whose language is `language`, an ISO 639-1 code. */
+/**
+ * The catalogue for a viewer whose language is `language`, an ISO 639-1 code. Each kind is indexed
+ * when first read, so opening Movies doesn't wait for the series.
+ */
 export function indexCatalogue(catalogue: OnDemandCatalogue, language: string): IndexedCatalogue {
+  const movies = once(() =>
+    indexKind("movie", catalogue.movieCategories, catalogue.movies, language),
+  );
+  const series = once(() =>
+    indexKind("series", catalogue.seriesCategories, catalogue.series, language),
+  );
   return {
     language,
-    movies: indexKind("movie", catalogue.movieCategories, catalogue.movies, language),
-    series: indexKind("series", catalogue.seriesCategories, catalogue.series, language),
+    get movies() {
+      return movies();
+    },
+    get series() {
+      return series();
+    },
   };
 }
 

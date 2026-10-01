@@ -25,6 +25,7 @@ import { player, usePlayer } from "../../player/player.ts";
 import { WINDOW_BAR } from "../../../../shared/window-bar.ts";
 import { watchChannel } from "../live/GuidePage.tsx";
 import { showList } from "../live/lists.ts";
+import { openCollection } from "../titles/TitlesPage.tsx";
 
 const NO_IDS: readonly string[] = [];
 const NO_CHANNELS: readonly LiveChannel[] = [];
@@ -177,12 +178,20 @@ export function HomeScreen({ active }: { active: boolean }) {
           </Section>
         )}
         {newMovies.length > 0 && (
-          <Section title="New movies" onAll={() => openView("movies")} tileRem={POSTER_REM}>
+          <Section
+            title="New movies"
+            onAll={() => openCollection("movie", "new-month")}
+            tileRem={POSTER_REM}
+          >
             {titles(newMovies)}
           </Section>
         )}
         {newSeries.length > 0 && (
-          <Section title="New series" onAll={() => openView("series")} tileRem={POSTER_REM}>
+          <Section
+            title="New series"
+            onAll={() => openCollection("series", "new-month")}
+            tileRem={POSTER_REM}
+          >
             {titles(newSeries)}
           </Section>
         )}
