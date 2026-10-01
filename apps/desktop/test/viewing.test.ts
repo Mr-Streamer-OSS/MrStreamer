@@ -207,7 +207,7 @@ describe("viewing record", () => {
     await viewing.played(movie("m2"), 900, 6000);
     await viewing.remove(movie("m2"));
     const before = await viewing.state();
-    const series = await viewing.progress({ seriesId: "s1" });
+    const series = await viewing.progress({ seriesIds: ["s1"] });
     await app.connect(1);
     await viewing.setFavourite("z", true);
     await app.connect(0);
@@ -219,7 +219,7 @@ describe("viewing record", () => {
 
     const restarted = await app.start();
     expect(await restarted.state()).toEqual(before);
-    expect(await restarted.progress({ seriesId: "s1" })).toEqual(series);
+    expect(await restarted.progress({ seriesIds: ["s1"] })).toEqual(series);
   });
 
   it("opens a record written before movies and series, and keeps its lists", async () => {
@@ -277,7 +277,7 @@ describe("how far movies and episodes got", () => {
       { title: movie("credits"), finished: true },
     ]);
     expect(
-      (await viewing.progress({ seriesId: "s1" })).map((entry) => entry.title.id).sort(),
+      (await viewing.progress({ seriesIds: ["s1"] })).map((entry) => entry.title.id).sort(),
     ).toEqual(["e1", "e2"]);
     expect((await (await app.start()).state()).continueWatching).toEqual(state.continueWatching);
   });

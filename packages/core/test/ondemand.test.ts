@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { byIds, indexCatalogue, page, search } from "../src/ondemand/catalogue.ts";
 import { episodeName, titleName } from "../src/ondemand/names.ts";
 import { continueWatching, isFinished, type TitleRow } from "../src/viewing/titles.ts";
 
@@ -56,5 +57,55 @@ describe("Continue watching", () => {
       row({ title: { kind: "movie", id: "m" }, at: 2 }),
     ]);
     expect(shown.map((entry) => entry.title.id)).toEqual(["e2", "m"]);
+  });
+});
+
+describe("one title per film", () => {
+  const movie = (id: string, name: string, tmdbId: string | null, addedAt: number) => ({
+    id,
+    name,
+    posterUrl: null,
+    backdropUrl: null,
+    rating: null,
+    addedAt,
+    releaseDate: null,
+    categoryIds: ["films"],
+    adult: false,
+    container: "mkv",
+    tmdbId,
+  });
+  const catalogue = {
+    movieCategories: [{ id: "films", name: "Films" }],
+    movies: [
+      movie("1", "Speak No Evil (NL)", "1114513", 3),
+      movie("2", "Speak No Evil (MULTI)", "1114513", 2),
+      movie("3", "Speak No Evil 2024 (DE)", "1114513", 4),
+      movie("4", "Blow (NL)", null, 1),
+    ],
+    seriesCategories: [],
+    series: [],
+  };
+  const query = { kind: "movie", sort: "added", offset: 0, limit: 10 } as const;
+  const listed = (language: string) =>
+    page(indexCatalogue(catalogue, language), query).titles.map((title) => [
+      title.id,
+      title.versions.map((version) => version.id),
+    ]);
+
+  it("gathers the versions sharing a TMDB id, the one suiting the language first", () => {
+    expect(listed("en")).toEqual([
+      ["2", ["2", "3", "1"]],
+      ["4", ["4"]],
+    ]);
+    expect(listed("nl")).toEqual([
+      ["1", ["1", "2", "3"]],
+      ["4", ["4"]],
+    ]);
+  });
+
+  it("finds the title by any of its versions, and by any version's name", () => {
+    const index = indexCatalogue(catalogue, "en");
+    expect(byIds(index, "movie", ["3"]).map((title) => title.id)).toEqual(["2"]);
+    expect(search(index, "movie", "speak").map((title) => title.id)).toEqual(["2"]);
   });
 });

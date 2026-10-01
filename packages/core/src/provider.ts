@@ -46,6 +46,11 @@ export interface ProviderTitle {
   readonly adult: boolean;
   /** The file type movies stream as: "mkv", "mp4". Null for series, whose episodes have their own. */
   readonly container: string | null;
+  /**
+   * The Movie Database's id, which Xtream Codes lists carry when the provider filled it: the same
+   * film in several language versions shares it.
+   */
+  readonly tmdbId?: string | null;
 }
 
 /** Movies and series as the provider delivers them, each with its own categories. */

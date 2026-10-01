@@ -13,6 +13,11 @@ export const Preferences = type({
   "audioLanguage?": "string | null",
   /** The subtitle language picked last, or "off" once subtitles were turned off. */
   "subtitleLanguage?": "string | null",
+  /**
+   * The language for movies and series, an ISO 639-1 code: which version of a film shows and
+   * plays first, and the sound until another is picked. English when absent.
+   */
+  "titleLanguage?": "string",
 });
 export type Preferences = typeof Preferences.infer;
 

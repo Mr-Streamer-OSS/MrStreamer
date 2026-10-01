@@ -23,14 +23,17 @@ export interface WorkerCalls {
   status: { args: { key: string }; result: WorkerStatus };
   /** Fetches both lists from the provider and keeps them when they look complete. */
   refresh: { args: { key: string; account: XtreamAccount }; result: WorkerStatus };
-  categories: { args: { key: string; kind: TitleKind }; result: readonly TitleCategory[] };
-  page: { args: { key: string; query: PageQuery }; result: TitlePage };
+  categories: {
+    args: { key: string; language: string; kind: TitleKind };
+    result: readonly TitleCategory[];
+  };
+  page: { args: { key: string; language: string; query: PageQuery }; result: TitlePage };
   byIds: {
-    args: { key: string; kind: TitleKind; ids: readonly string[] };
+    args: { key: string; language: string; kind: TitleKind; ids: readonly string[] };
     result: readonly Title[];
   };
   search: {
-    args: { key: string; query: string };
+    args: { key: string; language: string; query: string };
     result: { readonly movies: readonly Title[]; readonly series: readonly Title[] };
   };
   /** The file type a movie streams as, or null when the catalogue doesn't have the movie. */

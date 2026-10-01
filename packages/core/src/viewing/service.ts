@@ -36,10 +36,13 @@ export interface StoredViewing {
   readonly sequence: number;
 }
 
-/** Which titles' progress to read: movies by id, and every episode of a series. */
+/**
+ * Which titles' progress to read: movies by id, and every episode of the series by id, each
+ * language version of a film or series having its own.
+ */
 export interface TitleFilter {
   readonly movieIds?: readonly string[];
-  readonly seriesId?: string;
+  readonly seriesIds?: readonly string[];
 }
 
 /** Where the events and the state they add up to are kept. */

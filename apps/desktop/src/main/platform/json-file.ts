@@ -1,26 +1,32 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { promisify } from "node:util";
+import { gunzip as gunzipCallback, gzip as gzipCallback } from "node:zlib";
 import { ArkErrors } from "arktype";
 
+const gzip = promisify(gzipCallback);
+const gunzip = promisify(gunzipCallback);
+
 /**
- * Reads and validates a JSON file against an ArkType schema. Returns null when the file is
- * missing, unreadable or no longer matches, so callers treat stale formats like a first run.
+ * Reads and validates a JSON file against an ArkType schema, unpacking it first when its name
+ * ends in .gz. Returns null when the file is missing, unreadable or no longer matches, so callers
+ * treat stale formats like a first run.
  */
 export async function readJsonFile<T>(
   path: string,
   schema: (data: unknown) => T | ArkErrors,
 ): Promise<T | null> {
-  let text: string;
+  let bytes: Buffer;
   try {
-    text = await readFile(path, "utf8");
+    bytes = await readFile(path);
   } catch (cause) {
     if (isMissing(cause)) return null;
     throw cause;
   }
   let data: unknown;
   try {
-    data = JSON.parse(text);
+    data = JSON.parse((path.endsWith(".gz") ? await gunzip(bytes) : bytes).toString("utf8"));
   } catch {
     console.warn(`[storage] ignoring unreadable ${path}`);
     return null;
@@ -33,18 +39,22 @@ export async function readJsonFile<T>(
   return parsed;
 }
 
-/** Writes JSON atomically: a crash mid-write leaves the previous file intact. */
+/**
+ * Writes JSON atomically, packed when the name ends in .gz: a crash mid-write leaves the previous
+ * file intact.
+ */
 export async function writeJsonFile(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const temp = `${path}.${randomUUID()}.tmp`;
-  await writeFile(temp, JSON.stringify(value), "utf8");
+  const text = JSON.stringify(value);
+  await writeFile(temp, path.endsWith(".gz") ? await gzip(text) : text);
   await rename(temp, path);
 }
 
 /** Deletes what writes interrupted by a crash or power loss left behind in `dir`. */
 export async function removeUnfinishedWrites(dir: string): Promise<void> {
   const names = await readdir(dir).catch(() => []);
-  const unfinished = names.filter((name) => /\.(json|xml)\.[0-9a-f-]{36}\.tmp$/.test(name));
+  const unfinished = names.filter((name) => /\.(json|xml|gz)\.[0-9a-f-]{36}\.tmp$/.test(name));
   await Promise.all(unfinished.map((name) => rm(join(dir, name), { force: true })));
 }
 

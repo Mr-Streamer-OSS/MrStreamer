@@ -138,14 +138,20 @@ export const queries = {
       queryFn: () => call("ondemand.details", { kind, id }),
       staleTime: 30 * 60_000,
     }),
-  /** How far movies, or every episode of a series, got. Kept current by `syncViewing`. */
-  progress: (filter: { readonly movieIds?: readonly string[]; readonly seriesId?: string }) =>
+  /**
+   * How far movies, or every episode of series, got: each id a language version of one title.
+   * Kept current by `syncViewing`.
+   */
+  progress: (filter: {
+    readonly movieIds?: readonly string[];
+    readonly seriesIds?: readonly string[];
+  }) =>
     queryOptions({
-      queryKey: ["viewing", "progress", filter.seriesId ?? null, ...(filter.movieIds ?? [])],
+      queryKey: ["viewing", "progress", filter.movieIds ?? [], filter.seriesIds ?? []],
       queryFn: () =>
         call("viewing.progress", {
           ...(filter.movieIds ? { movieIds: [...filter.movieIds] } : {}),
-          ...(filter.seriesId ? { seriesId: filter.seriesId } : {}),
+          ...(filter.seriesIds ? { seriesIds: [...filter.seriesIds] } : {}),
         }),
       staleTime: Infinity,
     }),

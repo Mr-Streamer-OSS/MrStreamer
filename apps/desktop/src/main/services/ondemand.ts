@@ -17,6 +17,7 @@ import { diagnosed } from "@mrstreamer/core/diagnostics";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
 import type { PageQuery } from "@mrstreamer/core/ondemand/catalogue";
 import { movieDetails, seriesDetails } from "@mrstreamer/core/ondemand/details";
+import { DEFAULT_TITLE_LANGUAGE } from "@mrstreamer/core/ondemand/languages";
 import type { ProviderDetails } from "@mrstreamer/core/provider";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -32,6 +33,7 @@ import type {
   WorkerSetup,
   WorkerStatus,
 } from "../ondemand/protocol.ts";
+import { Settings } from "./preferences.ts";
 import { Subscriptions, type Source } from "./subscription.ts";
 
 /** How many titles' details stay in memory. Opening one again, or Home, then asks no one. */
@@ -81,12 +83,18 @@ export class OnDemand extends Context.Service<
 function make(deps: OnDemandDeps) {
   return Effect.gen(function* () {
     const subscriptions = yield* Subscriptions;
+    const settings = yield* Settings;
+    /** The language whose versions titles show and play first. */
+    const language = Effect.map(
+      settings.get,
+      (preferences) => preferences.titleLanguage ?? DEFAULT_TITLE_LANGUAGE,
+    );
     const updates = yield* PubSub.unbounded<OnDemandStatus>();
     const worker = yield* Effect.acquireRelease(
       Effect.sync(() =>
         workerClient(() =>
           deps.worker({
-            cachePath: join(deps.dataDir, "ondemand.json"),
+            cachePath: join(deps.dataDir, "ondemand.json.gz"),
             userAgent: deps.userAgent,
           }),
         ),
@@ -138,19 +146,22 @@ function make(deps: OnDemandDeps) {
       );
     });
 
-    /** Runs a call for the connected subscription, fetching the lists first when there are none. */
-    const loaded = <A>(run: (source: Source) => Effect.Effect<A, Failed>) =>
+    /**
+     * Runs a call for the connected subscription in the viewer's language, fetching the lists
+     * first when there are none.
+     */
+    const loaded = <A>(run: (source: Source, language: string) => Effect.Effect<A, Failed>) =>
       Effect.gen(function* () {
         const source = yield* requireSource;
         const worked = yield* call("status", { key: source.key });
         if (worked.fetchedAt === null) yield* refresh;
-        return yield* run(source);
+        return yield* run(source, yield* language);
       });
 
     const detailsOf = (kind: TitleKind, id: string) =>
       Effect.gen(function* () {
         const source = yield* requireSource;
-        const cacheKey = `${source.key}|${kind}|${id}`;
+        const cacheKey = `${source.key}|${yield* language}|${kind}|${id}`;
         const cached = details.get(cacheKey);
         if (cached) {
           // Most recently used last.
@@ -158,7 +169,9 @@ function make(deps: OnDemandDeps) {
           details.set(cacheKey, cached);
           return cached;
         }
-        const [title] = yield* loaded(() => call("byIds", { key: source.key, kind, ids: [id] }));
+        const [title] = yield* loaded((_, language) =>
+          call("byIds", { key: source.key, language, kind, ids: [id] }),
+        );
         if (!title) return yield* new Failed({ error: { kind: "title-not-found", titleId: id } });
         const raw = yield* Effect.tryPromise({
           try: (signal) =>
@@ -167,9 +180,11 @@ function make(deps: OnDemandDeps) {
               : source.provider.seriesDetails(id, signal),
           catch: failedWith,
         }).pipe(diagnosed("details"));
+        // The title as this version: its episodes and its file belong to `id`.
+        const version = { ...title, id };
         const found = {
           raw,
-          shown: kind === "movie" ? movieDetails(title, raw) : seriesDetails(title, raw),
+          shown: kind === "movie" ? movieDetails(version, raw) : seriesDetails(version, raw),
         };
         // Only for the subscription it was asked for.
         if ((yield* subscriptions.source)?.key === source.key) {
@@ -203,11 +218,13 @@ function make(deps: OnDemandDeps) {
         }),
 
       categories: (kind: TitleKind) =>
-        loaded((source) => call("categories", { key: source.key, kind })),
+        loaded((source, language) => call("categories", { key: source.key, language, kind })),
 
-      page: (query: PageQuery) => loaded((source) => call("page", { key: source.key, query })),
+      page: (query: PageQuery) =>
+        loaded((source, language) => call("page", { key: source.key, language, query })),
 
-      search: (query: string) => loaded((source) => call("search", { key: source.key, query })),
+      search: (query: string) =>
+        loaded((source, language) => call("search", { key: source.key, language, query })),
 
       details: (kind: TitleKind, id: string) =>
         Effect.map(detailsOf(kind, id), (found) => found.shown),

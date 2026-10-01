@@ -313,6 +313,7 @@ function defineTitleSchemas() {
     "category_ids?": "(string | number)[] | null",
     "container_extension?": "string | null",
     "is_adult?": "number | string | boolean | null",
+    "tmdb?": loose,
   });
 
   const SeriesRow = type({
@@ -326,6 +327,7 @@ function defineTitleSchemas() {
     "release_date?": "string | null",
     "category_id?": loose,
     "category_ids?": "(string | number)[] | null",
+    "tmdb?": loose,
   });
 
   const Info = type({
@@ -414,8 +416,15 @@ function toMovie(raw: unknown): ProviderTitle[] {
       categoryIds: categoryIdsOf(row),
       adult: isTruthy(row.is_adult),
       container: row.container_extension?.trim() || "mp4",
+      tmdbId: tmdbIdOf(row.tmdb),
     },
   ];
+}
+
+/** A TMDB id: digits, and not the 0 some panels write for none. */
+function tmdbIdOf(value: string | number | null | undefined): string | null {
+  const text = String(value ?? "").trim();
+  return /^\d+$/.test(text) && Number(text) > 0 ? text : null;
 }
 
 function toSeries(raw: unknown): ProviderTitle[] {
@@ -434,6 +443,7 @@ function toSeries(raw: unknown): ProviderTitle[] {
       categoryIds: categoryIdsOf(row),
       adult: false,
       container: null,
+      tmdbId: tmdbIdOf(row.tmdb),
     },
   ];
 }

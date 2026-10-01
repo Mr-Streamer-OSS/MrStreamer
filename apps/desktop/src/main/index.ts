@@ -45,6 +45,13 @@ const UPDATE_FEED =
 const UPDATE_API = process.env["MR_STREAMER_UPDATE_API"] ?? "https://api.github.com";
 const REPOSITORY = "Mr-Streamer-OSS/MrStreamer";
 
+/**
+ * Chromium's own cache, mostly posters and backdrops, on disk at most this big; the oldest go
+ * first. Artwork shown this session stays in memory either way.
+ */
+const DISK_CACHE_BYTES = 64 * 1024 * 1024;
+app.commandLine.appendSwitch("disk-cache-size", String(DISK_CACHE_BYTES));
+
 /** Refresh the channel list in the background when the cached copy is older than this. */
 const CATALOGUE_MAX_AGE = "12 hours";
 

@@ -34,9 +34,11 @@ const ProviderTitle = type({
   categoryIds: "string[]",
   adult: "boolean",
   container: "string | null",
+  "tmdbId?": "string | null",
 });
+/** Version 1 came before TMDB ids: still shown, but refreshed as soon as the app can. */
 const CachedCatalogue = type({
-  version: "1",
+  version: "1 | 2",
   /** Which subscription produced it. */
   key: "string",
   fetchedAt: "number",
@@ -49,9 +51,11 @@ const CachedCatalogue = type({
 interface Loaded {
   readonly key: string;
   readonly fetchedAt: number;
-  readonly index: IndexedCatalogue;
+  readonly catalogue: OnDemandCatalogue;
   readonly movies: number;
   readonly series: number;
+  /** Built on first use, and again when the viewer's language changes. */
+  index: IndexedCatalogue | null;
 }
 
 let loaded: Loaded | null = null;
@@ -66,11 +70,18 @@ function remember(key: string, fetchedAt: number, catalogue: OnDemandCatalogue):
   loaded = {
     key,
     fetchedAt,
-    index: indexCatalogue(catalogue),
+    catalogue,
     movies: catalogue.movies.length,
     series: catalogue.series.length,
+    index: null,
   };
   return loaded;
+}
+
+/** The catalogue as a viewer of `language` sees it. */
+function indexOf(found: Loaded, language: string): IndexedCatalogue {
+  if (found.index?.language !== language) found.index = indexCatalogue(found.catalogue, language);
+  return found.index;
 }
 
 /** The cache being written. Writes go one at a time, and clearing waits for them. */
@@ -81,10 +92,14 @@ let writing: Promise<void> = Promise.resolve();
  */
 const WRITE_AFTER_MS = 1000;
 
+/** The cache from before it was packed, read once and removed after the next write. */
+const legacyCachePath = setup.cachePath.replace(/\.gz$/, "");
+
 function persist(file: object): void {
   writing = writing
     .then(() => new Promise((done) => setTimeout(done, WRITE_AFTER_MS)))
     .then(() => writeJsonFile(setup.cachePath, file))
+    .then(() => removeFile(legacyCachePath))
     .catch(() => {});
 }
 
@@ -99,10 +114,15 @@ function current(key: string): Promise<Loaded | null> {
   if (loaded?.key === key) return Promise.resolve(loaded);
   if (reading?.key === key) return reading.done;
   const done = (async () => {
-    const file = await readJsonFile(setup.cachePath, CachedCatalogue);
+    const file =
+      (await readJsonFile(setup.cachePath, CachedCatalogue)) ??
+      (legacyCachePath === setup.cachePath
+        ? null
+        : await readJsonFile(legacyCachePath, CachedCatalogue));
     // Cleared while reading, when the account went.
     if (file?.key !== key || reading?.key !== key) return null;
-    return loaded?.key === key ? loaded : remember(key, file.fetchedAt, file);
+    if (loaded?.key === key) return loaded;
+    return remember(key, file.version === 2 ? file.fetchedAt : 0, file);
   })();
   reading = { key, done };
   const settled = () => {
@@ -158,7 +178,7 @@ async function refresh(args: WorkerCalls["refresh"]["args"]): Promise<WorkerStat
     const status = statusOf(remember(args.key, fetchedAt, catalogue));
     // Written after answering, so the lists show without waiting for the disk. A write cut short
     // by quitting leaves the previous lists for the next start, which refreshes them when due.
-    persist({ version: 1, key: args.key, fetchedAt, ...catalogue });
+    persist({ version: 2, key: args.key, fetchedAt, ...catalogue });
     return status;
   })();
   const running = { key: args.key, done, abort };
@@ -175,21 +195,26 @@ const handlers: {
 } = {
   status: async ({ key }) => statusOf(await current(key)),
   refresh,
-  categories: async ({ key, kind }) => kindOf((await required(key)).index, kind).categories,
-  page: async ({ key, query }) => page((await required(key)).index, query),
-  byIds: async ({ key, kind, ids }) => {
+  categories: async ({ key, language, kind }) =>
+    kindOf(indexOf(await required(key), language), kind).categories,
+  page: async ({ key, language, query }) => page(indexOf(await required(key), language), query),
+  byIds: async ({ key, language, kind, ids }) => {
     const found = await current(key);
-    return found ? byIds(found.index, kind, ids) : [];
+    return found ? byIds(indexOf(found, language), kind, ids) : [];
   },
-  search: async ({ key, query }) => {
+  search: async ({ key, language, query }) => {
     const found = await current(key);
     if (!found) return { movies: [], series: [] };
-    return {
-      movies: search(found.index, "movie", query),
-      series: search(found.index, "series", query),
-    };
+    const index = indexOf(found, language);
+    return { movies: search(index, "movie", query), series: search(index, "series", query) };
   },
-  container: async ({ key, id }) => (await current(key))?.index.movies.containers.get(id) ?? null,
+  container: async ({ key, id }) => {
+    const found = await current(key);
+    // Any language's index knows every version's file type.
+    return found
+      ? (found.catalogue.movies.find((movie) => movie.id === id)?.container ?? null)
+      : null;
+  },
   clear: async () => {
     refreshing?.abort.abort();
     refreshing = null;
@@ -197,7 +222,7 @@ const handlers: {
     loaded = null;
     emptyBefore.clear();
     await writing;
-    await removeFile(setup.cachePath);
+    await Promise.all([removeFile(setup.cachePath), removeFile(legacyCachePath)]);
     return null;
   },
   flush: async () => {

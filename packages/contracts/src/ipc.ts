@@ -90,7 +90,7 @@ export const ipcInputs = {
       duration: "number > 0",
     }),
   "viewing.removeFromContinue": () => type({ commandId: "string", title: TitleRef }),
-  "viewing.progress": () => type({ "movieIds?": "string[]", "seriesId?": "string" }),
+  "viewing.progress": () => type({ "movieIds?": "string[]", "seriesIds?": "string[]" }),
   "updates.status": none,
   "updates.setChannel": () => type({ channel: "'stable' | 'nightly'" }),
   "updates.check": none,

@@ -9,6 +9,7 @@ import { createStore, useStore } from "zustand";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { AudioTrack, StreamFailure, SubtitleTrack } from "@mrstreamer/contracts/playback";
 import type { Preferences } from "@mrstreamer/contracts/preferences";
+import { DEFAULT_TITLE_LANGUAGE } from "@mrstreamer/core/ondemand/languages";
 import { chooseTracks } from "@mrstreamer/core/ondemand/tracks";
 import { appError } from "../lib/errors.ts";
 import { call } from "../lib/ipc.ts";
@@ -270,7 +271,9 @@ export const titlePlayer = {
       }
       session = { id: opened.sessionId, url: opened.url };
       const chosen = chooseTracks(opened.audio, opened.subtitles, {
-        audioLanguage: preferences?.audioLanguage ?? null,
+        // The sound picked last, else the movies and series language, English to begin with.
+        audioLanguage:
+          preferences?.audioLanguage ?? preferences?.titleLanguage ?? DEFAULT_TITLE_LANGUAGE,
         subtitleLanguage: preferences?.subtitleLanguage ?? null,
       });
       store.setState({

@@ -5,12 +5,16 @@ import type { AppError } from "./errors.ts";
 export const TITLE_KINDS = ["movie", "series"] as const;
 export type TitleKind = (typeof TITLE_KINDS)[number];
 
-/** A movie or a series in a catalogue list. Series and movies share it, so lists show both alike. */
+/**
+ * A movie or a series in a catalogue list. Series and movies share it, so lists show both alike.
+ * Providers list each language version on its own; a title gathers them, and shows and plays the
+ * one that suits the viewer's language.
+ */
 export interface Title {
   readonly kind: TitleKind;
-  /** Stable within one subscription. */
+  /** The version shown and played first. Stable within one subscription and language. */
   readonly id: string;
-  /** The provider's name, for search: "Blow 2001 (NL)". */
+  /** The provider's name of that version, for search: "Blow 2001 (NL)". */
   readonly name: string;
   /** The name to show: "Blow". */
   readonly title: string;
@@ -28,6 +32,17 @@ export interface Title {
   readonly categoryIds: readonly string[];
   /** The provider marks it, or its category, as for adults. */
   readonly adult: boolean;
+  /** The Movie Database's id, which the language versions of one film share. */
+  readonly tmdbId: string | null;
+  /** Every version, the one shown first in front. */
+  readonly versions: readonly TitleVersion[];
+}
+
+/** One version of a title as the provider lists it, often one per language. */
+export interface TitleVersion {
+  readonly id: string;
+  /** Markers from its name: "NL", "MULTI", "4K". */
+  readonly tags: readonly string[];
 }
 
 export interface TitleCategory {

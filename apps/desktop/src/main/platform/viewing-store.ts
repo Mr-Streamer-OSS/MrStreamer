@@ -315,7 +315,7 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
     titles: (account, filter: TitleFilter) =>
       attempt((): TitleProgress[] => {
         const rows = [
-          ...(filter.seriesId ? statements.seriesTitles.all(account, filter.seriesId) : []),
+          ...(filter.seriesIds ?? []).flatMap((id) => statements.seriesTitles.all(account, id)),
           ...(filter.movieIds ?? []).flatMap((id) => {
             const row = statements.title.get(account, `movie:${id}`);
             return row ? [row] : [];
