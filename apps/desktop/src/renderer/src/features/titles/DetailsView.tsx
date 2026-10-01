@@ -1,5 +1,6 @@
 // A movie's or series' details, in a sheet over the page it was opened from, which stays in view
-// behind it. Resume is the main action for anything partly watched, and From the beginning plays
+// behind it: the facts, the actions, the story, the cast with their photos, and a series'
+// episodes. Resume is the main action for anything partly watched, and From the beginning plays
 // at once, without asking. A title with several versions plays the one picked with the arrow
 // beside Play, else the one that suits best; the sheet shows that version, so a series lists its
 // episodes. A series opens on the season being watched, and marks the episode.
@@ -11,6 +12,7 @@ import { useState, type ReactNode } from "react";
 import type {
   Episode,
   MovieDetails,
+  Person,
   SeriesDetails,
   Title,
   TitleDetails,
@@ -113,6 +115,7 @@ function Content({
 }) {
   const { title } = details;
   const facts = [
+    details.originalTitle ? `Original title ${details.originalTitle}` : null,
     title.year,
     details.kind === "movie" && details.duration ? runtime(details.duration) : null,
     details.kind === "series" && details.seasons.length > 0
@@ -136,9 +139,6 @@ function Content({
         <Dialog.Title className="text-4xl font-semibold tracking-tight text-balance">
           {title.title}
         </Dialog.Title>
-        {details.originalTitle && (
-          <div className="mt-1 text-[0.9375rem] text-muted-foreground">{details.originalTitle}</div>
-        )}
         <div className="mt-2 text-[0.9375rem] text-muted-foreground">{facts.join(" · ")}</div>
         {details.kind === "movie" ? (
           <MovieActions details={details} versions={versions} switching={switching} />
@@ -150,19 +150,7 @@ function Content({
             {details.plot}
           </p>
         )}
-        {(details.cast.length > 0 || details.directors.length > 0) && (
-          <div className="mt-3 max-w-[48rem] text-[0.8125rem] text-muted-foreground">
-            {[
-              details.cast
-                .slice(0, 5)
-                .map((person) => person.name)
-                .join(", "),
-              details.directors.slice(0, 2).join(", "),
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </div>
-        )}
+        <Credits details={details} />
         {details.kind === "series" && (
           <div inert={switching || undefined}>
             <Episodes details={details} />
@@ -171,6 +159,69 @@ function Content({
       </div>
     </>
   );
+}
+
+/** Who is in it, with their photos and parts, and who directed or created it. */
+function Credits({ details }: { details: TitleDetails }) {
+  const cast = details.cast.slice(0, 8);
+  const makers = details.directors.slice(0, 2);
+  if (cast.length === 0 && makers.length === 0) return null;
+  return (
+    <div className="mt-6 flex gap-5 overflow-x-auto pb-1">
+      {cast.map((person) => (
+        <CastMember key={`${person.name}:${person.role ?? ""}`} person={person} />
+      ))}
+      {makers.length > 0 && (
+        <div className="w-28 flex-none self-center text-[0.8125rem]">
+          <div className="text-muted-foreground">
+            {details.kind === "movie" ? "Directed by" : "Created by"}
+          </div>
+          {makers.map((name) => (
+            <div key={name} className="truncate font-medium">
+              {name}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CastMember({ person }: { person: Person }) {
+  // A photo that doesn't load leaves the initials.
+  const [failed, setFailed] = useState(false);
+  const photo = failed ? null : person.photoUrl;
+  return (
+    <div className="w-[5.5rem] flex-none text-center">
+      <div className="mx-auto size-16 overflow-hidden rounded-full bg-white/8 ring-1 ring-white/10">
+        {photo ? (
+          <img
+            src={photo}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            draggable={false}
+            onError={() => setFailed(true)}
+            className="size-full object-cover"
+          />
+        ) : (
+          <span className="grid size-full place-items-center text-sm font-semibold text-white/80">
+            {initials(person.name)}
+          </span>
+        )}
+      </div>
+      <div className="mt-2 truncate text-[0.8125rem] font-medium">{person.name}</div>
+      {person.role && <div className="truncate text-xs text-muted-foreground">{person.role}</div>}
+    </div>
+  );
+}
+
+/** "AL" for Ada Lovelace. */
+function initials(name: string): string {
+  const words = name.split(/\s+/).filter(Boolean);
+  return (
+    (words[0]?.[0] ?? "") + (words.length > 1 ? (words.at(-1)?.[0] ?? "") : "")
+  ).toUpperCase();
 }
 
 function MovieActions({
@@ -493,7 +544,10 @@ function Episodes({ details }: { details: SeriesDetails }) {
               <span className="min-w-0">
                 <span className="block truncate text-[0.9375rem] font-medium">{episode.title}</span>
                 <span className="block truncate text-xs text-muted-foreground">
-                  {[episode.duration ? runtime(episode.duration) : null, episode.airDate]
+                  {[
+                    timeLeftOf(partly) ?? (episode.duration ? runtime(episode.duration) : null),
+                    episode.airDate,
+                  ]
                     .filter(Boolean)
                     .join(" · ")}
                 </span>

@@ -35,7 +35,7 @@ Mr. Streamer has its own TMDB key. If TMDB stops accepting it, Settings > Movies
 
 ## Details
 
-A poster opens its details over the list, which stays where it was: the artwork, the year, length, genres and rating, the story and the cast. They load when you open the title, never before: TMDB's story, artwork and cast in your language where it has them, your provider's otherwise. A title opened before opens at once. A film's details are those of the version that plays.
+A poster opens its details over the list, which stays where it was: the artwork, the original title when it differs, the year, length, genres and rating, the story, the cast with their photos and parts, and who directed or created it. An episode you stopped in shows how much is left. They load when you open the title, never before: TMDB's story, artwork and cast in your language where it has them, your provider's otherwise. A title opened before opens at once. A film's details are those of the version that plays.
 
 - **Resume** plays a movie or episode from where you stopped. **From the beginning** starts it again, without asking.
 - **Play** starts something new. For a series it plays the episode you're on: the one you stopped in, the next one after one you finished, or the first.

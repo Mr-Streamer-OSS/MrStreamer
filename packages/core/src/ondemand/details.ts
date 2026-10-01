@@ -72,9 +72,13 @@ function shared(title: Title, details: ProviderDetails, about: TitleAbout | null
       posterUrl: poster ?? title.posterUrl ?? details.posterUrl,
       backdropUrl: backdrop ?? details.backdropUrl ?? title.backdropUrl,
     },
-    // TMDB's original name first. The provider's often repeats the version's own name, marks and
-    // all, "Blow 2001 (NL AUDIO)": without them it is mostly the shown one.
-    originalTitle: title.originalTitle ?? providerOriginal(details.originalName, title.title),
+    // TMDB's original name, when it answered. Otherwise the provider's, which often repeats the
+    // version's own name, marks and all, "Blow 2001 (NL AUDIO)": without them it is mostly the
+    // shown one.
+    originalTitle: about
+      ? otherThan(about.original, title.title)
+      : (title.originalTitle ??
+        otherThan(details.originalName && titleName(details.originalName).title, title.title)),
     plot: about?.overview ?? details.plot,
     genres: genres.length > 0 ? genres : details.genres,
     cast: about?.cast.length
@@ -92,7 +96,7 @@ function shared(title: Title, details: ProviderDetails, about: TitleAbout | null
   };
 }
 
-function providerOriginal(name: string | null, shown: string): string | null {
-  const original = name ? titleName(name).title : null;
-  return original && original.toLowerCase() !== shown.toLowerCase() ? original : null;
+/** `name`, unless it is the shown one. */
+function otherThan(name: string | null | undefined, shown: string): string | null {
+  return name && name.toLowerCase() !== shown.toLowerCase() ? name : null;
 }
