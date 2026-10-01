@@ -109,16 +109,19 @@ export function xtreamProvider(account: XtreamAccount, options: ProviderOptions)
 
   /**
    * A long list, parsed in one go: only the catalogue worker reads these, off the main thread,
-   * where one parse is several times faster than reading row by row.
+   * where one parse is several times faster than reading row by row. A refused login is an
+   * error, never an empty list that could replace the lists the app has.
    */
   const getRows = <A>(
     params: string,
     signal: AbortSignal | undefined,
     map: (raw: unknown) => A[],
   ) =>
-    request(params, CATALOGUE_TIMEOUT_MS, signal, async (response) =>
-      rows(JSON.parse(await response.text())).flatMap(map),
-    );
+    request(params, CATALOGUE_TIMEOUT_MS, signal, async (response) => {
+      const body: unknown = JSON.parse(await response.text());
+      if (isRejectedLogin(body)) throw new AppFailure({ kind: "invalid-login" });
+      return rows(body).flatMap(map);
+    });
 
   return {
     async authenticate(signal) {
@@ -327,6 +330,7 @@ function defineTitleSchemas() {
     "release_date?": "string | null",
     "category_id?": loose,
     "category_ids?": "(string | number)[] | null",
+    "is_adult?": "number | string | boolean | null",
     "tmdb?": loose,
   });
 
@@ -441,7 +445,7 @@ function toSeries(raw: unknown): ProviderTitle[] {
       addedAt: epochSeconds(row.last_modified),
       releaseDate: row.releaseDate?.trim() || row.release_date?.trim() || null,
       categoryIds: categoryIdsOf(row),
-      adult: false,
+      adult: isTruthy(row.is_adult),
       container: null,
       tmdbId: tmdbIdOf(row.tmdb),
     },

@@ -5,7 +5,8 @@
 // channel; every other channel streams an empty MPEG-TS program. About half the channels have a
 // guide id, shared by variants of one channel, and xmltv.php serves their programmes.
 //
-// Movies and series come with their own categories, one of them for adults. Their files redirect
+// Movies and series come with their own categories, one of them for adults, and one series is
+// marked for adults in an ordinary category. Their files redirect
 // to another address, as real panels do, and answer byte ranges; each open file holds a
 // connection slot like a live stream. The "TEST" movies and the "TEST | Formats" series stream the
 // title clips in test/fixtures; every other title streams the MP4 clip.
@@ -73,6 +74,8 @@ interface FakeSeries {
   readonly id: number;
   readonly name: string;
   readonly categoryId: string;
+  /** Marked for adults, though its category's name doesn't say so. */
+  readonly adult: boolean;
   readonly added: number;
   /** Episodes per season, in order. */
   readonly seasons: readonly (readonly FakeTitle[])[];
@@ -91,8 +94,12 @@ export interface FakeProvider {
   readonly titles: FakeTitles;
   /** How many requests for movie and episode files reached the provider, redirects included. */
   fileRequests(): number;
-  /** Makes movie and series list requests answer with this HTTP status, or restores them. */
-  failTitles(status: number | null): void;
+  /**
+   * Makes movie and series list requests answer with this HTTP status, or restores them. "login"
+   * answers the two lists with a refused login and HTTP 200, as panels do, while their categories
+   * still answer.
+   */
+  failTitles(status: number | "login" | null): void;
   /** Streams currently holding a connection slot. */
   activeStreams(): number;
   /** Picks the channel list each later request returns, as panel updates would. */
@@ -144,7 +151,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
       .flatMap((series) => series.seasons.flat())
       .map((episode) => [String(episode.id), episode]),
   );
-  let titleFailure: number | null = null;
+  let titleFailure: number | "login" | null = null;
   let fileCount = 0;
   let select = (all: readonly FakeChannel[]): readonly FakeChannel[] => all;
   let catalogueFailure: number | null = null;
@@ -202,8 +209,11 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     if (catalogueFailure !== null && action?.startsWith("get_live")) {
       return void response.writeHead(catalogueFailure).end();
     }
+    if (titleFailure === "login" && (action === "get_vod_streams" || action === "get_series")) {
+      return json(response, { user_info: { auth: 0 } });
+    }
     if (
-      titleFailure !== null &&
+      typeof titleFailure === "number" &&
       (action?.startsWith("get_vod") || action?.startsWith("get_series"))
     ) {
       return void response.writeHead(titleFailure).end();
@@ -255,6 +265,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
           releaseDate: "2024-03-01",
           category_id: series.categoryId,
           category_ids: [Number(series.categoryId)],
+          is_adult: series.adult ? 1 : 0,
           tmdb: String(series.id + 10_000),
         })),
       );
@@ -676,6 +687,7 @@ function buildTitles(size: number): FakeTitles {
       id: 80_000,
       name: "TEST | Formats (NL)",
       categoryId: "601",
+      adult: false,
       added: base,
       seasons: [
         [
@@ -689,6 +701,14 @@ function buildTitles(size: number): FakeTitles {
         ],
       ],
     },
+    {
+      id: 79_999,
+      name: "After Dark (EN)",
+      categoryId: "601",
+      adult: true,
+      added: base - 1000,
+      seasons: [[episode(799_990, "title-h264-aac.mp4", "mp4")]],
+    },
   ];
   for (let index = 0; series.length < Math.max(2, Math.floor(size / 4)); index++) {
     const word = WORDS[(index * 7) % WORDS.length] ?? "Earth";
@@ -697,6 +717,7 @@ function buildTitles(size: number): FakeTitles {
       id,
       name: `${word} Files ${index} (NL)`,
       categoryId: index % 2 === 0 ? "601" : "602",
+      adult: false,
       added: base - 2000 - Math.floor(random() * 1_000_000),
       seasons: [
         [
