@@ -49,6 +49,7 @@ async function connectedGuide(options: FakeProviderOptions = {}) {
       listings: (channelIds: readonly string[]) => run(guide.listings(channelIds)),
       schedule: (channelId: string) => run(guide.schedule(channelId)),
       search: (query: string) => run(guide.search(query)),
+      status: () => run(guide.status),
       clear: () => run(guide.clear),
       library: await promised(runtime, Library),
       /**
@@ -167,6 +168,18 @@ describe("programme guide", () => {
       { start: at("21:15"), stop: at("22:00"), title: "Overlap", description: null },
     ]);
     expect((await guide.search("een")).map((match) => match.programme.title)).toEqual(["Het één"]);
+  });
+
+  it("says how many channels it covers, and since when, for Settings", async () => {
+    const { guide, provider } = await connectedGuide();
+    expect(await guide.status()).toEqual({ channels: 0, fetchedAt: null });
+
+    await guide.refresh();
+
+    const ids = provider.catalogue.channels.map((channel) => String(channel.streamId));
+    const shown = Object.keys(await guide.listings(ids)).length;
+    expect(shown).toBeGreaterThan(0);
+    expect(await guide.status()).toEqual({ channels: shown, fetchedAt: NOW });
   });
 
   it("finds programmes by title, on now first, on the channel that shows them", async () => {

@@ -99,6 +99,13 @@ export function listingsAt(
   return result;
 }
 
+/** How many of the catalogue's channels the guide has programmes for. */
+export function channelsCovered(index: ProgrammeIndex, channels: GuideChannels): number {
+  let count = 0;
+  for (const guideId of index.byChannel.keys()) count += channels.channelsOf(guideId).length;
+  return count;
+}
+
 /** The channel's programme on now and everything after it that the guide knows. */
 export function scheduleAt(
   index: ProgrammeIndex,

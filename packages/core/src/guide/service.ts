@@ -6,7 +6,7 @@
 // The app supplies three ports: the subscription and its download, the catalogue's guide ids, and
 // a store for the document as it arrived. Downloads run in the service's scope, so `clear` and
 // shutdown stop them, and a load or download that finishes after a `clear` changes nothing.
-import type { Listing, Programme, ProgrammeMatch } from "@mrstreamer/contracts/guide";
+import type { GuideStatus, Listing, Programme, ProgrammeMatch } from "@mrstreamer/contracts/guide";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -19,6 +19,7 @@ import * as Stream from "effect/Stream";
 import { diagnosed } from "../diagnostics.ts";
 import { Failed, failedWith } from "../failure.ts";
 import {
+  channelsCovered,
   indexProgrammes,
   listingsAt,
   scheduleAt,
@@ -85,6 +86,8 @@ export class Guide extends Context.Service<
     schedule(channelId: string): Effect.Effect<readonly Programme[]>;
     /** Programmes on now or later whose title matches, on now first. */
     search(query: string): Effect.Effect<readonly ProgrammeMatch[]>;
+    /** How many channels the loaded guide covers, and when it was downloaded. */
+    readonly status: Effect.Effect<GuideStatus>;
     /** Downloads the guide. Concurrent calls share a download; a failure keeps the guide. */
     readonly refresh: Effect.Effect<void, Failed>;
     /** Downloads the guide when there is none or it is six hours old. */
@@ -252,6 +255,15 @@ function make() {
             found ? searchAt(found.guide, found.channels, query, found.at) : [],
           ),
         ),
+      status: Effect.gen(function* () {
+        const found = yield* context;
+        return found
+          ? {
+              channels: channelsCovered(found.guide, found.channels),
+              fetchedAt: found.guide.fetchedAt,
+            }
+          : { channels: 0, fetchedAt: (yield* current)?.fetchedAt ?? null };
+      }),
       refresh,
       refreshIfStale,
       clear: Effect.gen(function* () {

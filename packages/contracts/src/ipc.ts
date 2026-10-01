@@ -4,7 +4,7 @@
 // The main process refuses to start unless every method has a handler (see src/main/ipc.ts).
 import { type } from "arktype";
 import type { Result } from "./errors.ts";
-import type { Listing, Programme, ProgrammeMatch } from "./guide.ts";
+import type { GuideStatus, Listing, Programme, ProgrammeMatch } from "./guide.ts";
 import type { CatalogueStatus, Category, LiveChannel } from "./library.ts";
 import type { ThirdPartyNotice } from "./licences.ts";
 import {
@@ -53,6 +53,8 @@ export const ipcInputs = {
   "subscription.get": none,
   "subscription.connect": loginInput,
   "subscription.remove": none,
+  /** Asks the provider for the account's status now: expiry and connections in use. */
+  "subscription.recheck": none,
   "library.status": none,
   "library.categories": none,
   "library.channels": () =>
@@ -62,6 +64,9 @@ export const ipcInputs = {
   "guide.listings": () => type({ channelIds: "string[]" }),
   "guide.schedule": () => type({ channelId: "string" }),
   "guide.search": () => type({ query: "string" }),
+  "guide.status": none,
+  /** Downloads the guide now, and answers with its status. */
+  "guide.refresh": none,
   "ondemand.status": none,
   "ondemand.refresh": none,
   "ondemand.search": () => type({ query: "string" }),
@@ -127,6 +132,7 @@ export interface IpcOutputs {
   "subscription.get": SubscriptionSummary | null;
   "subscription.connect": SubscriptionSummary;
   "subscription.remove": null;
+  "subscription.recheck": SubscriptionSummary | null;
   "library.status": CatalogueStatus;
   "library.categories": readonly Category[];
   /**
@@ -142,6 +148,8 @@ export interface IpcOutputs {
   "guide.schedule": readonly Programme[];
   /** Programmes on now or later whose title matches, on now first. */
   "guide.search": readonly ProgrammeMatch[];
+  "guide.status": GuideStatus;
+  "guide.refresh": GuideStatus;
   "ondemand.status": OnDemandStatus;
   /** Fetches the movie and series lists again. */
   "ondemand.refresh": OnDemandStatus;

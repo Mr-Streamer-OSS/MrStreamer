@@ -109,17 +109,17 @@ Details come from the provider when a title opens (`get_vod_info`, `get_series_i
 
 The main process runs every service on one [Effect](https://effect.website) runtime (`effect` 4, pinned to a release candidate). `apps/desktop/src/main/runtime.ts` assembles them from Layers in `mainLayer`. `index.ts` makes the runtime at start, forwards each service's changes to the window, and registers the IPC handlers: each returns an Effect, and `ipc.ts` runs it on the runtime.
 
-| Service         | Where                              | Owns                                                   |
-| --------------- | ---------------------------------- | ------------------------------------------------------ |
-| `Subscriptions` | `services/subscription.ts`         | The login, its sealed password, the provider behind it |
-| `Settings`      | `services/preferences.ts`          | `preferences.json`                                     |
-| `Library`       | `services/library.ts`              | The catalogue, its cache and refreshes                 |
-| `OnDemand`      | `services/ondemand.ts`             | Movies and series, through the catalogue worker        |
-| `Playback`      | `services/playback.ts`             | Stream sessions and the loopback proxy                 |
-| `Updates`       | `services/updates.ts`              | The release channel, checks, downloads and the install |
-| `Guide`         | `@mrstreamer/core/guide/service`   | The programme guide                                    |
-| `ViewingRecord` | `@mrstreamer/core/viewing/service` | Favourites, watch history and title progress           |
-| `Licences`      | `services/licences.ts`             | Third-party notices for Settings > About               |
+| Service         | Where                              | Owns                                                                                                                                                                     |
+| --------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Subscriptions` | `services/subscription.ts`         | The login, its sealed password, the provider behind it, and the account's status: asked at startup and again when Settings > Subscription opens (`subscription.recheck`) |
+| `Settings`      | `services/preferences.ts`          | `preferences.json`                                                                                                                                                       |
+| `Library`       | `services/library.ts`              | The catalogue, its cache and refreshes                                                                                                                                   |
+| `OnDemand`      | `services/ondemand.ts`             | Movies and series, through the catalogue worker                                                                                                                          |
+| `Playback`      | `services/playback.ts`             | Stream sessions and the loopback proxy                                                                                                                                   |
+| `Updates`       | `services/updates.ts`              | The release channel, checks, downloads and the install                                                                                                                   |
+| `Guide`         | `@mrstreamer/core/guide/service`   | The programme guide                                                                                                                                                      |
+| `ViewingRecord` | `@mrstreamer/core/viewing/service` | Favourites, watch history and title progress                                                                                                                             |
+| `Licences`      | `services/licences.ts`             | Third-party notices for Settings > About                                                                                                                                 |
 
 A service is a `Context.Service` class with a `layer`, and reaches the others through the context rather than callbacks. Services whose rules run without the platform live in `packages/core` and ask for what they need through ports, services of their own that the app supplies: the guide's are `GuideSource` (the subscription and its download), `GuideCatalogue` (guide ids) and `GuideStore` (the saved document, `platform/guide-store.ts`). The others live in the app. Every expected failure is a `Failed` from `@mrstreamer/core/failure`, carrying the `AppError` the UI shows; a provider adapter's `AppFailure` keeps its error, anything else counts as unexpected.
 
@@ -147,7 +147,7 @@ The UI reads `viewing.get` and sends `viewing.setFavourite`, `viewing.recordWatc
 
 A download replaces the guide only when it completes and lists programmes; otherwise the last guide stays. The main process downloads after connecting a subscription and at startup; the service itself checks every 15 minutes and downloads when the guide is six hours old. Switching accounts clears it: the download in progress stops, and a load or download that finishes afterwards changes nothing. Indexing and lookups are plain functions in `@mrstreamer/core/guide/programmes`.
 
-The UI asks `guide.listings` for now and next per channel, `guide.schedule` for one channel's day and `guide.search` for programme titles. Lists ask for listings in pages of 40 as rows come into view, and again each minute. `apps/desktop/scripts/measure-guide.ts` measures download, indexing, stalls, lookups and memory against the slice 03 budgets.
+The UI asks `guide.listings` for now and next per channel, `guide.schedule` for one channel's day and `guide.search` for programme titles. Settings asks `guide.status` for how many of the catalogue's channels the guide covers and when it was downloaded, and `guide.refresh` downloads it now. Lists ask for listings in pages of 40 as rows come into view, and again each minute. `apps/desktop/scripts/measure-guide.ts` measures download, indexing, stalls, lookups and memory against the slice 03 budgets.
 
 ## Views and the picture
 

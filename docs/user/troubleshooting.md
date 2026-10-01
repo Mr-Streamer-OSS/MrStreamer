@@ -31,10 +31,10 @@ The Windows installer isn't code-signed yet, so SmartScreen shows "Windows prote
 
 ## Channels or login stop working
 
-- **"The provider rejected this username or password":** check the login with your provider, then choose **Edit login** in Settings.
-- **No programme information for a channel:** your provider's guide doesn't cover it. Many providers cover only some channels. When a guide download fails, the last guide stays in use and Mr. Streamer tries again later.
-- **"Channels unavailable":** the provider didn't send the channel list. **Try again**, or check your internet connection. When a refresh fails, Mr. Streamer keeps showing the last channel list it received, and Settings says why the list may be out of date.
-- **Movies or Series stay empty:** the first load of a large list takes a few seconds. If the provider offers no movies or series, the pages say so. A failed refresh keeps the last lists.
+- **"The provider rejected this username or password":** check the login with your provider, then choose **Edit** beside Login in Settings > Subscription.
+- **No programme information for a channel:** your provider's guide doesn't cover it. Many providers cover only some channels. When a guide download fails, the last guide stays in use and Mr. Streamer tries again later; the refresh button beside Guide in Settings > Subscription tries now.
+- **"Channels unavailable":** the provider didn't send the channel list. **Try again**, or check your internet connection. When a refresh fails, Mr. Streamer keeps showing the last channel list it received, and Settings > Subscription says why the list may be out of date; the refresh button beside Channels tries again.
+- **Movies or Series stay empty:** the first load of a large list takes a few seconds. If the provider offers no movies or series, the pages say so. A failed refresh keeps the last lists; Settings > Subscription says why and refreshes them on their own.
 - **No genres or streaming services:** they come from TMDB, which takes about a quarter of an hour the first time on a large subscription. Settings > General shows how far it got beside TMDB, or that TMDB refused the key; **Own key…** takes your own. Titles your provider lists without a TMDB id never get them.
 
 ## Updates

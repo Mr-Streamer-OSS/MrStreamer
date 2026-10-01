@@ -33,7 +33,7 @@ Get the latest release from the [Releases page](https://github.com/Mr-Streamer-O
 4. **Movies** and **Series** list what your provider offers on demand, in tabs: For you, New, genres, streaming services and everything. **Resume** carries on where you stopped, **Sound** and **CC** pick the tracks, and a series offers its next episode. See [Movies and series](docs/user/movies-and-series.md).
 5. ⌘K (Ctrl K on Windows and Linux) searches channels, programmes, movies and series.
 
-Settings (⌘, or Ctrl ,) has the languages for titles, sound and subtitles, and updates, under General; your subscription; and the open-source licences under About.
+Settings (⌘, or Ctrl ,) has the languages for titles, sound and subtitles, and updates, under General; your subscription, with its expiry, connections in use and each list loaded from it, which refreshes on its own; and the open-source licences under About.
 
 ## Updates
 
