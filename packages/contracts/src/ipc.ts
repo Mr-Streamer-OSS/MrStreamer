@@ -8,9 +8,15 @@ import type { Listing, Programme, ProgrammeMatch } from "./guide.ts";
 import type { CatalogueStatus, Category, LiveChannel } from "./library.ts";
 import type { ThirdPartyNotice } from "./licences.ts";
 import {
+  COLLECTION_SORTS,
+  isCollectionId,
+  ROW_TABS,
   TitleRef,
   TITLE_KINDS,
   TITLE_SORTS,
+  type CollectionPage,
+  type CollectionRow,
+  type CollectionTile,
   type OnDemandStatus,
   type Title,
   type TitleCategory,
@@ -64,6 +70,17 @@ export const ipcInputs = {
       limit: "1 <= number.integer <= 500",
     }),
   "ondemand.search": () => type({ query: "string" }),
+  "ondemand.rows": () =>
+    type({ kind: titleKind(), tab: type.enumerated(...ROW_TABS), "like?": "string > 0" }),
+  "ondemand.tiles": () => type({ kind: titleKind(), of: "'genres' | 'services'" }),
+  "ondemand.collection": () =>
+    type({
+      kind: titleKind(),
+      id: type("string").narrow(isCollectionId),
+      "sort?": type.enumerated(...COLLECTION_SORTS),
+      offset: "number.integer >= 0",
+      limit: "1 <= number.integer <= 500",
+    }),
   "ondemand.details": () => type({ kind: titleKind(), id: "string > 0" }),
   "playback.open": () =>
     type({
@@ -132,6 +149,12 @@ export interface IpcOutputs {
   /** Movies and series whose name matches, best first, without titles for adults. */
   "ondemand.search": { readonly movies: readonly Title[]; readonly series: readonly Title[] };
   "ondemand.details": TitleDetails;
+  /** A tab's rows; For you starts with titles like `like`, one watched lately. */
+  "ondemand.rows": readonly CollectionRow[];
+  /** Genres or streaming services as tiles, most stocked first. */
+  "ondemand.tiles": readonly CollectionTile[];
+  /** One page of a collection. */
+  "ondemand.collection": CollectionPage;
   /** Opens a stream for a channel and closes any stream that was open before. */
   "playback.open": StreamSession;
   /** Opens a movie or episode, and closes any stream that was open before. */

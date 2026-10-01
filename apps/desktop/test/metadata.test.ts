@@ -63,6 +63,51 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
     );
   });
 
+  it("builds genres, streaming services and rows from it, in the viewer's language", async () => {
+    const app = await metadataApp();
+    // Netflix streams the first generated films; their TMDB ids are their ids plus 10,000.
+    app.tmdb.stream(
+      "movie",
+      Array.from({ length: 30 }, (_, index) => String(101_000 + index)),
+    );
+    const { onDemand } = await app.start();
+    await vi.waitFor(
+      async () => expect(await onDemand.tiles("movie", "services")).not.toEqual([]),
+      { timeout: 25_000 },
+    );
+
+    const genres = await onDemand.tiles("movie", "genres");
+    expect(genres.map((genre) => genre.name).sort()).toEqual(["Comedy", "Drama"]);
+    const comedy = await onDemand.collection({
+      kind: "movie",
+      id: "genre:Comedy",
+      offset: 0,
+      limit: 500,
+    });
+    expect(comedy.titles.length).toBeGreaterThan(0);
+    expect(comedy.titles.every((title) => title.genres.includes("Comedy"))).toBe(true);
+
+    // Films made in Dutch with only a Dutch version: out of the English rows, but in All.
+    const all = await onDemand.collection({ kind: "movie", id: "all", offset: 0, limit: 500 });
+    const dutch = all.titles.filter(
+      (title) => Number(title.tmdbId) % 3 === 0 && title.tags.includes("NL"),
+    );
+    expect(dutch.length).toBeGreaterThan(0);
+    const shown = new Set(
+      [
+        ...comedy.titles,
+        ...(await onDemand.collection({ kind: "movie", id: "genre:Drama", offset: 0, limit: 500 }))
+          .titles,
+      ].map((title) => title.id),
+    );
+    expect(dutch.some((title) => shown.has(title.id))).toBe(false);
+
+    const services = await onDemand.tiles("movie", "services");
+    expect(services).toEqual([expect.objectContaining({ name: "Netflix" })]);
+    const rows = await onDemand.rows("movie", "for-you");
+    expect(rows.map((row) => row.name)).toEqual(expect.arrayContaining(["Popular", "Netflix"]));
+  });
+
   it("fetches nothing without a key", async () => {
     const app = await metadataApp(null);
     const { onDemand } = await app.start();

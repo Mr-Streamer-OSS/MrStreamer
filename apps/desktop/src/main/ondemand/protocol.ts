@@ -1,7 +1,18 @@
 // Messages between the main process and the catalogue worker. Every call names the account it
 // is for, so an answer can never mix two subscriptions.
 import type { AppError } from "@mrstreamer/contracts/errors";
-import type { Title, TitleCategory, TitleKind, TitlePage } from "@mrstreamer/contracts/ondemand";
+import type {
+  CollectionId,
+  CollectionPage,
+  CollectionRow,
+  CollectionSort,
+  CollectionTile,
+  RowTab,
+  Title,
+  TitleCategory,
+  TitleKind,
+  TitlePage,
+} from "@mrstreamer/contracts/ondemand";
 import type { PageQuery } from "@mrstreamer/core/ondemand/catalogue";
 import type { XtreamAccount } from "../providers/xtream.ts";
 import type { MetadataStatus } from "./metadata.ts";
@@ -39,6 +50,29 @@ export interface WorkerCalls {
   search: {
     args: { key: string; language: string; query: string };
     result: { readonly movies: readonly Title[]; readonly series: readonly Title[] };
+  };
+  /** A tab's rows; For you starts with titles like `like`, a title watched lately. */
+  rows: {
+    args: { key: string; language: string; kind: TitleKind; tab: RowTab; like?: string };
+    result: readonly CollectionRow[];
+  };
+  /** Genres or streaming services as tiles. */
+  tiles: {
+    args: { key: string; language: string; kind: TitleKind; of: "genres" | "services" };
+    result: readonly CollectionTile[];
+  };
+  /** One page of a collection. */
+  collection: {
+    args: {
+      key: string;
+      language: string;
+      kind: TitleKind;
+      id: CollectionId;
+      sort?: CollectionSort;
+      offset: number;
+      limit: number;
+    };
+    result: CollectionPage;
   };
   /** The file type a movie streams as, or null when the catalogue doesn't have the movie. */
   container: { args: { key: string; id: string }; result: string | null };

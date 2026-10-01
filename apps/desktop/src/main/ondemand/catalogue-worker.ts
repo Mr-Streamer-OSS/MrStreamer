@@ -15,8 +15,10 @@ import {
   search,
   type IndexedCatalogue,
 } from "@mrstreamer/core/ondemand/catalogue";
+import type { CollectionId, TitleKind } from "@mrstreamer/contracts/ondemand";
 import type { OnDemandCatalogue } from "@mrstreamer/core/provider";
 import { tmdb } from "@mrstreamer/core/metadata/tmdb";
+import { collections, type Collections } from "@mrstreamer/core/ondemand/collections";
 import { readJsonFile, removeFile, writeJsonFile } from "../platform/json-file.ts";
 import { xtreamProvider } from "../providers/xtream.ts";
 import { metadataStore, type Wanted } from "./metadata.ts";
@@ -30,6 +32,9 @@ import type {
 
 const setup = workerData as WorkerSetup;
 
+/** Counts arrivals of metadata, so collections built before them are built again. */
+let metadataVersion = 0;
+
 /** TMDB's metadata, kept across subscriptions: it describes titles, not accounts. */
 const metadata = metadataStore({
   path: setup.metadataPath,
@@ -37,8 +42,10 @@ const metadata = metadataStore({
     ? tmdb({ key: setup.tmdb.key, ...(setup.tmdb.api ? { api: setup.tmdb.api } : {}) })
     : null,
   region: setup.tmdb?.region ?? "US",
-  onChange: () =>
-    parentPort?.postMessage({ event: "metadata", status: metadata.status() } satisfies WorkerEvent),
+  onChange: () => {
+    metadataVersion++;
+    parentPort?.postMessage({ event: "metadata", status: metadata.status() } satisfies WorkerEvent);
+  },
 });
 
 /** Every TMDB id the catalogue lists, once, with when it was added. */
@@ -94,6 +101,8 @@ interface Loaded {
   readonly series: number;
   /** Built on first use, and again when the viewer's language changes. */
   index: IndexedCatalogue | null;
+  /** By language, kind and metadata version; built when first asked for. */
+  readonly collections: Map<string, Collections>;
 }
 
 let loaded: Loaded | null = null;
@@ -112,10 +121,40 @@ function remember(key: string, fetchedAt: number, catalogue: OnDemandCatalogue):
     movies: catalogue.movies.length,
     series: catalogue.series.length,
     index: null,
+    collections: new Map(),
   };
   metadata.want(wantedOf(catalogue));
   return loaded;
 }
+
+/** The collections of a kind as a viewer of `language` sees them, with the metadata so far. */
+function collectionsOf(found: Loaded, language: string, kind: TitleKind): Collections {
+  const key = `${language}|${kind}|${metadataVersion}`;
+  let made = found.collections.get(key);
+  if (!made) {
+    const tmdbKind = kind === "movie" ? "movie" : "tv";
+    made = collections({
+      kind,
+      titles: kindOf(indexOf(found, language), kind).titles,
+      language,
+      metadata: (tmdbId) => metadata.get(tmdbKind, tmdbId),
+      services: metadata.services(tmdbKind),
+      now: Date.now(),
+    });
+    // Older versions only take memory.
+    for (const old of found.collections.keys()) {
+      if (old.endsWith(`|${metadataVersion}`)) continue;
+      found.collections.delete(old);
+    }
+    found.collections.set(key, made);
+  }
+  return made;
+}
+
+/** How many titles a row shows before its All. */
+const ROW_TITLES = 24;
+/** Streaming services For you shows as rows, most stocked first. */
+const SERVICE_ROWS = 3;
 
 /** The catalogue as a viewer of `language` sees it. */
 function indexOf(found: Loaded, language: string): IndexedCatalogue {
@@ -246,6 +285,53 @@ const handlers: {
     if (!found) return { movies: [], series: [] };
     const index = indexOf(found, language);
     return { movies: search(index, "movie", query), series: search(index, "series", query) };
+  },
+  rows: async ({ key, language, kind, tab, like }) => {
+    const made = collectionsOf(await required(key), language, kind);
+    const ids: CollectionId[] =
+      tab === "new"
+        ? ["new-week", "new-month", "recent"]
+        : [
+            ...(like ? [`like:${like}` as const] : []),
+            "popular",
+            "new-week",
+            "top-rated",
+            ...made
+              .services()
+              .slice(0, SERVICE_ROWS)
+              .map((service) => `service:${service.id}` as const),
+          ];
+    return ids.flatMap((id) => {
+      const titles = made.list(id);
+      const name = made.name(id);
+      if (titles.length === 0 || !name) return [];
+      return [{ id, name, total: titles.length, titles: titles.slice(0, ROW_TITLES) }];
+    });
+  },
+  tiles: async ({ key, language, kind, of }) => {
+    const made = collectionsOf(await required(key), language, kind);
+    return of === "genres"
+      ? made.genres().map((genre) => ({
+          id: `genre:${genre.name}` as const,
+          name: genre.name,
+          count: genre.count,
+          artworkUrl: genre.artwork,
+        }))
+      : made.services().map((service) => ({
+          id: `service:${service.id}` as const,
+          name: service.name,
+          count: service.count,
+          artworkUrl: service.artwork,
+        }));
+  },
+  collection: async ({ key, language, kind, id, sort, offset, limit }) => {
+    const made = collectionsOf(await required(key), language, kind);
+    const titles = made.list(id, sort);
+    return {
+      name: made.name(id) ?? "",
+      total: titles.length,
+      titles: titles.slice(offset, offset + limit),
+    };
   },
   container: async ({ key, id }) => {
     const found = await current(key);

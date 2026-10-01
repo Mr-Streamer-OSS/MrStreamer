@@ -34,6 +34,8 @@ export interface Title {
   readonly adult: boolean;
   /** The Movie Database's id, which the language versions of one film share. */
   readonly tmdbId: string | null;
+  /** From TMDB, once its metadata arrived: "Comedy", "Drama". */
+  readonly genres: readonly string[];
   /** Every version, the one shown first in front. */
   readonly versions: readonly TitleVersion[];
 }
@@ -134,6 +136,58 @@ export type TitleSort = (typeof TITLE_SORTS)[number];
 export interface TitlePage {
   readonly total: number;
   readonly titles: readonly Title[];
+}
+
+/**
+ * A collection Movies and Series show: everything, what's new, popular or top rated, a genre, a
+ * streaming service, or titles like one the viewer watched.
+ */
+export type CollectionId =
+  | "all"
+  | "new-week"
+  | "new-month"
+  | "recent"
+  | "popular"
+  | "top-rated"
+  | "4k"
+  | `genre:${string}`
+  | `service:${number}`
+  | `like:${string}`;
+
+/** Whether text names a collection: what the UI sends is checked before it is used. */
+export function isCollectionId(text: string): text is CollectionId {
+  return /^(all|new-week|new-month|recent|popular|top-rated|4k|genre:.+|service:\d+|like:.+)$/.test(
+    text,
+  );
+}
+
+/** How a collection's page is ordered. */
+export const COLLECTION_SORTS = ["added", "popular", "rating", "title"] as const;
+export type CollectionSort = (typeof COLLECTION_SORTS)[number];
+
+/** The tabs of rows: For you, and New. */
+export const ROW_TABS = ["for-you", "new"] as const;
+export type RowTab = (typeof ROW_TABS)[number];
+
+/** One row of a tab: a collection's first titles, and how many it has. */
+export interface CollectionRow {
+  readonly id: CollectionId;
+  readonly name: string;
+  readonly total: number;
+  readonly titles: readonly Title[];
+}
+
+/** A genre or streaming service as a tile, with a picture from its most popular title. */
+export interface CollectionTile {
+  readonly id: CollectionId;
+  readonly name: string;
+  readonly count: number;
+  readonly artworkUrl: string | null;
+}
+
+/** One page of a collection, with its name. */
+export interface CollectionPage extends TitlePage {
+  readonly name: string;
 }
 
 /** Something that plays on demand: a movie, or one episode of a series. */

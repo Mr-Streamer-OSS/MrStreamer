@@ -249,6 +249,9 @@ async function start(): Promise<void> {
       "ondemand.titles": (query) => onDemand.page(query),
       "ondemand.search": ({ query }) => onDemand.search(query),
       "ondemand.details": ({ kind, id }) => onDemand.details(kind, id),
+      "ondemand.rows": ({ kind, tab, like }) => onDemand.rows(kind, tab, like),
+      "ondemand.tiles": ({ kind, of }) => onDemand.tiles(kind, of),
+      "ondemand.collection": (query) => onDemand.collection(query),
       "playback.open": ({ channelId, decoders, repair }) =>
         Effect.andThen(nextTurn, playback.open(channelId, decoders, { repair: repair ?? false })),
       "playback.openTitle": ({ title, decoders }) =>

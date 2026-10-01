@@ -5,8 +5,14 @@ import { join } from "node:path";
 import type { Worker } from "node:worker_threads";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import type {
+  CollectionId,
+  CollectionPage,
+  CollectionRow,
+  CollectionSort,
+  CollectionTile,
   MetadataProgress,
   OnDemandStatus,
+  RowTab,
   Title,
   TitleCategory,
   TitleDetails,
@@ -54,6 +60,15 @@ export interface OnDemandDeps {
   readonly tmdbApi?: string;
 }
 
+/** Which page of which collection. */
+export interface CollectionQuery {
+  readonly kind: TitleKind;
+  readonly id: CollectionId;
+  readonly sort?: CollectionSort | undefined;
+  readonly offset: number;
+  readonly limit: number;
+}
+
 /** Where a movie or episode streams from. Contains the login, so it stays in the main process. */
 export interface TitleFile {
   readonly url: string;
@@ -77,6 +92,19 @@ export class OnDemand extends Context.Service<
       Failed
     >;
     details(kind: TitleKind, id: string): Effect.Effect<TitleDetails, Failed>;
+    /** A tab's rows; For you starts with titles like `like`, one watched lately. */
+    rows(
+      kind: TitleKind,
+      tab: RowTab,
+      like?: string,
+    ): Effect.Effect<readonly CollectionRow[], Failed>;
+    /** Genres or streaming services as tiles. */
+    tiles(
+      kind: TitleKind,
+      of: "genres" | "services",
+    ): Effect.Effect<readonly CollectionTile[], Failed>;
+    /** One page of a collection. */
+    collection(query: CollectionQuery): Effect.Effect<CollectionPage, Failed>;
     /** The file a movie or episode streams from. */
     file(title: TitleRef): Effect.Effect<TitleFile, Failed>;
     /** Forgets the lists and details, for when the subscription changes or goes. */
@@ -256,6 +284,24 @@ function make(deps: OnDemandDeps) {
       page: (query: PageQuery) =>
         loaded((source, language) => call("page", { key: source.key, language, query })),
 
+      rows: (kind: TitleKind, tab: RowTab, like?: string) =>
+        loaded((source, language) =>
+          call("rows", { key: source.key, language, kind, tab, ...(like ? { like } : {}) }),
+        ),
+      tiles: (kind: TitleKind, of: "genres" | "services") =>
+        loaded((source, language) => call("tiles", { key: source.key, language, kind, of })),
+      collection: ({ kind, id, sort, offset, limit }: CollectionQuery) =>
+        loaded((source, language) =>
+          call("collection", {
+            key: source.key,
+            language,
+            kind,
+            id,
+            offset,
+            limit,
+            ...(sort ? { sort } : {}),
+          }),
+        ),
       search: (query: string) =>
         loaded((source, language) => call("search", { key: source.key, language, query })),
 

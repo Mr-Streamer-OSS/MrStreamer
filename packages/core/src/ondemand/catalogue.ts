@@ -117,6 +117,7 @@ function indexKind(
       categoryIds,
       adult,
       tmdbId: first.item.tmdbId ?? null,
+      genres: [],
       versions: versions.map(({ item, name }) => ({ id: item.id, tags: name.tags })),
     };
     titles.push(title);
