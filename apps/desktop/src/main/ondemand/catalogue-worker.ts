@@ -16,11 +16,49 @@ import {
   type IndexedCatalogue,
 } from "@mrstreamer/core/ondemand/catalogue";
 import type { OnDemandCatalogue } from "@mrstreamer/core/provider";
+import { tmdb } from "@mrstreamer/core/metadata/tmdb";
 import { readJsonFile, removeFile, writeJsonFile } from "../platform/json-file.ts";
 import { xtreamProvider } from "../providers/xtream.ts";
-import type { WorkerCalls, WorkerRequest, WorkerSetup, WorkerStatus } from "./protocol.ts";
+import { metadataStore, type Wanted } from "./metadata.ts";
+import type {
+  WorkerCalls,
+  WorkerEvent,
+  WorkerRequest,
+  WorkerSetup,
+  WorkerStatus,
+} from "./protocol.ts";
 
 const setup = workerData as WorkerSetup;
+
+/** TMDB's metadata, kept across subscriptions: it describes titles, not accounts. */
+const metadata = metadataStore({
+  path: setup.metadataPath,
+  client: setup.tmdb
+    ? tmdb({ key: setup.tmdb.key, ...(setup.tmdb.api ? { api: setup.tmdb.api } : {}) })
+    : null,
+  region: setup.tmdb?.region ?? "US",
+  onChange: () =>
+    parentPort?.postMessage({ event: "metadata", status: metadata.status() } satisfies WorkerEvent),
+});
+
+/** Every TMDB id the catalogue lists, once, with when it was added. */
+function wantedOf(catalogue: OnDemandCatalogue): Wanted[] {
+  const found = new Map<string, Wanted>();
+  for (const [kind, titles] of [
+    ["movie", catalogue.movies],
+    ["tv", catalogue.series],
+  ] as const) {
+    for (const title of titles) {
+      if (!title.tmdbId) continue;
+      const key = `${kind}:${title.tmdbId}`;
+      const addedAt = title.addedAt ?? 0;
+      if ((found.get(key)?.addedAt ?? -1) < addedAt) {
+        found.set(key, { kind, tmdbId: title.tmdbId, addedAt });
+      }
+    }
+  }
+  return [...found.values()];
+}
 
 const Category = type({ id: "string", name: "string" });
 const ProviderTitle = type({
@@ -75,6 +113,7 @@ function remember(key: string, fetchedAt: number, catalogue: OnDemandCatalogue):
     series: catalogue.series.length,
     index: null,
   };
+  metadata.want(wantedOf(catalogue));
   return loaded;
 }
 
@@ -226,7 +265,7 @@ const handlers: {
     return null;
   },
   flush: async () => {
-    await writing;
+    await Promise.all([writing, metadata.flush()]);
     return null;
   },
 };

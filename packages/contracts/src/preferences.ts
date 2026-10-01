@@ -18,6 +18,8 @@ export const Preferences = type({
    * plays first, and the sound until another is picked. English when absent.
    */
   "titleLanguage?": "string",
+  /** The viewer's own TMDB key or read access token, used instead of the app's. */
+  "tmdbKey?": "string",
 });
 export type Preferences = typeof Preferences.infer;
 

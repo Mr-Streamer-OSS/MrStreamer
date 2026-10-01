@@ -107,6 +107,8 @@ export function testConfig(dataDir: string): MainConfig {
     userAgent,
     ffmpeg: null,
     catalogueWorker,
+    tmdbKey: null,
+    region: "NL",
     updates: {
       installed: "0.0.1",
       discover: async () => [],

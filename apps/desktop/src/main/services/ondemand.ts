@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { Worker } from "node:worker_threads";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import type {
+  MetadataProgress,
   OnDemandStatus,
   Title,
   TitleCategory,
@@ -28,6 +29,7 @@ import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
 import type {
   WorkerCalls,
+  WorkerEvent,
   WorkerMethod,
   WorkerReply,
   WorkerSetup,
@@ -44,6 +46,12 @@ export interface OnDemandDeps {
   readonly userAgent: string;
   /** Starts the catalogue worker: the bundled one in the app, the source file in tests. */
   readonly worker: (setup: WorkerSetup) => Worker;
+  /** The app's TMDB key, built in; the viewer's own, from the settings, comes first. */
+  readonly tmdbKey: string | null;
+  /** ISO 3166-1 country whose streaming services to follow: "NL". */
+  readonly region: string;
+  /** Another TMDB API, for tests. */
+  readonly tmdbApi?: string;
 }
 
 /** Where a movie or episode streams from. Contains the login, so it stays in the main process. */
@@ -73,6 +81,8 @@ export class OnDemand extends Context.Service<
     file(title: TitleRef): Effect.Effect<TitleFile, Failed>;
     /** Forgets the lists and details, for when the subscription changes or goes. */
     readonly clear: Effect.Effect<void>;
+    /** Applies a changed TMDB key from the settings: the worker starts again with it. */
+    readonly reconfigure: Effect.Effect<void>;
     /** The status after every refresh, successful or not. */
     readonly changes: Stream.Stream<OnDemandStatus>;
   }
@@ -90,13 +100,32 @@ function make(deps: OnDemandDeps) {
       (preferences) => preferences.titleLanguage ?? DEFAULT_TITLE_LANGUAGE,
     );
     const updates = yield* PubSub.unbounded<OnDemandStatus>();
+    /** The TMDB key the worker runs with: the viewer's own, or the app's. */
+    const keyOf = (preferences: { readonly tmdbKey?: string }) =>
+      preferences.tmdbKey?.trim() || deps.tmdbKey;
+    let tmdbKey = keyOf(yield* settings.get);
+    let metadataProgress: MetadataProgress = { known: 0, wanted: 0, refused: false };
     const worker = yield* Effect.acquireRelease(
       Effect.sync(() =>
-        workerClient(() =>
-          deps.worker({
-            cachePath: join(deps.dataDir, "ondemand.json.gz"),
-            userAgent: deps.userAgent,
-          }),
+        workerClient(
+          () =>
+            deps.worker({
+              cachePath: join(deps.dataDir, "ondemand.json.gz"),
+              metadataPath: join(deps.dataDir, "metadata.json.gz"),
+              userAgent: deps.userAgent,
+              tmdb: tmdbKey
+                ? {
+                    key: tmdbKey,
+                    region: deps.region,
+                    ...(deps.tmdbApi ? { api: deps.tmdbApi } : {}),
+                  }
+                : null,
+            }),
+          (event) => {
+            metadataProgress = event.status;
+            // The UI refetches what it shows; the lists' own status stays as it was.
+            Effect.runFork(publishStatus);
+          },
         ),
       ),
       (client) => Effect.promise(() => client.stop()),
@@ -121,6 +150,7 @@ function make(deps: OnDemandDeps) {
     const statusOf = (worked: WorkerStatus, key: string): OnDemandStatus => ({
       ...worked,
       failure: failure?.key === key ? failure.error : null,
+      metadata: tmdbKey ? metadataProgress : null,
     });
 
     const refresh = Effect.gen(function* () {
@@ -194,15 +224,18 @@ function make(deps: OnDemandDeps) {
         return found;
       });
 
+    const status = Effect.gen(function* () {
+      const source = yield* subscriptions.source;
+      if (!source) return { movies: 0, series: 0, fetchedAt: null, failure: null, metadata: null };
+      const worked = yield* call("status", { key: source.key }).pipe(
+        Effect.orElseSucceed(() => ({ movies: 0, series: 0, fetchedAt: null })),
+      );
+      return statusOf(worked, source.key);
+    });
+    const publishStatus = Effect.flatMap(status, (current) => PubSub.publish(updates, current));
+
     return {
-      status: Effect.gen(function* () {
-        const source = yield* subscriptions.source;
-        if (!source) return { movies: 0, series: 0, fetchedAt: null, failure: null };
-        const worked = yield* call("status", { key: source.key }).pipe(
-          Effect.orElseSucceed(() => ({ movies: 0, series: 0, fetchedAt: null })),
-        );
-        return statusOf(worked, source.key);
-      }),
+      status,
 
       refresh,
 
@@ -255,6 +288,16 @@ function make(deps: OnDemandDeps) {
         yield* call("clear", {}).pipe(Effect.ignore);
       }),
 
+      reconfigure: Effect.gen(function* () {
+        const next = keyOf(yield* settings.get);
+        if (next === tmdbKey) return;
+        tmdbKey = next;
+        metadataProgress = { known: 0, wanted: 0, refused: false };
+        // The next call starts the worker again, with the new key.
+        yield* Effect.promise(() => worker.stop());
+        yield* publishStatus;
+      }),
+
       changes: Stream.fromPubSub(updates),
     };
   });
@@ -264,7 +307,7 @@ function make(deps: OnDemandDeps) {
  * Calls into the catalogue worker. The worker starts on the first call, and again after it
  * stops unexpectedly; calls in flight when it stops fail.
  */
-function workerClient(start: () => Worker) {
+function workerClient(start: () => Worker, onEvent: (event: WorkerEvent) => void) {
   let worker: Worker | null = null;
   let nextId = 1;
   const pending = new Map<
@@ -280,7 +323,8 @@ function workerClient(start: () => Worker) {
   const running = (): Worker => {
     if (worker) return worker;
     const started = start();
-    started.on("message", (reply: WorkerReply) => {
+    started.on("message", (reply: WorkerReply | WorkerEvent) => {
+      if ("event" in reply) return onEvent(reply);
       const entry = pending.get(reply.id);
       if (!entry) return;
       pending.delete(reply.id);

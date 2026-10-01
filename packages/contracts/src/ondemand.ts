@@ -113,6 +113,17 @@ export interface OnDemandStatus {
   readonly fetchedAt: number | null;
   /** Why the latest refresh failed, when it did. The lists from `fetchedAt` stay in use. */
   readonly failure: AppError | null;
+  /** How far TMDB's metadata has come; null without a key. */
+  readonly metadata: MetadataProgress | null;
+}
+
+/** TMDB's metadata for the catalogue: genres, languages, services. */
+export interface MetadataProgress {
+  /** Titles with metadata, of those listed with a TMDB id. */
+  readonly known: number;
+  readonly wanted: number;
+  /** TMDB refused the key; nothing more arrives until it changes. */
+  readonly refused: boolean;
 }
 
 /** What a list is ordered by: newest first, by name, or best rated first. */

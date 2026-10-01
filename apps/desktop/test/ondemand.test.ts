@@ -138,6 +138,7 @@ describe("movies and series", { timeout: 20_000 }, () => {
       series: 0,
       fetchedAt: null,
       failure: null,
+      metadata: null,
     });
     await expect(app.onDemand.search("story")).rejects.toMatchObject({
       error: { kind: "no-subscription" },

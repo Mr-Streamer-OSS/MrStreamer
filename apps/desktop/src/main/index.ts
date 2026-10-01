@@ -130,6 +130,12 @@ async function start(): Promise<void> {
       ffmpeg: toolPath("ffmpeg"),
       ffprobe: toolPath("ffprobe"),
       catalogueWorker: (setup) => createCatalogueWorker({ workerData: setup }),
+      // MR_STREAMER_TMDB_KEY at run time overrides the key built in, for testing.
+      tmdbKey: process.env["MR_STREAMER_TMDB_KEY"] || __TMDB_KEY__ || null,
+      region: app.getLocaleCountryCode() || "US",
+      ...(process.env["MR_STREAMER_TMDB_API"]
+        ? { tmdbApi: process.env["MR_STREAMER_TMDB_API"] }
+        : {}),
       updates: {
         installed: app.getVersion(),
         discover: discovery({
@@ -262,7 +268,12 @@ async function start(): Promise<void> {
       "playback.closeAll": () => Effect.andThen(nextTurn, Effect.as(playback.closeAll, null)),
       "playback.failure": ({ sessionId }) => playback.failure(sessionId),
       "preferences.get": () => settings.get,
-      "preferences.update": (patch) => settings.update(patch),
+      "preferences.update": (patch) =>
+        Effect.gen(function* () {
+          const updated = yield* settings.update(patch);
+          if ("tmdbKey" in patch) yield* onDemand.reconfigure;
+          return updated;
+        }),
       "viewing.get": () => viewing.state,
       "viewing.setFavourite": ({ commandId, channelId, favourite }) =>
         viewing.setFavourite(commandId, channelId, favourite),

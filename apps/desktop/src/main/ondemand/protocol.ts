@@ -4,11 +4,15 @@ import type { AppError } from "@mrstreamer/contracts/errors";
 import type { Title, TitleCategory, TitleKind, TitlePage } from "@mrstreamer/contracts/ondemand";
 import type { PageQuery } from "@mrstreamer/core/ondemand/catalogue";
 import type { XtreamAccount } from "../providers/xtream.ts";
+import type { MetadataStatus } from "./metadata.ts";
 
-/** What the worker needs once: where the cache lives and how to introduce itself. */
+/** What the worker needs once: where the caches live and how to introduce itself. */
 export interface WorkerSetup {
   readonly cachePath: string;
+  readonly metadataPath: string;
   readonly userAgent: string;
+  /** TMDB's key, the region for streaming services and, in tests, another API; null fetches none. */
+  readonly tmdb: { readonly key: string; readonly region: string; readonly api?: string } | null;
 }
 
 /** The loaded catalogue's size and age; null counts when nothing is loaded for the account. */
@@ -57,3 +61,9 @@ export type WorkerRequest = {
 export type WorkerReply =
   | { readonly id: number; readonly ok: true; readonly value: unknown }
   | { readonly id: number; readonly ok: false; readonly error: AppError };
+
+/** What the worker says unasked: more metadata arrived, or TMDB refused the key. */
+export interface WorkerEvent {
+  readonly event: "metadata";
+  readonly status: MetadataStatus;
+}

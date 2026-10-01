@@ -129,6 +129,9 @@ jobs:
       - run: npm pkg set version="${{ needs.plan.outputs.version }}"
         working-directory: apps/desktop
       - run: pnpm build
+        env:
+          # The app's TMDB key, built into the main bundle; see docs/maintainers/releasing.md.
+          MR_STREAMER_TMDB_KEY: ${{ secrets.TMDB_API_KEY }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: js-bundle

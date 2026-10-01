@@ -30,6 +30,12 @@ export interface MainConfig {
   readonly updates: Omit<UpdatesDeps, "dataDir">;
   /** Starts the movie and series catalogue's worker thread. */
   readonly catalogueWorker: OnDemandDeps["worker"];
+  /** The app's TMDB key, or null in builds without one. */
+  readonly tmdbKey: string | null;
+  /** The country whose streaming services to follow. */
+  readonly region: string;
+  /** Another TMDB API, for tests. */
+  readonly tmdbApi?: string;
 }
 
 export type MainServices =
@@ -56,7 +62,14 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
   );
   const services = Layer.mergeAll(
     Library.layer({ dataDir }),
-    OnDemand.layer({ dataDir, userAgent: config.userAgent, worker: config.catalogueWorker }),
+    OnDemand.layer({
+      dataDir,
+      userAgent: config.userAgent,
+      worker: config.catalogueWorker,
+      tmdbKey: config.tmdbKey,
+      region: config.region,
+      ...(config.tmdbApi ? { tmdbApi: config.tmdbApi } : {}),
+    }),
     Playback.layer({
       userAgent: config.userAgent,
       ffmpeg: config.ffmpeg,
