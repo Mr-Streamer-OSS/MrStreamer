@@ -19,16 +19,20 @@ The repository is a pnpm workspace: the app is `apps/desktop`, shared contracts 
 
 Mr. Streamer needs an Xtream Codes subscription to show anything; use your own. Keep its details out of the repository: the gitignored `.local/` folder is the place for private notes and test access.
 
+Genres, streaming services and popularity in Movies and Series come from TMDB. A development build has no key built in: set `MR_STREAMER_TMDB_KEY`, or paste one in Settings > Movies & series. A free TMDB account gets one.
+
 Streams the player can't decode go through ffmpeg, and every movie and episode goes through ffprobe and ffmpeg (see [architecture](architecture.md#playback)). Development builds use the `ffmpeg` and `ffprobe` on your PATH (`brew install ffmpeg`, `apt install ffmpeg` or `winget install Gyan.FFmpeg`); packaged builds use their bundled copies.
 
 Environment variables for testing:
 
-| Variable                    | Effect                                                                                                                          |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `MR_STREAMER_FFMPEG`        | The ffmpeg to convert streams with, in development and packaged builds; its ffprobe must sit beside it. The tests read it too.  |
-| `MR_STREAMER_UPDATE_FEED`   | The update feed to read instead of the published one; see [releasing](releasing.md#testing-updates-against-another-feed).       |
-| `MR_STREAMER_UPDATE_API`    | A GitHub-compatible API for when the feed is missing, instead of `https://api.github.com`.                                      |
-| `MR_STREAMER_UPDATE_CHECKS` | `off` stops the automatic update checks; checking from Settings still works. The packaged-app test and the measurements set it. |
+| Variable                    | Effect                                                                                                                                                     |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MR_STREAMER_FFMPEG`        | The ffmpeg to convert streams with, in development and packaged builds; its ffprobe must sit beside it. The tests read it too.                             |
+| `MR_STREAMER_UPDATE_FEED`   | The update feed to read instead of the published one; see [releasing](releasing.md#testing-updates-against-another-feed).                                  |
+| `MR_STREAMER_UPDATE_API`    | A GitHub-compatible API for when the feed is missing, instead of `https://api.github.com`.                                                                 |
+| `MR_STREAMER_UPDATE_CHECKS` | `off` stops the automatic update checks; checking from Settings still works. The packaged-app test and the measurements set it.                            |
+| `MR_STREAMER_TMDB_KEY`      | A TMDB key or read access token. At build time it's built into the app; at run time it replaces the built-in one. A key set in Settings still comes first. |
+| `MR_STREAMER_TMDB_API`      | A TMDB-compatible API instead of `https://api.themoviedb.org/3`, such as the tests' fake.                                                                  |
 
 ## Installers
 

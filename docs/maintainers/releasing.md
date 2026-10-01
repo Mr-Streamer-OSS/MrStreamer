@@ -31,7 +31,7 @@ Releases come from `.github/workflows/release.yml` and live on GitHub Releases. 
 - Then points the [update feed](#update-feed) at the release. Until then the app doesn't offer it.
 - Nightlies are pre-releases and never marked latest. Stable releases are marked latest.
 - Runs never cancel each other. Nightlies and stable releases wait in one queue, and each pull request's dry runs in their own, so a requested stable release is never dropped.
-- Sharing the queue keeps a nightly from being planned while a stable release builds. Planned then, it would preview the same version from newer code, and once the stable release published, its users would be offered that release and move back to older code. A stable release waits for a nightly that's running, measurements included, and the other way round.
+- Sharing the queue keeps a nightly from being planned while a stable release builds. Planned then, it would preview the same version from newer code, and once the stable release published, its users would be offered that release and move back to older code. A stable release waits for a nightly that's running, and the other way round.
 
 ## Versions
 
@@ -152,7 +152,7 @@ Forks get no signing secrets, so their pull requests can't run it.
 - Pushes by the workflow token start no workflows, so the version commit doesn't run CI.
 - The plan job removes the dry-run label (`pull-requests: write`).
 - The feed job reads the releases (`contents: read`) and deploys to Pages (`pages: write`, `id-token: write`) through the `github-pages` environment.
-- Only the macOS packaging step reads the signing secrets; see [signing](signing.md). CI needs none.
+- Only the macOS packaging step reads the signing secrets; see [signing](signing.md). The bundle step reads `TMDB_API_KEY`; see [TMDB key](#tmdb-key). CI needs none.
 
 ## First release
 
@@ -160,6 +160,14 @@ Forks get no signing secrets, so their pull requests can't run it.
 2. [Enable Pages](#enabling-pages) and open the feed: its `nightly` must name the nightly.
 3. Install the nightly on each system and check that the app offers the next one once it's out.
 4. Start a stable release to publish `0.0.1`. On Stable, confirm it's offered and nightlies are not.
+
+## TMDB key
+
+Movies and Series take genres, popularity and streaming services from TMDB. The bundle step builds the repository secret `TMDB_API_KEY`, a TMDB API Read Access Token, into the main process's bundle as `MR_STREAMER_TMDB_KEY`. Without the secret, the build succeeds and the app has no key: movies and series show without genres or services until a viewer adds their own in Settings.
+
+The token can be read out of any installer. It only reads TMDB's public data. If it's abused or revoked, regenerate it in the TMDB account's API settings, update the secret, and release; until then, viewers can use their own key.
+
+TMDB's terms ask that the app shows its logo and notice, which Settings > About does, keeps its data no longer than six months, and credits JustWatch where streaming services show.
 
 ## Windows signing
 

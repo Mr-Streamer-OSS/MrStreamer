@@ -2,17 +2,37 @@
 
 **Movies** and **Series** in the top bar list what your provider offers on demand. Mr. Streamer loads both lists after connecting and keeps them on your computer, refreshing them twice a day; the first load can take a few seconds on a large subscription.
 
+Each film shows once, even when your provider lists it once per language. Mr. Streamer picks the version in your language, then one with several languages, then one without a language mark.
+
 ## Finding something
 
-The lists on the left start with **Continue watching** and **Recently added** (**Recently updated** for series), then your provider's categories under their country, as in Live TV. The posters on the right can be sorted by the date they were added, by name or by rating. The arrow keys move through them, Enter opens one, and the pointer only hovers.
+Tabs under the top bar:
 
-Titles your provider marks for adults appear only when you open their category: never on Home, in Recently added or in search.
+- **For you** leads with a featured title, then what you're watching, titles like the one you watched last, what's popular, new this week, top rated, and what's on the streaming services with the most of your catalogue.
+- **New** has what your provider added this week and this month, and recent releases.
+- **Genres** and **Services** show a tile for each genre and streaming service. Open one for its titles.
+- **4K** lists titles with a 4K version, when your provider has any.
+- **All movies** and **All series** list everything, sorted by date added, popularity, rating or name.
+
+A row's **All**, a genre or a service opens the whole list; **Back**, or Escape, returns to the tab. In a list, the arrow keys move through the posters, Enter opens one, and the pointer only hovers.
+
+The rows show titles in your language, or in several, and titles that say nothing about their language unless they were made in another. **All movies**, **All series** and search show everything. Titles your provider marks for adults don't show anywhere.
 
 ⌘K (Ctrl K on Windows and Linux) searches movies and series along with channels and programmes.
 
+## Language
+
+Settings > Movies & series picks the language, English unless you change it. It decides which version of a film shows and plays, the sound a title starts with until you pick another in the player, and what the rows show.
+
+## Genres and streaming services
+
+Your provider's lists don't say a film's genre or where else it streams, so Mr. Streamer asks [TMDB](https://www.themoviedb.org), using the TMDB ids providers list. It asks about each title once, newest first, and fills in genres, popularity and services as answers come in: on a large subscription that takes about a quarter of an hour the first time. Which titles each service streams comes from [JustWatch](https://www.justwatch.com), for the country your computer is set to.
+
+Mr. Streamer has its own TMDB key. If TMDB stops accepting it, Settings > Movies & series says so, and you can paste a key of your own there; a free TMDB account gets one.
+
 ## Details
 
-A poster opens its details over the list, which stays where it was: the artwork your provider supplies, the year, length, genres and rating, the plot and the cast.
+A poster opens its details over the list, which stays where it was: the artwork your provider supplies, the year, length, genres and rating, the plot and the cast. A film's details are those of the version that suits your language best.
 
 - **Resume** plays a movie or episode from where you stopped. **From the beginning** starts it again, without asking.
 - **Play** starts something new. For a series it plays the episode you're on: the one you stopped in, the next one after one you finished, or the first.
