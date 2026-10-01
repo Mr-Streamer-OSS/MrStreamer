@@ -28,7 +28,7 @@ import type {
   StreamSession,
   TitleSession,
 } from "@mrstreamer/contracts/playback";
-import { audioTracks, subtitleTracks } from "@mrstreamer/core/ondemand/tracks";
+import { audioTracks, languageCode, subtitleTracks } from "@mrstreamer/core/ondemand/tracks";
 import { Diagnostics } from "@mrstreamer/core/diagnostics";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
 import * as Context from "effect/Context";
@@ -97,6 +97,8 @@ interface LiveSession extends SessionBase {
   readonly repair: boolean;
   /** The sound track chosen by PID, or null for the channel's first. */
   readonly audio: number | null;
+  /** Without a chosen track, the language whose sound plays when the channel has it. */
+  readonly audioLanguage: string | null;
   /** The tracks the stream carries, once it has been inspected. */
   layout: StreamLayout | null;
   /** The caption channels found in the pictures so far, 1 and 3. */
@@ -146,7 +148,11 @@ export class Playback extends Context.Service<
     open(
       channelId: string,
       decoders: readonly Codec[],
-      options?: { readonly repair?: boolean; readonly audio?: number | null },
+      options?: {
+        readonly repair?: boolean;
+        readonly audio?: number | null;
+        readonly audioLanguage?: string | null;
+      },
     ): Effect.Effect<StreamSession, Failed>;
     /**
      * Opens a movie or episode from its provider file: closes any open stream, reads which
@@ -312,14 +318,19 @@ function make(deps: PlaybackDeps) {
         video && video.codec !== "unknown" && CLEAN_START_CODECS.has(video.codec)
           ? cleanStart(replay(start, reader), createCleanStart(video.pid, video.codec))
           : replay(start, reader);
+      // The track asked for, else the sound in the viewer's language, else the channel's first.
+      const chosen =
+        layout?.audio.find((track) => track.pid === session.audio) ??
+        (session.audioLanguage
+          ? layout?.audio.find((track) => languageCode(track.language) === session.audioLanguage)
+          : undefined);
       const conversion = layout
         ? planConversion(layout, session.decoders, {
             repair: session.repair,
-            audio: session.audio,
+            audio: chosen?.pid ?? null,
           })
         : null;
       // The player plays the first sound track its table lists; ffmpeg keeps only the chosen one.
-      const chosen = layout?.audio.find((track) => track.pid === session.audio);
       const chosenFirst =
         layout && chosen && chosen !== layout.audio[0] && !conversion
           ? filtered(cleaned, createAudioChoice(layout.programPid, chosen.pid))
@@ -815,7 +826,11 @@ function make(deps: PlaybackDeps) {
       open: (
         channelId: string,
         decoders: readonly Codec[],
-        options: { readonly repair?: boolean; readonly audio?: number | null } = {},
+        options: {
+          readonly repair?: boolean;
+          readonly audio?: number | null;
+          readonly audioLanguage?: string | null;
+        } = {},
       ) =>
         openOne(
           Effect.gen(function* () {
@@ -844,6 +859,7 @@ function make(deps: PlaybackDeps) {
               decoders: new Set(decoders),
               repair: options.repair ?? false,
               audio: options.audio ?? null,
+              audioLanguage: options.audioLanguage ?? null,
               layout: null,
               captions: [],
               closed,

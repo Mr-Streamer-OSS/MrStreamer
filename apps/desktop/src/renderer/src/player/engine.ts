@@ -52,6 +52,11 @@ export interface Engine {
   readonly started: Promise<void>;
   /** Called at most once, when playback breaks after it started. */
   onFailure(listener: (error: EngineError) => void): void;
+  /**
+   * Hears each private data packet of the stream, as teletext, DVB subtitles and copied captions
+   * travel, with its time on the element's clock in seconds. Only MPEG-TS streams have them.
+   */
+  onPrivateData(listener: (pid: number, data: Uint8Array, at: number) => void): void;
   info(): StreamInfo;
   /** Stops playback, closes the connection and frees the video element. */
   destroy(): void;
@@ -96,6 +101,16 @@ function mpegtsEngine(video: HTMLVideoElement, url: string): Engine {
   player.on(mpegts.Events.LOADING_COMPLETE, () => {
     life.fail({ kind: "network", detail: "The provider ended the stream." });
   });
+  let privateData: ((pid: number, data: Uint8Array, at: number) => void) | null = null;
+  // mpegts.js times private data in milliseconds on the timeline it gives the element.
+  player.on(mpegts.Events.PES_PRIVATE_DATA_ARRIVED, (packet: unknown) => {
+    if (!privateData || typeof packet !== "object" || packet === null) return;
+    const { pid, data, pts, nearest_pts } = packet as Record<string, unknown>;
+    const at = typeof pts === "number" ? pts : nearest_pts;
+    if (typeof pid === "number" && data instanceof Uint8Array && typeof at === "number") {
+      privateData(pid, data, at / 1000);
+    }
+  });
   player.attachMediaElement(video);
   player.load();
   void Promise.resolve(player.play()).catch(() => {});
@@ -103,6 +118,9 @@ function mpegtsEngine(video: HTMLVideoElement, url: string): Engine {
   return {
     name: "mpegts.js",
     ...life.handle,
+    onPrivateData(listener) {
+      privateData = listener;
+    },
     info() {
       // createPlayer returns the base Player type; for MSE playback mediaInfo carries codec details.
       const media: mpegts.MSEPlayerMediaInfo = player.mediaInfo;
@@ -149,6 +167,7 @@ function hlsEngine(video: HTMLVideoElement, url: string): Engine {
   return {
     name: "hls.js",
     ...life.handle,
+    onPrivateData: () => {},
     info() {
       const level = hls.levels[hls.currentLevel];
       return {
@@ -167,13 +186,18 @@ export function nativeEngine(video: HTMLVideoElement, url: string): Engine {
   const life = lifecycle(video, () => {});
   video.src = url;
   void video.play().catch(() => {});
-  return { name: "native", ...life.handle, info: () => elementInfo(video) };
+  return {
+    name: "native",
+    ...life.handle,
+    onPrivateData: () => {},
+    info: () => elementInfo(video),
+  };
 }
 
 function failedEngine(name: EngineName, video: HTMLVideoElement, error: EngineError): Engine {
   const life = lifecycle(video, () => {});
   life.fail(error);
-  return { name, ...life.handle, info: () => elementInfo(video) };
+  return { name, ...life.handle, onPrivateData: () => {}, info: () => elementInfo(video) };
 }
 
 /**

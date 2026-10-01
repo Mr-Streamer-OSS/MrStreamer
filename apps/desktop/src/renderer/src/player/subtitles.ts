@@ -10,12 +10,13 @@ import {
 
 /** How long a cue whose end isn't known yet lasts until the next change closes it. */
 const OPEN_END_S = 60 * 60;
-/** Picture cues this far behind the position are let go, with their pixels. */
+/** Cues this far behind the position are let go, pictures with their pixels. */
 const KEEP_BEHIND_S = 30;
 
 /** The canvas pictures are drawn on. Picture.tsx keeps it over the video, wherever that goes. */
 export const subtitleCanvas = document.createElement("canvas");
 subtitleCanvas.setAttribute("aria-hidden", "true");
+subtitleCanvas.dataset["subtitles"] = "";
 subtitleCanvas.style.cssText =
   "position:absolute;inset:0;width:100%;height:100%;pointer-events:none";
 
@@ -92,6 +93,12 @@ export function subtitlePresenter(video: HTMLVideoElement, offset = 0) {
         open.endTime = Math.max(open.startTime, at);
         open = null;
       }
+      // Cues shown long ago go, so a long film or a channel left on all day doesn't keep every one.
+      for (const track of [text, timing]) {
+        for (const old of [...(track.cues ?? [])]) {
+          if (old.endTime < video.currentTime - KEEP_BEHIND_S) track.removeCue(old);
+        }
+      }
       if (isBlank(change.screen)) return;
       const end = change.until === null ? at + OPEN_END_S : change.until - offset;
       if (change.screen.kind === "text") {
@@ -122,10 +129,6 @@ export function subtitlePresenter(video: HTMLVideoElement, offset = 0) {
       };
       timing.addCue(cue);
       open = change.until === null ? cue : null;
-      // Pictures shown long ago go, so a long film doesn't keep every one.
-      for (const old of [...(timing.cues ?? [])]) {
-        if (old !== open && old.endTime < video.currentTime - KEEP_BEHIND_S) timing.removeCue(old);
-      }
     },
   };
 }

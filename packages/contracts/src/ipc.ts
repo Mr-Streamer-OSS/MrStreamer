@@ -84,6 +84,8 @@ export const ipcInputs = {
       "repair?": "boolean",
       /** The sound track to play, by PID; the channel's first otherwise. */
       "audio?": "number.integer >= 0",
+      /** Without `audio`, the sound in this language when the channel has it: "nl". */
+      "audioLanguage?": "string",
     }),
   "playback.openTitle": () => type({ title: TitleRef, decoders: decoders() }),
   "playback.close": () => type({ sessionId: "string" }),

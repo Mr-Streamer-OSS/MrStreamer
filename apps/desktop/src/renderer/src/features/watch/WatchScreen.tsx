@@ -3,7 +3,8 @@
 // leaving; Escape closes it, then leaves full screen, then goes back to the page underneath.
 //   Up and Down switch channel, or move in the open list. Enter or Left opens the list; in it,
 //   Enter plays, Left swaps to the lists and Right swaps back. Backspace returns to the previous
-//   channel, digits jump to a number, F is full screen, M mutes, I shows the details, S stars.
+//   channel, digits jump to a number, F is full screen, M mutes, C turns subtitles on or off, I
+//   shows the details, S stars. While a sound or subtitle menu is open, keys are its own.
 import { useEffect, useRef, useState } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { hasModifier, isTyping } from "../../app/platform.ts";
@@ -28,6 +29,7 @@ import { useFullscreen, useWake } from "./layout.ts";
 import { NowPlayingBar } from "./NowPlaying.tsx";
 import { numberEntry, NumberEntry } from "./NumberEntry.tsx";
 import { PlaybackState } from "./PlaybackState.tsx";
+import type { TrackMenu } from "./TrackMenus.tsx";
 
 /** Controls fade out after this long without input. */
 const IDLE_MS = 3000;
@@ -50,6 +52,7 @@ export function WatchScreen() {
   const [picking, setPicking] = useState(false);
   const [selected, setSelected] = useState(0);
   const [entry, setEntry] = useState(0);
+  const [menu, setMenu] = useState<TrackMenu>(null);
 
   // Watch plays sound; the page underneath goes back to a muted preview.
   useEffect(() => {
@@ -106,6 +109,7 @@ export function WatchScreen() {
     toggleFullscreen,
     toggleFavourite,
     wake,
+    menu,
   });
   latest.current = {
     picking,
@@ -122,6 +126,7 @@ export function WatchScreen() {
     toggleFullscreen,
     toggleFavourite,
     wake,
+    menu,
   };
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -130,6 +135,15 @@ export function WatchScreen() {
         return;
       if (ui.searchOpen || ui.settings || ui.updateDialog || !ui.watching) return;
       const now = latest.current;
+      if (now.menu) {
+        // The menu's own keys; Escape closes it.
+        if (event.key === "Escape") {
+          setMenu(null);
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        return;
+      }
       const {
         switchBy,
         openChannels,
@@ -203,6 +217,9 @@ export function WatchScreen() {
         case "m":
           player.toggleMute();
           break;
+        case "c":
+          player.toggleSubtitles();
+          break;
         case "i":
           wake();
           break;
@@ -223,10 +240,11 @@ export function WatchScreen() {
   }, []);
 
   if (!channel) return null;
-  const controlsVisible = awake || phase.kind !== "playing";
+  const controlsVisible = awake || phase.kind !== "playing" || menu !== null;
   return (
     <div
       data-view="watch"
+      data-controls={controlsVisible && !channelsOpen ? "" : undefined}
       onMouseMove={wake}
       className={cn(
         "fixed inset-0 z-30 overflow-hidden bg-black",
@@ -281,6 +299,8 @@ export function WatchScreen() {
         onToggleFullscreen={toggleFullscreen}
         onOpenChannels={openChannels}
         onSwitch={switchBy}
+        menu={menu}
+        onMenu={setMenu}
       />
       <NumberEntry onChannel={(target) => player.play(target)} />
     </div>

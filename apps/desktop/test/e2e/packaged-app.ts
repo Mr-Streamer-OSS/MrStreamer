@@ -173,7 +173,7 @@ async function playMovie(page: Page): Promise<{ ok: boolean; detail: string }> {
 
 /**
  * Plays the movie with picture subtitles: English PGS from 2 to 4 s, then Dutch DVD subtitles
- * from 8 to 10 s, each chosen in Audio & subtitles. Counts the pixels drawn over the picture.
+ * from 8 to 10 s, each chosen under CC. Counts the pixels drawn over the picture.
  */
 async function pictureSubtitles(page: Page): Promise<{ ok: boolean; detail: string }> {
   await key(page, "Escape", 27);
@@ -197,13 +197,14 @@ async function pictureSubtitles(page: Page): Promise<{ ok: boolean; detail: stri
     await page.evaluate(
       `document.querySelector("[data-view=title]").dispatchEvent(new MouseEvent("mousemove", { bubbles: true }))`,
     );
-    const menu = `[...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Audio & subtitles")`;
+    // "Subtitles", or "Subtitles on" once chosen.
+    const menu = `document.querySelector('[aria-label^="Subtitles"]')`;
     await waitFor(() => page.evaluate<boolean>(`!!${menu}`), 10_000);
     await page.evaluate(`${menu}.click()`);
     const track = `[...document.querySelectorAll("button")].find((b) => b.textContent.trim() === ${JSON.stringify(label)})`;
     await waitFor(() => page.evaluate<boolean>(`!!${track}`), 10_000);
+    // Choosing closes the menu.
     await page.evaluate(`${track}.click()`);
-    await key(page, "Escape", 27);
   };
   await waitFor(async () => (await time()) > 0.1, 30_000);
   await choose("English");

@@ -256,10 +256,14 @@ async function start(): Promise<void> {
       "ondemand.rows": ({ kind, tab, like }) => onDemand.rows(kind, tab, like),
       "ondemand.tiles": ({ kind, of }) => onDemand.tiles(kind, of),
       "ondemand.collection": (query) => onDemand.collection(query),
-      "playback.open": ({ channelId, decoders, repair, audio }) =>
+      "playback.open": ({ channelId, decoders, repair, audio, audioLanguage }) =>
         Effect.andThen(
           nextTurn,
-          playback.open(channelId, decoders, { repair: repair ?? false, audio: audio ?? null }),
+          playback.open(channelId, decoders, {
+            repair: repair ?? false,
+            audio: audio ?? null,
+            audioLanguage: audioLanguage ?? null,
+          }),
         ),
       "playback.openTitle": ({ title, decoders }) =>
         Effect.gen(function* () {

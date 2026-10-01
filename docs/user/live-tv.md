@@ -26,6 +26,11 @@ Programme information comes from your provider. Many providers only cover some c
 
 While watching, the channel list opens over the left of the picture with the list button, Enter or the left arrow. Click a channel to switch; its title switches to another category. Clicking the picture shows the controls, and a double click toggles full screen.
 
+- **Sound** shows when a channel has more than one sound track. Picking another starts the channel again with it, which takes a moment.
+- **CC** lists the channel's subtitles: DVB subtitles, teletext subtitle pages and closed captions. C turns the last ones you picked on and off.
+
+The languages you pick carry over to other channels, and to movies and series. A channel with subtitles in your language starts with them on.
+
 ## Search
 
 ⌘K (Ctrl K on Windows and Linux) searches every channel, movies and series, and the programmes on now and later today. Pick a channel, or a programme that's on, to watch it. Pick a later programme to read about it, or a movie or series to see its details.
@@ -43,4 +48,5 @@ While watching, the channel list opens over the left of the picture with the lis
 | S                  | Add to or remove from favourites                               | The same, for the channel you're watching   |
 | Escape             | Home                                                           | Close the list, leave full screen, go back  |
 | Backspace          |                                                                | The previous channel                        |
+| C                  |                                                                | Subtitles on and off                        |
 | F, M, I            |                                                                | Full screen, mute, show the details         |

@@ -104,6 +104,8 @@ let checkpoint: ReturnType<typeof setInterval> | null = null;
 let releaseTimer: ReturnType<typeof setTimeout> | null = null;
 /** Where a run stopped for a long pause resumes from. */
 let released: number | null = null;
+/** The subtitles shown last in this title, which C turns on again. */
+let lastSubtitle: SubtitleTrack | null = null;
 
 video.addEventListener("timeupdate", () => {
   if (engine) store.setState({ position: engine.position() });
@@ -159,8 +161,11 @@ function releaseRun(): void {
   store.setState({ phase: { kind: "paused" }, position: released });
 }
 
-/** Starts a run at `start` with the chosen tracks. `attempt` counts reconnects. */
-async function run(start: number, attempt = 0): Promise<void> {
+/**
+ * Starts a run at `start` with the chosen tracks, held on its first picture when `paused`.
+ * `attempt` counts reconnects.
+ */
+async function run(start: number, attempt = 0, paused = false): Promise<void> {
   if (!session) return;
   const mine = ++generation;
   stopEngine();
@@ -181,6 +186,7 @@ async function run(start: number, attempt = 0): Promise<void> {
     page: subtitle?.page ?? null,
     convertSound,
     duration,
+    paused,
   });
   engine = started;
   try {
@@ -273,6 +279,7 @@ export const titlePlayer = {
     player.suspend();
     const mine = ++generation;
     convertSound = false;
+    lastSubtitle = null;
     store.setState({ ...idle, now, phase: { kind: "opening" }, position: from });
     try {
       // The languages chosen last, fresh: a choice in the title before counts.
@@ -335,7 +342,8 @@ export const titlePlayer = {
       }
       return;
     }
-    void run(target);
+    // A skip while paused stays paused, on the new picture.
+    void run(target, 0, phase.kind === "paused");
   },
 
   /** Skips back or forward by `seconds`. */
@@ -379,7 +387,7 @@ export const titlePlayer = {
       void call("preferences.update", { audioLanguage: track.language }).catch(() => {});
     }
     save();
-    void run(position);
+    void run(position, 0, store.getState().phase.kind === "paused");
   },
 
   /** Shows another subtitle track, or none, and remembers the choice. */
@@ -387,6 +395,7 @@ export const titlePlayer = {
     const { position } = store.getState();
     if ((track && !SHOWN_SUBTITLES.has(track.format)) || !session) return;
     store.setState({ subtitle: track });
+    if (track) lastSubtitle = track;
     void call("preferences.update", {
       subtitleLanguage: track ? (track.language ?? null) : "off",
     }).catch(() => {});
@@ -396,7 +405,18 @@ export const titlePlayer = {
       return;
     }
     save();
-    void run(position);
+    void run(position, 0, store.getState().phase.kind === "paused");
+  },
+
+  /** C: subtitles off, or back on: the ones chosen last in this title, else the first. */
+  toggleSubtitles(): void {
+    const { subtitle, subtitles } = store.getState();
+    if (subtitle) {
+      lastSubtitle = subtitle;
+      return titlePlayer.setSubtitle(null);
+    }
+    const next = lastSubtitle ?? subtitles[0] ?? null;
+    if (next) titlePlayer.setSubtitle(next);
   },
 
   /** Saves how far the title got, then closes it and its provider connection. */
