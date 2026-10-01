@@ -109,10 +109,6 @@ function indexKind(
       adult = item.adult;
       for (const id of item.categoryIds) adult ||= adultCategories.has(id);
     }
-    const categoryIds =
-      versions.length === 1
-        ? first.item.categoryIds
-        : [...new Set(group.flatMap((item) => item.categoryIds))];
     const title: Title = {
       kind,
       id: first.item.id,
@@ -124,7 +120,6 @@ function indexKind(
       backdropUrl,
       rating: rating || null,
       addedAt: addedAt || null,
-      categoryIds,
       adult,
       tmdbId: first.item.tmdbId ?? null,
       genres: [],

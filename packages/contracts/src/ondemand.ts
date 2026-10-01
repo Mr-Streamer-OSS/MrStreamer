@@ -29,7 +29,6 @@ export interface Title {
   readonly rating: number | null;
   /** When the provider added the movie, or last changed the series: epoch milliseconds. */
   readonly addedAt: number | null;
-  readonly categoryIds: readonly string[];
   /** The provider marks it, or its category, as for adults. */
   readonly adult: boolean;
   /** The Movie Database's id, which the language versions of one film share. */
