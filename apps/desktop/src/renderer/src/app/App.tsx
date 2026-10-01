@@ -5,7 +5,7 @@ import { HomeScreen } from "../features/home/HomeScreen.tsx";
 import { GuidePage } from "../features/live/GuidePage.tsx";
 import { SearchPalette } from "../features/search/SearchPalette.tsx";
 import { SettingsPage } from "../features/settings/SettingsPage.tsx";
-import { BrowsePage } from "../features/titles/BrowsePage.tsx";
+import { TitlesPage } from "../features/titles/TitlesPage.tsx";
 import { DetailsView } from "../features/titles/DetailsView.tsx";
 import { TitleWatch } from "../features/titles/TitleWatch.tsx";
 import { WatchScreen } from "../features/watch/WatchScreen.tsx";
@@ -92,7 +92,12 @@ function Shell() {
         ) : view === "live" ? (
           <GuidePage active={pageActive} />
         ) : (
-          <BrowsePage kind={view === "movies" ? "movie" : "series"} active={pageActive} />
+          // Its own page per kind, so one never shows the other's lists while its own load.
+          <TitlesPage
+            key={view}
+            kind={view === "movies" ? "movie" : "series"}
+            active={pageActive}
+          />
         )}
       </div>
       {/* Closed under Settings, whose Escape would otherwise reach the sheet's focus first. */}

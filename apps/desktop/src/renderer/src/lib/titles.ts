@@ -1,6 +1,7 @@
 // Movies and episodes as the views talk about them: how long, how far, what's next, and playing
 // one. The player itself is in ../player/title-player.ts.
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 import type { Episode, SeriesDetails, Title, TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { TitleProgress } from "@mrstreamer/contracts/viewing";
 import { useUi } from "../app/ui-store.ts";
@@ -90,11 +91,42 @@ export function playTitle(now: NowPlaying, from: number): void {
   void titlePlayer.open(now, from);
 }
 
-/** Takes a movie, or an episode's series, out of Continue watching. */
-export function removeFromContinue(title: TitleRef): void {
-  void call("viewing.removeFromContinue", { commandId: crypto.randomUUID(), title }).catch(
-    () => {},
-  );
+/** How long the pointer rests on a title, or the keyboard on it, before its details load. */
+const PREFETCH_AFTER_MS = 200;
+
+/**
+ * Loads a title's details while the pointer rests on it or the keyboard selects it, so they are
+ * there when it opens: the provider takes a second or so to answer. Spread the returned handlers
+ * onto the tile.
+ */
+export function usePrefetchDetails(title: Title, selected = false) {
+  const client = useQueryClient();
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stop = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+  };
+  const start = () => {
+    stop();
+    timer.current = setTimeout(
+      () => void client.prefetchQuery(queries.details(title.kind, title.id)),
+      PREFETCH_AFTER_MS,
+    );
+  };
+  useEffect(() => {
+    if (selected) start();
+    return stop;
+  }, [selected, title.kind, title.id]);
+  return { onPointerEnter: start, onPointerLeave: stop };
+}
+
+/** Takes movies, or episodes' series, out of Continue watching: every version played. */
+export function removeFromContinue(...titles: readonly TitleRef[]): void {
+  for (const title of titles) {
+    void call("viewing.removeFromContinue", { commandId: crypto.randomUUID(), title }).catch(
+      () => {},
+    );
+  }
 }
 
 /** One Continue watching entry, ready to show and play. */
@@ -102,8 +134,10 @@ export interface ContinueEntry {
   readonly key: string;
   /** The movie, or the series. */
   readonly title: Title;
-  /** What the viewer played last; Remove takes this out. */
+  /** What the viewer played last. */
   readonly progress: TitleProgress;
+  /** Every version of it played, which Remove takes out. */
+  readonly played: readonly TitleRef[];
   /** What plays: the same title, or the next episode of a finished one. */
   readonly now: NowPlaying;
   readonly from: number;
@@ -135,14 +169,16 @@ export function useContinueWatching(limit = Infinity): {
     ),
   });
   const loading = viewing.isPending || details.some((each) => each.isPending);
-  const entries = items.flatMap((progress, index): ContinueEntry[] => {
+  const shown = items.flatMap((progress, index): Omit<ContinueEntry, "played">[] => {
     const found = details[index]?.data;
     if (!found || found.title.adult) return [];
     const title = progress.title;
+    // One entry per film or series, whichever of its versions was played.
+    const film = found.title.tmdbId ?? found.title.id;
     if (found.kind === "movie" && title.kind === "movie") {
       return [
         {
-          key: `movie:${title.id}`,
+          key: `movie:${film}`,
           title: found.title,
           progress,
           now: movieNow(found.title, found.backdropUrl),
@@ -161,7 +197,7 @@ export function useContinueWatching(limit = Infinity): {
     if (!next) return [];
     return [
       {
-        key: `series:${found.title.id}`,
+        key: `series:${film}`,
         title: found.title,
         progress,
         now: episodeNow(found, next),
@@ -174,5 +210,16 @@ export function useContinueWatching(limit = Infinity): {
       },
     ];
   });
-  return { entries: entries.slice(0, limit), loading, error: viewing.error };
+  // Most recent first, so the version played last stands for the rest.
+  const entries = new Map<string, ContinueEntry>();
+  for (const entry of shown) {
+    const earlier = entries.get(entry.key);
+    entries.set(
+      entry.key,
+      earlier
+        ? { ...earlier, played: [...earlier.played, entry.progress.title] }
+        : { ...entry, played: [entry.progress.title] },
+    );
+  }
+  return { entries: [...entries.values()].slice(0, limit), loading, error: viewing.error };
 }

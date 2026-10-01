@@ -3,7 +3,6 @@ import { type } from "arktype";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import type { LoginInput } from "@mrstreamer/contracts/ipc";
 import type { AccountState, AccountStatus } from "@mrstreamer/contracts/subscription";
-import { jsonRows } from "@mrstreamer/core/json-rows";
 import type {
   LiveCatalogue,
   OnDemandCatalogue,
@@ -108,18 +107,18 @@ export function xtreamProvider(account: XtreamAccount, options: ProviderOptions)
   const getJson = (params: string, timeoutMs: number, signal?: AbortSignal): Promise<unknown> =>
     request(params, timeoutMs, signal, async (response) => JSON.parse(await response.text()));
 
-  /** A long list, read one row at a time so reading it never holds the thread for long. */
+  /**
+   * A long list, parsed in one go: only the catalogue worker reads these, off the main thread,
+   * where one parse is several times faster than reading row by row.
+   */
   const getRows = <A>(
     params: string,
     signal: AbortSignal | undefined,
     map: (raw: unknown) => A[],
   ) =>
-    request(params, CATALOGUE_TIMEOUT_MS, signal, async (response) => {
-      const rows: A[] = [];
-      if (!response.body) return rows;
-      for await (const raw of jsonRows(response.body)) rows.push(...map(raw));
-      return rows;
-    });
+    request(params, CATALOGUE_TIMEOUT_MS, signal, async (response) =>
+      rows(JSON.parse(await response.text())).flatMap(map),
+    );
 
   return {
     async authenticate(signal) {
@@ -314,6 +313,7 @@ function defineTitleSchemas() {
     "category_ids?": "(string | number)[] | null",
     "container_extension?": "string | null",
     "is_adult?": "number | string | boolean | null",
+    "tmdb?": loose,
   });
 
   const SeriesRow = type({
@@ -327,6 +327,7 @@ function defineTitleSchemas() {
     "release_date?": "string | null",
     "category_id?": loose,
     "category_ids?": "(string | number)[] | null",
+    "tmdb?": loose,
   });
 
   const Info = type({
@@ -415,8 +416,15 @@ function toMovie(raw: unknown): ProviderTitle[] {
       categoryIds: categoryIdsOf(row),
       adult: isTruthy(row.is_adult),
       container: row.container_extension?.trim() || "mp4",
+      tmdbId: tmdbIdOf(row.tmdb),
     },
   ];
+}
+
+/** A TMDB id: digits, and not the 0 some panels write for none. */
+function tmdbIdOf(value: string | number | null | undefined): string | null {
+  const text = String(value ?? "").trim();
+  return /^\d+$/.test(text) && Number(text) > 0 ? text : null;
 }
 
 function toSeries(raw: unknown): ProviderTitle[] {
@@ -435,6 +443,7 @@ function toSeries(raw: unknown): ProviderTitle[] {
       categoryIds: categoryIdsOf(row),
       adult: false,
       container: null,
+      tmdbId: tmdbIdOf(row.tmdb),
     },
   ];
 }

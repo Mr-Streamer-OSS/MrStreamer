@@ -10,7 +10,7 @@ Mr. Streamer keeps everything on your computer, in one folder:
 | Windows | `%APPDATA%\Mr. Streamer`                     |
 | Linux   | `~/.config/Mr. Streamer`                     |
 
-It holds your subscription with its encrypted password, your preferences, favourites, watch history and how far you got in movies and episodes, copies of your channel list, programme guide and movie and series lists, your update channel, and a diagnostics log. Uninstalling leaves the folder in place, so a reinstall picks up where you left off. Delete the folder to remove everything.
+It holds your subscription with its encrypted password, your preferences, favourites, watch history and how far you got in movies and episodes, copies of your channel list, programme guide and movie and series lists, what TMDB said about your movies and series, your update channel, and a diagnostics log. Chromium's cache of posters and pictures there stays under 64 MB. Uninstalling leaves the folder in place, so a reinstall picks up where you left off. Delete the folder to remove everything.
 
 Your password is encrypted with a key your system keeps: the macOS Keychain, Windows' user encryption, or the desktop keyring on Linux.
 
@@ -35,6 +35,7 @@ The Windows installer isn't code-signed yet, so SmartScreen shows "Windows prote
 - **No programme information for a channel:** your provider's guide doesn't cover it. Many providers cover only some channels. When a guide download fails, the last guide stays in use and Mr. Streamer tries again later.
 - **"Channels unavailable":** the provider didn't send the channel list. **Try again**, or check your internet connection. When a refresh fails, Mr. Streamer keeps showing the last channel list it received, and Settings says why the list may be out of date.
 - **Movies or Series stay empty:** the first load of a large list takes a few seconds. If the provider offers no movies or series, the pages say so. A failed refresh keeps the last lists.
+- **No genres or streaming services:** they come from TMDB, which takes about a quarter of an hour the first time on a large subscription. Settings > Movies & series shows how far it got, or that TMDB refused the key; you can paste your own key there. Titles your provider lists without a TMDB id never get them.
 
 ## Updates
 

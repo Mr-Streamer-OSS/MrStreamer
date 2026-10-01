@@ -45,6 +45,13 @@ const UPDATE_FEED =
 const UPDATE_API = process.env["MR_STREAMER_UPDATE_API"] ?? "https://api.github.com";
 const REPOSITORY = "Mr-Streamer-OSS/MrStreamer";
 
+/**
+ * Chromium's own cache, mostly posters and backdrops, on disk at most this big; the oldest go
+ * first. Artwork shown this session stays in memory either way.
+ */
+const DISK_CACHE_BYTES = 64 * 1024 * 1024;
+app.commandLine.appendSwitch("disk-cache-size", String(DISK_CACHE_BYTES));
+
 /** Refresh the channel list in the background when the cached copy is older than this. */
 const CATALOGUE_MAX_AGE = "12 hours";
 
@@ -123,6 +130,12 @@ async function start(): Promise<void> {
       ffmpeg: toolPath("ffmpeg"),
       ffprobe: toolPath("ffprobe"),
       catalogueWorker: (setup) => createCatalogueWorker({ workerData: setup }),
+      // MR_STREAMER_TMDB_KEY at run time overrides the key built in, for testing.
+      tmdbKey: process.env["MR_STREAMER_TMDB_KEY"] || __TMDB_KEY__ || null,
+      region: app.getLocaleCountryCode() || "US",
+      ...(process.env["MR_STREAMER_TMDB_API"]
+        ? { tmdbApi: process.env["MR_STREAMER_TMDB_API"] }
+        : {}),
       updates: {
         installed: app.getVersion(),
         discover: discovery({
@@ -232,10 +245,11 @@ async function start(): Promise<void> {
       "guide.search": ({ query }) => guide.search(query),
       "ondemand.status": () => onDemand.status,
       "ondemand.refresh": () => onDemand.refresh,
-      "ondemand.categories": ({ kind }) => onDemand.categories(kind),
-      "ondemand.titles": (query) => onDemand.page(query),
       "ondemand.search": ({ query }) => onDemand.search(query),
       "ondemand.details": ({ kind, id }) => onDemand.details(kind, id),
+      "ondemand.rows": ({ kind, tab, like }) => onDemand.rows(kind, tab, like),
+      "ondemand.tiles": ({ kind, of }) => onDemand.tiles(kind, of),
+      "ondemand.collection": (query) => onDemand.collection(query),
       "playback.open": ({ channelId, decoders, repair }) =>
         Effect.andThen(nextTurn, playback.open(channelId, decoders, { repair: repair ?? false })),
       "playback.openTitle": ({ title, decoders }) =>
@@ -255,7 +269,12 @@ async function start(): Promise<void> {
       "playback.closeAll": () => Effect.andThen(nextTurn, Effect.as(playback.closeAll, null)),
       "playback.failure": ({ sessionId }) => playback.failure(sessionId),
       "preferences.get": () => settings.get,
-      "preferences.update": (patch) => settings.update(patch),
+      "preferences.update": (patch) =>
+        Effect.gen(function* () {
+          const updated = yield* settings.update(patch);
+          if ("tmdbKey" in patch) yield* onDemand.reconfigure;
+          return updated;
+        }),
       "viewing.get": () => viewing.state,
       "viewing.setFavourite": ({ commandId, channelId, favourite }) =>
         viewing.setFavourite(commandId, channelId, favourite),

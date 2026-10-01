@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { jsonRows } from "../src/json-rows.ts";
+import { byIds, indexCatalogue, search } from "../src/ondemand/catalogue.ts";
+import { collections } from "../src/ondemand/collections.ts";
 import { episodeName, titleName } from "../src/ondemand/names.ts";
 import { continueWatching, isFinished, type TitleRow } from "../src/viewing/titles.ts";
 
@@ -32,45 +33,6 @@ describe("title names", () => {
   });
 });
 
-describe("reading long lists", () => {
-  it("reads rows split across chunks, from arrays and from objects keyed by index", async () => {
-    const rows = [{ id: 1, name: 'a "quoted" {brace}', tags: [1, [2]] }, { id: 2 }, { id: 3 }];
-    const text = JSON.stringify(rows);
-    const keyed = JSON.stringify({ "0": rows[0], "1": rows[1], "2": rows[2] });
-    for (const document of [text, keyed]) {
-      const bytes = new TextEncoder().encode(document);
-      const chunks = async function* () {
-        for (let offset = 0; offset < bytes.length; offset += 5)
-          yield bytes.subarray(offset, offset + 5);
-      };
-      const read: unknown[] = [];
-      for await (const row of jsonRows(chunks())) read.push(row);
-      expect(read).toEqual(rows);
-    }
-  });
-
-  it("refuses an error page or a list cut short, and reads null as no rows", async () => {
-    const read = async (document: string) => {
-      const rows: unknown[] = [];
-      const chunks = async function* () {
-        yield new TextEncoder().encode(document);
-      };
-      for await (const row of jsonRows(chunks())) rows.push(row);
-      return rows;
-    };
-    for (const document of [
-      '[{"stream_id":1},{"stream_id":2},{"stream_id":3,"na',
-      "<br />\n<b>Fatal error</b>: Allowed memory size exhausted",
-      "<html><body>Maintenance</body></html>",
-      "",
-    ]) {
-      await expect(read(document)).rejects.toThrow(SyntaxError);
-    }
-    expect(await read(" null\n")).toEqual([]);
-    expect(await read("[]")).toEqual([]);
-  });
-});
-
 describe("Continue watching", () => {
   const row = (partial: Partial<TitleRow> & Pick<TitleRow, "title" | "at">): TitleRow => ({
     position: 600,
@@ -96,5 +58,146 @@ describe("Continue watching", () => {
       row({ title: { kind: "movie", id: "m" }, at: 2 }),
     ]);
     expect(shown.map((entry) => entry.title.id)).toEqual(["e2", "m"]);
+  });
+});
+
+describe("one title per film", () => {
+  const movie = (id: string, name: string, tmdbId: string | null, addedAt: number) => ({
+    id,
+    name,
+    posterUrl: null,
+    backdropUrl: null,
+    rating: null,
+    addedAt,
+    releaseDate: null,
+    categoryIds: ["films"],
+    adult: false,
+    container: "mkv",
+    tmdbId,
+  });
+  const catalogue = {
+    movieCategories: [{ id: "films", name: "Films" }],
+    movies: [
+      movie("1", "Speak No Evil (NL)", "1114513", 3),
+      movie("2", "Speak No Evil (MULTI)", "1114513", 2),
+      movie("3", "Speak No Evil 2024 (DE)", "1114513", 4),
+      movie("4", "Blow (NL)", null, 1),
+    ],
+    seriesCategories: [],
+    series: [],
+  };
+  const listed = (language: string) =>
+    indexCatalogue(catalogue, language).movies.titles.map((title) => [
+      title.id,
+      title.versions.map((version) => version.id),
+    ]);
+
+  it("gathers the versions sharing a TMDB id, the one suiting the language first", () => {
+    expect(listed("en")).toEqual([
+      ["2", ["2", "1", "3"]],
+      ["4", ["4"]],
+    ]);
+    expect(listed("nl")).toEqual([
+      ["1", ["1", "2", "3"]],
+      ["4", ["4"]],
+    ]);
+  });
+
+  it("shows titles in the viewer's language, or subtitled, but not dubbed into another", () => {
+    const films = {
+      ...catalogue,
+      movies: [
+        movie("10", "Fright Night 2 (DE)", "100", 1),
+        movie("11", "Fright Night (NL)", "101", 1),
+        movie("12", "De Bondgenoten (NL)", "102", 1),
+        movie("13", "Das Boot (MULTI)", "103", 1),
+        movie("14", "Blow", "104", 1),
+      ],
+    };
+    const madeIn: Record<string, string> = { "100": "en", "101": "en", "102": "nl", "103": "de" };
+    const shown = (language: string) =>
+      collections({
+        kind: "movie",
+        titles: indexCatalogue(films, language).movies.titles,
+        language,
+        metadata: (tmdbId) => ({
+          genres: [18],
+          language: madeIn[tmdbId] ?? null,
+          popularity: 1,
+          rating: 7,
+          votes: 10,
+          collection: null,
+          backdrop: null,
+        }),
+        services: [],
+        now: 0,
+      })
+        .list("genre:Drama", "title")
+        .map((title) => title.id);
+    expect(shown("en")).toEqual(["14", "13", "11"]);
+    expect(shown("nl")).toEqual(["14", "13", "12", "11"]);
+  });
+
+  it("keeps a film when one of its versions is for adults", () => {
+    const films = {
+      ...catalogue,
+      movies: [
+        movie("20", "Wicked (NL)", "300", 1),
+        { ...movie("21", "Wicked", "300", 2), adult: true },
+      ],
+    };
+    const titles = indexCatalogue(films, "en").movies.titles;
+    expect(titles.map((title) => [title.id, title.adult])).toEqual([
+      ["20", false],
+      ["21", true],
+    ]);
+  });
+
+  it.each([
+    // "(NL)" keeps the film's own sound, so it beats an unmarked version, which may be a dub.
+    ["en", ["41", "40", "42"]],
+    ["nl", ["42", "41", "40"]],
+  ])("prefers a version with its own sound for %s", (language, order) => {
+    const films = {
+      ...catalogue,
+      movies: [
+        movie("40", "Sessiz Bir Yer", "400", 9),
+        movie("41", "A Quiet Place (NL)", "400", 1),
+        movie("42", "A Quiet Place (NL AUDIO)", "400", 10),
+      ],
+    };
+    const [title] = indexCatalogue(films, language).movies.titles;
+    expect(title?.versions.map((version) => version.id)).toEqual(order);
+  });
+
+  it("counts a film as new or in 4K only by versions the viewer would watch", () => {
+    const day = 86_400_000;
+    const now = Date.UTC(2026, 9, 1);
+    const films = {
+      ...catalogue,
+      movies: [
+        movie("30", "Heat (MULTI)", "600", now - 90 * day),
+        movie("31", "Heat 4K (DE)", "600", now - day),
+        movie("32", "Alien (MULTI)", "601", now - 10 * day),
+        movie("33", "Alien 4K (MULTI)", "601", now - 90 * day),
+      ],
+    };
+    const made = collections({
+      kind: "movie",
+      titles: indexCatalogue(films, "en").movies.titles,
+      language: "en",
+      metadata: () => null,
+      services: [],
+      now,
+    });
+    expect(made.list("new-week")).toEqual([]);
+    // Opening it opens the 4K version.
+    expect(made.list("4k").map((title) => title.id)).toEqual(["33"]);
+  });
+
+  it("finds the title by any of its versions, and by any version's name", () => {
+    const index = indexCatalogue(catalogue, "en");
+    expect(byIds(index, "movie", ["3"]).map((title) => title.id)).toEqual(["2"]);
+    expect(search(index, "movie", "speak").map((title) => title.id)).toEqual(["2"]);
   });
 });

@@ -1,6 +1,6 @@
 # Slice 04: movies, series, Home, updates and licences
 
-Status: built on 30 September 2026 on `t3code/movies-home-updates-licences`, in review. Nothing is merged or published, and the update feed isn't deployed. [Known gaps](#known-gaps) lists what remains open.
+Status: merged on 30 September 2026 as #16 (`eca123f`) and shipped in nightly `0.0.3-nightly.20260930.37`, with the update feed live. [Slice 4.5](04.5-movies-and-series-browsing.md) replaced the Movies and Series layout picked here. [Known gaps](#known-gaps) lists what remains open.
 
 Outcome: movies and series from the subscription, with resume, seasons, tracks and subtitles; a Home built around what you're watching; updates found without GitHub's API limit; and notices for everything the installers ship.
 
@@ -101,13 +101,13 @@ Against the fake provider in Electron: a title starts in about 1.1 s and seeks o
 | Memory on Home, stopped           | 790 MB   | 825 MB     | +4%    |
 | Installed size                    | 286 MB   | 295 MB     | +3%    |
 
-Guide open is 15 ms slower, within this machine's noise. Idle CPU with the preview varies more than the change: this slice's runs spread from 56 to 93 %, 0.0.2's from 64 to 98 %. The cold start held across runs. Profiles put it in the main process before the window opens, where ArkType compiled about 40 new schemas from this slice as their modules loaded. Now the IPC inputs, the provider's movie and series schemas and ffprobe's are built on first use. In the quietest profiles the main process then reaches `start()` at 584 to 632 ms, against 637 ms for 0.0.2 and 719 ms before the change. Wall-clock cold starts on this machine vary by more than that, so the dry run's measurement on macOS decides. The extra 9 MB installed is ffprobe.
+Guide open is 15 ms slower, within this machine's noise. Idle CPU with the preview varies more than the change: this slice's runs spread from 56 to 93 %, 0.0.2's from 64 to 98 %. The cold start held across runs. Profiles put it in the main process before the window opens, where ArkType compiled about 40 new schemas from this slice as their modules loaded. Now the IPC inputs, the provider's movie and series schemas and ffprobe's are built on first use. In the quietest profiles the main process then reaches `start()` at 584 to 632 ms, against 637 ms for 0.0.2 and 719 ms before the change. Wall-clock cold starts on this machine vary by more than that; the Mac measurements are open in [slice 4.5's known gaps](04.5-movies-and-series-browsing.md#known-gaps). The extra 9 MB installed is ffprobe.
 
 ## Known gaps
 
 - Mac and Windows: installers come from the release dry run on the pull request. Wout's checks on both are pending: browsing and playing movies and episodes with Wout's provider, tracks, resume, the update notice and About.
 - GPU evidence: none on Linux or Windows. Pictures the player can't decode, such as HEVC where the system has no decoder or MPEG-4 Part 2, become H.264 in software; 4K HEVC on such a machine will cost a lot of CPU.
-- The feed goes live only once Wout enables GitHub Pages (Settings > Pages > Source: GitHub Actions) and the first release after merging runs; until then the app asks GitHub's API, as before. The feed's address is still open, above.
+- The feed is live on GitHub Pages, and nightly `.37` onwards read it at the address above. Whether to put it behind a domain is still open, above.
 - Picture subtitles (PGS, VobSub) are listed but can't be shown.
 - A pause over five minutes lets go of the connection; playing again reopens the file at the same position, which takes about a second.
 - Downloads, trailers, external metadata, other provider types, several subscriptions and mobile or TV apps are out of scope.

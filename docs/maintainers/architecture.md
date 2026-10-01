@@ -8,15 +8,16 @@ packages/contracts   @mrstreamer/contracts: IPC schemas, library, guide and movi
                      nothing else in the workspace.
 packages/core        @mrstreamer/core: rules that run without Electron, React or the DOM. Catalogue
                      names and regions, trusted guide ids, the XMLTV reader, the guide and viewing
-                     record services, movie and series names, their catalogue and tracks, update
-                     discovery, the provider port, reading long JSON lists, text folding. Depends
-                     on contracts.
+                     record services, movie and series names, their catalogue, languages,
+                     collections and tracks, TMDB's client, update discovery, the provider port,
+                     text folding. Depends on contracts.
 apps/desktop         The app, package name mrstreamer
   src/main           Electron main process
     providers        The Xtream Codes adapter
     services         Subscriptions, library, movies and series, playback proxy, settings
                      (preferences.json), updates, licences
-    ondemand         The worker thread that holds the movie and series catalogue
+    ondemand         The worker thread that holds the movie and series catalogue and TMDB's
+                     metadata
     playback         Stream inspection, the clean start and ffmpeg conversion behind the proxy;
                      probing and ffmpeg runs for movies and episodes
     platform         Keychain-backed secrets, atomic JSON files, the guide and viewing stores, the
@@ -39,19 +40,22 @@ Packages export their source files by path, `@mrstreamer/core/catalogue/normaliz
 
 ## Data
 
-Everything lives in Electron's `userData` folder, named after the product, not the app id: see the [user troubleshooting page](../user/troubleshooting.md#where-your-data-is). Each JSON file is written atomically; leftovers of an interrupted write are removed at startup. Changes to these files must stay readable by the newest stable release: choosing Stable on a nightly installs that release over the nightly, and it reads what the nightly wrote. Add fields rather than change a file's version: older readers ignore keys they don't know and keep them when they write. New files are fine: older releases don't look for them. The one agreed exception: Stable 0.0.1 doesn't read `mrstreamer.db`, so it shows no favourites or watch history; Stable 0.0.2 reads it and skips what it doesn't know (see [Viewing record](#viewing-record)).
+Everything lives in Electron's `userData` folder, named after the product, not the app id: see the [user troubleshooting page](../user/troubleshooting.md#where-your-data-is). Each JSON file is written atomically, packed with gzip when its name ends in `.gz`; leftovers of an interrupted write are removed at startup. Changes to these files must stay readable by the newest stable release: choosing Stable on a nightly installs that release over the nightly, and it reads what the nightly wrote. Add fields rather than change a file's version: older readers ignore keys they don't know and keep them when they write. New files are fine: older releases don't look for them. The one agreed exception: Stable 0.0.1 doesn't read `mrstreamer.db`, so it shows no favourites or watch history; Stable 0.0.2 reads it and skips what it doesn't know (see [Viewing record](#viewing-record)).
 
-| File                | Owner                                                                                                            |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `subscription.json` | `services/subscription.ts`; the password is sealed with `safeStorage`                                            |
-| `preferences.json`  | `services/preferences.ts`: volume, mute, last channel and category, the sound and subtitle languages picked last |
-| `mrstreamer.db`     | `platform/viewing-store.ts`: the viewing record, favourites, watch history and title progress per account        |
-| `catalogue.json`    | `services/library.ts`: the last good catalogue, as the provider sent it                                          |
-| `ondemand.json`     | `ondemand/catalogue-worker.ts`: the last good movie and series lists, as the provider sent them                  |
-| `guide.xml`         | `platform/guide-store.ts`: the last complete XMLTV download, as it arrived                                       |
-| `guide.json`        | `platform/guide-store.ts`: which subscription `guide.xml` belongs to, and when it arrived                        |
-| `updates.json`      | `services/updates.ts`: the chosen channel, and the version whose notice was closed                               |
-| `diagnostics.log`   | `platform/diagnostics-log.ts`: what the app did; `diagnostics.1.log` is the one before                           |
+| File                | Owner                                                                                                                                                                           |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `subscription.json` | `services/subscription.ts`; the password is sealed with `safeStorage`                                                                                                           |
+| `preferences.json`  | `services/preferences.ts`: volume, mute, last channel and category, the sound and subtitle languages picked last, the language for movies and series, the viewer's own TMDB key |
+| `mrstreamer.db`     | `platform/viewing-store.ts`: the viewing record, favourites, watch history and title progress per account                                                                       |
+| `catalogue.json`    | `services/library.ts`: the last good catalogue, as the provider sent it                                                                                                         |
+| `ondemand.json.gz`  | `ondemand/catalogue-worker.ts`: the last good movie and series lists, as the provider sent them                                                                                 |
+| `metadata.json.gz`  | `ondemand/metadata.ts`: what TMDB said about each title, and what each streaming service carries                                                                                |
+| `guide.xml`         | `platform/guide-store.ts`: the last complete XMLTV download, as it arrived                                                                                                      |
+| `guide.json`        | `platform/guide-store.ts`: which subscription `guide.xml` belongs to, and when it arrived                                                                                       |
+| `updates.json`      | `services/updates.ts`: the chosen channel, and the version whose notice was closed                                                                                              |
+| `diagnostics.log`   | `platform/diagnostics-log.ts`: what the app did; `diagnostics.1.log` is the one before                                                                                          |
+
+Chromium keeps its own cache there too, mostly posters and backdrops; `index.ts` caps it at 64 MB on disk, and artwork is asked for at the width it shows at (`components/TitleArt.tsx`).
 
 ## Catalogue
 
@@ -61,9 +65,38 @@ Each channel keeps the provider's guide id (`epg_channel_id` on Xtream panels). 
 
 ## Movies and series
 
-`services/ondemand.ts` (`OnDemand`) owns movies and series. Their lists are large: 53,000 movies (21 MB of JSON) and 10,000 series on Wout's provider. Reading, indexing and sorting them on the main thread stalled it for 100 to 300 ms, so the catalogue lives in a worker thread, `ondemand/catalogue-worker.ts`, started on first use (electron-vite bundles it through `?nodeWorker`; tests start the source file). The worker fetches both lists with its own copy of the Xtream adapter, reading each a row at a time (`@mrstreamer/core/json-rows`), keeps them in `ondemand.json` as the provider sent them, and answers the main process's small calls: pages of a category or of every title, sorted by date added, name or rating; titles by id; search; a movie's file type. Every call names the subscription it is for, so an answer never mixes accounts. Display names are worked out on load (`@mrstreamer/core/ondemand/names`: "Blow 2001 (NL)" is "Blow 2001" with the tag NL), and categories group by country the way live ones do.
+`services/ondemand.ts` (`OnDemand`) owns movies and series. Their lists are large: 53,000 movies (21 MB of JSON) and 10,000 series on Wout's provider. Reading, indexing and sorting them on the main thread stalled it for 100 to 300 ms, so the catalogue lives in a worker thread, `ondemand/catalogue-worker.ts`, started on first use (electron-vite bundles it through `?nodeWorker`; tests start the source file). The worker fetches both lists with its own copy of the Xtream adapter, parsing each in one go, which off the main thread is several times faster than reading row by row. It answers first and a second later keeps the lists in `ondemand.json.gz` as the provider sent them, 3.3 MB packed instead of 17.7. A key change restarts the worker after up to 2 s for a write in progress; quitting doesn't wait, and a write cut short leaves the previous lists, which the next start refreshes when due. Every call names the subscription it is for, so an answer never mixes accounts. An empty answer never replaces lists that had titles. The lists refresh at startup after the live catalogue and the guide when they are older than 12 hours, and when first needed.
 
-Titles the provider marks for adults, or that sit in a category named for adults, appear only inside their category: pages of every title and search leave them out. An empty answer never replaces lists that had titles. The lists refresh at startup after the live catalogue and the guide when they are older than 12 hours, and when first needed.
+Nothing depends on a field only some providers send. The worker reads what Xtream Codes panels list for every movie and series, names, dates, ratings, artwork and the TMDB id (`tmdb`), and asks TMDB for the rest. The provider's categories aren't shown.
+
+### Titles and versions
+
+`@mrstreamer/core/ondemand/catalogue` indexes the lists for one language, each kind when first read. Display names are worked out on load (`@mrstreamer/core/ondemand/names`: "Blow 2001 (NL)" is "Blow 2001" with the tag NL), so naming rules improve without fetching again. Providers list each language version of a film as its own stream; rows sharing a TMDB id become one title with its versions inside, and rows without one stay on their own. A title shows the version that suits the viewer's language best (`@mrstreamer/core/ondemand/languages`): marked with the language, then marked for several, then marked for a language that subtitles rather than dubs, then unmarked, then dubbed into another, the newest first among equals. Dutch, Flemish included, subtitles: "(NL)" on an English film is English with Dutch subtitles, unless the mark says otherwise, as "(NL AUDIO)". A row for adults never joins the others, so the film's other versions stay. The language is `titleLanguage` in the preferences, English by default, and changing it indexes again. Every version's id finds its title, details belong to the version they were opened for, and progress counts across versions: `viewing.progress` takes the ids of every version of a series.
+
+Titles the provider marks for adults, or that sit in a category named for adults, are left out of every collection and of search.
+
+### TMDB
+
+`@mrstreamer/core/metadata/tmdb` is TMDB's client: one title's details (genres, original language, popularity, rating and votes, franchise, backdrop), always in English, and which titles each streaming service carries in a region, from TMDB's watch providers, whose data comes from JustWatch. A read access token goes in the Authorization header, an API key in the query.
+
+`ondemand/metadata.ts` keeps what collections use in `metadata.json.gz`, inside the worker. After the lists load, it asks about each listed title once, newest first, 8 at a time and at most 40 a second, waiting when TMDB asks it to and trying twice more after a failure, 15 s at most per request. It asks again after 150 days, and stops using and keeping anything after six months, TMDB's limit. A list given while it fetches, as after a refresh, takes over, ahead of the streaming services. Those, the 12 most prominent per kind in the system's region with their 5,000 most popular titles each, are fetched again after a week. It saves every 30 s while fetching, and tells the main process, which tells the UI, at most every 3 s. A refused key stops it until the key changes; Settings > Movies & series shows how far it got.
+
+The key is the viewer's own from Settings (`tmdbKey`), else `MR_STREAMER_TMDB_KEY` at run time, else the one built in from the release's `TMDB_API_KEY` secret (see [releasing](releasing.md#tmdb-key)). Changing it restarts the worker. Without a key, movies and series work without genres, services or popularity.
+
+### Collections
+
+`@mrstreamer/core/ondemand/collections` builds a kind's collections for a language from the titles and the metadata so far:
+
+- All, every title but those for adults
+- New this week and this month, by the date the provider added them
+- Recent releases, from this year and last
+- Popular, by TMDB's popularity
+- Top rated, 7.5 and up on TMDB once 100 people voted; the provider's rating only sorts titles TMDB doesn't know
+- 4K, titles with a version marked 4K or UHD
+- each genre and each streaming service, `genre:Comedy` and `service:8`
+- titles like one, `like:<id>`: the most genres shared, then the most popular
+
+Every collection but All holds only titles that suit the language: a version in it or in several, or one with its own sound or unmarked that TMDB doesn't place in another language. New counts the date a version arrived unless it is a dub into another language. The worker builds them when first asked and again after more metadata arrived, and answers three calls. `ondemand.rows` gives a tab's rows: For you starts with titles like the one watched last, then popular, new this week, top rated and the three best-stocked services; New has this week, this month and recent releases. `ondemand.tiles` gives the genres or services with their counts and a picture. `ondemand.collection` gives a page of one, in its own order or by date added, popularity, rating or name.
 
 Details come from the provider when a title opens (`get_vod_info`, `get_series_info`) and stay in memory for the last 200 titles. `@mrstreamer/core/ondemand/details` builds a series' seasons from its episodes, because panels list seasons incompletely or not at all, and puts specials last. `OnDemand.file` names the provider file a movie or episode streams from; the URL holds the login and never leaves the main process.
 
@@ -101,7 +134,7 @@ Older builds share the file, as when someone returns to Stable 0.0.2: they skip 
 
 The first start with the record imports the lists `preferences.json` kept before, in the transaction that sets the import marker, and only then takes them out of the file. Lists wait for an account to import into, and connecting a different account drops them. Once the marker is set, lists found in the file again, as after running Stable 0.0.1, are removed without importing.
 
-The UI reads `viewing.get` and sends `viewing.setFavourite`, `viewing.recordWatch`, `viewing.recordProgress` and `viewing.removeFromContinue` with a command id it makes up; `viewing.progress` reads the rows of some movies or of one series. After each commit the main process sends `viewing.changed` with the new sequence, and the UI reads again when it holds an older one. `apps/desktop/scripts/measure-viewing.ts` measures commits, opening and a rebuild with 100,000 events.
+The UI reads `viewing.get` and sends `viewing.setFavourite`, `viewing.recordWatch`, `viewing.recordProgress` and `viewing.removeFromContinue` with a command id it makes up; `viewing.progress` reads the rows of some movies or of a series' versions. After each commit the main process sends `viewing.changed` with the new sequence, and the UI reads again when it holds an older one. `apps/desktop/scripts/measure-viewing.ts` measures commits, opening and a rebuild with 100,000 events.
 
 ## Programme guide
 

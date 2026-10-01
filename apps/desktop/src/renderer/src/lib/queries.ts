@@ -2,7 +2,12 @@
 import { queryOptions, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
-import type { TitleKind, TitleSort } from "@mrstreamer/contracts/ondemand";
+import type {
+  CollectionId,
+  CollectionSort,
+  RowTab,
+  TitleKind,
+} from "@mrstreamer/contracts/ondemand";
 import type { Viewing } from "@mrstreamer/contracts/viewing";
 import { call, listen } from "./ipc.ts";
 
@@ -98,30 +103,34 @@ export const queries = {
       queryFn: () => call("ondemand.status"),
       staleTime: Infinity,
     }),
-  titleCategories: (kind: TitleKind) =>
+  /** A tab's rows; For you starts with titles like `like`, one watched lately. */
+  rows: (kind: TitleKind, tab: RowTab, like: string | null) =>
     queryOptions({
-      queryKey: ["ondemand", "categories", kind],
-      queryFn: () => call("ondemand.categories", { kind }),
+      queryKey: ["ondemand", "rows", kind, tab, like],
+      queryFn: () => call("ondemand.rows", { kind, tab, ...(like ? { like } : {}) }),
       staleTime: Infinity,
+      placeholderData: (previous) => previous,
     }),
-  /** One page of a category, or of every title of the kind without those for adults. */
-  titles: (
+  /** Genres or streaming services as tiles. */
+  tiles: (kind: TitleKind, of: "genres" | "services") =>
+    queryOptions({
+      queryKey: ["ondemand", "tiles", kind, of],
+      queryFn: () => call("ondemand.tiles", { kind, of }),
+      staleTime: Infinity,
+      placeholderData: (previous) => previous,
+    }),
+  /** One page of a collection, in `sort` or the collection's own order. */
+  collection: (
     kind: TitleKind,
-    categoryId: string | null,
-    sort: TitleSort,
+    id: CollectionId,
+    sort: CollectionSort | undefined,
     offset: number,
     limit: number,
   ) =>
     queryOptions({
-      queryKey: ["ondemand", "titles", kind, categoryId, sort, offset, limit],
+      queryKey: ["ondemand", "collection", kind, id, sort ?? null, offset, limit],
       queryFn: () =>
-        call("ondemand.titles", {
-          kind,
-          sort,
-          offset,
-          limit,
-          ...(categoryId === null ? {} : { categoryId }),
-        }),
+        call("ondemand.collection", { kind, id, offset, limit, ...(sort ? { sort } : {}) }),
       staleTime: Infinity,
       placeholderData: (previous) => previous,
     }),
@@ -138,14 +147,20 @@ export const queries = {
       queryFn: () => call("ondemand.details", { kind, id }),
       staleTime: 30 * 60_000,
     }),
-  /** How far movies, or every episode of a series, got. Kept current by `syncViewing`. */
-  progress: (filter: { readonly movieIds?: readonly string[]; readonly seriesId?: string }) =>
+  /**
+   * How far movies, or every episode of series, got: each id a language version of one title.
+   * Kept current by `syncViewing`.
+   */
+  progress: (filter: {
+    readonly movieIds?: readonly string[];
+    readonly seriesIds?: readonly string[];
+  }) =>
     queryOptions({
-      queryKey: ["viewing", "progress", filter.seriesId ?? null, ...(filter.movieIds ?? [])],
+      queryKey: ["viewing", "progress", filter.movieIds ?? [], filter.seriesIds ?? []],
       queryFn: () =>
         call("viewing.progress", {
           ...(filter.movieIds ? { movieIds: [...filter.movieIds] } : {}),
-          ...(filter.seriesId ? { seriesId: filter.seriesId } : {}),
+          ...(filter.seriesIds ? { seriesIds: [...filter.seriesIds] } : {}),
         }),
       staleTime: Infinity,
     }),
@@ -223,7 +238,11 @@ export function syncLibraryUpdates(client: QueryClient): () => void {
 /** Reads movies and series again once the main process has fetched new lists. */
 export function syncOnDemand(client: QueryClient): () => void {
   return listen("ondemand.updated", () => {
-    void client.invalidateQueries({ queryKey: ["ondemand"] });
+    // Lists change with a refresh and as TMDB's metadata arrives; a title's details don't.
+    void client.invalidateQueries({
+      queryKey: ["ondemand"],
+      predicate: (query) => query.queryKey[1] !== "details",
+    });
   });
 }
 

@@ -1,17 +1,13 @@
-// The movie and series catalogue as plain data and functions: indexing what the provider sent and
-// answering the lists, pages and searches the UI asks for. Display names are worked out here, on
-// load, so naming rules improve without fetching again.
-import type {
-  Title,
-  TitleCategory,
-  TitleKind,
-  TitlePage,
-  TitleSort,
-} from "@mrstreamer/contracts/ondemand";
-import { normalizeCatalogue } from "../catalogue/normalize.ts";
+// The movie and series catalogue as plain data and functions: indexing what the provider sent,
+// finding titles by id and searching them; collections.ts builds the lists the UI shows. Display
+// names are worked out here, on load, so naming rules improve without fetching again. The
+// language versions of one film, which share a TMDB id, become one title that shows the version
+// suiting the viewer's language.
+import type { Title, TitleKind } from "@mrstreamer/contracts/ondemand";
 import type { OnDemandCatalogue, ProviderCategory, ProviderTitle } from "../provider.ts";
 import { normalize } from "../text.ts";
-import { titleName } from "./names.ts";
+import { suitability } from "./languages.ts";
+import { titleName, type TitleName } from "./names.ts";
 
 /** How many titles of each kind a search returns. */
 export const SEARCH_LIMIT = 60;
@@ -21,26 +17,38 @@ const ADULT_CATEGORY = /(?<![\p{L}\p{N}])(xxx|adults?|18\+|porn)(?![\p{L}\p{N}])
 
 interface IndexedKind {
   readonly titles: readonly Title[];
+  /** Every version's id, to the title it belongs to. */
   readonly byId: ReadonlyMap<string, Title>;
-  /** The file type each movie streams as. */
-  readonly containers: ReadonlyMap<string, string>;
-  readonly categories: readonly TitleCategory[];
-  readonly byCategory: ReadonlyMap<string, readonly Title[]>;
   /** Folded names, index-aligned with `titles`, worked out on the first search. */
   readonly searchNames: () => readonly string[];
-  /** Lists already sorted, by category (or "" for all) and order. */
-  readonly sorted: Map<string, readonly Title[]>;
 }
 
 export interface IndexedCatalogue {
+  /** The language whose versions the titles show. */
+  readonly language: string;
   readonly movies: IndexedKind;
   readonly series: IndexedKind;
 }
 
-export function indexCatalogue(catalogue: OnDemandCatalogue): IndexedCatalogue {
+/**
+ * The catalogue for a viewer whose language is `language`, an ISO 639-1 code. Each kind is indexed
+ * when first read, so opening Movies doesn't wait for the series.
+ */
+export function indexCatalogue(catalogue: OnDemandCatalogue, language: string): IndexedCatalogue {
+  const movies = once(() =>
+    indexKind("movie", catalogue.movieCategories, catalogue.movies, language),
+  );
+  const series = once(() =>
+    indexKind("series", catalogue.seriesCategories, catalogue.series, language),
+  );
   return {
-    movies: indexKind("movie", catalogue.movieCategories, catalogue.movies),
-    series: indexKind("series", catalogue.seriesCategories, catalogue.series),
+    language,
+    get movies() {
+      return movies();
+    },
+    get series() {
+      return series();
+    },
   };
 }
 
@@ -48,90 +56,94 @@ function indexKind(
   kind: TitleKind,
   rawCategories: readonly ProviderCategory[],
   raw: readonly ProviderTitle[],
+  language: string,
 ): IndexedKind {
-  const shown = normalizeCatalogue({ categories: rawCategories, channels: [] }).categories;
+  // The adult flag is a standard field; a category named for adults also counts.
   const adultCategories = new Set(
     rawCategories.filter((category) => ADULT_CATEGORY.test(category.name)).map(({ id }) => id),
   );
-  const titles: Title[] = [];
-  const byId = new Map<string, Title>();
-  const containers = new Map<string, string>();
-  const byCategory = new Map<string, Title[]>();
+  const isAdult = (item: ProviderTitle) =>
+    item.adult || item.categoryIds.some((id) => adultCategories.has(id));
+  // One group per film: the versions sharing a TMDB id, or a row on its own without one. A row
+  // for adults stays on its own, so the film's other versions don't go with it.
+  const groups: ProviderTitle[][] = [];
+  const byTmdbId = new Map<string, ProviderTitle[]>();
+  const seen = new Set<string>();
   for (const item of raw) {
-    if (byId.has(item.id)) continue;
-    const name = titleName(item.name, item.releaseDate);
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    const key = item.tmdbId && !isAdult(item) ? item.tmdbId : null;
+    const group = key ? byTmdbId.get(key) : undefined;
+    if (group) {
+      group.push(item);
+      continue;
+    }
+    const created = [item];
+    groups.push(created);
+    if (key) byTmdbId.set(key, created);
+  }
+  const titles: Title[] = [];
+  /** Every version's name, title by title, for search. */
+  const names: string[] = [];
+  const byId = new Map<string, Title>();
+  for (const group of groups) {
+    const versions = group.map((item): Version => {
+      const name = titleName(item.name, item.releaseDate);
+      // With one version there is nothing to choose between.
+      return { item, name, fit: group.length === 1 ? 1 : suitability(name.tags, language) };
+    });
+    // The version suiting the language best first, then the newest.
+    if (versions.length > 1) {
+      versions.sort((a, b) => b.fit - a.fit || (b.item.addedAt ?? 0) - (a.item.addedAt ?? 0));
+    }
+    const first = versions[0] as Version;
+    // What the first version lacks, another may have; one pass, as most films have one version.
+    let year = first.name.year;
+    let posterUrl = first.item.posterUrl;
+    let backdropUrl = first.item.backdropUrl;
+    let rating = 0;
+    // New when a version the viewer would watch arrived, not a dub into another language.
+    let addedAt = 0;
+    let anyAddedAt = 0;
+    for (const { item, name, fit } of versions) {
+      year ??= name.year;
+      posterUrl ??= item.posterUrl;
+      backdropUrl ??= item.backdropUrl;
+      rating = Math.max(rating, item.rating ?? 0);
+      if (fit > 0) addedAt = Math.max(addedAt, item.addedAt ?? 0);
+      anyAddedAt = Math.max(anyAddedAt, item.addedAt ?? 0);
+    }
     const title: Title = {
       kind,
-      id: item.id,
-      name: item.name,
-      title: name.title,
-      tags: name.tags,
-      year: name.year,
-      posterUrl: item.posterUrl,
-      backdropUrl: item.backdropUrl,
-      rating: item.rating,
-      addedAt: item.addedAt,
-      categoryIds: item.categoryIds,
-      adult: item.adult || item.categoryIds.some((id) => adultCategories.has(id)),
+      id: first.item.id,
+      name: first.item.name,
+      title: first.name.title,
+      tags: first.name.tags,
+      year,
+      posterUrl,
+      backdropUrl,
+      rating: rating || null,
+      addedAt: addedAt || anyAddedAt || null,
+      adult: versions.length === 1 && isAdult(first.item),
+      tmdbId: first.item.tmdbId ?? null,
+      genres: [],
+      versions: versions.map(({ item, name }) => ({ id: item.id, tags: name.tags })),
     };
     titles.push(title);
-    byId.set(title.id, title);
-    if (item.container) containers.set(item.id, item.container);
-    for (const categoryId of item.categoryIds) {
-      const list = byCategory.get(categoryId);
-      if (list) list.push(title);
-      else byCategory.set(categoryId, [title]);
-    }
+    names.push(versions.length === 1 ? first.item.name : group.map((item) => item.name).join(" "));
+    for (const { item } of versions) byId.set(item.id, title);
   }
-  const categories = shown.flatMap((category): TitleCategory[] => {
-    const members = byCategory.get(category.id) ?? [];
-    if (members.length === 0) return [];
-    const adult =
-      adultCategories.has(category.id) ||
-      members.filter((title) => title.adult).length > members.length / 2;
-    return [{ ...category, count: members.length, adult }];
-  });
   return {
     titles,
     byId,
-    containers,
-    categories,
-    byCategory,
-    searchNames: once(() => titles.map((title) => normalize(`${title.title} ${title.name}`))),
-    sorted: new Map(),
+    searchNames: once(() =>
+      titles.map((title, index) => normalize(`${title.title} ${names[index] ?? ""}`)),
+    ),
   };
 }
 
 export function kindOf(catalogue: IndexedCatalogue, kind: TitleKind): IndexedKind {
   return kind === "movie" ? catalogue.movies : catalogue.series;
-}
-
-export interface PageQuery {
-  readonly kind: TitleKind;
-  /** A category, or every title of the kind. */
-  readonly categoryId?: string | undefined;
-  readonly sort: TitleSort;
-  readonly offset: number;
-  readonly limit: number;
-}
-
-/**
- * One page of a list. Titles for adults show only inside a category the viewer opened, never in
- * the lists of every title.
- */
-export function page(catalogue: IndexedCatalogue, query: PageQuery): TitlePage {
-  const indexed = kindOf(catalogue, query.kind);
-  const cacheKey = `${query.categoryId ?? ""}|${query.sort}`;
-  let list = indexed.sorted.get(cacheKey);
-  if (!list) {
-    const members =
-      query.categoryId === undefined
-        ? indexed.titles.filter((title) => !title.adult)
-        : (indexed.byCategory.get(query.categoryId) ?? []);
-    list = members.toSorted(ORDERS[query.sort]);
-    indexed.sorted.set(cacheKey, list);
-  }
-  return { total: list.length, titles: list.slice(query.offset, query.offset + query.limit) };
 }
 
 /** Titles by id, in the order asked, skipping ids the catalogue doesn't have. */
@@ -167,21 +179,18 @@ export function search(
     const rank = name.startsWith(folded) ? 0 : ` ${name}`.includes(` ${folded}`) ? 1 : 2;
     ranked.push({ title, rank });
   }
-  ranked.sort((a, b) => a.rank - b.rank || ORDERS.added(a.title, b.title));
+  ranked.sort((a, b) => a.rank - b.rank || (b.title.addedAt ?? 0) - (a.title.addedAt ?? 0));
   return ranked.slice(0, limit).map((entry) => entry.title);
+}
+
+interface Version {
+  readonly item: ProviderTitle;
+  readonly name: TitleName;
+  /** How well it suits the viewer's language: `suitability`. */
+  readonly fit: number;
 }
 
 function once<A>(make: () => A): () => A {
   let value: { readonly made: A } | null = null;
   return () => (value ??= { made: make() }).made;
 }
-
-const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
-
-const byName = (a: Title, b: Title) => collator.compare(a.title, b.title);
-
-const ORDERS: Record<TitleSort, (a: Title, b: Title) => number> = {
-  added: (a, b) => (b.addedAt ?? 0) - (a.addedAt ?? 0) || byName(a, b),
-  title: byName,
-  rating: (a, b) => (b.rating ?? 0) - (a.rating ?? 0) || byName(a, b),
-};

@@ -135,7 +135,12 @@ function Palette() {
                   )}
                 >
                   <span className="block h-12 w-8 flex-none overflow-hidden rounded-md">
-                    <Artwork url={title.posterUrl} name={title.title} className="text-[0.5rem]" />
+                    <Artwork
+                      url={title.posterUrl}
+                      name={title.title}
+                      size="thumb"
+                      className="text-[0.5rem]"
+                    />
                   </span>
                   <span className="min-w-0 flex-1" title={title.name}>
                     <span className="block truncate text-[0.9375rem] text-foreground">

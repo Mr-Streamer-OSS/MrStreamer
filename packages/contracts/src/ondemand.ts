@@ -5,12 +5,19 @@ import type { AppError } from "./errors.ts";
 export const TITLE_KINDS = ["movie", "series"] as const;
 export type TitleKind = (typeof TITLE_KINDS)[number];
 
-/** A movie or a series in a catalogue list. Series and movies share it, so lists show both alike. */
+/**
+ * A movie or a series in a catalogue list. Series and movies share it, so lists show both alike.
+ * Providers list each language version on its own; a title gathers them, and shows and plays the
+ * one that suits the viewer's language.
+ */
 export interface Title {
   readonly kind: TitleKind;
-  /** Stable within one subscription. */
+  /**
+   * The version shown and played first. It can change with the language or when the provider adds
+   * a better suited version, so what is kept refers to versions by their own ids.
+   */
   readonly id: string;
-  /** The provider's name, for search: "Blow 2001 (NL)". */
+  /** The provider's name of that version, for search: "Blow 2001 (NL)". */
   readonly name: string;
   /** The name to show: "Blow". */
   readonly title: string;
@@ -25,21 +32,21 @@ export interface Title {
   readonly rating: number | null;
   /** When the provider added the movie, or last changed the series: epoch milliseconds. */
   readonly addedAt: number | null;
-  readonly categoryIds: readonly string[];
   /** The provider marks it, or its category, as for adults. */
   readonly adult: boolean;
+  /** The Movie Database's id, which the language versions of one film share. */
+  readonly tmdbId: string | null;
+  /** From TMDB, once its metadata arrived: "Comedy", "Drama". */
+  readonly genres: readonly string[];
+  /** Every version, the one shown first in front. */
+  readonly versions: readonly TitleVersion[];
 }
 
-export interface TitleCategory {
+/** One version of a title as the provider lists it, often one per language. */
+export interface TitleVersion {
   readonly id: string;
-  /** The provider's name: "NL | NETFLIX FILMS". */
-  readonly name: string;
-  /** The country or region it is grouped under: "Netherlands". Null when it stands on its own. */
-  readonly group: string | null;
-  /** The name to show, within its group if it has one: "Netflix Films". */
-  readonly title: string;
-  readonly count: number;
-  readonly adult: boolean;
+  /** Markers from its name: "NL", "MULTI", "4K". */
+  readonly tags: readonly string[];
 }
 
 interface DetailsBase {
@@ -98,16 +105,75 @@ export interface OnDemandStatus {
   readonly fetchedAt: number | null;
   /** Why the latest refresh failed, when it did. The lists from `fetchedAt` stay in use. */
   readonly failure: AppError | null;
+  /** How far TMDB's metadata has come; null without a key. */
+  readonly metadata: MetadataProgress | null;
 }
 
-/** What a list is ordered by: newest first, by name, or best rated first. */
-export const TITLE_SORTS = ["added", "title", "rating"] as const;
-export type TitleSort = (typeof TITLE_SORTS)[number];
+/** TMDB's metadata for the catalogue: genres, languages, services. */
+export interface MetadataProgress {
+  /** Titles TMDB answered for, of those listed with a TMDB id. */
+  readonly known: number;
+  readonly wanted: number;
+  /** TMDB refused the key; nothing more arrives until it changes. */
+  readonly refused: boolean;
+}
 
 /** One page of a list, and how long the whole list is. */
 export interface TitlePage {
   readonly total: number;
   readonly titles: readonly Title[];
+}
+
+/**
+ * A collection Movies and Series show: everything, what's new, popular or top rated, a genre, a
+ * streaming service, or titles like one the viewer watched.
+ */
+export type CollectionId =
+  | "all"
+  | "new-week"
+  | "new-month"
+  | "recent"
+  | "popular"
+  | "top-rated"
+  | "4k"
+  | `genre:${string}`
+  | `service:${number}`
+  | `like:${string}`;
+
+/** Whether text names a collection: what the UI sends is checked before it is used. */
+export function isCollectionId(text: string): text is CollectionId {
+  return /^(all|new-week|new-month|recent|popular|top-rated|4k|genre:.+|service:\d+|like:.+)$/.test(
+    text,
+  );
+}
+
+/** How a collection's page is ordered. */
+export const COLLECTION_SORTS = ["added", "popular", "rating", "title"] as const;
+export type CollectionSort = (typeof COLLECTION_SORTS)[number];
+
+/** The tabs of rows: For you, and New. */
+export const ROW_TABS = ["for-you", "new"] as const;
+export type RowTab = (typeof ROW_TABS)[number];
+
+/** One row of a tab: a collection's first titles, and how many it has. */
+export interface CollectionRow {
+  readonly id: CollectionId;
+  readonly name: string;
+  readonly total: number;
+  readonly titles: readonly Title[];
+}
+
+/** A genre or streaming service as a tile, with a picture from its most popular title. */
+export interface CollectionTile {
+  readonly id: CollectionId;
+  readonly name: string;
+  readonly count: number;
+  readonly artworkUrl: string | null;
+}
+
+/** One page of a collection, with its name. */
+export interface CollectionPage extends TitlePage {
+  readonly name: string;
 }
 
 /** Something that plays on demand: a movie, or one episode of a series. */

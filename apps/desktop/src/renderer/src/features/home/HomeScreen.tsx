@@ -25,6 +25,7 @@ import { player, usePlayer } from "../../player/player.ts";
 import { WINDOW_BAR } from "../../../../shared/window-bar.ts";
 import { watchChannel } from "../live/GuidePage.tsx";
 import { showList } from "../live/lists.ts";
+import { openCollection } from "../titles/TitlesPage.tsx";
 
 const NO_IDS: readonly string[] = [];
 const NO_CHANNELS: readonly LiveChannel[] = [];
@@ -151,7 +152,7 @@ export function HomeScreen({ active }: { active: boolean }) {
                 line={entry.line}
                 done={entry.done}
                 onPlay={() => playTitle(entry.now, entry.from)}
-                onRemove={() => removeFromContinue(entry.progress.title)}
+                onRemove={() => removeFromContinue(...entry.played)}
               />
             ))}
           </Section>
@@ -177,12 +178,20 @@ export function HomeScreen({ active }: { active: boolean }) {
           </Section>
         )}
         {newMovies.length > 0 && (
-          <Section title="New movies" onAll={() => openView("movies")} tileRem={POSTER_REM}>
+          <Section
+            title="New movies"
+            onAll={() => openCollection("movie", "new-month")}
+            tileRem={POSTER_REM}
+          >
             {titles(newMovies)}
           </Section>
         )}
         {newSeries.length > 0 && (
-          <Section title="New series" onAll={() => openView("series")} tileRem={POSTER_REM}>
+          <Section
+            title="New series"
+            onAll={() => openCollection("series", "new-month")}
+            tileRem={POSTER_REM}
+          >
             {titles(newSeries)}
           </Section>
         )}
@@ -201,9 +210,9 @@ export function HomeScreen({ active }: { active: boolean }) {
   );
 }
 
-/** The newest titles of a kind, without those for adults. */
+/** The newest titles of a kind in the viewer's language, without those for adults. */
 function useNewest(kind: TitleKind, count: number): readonly Title[] {
-  const page = useQuery(queries.titles(kind, null, "added", 0, Math.max(count, 1)));
+  const page = useQuery(queries.collection(kind, "new-month", undefined, 0, Math.max(count, 1)));
   return page.data?.titles.slice(0, count) ?? NO_TITLES;
 }
 

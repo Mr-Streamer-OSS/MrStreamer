@@ -10,6 +10,7 @@ import type {
   MovieDetails,
   SeriesDetails,
   TitleDetails,
+  TitleRef,
 } from "@mrstreamer/contracts/ondemand";
 import type { TitleProgress } from "@mrstreamer/contracts/viewing";
 import { useUi, type DetailsTarget } from "../../app/ui-store.ts";
@@ -76,7 +77,12 @@ function Content({ details }: { details: TitleDetails }) {
   return (
     <>
       <div className="relative h-[clamp(12rem,32vh,22rem)] overflow-hidden rounded-t-3xl">
-        <Artwork url={details.backdropUrl ?? title.posterUrl} name={title.title} plain />
+        <Artwork
+          url={details.backdropUrl ?? title.posterUrl}
+          name={title.title}
+          size="full"
+          plain
+        />
         <div className="absolute inset-0 bg-gradient-to-t from-[#0b0b0c] via-[#0b0b0c]/40 to-transparent" />
       </div>
       <div className="relative -mt-20 px-10 pb-12">
@@ -111,18 +117,44 @@ function Content({ details }: { details: TitleDetails }) {
 }
 
 function MovieActions({ details }: { details: MovieDetails }) {
-  const progress = useQuery(queries.progress({ movieIds: [details.title.id] }));
-  const current = progress.data?.[0];
+  const progress = useQuery(
+    queries.progress({ movieIds: details.title.versions.map((version) => version.id) }),
+  );
+  // The version watched last, which Resume carries on in.
+  const current = progress.data?.toSorted((a, b) => b.at - a.at)[0];
   const partly = current && !current.finished && current.position > 0;
   const now = movieNow(details.title, details.backdropUrl);
+  const resumed = partly
+    ? movieNow({ ...details.title, id: current.title.id }, details.backdropUrl)
+    : now;
   return (
     <Actions
       progress={partly ? current : undefined}
       primaryLabel={partly ? "Resume" : "Play"}
-      onPrimary={() => playTitle(now, resumePoint(partly ? current : undefined))}
+      onPrimary={() => playTitle(resumed, resumePoint(partly ? current : undefined))}
       onBeginning={partly ? () => playTitle(now, 0) : null}
-      onRemove={partly ? () => removeFromContinue(now.title) : null}
+      onRemove={
+        partly
+          ? () =>
+              removeFromContinue(
+                ...(progress.data ?? []).flatMap((entry) => (entry.finished ? [] : [entry.title])),
+              )
+          : null
+      }
     />
+  );
+}
+
+/**
+ * An episode of these details matching a progress entry: the same one, or the same season and
+ * number in another version of the series.
+ */
+function episodeOf(episodes: readonly Episode[], progress: TitleProgress): Episode | undefined {
+  const { title } = progress;
+  if (title.kind !== "episode") return undefined;
+  return (
+    episodes.find((episode) => episode.id === title.id) ??
+    episodes.find((episode) => episode.season === title.season && episode.number === title.episode)
   );
 }
 
@@ -133,7 +165,7 @@ function resumeTarget(
 ): { episode: Episode; progress: TitleProgress | undefined } | null {
   const episodes = details.seasons.flatMap((season) => season.episodes);
   const latest = progress.toSorted((a, b) => b.at - a.at)[0];
-  const watched = latest && episodes.find((episode) => episode.id === latest.title.id);
+  const watched = latest && episodeOf(episodes, latest);
   if (latest && watched) {
     if (!latest.finished) return { episode: watched, progress: latest };
     const next = nextEpisode(details, { season: watched.season, episode: watched.number });
@@ -145,8 +177,19 @@ function resumeTarget(
   return episode ? { episode, progress: undefined } : null;
 }
 
+/** One episode of each version of a series played, which removing it from Continue watching takes. */
+function seriesPlayed(progress: readonly TitleProgress[]): TitleRef[] {
+  const bySeries = new Map<string, TitleRef>();
+  for (const entry of progress) {
+    if (entry.title.kind === "episode") bySeries.set(entry.title.seriesId, entry.title);
+  }
+  return [...bySeries.values()];
+}
+
 function SeriesActions({ details }: { details: SeriesDetails }) {
-  const progress = useQuery(queries.progress({ seriesId: details.title.id }));
+  const progress = useQuery(
+    queries.progress({ seriesIds: details.title.versions.map((version) => version.id) }),
+  );
   const target = resumeTarget(details, progress.data ?? []);
   if (!target) {
     return <p className="mt-6 text-[0.9375rem] text-muted-foreground">No episodes yet.</p>;
@@ -162,7 +205,7 @@ function SeriesActions({ details }: { details: SeriesDetails }) {
       primaryLabel={label}
       onPrimary={() => playTitle(now, resumePoint(partly))}
       onBeginning={partly ? () => playTitle(now, 0) : null}
-      onRemove={started ? () => removeFromContinue(now.title) : null}
+      onRemove={started ? () => removeFromContinue(...seriesPlayed(progress.data ?? [])) : null}
     />
   );
 }
@@ -211,8 +254,20 @@ function Actions({
 }
 
 function Episodes({ details }: { details: SeriesDetails }) {
-  const progress = useQuery(queries.progress({ seriesId: details.title.id }));
+  const progress = useQuery(
+    queries.progress({ seriesIds: details.title.versions.map((version) => version.id) }),
+  );
   const byEpisode = new Map((progress.data ?? []).map((entry) => [entry.title.id, entry]));
+  // Another version's episodes count by season and number; the latest wins.
+  const byNumber = new Map(
+    (progress.data ?? [])
+      .toSorted((a, b) => a.at - b.at)
+      .flatMap((entry) =>
+        entry.title.kind === "episode"
+          ? [[`${entry.title.season}:${entry.title.episode}`, entry] as const]
+          : [],
+      ),
+  );
   const target = resumeTarget(details, progress.data ?? []);
   // The season picked here, else the one being watched once progress has loaded.
   const [picked, setSeason] = useState<number | null>(null);
@@ -243,7 +298,8 @@ function Episodes({ details }: { details: SeriesDetails }) {
       )}
       <div>
         {shown.episodes.map((episode) => {
-          const done = byEpisode.get(episode.id);
+          const done =
+            byEpisode.get(episode.id) ?? byNumber.get(`${episode.season}:${episode.number}`);
           const current = target?.episode.id === episode.id;
           const partly = done && !done.finished && done.position > 0 ? done : undefined;
           return (
@@ -260,7 +316,12 @@ function Episodes({ details }: { details: SeriesDetails }) {
                 {episode.number}
               </span>
               <span className="relative block aspect-video overflow-hidden rounded-lg">
-                <Artwork url={episode.stillUrl} name={episode.title} className="text-[0.625rem]" />
+                <Artwork
+                  url={episode.stillUrl}
+                  name={episode.title}
+                  size="card"
+                  className="text-[0.625rem]"
+                />
               </span>
               <span className="min-w-0">
                 <span className="block truncate text-[0.9375rem] font-medium">{episode.title}</span>

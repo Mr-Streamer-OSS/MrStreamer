@@ -14,6 +14,8 @@ const notices = thirdPartyNotices(fileURLToPath(new URL(".", import.meta.url)), 
 export default defineConfig({
   main: {
     plugins: [notices("main")],
+    // The app's TMDB key, from the release's secret; builds without it fetch no metadata.
+    define: { __TMDB_KEY__: JSON.stringify(process.env["MR_STREAMER_TMDB_KEY"] ?? "") },
   },
   preload: {
     plugins: [notices("preload")],

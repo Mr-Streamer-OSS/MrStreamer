@@ -235,6 +235,9 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
           category_id: movie.categoryId,
           category_ids: [Number(movie.categoryId)],
           container_extension: movie.container,
+          // TMDB ids, as the standard list field: 10,000 more than the stream id, and "0" for a
+          // few, as panels write for none.
+          tmdb: movie.id % 7 === 0 ? "0" : String(movie.id + 10_000),
         })),
       );
     }
@@ -252,6 +255,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
           releaseDate: "2024-03-01",
           category_id: series.categoryId,
           category_ids: [Number(series.categoryId)],
+          tmdb: String(series.id + 10_000),
         })),
       );
     }

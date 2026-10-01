@@ -12,10 +12,15 @@ export function launch(
   return spawn(
     executable,
     [`--remote-debugging-port=${options.port}`, `--user-data-dir=${options.profile}`, ...args],
-    // No automatic update checks: they would reach the network in the middle of a measurement.
+    // No automatic update checks and no TMDB, a closed port unless the caller serves one: both
+    // would reach the network in the middle of a measurement.
     {
       stdio: ["ignore", "inherit", "inherit"],
-      env: { ...process.env, MR_STREAMER_UPDATE_CHECKS: "off" },
+      env: {
+        ...process.env,
+        MR_STREAMER_UPDATE_CHECKS: "off",
+        MR_STREAMER_TMDB_API: process.env["MR_STREAMER_TMDB_API"] ?? "http://127.0.0.1:9/3",
+      },
     },
   );
 }
