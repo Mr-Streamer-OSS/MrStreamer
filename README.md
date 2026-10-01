@@ -2,9 +2,11 @@
 
 # Mr. Streamer
 
-A desktop player for the IPTV subscription you already have. Connect it once, then watch its live channels with a programme guide, and its movies and series with resume and the next episode. Your login, lists and what you watched stay on your computer.
+**A desktop player for the IPTV subscription you already have.** For macOS, Windows and Linux.
 
-Mr. Streamer works with providers that offer Xtream Codes access (a server address, username and password, or an M3U link that contains them).
+Connect it once, then watch its live channels with a programme guide, and its movies and series with resume and the next episode, in the languages you choose. Your login, lists and what you watched stay on your computer.
+
+Mr. Streamer works with providers that offer Xtream Codes access: a server address, username and password, or an M3U link that contains them.
 
 ## Download
 
@@ -17,39 +19,64 @@ Get the latest release from the [Releases page](https://github.com/Mr-Streamer-O
 | Linux, 64-bit (Ubuntu, Debian)      | `Mr-Streamer-<version>-linux-amd64.deb`       |
 | Linux, 64-bit (other distributions) | `Mr-Streamer-<version>-linux-x86_64.AppImage` |
 
-## Install
+**macOS:** open the DMG and drag Mr. Streamer to Applications.
 
-**macOS:** open the DMG and drag Mr. Streamer to Applications. Open it from Applications.
+**Windows:** run the setup file. It installs for your user account, without administrator rights. The installer isn't signed yet, so SmartScreen may warn that the app is unrecognised: choose **More info**, then **Run anyway**.
 
-**Windows:** run the setup file. It installs for your user account only, without asking for administrator rights. Windows SmartScreen may warn that the app is unrecognised, because the installer isn't signed yet: choose **More info**, then **Run anyway**.
+**Linux:** install the deb with `sudo apt install ./Mr-Streamer-<version>-linux-amd64.deb`. The AppImage runs without installing: make it executable (`chmod +x`) and open it. AppImages need FUSE 2; on Ubuntu, `sudo apt install libfuse2t64` provides it.
 
-**Linux:** install the deb with `sudo apt install ./Mr-Streamer-<version>-linux-amd64.deb`, then start Mr. Streamer from your applications menu. The AppImage runs without installing: make it executable (`chmod +x`) and open it. AppImages need FUSE 2; on Ubuntu, `sudo apt install libfuse2t64` provides it.
+## What it does
 
-## Use
+<table>
+  <tr>
+    <td width="33%"><img src="docs/assets/live-tv.webp" alt="Live TV: channels with what's on now and next"></td>
+    <td width="33%"><img src="docs/assets/details.webp" alt="A film's details: its versions, story and cast"></td>
+    <td width="33%"><img src="docs/assets/watching.webp" alt="A film playing with English subtitles"></td>
+  </tr>
+  <tr>
+    <td>Every channel, with what's on now and next</td>
+    <td>Each film once, in your language, with its other versions</td>
+    <td>Sound and subtitles in the language you choose</td>
+  </tr>
+</table>
 
-1. Enter your provider's server address, username and password, or paste the M3U link your provider sent. Mr. Streamer checks the login and loads your channels.
-2. **Home** plays your last channel, muted, with what's on now, then what you were watching, your favourites, new movies and new series.
-3. **Live TV** lists every channel with what's on now and next, by favourites, country and category. [Live TV](docs/user/live-tv.md) covers the guide and its keys.
-4. **Movies** and **Series** list what your provider offers on demand, in tabs: For you, New, genres, streaming services and everything. **Resume** carries on where you stopped, **Sound** and **CC** pick the tracks, and a series offers its next episode. See [Movies and series](docs/user/movies-and-series.md).
-5. ⌘K (Ctrl K on Windows and Linux) searches channels, programmes, movies and series.
+- **Live TV** with a programme guide, favourites and the channels you watched last. Home plays your last channel, muted, behind what's on.
+- **Movies and series** in tabs: for you, new, genres, streaming services and everything, with names, stories, artwork and cast from TMDB. Each film shows once, in the version that suits your language; the arrow beside Play picks another.
+- **Resume** wherever you stopped, and the next episode when you want it.
+- **Sound and subtitles** on live channels and on demand: text subtitles, subtitles stored as pictures (Blu-ray, DVD, DVB), teletext and closed captions.
+- **Search** everything with ⌘K (Ctrl K on Windows and Linux), or just movies or series from their own tabs.
+- **Updates** you choose when to install, so nothing interrupts what you're watching.
 
-Settings (⌘, or Ctrl ,) has the languages for titles, sound and subtitles, and updates, under General; your subscription, with its expiry, connections in use and each list loaded from it, which refreshes on its own; and the open-source licences under About.
+The pictures above come from a test provider with made-up titles and artwork.
 
-## Updates
+## Getting started
 
-Mr. Streamer checks for updates after it starts and every four hours. A quiet **Update** appears in the top bar: download it when you like, and restart when it suits you. It never restarts on its own, so nothing interrupts what you're watching.
+1. Enter your provider's server address, username and password, or paste the M3U link your provider sent. Mr. Streamer checks the login and loads your channels; movies and series follow.
+2. **Live TV** lists every channel with what's on now and next. Click one to watch; the list opens over the picture to switch.
+3. **Movies** and **Series** open on For you. A poster opens its details; **Play** or **Resume** starts it.
+4. In Settings (⌘, or Ctrl ,), **General** sets the languages for titles, sound and subtitles, and your update channel; **Subscription** shows your account and refreshes its lists.
 
-There are two channels: **Stable** for tested releases, and **Nightly** for the newest builds. Installing a newer version by hand from the Releases page also keeps your data. [Updates and channels](docs/user/updates.md) covers switching channels.
+Mr. Streamer looks for updates after it starts and every four hours. When one is ready, **Update** appears in the top bar: download it, then restart when it suits you. **Stable** gets tested releases, **Nightly** the newest builds.
+
+## Limits
+
+- One subscription at a time, from a provider with Xtream Codes access.
+- No recording, downloads or casting to a TV.
+- Surround sound that needs converting plays as stereo, and converting a picture uses much more of your computer's processor than playing it as it is.
+- Choosing another sound track on a live channel starts the channel again for a moment.
+- The Windows installer isn't signed yet.
+
+[What plays](docs/user/playback.md#known-limits) lists the formats and every known limit.
 
 ## Help
 
-- [Live TV](docs/user/live-tv.md): Home, the guide, favourites, search and keys
-- [Movies and series](docs/user/movies-and-series.md): browsing, resume, tracks and the next episode
+- [Live TV](docs/user/live-tv.md): Home, the guide, favourites, sound and subtitles, search and keys
+- [Movies and series](docs/user/movies-and-series.md): browsing, versions, languages, resume and the next episode
 - [Updates and channels](docs/user/updates.md)
-- [What plays](docs/user/playback.md), including formats that are converted and known limits
+- [What plays](docs/user/playback.md): formats, what gets converted, and known limits
 - [Troubleshooting](docs/user/troubleshooting.md): login and keychain, installation warnings, where your data is stored
 
-Found a bug? [Report it](https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose) with your system, the Mr. Streamer version from Settings, and what happened.
+Found a bug? [Report it](https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose) with your system, the Mr. Streamer version from Settings > About, and what happened.
 
 ## Development
 
