@@ -172,17 +172,19 @@ function speaking(language: string): void {
 }
 
 /**
- * A title with TMDB's name for a viewer of `language` and its backdrop, once known, as
- * collections show it.
+ * A title with TMDB's name for a viewer of `language`, the language it was made in and its
+ * backdrop, once known, as collections show it.
  */
 function named(title: Title, language: string): Title {
   if (!title.tmdbId) return title;
   const kind = title.kind === "movie" ? "movie" : "tv";
   const found = metadata.name(kind, title.tmdbId, language);
-  const backdrop = title.backdropUrl ? null : metadata.get(kind, title.tmdbId)?.backdrop;
+  const known = metadata.get(kind, title.tmdbId);
+  const backdrop = title.backdropUrl ? null : known?.backdrop;
   return {
     ...title,
     ...(found ? { title: found.name, originalTitle: found.original } : {}),
+    originalLanguage: known?.language ?? null,
     ...(backdrop ? { backdropUrl: tmdbImage(backdrop, 1280) } : {}),
   };
 }

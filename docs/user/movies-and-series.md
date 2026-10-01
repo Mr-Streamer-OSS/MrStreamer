@@ -12,7 +12,7 @@ Tabs under the top bar:
 - **New** has what your provider added this week and this month, and recent releases.
 - **Genres** and **Services** show a tile for each genre and streaming service. Open one for its titles.
 - **4K** lists titles with a 4K version, when your provider has any.
-- **Adults** lists the titles your provider marks for adults, once you turn on **Titles for adults** in Settings > Movies & series.
+- **Adults** lists the titles your provider marks for adults, once you turn on **Titles for adults** in Settings > General.
 - **All movies** and **All series** list everything, sorted by date added, popularity, rating or name.
 
 A row's **All**, a genre or a service opens the whole list; **Back**, or Escape, returns to the tab. In a list, the arrow keys move through the posters, Enter opens one, and the pointer only hovers.
@@ -25,13 +25,19 @@ The field at the end of the tabs searches movies on Movies and series on Series.
 
 ## Language
 
-Settings > Movies & series picks the language, English unless you change it. It decides which version of a film shows and plays, the sound a title starts with until you pick another in the player, and what the tabs show.
+Settings > General has three languages for movies and series:
+
+- **Titles in**, English unless you change it, decides the names titles show, which version of a film shows and plays, and what the tabs show.
+- **Audio in** is the sound a title starts with: a language, or **Original language**, the one it was made in. Until you set it, it follows Titles in.
+- **Subtitles** are **Off**, **Only when forced**, which shows only subtitles a file marks as forced for its sound, such as translations of signs, or a language.
+
+Picking a sound track or subtitles in the player sets Audio in or Subtitles to its language, so the next title starts the same way.
 
 ## Genres and streaming services
 
 Your provider's lists don't say a film's genre or where else it streams, and name films their own way, so Mr. Streamer asks [TMDB](https://www.themoviedb.org), using the TMDB ids providers list. It asks about each title once, newest first, and fills in names, genres, popularity and services as answers come in: on a large subscription that takes about a quarter of an hour the first time, and again once after you choose another language. Titles take their usual name in your language from Settings, or the English one where TMDB has no translation, and their details show the original name. Search finds a title by any of these names and by your provider's. Meanwhile a ring beside search in the top bar fills up, and goes when the asking stops; hover it for how far it got, or click it for Settings. Which titles each service streams comes from [JustWatch](https://www.justwatch.com), for the country your computer is set to.
 
-Mr. Streamer has its own TMDB key. If TMDB stops accepting it, Settings > Movies & series says so, and you can paste a key of your own there; a free TMDB account gets one.
+Mr. Streamer has its own TMDB key. If TMDB stops accepting it, Settings > General says so beside TMDB, and **Own key…** takes a key of your own; a free TMDB account gets one.
 
 ## Details
 
@@ -48,7 +54,7 @@ A poster opens its details over the list, which stays where it was: the artwork,
 The picture fills the window, with the title, a timeline and the controls along the bottom; they fade while you watch and come back when you move the pointer.
 
 - Drag the timeline, or skip back and forward 10 seconds. A skip into what's already loaded is instant; further away, the picture takes a second to catch up.
-- **Sound** lists the sound tracks the file carries, and **CC** its subtitles. C turns the last ones you picked on and off, and a paused title stays paused while it changes. Your choice of language is remembered, and the next title or channel that has it starts with it. Until you choose, the sound in your language from Settings > Movies & series plays when the file has it, else the file's own default, with subtitles only where the file marks them as forced for that language, such as translations of signs.
+- **Sound** lists the sound tracks the file carries, and **CC** its subtitles. C turns the last ones you picked on and off, and a paused title stays paused while it changes. Your choice of language is remembered, and the next title or channel that has it starts with it, as **Audio in** and **Subtitles** in Settings > General describe. When the file has no sound in that language, its own default plays.
 - **Next episode** plays the next one, whenever you choose. At the end of an episode Mr. Streamer offers it, but never plays it on its own.
 - **Back**, or Escape, returns to the details or the page you came from.
 

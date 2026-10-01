@@ -105,7 +105,7 @@ export function WindowBar({
           size="icon-sm"
           aria-label="Settings"
           aria-pressed={settingsOpen}
-          onClick={() => useUi.setState({ settings: settingsOpen ? null : "subscription" })}
+          onClick={() => useUi.setState({ settings: settingsOpen ? null : "general" })}
         >
           <Settings />
         </Button>

@@ -73,6 +73,7 @@ export function episodeNow(series: SeriesDetails, episode: Episode): NowPlaying 
     name: series.title.title,
     detail: `${episodeLabel(episode.season, episode.number)} · ${episode.title}`,
     artworkUrl: episode.stillUrl ?? series.backdropUrl ?? series.title.posterUrl,
+    originalLanguage: series.title.originalLanguage,
   };
 }
 
@@ -82,6 +83,7 @@ export function movieNow(title: Title, backdropUrl: string | null): NowPlaying {
     name: title.title,
     detail: title.year ? String(title.year) : null,
     artworkUrl: backdropUrl ?? title.posterUrl,
+    originalLanguage: title.originalLanguage,
   };
 }
 

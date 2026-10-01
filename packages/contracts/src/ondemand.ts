@@ -26,6 +26,8 @@ export interface Title {
   readonly title: string;
   /** TMDB's name in the language the title was made in, when it differs from `title`. */
   readonly originalTitle: string | null;
+  /** The language TMDB says it was made in, an ISO 639-1 code; null until TMDB said. */
+  readonly originalLanguage: string | null;
   /** Markers from the name: language ("NL", "MULTI") and quality ("4K"). */
   readonly tags: readonly string[];
   readonly year: number | null;

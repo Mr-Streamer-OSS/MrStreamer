@@ -72,7 +72,7 @@ function Shell() {
     function onKey(event: KeyboardEvent) {
       if (!hasModifier(event)) return;
       if (event.key === "k") useUi.setState((state) => ({ searchOpen: !state.searchOpen }));
-      else if (event.key === ",") useUi.setState({ settings: "subscription", searchOpen: false });
+      else if (event.key === ",") useUi.setState({ settings: "general", searchOpen: false });
       else return;
       event.preventDefault();
     }

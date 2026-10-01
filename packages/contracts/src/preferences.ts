@@ -9,9 +9,15 @@ export const Preferences = type({
   muted: "boolean",
   lastChannelId: "string | null",
   lastCategoryId: "string | null",
-  /** The sound language picked last for a movie or episode: "nl". Absent until one is picked. */
+  /**
+   * The sound to play: "nl", or ORIGINAL_SOUND for the language a title was made in. Set in
+   * Settings, and by the sound track picked last. Absent plays the language for movies and series.
+   */
   "audioLanguage?": "string | null",
-  /** The subtitle language picked last, or "off" once subtitles were turned off. */
+  /**
+   * Subtitles to show: a language, "off" for none, or absent or null for only those forced for
+   * the sound's language. Set in Settings, and by the subtitles picked last.
+   */
   "subtitleLanguage?": "string | null",
   /**
    * The language for movies and series, an ISO 639-1 code: which version of a film shows and
@@ -29,6 +35,9 @@ export const Preferences = type({
   "titleVersions?": "Record<string, string>",
 });
 export type Preferences = typeof Preferences.infer;
+
+/** `audioLanguage` for the sound in the language a title was made in. */
+export const ORIGINAL_SOUND = "original";
 
 export const defaultPreferences: Preferences = {
   volume: 1,

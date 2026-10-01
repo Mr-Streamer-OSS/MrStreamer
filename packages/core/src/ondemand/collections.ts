@@ -83,6 +83,7 @@ export function collections(source: CollectionSource): Collections {
         ? {
             ...title,
             ...(names ? { title: names.name, originalTitle: names.original } : {}),
+            originalLanguage: meta.language ?? null,
             backdropUrl:
               title.backdropUrl ?? (meta.backdrop ? tmdbImage(meta.backdrop, 1280) : null),
             genres: genresOf(meta),

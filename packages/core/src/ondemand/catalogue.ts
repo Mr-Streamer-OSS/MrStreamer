@@ -119,6 +119,7 @@ function indexKind(
       name: first.item.name,
       title: first.name.title,
       originalTitle: null,
+      originalLanguage: null,
       tags: first.name.tags,
       year,
       posterUrl,
