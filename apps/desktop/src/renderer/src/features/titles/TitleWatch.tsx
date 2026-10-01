@@ -31,7 +31,7 @@ import { clock, episodeLabel, episodeNow, nextEpisode, playTitle } from "../../l
 import { cn } from "../../lib/utils.ts";
 import { Picture } from "../../player/Picture.tsx";
 import { player, type PlaybackProblem } from "../../player/player.ts";
-import { SHOWN_SUBTITLES, titlePlayer, useTitlePlayer } from "../../player/title-player.ts";
+import { titlePlayer, useTitlePlayer } from "../../player/title-player.ts";
 import { useFullscreen, useWake } from "../watch/layout.ts";
 import { VolumeControl } from "../watch/VolumeControl.tsx";
 
@@ -329,13 +329,9 @@ function Tracks({ open, onOpenChange }: { open: boolean; onOpenChange: (open: bo
                 <Choice
                   key={`${track.id}:${track.page}`}
                   chosen={track.id === subtitle?.id && track.page === subtitle.page}
-                  disabled={!SHOWN_SUBTITLES.has(track.format)}
                   onChoose={() => titlePlayer.setSubtitle(track)}
                 >
                   {track.label}
-                  {!SHOWN_SUBTITLES.has(track.format) && (
-                    <span className="text-muted-foreground"> · can't show</span>
-                  )}
                 </Choice>
               ))}
             </TrackList>
@@ -357,25 +353,21 @@ function TrackList({ title, children }: { title: string; children: ReactNode }) 
 
 function Choice({
   chosen,
-  disabled = false,
   onChoose,
   children,
 }: {
   chosen: boolean;
-  disabled?: boolean;
   onChoose: () => void;
   children: ReactNode;
 }) {
   return (
     <button
-      disabled={disabled}
       aria-pressed={chosen}
       onMouseDown={(event) => event.preventDefault()}
       onClick={onChoose}
       className={cn(
         "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left",
         chosen ? "text-white" : "text-foreground/80 hover:bg-white/6",
-        disabled && "pointer-events-none text-muted-foreground/60",
       )}
     >
       <span className={cn("size-1.5 flex-none rounded-full", chosen && "bg-white")} />

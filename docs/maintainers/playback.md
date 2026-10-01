@@ -104,3 +104,18 @@ Two designs were tried in Electron against these formats:
 The second shipped, as the one path for every title: track choice and subtitles are the point of the feature, and a second path for the files Chromium plays would double the seeking, track and subtitle work for half a second at start. With the whole design in place, the fake provider's titles start in 1.1 s and seek outside the buffer in 0.9 s ([architecture](architecture.md#movies-and-episodes)). On real hardware, time to picture depends mostly on the provider: its redirect, and the 1 to 3 range requests the probe needs.
 
 libmpv stays the fallback if a format turns up that this can't handle; none has in the sample.
+
+## Subtitles beyond text
+
+Slice 5 shows every subtitle format a stream carries: PGS (Blu-ray), DVD and DivX pictures, DVB subtitles, teletext pages and closed captions (CEA-608), on live channels as well as in movies and episodes. Two ways to show pictures were compared on a 1080p H.264 file with PGS subtitles, using the bundled ffmpeg:
+
+| Design                                                    | CPU for 6 s of 1080p | Picture              |
+| --------------------------------------------------------- | -------------------- | -------------------- |
+| Draw over the untouched picture, subtitles sent beside it | 0.04 s               | Copied, as before    |
+| Burn into the picture: ffmpeg's overlay, then H.264 again | 6.55 s               | Re-encoded at CRF 21 |
+
+Burning in costs more than a core for as long as the subtitles are on, and turns every copied picture into a converted one, with its quality loss and slower start. Drawing leaves the picture alone; the side output adds nothing measurable to a run's start (174 to 176 ms on the fake provider with and without it).
+
+Decoding was the second choice. ffmpeg decodes PGS, DVD and DVB pictures itself, and teletext only through libzvbi, which needs iconv on Windows; CEA-608 inside a live picture needs the whole picture decoded first. And live channels play through mpegts.js, not ffmpeg: it passes teletext and DVB packets on with times on the player's clock, but not the SEI messages captions travel in. So the app decodes them itself (`@mrstreamer/core/subtitles`), in TypeScript, from what ffmpeg and mpegts.js hand over: DVB, teletext, PGS and CEA-608. No library joins the bundle; ffmpeg gains the DVD and DivX decoders, the DVB subtitle encoder, the `sup` muxer and `filter_units`, about 0.3 MB. The fixtures check each decoder against ffmpeg's and libzvbi's reading of the same data, including a national character set.
+
+Not measured yet: real broadcasts with teletext and captions, and PGS from real Blu-ray rips, on the Mac and Windows; decoding cost on a slow machine, though a picture is decoded once per change and the canvas is only drawn then.

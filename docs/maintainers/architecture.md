@@ -10,7 +10,8 @@ packages/core        @mrstreamer/core: rules that run without Electron, React or
                      names and regions, trusted guide ids, the XMLTV reader, the guide and viewing
                      record services, movie and series names, their catalogue, languages,
                      collections and tracks, TMDB's client, update discovery, the provider port,
-                     text folding. Depends on contracts.
+                     text folding, and the subtitle decoders: DVB, PGS, teletext, CEA-608.
+                     Depends on contracts.
 apps/desktop         The app, package name mrstreamer
   src/main           Electron main process
     providers        The Xtream Codes adapter
@@ -18,13 +19,14 @@ apps/desktop         The app, package name mrstreamer
                      (preferences.json), updates, licences
     ondemand         The worker thread that holds the movie and series catalogue and TMDB's
                      metadata
-    playback         Stream inspection, the clean start and ffmpeg conversion behind the proxy;
-                     probing and ffmpeg runs for movies and episodes
+    playback         Stream inspection, the clean start, the sound track choice, captions copied
+                     out of the pictures and ffmpeg conversion behind the proxy; probing and
+                     ffmpeg runs for movies and episodes
     platform         Keychain-backed secrets, atomic JSON files, the guide and viewing stores, the
                      electron-updater installer, the diagnostics log
   src/preload        The typed bridge exposed to the UI
   src/renderer       React UI; player/ holds the playback engines, the live and title player
-                     controllers, Picture
+                     controllers, Picture, and the subtitles drawn over it
   src/shared         What main and the renderer share inside the app: window bar sizes
   scripts            Icons, the DMG background, signing, notarization, ffmpeg builds, third-party
                      notices, guide and viewing record measurements
@@ -168,6 +170,8 @@ The UI never sees provider URLs; they contain the login. `playback.open` returns
 
 If the player still fails to decode the picture, the player controller retries once with `repair`, which re-encodes the picture and conceals broadcast damage.
 
+Closed captions travel inside the pictures, in SEI messages, which mpegts.js reads but doesn't pass on. On their way out, after any conversion, `playback/caption-stream.ts` copies each picture's CEA-608 pairs into a private data stream on PID 0x1FF0, with the picture's time, in display order: pictures arrive in decoding order, and B-frames reorder them. The program table lists that stream once a picture carries captions, so a channel without them passes unchanged, and `playback.tracks` lists the caption channels found. mpegts.js passes private data on with times on the player's clock, as it does teletext and DVB subtitles.
+
 Providers send a burst of buffered seconds when a stream opens. mpegts.js jumps forward when the picture falls more than 8 s behind the newest data, keeping 3 s of buffer, instead of playing faster to catch up: a 1.2× rate was audible and visible for half a minute after every start. The [playback evaluation](playback.md) records why this design won over a bundled engine such as libmpv.
 
 ### Movies and episodes
@@ -175,8 +179,14 @@ Providers send a burst of buffered seconds when a stream opens. mpegts.js jumps 
 Providers keep movies and episodes as files behind a redirect, and answer byte ranges: two thirds MKV (H.264, sometimes HEVC, with E-AC-3 sound in several languages and dozens of SubRip subtitles), a third MP4, and a few AVI, MPEG-TS and MPEG-PS. Chromium's own player can't pick among their sound tracks or show their subtitles, and doesn't decode E-AC-3 on Linux, so every title goes through ffmpeg (`playback/title.ts`, `services/playback.ts`):
 
 1. **Probe.** `playback.openTitle` closes any open stream, opens a title session and runs the bundled ffprobe on the proxy's `/source/<token>`, which forwards ranges to the provider one upstream request at a time; a new one, such as a seek, ends the one before, and a refusal is retried after 0.15, 0.4, 1 and 2 s, since panels take a moment to free the connection just closed. ffprobe decodes the first keyframe too, since only a decoded picture shows the closed captions inside it. The session answers with the tracks, labelled in their own language (`@mrstreamer/core/ondemand/tracks`), and the length. Each subtitle track has a format: text (SubRip, ASS, MP4 text, WebVTT), picture (PGS, DVD, DVB, XSUB), teletext, one track per subtitle page, or captions (CEA-608 tracks, and captions inside the picture). Formats outside these aren't listed.
-2. **Run.** Each request to `/title/<token>.mp4?start=&audio=&subtitle=` runs ffmpeg from that position with those tracks and replaces the run before. Video the player decodes is copied, the rest becomes H.264; sound likewise becomes stereo AAC. Copied video starts at the keyframe before the position, so ffmpeg keeps the file's timestamps (`-copyts`) and PUTs a one-packet `framecrc` report of the first video packet back to the proxy, which reads the keyframe's time from its first line and answers with `x-start`. The fragmented MP4 goes to the player; text subtitles become WebVTT, PUT to the proxy and streamed to the player on the file's clock, with `x-origin` for where that clock starts. `delay_moov` lets ffmpeg describe copied AC-3 and E-AC-3, and a start at zero doesn't seek, which skips seconds of some AVI and FLV files.
+2. **Run.** Each request to `/title/<token>.mp4?start=&audio=&subtitle=` runs ffmpeg from that position with those tracks and replaces the run before. Video the player decodes is copied, the rest becomes H.264; sound likewise becomes stereo AAC. Copied video starts at the keyframe before the position, so ffmpeg keeps the file's timestamps (`-copyts`) and PUTs a one-packet `framecrc` report of the first video packet back to the proxy, which reads the keyframe's time from its first line and answers with `x-start`. The fragmented MP4 goes to the player; text subtitles and CEA-608 tracks become WebVTT, PUT to the proxy and streamed to the player on the file's clock, with `x-origin` for where that clock starts. Other subtitles go beside the picture as packets the player decodes: PGS as it is stored (the `sup` muxer), since ffmpeg only learns how long a PGS picture shows when the next arrives; DVD and DivX pictures as DVB subtitles, which carry their length; DVB and teletext as they are; and a picture's captions as its SEI units alone (`filter_units`). The proxy turns them into JSON lines, each packet's time on the file's clock and its data, at `x-packets`, with `x-packets-codec` naming the decoder. Copied AAC passes `aac_adtstoasc`, which MPEG-TS files need. `delay_moov` lets ffmpeg describe copied AC-3 and E-AC-3, and a start at zero doesn't seek, which skips seconds of some AVI and FLV files.
 3. **Play.** `player/title-engine.ts` feeds the fragments to Media Source Extensions with the timestamp offset that puts the first fragment at `x-start`, so the element's clock is the title's: the position is `currentTime`, a skip into what is buffered only moves `currentTime`, and cues from `webvtt.ts` go straight onto a text track. `player/mp4.ts` reads the codec string MSE needs from the first boxes. Reading stops once 60 s are buffered ahead and starts again below 40 s; while paused nothing more is read and the provider's connection idles until playback moves on. When the provider breaks off a file, ffmpeg can still end its run as if the file had ended; the proxy saw the break, so it ends the run's response as broken, and the player reconnects instead of playing out to a false end.
+
+### Subtitles the app draws
+
+`@mrstreamer/core/subtitles` decodes DVB subtitles, PGS, teletext subtitle pages and CEA-608 captions into changes of a screen: lines of text, or pictures on a canvas the size the subtitles were made for. Teletext shows only a subtitle page's boxed text, with the page's national character set and the accented letters enhancement packets add; captions build up as pop-on, roll-up or paint-on. `player/subtitles.ts` shows each change from its time on: text as cues on the element's subtitle track, where Chromium lays it out as it does WebVTT, and pictures on a canvas over the picture, stretched over the area the picture fills, as broadcasts mean them. Cues on a hidden metadata track show and hide the pictures, so the element's own clock times them and the canvas is only drawn at a change or a resize. `Picture` moves the canvas with the video element.
+
+A run starting from a position gets the subtitle packets from there on, so after a seek a picture, page or caption already on screen shows again only from the next change.
 
 Measured with Electron 44 against the fake provider: a run starts in about 1.1 s and a seek outside the buffer in 0.9 s; starting 10 minutes into a file read 57 MB, probe and a minute ahead included, and nothing more while paused. [Playback evaluation](playback.md#movies-and-episodes) records how this design was chosen.
 

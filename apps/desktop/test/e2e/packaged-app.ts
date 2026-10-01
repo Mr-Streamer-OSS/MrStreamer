@@ -1,14 +1,16 @@
 // Smoke test for a built app: connects it to the fake provider through the login form, then plays
 // a stream the player decodes directly and one the bundled ffmpeg has to convert. Then it leaves
-// Watch for Home and comes back, which must keep the one stream rather than open another. Last, it
+// Watch for Home and comes back, which must keep the one stream rather than open another. Then it
 // plays a movie from Movies, which the bundled ffprobe reads and ffmpeg repackages, skips ahead and
-// leaves it.
+// leaves it. Last, it shows a movie's PGS subtitles and its DVD subtitles, which the bundled
+// ffmpeg sends beside the picture, as stored and as DVB, for the app to draw.
 //
 //   node test/e2e/packaged-app.ts <app executable> [-- extra app arguments]
 //
 // Passes when both channels show a moving picture with decoded sound, Home and Watch share the
 // stream: muted on Home, with sound in Watch, and no second request to the provider, and the movie
-// plays with sound, skips 10 seconds and lets go of its connection when left. The app runs with a
+// plays with sound, skips 10 seconds and lets go of its connection when left, and both subtitle
+// tracks draw over the picture while they are due. The app runs with a
 // throwaway profile and remote debugging on a random port; on macOS pass --use-mock-keychain so
 // the test never touches a real keychain.
 import { mkdtempSync, rmSync } from "node:fs";
@@ -42,6 +44,9 @@ try {
   const movie = await playMovie(page);
   console.log(`${movie.ok ? "PASS" : "FAIL"} A movie plays, skips and lets go: ${movie.detail}`);
   failed ||= !movie.ok;
+  const subtitles = await pictureSubtitles(page);
+  console.log(`${subtitles.ok ? "PASS" : "FAIL"} Picture subtitles draw: ${subtitles.detail}`);
+  failed ||= !subtitles.ok;
   page.close();
 } catch (error) {
   console.error(`FAIL ${String(error)}`);
@@ -163,5 +168,55 @@ async function playMovie(page: Page): Promise<{ ok: boolean; detail: string }> {
   return {
     ok,
     detail: `played to ${started.time.toFixed(1)} s with ${started.audio} bytes of sound, skipped to ${skipped.time.toFixed(1)} s, ${open} connections open after leaving`,
+  };
+}
+
+/**
+ * Plays the movie with picture subtitles: English PGS from 2 to 4 s, then Dutch DVD subtitles
+ * from 8 to 10 s, each chosen in Audio & subtitles. Counts the pixels drawn over the picture.
+ */
+async function pictureSubtitles(page: Page): Promise<{ ok: boolean; detail: string }> {
+  await key(page, "Escape", 27);
+  await delay(500);
+  const poster = `[...document.querySelectorAll("button[title]")].find((b) => b.title.includes("Picture subtitles"))`;
+  await waitFor(() => page.evaluate<boolean>(`!!${poster}`), 20_000);
+  await page.evaluate(`${poster}.click()`);
+  const play = `[...document.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent.trim() === "Play")`;
+  await waitFor(() => page.evaluate<boolean>(`!!${play}`), 20_000);
+  await page.evaluate(`${play}.click()`);
+  const time = () => page.evaluate<number>(`document.querySelector("video")?.currentTime ?? 0`);
+  const drawn = () =>
+    page.evaluate<number>(`(() => {
+      const canvas = document.querySelector("canvas[aria-hidden]");
+      const data = canvas?.getContext("2d")?.getImageData(0, 0, canvas.width, canvas.height).data;
+      let count = 0;
+      for (let index = 3; index < (data?.length ?? 0); index += 4) if (data[index] > 0) count++;
+      return count;
+    })()`);
+  const choose = async (label: string) => {
+    await page.evaluate(
+      `document.querySelector("[data-view=title]").dispatchEvent(new MouseEvent("mousemove", { bubbles: true }))`,
+    );
+    const menu = `[...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Audio & subtitles")`;
+    await waitFor(() => page.evaluate<boolean>(`!!${menu}`), 10_000);
+    await page.evaluate(`${menu}.click()`);
+    const track = `[...document.querySelectorAll("button")].find((b) => b.textContent.trim() === ${JSON.stringify(label)})`;
+    await waitFor(() => page.evaluate<boolean>(`!!${track}`), 10_000);
+    await page.evaluate(`${track}.click()`);
+    await key(page, "Escape", 27);
+  };
+  await waitFor(async () => (await time()) > 0.1, 30_000);
+  await choose("English");
+  await waitFor(async () => (await time()) >= 2.5, 30_000);
+  await delay(300);
+  const english = await drawn();
+  await choose("Nederlands · Forced");
+  await waitFor(async () => (await time()) >= 8.5, 30_000);
+  await delay(300);
+  const dutch = await drawn();
+  await key(page, "Escape", 27);
+  return {
+    ok: english > 0 && dutch > 0,
+    detail: `${english} pixels of PGS at 2.5 s, ${dutch} of DVD subtitles at 8.5 s`,
   };
 }

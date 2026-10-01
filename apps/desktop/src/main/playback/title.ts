@@ -1,11 +1,14 @@
 // Movies and episodes: what a file holds, as ffprobe reports it, and the ffmpeg run that plays it
 // from a position. The run copies what the player decodes and converts the rest: the picture to
-// H.264, sound to stereo AAC, text subtitles to WebVTT. It writes fragmented MP4 for Media Source
-// Extensions and keeps the file's own timestamps, so subtitle cues and the picture share one
-// clock; a one-line report of the first video packet says where on that clock the picture starts.
+// H.264, sound to stereo AAC, text subtitles to WebVTT. Subtitles the player draws itself, PGS,
+// DVB, teletext and captions inside the picture, go beside it as they are, and DVD and DivX
+// pictures as DVB. It writes fragmented MP4 for Media Source Extensions and keeps the file's own
+// timestamps, so subtitles and the picture share one clock; a one-line report of the first video
+// packet says where on that clock the picture starts.
 import { type } from "arktype";
 import type { Codec, SubtitleFormat } from "@mrstreamer/contracts/playback";
 import type { AudioFacts, SubtitleFacts } from "@mrstreamer/core/ondemand/tracks";
+import type { SubtitleCodec } from "@mrstreamer/core/subtitles/decoder";
 
 export interface TitleProbe {
   /** Seconds, or null when the file doesn't say. */
@@ -18,7 +21,8 @@ export interface TitleProbe {
     readonly name: string;
   } | null;
   readonly audio: readonly (AudioFacts & { readonly codec: Codec | null })[];
-  readonly subtitles: readonly SubtitleFacts[];
+  /** With ffmpeg's name for each codec; null for captions inside the picture. */
+  readonly subtitles: readonly (SubtitleFacts & { readonly codec: string | null })[];
 }
 
 /**
@@ -110,11 +114,12 @@ export function readProbe(json: unknown): TitleProbe | null {
         codec: audioCodec(stream.codec_name),
       })),
     subtitles: [
-      ...streams.flatMap((stream): SubtitleFacts[] => {
+      ...streams.flatMap((stream): TitleProbe["subtitles"][number][] => {
         const format = SUBTITLE_FORMATS[stream.codec_name ?? ""];
         if (stream.codec_type !== "subtitle" || !format) return [];
         const subtitle = {
           ...facts(stream),
+          codec: stream.codec_name ?? null,
           page: null,
           format,
           forced: stream.disposition?.forced === 1,
@@ -125,11 +130,15 @@ export function readProbe(json: unknown): TitleProbe | null {
         const pages = teletextPages(stream.extradata, stream.tags?.language);
         return pages.length === 0 ? [subtitle] : pages.map((page) => ({ ...subtitle, ...page }));
       }),
-      // Closed captions inside the picture, channel 1, under the picture's own number.
-      ...(video && hasCaptions(probe.frames ?? [], video.index)
+      // Closed captions inside an H.264 or HEVC picture, channel 1, under the picture's own
+      // number.
+      ...(video &&
+      (video.codec_name === "h264" || video.codec_name === "hevc") &&
+      hasCaptions(probe.frames ?? [], video.index)
         ? [
             {
               id: video.index,
+              codec: null,
               language: null,
               name: null,
               default: false,
@@ -238,7 +247,7 @@ export interface TitleRun {
   readonly start: number;
   /** A sound track's id; null for the file's first. */
   readonly audio: number | null;
-  /** A text subtitle track's id, or null for none. */
+  /** A subtitle track's id, or null for none. */
   readonly subtitle: number | null;
   /** Convert the sound even when the player decodes it: the second try after a failed start. */
   readonly convertSound?: boolean;
@@ -247,24 +256,31 @@ export interface TitleRun {
 export interface TitlePlan {
   readonly video: "copy" | "convert" | "none";
   readonly audio: "copy" | "convert" | "none";
-  readonly subtitle: boolean;
+  /** The subtitles as WebVTT cues, or as packets the player decodes, in their codec. */
+  readonly subtitle: { readonly cues: true } | { readonly packets: SubtitleCodec } | null;
+  /** How ffmpeg writes those packets: a transport stream, or PGS as it is stored. */
+  readonly packets: "mpegts" | "sup" | null;
   readonly args: readonly string[];
 }
 
 /**
- * The ffmpeg arguments for a run. `source` is the loopback address of the file; `cues` and
- * `start` are where ffmpeg sends the subtitles and the first video packet's report.
+ * The ffmpeg arguments for a run. `source` is the loopback address of the file; `cues`,
+ * `packets` and `start` are where ffmpeg sends the subtitles and the first video packet's report.
  */
 export function titlePlan(
   probe: TitleProbe,
   run: TitleRun,
   decoders: ReadonlySet<Codec>,
-  urls: { readonly source: string; readonly cues: string; readonly start: string },
+  urls: {
+    readonly source: string;
+    readonly cues: string;
+    readonly packets: string;
+    readonly start: string;
+  },
 ): TitlePlan {
   const video = probe.video;
   const sound = probe.audio.find((track) => track.id === run.audio) ?? probe.audio[0] ?? null;
-  const subtitle =
-    probe.subtitles.find((track) => track.id === run.subtitle && track.format === "text") ?? null;
+  const subtitle = probe.subtitles.find((track) => track.id === run.subtitle) ?? null;
   const copyVideo = video?.codec != null && decoders.has(video.codec);
   const copySound = sound?.codec != null && decoders.has(sound.codec) && run.convertSound !== true;
 
@@ -290,8 +306,11 @@ export function titlePlan(
       ...["-vf", "yadif=deint=interlaced,scale=w='min(1920,iw)':h=-2", "-pix_fmt", "yuv420p"],
     );
   }
-  if (sound && copySound) args.push("-c:a", "copy");
-  else if (sound) args.push("-c:a", "aac", "-b:a", "192k", "-ac", "2");
+  if (sound && copySound) {
+    args.push("-c:a", "copy");
+    // AAC from an MPEG-TS file comes with ADTS headers, which MP4 doesn't take.
+    if (sound.codec === "aac") args.push("-bsf:a", "aac_adtstoasc");
+  } else if (sound) args.push("-c:a", "aac", "-b:a", "192k", "-ac", "2");
   args.push(
     // delay_moov waits for the first packets before describing the tracks, which copied AC-3 and
     // E-AC-3 need.
@@ -299,11 +318,19 @@ export function titlePlan(
     // Short fragments reach the player sooner, and let it hold back reading while paused.
     ...["-frag_duration", "1000000", "pipe:1"],
   );
-  if (subtitle) {
-    args.push(
-      ...["-map", `0:${subtitle.id}`, "-c:s", "webvtt", "-f", "webvtt"],
-      ...["-method", "PUT", urls.cues],
-    );
+  const side = subtitle ? sideOutput(subtitle, video?.name ?? null) : null;
+  if (subtitle && side) {
+    if ("cues" in side) {
+      args.push(
+        ...["-map", `0:${subtitle.id}`, "-c:s", "webvtt", "-f", "webvtt"],
+        ...["-method", "PUT", urls.cues],
+      );
+    } else {
+      // The times as the file has them; a transport stream would otherwise start at 1.4 s.
+      const format =
+        side.container === "sup" ? ["-f", "sup"] : ["-mpegts_copyts", "1", "-f", "mpegts"];
+      args.push(...side.args, ...format, "-method", "PUT", urls.packets);
+    }
   }
   if (video && copyVideo) {
     // Copied video starts at the keyframe before `start`; the report says which.
@@ -315,9 +342,51 @@ export function titlePlan(
   return {
     video: !video ? "none" : copyVideo ? "copy" : "convert",
     audio: !sound ? "none" : copySound ? "copy" : "convert",
-    subtitle: subtitle !== null,
+    subtitle: !side ? null : "cues" in side ? { cues: true } : { packets: side.codec },
+    packets: side && !("cues" in side) ? side.container : null,
     args,
   };
+}
+
+/**
+ * How a subtitle track leaves the run: as WebVTT cues for text and CEA-608 tracks, or beside
+ * the picture as packets the player decodes. PGS goes as it is stored, since ffmpeg only learns
+ * how long a PGS picture shows once the next arrives; DVD and DivX pictures carry their length
+ * and become DVB; DVB, teletext and the picture's captions, its SEI units only, go as they are.
+ */
+function sideOutput(
+  track: TitleProbe["subtitles"][number],
+  videoCodec: string | null,
+):
+  | { readonly cues: true }
+  | {
+      readonly codec: SubtitleCodec;
+      readonly container: "mpegts" | "sup";
+      readonly args: readonly string[];
+    }
+  | null {
+  const map = ["-map", `0:${track.id}`];
+  switch (track.codec) {
+    case null: {
+      const units = videoCodec === "hevc" ? "39|40" : "6";
+      return {
+        codec: "captions",
+        container: "mpegts",
+        args: [...map, "-c:v", "copy", "-bsf:v", `filter_units=pass_types=${units}`],
+      };
+    }
+    case "hdmv_pgs_subtitle":
+      return { codec: "pgs", container: "sup", args: [...map, "-c:s", "copy"] };
+    case "dvd_subtitle":
+    case "xsub":
+      return { codec: "dvb", container: "mpegts", args: [...map, "-c:s", "dvbsub"] };
+    case "dvb_subtitle":
+      return { codec: "dvb", container: "mpegts", args: [...map, "-c:s", "copy"] };
+    case "dvb_teletext":
+      return { codec: "teletext", container: "mpegts", args: [...map, "-c:s", "copy"] };
+    default:
+      return track.format === "text" || track.codec === "eia_608" ? { cues: true } : null;
+  }
 }
 
 /**
