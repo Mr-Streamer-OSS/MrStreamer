@@ -2,7 +2,7 @@
 
 ## Using Mr. Streamer
 
-- [Install](../README.md#install)
+- [Download and install](../README.md#download)
 - [Live TV](./user/live-tv.md)
 - [Movies and series](./user/movies-and-series.md)
 - [Updates and channels](./user/updates.md)
