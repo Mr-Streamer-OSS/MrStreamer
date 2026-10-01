@@ -12,11 +12,12 @@ Tabs under the top bar:
 - **New** has what your provider added this week and this month, and recent releases.
 - **Genres** and **Services** show a tile for each genre and streaming service. Open one for its titles.
 - **4K** lists titles with a 4K version, when your provider has any.
+- **Adults** lists the titles your provider marks for adults, once you turn on **Titles for adults** in Settings > Movies & series.
 - **All movies** and **All series** list everything, sorted by date added, popularity, rating or name.
 
 A row's **All**, a genre or a service opens the whole list; **Back**, or Escape, returns to the tab. In a list, the arrow keys move through the posters, Enter opens one, and the pointer only hovers.
 
-Every tab but **All movies** and **All series** shows titles in your language, or in several, and titles with their own sound, such as films with Dutch subtitles, unless they were made in another language. **All movies**, **All series** and search show everything. Titles your provider marks for adults don't show anywhere.
+Every tab but **All movies** and **All series** shows titles in your language, or in several, and titles with their own sound, such as films with Dutch subtitles, unless they were made in another language. **All movies**, **All series** and search show everything else. Titles for adults show only in their own tab, never on Home, in another tab or in search.
 
 ⌘K (Ctrl K on Windows and Linux) searches movies and series along with channels and programmes.
 

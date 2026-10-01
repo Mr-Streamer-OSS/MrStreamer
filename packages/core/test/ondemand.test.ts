@@ -151,6 +151,17 @@ describe("one title per film", () => {
       ["20", false],
       ["21", true],
     ]);
+    // Only the collection for adults holds the adult row.
+    const made = collections({
+      kind: "movie",
+      titles,
+      language: "en",
+      metadata: () => null,
+      services: [],
+      now: 0,
+    });
+    expect(made.list("all").map((title) => title.id)).toEqual(["20"]);
+    expect(made.list("adult").map((title) => title.id)).toEqual(["21"]);
   });
 
   it.each([

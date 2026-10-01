@@ -104,6 +104,22 @@ export function collections(source: CollectionSource): Collections {
       };
     });
   const suiting = ranked.filter((entry) => entry.suits);
+  /** Titles for adults: in their own collection only, as the provider lists them. */
+  const adult = source.titles.flatMap((title): Ranked[] =>
+    title.adult
+      ? [
+          {
+            title,
+            genres: [],
+            popularity: 0,
+            rating: title.rating ?? 0,
+            rated: false,
+            suits: false,
+            fourK: null,
+          },
+        ]
+      : [],
+  );
   const lists = new Map<string, readonly Title[]>();
 
   const orders: Record<CollectionSort, (a: Ranked, b: Ranked) => number> = {
@@ -117,6 +133,7 @@ export function collections(source: CollectionSource): Collections {
   /** A collection's members and the order it shows them in unless asked otherwise. */
   function members(id: CollectionId): { entries: readonly Ranked[]; order: CollectionSort } {
     if (id === "all") return { entries: ranked, order: "added" };
+    if (id === "adult") return { entries: adult, order: "added" };
     if (id === "new-week") {
       return {
         entries: suiting.filter((entry) => added(entry) > source.now - 7 * DAY_MS),
@@ -257,6 +274,7 @@ const NAMES = {
   popular: "Popular",
   "top-rated": "Top rated",
   "4k": "4K",
+  adult: "For adults",
 } as const;
 
 const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });

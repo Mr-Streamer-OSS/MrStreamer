@@ -33,7 +33,7 @@ import {
 import { cn } from "../../lib/utils.ts";
 import { CollectionGrid, useCollection } from "./CollectionGrid.tsx";
 
-type Tab = "for-you" | "new" | "genres" | "services" | "4k" | "all";
+type Tab = "for-you" | "new" | "genres" | "services" | "4k" | "adult" | "all";
 
 interface Place {
   readonly tab: Tab;
@@ -67,8 +67,13 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
     usePlace.setState((state) => ({ [kind]: { ...state[kind], ...next } }));
   const status = useQuery(queries.onDemandStatus());
   const fourK = useQuery(queries.collection(kind, "4k", undefined, 0, 1));
-  // 4K goes when nothing is left in it, as after changing the language.
-  const tab = place.tab === "4k" && fourK.data?.total === 0 ? "for-you" : place.tab;
+  // Empty unless Settings shows titles for adults.
+  const adult = useQuery(queries.collection(kind, "adult", undefined, 0, 1));
+  // 4K and Adults go when nothing is left in them, as after changing the language or the setting.
+  const emptied =
+    (place.tab === "4k" && fourK.data?.total === 0) ||
+    (place.tab === "adult" && adult.data?.total === 0);
+  const tab = emptied ? "for-you" : place.tab;
   const label = kind === "movie" ? "Movies" : "Series";
   const tabs: readonly { value: Tab; label: string }[] = [
     { value: "for-you", label: "For you" },
@@ -76,6 +81,7 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
     { value: "genres", label: "Genres" },
     { value: "services", label: "Services" },
     ...(fourK.data?.total ? [{ value: "4k" as const, label: "4K" }] : []),
+    ...(adult.data?.total ? [{ value: "adult" as const, label: "Adults" }] : []),
     { value: "all", label: kind === "movie" ? "All movies" : "All series" },
   ];
 

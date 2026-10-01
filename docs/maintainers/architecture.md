@@ -42,18 +42,18 @@ Packages export their source files by path, `@mrstreamer/core/catalogue/normaliz
 
 Everything lives in Electron's `userData` folder, named after the product, not the app id: see the [user troubleshooting page](../user/troubleshooting.md#where-your-data-is). Each JSON file is written atomically, packed with gzip when its name ends in `.gz`; leftovers of an interrupted write are removed at startup. Changes to these files must stay readable by the newest stable release: choosing Stable on a nightly installs that release over the nightly, and it reads what the nightly wrote. Add fields rather than change a file's version: older readers ignore keys they don't know and keep them when they write. New files are fine: older releases don't look for them. The one agreed exception: Stable 0.0.1 doesn't read `mrstreamer.db`, so it shows no favourites or watch history; Stable 0.0.2 reads it and skips what it doesn't know (see [Viewing record](#viewing-record)).
 
-| File                | Owner                                                                                                                                                                           |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `subscription.json` | `services/subscription.ts`; the password is sealed with `safeStorage`                                                                                                           |
-| `preferences.json`  | `services/preferences.ts`: volume, mute, last channel and category, the sound and subtitle languages picked last, the language for movies and series, the viewer's own TMDB key |
-| `mrstreamer.db`     | `platform/viewing-store.ts`: the viewing record, favourites, watch history and title progress per account                                                                       |
-| `catalogue.json`    | `services/library.ts`: the last good catalogue, as the provider sent it                                                                                                         |
-| `ondemand.json.gz`  | `ondemand/catalogue-worker.ts`: the last good movie and series lists, as the provider sent them                                                                                 |
-| `metadata.json.gz`  | `ondemand/metadata.ts`: what TMDB said about each title, and what each streaming service carries                                                                                |
-| `guide.xml`         | `platform/guide-store.ts`: the last complete XMLTV download, as it arrived                                                                                                      |
-| `guide.json`        | `platform/guide-store.ts`: which subscription `guide.xml` belongs to, and when it arrived                                                                                       |
-| `updates.json`      | `services/updates.ts`: the chosen channel, and the version whose notice was closed                                                                                              |
-| `diagnostics.log`   | `platform/diagnostics-log.ts`: what the app did; `diagnostics.1.log` is the one before                                                                                          |
+| File                | Owner                                                                                                                                                                                                           |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `subscription.json` | `services/subscription.ts`; the password is sealed with `safeStorage`                                                                                                                                           |
+| `preferences.json`  | `services/preferences.ts`: volume, mute, last channel and category, the sound and subtitle languages picked last, the language for movies and series, the viewer's own TMDB key, whether titles for adults show |
+| `mrstreamer.db`     | `platform/viewing-store.ts`: the viewing record, favourites, watch history and title progress per account                                                                                                       |
+| `catalogue.json`    | `services/library.ts`: the last good catalogue, as the provider sent it                                                                                                                                         |
+| `ondemand.json.gz`  | `ondemand/catalogue-worker.ts`: the last good movie and series lists, as the provider sent them                                                                                                                 |
+| `metadata.json.gz`  | `ondemand/metadata.ts`: what TMDB said about each title, and what each streaming service carries                                                                                                                |
+| `guide.xml`         | `platform/guide-store.ts`: the last complete XMLTV download, as it arrived                                                                                                                                      |
+| `guide.json`        | `platform/guide-store.ts`: which subscription `guide.xml` belongs to, and when it arrived                                                                                                                       |
+| `updates.json`      | `services/updates.ts`: the chosen channel, and the version whose notice was closed                                                                                                                              |
+| `diagnostics.log`   | `platform/diagnostics-log.ts`: what the app did; `diagnostics.1.log` is the one before                                                                                                                          |
 
 Chromium keeps its own cache there too, mostly posters and backdrops; `index.ts` caps it at 64 MB on disk, and artwork is asked for at the width it shows at (`components/TitleArt.tsx`).
 
@@ -73,7 +73,7 @@ Nothing depends on a field only some providers send. The worker reads what Xtrea
 
 `@mrstreamer/core/ondemand/catalogue` indexes the lists for one language, each kind when first read. Display names are worked out on load (`@mrstreamer/core/ondemand/names`: "Blow 2001 (NL)" is "Blow 2001" with the tag NL), so naming rules improve without fetching again. Providers list each language version of a film as its own stream; rows sharing a TMDB id become one title with its versions inside, and rows without one stay on their own. A title shows the version that suits the viewer's language best (`@mrstreamer/core/ondemand/languages`): marked with the language, then marked for several, then marked for a language that subtitles rather than dubs, then unmarked, then dubbed into another, the newest first among equals. Dutch, Flemish included, subtitles: "(NL)" on an English film is English with Dutch subtitles, unless the mark says otherwise, as "(NL AUDIO)". A row for adults never joins the others, so the film's other versions stay. The language is `titleLanguage` in the preferences, English by default, and changing it indexes again. Every version's id finds its title, details belong to the version they were opened for, and progress counts across versions: `viewing.progress` takes the ids of every version of a series.
 
-Titles the provider marks for adults, or that sit in a category named for adults, are left out of every collection and of search.
+Titles the provider marks for adults, or that sit in a category named for adults, are left out of every collection but their own, `adult`, and of search. That one answers empty unless `adultTitles` in the preferences says to show them; Movies and Series then show an Adults tab.
 
 ### TMDB
 
@@ -88,6 +88,7 @@ The key is the viewer's own from Settings (`tmdbKey`), else `MR_STREAMER_TMDB_KE
 `@mrstreamer/core/ondemand/collections` builds a kind's collections for a language from the titles and the metadata so far:
 
 - All, every title but those for adults
+- For adults, only once the viewer turns them on in Settings
 - New this week and this month, by the date the provider added them
 - Recent releases, from this year and last
 - Popular, by TMDB's popularity

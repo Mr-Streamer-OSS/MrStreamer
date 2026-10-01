@@ -126,7 +126,8 @@ export interface TitlePage {
 
 /**
  * A collection Movies and Series show: everything, what's new, popular or top rated, a genre, a
- * streaming service, or titles like one the viewer watched.
+ * streaming service, titles like one the viewer watched, or titles for adults, which no other
+ * collection holds and which shows only once the viewer asks for it in Settings.
  */
 export type CollectionId =
   | "all"
@@ -136,13 +137,14 @@ export type CollectionId =
   | "popular"
   | "top-rated"
   | "4k"
+  | "adult"
   | `genre:${string}`
   | `service:${number}`
   | `like:${string}`;
 
 /** Whether text names a collection: what the UI sends is checked before it is used. */
 export function isCollectionId(text: string): text is CollectionId {
-  return /^(all|new-week|new-month|recent|popular|top-rated|4k|genre:.+|service:\d+|like:.+)$/.test(
+  return /^(all|new-week|new-month|recent|popular|top-rated|4k|adult|genre:.+|service:\d+|like:.+)$/.test(
     text,
   );
 }
