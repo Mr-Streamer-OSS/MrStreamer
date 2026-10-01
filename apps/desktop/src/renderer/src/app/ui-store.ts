@@ -62,6 +62,22 @@ export function openView(view: View): void {
   useUi.setState({ view, watching: false, channelsOpen: false, settings: null, details: null });
 }
 
+/**
+ * Home with nothing open over it, for a new account or none: a list, details or a title open
+ * before belonged to the account that went.
+ */
+export function resetForAccount(): void {
+  useUi.setState({
+    view: "home",
+    watching: false,
+    playingTitle: false,
+    details: null,
+    channelsOpen: false,
+    searchOpen: false,
+    list: { kind: "all" },
+  });
+}
+
 /** Opens Watch over the current page. */
 export function openWatch(): void {
   useUi.setState({ watching: true, searchOpen: false, settings: null });
