@@ -71,6 +71,33 @@ async function playerReceives(
   return playerReceivesBytes(Buffer.from(await (await fetch(url)).arrayBuffer()));
 }
 
+/** The streams ffprobe finds, in program table order, with their PIDs and languages. */
+function streamIds(body: Buffer): { type: string; id: number; language?: string }[] {
+  const probe = spawnSync(
+    "ffprobe",
+    [
+      "-v",
+      "error",
+      "-show_entries",
+      "stream=codec_type,id:stream_tags=language",
+      "-of",
+      "json",
+      "-i",
+      "pipe:0",
+    ],
+    { input: body, encoding: "utf8" },
+  );
+  return (
+    JSON.parse(probe.stdout) as {
+      streams: { codec_type: string; id: string; tags?: { language?: string } }[];
+    }
+  ).streams.map((stream) => ({
+    type: stream.codec_type,
+    id: Number(stream.id),
+    ...(stream.tags?.language ? { language: stream.tags.language } : {}),
+  }));
+}
+
 function playerReceivesBytes(body: Buffer): { video: string | null; audio: string | null } {
   const probe = spawnSync(
     "ffprobe",
@@ -173,6 +200,57 @@ describe("playback", () => {
     await playback.dispose();
   });
 
+  it("lists a channel's sound tracks and subtitle pages once its stream starts", async () => {
+    const { provider, playback } = await connectedPlayback();
+    const session = await playback.open(
+      channelNamed(provider, "TEST | Subtitles and two sound tracks"),
+      LINUX,
+    );
+    expect(await playback.tracks(session.sessionId)).toBeNull();
+
+    await fetch(session.url).then((response) => response.arrayBuffer());
+
+    expect(await playback.tracks(session.sessionId)).toEqual({
+      audio: [
+        { id: 0x101, language: "en", label: "English", default: true },
+        { id: 0x102, language: "nl", label: "Nederlands", default: false },
+      ],
+      subtitles: [
+        expect.objectContaining({
+          id: 0x103,
+          page: 1,
+          format: "picture",
+          label: "Nederlands · Picture",
+        }),
+        expect.objectContaining({
+          id: 0x300,
+          page: 888,
+          format: "teletext",
+          label: "Nederlands · Teletext",
+        }),
+      ],
+    });
+    await playback.dispose();
+  });
+
+  it("plays the chosen sound track, keeping the rest of the stream", async () => {
+    const { provider, playback } = await connectedPlayback();
+
+    const session = await playback.open(
+      channelNamed(provider, "TEST | Subtitles and two sound tracks"),
+      LINUX,
+      { audio: 0x102 },
+    );
+    const received = streamIds(Buffer.from(await (await fetch(session.url)).arrayBuffer()));
+
+    // The player plays the first sound track the program table lists.
+    expect(received.filter((stream) => stream.type === "audio").map((stream) => stream.id)).toEqual(
+      [0x102, 0x101],
+    );
+    expect(received.map((stream) => stream.id)).toContain(0x300);
+    await playback.dispose();
+  });
+
   it("names the formats of a stream it cannot convert", async () => {
     const { provider, playback } = await connectedPlayback({ ffmpeg: false });
 
@@ -233,6 +311,26 @@ describe("playback", () => {
 
       expect(probe.stdout.trim().split("\n")[0]).toBe("1");
       expect(probe.stderr).not.toMatch(/non-existing|decode_slice_header error|reference/i);
+      await playback.dispose();
+    });
+
+    it("converts the chosen sound track and keeps the subtitles where the player finds them", async () => {
+      const { provider, playback } = await connectedPlayback({ ffmpeg: true });
+
+      // A player without AAC: the sound converts.
+      const session = await playback.open(
+        channelNamed(provider, "TEST | Subtitles and two sound tracks"),
+        ["h264", "mp3"],
+        { audio: 0x102 },
+      );
+      const received = streamIds(Buffer.from(await (await fetch(session.url)).arrayBuffer()));
+
+      expect(received.filter((stream) => stream.type === "audio")).toEqual([
+        { type: "audio", id: expect.any(Number), language: "dut" },
+      ]);
+      expect(
+        received.filter((stream) => stream.type === "subtitle").map((stream) => stream.id),
+      ).toEqual([0x103, 0x300]);
       await playback.dispose();
     });
 

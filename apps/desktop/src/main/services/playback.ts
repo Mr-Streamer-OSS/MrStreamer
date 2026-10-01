@@ -21,6 +21,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { Readable } from "node:stream";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
 import type {
+  ChannelTracks,
   Codec,
   StreamFailure,
   StreamFormat,
@@ -39,8 +40,10 @@ import * as Semaphore from "effect/Semaphore";
 import { createCleanStart } from "../playback/clean-start.ts";
 import { ffmpegArguments, planConversion, type Conversion } from "../playback/convert.ts";
 import { createInspector, type Inspection, type StreamLayout } from "../playback/inspect.ts";
+import { createAudioChoice } from "../playback/program-table.ts";
 import {
   firstPacketTime,
+  PROBE_ARGUMENTS,
   readProbe,
   titlePlan,
   type TitleProbe,
@@ -88,6 +91,10 @@ interface LiveSession extends SessionBase {
   readonly format: StreamFormat;
   /** Re-encode the picture even when the player could decode it; see `open`. */
   readonly repair: boolean;
+  /** The sound track chosen by PID, or null for the channel's first. */
+  readonly audio: number | null;
+  /** The tracks the stream carries, once it has been inspected. */
+  layout: StreamLayout | null;
 }
 
 interface TitleSessionState extends SessionBase {
@@ -128,7 +135,7 @@ export class Playback extends Context.Service<
     open(
       channelId: string,
       decoders: readonly Codec[],
-      options?: { readonly repair?: boolean },
+      options?: { readonly repair?: boolean; readonly audio?: number | null },
     ): Effect.Effect<StreamSession, Failed>;
     /**
      * Opens a movie or episode from its provider file: closes any open stream, reads which
@@ -146,6 +153,11 @@ export class Playback extends Context.Service<
     readonly closeAll: Effect.Effect<void>;
     /** Why the session's last upstream request failed, or null. */
     failure(sessionId: string): Effect.Effect<StreamFailure | null>;
+    /**
+     * A channel's sound and subtitle tracks, from its program table; null until its stream has
+     * started, and for movies and episodes.
+     */
+    tracks(sessionId: string): Effect.Effect<ChannelTracks | null>;
   }
 >()("mrstreamer/Playback") {
   static readonly layer = (deps: PlaybackDeps) => Layer.effect(Playback, make(deps));
@@ -267,14 +279,25 @@ function make(deps: PlaybackDeps) {
         response.destroy();
         return;
       }
-      const video = start.layout?.video;
-      const chunks =
+      const { layout } = start;
+      session.layout = layout;
+      const video = layout?.video;
+      const cleaned =
         video && video.codec !== "unknown" && CLEAN_START_CODECS.has(video.codec)
           ? cleanStart(replay(start, reader), createCleanStart(video.pid, video.codec))
           : replay(start, reader);
-      const conversion = start.layout
-        ? planConversion(start.layout, session.decoders, { repair: session.repair })
+      const conversion = layout
+        ? planConversion(layout, session.decoders, {
+            repair: session.repair,
+            audio: session.audio,
+          })
         : null;
+      // The player plays the first sound track its table lists; ffmpeg keeps only the chosen one.
+      const chosen = layout?.audio.find((track) => track.pid === session.audio);
+      const chunks =
+        layout && chosen && chosen !== layout.audio[0] && !conversion
+          ? filtered(cleaned, createAudioChoice(layout.programPid, chosen.pid))
+          : cleaned;
       const delivery = !conversion ? "direct" : session.repair ? "repaired" : "converted";
       const body = Readable.from(chunks);
       body.on("error", (cause) => {
@@ -611,10 +634,7 @@ function make(deps: PlaybackDeps) {
       const output = await new Promise<string | null>((resolve) => {
         const child = execFile(
           ffprobe,
-          [
-            ...["-v", "error", "-print_format", "json", "-show_streams", "-show_format"],
-            `${base}/source/${session.token}`,
-          ],
+          [...PROBE_ARGUMENTS, `${base}/source/${session.token}`],
           { timeout: PROBE_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 },
           (error, stdout) => resolve(error ? null : stdout),
         );
@@ -692,7 +712,7 @@ function make(deps: PlaybackDeps) {
       open: (
         channelId: string,
         decoders: readonly Codec[],
-        options: { readonly repair?: boolean } = {},
+        options: { readonly repair?: boolean; readonly audio?: number | null } = {},
       ) =>
         openOne(
           Effect.gen(function* () {
@@ -720,6 +740,8 @@ function make(deps: PlaybackDeps) {
               format: upstream.format,
               decoders: new Set(decoders),
               repair: options.repair ?? false,
+              audio: options.audio ?? null,
+              layout: null,
               closed,
               scope: sessionScope,
               active: null,
@@ -794,6 +816,12 @@ function make(deps: PlaybackDeps) {
       closeAll,
 
       failure: (sessionId: string) => Effect.sync(() => sessions.get(sessionId)?.failure ?? null),
+
+      tracks: (sessionId: string) =>
+        Effect.sync(() => {
+          const session = sessions.get(sessionId);
+          return session?.kind === "live" && session.layout ? channelTracks(session.layout) : null;
+        }),
     };
   });
 }
@@ -951,14 +979,50 @@ async function* replay(
 }
 
 /** The stream from its first decodable picture on. */
-async function* cleanStart(
+function cleanStart(
   chunks: AsyncGenerator<Uint8Array>,
   filter: ReturnType<typeof createCleanStart>,
 ): AsyncGenerator<Uint8Array> {
+  return filtered(chunks, filter);
+}
+
+/** The stream through a filter that takes chunks and returns whole packets. */
+async function* filtered(
+  chunks: AsyncGenerator<Uint8Array>,
+  filter: { push(chunk: Uint8Array): Uint8Array },
+): AsyncGenerator<Uint8Array> {
   for await (const chunk of chunks) {
-    const filtered = filter.push(chunk);
-    if (filtered.length > 0) yield filtered;
+    const out = filter.push(chunk);
+    if (out.length > 0) yield out;
   }
+}
+
+/** The tracks a channel's program table names, as the UI lists them. */
+function channelTracks(layout: StreamLayout): ChannelTracks {
+  return {
+    audio: audioTracks(
+      layout.audio.map((track, index) => ({
+        id: track.pid,
+        language: track.language,
+        name: null,
+        default: index === 0,
+        channels: null,
+        description: track.description,
+      })),
+    ),
+    subtitles: subtitleTracks(
+      layout.subtitles.map((track) => ({
+        id: track.pid,
+        page: track.page,
+        format: track.format,
+        language: track.language,
+        name: null,
+        default: false,
+        forced: false,
+        hearingImpaired: track.hearingImpaired,
+      })),
+    ),
+  };
 }
 
 /** "HEVC 10-bit video and MP2 sound", for a stream this build cannot convert. */

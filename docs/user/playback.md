@@ -28,7 +28,8 @@ Providers keep movies and episodes as files, mostly MKV and MP4 and a few AVI. M
 | HEVC (H.265) video                                       | Plays as it is on macOS; converted to H.264 where there's no HEVC decoder |
 | MPEG-4 Part 2 (Xvid) or MPEG-2 video                     | Converted to H.264                                                        |
 | SubRip, ASS or MP4 text subtitles                        | Shown under the picture                                                   |
-| Subtitles stored as pictures (Blu-ray, DVD)              | Listed as unavailable                                                     |
+| Subtitles stored as pictures (Blu-ray, DVD, DVB)         | Listed as unavailable for now                                             |
+| Teletext subtitles and closed captions                   | Listed as unavailable for now                                             |
 
 A movie starts about a second after you choose it. Skipping into what's already loaded is instant; skipping further away starts it again from there, which takes about a second too.
 

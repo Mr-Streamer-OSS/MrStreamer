@@ -1,6 +1,7 @@
-// Reads the start of an MPEG-TS stream to learn which codecs it carries, before any byte reaches
-// the player. The program tables name each track's format; for MPEG audio, HEVC and AAC the
-// first frame header adds what the tables leave open: MP2 or MP3, 8 or 10-bit, the channel layout.
+// Reads the start of an MPEG-TS stream to learn which tracks it carries, before any byte reaches
+// the player. The program tables name each track's format, language and, for teletext and DVB
+// subtitles, their pages; for MPEG audio, HEVC and AAC the first frame header adds what the tables
+// leave open: MP2 or MP3, 8 or 10-bit, the channel layout.
 import type { Codec } from "@mrstreamer/contracts/playback";
 
 const PACKET = 188;
@@ -11,10 +12,30 @@ interface Track {
   readonly codec: Codec | "unknown";
 }
 
+interface AudioStream extends Track {
+  /** ISO 639-2 code from the program table, or null. */
+  readonly language: string | null;
+  /** Describes the picture for viewers who can't see it. */
+  readonly description: boolean;
+}
+
+/** A teletext subtitle page, or the pictures of a DVB subtitle page. */
+interface SubtitleStream {
+  readonly pid: number;
+  readonly format: "teletext" | "picture";
+  /** Teletext: the page, 888. DVB: the composition page. */
+  readonly page: number;
+  readonly language: string | null;
+  readonly hearingImpaired: boolean;
+}
+
 /** The tracks of the first program, in the order its table lists them. */
 export interface StreamLayout {
+  /** The pid of the program table, which names the tracks. */
+  readonly programPid: number;
   readonly video: Track | null;
-  readonly audio: readonly Track[];
+  readonly audio: readonly AudioStream[];
+  readonly subtitles: readonly SubtitleStream[];
 }
 
 /** A track whose codec needs a look at its first frame. */
@@ -45,24 +66,31 @@ export function createInspector() {
   let unaligned = 0;
   let aligned = false;
   let pmtPid: number | null = null;
-  let tracks:
-    | { pid: number; codec: Codec | "unknown"; pending: Pending | null; kind: "video" | "audio" }[]
-    | null = null;
+  let table: ProgramTable | null = null;
   /** Payload collected from the first PES packet of each pending track. */
   const payloads = new Map<number, Uint8Array>();
 
   function inspection(): Inspection | null {
-    if (!tracks) return null;
-    const known = tracks.map(({ pid, codec, pending, kind }) => ({
-      kind,
-      track: { pid, codec: pending ? fallback(pending) : codec },
-    }));
+    if (!table || pmtPid === null) return null;
+    const settled = (track: TableTrack) => ({
+      pid: track.pid,
+      codec: track.pending ? fallback(track.pending) : track.codec,
+    });
+    const video = table.tracks.find((track) => track.kind === "video");
     return {
       layout: {
-        video: known.find((entry) => entry.kind === "video")?.track ?? null,
-        audio: known.filter((entry) => entry.kind === "audio").map((entry) => entry.track),
+        programPid: pmtPid,
+        video: video ? settled(video) : null,
+        audio: table.tracks
+          .filter((track) => track.kind === "audio")
+          .map((track) => ({
+            ...settled(track),
+            language: track.language,
+            description: track.description,
+          })),
+        subtitles: table.subtitles,
       },
-      open: tracks.flatMap((track) => (track.pending ? [CANDIDATES[track.pending]] : [])),
+      open: table.tracks.flatMap((track) => (track.pending ? [CANDIDATES[track.pending]] : [])),
     };
   }
 
@@ -77,9 +105,9 @@ export function createInspector() {
     const payload = bytes.subarray(offset);
 
     if (pid === 0 && start && pmtPid === null) pmtPid = parsePat(payload);
-    else if (pid === pmtPid && start && tracks === null) tracks = parsePmt(payload);
-    else if (tracks) {
-      const track = tracks.find((entry) => entry.pid === pid);
+    else if (pid === pmtPid && start && table === null) table = parsePmt(payload);
+    else if (table) {
+      const track = table.tracks.find((entry) => entry.pid === pid);
       if (!track?.pending) return;
       const collected = payloads.get(pid);
       if (!collected && !start) return;
@@ -154,28 +182,118 @@ function parsePat(payload: Uint8Array): number | null {
   return null;
 }
 
-function parsePmt(payload: Uint8Array) {
+interface TableTrack {
+  readonly pid: number;
+  readonly kind: "video" | "audio";
+  codec: Codec | "unknown";
+  pending: Pending | null;
+  readonly language: string | null;
+  readonly description: boolean;
+}
+
+interface ProgramTable {
+  readonly tracks: TableTrack[];
+  readonly subtitles: readonly SubtitleStream[];
+}
+
+function parsePmt(payload: Uint8Array): ProgramTable | null {
   const section = payload.subarray(1 + payload[0]!);
   if (section[0] !== 0x02) return null;
   const length = ((section[1]! & 0x0f) << 8) | section[2]!;
   const end = Math.min(3 + length - 4, section.length);
   const programInfo = ((section[10]! & 0x0f) << 8) | section[11]!;
-  const found: {
-    pid: number;
-    codec: Codec | "unknown";
-    pending: Pending | null;
-    kind: "video" | "audio";
-  }[] = [];
+  const tracks: TableTrack[] = [];
+  const subtitles: SubtitleStream[] = [];
   for (let offset = 12 + programInfo; offset + 5 <= end;) {
     const type = section[offset]!;
     const pid = ((section[offset + 1]! & 0x1f) << 8) | section[offset + 2]!;
     const infoLength = ((section[offset + 3]! & 0x0f) << 8) | section[offset + 4]!;
     const descriptors = section.subarray(offset + 5, offset + 5 + infoLength);
-    const entry = classify(type, descriptors);
-    if (entry) found.push({ pid, ...entry });
     offset += 5 + infoLength;
+    const pages = type === 0x06 ? subtitlePages(pid, descriptors) : [];
+    if (pages.length > 0) {
+      subtitles.push(...pages);
+      continue;
+    }
+    const entry = classify(type, descriptors);
+    if (entry) tracks.push({ pid, ...entry, ...audioFacts(descriptors) });
   }
-  return found;
+  return { tracks, subtitles };
+}
+
+/** The language and purpose a track's descriptors give it. */
+function audioFacts(descriptors: Uint8Array): { language: string | null; description: boolean } {
+  let language: string | null = null;
+  let description = false;
+  for (const [tag, body] of descriptorsOf(descriptors)) {
+    // ISO 639 language, then the audio type: 3 is commentary for viewers who can't see.
+    if (tag === 0x0a && body.length >= 4) {
+      language = code(body.subarray(0, 3));
+      description ||= body[3] === 0x03;
+    }
+    // DVB's supplementary audio descriptor: an editorial classification of 1 is a description.
+    if (tag === 0x7f && body[0] === 0x06 && body.length >= 2) {
+      description ||= ((body[1]! >> 2) & 0x1f) === 0x01;
+      if (body[1]! & 0x01 && body.length >= 5) language = code(body.subarray(2, 5));
+    }
+  }
+  return { language, description };
+}
+
+/** Teletext subtitle pages and DVB subtitle pages a private data track describes. */
+function subtitlePages(pid: number, descriptors: Uint8Array): SubtitleStream[] {
+  const pages: SubtitleStream[] = [];
+  for (const [tag, body] of descriptorsOf(descriptors)) {
+    // Teletext, or VBI teletext: language, type and magazine, page. Types 2 and 5 are subtitles,
+    // 5 for viewers who are hard of hearing.
+    if (tag === 0x56 || tag === 0x46) {
+      for (let entry = 0; entry + 5 <= body.length; entry += 5) {
+        const kind = body[entry + 3]! >> 3;
+        if (kind !== 0x02 && kind !== 0x05) continue;
+        const magazine = body[entry + 3]! & 0x07 || 8;
+        const page = magazine * 100 + Number(body[entry + 4]!.toString(16));
+        if (!Number.isInteger(page)) continue;
+        pages.push({
+          pid,
+          format: "teletext",
+          page,
+          language: code(body.subarray(entry, entry + 3)),
+          hearingImpaired: kind === 0x05,
+        });
+      }
+    }
+    // DVB subtitles: language, type, composition page, ancillary page. Types 0x20 to 0x24 are
+    // for viewers who are hard of hearing.
+    if (tag === 0x59) {
+      for (let entry = 0; entry + 8 <= body.length; entry += 8) {
+        const kind = body[entry + 3]!;
+        pages.push({
+          pid,
+          format: "picture",
+          page: (body[entry + 4]! << 8) | body[entry + 5]!,
+          language: code(body.subarray(entry, entry + 3)),
+          hearingImpaired: kind >= 0x20 && kind <= 0x24,
+        });
+      }
+    }
+  }
+  return pages;
+}
+
+/** Each descriptor's tag and body. */
+function* descriptorsOf(descriptors: Uint8Array): Generator<readonly [number, Uint8Array]> {
+  for (let offset = 0; offset + 2 <= descriptors.length; offset += 2 + descriptors[offset + 1]!) {
+    yield [
+      descriptors[offset]!,
+      descriptors.subarray(offset + 2, offset + 2 + descriptors[offset + 1]!),
+    ];
+  }
+}
+
+/** A three-letter language code, or null for one that isn't letters. */
+function code(bytes: Uint8Array): string | null {
+  const text = String.fromCharCode(...bytes).toLowerCase();
+  return /^[a-z]{3}$/.test(text) ? text : null;
 }
 
 /** What a PMT entry is, from its stream type and descriptors. Subtitles and data are skipped. */

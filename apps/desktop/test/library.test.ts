@@ -60,7 +60,7 @@ describe("live library", () => {
       name: "TEST | Formats and failures",
       group: null,
       title: "TEST | Formats and failures",
-      channelCount: 12,
+      channelCount: 13,
     });
     expect(categories[1]).toMatchObject({ group: "United Kingdom", title: "Entertainment" });
     expect(updates).toContainEqual({

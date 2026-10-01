@@ -20,7 +20,13 @@ import {
   type Title,
   type TitleDetails,
 } from "./ondemand.ts";
-import { CODECS, type StreamFailure, type StreamSession, type TitleSession } from "./playback.ts";
+import {
+  CODECS,
+  type ChannelTracks,
+  type StreamFailure,
+  type StreamSession,
+  type TitleSession,
+} from "./playback.ts";
 import { Preferences } from "./preferences.ts";
 import type { SubscriptionSummary } from "./subscription.ts";
 import type { UpdateStatus } from "./updates.ts";
@@ -75,11 +81,14 @@ export const ipcInputs = {
       channelId: "string",
       decoders: decoders(),
       "repair?": "boolean",
+      /** The sound track to play, by PID; the channel's first otherwise. */
+      "audio?": "number.integer >= 0",
     }),
   "playback.openTitle": () => type({ title: TitleRef, decoders: decoders() }),
   "playback.close": () => type({ sessionId: "string" }),
   "playback.closeAll": none,
   "playback.failure": () => type({ sessionId: "string" }),
+  "playback.tracks": () => type({ sessionId: "string" }),
   "preferences.get": none,
   "preferences.update": () => Preferences.partial(),
   "viewing.get": none,
@@ -148,6 +157,8 @@ export interface IpcOutputs {
   "playback.closeAll": null;
   /** Why a session's upstream request failed, or null if it has not failed. */
   "playback.failure": StreamFailure | null;
+  /** A playing channel's sound and subtitle tracks; null until its stream has started. */
+  "playback.tracks": ChannelTracks | null;
   "preferences.get": Preferences;
   "preferences.update": Preferences;
   /** Favourites and recently watched channels of the connected account. */

@@ -53,12 +53,18 @@ export interface TitleSession {
   readonly duration: number | null;
   /** Sound tracks in the file's order. */
   readonly audio: readonly AudioTrack[];
-  /** Subtitle tracks in the file's order, including ones that can't be shown. */
+  /** Subtitle tracks in the file's order, whatever their format. */
+  readonly subtitles: readonly SubtitleTrack[];
+}
+
+/** The sound and subtitle tracks of a playing channel, from its program table. */
+export interface ChannelTracks {
+  readonly audio: readonly AudioTrack[];
   readonly subtitles: readonly SubtitleTrack[];
 }
 
 export interface AudioTrack {
-  /** The track's number in the file; pass it back to choose it. */
+  /** The track's number in a file, or its PID in a channel; pass it back to choose it. */
   readonly id: number;
   /** ISO 639 language code as the file names it, or null. */
   readonly language: string | null;
@@ -68,16 +74,31 @@ export interface AudioTrack {
   readonly default: boolean;
 }
 
+/**
+ * How subtitles are carried. `text`: lines the player lays out, such as SubRip. `picture`:
+ * images drawn over the picture, such as PGS, DVD and DVB subtitles. `teletext`: a teletext
+ * subtitle page. `captions`: closed captions (CEA-608), inside the picture or as a track.
+ */
+export type SubtitleFormat = "text" | "picture" | "teletext" | "captions";
+
 export interface SubtitleTrack {
+  /**
+   * The track's number in a file, or its PID in a channel. Captions inside the picture use the
+   * picture's.
+   */
   readonly id: number;
+  /**
+   * Which of several in one track: a teletext page (888), a DVB subtitle page, or a caption
+   * channel (1 for CC1). Null when the track holds one.
+   */
+  readonly page: number | null;
+  readonly format: SubtitleFormat;
   readonly language: string | null;
   /** "Nederlands", "English · SDH", "Deutsch · Forced" */
   readonly label: string;
   /** Only for scenes in another language, such as signs and foreign dialogue. */
   readonly forced: boolean;
   readonly default: boolean;
-  /** False for subtitles stored as pictures, which the player can't show. */
-  readonly text: boolean;
 }
 
 /** Why the provider did not deliver a stream. */

@@ -31,7 +31,7 @@ import { clock, episodeLabel, episodeNow, nextEpisode, playTitle } from "../../l
 import { cn } from "../../lib/utils.ts";
 import { Picture } from "../../player/Picture.tsx";
 import { player, type PlaybackProblem } from "../../player/player.ts";
-import { titlePlayer, useTitlePlayer } from "../../player/title-player.ts";
+import { SHOWN_SUBTITLES, titlePlayer, useTitlePlayer } from "../../player/title-player.ts";
 import { useFullscreen, useWake } from "../watch/layout.ts";
 import { VolumeControl } from "../watch/VolumeControl.tsx";
 
@@ -299,7 +299,7 @@ function Tracks({ open, onOpenChange }: { open: boolean; onOpenChange: (open: bo
   const audio = useTitlePlayer((state) => state.audio);
   const subtitles = useTitlePlayer((state) => state.subtitles);
   const audioId = useTitlePlayer((state) => state.audioId);
-  const subtitleId = useTitlePlayer((state) => state.subtitleId);
+  const subtitle = useTitlePlayer((state) => state.subtitle);
   if (audio.length < 2 && subtitles.length === 0) return null;
   return (
     <Popover.Root open={open} onOpenChange={onOpenChange}>
@@ -322,19 +322,19 @@ function Tracks({ open, onOpenChange }: { open: boolean; onOpenChange: (open: bo
               ))}
             </TrackList>
             <TrackList title="Subtitles">
-              <Choice chosen={subtitleId === null} onChoose={() => titlePlayer.setSubtitle(null)}>
+              <Choice chosen={subtitle === null} onChoose={() => titlePlayer.setSubtitle(null)}>
                 Off
               </Choice>
               {subtitles.map((track) => (
                 <Choice
-                  key={track.id}
-                  chosen={track.id === subtitleId}
-                  disabled={!track.text}
-                  onChoose={() => titlePlayer.setSubtitle(track.id)}
+                  key={`${track.id}:${track.page}`}
+                  chosen={track.id === subtitle?.id && track.page === subtitle.page}
+                  disabled={!SHOWN_SUBTITLES.has(track.format)}
+                  onChoose={() => titlePlayer.setSubtitle(track)}
                 >
                   {track.label}
-                  {!track.text && (
-                    <span className="text-muted-foreground"> · a picture, can't show</span>
+                  {!SHOWN_SUBTITLES.has(track.format) && (
+                    <span className="text-muted-foreground"> · can't show</span>
                   )}
                 </Choice>
               ))}

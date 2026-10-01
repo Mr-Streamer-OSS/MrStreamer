@@ -7,20 +7,29 @@ import type { StreamLayout } from "./inspect.ts";
 export interface Conversion {
   readonly video: "copy" | "h264" | "none";
   readonly audio: "copy" | "aac" | "none";
+  /**
+   * The tracks kept, by PID, and kept under the same PIDs, so the player finds the subtitles
+   * where the program table said and no two tracks share one.
+   */
+  readonly pids: {
+    readonly video: number | null;
+    readonly audio: number | null;
+    readonly subtitles: readonly number[];
+  };
 }
 
 /**
- * What to convert so the player decodes the picture and the first sound track, or null when it
- * already does. The player plays the first sound track, so the others do not matter. `repair`
- * re-encodes the picture as well.
+ * What to convert so the player decodes the picture and the chosen sound track, or null when it
+ * already does. The player plays one sound track, so the others do not matter. `repair`
+ * re-encodes the picture as well. `audio` chooses a sound track by PID; the first otherwise.
  */
 export function planConversion(
   layout: StreamLayout,
   decoders: ReadonlySet<Codec>,
-  options: { readonly repair?: boolean } = {},
+  options: { readonly repair?: boolean; readonly audio?: number | null } = {},
 ): Conversion | null {
   const { video } = layout;
-  const audio = layout.audio[0];
+  const audio = layout.audio.find((track) => track.pid === options.audio) ?? layout.audio[0];
   // Repairing re-encodes a picture the player could decode but not survive.
   const videoOk =
     !video || (!options.repair && video.codec !== "unknown" && decoders.has(video.codec));
@@ -29,6 +38,11 @@ export function planConversion(
   return {
     video: !video ? "none" : videoOk ? "copy" : "h264",
     audio: !audio ? "none" : audioOk ? "copy" : "aac",
+    pids: {
+      video: video?.pid ?? null,
+      audio: audio?.pid ?? null,
+      subtitles: [...new Set(layout.subtitles.map((track) => track.pid))],
+    },
   };
 }
 
@@ -43,8 +57,18 @@ export function ffmpegArguments(conversion: Conversion): string[] {
     ...["-fflags", "+genpts"],
     ...["-f", "mpegts", "-i", "pipe:0"],
   ];
-  if (conversion.video !== "none") args.push("-map", "0:v:0");
-  if (conversion.audio !== "none") args.push("-map", "0:a:0");
+  const { pids } = conversion;
+  const kept = [
+    ...(conversion.video !== "none" ? [{ map: "0:v:0", pid: pids.video }] : []),
+    ...(conversion.audio !== "none" ? [{ map: "0:a:0", pid: pids.audio }] : []),
+    // Teletext and DVB subtitles pass as they are.
+    ...pids.subtitles.map((pid) => ({ map: "", pid })),
+  ];
+  kept.forEach(({ map, pid }, index) => {
+    args.push("-map", pid === null ? map : `0:i:${pid}${map ? "" : "?"}`);
+    if (pid !== null) args.push("-streamid", `${index}:${pid}`);
+  });
+  if (pids.subtitles.length > 0) args.push("-c:s", "copy");
   if (conversion.video === "copy") args.push("-c:v", "copy");
   if (conversion.video === "h264") {
     args.push(

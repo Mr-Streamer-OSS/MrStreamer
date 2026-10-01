@@ -14,8 +14,8 @@ The suite checks what the services promise, through their public functions, agai
 | `apps/desktop/test/diagnostics.test.ts`  | What the log records for a session, without addresses, logins or channel names; rotation                                                                                                                                                                                                              |
 | `apps/desktop/test/viewing.test.ts`      | Favourites and history order across restarts, commands sent again, accounts, change notices, the one-time import from `preferences.json`, rebuilding from events, records from before movies and series, how far movies and episodes got, removing from Continue watching, a database that can't open |
 | `apps/desktop/test/guide.test.ts`        | Now and next, the rest of the day, untidy XMLTV in small pieces, guide ids shared by unrelated channels, programme search, restarts from disk, six-hour refreshes and failed ones, answering before the first download, account changes                                                               |
-| `apps/desktop/test/playback.test.ts`     | The local proxy, one-connection switching, quitting, refusals, and what the player receives for each codec clip                                                                                                                                                                                       |
-| `apps/desktop/test/titles.test.ts`       | Movies and episodes: track names, playing from a position with cues on the file's clock, copied and converted sound and picture, the chosen track, MP4 read by byte ranges, missing files, one connection while seeking                                                                               |
+| `apps/desktop/test/playback.test.ts`     | The local proxy, one-connection switching, quitting, refusals, what the player receives for each codec clip, a channel's sound and subtitle tracks, the chosen sound track, played as it is or converted                                                                                              |
+| `apps/desktop/test/titles.test.ts`       | Movies and episodes: track names, subtitles in every format, playing from a position with cues on the file's clock, copied and converted sound and picture, the chosen track, MP4 read by byte ranges, missing files, one connection while seeking                                                    |
 | `apps/desktop/test/updates.test.ts`      | Channels, release routing, going back to Stable, closed notices, downloads and retries, channel switches, checks answering late, the four-hourly schedule and its backoff, the feed, GitHub as the fallback and its limits                                                                            |
 | `apps/desktop/test/installer.test.ts`    | The electron-updater adapter: cancelling at every step, one download at a time, refused installs                                                                                                                                                                                                      |
 | `apps/desktop/test/licences.test.ts`     | Third-party notices: which packages the bundles hold, NOTICE files, what fails the build, prebuilt files, components, reading notices and Chromium's credits                                                                                                                                          |
@@ -48,13 +48,14 @@ ffmpeg -f lavfi -i smptebars=size=128x72:rate=25 -f lavfi -i sine=frequency=440:
 | `h264-open-gop-joined`              | Four seconds of `testsrc2` with `-x264-params keyint=25:min-keyint=25:open-gop=1:bframes=3:scenecut=0`, cut 45% in on a 188-byte boundary, like joining a broadcast mid-sequence |
 | `h264-damaged`                      | `h264-aac` with the payload of two video packets a third of the way in overwritten, like lost packets                                                                            |
 
-Three title clips stand in for movies and episodes, with the same test picture and tone:
+Four title clips stand in for movies and episodes, with the same test picture and tone:
 
-| Clip                       | What it holds                                                                                                                                                         |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `title-h264-eac3-subs.mkv` | 20 s, a keyframe every 5 s; E-AC-3 5.1 in English and a Spanish AAC commentary at 660 Hz; English SubRip subtitles at 2, 12 and 17 s, and forced Spanish ones at 12 s |
-| `title-h264-aac.mp4`       | 12 s, AAC marked Dutch, English `mov_text` subtitles, and the index at the end, as ffmpeg writes MP4 by default                                                       |
-| `title-mpeg4-mp3.avi`      | 6 s of MPEG-4 Part 2 with MP3: a picture the player doesn't decode                                                                                                    |
+| Clip                          | What it holds                                                                                                                                                         |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `title-h264-eac3-subs.mkv`    | 20 s, a keyframe every 5 s; E-AC-3 5.1 in English and a Spanish AAC commentary at 660 Hz; English SubRip subtitles at 2, 12 and 17 s, and forced Spanish ones at 12 s |
+| `title-h264-aac.mp4`          | 12 s, AAC marked Dutch, English `mov_text` subtitles, and the index at the end, as ffmpeg writes MP4 by default                                                       |
+| `title-mpeg4-mp3.avi`         | 6 s of MPEG-4 Part 2 with MP3: a picture the player doesn't decode                                                                                                    |
+| `title-h264-picture-subs.mkv` | `title-h264-aac.mp4`'s picture and sound, with English PGS subtitles at 2 to 4 and 8 to 10 s, and forced Dutch DVD subtitles at 8 to 10 s                             |
 
 ```sh
 # en.srt: "First line" 2-4 s, "Twelve seconds" 12-14 s, "Seventeen" 17-19 s; es.srt: "Doce" 12-14 s
@@ -71,6 +72,8 @@ ffmpeg -f lavfi -i testsrc2=size=128x72:rate=25 -f lavfi -i sine=frequency=440:s
 ffmpeg -f lavfi -i testsrc2=size=128x72:rate=25 -f lavfi -i sine=frequency=440:sample_rate=48000 -t 6 \
   -c:v mpeg4 -q:v 8 -g 50 -c:a libmp3lame -b:a 32k -ac 2 title-mpeg4-mp3.avi
 ```
+
+`apps/desktop/scripts/subtitle-fixtures.ts` writes the subtitle clips with the ffmpeg on PATH: `title-h264-picture-subs.mkv` above, and `h264-subtitles.mpegts`, four seconds of a channel with English and Dutch sound, Dutch DVB subtitles from 0.5 to 3 s, teletext page 888 in Dutch from 1 to 3 s, and closed captions in the picture from 1 to 3 s. It draws the text with a pixel font of its own and writes teletext and captions from their specifications, so nothing comes from a real broadcast. FFmpeg's decoders and libzvbi read every one back: the DVB, DVD and PGS pictures, "TELETEKST 888" and "HELLO CAPTIONS". The fake provider streams the channel as "TEST | Subtitles and two sound tracks", and as the movie "TEST | Broadcast recording"; "TEST | Picture subtitles" plays the title clip.
 
 ## Packaged app
 

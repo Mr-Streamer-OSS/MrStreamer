@@ -134,6 +134,8 @@ const FIXTURE_CHANNELS: readonly { name: string; fixture: string | null }[] = [
   { name: "TEST | H.264 joined mid-stream", fixture: "h264-open-gop-joined.mpegts" },
   /** Lost packets mid-stream, which a decoder has to conceal. */
   { name: "TEST | H.264 damaged", fixture: "h264-damaged.mpegts" },
+  /** English and Dutch sound, DVB subtitles, teletext page 888 and captions in the picture. */
+  { name: "TEST | Subtitles and two sound tracks", fixture: "h264-subtitles.mpegts" },
   { name: "TEST | Offline", fixture: null },
 ];
 
@@ -626,6 +628,12 @@ const TEST_MOVIES: readonly { name: string; container: string; fixture: string |
   { name: "TEST | Index at the end (NL)", container: "mp4", fixture: "title-h264-aac.mp4" },
   { name: "TEST | Old AVI (NL)", container: "avi", fixture: "title-mpeg4-mp3.avi" },
   { name: "TEST | Missing file (NL)", container: "mkv", fixture: null },
+  {
+    name: "TEST | Picture subtitles (MULTI)",
+    container: "mkv",
+    fixture: "title-h264-picture-subs.mkv",
+  },
+  { name: "TEST | Broadcast recording (NL)", container: "ts", fixture: "h264-subtitles.mpegts" },
 ];
 
 /** Builds roughly `size` movies and series. The same size always gives the same titles. */
