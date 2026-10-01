@@ -62,6 +62,18 @@ describe("movies and series", { timeout: 20_000 }, () => {
     expect((await onDemand.search("adult film")).movies).toEqual([]);
   });
 
+  it("keeps series marked for adults out of everything else, whatever their category", async () => {
+    const { onDemand, settings } = await onDemandApp();
+    const series = (id: "all" | "adult") =>
+      onDemand.collection({ kind: "series", id, sort: "title", offset: 0, limit: 1000 });
+
+    expect((await series("all")).titles.map((title) => title.title)).not.toContain("After Dark");
+    expect((await onDemand.search("after dark")).series).toEqual([]);
+
+    await settings.update({ adultTitles: true });
+    expect((await series("adult")).titles.map((title) => title.title)).toEqual(["After Dark"]);
+  });
+
   it("searches movies and series by any words of their names", async () => {
     const { onDemand } = await onDemandApp();
 
@@ -127,6 +139,24 @@ describe("movies and series", { timeout: 20_000 }, () => {
     const after = await onDemand.status();
     expect(after.movies).toBeGreaterThan(before.movies);
     expect(after.failure).toEqual({ kind: "provider-error", status: 503 });
+  });
+
+  it("keeps the lists when the provider refuses the login for them", async () => {
+    const { onDemand, provider } = await onDemandApp();
+    await onDemand.collection({ kind: "movie", id: "all", offset: 0, limit: 1 });
+    const before = await onDemand.status();
+    provider.failTitles("login");
+
+    // Twice: a second empty answer in a row would count as the provider's real lists.
+    for (const _ of [1, 2]) {
+      await expect(onDemand.refresh()).rejects.toMatchObject({ error: { kind: "invalid-login" } });
+    }
+
+    expect(await onDemand.status()).toMatchObject({
+      movies: before.movies,
+      series: before.series,
+      failure: { kind: "invalid-login" },
+    });
   });
 
   it("doesn't ask the provider again for every list after the first fetch failed", async () => {
