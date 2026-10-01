@@ -1,7 +1,9 @@
-// Settings > Movies & series: the language titles show and play in, and TMDB, where genres,
-// popularity and streaming services come from. The app has its own key; a viewer's own comes
-// first, for when TMDB stops accepting the app's.
+// Settings > Movies & series: the language titles show and play in, whether titles for adults
+// show, and TMDB, where genres, popularity and streaming services come from. The app has its
+// own key; a viewer's own comes first, for when TMDB stops accepting the app's.
+import { Checkbox } from "@base-ui/react/checkbox";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Check } from "lucide-react";
 import { useState } from "react";
 import type { Preferences } from "@mrstreamer/contracts/preferences";
 import { DEFAULT_TITLE_LANGUAGE, TITLE_LANGUAGES } from "@mrstreamer/core/ondemand/languages";
@@ -20,7 +22,7 @@ export function TitlesSection() {
     mutationFn: (patch: Partial<Preferences>) => call("preferences.update", patch),
     onSuccess: async (saved) => {
       client.setQueryData(queries.preferences().queryKey, saved);
-      // Lists show other versions in another language; a new key fetches again.
+      // Lists change with the language and with titles for adults; a new key fetches again.
       await client.invalidateQueries({ queryKey: ["ondemand"] });
     },
   });
@@ -57,6 +59,24 @@ export function TitlesSection() {
           Which version of a film plays, the sound to start with, and what the rows show.
         </p>
       </div>
+
+      <label className="flex items-center gap-3">
+        <Checkbox.Root
+          checked={preferences.data?.adultTitles ?? false}
+          onCheckedChange={(checked) => update.mutate({ adultTitles: checked })}
+          className="grid size-4 flex-none place-items-center rounded-[0.25rem] shadow-[inset_0_0_0_1.5px_rgb(255_255_255/45%)] outline-none transition-shadow duration-150 focus-visible:ring-2 focus-visible:ring-ring data-checked:bg-white data-checked:shadow-none"
+        >
+          <Checkbox.Indicator>
+            <Check className="size-3 text-black" strokeWidth={3} />
+          </Checkbox.Indicator>
+        </Checkbox.Root>
+        <span>
+          Titles for adults{" "}
+          <span className="text-muted-foreground">
+            · In their own tab, never on Home or in search
+          </span>
+        </span>
+      </label>
 
       <div>
         <div className="mb-2 font-medium">TMDB</div>

@@ -303,14 +303,20 @@ function make(deps: OnDemandDeps) {
         loaded((source, language) => call("tiles", { key: source.key, language, kind, of })),
       collection: ({ kind, id, sort, offset, limit }: CollectionQuery) =>
         loaded((source, language) =>
-          call("collection", {
-            key: source.key,
-            language,
-            kind,
-            id,
-            offset,
-            limit,
-            ...(sort ? { sort } : {}),
+          Effect.gen(function* () {
+            // Titles for adults only once the viewer asked for them.
+            if (id === "adult" && !(yield* settings.get).adultTitles) {
+              return { name: "For adults", total: 0, titles: [] };
+            }
+            return yield* call("collection", {
+              key: source.key,
+              language,
+              kind,
+              id,
+              offset,
+              limit,
+              ...(sort ? { sort } : {}),
+            });
           }),
         ),
       search: (query: string) =>

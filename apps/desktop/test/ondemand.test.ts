@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { OnDemand } from "../src/main/services/ondemand.ts";
+import { Settings } from "../src/main/services/preferences.ts";
 import { mainLayer } from "../src/main/runtime.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
@@ -12,7 +13,8 @@ async function onDemandApp(options: { titles?: number } = {}) {
     const runtime = runtimeFor(mainLayer(testConfig(dataDir)));
     const subscriptions = await promised(runtime, Subscriptions);
     const onDemand = await promised(runtime, OnDemand);
-    return { runtime, subscriptions, onDemand };
+    const settings = await promised(runtime, Settings);
+    return { runtime, subscriptions, onDemand, settings };
   };
   const app = await start();
   await app.subscriptions.connect({ server: provider.url, username: "demo", password: "demo" });
@@ -44,6 +46,19 @@ describe("movies and series", { timeout: 20_000 }, () => {
     expect(all.titles.some((title) => title.adult)).toBe(false);
     expect(all.total).toBe(all.titles.length);
     expect((await onDemand.status()).movies).toBeGreaterThan(all.total);
+    expect((await onDemand.search("adult film")).movies).toEqual([]);
+  });
+
+  it("lists titles for adults on their own, once the viewer asks for them", async () => {
+    const { onDemand, settings } = await onDemandApp();
+    const adult = () => onDemand.collection({ kind: "movie", id: "adult", offset: 0, limit: 100 });
+    expect((await adult()).total).toBe(0);
+
+    await settings.update({ adultTitles: true });
+    const listed = await adult();
+    expect(listed.total).toBeGreaterThan(0);
+    expect(listed.titles.every((title) => title.adult)).toBe(true);
+    // Still nowhere else.
     expect((await onDemand.search("adult film")).movies).toEqual([]);
   });
 

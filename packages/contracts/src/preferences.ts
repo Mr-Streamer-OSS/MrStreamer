@@ -20,6 +20,8 @@ export const Preferences = type({
   "titleLanguage?": "string",
   /** The viewer's own TMDB key or read access token, used instead of the app's. */
   "tmdbKey?": "string",
+  /** Titles the provider marks for adults show, in their own tab. Off when absent. */
+  "adultTitles?": "boolean",
 });
 export type Preferences = typeof Preferences.infer;
 
