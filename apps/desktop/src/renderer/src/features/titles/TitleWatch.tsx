@@ -1,22 +1,12 @@
 // Playing a movie or an episode: the picture fills the window, with the title, a scrubber and the
-// controls along the bottom, fading when idle. Audio and subtitles opens the file's tracks; a
-// series offers its next episode, only when asked. Back returns to where the title was opened.
+// controls along the bottom, fading when idle. Sound and CC open the file's tracks; a series
+// offers its next episode, only when asked. Back returns to where the title was opened.
 //   Space or K pauses, Left and Right skip 10 seconds, Up and Down change the volume, F is full
-//   screen, M mutes, N plays the next episode. Escape closes the tracks, then leaves full screen,
-//   then goes back.
-import { Popover } from "@base-ui/react/popover";
+//   screen, M mutes, C turns subtitles on or off, N plays the next episode. Escape closes a track
+//   menu, then leaves full screen, then goes back.
 import { Slider as SliderPrimitive } from "@base-ui/react/slider";
 import { useQuery } from "@tanstack/react-query";
-import {
-  Languages,
-  Maximize,
-  Minimize,
-  Pause,
-  Play,
-  RotateCcw,
-  RotateCw,
-  SkipForward,
-} from "lucide-react";
+import { Maximize, Minimize, Pause, Play, RotateCcw, RotateCw, SkipForward } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Episode, SeriesDetails } from "@mrstreamer/contracts/ondemand";
 import { hasModifier, isTyping } from "../../app/platform.ts";
@@ -33,6 +23,7 @@ import { Picture } from "../../player/Picture.tsx";
 import { player, type PlaybackProblem } from "../../player/player.ts";
 import { titlePlayer, useTitlePlayer } from "../../player/title-player.ts";
 import { useFullscreen, useWake } from "../watch/layout.ts";
+import { TrackMenus, type TrackMenu } from "../watch/TrackMenus.tsx";
 import { VolumeControl } from "../watch/VolumeControl.tsx";
 
 /** Controls fade out after this long without input. */
@@ -50,7 +41,7 @@ export function TitleWatch() {
   const [fullscreen, toggleFullscreen] = useFullscreen();
   const now = useTitlePlayer((state) => state.now);
   const phase = useTitlePlayer((state) => state.phase);
-  const [tracksOpen, setTracksOpen] = useState(false);
+  const [menu, setMenu] = useState<TrackMenu>(null);
   const next = useNextEpisode();
   const playNext = () => {
     if (next) playTitle(episodeNow(next.series, next.episode), 0);
@@ -68,8 +59,8 @@ export function TitleWatch() {
   }, [now]);
 
   // The key handler reads the latest render through a ref; see WatchScreen.
-  const latest = useRef({ tracksOpen, toggleFullscreen, wake, playNext });
-  latest.current = { tracksOpen, toggleFullscreen, wake, playNext };
+  const latest = useRef({ menu, toggleFullscreen, wake, playNext });
+  latest.current = { menu, toggleFullscreen, wake, playNext };
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       const ui = useUi.getState();
@@ -101,11 +92,14 @@ export function TitleWatch() {
         case "m":
           player.toggleMute();
           break;
+        case "c":
+          titlePlayer.toggleSubtitles();
+          break;
         case "n":
           current.playNext();
           break;
         case "Escape":
-          if (current.tracksOpen) return;
+          if (current.menu) return;
           if (document.fullscreenElement) void document.exitFullscreen();
           else leave();
           break;
@@ -122,11 +116,12 @@ export function TitleWatch() {
   }, []);
 
   if (!now) return null;
-  const controlsVisible = awake || phase.kind !== "playing" || tracksOpen;
+  const controlsVisible = awake || phase.kind !== "playing" || menu !== null;
   const ended = phase.kind === "ended";
   return (
     <div
       data-view="title"
+      data-controls={controlsVisible ? "" : undefined}
       onMouseMove={wake}
       className={cn(
         "fixed inset-0 z-30 overflow-hidden bg-black",
@@ -192,7 +187,7 @@ export function TitleWatch() {
               </Button>
             </Tooltip>
             <div className="ml-auto flex items-center gap-2">
-              <Tracks open={tracksOpen} onOpenChange={setTracksOpen} />
+              <Tracks menu={menu} onMenu={setMenu} />
               {next && (
                 <Button variant="media" onClick={playNext}>
                   <SkipForward />
@@ -295,84 +290,22 @@ function Scrubber() {
 }
 
 /** The file's sound and subtitle tracks, to choose from while playing. */
-function Tracks({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+function Tracks({ menu, onMenu }: { menu: TrackMenu; onMenu: (menu: TrackMenu) => void }) {
   const audio = useTitlePlayer((state) => state.audio);
   const subtitles = useTitlePlayer((state) => state.subtitles);
   const audioId = useTitlePlayer((state) => state.audioId);
   const subtitle = useTitlePlayer((state) => state.subtitle);
-  if (audio.length < 2 && subtitles.length === 0) return null;
   return (
-    <Popover.Root open={open} onOpenChange={onOpenChange}>
-      <Popover.Trigger render={<Button variant="media" />}>
-        <Languages />
-        Audio &amp; subtitles
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Positioner side="top" align="end" sideOffset={10} className="z-[60]">
-          <Popover.Popup className="grid max-h-[60vh] w-[32rem] grid-cols-2 gap-6 overflow-y-auto rounded-2xl bg-popover p-5 text-[0.9375rem] shadow-2xl ring-1 ring-white/12 outline-none transition-[opacity,scale] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
-            <TrackList title="Audio">
-              {audio.map((track) => (
-                <Choice
-                  key={track.id}
-                  chosen={track.id === audioId}
-                  onChoose={() => titlePlayer.setAudio(track.id)}
-                >
-                  {track.label}
-                </Choice>
-              ))}
-            </TrackList>
-            <TrackList title="Subtitles">
-              <Choice chosen={subtitle === null} onChoose={() => titlePlayer.setSubtitle(null)}>
-                Off
-              </Choice>
-              {subtitles.map((track) => (
-                <Choice
-                  key={`${track.id}:${track.page}`}
-                  chosen={track.id === subtitle?.id && track.page === subtitle.page}
-                  onChoose={() => titlePlayer.setSubtitle(track)}
-                >
-                  {track.label}
-                </Choice>
-              ))}
-            </TrackList>
-          </Popover.Popup>
-        </Popover.Positioner>
-      </Popover.Portal>
-    </Popover.Root>
-  );
-}
-
-function TrackList({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className="min-w-0">
-      <div className="mb-2 text-[0.8125rem] font-semibold text-muted-foreground">{title}</div>
-      <div className="space-y-0.5">{children}</div>
-    </div>
-  );
-}
-
-function Choice({
-  chosen,
-  onChoose,
-  children,
-}: {
-  chosen: boolean;
-  onChoose: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      aria-pressed={chosen}
-      onMouseDown={(event) => event.preventDefault()}
-      onClick={onChoose}
-      className={cn(
-        "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left",
-        chosen ? "text-white" : "text-foreground/80 hover:bg-white/6",
-      )}
-    >
-      <span className={cn("size-1.5 flex-none rounded-full", chosen && "bg-white")} />
-      <span className="min-w-0">{children}</span>
-    </button>
+    <TrackMenus
+      audio={audio}
+      audioId={audioId}
+      subtitles={subtitles}
+      subtitle={subtitle}
+      open={menu}
+      onOpenChange={onMenu}
+      onAudio={(id) => titlePlayer.setAudio(id)}
+      onSubtitle={(track) => titlePlayer.setSubtitle(track)}
+    />
   );
 }
 

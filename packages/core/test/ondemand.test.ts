@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { byIds, indexCatalogue, search } from "../src/ondemand/catalogue.ts";
 import { collections } from "../src/ondemand/collections.ts";
 import { episodeName, titleName } from "../src/ondemand/names.ts";
+import { channelSubtitle } from "../src/ondemand/tracks.ts";
 import { continueWatching, isFinished, type TitleRow } from "../src/viewing/titles.ts";
 
 describe("title names", () => {
@@ -213,5 +214,36 @@ describe("one title per film", () => {
     const index = indexCatalogue(catalogue, "en");
     expect(byIds(index, "movie", ["3"]).map((title) => title.id)).toEqual(["2"]);
     expect(search(index, "movie", "speak").map((title) => title.id)).toEqual(["2"]);
+  });
+});
+
+describe("subtitles a channel starts with", () => {
+  const sound = (language: string) => ({ id: 1, language, label: language, default: true });
+  const subtitles = (language: string, forced = false) => ({
+    id: 2,
+    page: 888,
+    format: "teletext" as const,
+    language,
+    label: language,
+    forced,
+    default: false,
+  });
+
+  it.each([
+    ["in the remembered language, where the channel speaks another", ["en"], "nl", "nl"],
+    ["none on a channel that speaks it: those are for the hard of hearing", ["nl"], "nl", null],
+    ["none on a channel with a sound track in it among others", ["en", "nl"], "dut", null],
+    ["none when turned off", ["en"], "off", null],
+    ["none when never chosen", ["en"], null, null],
+  ])("%s", (_, audio, remembered, language) => {
+    const tracks = { audio: audio.map(sound), subtitles: [subtitles("nl")] };
+
+    expect(channelSubtitle(tracks, remembered)?.language ?? null).toBe(language);
+  });
+
+  it("prefers full subtitles to forced ones", () => {
+    const tracks = { audio: [sound("en")], subtitles: [subtitles("nl", true), subtitles("nl")] };
+
+    expect(channelSubtitle(tracks, "nl")?.forced).toBe(false);
   });
 });

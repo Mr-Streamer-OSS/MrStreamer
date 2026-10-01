@@ -16,6 +16,7 @@ import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Progress } from "../../components/Progress.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { Tooltip } from "../../components/ui/tooltip.tsx";
+import { TrackMenus, type TrackMenu } from "./TrackMenus.tsx";
 import { useNow } from "../../lib/clock.ts";
 import { channelLine, clockTime, progressOf, techLine, timeLeft } from "../../lib/format.ts";
 import { queries, useFavouriteIds, useToggleFavourite } from "../../lib/queries.ts";
@@ -25,6 +26,9 @@ import { VolumeControl } from "./VolumeControl.tsx";
 
 interface NowPlayingProps {
   channel: LiveChannel;
+  /** The sound or subtitle menu open over the controls. */
+  menu: TrackMenu;
+  onMenu: (menu: TrackMenu) => void;
   categories: ReadonlyMap<string, Category>;
   fullscreen: boolean;
   onToggleFullscreen: () => void;
@@ -88,7 +92,12 @@ function Controls({
   onToggleFullscreen,
   onOpenChannels,
   onSwitch,
+  menu,
+  onMenu,
 }: NowPlayingProps) {
+  const tracks = usePlayer((state) => state.tracks);
+  const audioId = usePlayer((state) => state.audioId);
+  const subtitle = usePlayer((state) => state.subtitle);
   const active = usePlayer((state) => state.phase.kind !== "idle" && state.phase.kind !== "failed");
   const previous = usePlayer((state) => state.previous);
   const favourite = useFavouriteIds().has(channel.id);
@@ -151,6 +160,18 @@ function Controls({
             <Play className="size-4 translate-x-px fill-current" />
           </Button>
         </Tooltip>
+      )}
+      {tracks && (
+        <TrackMenus
+          audio={tracks.audio}
+          audioId={audioId}
+          subtitles={tracks.subtitles}
+          subtitle={subtitle}
+          open={menu}
+          onOpenChange={onMenu}
+          onAudio={(id) => player.setAudio(id)}
+          onSubtitle={(track) => player.setSubtitle(track)}
+        />
       )}
       <VolumeControl />
       <Tooltip label={fullscreen ? "Exit full screen" : "Full screen"}>

@@ -1,6 +1,11 @@
 // Sound and subtitle tracks as the viewer chooses them: named in their own language ("Deutsch",
 // "Nederlands"), with what sets them apart, and which ones play unless the viewer picks.
-import type { AudioTrack, SubtitleFormat, SubtitleTrack } from "@mrstreamer/contracts/playback";
+import type {
+  AudioTrack,
+  ChannelTracks,
+  SubtitleFormat,
+  SubtitleTrack,
+} from "@mrstreamer/contracts/playback";
 
 /**
  * ISO 639-2 bibliographic codes, as files often carry them, and the codes Intl knows them by.
@@ -190,4 +195,19 @@ export function chooseTracks(
       ? undefined
       : shown.find((track) => track.forced && track.language === sound?.language);
   return { audio: sound?.id ?? null, subtitle: wanted ?? forced ?? null };
+}
+
+/**
+ * The subtitles a channel starts with: in the remembered language, plain ones before forced, and
+ * only where none of its sound tracks speaks it. On a channel that does, they are for the hard of
+ * hearing, as teletext page 888 mostly is.
+ */
+export function channelSubtitle(
+  tracks: ChannelTracks,
+  subtitleLanguage: string | null,
+): SubtitleTrack | null {
+  const code = subtitleLanguage === "off" ? null : languageCode(subtitleLanguage);
+  if (!code || tracks.audio.some((track) => track.language === code)) return null;
+  const wanted = tracks.subtitles.filter((track) => track.language === code);
+  return wanted.find((track) => !track.forced) ?? wanted[0] ?? null;
 }

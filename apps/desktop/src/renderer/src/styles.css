@@ -73,6 +73,28 @@ input {
   app-region: no-drag;
 }
 
+/*
+ * Subtitles, text and pictures alike, show only in Watch and a playing title, not in the muted
+ * previews, and rise above the player's controls while they show.
+ */
+video::-webkit-media-text-track-container,
+[data-subtitles] {
+  visibility: hidden;
+}
+[data-view] video::-webkit-media-text-track-container,
+[data-view] [data-subtitles] {
+  visibility: visible;
+  transition: translate 150ms;
+}
+[data-view="watch"][data-controls] video::-webkit-media-text-track-container,
+[data-view="watch"][data-controls] [data-subtitles] {
+  translate: 0 -5.5rem;
+}
+[data-view="title"][data-controls] video::-webkit-media-text-track-container,
+[data-view="title"][data-controls] [data-subtitles] {
+  translate: 0 -9rem;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;

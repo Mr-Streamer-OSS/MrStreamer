@@ -265,13 +265,16 @@ describe("playback", () => {
     await playback.dispose();
   });
 
-  it("plays the chosen sound track, keeping the rest of the stream", async () => {
+  it.each([
+    ["chosen sound track", { audio: 0x102 }],
+    ["sound track in the remembered language", { audioLanguage: "nl" }],
+  ])("plays the %s, keeping the rest of the stream", async (_, choice) => {
     const { provider, playback } = await connectedPlayback();
 
     const session = await playback.open(
       channelNamed(provider, "TEST | Subtitles and two sound tracks"),
       LINUX,
-      { audio: 0x102 },
+      choice,
     );
     const received = streamIds(Buffer.from(await (await fetch(session.url)).arrayBuffer()));
 

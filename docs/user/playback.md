@@ -14,6 +14,9 @@ Most channels play directly. For the rest, Mr. Streamer converts only what the p
 | HEVC video on Windows or Linux without a hardware decoder          | The picture is converted to H.264; 4K is reduced to 1080p                     |
 | MPEG-2 video                                                       | The picture is converted to H.264 and deinterlaced                            |
 | A picture the player can't decode because the broadcast is damaged | Mr. Streamer retries once with the picture re-encoded, which hides the damage |
+| Several sound tracks                                               | The one in the language you picked last plays, else the channel's first       |
+| DVB subtitles                                                      | Drawn over the picture                                                        |
+| Teletext subtitles and closed captions                             | Shown under the picture                                                       |
 
 Converted channels take a moment longer to start, about a second, and use more of your computer's processor, especially when the picture is converted.
 
@@ -35,7 +38,7 @@ A movie starts about a second after you choose it. Skipping into what's already 
 
 ## Known limits
 
-- Live channels show no subtitles or teletext, and play their first sound track.
+- Live subtitles show from their next line after you turn them on, and another sound track starts the channel again.
 - Surround sound that needs converting plays as stereo.
 - After you skip in a movie or episode, picture subtitles, teletext and captions already on screen at that moment show again from the next line.
 - Converting an HEVC or Xvid picture uses much more of your computer's processor than playing it as it is.

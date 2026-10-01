@@ -45,7 +45,7 @@ A poster opens its details over the list, which stays where it was: the artwork,
 The picture fills the window, with the title, a timeline and the controls along the bottom; they fade while you watch and come back when you move the pointer.
 
 - Drag the timeline, or skip back and forward 10 seconds. A skip into what's already loaded is instant; further away, the picture takes a second to catch up.
-- **Audio & subtitles** lists the sound tracks and subtitles the file carries. Your choice of language is remembered, and the next title that has it starts with it. Until you choose, the sound in your language from Settings > Movies & series plays when the file has it, else the file's own default, with subtitles only where the file marks them as forced for that language, such as translations of signs.
+- **Sound** lists the sound tracks the file carries, and **CC** its subtitles. C turns the last ones you picked on and off, and a paused title stays paused while it changes. Your choice of language is remembered, and the next title or channel that has it starts with it. Until you choose, the sound in your language from Settings > Movies & series plays when the file has it, else the file's own default, with subtitles only where the file marks them as forced for that language, such as translations of signs.
 - **Next episode** plays the next one, whenever you choose. At the end of an episode Mr. Streamer offers it, but never plays it on its own.
 - **Back**, or Escape, returns to the details or the page you came from.
 
@@ -63,6 +63,7 @@ Home's first row shows what you were watching: movies you started, and for each 
 | Left, Right | Back or forward 10 seconds            |
 | Up, Down    | Volume                                |
 | N           | Next episode                          |
+| C           | Subtitles on and off                  |
 | F, M        | Full screen, mute                     |
 | Escape      | Close a menu, leave full screen, back |
 

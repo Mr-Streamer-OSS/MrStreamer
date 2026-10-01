@@ -30,7 +30,7 @@ Get the latest release from the [Releases page](https://github.com/Mr-Streamer-O
 1. Enter your provider's server address, username and password, or paste the M3U link your provider sent. Mr. Streamer checks the login and loads your channels.
 2. **Home** plays your last channel, muted, with what's on now, then what you were watching, your favourites, new movies and new series.
 3. **Live TV** lists every channel with what's on now and next, by favourites, country and category. [Live TV](docs/user/live-tv.md) covers the guide and its keys.
-4. **Movies** and **Series** list what your provider offers on demand, in tabs: For you, New, genres, streaming services and everything. **Resume** carries on where you stopped, **Audio & subtitles** picks the tracks, and a series offers its next episode. See [Movies and series](docs/user/movies-and-series.md).
+4. **Movies** and **Series** list what your provider offers on demand, in tabs: For you, New, genres, streaming services and everything. **Resume** carries on where you stopped, **Sound** and **CC** pick the tracks, and a series offers its next episode. See [Movies and series](docs/user/movies-and-series.md).
 5. ⌘K (Ctrl K on Windows and Linux) searches channels, programmes, movies and series.
 
 Settings (⌘, or Ctrl ,) shows your subscription, the language for movies and series, updates and the open-source licences.

@@ -34,6 +34,11 @@ export interface TitleRun {
   readonly page: number | null;
   /** Converts the sound even when the player decodes it: the second try after a failed start. */
   readonly convertSound: boolean;
+  /**
+   * Shows the first picture and waits, as when the viewer changes tracks or skips while paused;
+   * otherwise it plays.
+   */
+  readonly paused: boolean;
   /** Seconds, so the element's timeline covers the whole title. */
   readonly duration: number | null;
 }
@@ -252,7 +257,20 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     from = Math.max(run.start, buffer.buffered.length > 0 ? buffer.buffered.start(0) : run.start);
     video.currentTime = from;
     lastTime = from;
-    void video.play().catch(() => {});
+    if (run.paused) {
+      // Paused, the clock doesn't move: the run has started once the picture is there.
+      void new Promise((ready) => {
+        if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && !video.seeking) ready(null);
+        else video.addEventListener("seeked", ready, { once: true });
+      }).then(() => {
+        if (!settled && !finished) {
+          settled = true;
+          resolve();
+        }
+      });
+    } else {
+      void video.play().catch(() => {});
+    }
     for (;;) {
       await room();
       if (abort.signal.aborted) return;
