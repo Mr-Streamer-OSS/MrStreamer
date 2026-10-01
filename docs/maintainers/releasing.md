@@ -23,7 +23,6 @@ Releases come from `.github/workflows/release.yml` and live on GitHub Releases. 
     - Linux x64: the AppImage and deb
     - every `latest*.yml` must name the release version
     - the [packaged-app test](testing.md#packaged-app) runs on the installed DMG, setup, deb and AppImage
-  - for nightlies and dry runs, `measure` then [compares the build with the last nightly](testing.md#app-measurements) on macOS and Linux and reports it in the run summary. It can't fail the run or hold up publishing.
 - Publishes only when every check and platform succeeded:
   - checks that each platform's installers and update metadata are present
   - attaches them with the FFmpeg and x264 sources the GPL requires, `SHA256SUMS.txt`, and the [notes](#release-notes)
