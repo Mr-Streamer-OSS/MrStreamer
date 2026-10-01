@@ -284,17 +284,29 @@ describe("version labels", () => {
 
 describe("details", () => {
   it.each([
-    ["the version's own name, marks and all", "Blow 1080p (NL AUDIO)", null],
-    ["the shown name in capitals", "BLOW", null],
-    ["another name", "Blow: Het Verhaal", "Blow: Het Verhaal"],
-  ])("leave out the provider's original name when it is %s", (_, originalName, shown) => {
+    [
+      "not the provider's, when it is the version's name with marks",
+      "Blow 1080p (NL AUDIO)",
+      undefined,
+      null,
+    ],
+    ["not the provider's, when it is the shown name in capitals", "BLOW", undefined, null],
+    [
+      "the provider's, when it is another name",
+      "Blow: Het Verhaal",
+      undefined,
+      "Blow: Het Verhaal",
+    ],
+    ["TMDB's, when TMDB answered", "Blow: Het Verhaal", "Blow Up", "Blow Up"],
+    ["none, when TMDB answered with the shown name", "Blow: Het Verhaal", "Blow", null],
+  ])("show as the original title %s", (_, originalName, tmdbOriginal, shown) => {
     const title = {
       kind: "movie" as const,
       id: "1",
-      name: "Blow 2001 (NL AUDIO)",
+      name: "Blow 1080p (NL AUDIO)",
       title: "Blow",
       originalTitle: null,
-      tags: ["NL AUDIO"],
+      tags: ["NL AUDIO", "1080p"],
       year: 2001,
       posterUrl: null,
       backdropUrl: null,
@@ -303,7 +315,7 @@ describe("details", () => {
       adult: false,
       tmdbId: null,
       genres: [],
-      versions: [{ id: "1", tags: ["NL AUDIO"] }],
+      versions: [{ id: "1", tags: ["NL AUDIO", "1080p"] }],
     };
     const provider = {
       originalName,
@@ -319,7 +331,20 @@ describe("details", () => {
       episodes: [],
       container: null,
     };
+    const about =
+      tmdbOriginal === undefined
+        ? null
+        : {
+            original: tmdbOriginal,
+            overview: null,
+            poster: null,
+            backdrop: null,
+            genres: [],
+            runtime: null,
+            cast: [],
+            directors: [],
+          };
 
-    expect(movieDetails(title, provider).originalTitle).toBe(shown);
+    expect(movieDetails(title, provider, about).originalTitle).toBe(shown);
   });
 });

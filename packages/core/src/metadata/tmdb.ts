@@ -30,6 +30,8 @@ export interface TitleNames {
 
 /** What a title's details show from TMDB, asked for when the viewer opens it. */
 export interface TitleAbout {
+  /** The name in the language it was made in. */
+  readonly original: string | null;
   readonly overview: string | null;
   /** Paths on TMDB's image server; `tmdbImage` makes them addresses. */
   readonly poster: string | null;
@@ -132,6 +134,8 @@ const Details = type({
 });
 
 const About = type({
+  "original_title?": "string | null",
+  "original_name?": "string | null",
   "overview?": "string | null",
   "poster_path?": "string | null",
   "backdrop_path?": "string | null",
@@ -263,6 +267,7 @@ export function tmdb(options: TmdbOptions) {
               .filter((person) => person.job === "Director")
               .map((person) => person.name);
       return {
+        original: (body.original_title ?? body.original_name)?.trim() || null,
         overview: body.overview?.trim() || null,
         poster: body.poster_path ?? null,
         backdrop: body.backdrop_path ?? null,
