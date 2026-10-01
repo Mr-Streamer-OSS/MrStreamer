@@ -11,16 +11,14 @@ import { call } from "../../lib/ipc.ts";
 import { queries } from "../../lib/queries.ts";
 import { player } from "../../player/player.ts";
 import { cn } from "../../lib/utils.ts";
-import { UpdatesSection } from "../updates/UpdatesSection.tsx";
 import tmdbLogo from "../../assets/tmdb.svg";
 import { Licences } from "./Licences.tsx";
-import { TitlesSection } from "./TitlesSection.tsx";
+import { GeneralSection } from "./GeneralSection.tsx";
 import { useUpdates } from "../updates/use-updates.ts";
 
 const TABS: readonly { value: SettingsTab; label: string }[] = [
+  { value: "general", label: "General" },
   { value: "subscription", label: "Subscription" },
-  { value: "titles", label: "Movies & series" },
-  { value: "updates", label: "Updates" },
   { value: "about", label: "About" },
 ];
 
@@ -80,9 +78,8 @@ export function SettingsPage() {
         ) : (
           <main className="min-w-0 flex-1 overflow-y-auto px-10 pt-6 pb-10">
             <div className="max-w-[40rem]">
+              {tab === "general" && <GeneralSection />}
               {tab === "subscription" && <Subscription />}
-              {tab === "titles" && <TitlesSection />}
-              {tab === "updates" && <UpdatesSection />}
               {tab === "about" && <About />}
             </div>
           </main>

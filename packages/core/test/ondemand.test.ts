@@ -306,6 +306,7 @@ describe("details", () => {
       name: "Blow 1080p (NL AUDIO)",
       title: "Blow",
       originalTitle: null,
+      originalLanguage: null,
       tags: ["NL AUDIO", "1080p"],
       year: 2001,
       posterUrl: null,

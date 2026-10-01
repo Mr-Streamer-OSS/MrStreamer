@@ -138,7 +138,12 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
           : madeIn === "en"
             ? shown.original
             : tmdbName(id, "en").name;
-      return { title: name, originalTitle: name === shown.original ? null : shown.original };
+      return {
+        title: name,
+        originalTitle: name === shown.original ? null : shown.original,
+        // Which sound "Original language" plays.
+        originalLanguage: madeIn,
+      };
     };
     const all = async () =>
       (await onDemand.collection({ kind: "movie", id: "all", offset: 0, limit: 500 })).titles;

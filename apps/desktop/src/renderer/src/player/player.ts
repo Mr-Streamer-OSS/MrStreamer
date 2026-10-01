@@ -13,6 +13,7 @@
 import { createStore, useStore } from "zustand";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
+import { ORIGINAL_SOUND } from "@mrstreamer/contracts/preferences";
 import type {
   ChannelTracks,
   StreamFailure,
@@ -189,8 +190,8 @@ async function start(
       decoders: [...decoders],
       repair,
       ...(audioId !== null ? { audio: audioId } : {}),
-      // The sound in the viewer's language, when the channel has it; "original" is its own.
-      ...(preferred && preferred !== "original" ? { audioLanguage: preferred } : {}),
+      // The sound in the viewer's language, when the channel has it; the original is its own.
+      ...(preferred && preferred !== ORIGINAL_SOUND ? { audioLanguage: preferred } : {}),
     });
   } catch (cause) {
     if (mine === selection)

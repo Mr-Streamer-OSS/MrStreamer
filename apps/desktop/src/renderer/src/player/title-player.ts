@@ -13,7 +13,7 @@ import type {
   SubtitleFormat,
   SubtitleTrack,
 } from "@mrstreamer/contracts/playback";
-import type { Preferences } from "@mrstreamer/contracts/preferences";
+import { ORIGINAL_SOUND, type Preferences } from "@mrstreamer/contracts/preferences";
 import { DEFAULT_TITLE_LANGUAGE } from "@mrstreamer/core/ondemand/languages";
 import { chooseTracks } from "@mrstreamer/core/ondemand/tracks";
 import { appError } from "../lib/errors.ts";
@@ -47,6 +47,8 @@ export interface NowPlaying {
   /** For episodes: "S2 E3 · Aankomst in Tbilisi". */
   readonly detail: string | null;
   readonly artworkUrl: string | null;
+  /** The language it was made in, which "Original language" sound plays; null when unknown. */
+  readonly originalLanguage: string | null;
 }
 
 type TitlePhase =
@@ -292,13 +294,15 @@ export const titlePlayer = {
         return;
       }
       session = { id: opened.sessionId, url: opened.url };
+      // The sound picked last or in Settings, else the movies and series language, English to
+      // begin with. "original" is the language the title was made in, or the file's own choice.
+      const sound =
+        preferences?.audioLanguage ?? preferences?.titleLanguage ?? DEFAULT_TITLE_LANGUAGE;
       const chosen = chooseTracks(
         opened.audio,
         opened.subtitles,
         {
-          // The sound picked last, else the movies and series language, English to begin with.
-          audioLanguage:
-            preferences?.audioLanguage ?? preferences?.titleLanguage ?? DEFAULT_TITLE_LANGUAGE,
+          audioLanguage: sound === ORIGINAL_SOUND ? now.originalLanguage : sound,
           subtitleLanguage: preferences?.subtitleLanguage ?? null,
         },
         SHOWN_SUBTITLES,

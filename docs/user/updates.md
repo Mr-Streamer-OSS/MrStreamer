@@ -16,23 +16,23 @@ On Linux, installing the deb package asks for your password, because installing 
 
 ## Updates in Settings
 
-Settings (⌘, on macOS, Ctrl , on Windows and Linux) > **Updates** shows your version and channel, when Mr. Streamer last checked and when it checks next, and the step the update is at, with the same actions as the top bar. **Check now** looks straight away. **What's new** lists the changes in the offered version, each linked to its details.
+Settings (⌘, on macOS, Ctrl , on Windows and Linux) > General > **Updates** shows your version, where the update stands: when Mr. Streamer checks next, that it's up to date, or the step the update is at, with the same actions as the top bar, and your channel. **Check now** looks straight away. **What's new** lists the changes in the offered version, each linked to its details.
 
 When a check doesn't work, Settings says why in a few words: you're offline, the update server answered with an error, or GitHub is limiting requests from your network and until when. A check Mr. Streamer made on its own fails quietly and tries again later, sooner at first; an update it found earlier stays available meanwhile.
 
 ## Install a newer version by hand
 
-**Download from GitHub** in Settings opens the release. You can also take any installer from the [Releases page](https://github.com/Mr-Streamer-OSS/MrStreamer/releases) and install it over the old one, as the [README](../../README.md#install) describes. Mr. Streamer keeps its data in a folder of its own (see [Troubleshooting](troubleshooting.md#where-your-data-is)), so everything carries over.
+**GitHub ›** beside an offered update in Settings opens its release. You can also take any installer from the [Releases page](https://github.com/Mr-Streamer-OSS/MrStreamer/releases) and install it over the old one, as the [README](../../README.md#install) describes. Mr. Streamer keeps its data in a folder of its own (see [Troubleshooting](troubleshooting.md#where-your-data-is)), so everything carries over.
 
 ## Stable and Nightly
 
 - **Stable** gets tested releases only.
 - **Nightly** gets new builds first, up to four a day when there are changes, and every stable release too. Nightly builds can have rough edges.
 
-The version you download sets your channel on first launch. After that, only your choice under **Updates** in Settings changes it. Installing a stable release while on Nightly keeps you on Nightly.
+The version you download sets your channel on first launch. After that, only **Channel** under **Updates** in Settings changes it. Installing a stable release while on Nightly keeps you on Nightly.
 
 ## Going back to Stable
 
-Choose **Stable** under **Updates** in Settings. Mr. Streamer offers the newest stable release right away, even when it is older than your nightly, and installs it like any other update: your login, preferences, favourites and history stay.
+Choose **Stable** as the **Channel** under **Updates** in Settings. Mr. Streamer offers the newest stable release right away, even when it is older than your nightly, and installs it like any other update: your login, preferences, favourites and history stay.
 
 A stable release older than your nightly may not have everything the nightly has. Stable 0.0.2 has no movies and series; how far you got in them stays saved and is back when you return to Nightly or a stable release that has them.

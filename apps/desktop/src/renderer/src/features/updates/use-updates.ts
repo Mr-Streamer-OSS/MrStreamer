@@ -36,7 +36,7 @@ export function useUpdates() {
      * release was refused or the install couldn't start; Settings then shows why.
      */
     restart: () => {
-      const showSettings = () => useUi.setState({ settings: "updates", updateDialog: null });
+      const showSettings = () => useUi.setState({ settings: "general", updateDialog: null });
       call("updates.restart").then(showSettings, showSettings);
     },
   };

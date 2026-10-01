@@ -19,7 +19,7 @@ The repository is a pnpm workspace: the app is `apps/desktop`, shared contracts 
 
 Mr. Streamer needs an Xtream Codes subscription to show anything; use your own. Keep its details out of the repository: the gitignored `.local/` folder is the place for private notes and test access.
 
-Genres, streaming services and popularity in Movies and Series come from TMDB. A development build has no key built in: set `MR_STREAMER_TMDB_KEY`, or paste one in Settings > Movies & series. A free TMDB account gets one.
+Genres, streaming services and popularity in Movies and Series come from TMDB. A development build has no key built in: set `MR_STREAMER_TMDB_KEY`, or paste one in Settings > General with **Own key…**. A free TMDB account gets one.
 
 Streams the player can't decode go through ffmpeg, and every movie and episode goes through ffprobe and ffmpeg (see [architecture](architecture.md#playback)). Development builds use the `ffmpeg` and `ffprobe` on your PATH (`brew install ffmpeg`, `apt install ffmpeg` or `winget install Gyan.FFmpeg`); packaged builds use their bundled copies.
 
