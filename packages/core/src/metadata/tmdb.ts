@@ -21,6 +21,13 @@ export interface TitleMetadata {
   readonly backdrop: string | null;
 }
 
+/** A film's or series' name in one language, and in the language it was made in. */
+export interface TitleNames {
+  /** The name in the language asked for; null when TMDB has no translation into it. */
+  readonly name: string | null;
+  readonly original: string | null;
+}
+
 /** A streaming service as TMDB names it, from JustWatch's data. */
 export interface StreamingService {
   readonly id: number;
@@ -83,6 +90,10 @@ const API = "https://api.themoviedb.org/3";
 const REQUEST_MS = 15_000;
 
 const Details = type({
+  "title?": "string | null",
+  "name?": "string | null",
+  "original_title?": "string | null",
+  "original_name?": "string | null",
   "genres?": type({ id: "number" }).array(),
   "original_language?": "string | null",
   "popularity?": "number",
@@ -152,20 +163,34 @@ export function tmdb(options: TmdbOptions) {
   }
 
   return {
-    /** What TMDB knows about a film or series. */
-    async details(kind: TmdbKind, id: string, signal?: AbortSignal): Promise<TitleMetadata> {
-      const body = Details(await get(`/${kind}/${id}`, { language: "en-US" }, signal));
+    /**
+     * What TMDB knows about a film or series, with its name in `language`, an ISO 639-1 code.
+     * TMDB answers with the original name when it has no translation; that counts as none, unless
+     * the title was made in that language.
+     */
+    async details(
+      kind: TmdbKind,
+      id: string,
+      language: string,
+      signal?: AbortSignal,
+    ): Promise<TitleMetadata & TitleNames> {
+      const body = Details(await get(`/${kind}/${id}`, { language }, signal));
       if (body instanceof type.errors) {
         throw new TmdbError({ kind: "unavailable", detail: body.summary });
       }
+      const name = (body.title ?? body.name)?.trim() || null;
+      const original = (body.original_title ?? body.original_name)?.trim() || null;
+      const madeIn = body.original_language || null;
       return {
         genres: (body.genres ?? []).map((genre) => genre.id),
-        language: body.original_language || null,
+        language: madeIn,
         popularity: body.popularity ?? 0,
         rating: body.vote_average ?? 0,
         votes: body.vote_count ?? 0,
         collection: body.belongs_to_collection ?? null,
         backdrop: body.backdrop_path ?? null,
+        name: name !== original || madeIn === language ? name : null,
+        original,
       };
     },
 

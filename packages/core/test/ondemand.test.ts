@@ -120,6 +120,7 @@ describe("one title per film", () => {
         kind: "movie",
         titles: indexCatalogue(films, language).movies.titles,
         language,
+        names: () => null,
         metadata: (tmdbId) => ({
           genres: [18],
           language: madeIn[tmdbId] ?? null,
@@ -157,6 +158,7 @@ describe("one title per film", () => {
       titles,
       language: "en",
       metadata: () => null,
+      names: () => null,
       services: [],
       now: 0,
     });
@@ -198,6 +200,7 @@ describe("one title per film", () => {
       titles: indexCatalogue(films, "en").movies.titles,
       language: "en",
       metadata: () => null,
+      names: () => null,
       services: [],
       now,
     });

@@ -19,8 +19,13 @@ export interface Title {
   readonly id: string;
   /** The provider's name of that version, for search: "Blow 2001 (NL)". */
   readonly name: string;
-  /** The name to show: "Blow". */
+  /**
+   * The name to show: TMDB's name in the viewer's language once its metadata arrived, else the
+   * provider's without its marks, "Blow".
+   */
   readonly title: string;
+  /** TMDB's name in the language the title was made in, when it differs from `title`. */
+  readonly originalTitle: string | null;
   /** Markers from the name: language ("NL", "MULTI") and quality ("4K"). */
   readonly tags: readonly string[];
   readonly year: number | null;

@@ -14,7 +14,7 @@ import {
   search,
   type IndexedCatalogue,
 } from "@mrstreamer/core/ondemand/catalogue";
-import type { CollectionId, TitleKind } from "@mrstreamer/contracts/ondemand";
+import type { CollectionId, Title, TitleKind } from "@mrstreamer/contracts/ondemand";
 import type { OnDemandCatalogue } from "@mrstreamer/core/provider";
 import { tmdb } from "@mrstreamer/core/metadata/tmdb";
 import { collections, type Collections } from "@mrstreamer/core/ondemand/collections";
@@ -33,6 +33,8 @@ const setup = workerData as WorkerSetup;
 
 /** Counts arrivals of metadata, so collections built before them are built again. */
 let metadataVersion = 0;
+/** The viewer's language as the last call named it: TMDB's names are asked for in it. */
+let viewerLanguage = "en";
 
 /** TMDB's metadata, kept across subscriptions: it describes titles, not accounts. */
 const metadata = metadataStore({
@@ -124,7 +126,7 @@ function remember(key: string, fetchedAt: number, catalogue: OnDemandCatalogue):
   };
   // After the call that loaded it has answered, unless another catalogue took its place.
   setTimeout(() => {
-    if (loaded?.catalogue === catalogue) metadata.want(wantedOf(catalogue));
+    if (loaded?.catalogue === catalogue) metadata.want(wantedOf(catalogue), viewerLanguage);
   }, 0);
   return loaded;
 }
@@ -140,6 +142,7 @@ function collectionsOf(found: Loaded, language: string, kind: TitleKind): Collec
       titles: kindOf(indexOf(found, language), kind).titles,
       language,
       metadata: (tmdbId) => metadata.get(tmdbKind, tmdbId),
+      names: (tmdbId) => metadata.name(tmdbKind, tmdbId, language),
       services: metadata.services(tmdbKind),
       now: Date.now(),
     });
@@ -157,6 +160,24 @@ function collectionsOf(found: Loaded, language: string, kind: TitleKind): Collec
 const ROW_TITLES = 24;
 /** Streaming services For you shows as rows, most stocked first. */
 const SERVICE_ROWS = 3;
+
+/**
+ * Notes the viewer's language from a call; a new one asks TMDB for names in it, in the
+ * background.
+ */
+function speaking(language: string): void {
+  if (language === viewerLanguage) return;
+  viewerLanguage = language;
+  if (loaded) metadata.want(wantedOf(loaded.catalogue), language);
+}
+
+/** A title with TMDB's name for a viewer of `language`, once known. */
+function named(title: Title, language: string): Title {
+  const found = title.tmdbId
+    ? metadata.name(title.kind === "movie" ? "movie" : "tv", title.tmdbId, language)
+    : null;
+  return found ? { ...title, title: found.name, originalTitle: found.original } : title;
+}
 
 /** The catalogue as a viewer of `language` sees it. */
 function indexOf(found: Loaded, language: string): IndexedCatalogue {
@@ -276,16 +297,28 @@ const handlers: {
   status: async ({ key }) => statusOf(await current(key)),
   refresh,
   byIds: async ({ key, language, kind, ids }) => {
+    speaking(language);
     const found = await current(key);
-    return found ? byIds(indexOf(found, language), kind, ids) : [];
+    return found
+      ? byIds(indexOf(found, language), kind, ids).map((title) => named(title, language))
+      : [];
   },
   search: async ({ key, language, query }) => {
+    speaking(language);
     const found = await current(key);
     if (!found) return { movies: [], series: [] };
     const index = indexOf(found, language);
-    return { movies: search(index, "movie", query), series: search(index, "series", query) };
+    // TMDB's names count too: the translations and the original.
+    const aliases = (title: Title) =>
+      title.tmdbId
+        ? metadata.searchName(title.kind === "movie" ? "movie" : "tv", title.tmdbId)
+        : "";
+    const matches = (kind: TitleKind) =>
+      search(index, kind, query, aliases).map((title) => named(title, language));
+    return { movies: matches("movie"), series: matches("series") };
   },
   rows: async ({ key, language, kind, tab, like }) => {
+    speaking(language);
     const made = collectionsOf(await required(key), language, kind);
     const ids: CollectionId[] =
       tab === "new"
@@ -308,6 +341,7 @@ const handlers: {
     });
   },
   tiles: async ({ key, language, kind, of }) => {
+    speaking(language);
     const made = collectionsOf(await required(key), language, kind);
     return of === "genres"
       ? made.genres().map((genre) => ({
@@ -324,6 +358,7 @@ const handlers: {
         }));
   },
   collection: async ({ key, language, kind, id, sort, offset, limit }) => {
+    speaking(language);
     const made = collectionsOf(await required(key), language, kind);
     const titles = made.list(id, sort);
     return {

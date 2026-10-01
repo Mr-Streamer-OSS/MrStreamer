@@ -7,7 +7,8 @@ import { metadataStore, type Wanted } from "../src/main/ondemand/metadata.ts";
 import { OnDemand } from "../src/main/services/ondemand.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { mainLayer } from "../src/main/runtime.ts";
-import { startFakeTmdb, type FakeTmdb } from "./fake-tmdb.ts";
+import { Settings } from "../src/main/services/preferences.ts";
+import { startFakeTmdb, tmdbName, type FakeTmdb } from "./fake-tmdb.ts";
 import { fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 
 let tmdb: FakeTmdb | null = null;
@@ -111,6 +112,70 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
     expect(services).toEqual([expect.objectContaining({ name: "Netflix" })]);
     const rows = await onDemand.rows("movie", "for-you");
     expect(rows.map((row) => row.name)).toEqual(expect.arrayContaining(["Popular", "Netflix"]));
+  });
+
+  it("shows TMDB's names in the viewer's language, and finds titles by their original name", async () => {
+    const app = await metadataApp();
+    const { runtime, onDemand } = await app.start();
+    const settings = await promised(runtime, Settings);
+    const done = () =>
+      vi.waitFor(
+        async () => {
+          const { metadata } = await onDemand.status();
+          expect(metadata?.known).toBe(metadata?.wanted);
+        },
+        { timeout: 20_000 },
+      );
+    /** What a title shows, by TMDB's rules as the fake TMDB plays them. */
+    const expected = (tmdbId: string, language: string) => {
+      const id = Number(tmdbId);
+      const shown = tmdbName(id, language);
+      const madeIn = id % 3 === 0 ? "nl" : "en";
+      // Without a translation, the English name stands in; for an English film, its own.
+      const name =
+        shown.name !== shown.original || madeIn === language
+          ? shown.name
+          : madeIn === "en"
+            ? shown.original
+            : tmdbName(id, "en").name;
+      return { title: name, originalTitle: name === shown.original ? null : shown.original };
+    };
+    const all = async () =>
+      (await onDemand.collection({ kind: "movie", id: "all", offset: 0, limit: 500 })).titles;
+
+    // Lists take up what arrived with the store's next notice.
+    const named = (language: string) =>
+      vi.waitFor(
+        async () => {
+          const titles = (await all()).filter((title) => title.tmdbId);
+          expect(titles.length).toBeGreaterThan(0);
+          for (const title of titles) {
+            expect(title).toMatchObject(expected(title.tmdbId ?? "", language));
+          }
+          return titles;
+        },
+        { timeout: 20_000 },
+      );
+    await done();
+    const english = await named("en");
+    // A Dutch film shown by its English name is found by its Dutch one.
+    const dutch = english.find((title) => title.originalTitle?.startsWith("Origineel"));
+    expect(dutch).toBeDefined();
+    expect(
+      (await onDemand.search(dutch?.originalTitle ?? "")).movies.map((title) => title.tmdbId),
+    ).toContain(dutch?.tmdbId);
+
+    // Dutch names come in the background; English ones stay known.
+    const asked = app.tmdb.detailRequests();
+    await settings.update({ titleLanguage: "nl" });
+    await all();
+    await done();
+    await named("nl");
+    expect(app.tmdb.detailRequests("nl")).toBe(app.tmdb.detailRequests() - asked);
+    const both = app.tmdb.detailRequests();
+    await settings.update({ titleLanguage: "en" });
+    await named("en");
+    expect(app.tmdb.detailRequests()).toBe(both);
   });
 
   it("fetches nothing without a key", async () => {

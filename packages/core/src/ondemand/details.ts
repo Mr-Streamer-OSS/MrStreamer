@@ -58,8 +58,10 @@ function shared(title: Title, details: ProviderDetails) {
       posterUrl: title.posterUrl ?? details.posterUrl,
       backdropUrl: details.backdropUrl ?? title.backdropUrl,
     },
+    // TMDB's original name first; the provider's often repeats the shown one.
     originalTitle:
-      details.originalName && details.originalName !== title.title ? details.originalName : null,
+      title.originalTitle ??
+      (details.originalName && details.originalName !== title.title ? details.originalName : null),
     plot: details.plot,
     genres: details.genres,
     cast: details.cast,
