@@ -16,8 +16,8 @@ const KEEP_MS = 150 * 24 * 60 * 60_000;
 /** Which titles each streaming service carries changes often; fetched again after a week. */
 const SERVICES_KEEP_MS = 7 * 24 * 60 * 60_000;
 /** Requests in flight at once, and at most this many a second: TMDB allows about 50. */
-const PARALLEL = 6;
-const PER_SECOND = 30;
+const PARALLEL = 8;
+const PER_SECOND = 40;
 /** How often the store is written while fetching. */
 const SAVE_EVERY_MS = 30_000;
 /** Streaming services followed per region and kind, most prominent first. */

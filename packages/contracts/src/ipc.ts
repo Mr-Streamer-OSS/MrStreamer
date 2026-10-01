@@ -13,15 +13,12 @@ import {
   ROW_TABS,
   TitleRef,
   TITLE_KINDS,
-  TITLE_SORTS,
   type CollectionPage,
   type CollectionRow,
   type CollectionTile,
   type OnDemandStatus,
   type Title,
-  type TitleCategory,
   type TitleDetails,
-  type TitlePage,
 } from "./ondemand.ts";
 import { CODECS, type StreamFailure, type StreamSession, type TitleSession } from "./playback.ts";
 import { Preferences } from "./preferences.ts";
@@ -60,15 +57,6 @@ export const ipcInputs = {
   "guide.search": () => type({ query: "string" }),
   "ondemand.status": none,
   "ondemand.refresh": none,
-  "ondemand.categories": () => type({ kind: titleKind() }),
-  "ondemand.titles": () =>
-    type({
-      kind: titleKind(),
-      "categoryId?": "string",
-      sort: type.enumerated(...TITLE_SORTS),
-      offset: "number.integer >= 0",
-      limit: "1 <= number.integer <= 500",
-    }),
   "ondemand.search": () => type({ query: "string" }),
   "ondemand.rows": () =>
     type({ kind: titleKind(), tab: type.enumerated(...ROW_TABS), "like?": "string > 0" }),
@@ -142,10 +130,6 @@ export interface IpcOutputs {
   "ondemand.status": OnDemandStatus;
   /** Fetches the movie and series lists again. */
   "ondemand.refresh": OnDemandStatus;
-  /** A kind's categories, in the provider's order. Fetches the lists first when there are none. */
-  "ondemand.categories": readonly TitleCategory[];
-  /** One page of a category, or of every title without those for adults. */
-  "ondemand.titles": TitlePage;
   /** Movies and series whose name matches, best first, without titles for adults. */
   "ondemand.search": { readonly movies: readonly Title[]; readonly series: readonly Title[] };
   "ondemand.details": TitleDetails;

@@ -201,9 +201,9 @@ export function HomeScreen({ active }: { active: boolean }) {
   );
 }
 
-/** The newest titles of a kind, without those for adults. */
+/** The newest titles of a kind in the viewer's language, without those for adults. */
 function useNewest(kind: TitleKind, count: number): readonly Title[] {
-  const page = useQuery(queries.titles(kind, null, "added", 0, Math.max(count, 1)));
+  const page = useQuery(queries.collection(kind, "new-month", undefined, 0, Math.max(count, 1)));
   return page.data?.titles.slice(0, count) ?? NO_TITLES;
 }
 

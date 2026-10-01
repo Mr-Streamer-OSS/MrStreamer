@@ -9,11 +9,8 @@ import type {
   CollectionTile,
   RowTab,
   Title,
-  TitleCategory,
   TitleKind,
-  TitlePage,
 } from "@mrstreamer/contracts/ondemand";
-import type { PageQuery } from "@mrstreamer/core/ondemand/catalogue";
 import type { XtreamAccount } from "../providers/xtream.ts";
 import type { MetadataStatus } from "./metadata.ts";
 
@@ -38,11 +35,6 @@ export interface WorkerCalls {
   status: { args: { key: string }; result: WorkerStatus };
   /** Fetches both lists from the provider and keeps them when they look complete. */
   refresh: { args: { key: string; account: XtreamAccount }; result: WorkerStatus };
-  categories: {
-    args: { key: string; language: string; kind: TitleKind };
-    result: readonly TitleCategory[];
-  };
-  page: { args: { key: string; language: string; query: PageQuery }; result: TitlePage };
   byIds: {
     args: { key: string; language: string; kind: TitleKind; ids: readonly string[] };
     result: readonly Title[];

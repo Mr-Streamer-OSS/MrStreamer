@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { byIds, indexCatalogue, page, search } from "../src/ondemand/catalogue.ts";
+import { byIds, indexCatalogue, search } from "../src/ondemand/catalogue.ts";
 import { episodeName, titleName } from "../src/ondemand/names.ts";
 import { continueWatching, isFinished, type TitleRow } from "../src/viewing/titles.ts";
 
@@ -85,9 +85,8 @@ describe("one title per film", () => {
     seriesCategories: [],
     series: [],
   };
-  const query = { kind: "movie", sort: "added", offset: 0, limit: 10 } as const;
   const listed = (language: string) =>
-    page(indexCatalogue(catalogue, language), query).titles.map((title) => [
+    indexCatalogue(catalogue, language).movies.titles.map((title) => [
       title.id,
       title.versions.map((version) => version.id),
     ]);

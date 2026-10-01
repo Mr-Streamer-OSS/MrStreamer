@@ -22,7 +22,7 @@ async function metadataApp(key: string | null = "test-key") {
     );
     const onDemand = await promised(runtime, OnDemand);
     // Any list loads the catalogue, and with it the metadata.
-    await onDemand.page({ kind: "movie", sort: "added", offset: 0, limit: 10 });
+    await onDemand.collection({ kind: "movie", id: "all", offset: 0, limit: 10 });
     return { runtime, onDemand };
   };
   const runtime = runtimeFor(mainLayer(testConfig(dataDir)));

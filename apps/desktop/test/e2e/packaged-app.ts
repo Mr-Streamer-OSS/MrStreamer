@@ -122,6 +122,10 @@ async function playMovie(page: Page): Promise<{ ok: boolean; detail: string }> {
   await page.evaluate(
     `[...document.querySelectorAll("header button")].find((b) => b.textContent.trim() === "Movies").click()`,
   );
+  // Every movie is in the All movies tab, with or without TMDB's metadata.
+  const allTab = `[...document.querySelectorAll("nav button")].find((b) => b.textContent.trim() === "All movies")`;
+  await waitFor(() => page.evaluate<boolean>(`!!${allTab}`), 60_000);
+  await page.evaluate(`${allTab}.click()`);
   const poster = `[...document.querySelectorAll("button[title]")].find((b) => b.title.includes("Two sound tracks"))`;
   await waitFor(() => page.evaluate<boolean>(`!!${poster}`), 60_000);
   await page.evaluate(`${poster}.click()`);

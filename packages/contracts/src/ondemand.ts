@@ -47,18 +47,6 @@ export interface TitleVersion {
   readonly tags: readonly string[];
 }
 
-export interface TitleCategory {
-  readonly id: string;
-  /** The provider's name: "NL | NETFLIX FILMS". */
-  readonly name: string;
-  /** The country or region it is grouped under: "Netherlands". Null when it stands on its own. */
-  readonly group: string | null;
-  /** The name to show, within its group if it has one: "Netflix Films". */
-  readonly title: string;
-  readonly count: number;
-  readonly adult: boolean;
-}
-
 interface DetailsBase {
   readonly title: Title;
   readonly originalTitle: string | null;
@@ -127,10 +115,6 @@ export interface MetadataProgress {
   /** TMDB refused the key; nothing more arrives until it changes. */
   readonly refused: boolean;
 }
-
-/** What a list is ordered by: newest first, by name, or best rated first. */
-export const TITLE_SORTS = ["added", "title", "rating"] as const;
-export type TitleSort = (typeof TITLE_SORTS)[number];
 
 /** One page of a list, and how long the whole list is. */
 export interface TitlePage {

@@ -14,15 +14,12 @@ import type {
   OnDemandStatus,
   RowTab,
   Title,
-  TitleCategory,
   TitleDetails,
   TitleKind,
-  TitlePage,
   TitleRef,
 } from "@mrstreamer/contracts/ondemand";
 import { diagnosed } from "@mrstreamer/core/diagnostics";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
-import type { PageQuery } from "@mrstreamer/core/ondemand/catalogue";
 import { movieDetails, seriesDetails } from "@mrstreamer/core/ondemand/details";
 import { DEFAULT_TITLE_LANGUAGE } from "@mrstreamer/core/ondemand/languages";
 import type { ProviderDetails } from "@mrstreamer/core/provider";
@@ -83,8 +80,6 @@ export class OnDemand extends Context.Service<
     readonly refresh: Effect.Effect<OnDemandStatus, Failed>;
     /** Whether the lists should be fetched again: missing, or older than `maxAge`. */
     isStale(maxAge: Duration.Input): Effect.Effect<boolean>;
-    categories(kind: TitleKind): Effect.Effect<readonly TitleCategory[], Failed>;
-    page(query: PageQuery): Effect.Effect<TitlePage, Failed>;
     search(
       query: string,
     ): Effect.Effect<
@@ -277,12 +272,6 @@ function make(deps: OnDemandDeps) {
           const now = yield* Clock.currentTimeMillis;
           return worked.fetchedAt === null || now - worked.fetchedAt > Duration.toMillis(maxAge);
         }),
-
-      categories: (kind: TitleKind) =>
-        loaded((source, language) => call("categories", { key: source.key, language, kind })),
-
-      page: (query: PageQuery) =>
-        loaded((source, language) => call("page", { key: source.key, language, query })),
 
       rows: (kind: TitleKind, tab: RowTab, like?: string) =>
         loaded((source, language) =>

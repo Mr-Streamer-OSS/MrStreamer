@@ -5,7 +5,7 @@ import type { TitleKind } from "@mrstreamer/contracts/ondemand";
 export type View = "home" | "live" | "movies" | "series";
 
 /** The tabs of the Settings page, and the licences About opens. */
-export type SettingsTab = "subscription" | "updates" | "about" | "licences";
+export type SettingsTab = "subscription" | "titles" | "updates" | "about" | "licences";
 
 /** A list of channels the guide and Watch's channel list show. */
 export type ChannelList =

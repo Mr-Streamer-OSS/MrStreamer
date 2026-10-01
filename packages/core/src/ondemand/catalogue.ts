@@ -1,15 +1,9 @@
-// The movie and series catalogue as plain data and functions: indexing what the provider sent and
-// answering the lists, pages and searches the UI asks for. Display names are worked out here, on
-// load, so naming rules improve without fetching again. The language versions of one film, which
-// share a TMDB id, become one title that shows the version suiting the viewer's language.
-import type {
-  Title,
-  TitleCategory,
-  TitleKind,
-  TitlePage,
-  TitleSort,
-} from "@mrstreamer/contracts/ondemand";
-import { normalizeCatalogue } from "../catalogue/normalize.ts";
+// The movie and series catalogue as plain data and functions: indexing what the provider sent,
+// finding titles by id and searching them; collections.ts builds the lists the UI shows. Display
+// names are worked out here, on load, so naming rules improve without fetching again. The
+// language versions of one film, which share a TMDB id, become one title that shows the version
+// suiting the viewer's language.
+import type { Title, TitleKind } from "@mrstreamer/contracts/ondemand";
 import type { OnDemandCatalogue, ProviderCategory, ProviderTitle } from "../provider.ts";
 import { normalize } from "../text.ts";
 import { suitability } from "./languages.ts";
@@ -25,14 +19,8 @@ interface IndexedKind {
   readonly titles: readonly Title[];
   /** Every version's id, to the title it belongs to. */
   readonly byId: ReadonlyMap<string, Title>;
-  /** The file type each movie streams as. */
-  readonly containers: ReadonlyMap<string, string>;
-  readonly categories: readonly TitleCategory[];
-  readonly byCategory: ReadonlyMap<string, readonly Title[]>;
   /** Folded names, index-aligned with `titles`, worked out on the first search. */
   readonly searchNames: () => readonly string[];
-  /** Lists already sorted, by category (or "" for all) and order. */
-  readonly sorted: Map<string, readonly Title[]>;
 }
 
 export interface IndexedCatalogue {
@@ -57,7 +45,7 @@ function indexKind(
   raw: readonly ProviderTitle[],
   language: string,
 ): IndexedKind {
-  const shown = normalizeCatalogue({ categories: rawCategories, channels: [] }).categories;
+  // The adult flag is a standard field; a category named for adults also counts.
   const adultCategories = new Set(
     rawCategories.filter((category) => ADULT_CATEGORY.test(category.name)).map(({ id }) => id),
   );
@@ -76,8 +64,6 @@ function indexKind(
   /** Every version's name, title by title, for search. */
   const names: string[] = [];
   const byId = new Map<string, Title>();
-  const containers = new Map<string, string>();
-  const byCategory = new Map<string, Title[]>();
   for (const group of groups.values()) {
     const versions = group.map((item) => ({ item, name: titleName(item.name, item.releaseDate) }));
     if (versions.length > 1) {
@@ -122,67 +108,19 @@ function indexKind(
     };
     titles.push(title);
     names.push(versions.length === 1 ? first.item.name : group.map((item) => item.name).join(" "));
-    for (const { item } of versions) {
-      byId.set(item.id, title);
-      if (item.container) containers.set(item.id, item.container);
-    }
-    for (const categoryId of categoryIds) {
-      const list = byCategory.get(categoryId);
-      if (list) list.push(title);
-      else byCategory.set(categoryId, [title]);
-    }
+    for (const { item } of versions) byId.set(item.id, title);
   }
-  const categories = shown.flatMap((category): TitleCategory[] => {
-    const members = byCategory.get(category.id) ?? [];
-    if (members.length === 0) return [];
-    const adult =
-      adultCategories.has(category.id) ||
-      members.filter((title) => title.adult).length > members.length / 2;
-    return [{ ...category, count: members.length, adult }];
-  });
   return {
     titles,
     byId,
-    containers,
-    categories,
-    byCategory,
     searchNames: once(() =>
       titles.map((title, index) => normalize(`${title.title} ${names[index] ?? ""}`)),
     ),
-    sorted: new Map(),
   };
 }
 
 export function kindOf(catalogue: IndexedCatalogue, kind: TitleKind): IndexedKind {
   return kind === "movie" ? catalogue.movies : catalogue.series;
-}
-
-export interface PageQuery {
-  readonly kind: TitleKind;
-  /** A category, or every title of the kind. */
-  readonly categoryId?: string | undefined;
-  readonly sort: TitleSort;
-  readonly offset: number;
-  readonly limit: number;
-}
-
-/**
- * One page of a list. Titles for adults show only inside a category the viewer opened, never in
- * the lists of every title.
- */
-export function page(catalogue: IndexedCatalogue, query: PageQuery): TitlePage {
-  const indexed = kindOf(catalogue, query.kind);
-  const cacheKey = `${query.categoryId ?? ""}|${query.sort}`;
-  let list = indexed.sorted.get(cacheKey);
-  if (!list) {
-    const members =
-      query.categoryId === undefined
-        ? indexed.titles.filter((title) => !title.adult)
-        : (indexed.byCategory.get(query.categoryId) ?? []);
-    list = members.toSorted(ORDERS[query.sort]);
-    indexed.sorted.set(cacheKey, list);
-  }
-  return { total: list.length, titles: list.slice(query.offset, query.offset + query.limit) };
 }
 
 /** Titles by id, in the order asked, skipping ids the catalogue doesn't have. */
@@ -218,7 +156,7 @@ export function search(
     const rank = name.startsWith(folded) ? 0 : ` ${name}`.includes(` ${folded}`) ? 1 : 2;
     ranked.push({ title, rank });
   }
-  ranked.sort((a, b) => a.rank - b.rank || ORDERS.added(a.title, b.title));
+  ranked.sort((a, b) => a.rank - b.rank || (b.title.addedAt ?? 0) - (a.title.addedAt ?? 0));
   return ranked.slice(0, limit).map((entry) => entry.title);
 }
 
@@ -237,13 +175,3 @@ function once<A>(make: () => A): () => A {
   let value: { readonly made: A } | null = null;
   return () => (value ??= { made: make() }).made;
 }
-
-const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
-
-const byName = (a: Title, b: Title) => collator.compare(a.title, b.title);
-
-const ORDERS: Record<TitleSort, (a: Title, b: Title) => number> = {
-  added: (a, b) => (b.addedAt ?? 0) - (a.addedAt ?? 0) || byName(a, b),
-  title: byName,
-  rating: (a, b) => (b.rating ?? 0) - (a.rating ?? 0) || byName(a, b),
-};

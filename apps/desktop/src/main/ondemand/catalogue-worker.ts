@@ -11,7 +11,6 @@ import {
   byIds,
   indexCatalogue,
   kindOf,
-  page,
   search,
   type IndexedCatalogue,
 } from "@mrstreamer/core/ondemand/catalogue";
@@ -273,9 +272,6 @@ const handlers: {
 } = {
   status: async ({ key }) => statusOf(await current(key)),
   refresh,
-  categories: async ({ key, language, kind }) =>
-    kindOf(indexOf(await required(key), language), kind).categories,
-  page: async ({ key, language, query }) => page(indexOf(await required(key), language), query),
   byIds: async ({ key, language, kind, ids }) => {
     const found = await current(key);
     return found ? byIds(indexOf(found, language), kind, ids) : [];
