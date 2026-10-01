@@ -37,6 +37,8 @@ export interface WorkerCalls {
   container: { args: { key: string; id: string }; result: string | null };
   /** Forgets the catalogue and removes the cache, for when the subscription changes or goes. */
   clear: { args: Record<string, never>; result: null };
+  /** Answers once the cache write in progress is done, so stopping the worker keeps it. */
+  flush: { args: Record<string, never>; result: null };
 }
 
 export type WorkerMethod = keyof WorkerCalls;

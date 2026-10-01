@@ -1,6 +1,7 @@
 // Movies and episodes as the views talk about them: how long, how far, what's next, and playing
 // one. The player itself is in ../player/title-player.ts.
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 import type { Episode, SeriesDetails, Title, TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { TitleProgress } from "@mrstreamer/contracts/viewing";
 import { useUi } from "../app/ui-store.ts";
@@ -88,6 +89,35 @@ export function movieNow(title: Title, backdropUrl: string | null): NowPlaying {
 export function playTitle(now: NowPlaying, from: number): void {
   useUi.setState({ playingTitle: true, searchOpen: false, settings: null });
   void titlePlayer.open(now, from);
+}
+
+/** How long the pointer rests on a title, or the keyboard on it, before its details load. */
+const PREFETCH_AFTER_MS = 200;
+
+/**
+ * Loads a title's details while the pointer rests on it or the keyboard selects it, so they are
+ * there when it opens: the provider takes a second or so to answer. Spread the returned handlers
+ * onto the tile.
+ */
+export function usePrefetchDetails(title: Title, selected = false) {
+  const client = useQueryClient();
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stop = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+  };
+  const start = () => {
+    stop();
+    timer.current = setTimeout(
+      () => void client.prefetchQuery(queries.details(title.kind, title.id)),
+      PREFETCH_AFTER_MS,
+    );
+  };
+  useEffect(() => {
+    if (selected) start();
+    return stop;
+  }, [selected, title.kind, title.id]);
+  return { onPointerEnter: start, onPointerLeave: stop };
 }
 
 /** Takes a movie, or an episode's series, out of Continue watching. */

@@ -3,18 +3,33 @@
 import { X } from "lucide-react";
 import { useState } from "react";
 import type { Title } from "@mrstreamer/contracts/ondemand";
+import { usePrefetchDetails } from "../lib/titles.ts";
 import { cn } from "../lib/utils.ts";
 import { hueOf } from "./ChannelLogo.tsx";
 import { Progress } from "./Progress.tsx";
 
+/**
+ * Widths to ask TMDB for, by how wide the artwork shows: twice its width on screen, for sharp
+ * displays. Providers link 600-pixel posters and 1280-pixel backdrops whatever the use.
+ */
+const WIDTHS = { thumb: 154, card: 342, wide: 780, full: 1280 } as const;
+
+/** A provider's TMDB link at the width shown; any other link as it is. */
+function sized(url: string, size: keyof typeof WIDTHS): string {
+  return url.replace(/^(https?:\/\/image\.tmdb\.org\/t\/p\/)[^/]+\//, `$1w${WIDTHS[size]}/`);
+}
+
 export function Artwork({
   url,
   name,
+  size,
   className,
   plain = false,
 }: {
   url: string | null;
   name: string;
+  /** How wide it shows: thumb up to 77 px, card 171, wide 390, full beyond. */
+  size: keyof typeof WIDTHS;
   className?: string;
   /** Only the tint, where the name already shows beside it. */
   plain?: boolean;
@@ -23,7 +38,7 @@ export function Artwork({
   if (url && !failed) {
     return (
       <img
-        src={url}
+        src={sized(url, size)}
         alt=""
         loading="lazy"
         decoding="async"
@@ -60,14 +75,16 @@ export function PosterTile({
   line?: string;
   onOpen: () => void;
 }) {
+  const prefetch = usePrefetchDetails(title);
   return (
     <button
+      {...prefetch}
       onMouseDown={(event) => event.preventDefault()}
       onClick={onOpen}
       className="group min-w-0 text-left"
     >
       <span className="block aspect-[2/3] overflow-hidden rounded-xl ring-1 ring-white/8 transition-[box-shadow,transform] duration-150 group-hover:ring-2 group-hover:ring-white/40 group-active:scale-[0.98]">
-        <Artwork url={title.posterUrl} name={title.title} />
+        <Artwork url={title.posterUrl} name={title.title} size="card" />
       </span>
       <span className="mt-2 block truncate text-[0.875rem] font-medium">{title.title}</span>
       <span className="block truncate text-xs text-muted-foreground">
@@ -105,7 +122,7 @@ export function StillTile({
         className="block w-full text-left"
       >
         <span className="relative block aspect-video overflow-hidden rounded-xl ring-1 ring-white/8 transition-[box-shadow,transform] duration-150 group-hover:ring-2 group-hover:ring-white/40 group-active:scale-[0.98]">
-          <Artwork url={artworkUrl} name={name} />
+          <Artwork url={artworkUrl} name={name} size="wide" />
           {done !== null && <Progress value={done} className="absolute inset-x-3 bottom-2.5" />}
         </span>
         <span className="mt-2 block truncate text-[0.875rem] font-medium">{name}</span>

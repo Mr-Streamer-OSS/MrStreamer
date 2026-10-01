@@ -492,7 +492,12 @@ function NextUp({
   return (
     <div className="absolute inset-0 z-10">
       <div className="absolute inset-0 opacity-35">
-        <Artwork url={episode.stillUrl ?? next.series.backdropUrl} name={episode.title} plain />
+        <Artwork
+          url={episode.stillUrl ?? next.series.backdropUrl}
+          name={episode.title}
+          size="full"
+          plain
+        />
       </div>
       <div className="absolute inset-0 bg-gradient-to-t from-black via-black/60 to-black/20" />
       <div className="absolute bottom-16 left-10 max-w-[44rem]">

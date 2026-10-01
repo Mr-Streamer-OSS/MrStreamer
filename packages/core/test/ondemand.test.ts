@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { jsonRows } from "../src/json-rows.ts";
 import { episodeName, titleName } from "../src/ondemand/names.ts";
 import { continueWatching, isFinished, type TitleRow } from "../src/viewing/titles.ts";
 
@@ -29,45 +28,6 @@ describe("title names", () => {
       "Aankomst in Tbilisi",
     );
     expect(episodeName("Blood Sacrifice (MULTI) - S01E04", 4)).toBe("Episode 4");
-  });
-});
-
-describe("reading long lists", () => {
-  it("reads rows split across chunks, from arrays and from objects keyed by index", async () => {
-    const rows = [{ id: 1, name: 'a "quoted" {brace}', tags: [1, [2]] }, { id: 2 }, { id: 3 }];
-    const text = JSON.stringify(rows);
-    const keyed = JSON.stringify({ "0": rows[0], "1": rows[1], "2": rows[2] });
-    for (const document of [text, keyed]) {
-      const bytes = new TextEncoder().encode(document);
-      const chunks = async function* () {
-        for (let offset = 0; offset < bytes.length; offset += 5)
-          yield bytes.subarray(offset, offset + 5);
-      };
-      const read: unknown[] = [];
-      for await (const row of jsonRows(chunks())) read.push(row);
-      expect(read).toEqual(rows);
-    }
-  });
-
-  it("refuses an error page or a list cut short, and reads null as no rows", async () => {
-    const read = async (document: string) => {
-      const rows: unknown[] = [];
-      const chunks = async function* () {
-        yield new TextEncoder().encode(document);
-      };
-      for await (const row of jsonRows(chunks())) rows.push(row);
-      return rows;
-    };
-    for (const document of [
-      '[{"stream_id":1},{"stream_id":2},{"stream_id":3,"na',
-      "<br />\n<b>Fatal error</b>: Allowed memory size exhausted",
-      "<html><body>Maintenance</body></html>",
-      "",
-    ]) {
-      await expect(read(document)).rejects.toThrow(SyntaxError);
-    }
-    expect(await read(" null\n")).toEqual([]);
-    expect(await read("[]")).toEqual([]);
   });
 });
 

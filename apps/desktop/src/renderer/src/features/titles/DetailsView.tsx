@@ -76,7 +76,12 @@ function Content({ details }: { details: TitleDetails }) {
   return (
     <>
       <div className="relative h-[clamp(12rem,32vh,22rem)] overflow-hidden rounded-t-3xl">
-        <Artwork url={details.backdropUrl ?? title.posterUrl} name={title.title} plain />
+        <Artwork
+          url={details.backdropUrl ?? title.posterUrl}
+          name={title.title}
+          size="full"
+          plain
+        />
         <div className="absolute inset-0 bg-gradient-to-t from-[#0b0b0c] via-[#0b0b0c]/40 to-transparent" />
       </div>
       <div className="relative -mt-20 px-10 pb-12">
@@ -260,7 +265,12 @@ function Episodes({ details }: { details: SeriesDetails }) {
                 {episode.number}
               </span>
               <span className="relative block aspect-video overflow-hidden rounded-lg">
-                <Artwork url={episode.stillUrl} name={episode.title} className="text-[0.625rem]" />
+                <Artwork
+                  url={episode.stillUrl}
+                  name={episode.title}
+                  size="card"
+                  className="text-[0.625rem]"
+                />
               </span>
               <span className="min-w-0">
                 <span className="block truncate text-[0.9375rem] font-medium">{episode.title}</span>

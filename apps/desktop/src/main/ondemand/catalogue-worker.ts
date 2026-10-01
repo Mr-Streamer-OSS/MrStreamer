@@ -73,6 +73,21 @@ function remember(key: string, fetchedAt: number, catalogue: OnDemandCatalogue):
   return loaded;
 }
 
+/** The cache being written. Writes go one at a time, and clearing waits for them. */
+let writing: Promise<void> = Promise.resolve();
+/**
+ * How long a write waits. Turning the lists into JSON holds this thread for a quarter of a
+ * second, and the pages the UI asks for right after a refresh come first.
+ */
+const WRITE_AFTER_MS = 1000;
+
+function persist(file: object): void {
+  writing = writing
+    .then(() => new Promise((done) => setTimeout(done, WRITE_AFTER_MS)))
+    .then(() => writeJsonFile(setup.cachePath, file))
+    .catch(() => {});
+}
+
 /** Lists that came back empty once, by subscription: a second time in a row, they count. */
 const emptyBefore = new Set<string>();
 
@@ -140,9 +155,11 @@ async function refresh(args: WorkerCalls["refresh"]["args"]): Promise<WorkerStat
     }
     if (abort.signal.aborted) throw new AppFailure({ kind: "unexpected", detail: "Stopped." });
     const fetchedAt = Date.now();
-    // Written before it is used: the next start must not find an older catalogue on disk.
-    await writeJsonFile(setup.cachePath, { version: 1, key: args.key, fetchedAt, ...catalogue });
-    return statusOf(remember(args.key, fetchedAt, catalogue));
+    const status = statusOf(remember(args.key, fetchedAt, catalogue));
+    // Written after answering, so the lists show without waiting for the disk. A write cut short
+    // by quitting leaves the previous lists for the next start, which refreshes them when due.
+    persist({ version: 1, key: args.key, fetchedAt, ...catalogue });
+    return status;
   })();
   const running = { key: args.key, done, abort };
   refreshing = running;
@@ -179,7 +196,12 @@ const handlers: {
     reading = null;
     loaded = null;
     emptyBefore.clear();
+    await writing;
     await removeFile(setup.cachePath);
+    return null;
+  },
+  flush: async () => {
+    await writing;
     return null;
   },
 };

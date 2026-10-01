@@ -16,7 +16,7 @@ import { WindowBar } from "../../components/WindowBar.tsx";
 import { appError, describeError } from "../../lib/errors.ts";
 import { useKeyboardMode } from "../../lib/input-mode.ts";
 import { queries } from "../../lib/queries.ts";
-import { useContinueWatching } from "../../lib/titles.ts";
+import { useContinueWatching, usePrefetchDetails } from "../../lib/titles.ts";
 import { useRem } from "../../lib/use-rem.ts";
 import { cn } from "../../lib/utils.ts";
 
@@ -422,8 +422,14 @@ function Poster({ title, selected }: { title: Title | undefined; selected: boole
       </div>
     );
   }
+  return <LoadedPoster title={title} selected={selected} />;
+}
+
+function LoadedPoster({ title, selected }: { title: Title; selected: boolean }) {
+  const prefetch = usePrefetchDetails(title, selected);
   return (
     <button
+      {...prefetch}
       onMouseDown={(event) => event.preventDefault()}
       onClick={() => openDetails({ kind: title.kind, id: title.id })}
       className="group min-w-0 text-left"
@@ -435,7 +441,7 @@ function Poster({ title, selected }: { title: Title | undefined; selected: boole
           selected && "ring-2 ring-white",
         )}
       >
-        <Artwork url={title.posterUrl} name={title.title} />
+        <Artwork url={title.posterUrl} name={title.title} size="card" />
       </span>
       <span className="mt-2 block truncate text-[0.875rem] font-medium">{title.title}</span>
       <span className="block truncate text-xs text-muted-foreground">

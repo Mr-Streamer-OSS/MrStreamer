@@ -279,21 +279,27 @@ function workerClient(start: () => Worker) {
     return started;
   };
 
+  const call = <M extends WorkerMethod>(
+    method: M,
+    args: WorkerCalls[M]["args"],
+  ): Promise<WorkerCalls[M]["result"]> => {
+    const id = nextId++;
+    return new Promise((resolve, reject) => {
+      pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
+      running().postMessage({ id, method, args });
+    });
+  };
+
   return {
-    call<M extends WorkerMethod>(
-      method: M,
-      args: WorkerCalls[M]["args"],
-    ): Promise<WorkerCalls[M]["result"]> {
-      const id = nextId++;
-      return new Promise((resolve, reject) => {
-        pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
-        running().postMessage({ id, method, args });
-      });
-    },
+    call,
     async stop(): Promise<void> {
       const current = worker;
+      if (!current) return;
+      // A cache write in progress gets a moment to finish, so the next start reads it.
+      const flushed = call("flush", {}).catch(() => null);
+      await Promise.race([flushed, new Promise((done) => setTimeout(done, 2000))]);
       worker = null;
-      if (current) await current.terminate();
+      await current.terminate();
     },
   };
 }
