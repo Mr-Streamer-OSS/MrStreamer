@@ -35,7 +35,7 @@ interface Ranked {
   readonly popularity: number;
   /** TMDB's rating when enough people voted, else the provider's. */
   readonly rating: number;
-  /** In the viewer's language, or made in it, or nothing says otherwise. */
+  /** In the viewer's language or several; or, when nothing says how it sounds, not made in another. */
   readonly suits: boolean;
 }
 
@@ -84,7 +84,7 @@ export function collections(source: CollectionSource): Collections {
         genres: shown.genres,
         popularity: meta?.popularity ?? 0,
         rating: meta && meta.votes >= ENOUGH_VOTES ? meta.rating : (title.rating ?? 0),
-        suits: fit >= 2 || meta?.language === source.language || (fit === 1 && !meta?.language),
+        suits: fit >= 2 || (fit === 1 && (!meta?.language || meta.language === source.language)),
       };
     });
   const suiting = ranked.filter((entry) => entry.suits);

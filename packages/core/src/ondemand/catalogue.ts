@@ -50,25 +50,34 @@ function indexKind(
     rawCategories.filter((category) => ADULT_CATEGORY.test(category.name)).map(({ id }) => id),
   );
   // One group per film: the versions sharing a TMDB id, or a row on its own without one.
-  const groups = new Map<string, ProviderTitle[]>();
+  const groups: ProviderTitle[][] = [];
+  const byTmdbId = new Map<string, ProviderTitle[]>();
   const seen = new Set<string>();
   for (const item of raw) {
     if (seen.has(item.id)) continue;
     seen.add(item.id);
-    const key = item.tmdbId ? `tmdb:${item.tmdbId}` : `id:${item.id}`;
-    const group = groups.get(key);
-    if (group) group.push(item);
-    else groups.set(key, [item]);
+    const group = item.tmdbId ? byTmdbId.get(item.tmdbId) : undefined;
+    if (group) {
+      group.push(item);
+      continue;
+    }
+    const created = [item];
+    groups.push(created);
+    if (item.tmdbId) byTmdbId.set(item.tmdbId, created);
   }
   const titles: Title[] = [];
   /** Every version's name, title by title, for search. */
   const names: string[] = [];
   const byId = new Map<string, Title>();
-  for (const group of groups.values()) {
-    const versions = group.map((item) => ({ item, name: titleName(item.name, item.releaseDate) }));
-    if (versions.length > 1) {
-      versions.sort((a, b) => preference(b, language) - preference(a, language));
-    }
+  for (const group of groups) {
+    const versions = group.map((item): Version => {
+      const name = titleName(item.name, item.releaseDate);
+      // Suitability counts most; the date added only breaks ties, scaled below one point.
+      const rank =
+        group.length === 1 ? 0 : suitability(name.tags, language) + (item.addedAt ?? 0) / 1e14;
+      return { item, name, rank };
+    });
+    if (versions.length > 1) versions.sort((a, b) => b.rank - a.rank);
     const first = versions[0] as Version;
     // What the first version lacks, another may have; one pass, as most films have one version.
     let year = first.name.year;
@@ -83,7 +92,9 @@ function indexKind(
       backdropUrl ??= item.backdropUrl;
       rating = Math.max(rating, item.rating ?? 0);
       addedAt = Math.max(addedAt, item.addedAt ?? 0);
-      adult ||= item.adult || item.categoryIds.some((id) => adultCategories.has(id));
+      if (adult) continue;
+      adult = item.adult;
+      for (const id of item.categoryIds) adult ||= adultCategories.has(id);
     }
     const categoryIds =
       versions.length === 1
@@ -163,12 +174,8 @@ export function search(
 interface Version {
   readonly item: ProviderTitle;
   readonly name: TitleName;
-}
-
-/** Which version comes first: the one in the language, then the newest. */
-function preference(version: Version, language: string): number {
-  // Suitability counts most; the date added only breaks ties, scaled below one point.
-  return suitability(version.name.tags, language) + (version.item.addedAt ?? 0) / 1e14;
+  /** Which version comes first: the one suiting the language, then the newest. */
+  readonly rank: number;
 }
 
 function once<A>(make: () => A): () => A {

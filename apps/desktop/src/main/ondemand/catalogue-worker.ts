@@ -2,7 +2,7 @@
 // reading, indexing and sorting them would hold the main process for hundreds of milliseconds;
 // here that costs nothing the viewer notices. The main process sends small calls and gets pages.
 //
-// The catalogue on disk (ondemand.json) keeps the provider's lists as they came, for one
+// The catalogue on disk (ondemand.json.gz) keeps the provider's lists as they came, for one
 // subscription; display names are worked out on load.
 import { workerData, parentPort } from "node:worker_threads";
 import { type } from "arktype";

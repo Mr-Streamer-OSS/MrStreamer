@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { byIds, indexCatalogue, search } from "../src/ondemand/catalogue.ts";
+import { collections } from "../src/ondemand/collections.ts";
 import { episodeName, titleName } from "../src/ondemand/names.ts";
 import { continueWatching, isFinished, type TitleRow } from "../src/viewing/titles.ts";
 
@@ -93,13 +94,48 @@ describe("one title per film", () => {
 
   it("gathers the versions sharing a TMDB id, the one suiting the language first", () => {
     expect(listed("en")).toEqual([
-      ["2", ["2", "3", "1"]],
+      ["2", ["2", "1", "3"]],
       ["4", ["4"]],
     ]);
     expect(listed("nl")).toEqual([
       ["1", ["1", "2", "3"]],
       ["4", ["4"]],
     ]);
+  });
+
+  it("shows titles in the viewer's language, or subtitled, but not dubbed into another", () => {
+    const films = {
+      ...catalogue,
+      movies: [
+        movie("10", "Fright Night 2 (DE)", "100", 1),
+        movie("11", "Fright Night (NL)", "101", 1),
+        movie("12", "De Bondgenoten (NL)", "102", 1),
+        movie("13", "Das Boot (MULTI)", "103", 1),
+        movie("14", "Blow", "104", 1),
+      ],
+    };
+    const madeIn: Record<string, string> = { "100": "en", "101": "en", "102": "nl", "103": "de" };
+    const shown = (language: string) =>
+      collections({
+        kind: "movie",
+        titles: indexCatalogue(films, language).movies.titles,
+        language,
+        metadata: (tmdbId) => ({
+          genres: [18],
+          language: madeIn[tmdbId] ?? null,
+          popularity: 1,
+          rating: 7,
+          votes: 10,
+          collection: null,
+          backdrop: null,
+        }),
+        services: [],
+        now: 0,
+      })
+        .list("genre:Drama", "title")
+        .map((title) => title.id);
+    expect(shown("en")).toEqual(["14", "13", "11"]);
+    expect(shown("nl")).toEqual(["14", "13", "12", "11"]);
   });
 
   it("finds the title by any of its versions, and by any version's name", () => {

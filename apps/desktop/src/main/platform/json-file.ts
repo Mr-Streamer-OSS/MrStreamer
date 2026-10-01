@@ -7,6 +7,11 @@ import { ArkErrors } from "arktype";
 
 const gzip = promisify(gzipCallback);
 const gunzip = promisify(gunzipCallback);
+/**
+ * zlib hands work back and forth in chunks of this size. Its default, 16 KB, made unpacking the
+ * movie and series cache take 250 to 450 ms instead of 30 to 70.
+ */
+const ZLIB = { chunkSize: 1024 * 1024 };
 
 /**
  * Reads and validates a JSON file against an ArkType schema, unpacking it first when its name
@@ -26,7 +31,7 @@ export async function readJsonFile<T>(
   }
   let data: unknown;
   try {
-    data = JSON.parse((path.endsWith(".gz") ? await gunzip(bytes) : bytes).toString("utf8"));
+    data = JSON.parse((path.endsWith(".gz") ? await gunzip(bytes, ZLIB) : bytes).toString("utf8"));
   } catch {
     console.warn(`[storage] ignoring unreadable ${path}`);
     return null;
@@ -47,7 +52,7 @@ export async function writeJsonFile(path: string, value: unknown): Promise<void>
   await mkdir(dirname(path), { recursive: true });
   const temp = `${path}.${randomUUID()}.tmp`;
   const text = JSON.stringify(value);
-  await writeFile(temp, path.endsWith(".gz") ? await gzip(text) : text);
+  await writeFile(temp, path.endsWith(".gz") ? await gzip(text, ZLIB) : text);
   await rename(temp, path);
 }
 
