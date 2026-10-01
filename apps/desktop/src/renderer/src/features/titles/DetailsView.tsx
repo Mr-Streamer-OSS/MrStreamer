@@ -65,6 +65,7 @@ export function DetailsView({ target }: { target: DetailsTarget }) {
   const playing = picked ?? (title ? automaticVersion(title, progress.data ?? []) : target.id);
   const known = !listed.isPending && (!title || !progress.isPending) && !preferences.isPending;
   // Another version's details replace these once they arrive; nothing plays from them meanwhile.
+  // A new target mounts a new sheet (see App), so these are only ever the same title's.
   const details = useQuery({
     ...queries.details(target.kind, playing),
     enabled: known,
@@ -121,7 +122,7 @@ function Content({
     title.rating ? `★ ${title.rating.toFixed(1)}` : null,
   ].filter(Boolean);
   return (
-    <div inert={switching || undefined}>
+    <>
       <div className="relative h-[clamp(12rem,32vh,22rem)] overflow-hidden rounded-t-3xl">
         <Artwork
           url={details.backdropUrl ?? title.posterUrl}
@@ -140,9 +141,9 @@ function Content({
         )}
         <div className="mt-2 text-[0.9375rem] text-muted-foreground">{facts.join(" · ")}</div>
         {details.kind === "movie" ? (
-          <MovieActions details={details} versions={versions} />
+          <MovieActions details={details} versions={versions} switching={switching} />
         ) : (
-          <SeriesActions details={details} versions={versions} />
+          <SeriesActions details={details} versions={versions} switching={switching} />
         )}
         {details.plot && (
           <p className="mt-6 max-w-[48rem] text-[0.9375rem] leading-relaxed text-foreground/85">
@@ -162,13 +163,25 @@ function Content({
               .join(" · ")}
           </div>
         )}
-        {details.kind === "series" && <Episodes details={details} />}
+        {details.kind === "series" && (
+          <div inert={switching || undefined}>
+            <Episodes details={details} />
+          </div>
+        )}
       </div>
-    </div>
+    </>
   );
 }
 
-function MovieActions({ details, versions }: { details: MovieDetails; versions: Versions }) {
+function MovieActions({
+  details,
+  versions,
+  switching,
+}: {
+  details: MovieDetails;
+  versions: Versions;
+  switching: boolean;
+}) {
   const progress = useQuery(
     queries.progress({ movieIds: details.title.versions.map((version) => version.id) }),
   );
@@ -179,6 +192,7 @@ function MovieActions({ details, versions }: { details: MovieDetails; versions: 
   return (
     <Actions
       versions={versions}
+      switching={switching}
       progress={partly ? current : undefined}
       primaryLabel={partly ? "Resume" : "Play"}
       onPrimary={() => playTitle(now, resumePoint(partly ? current : undefined))}
@@ -236,7 +250,15 @@ function seriesPlayed(progress: readonly TitleProgress[]): TitleRef[] {
   return [...bySeries.values()];
 }
 
-function SeriesActions({ details, versions }: { details: SeriesDetails; versions: Versions }) {
+function SeriesActions({
+  details,
+  versions,
+  switching,
+}: {
+  details: SeriesDetails;
+  versions: Versions;
+  switching: boolean;
+}) {
   const progress = useQuery(
     queries.progress({ seriesIds: details.title.versions.map((version) => version.id) }),
   );
@@ -252,6 +274,7 @@ function SeriesActions({ details, versions }: { details: SeriesDetails; versions
   return (
     <Actions
       versions={versions}
+      switching={switching}
       progress={partly}
       primaryLabel={label}
       onPrimary={() => playTitle(now, resumePoint(partly))}
@@ -263,6 +286,7 @@ function SeriesActions({ details, versions }: { details: SeriesDetails; versions
 
 function Actions({
   versions,
+  switching,
   progress,
   primaryLabel,
   onPrimary,
@@ -270,6 +294,8 @@ function Actions({
   onRemove,
 }: {
   versions: Versions;
+  /** Another version's details are on their way: nothing plays until they're here. */
+  switching: boolean;
   progress: TitleProgress | undefined;
   primaryLabel: string;
   onPrimary: () => void;
@@ -296,6 +322,7 @@ function Actions({
             variant="primary"
             size="lg"
             autoFocus
+            disabled={switching}
             onClick={onPrimary}
             className={cn(several && "rounded-r-none pr-5")}
           >
@@ -309,7 +336,7 @@ function Actions({
           )}
         </div>
         {onBeginning && (
-          <Button variant="secondary" size="lg" onClick={onBeginning}>
+          <Button variant="secondary" size="lg" disabled={switching} onClick={onBeginning}>
             <RotateCcw />
             From the beginning
           </Button>

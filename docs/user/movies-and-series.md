@@ -37,7 +37,7 @@ A poster opens its details over the list, which stays where it was: the artwork,
 
 - **Resume** plays a movie or episode from where you stopped. **From the beginning** starts it again, without asking.
 - **Play** starts something new. For a series it plays the episode you're on: the one you stopped in, the next one after one you finished, or the first.
-- The arrow beside **Play** shows when there are several versions, such as "English · 4K" and "Nederlands audio · 1080p", named after the marks in your provider's list; the line under the buttons says which one plays. **Automatic** plays the one you were watching, else the one that suits your language. Pick another and that title plays it from then on, from Home and the lists too, and a series lists its episodes. How far you got carries over. Picks belong to your subscription and go when you connect another.
+- The arrow beside **Play** shows when there are several versions, such as "English · 4K" and "Nederlands audio · 1080p", named after the marks in your provider's list; the line under the buttons says which one plays. **Automatic** carries on in the version you were watching, else plays the one that suits your language. Pick another and that title plays it from then on, from Home and the lists too, and a series lists its episodes. How far you got carries over. Picks belong to your subscription and go when you connect another.
 - A series opens on the season you're watching. Watched episodes have a check mark, and one you stopped in shows how far you got. Click an episode to play it.
 - **Remove from Continue watching** takes the title off Home's row. It comes back when you play it again.
 

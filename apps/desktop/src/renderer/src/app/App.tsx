@@ -101,7 +101,9 @@ function Shell() {
         )}
       </div>
       {/* Closed under Settings, whose Escape would otherwise reach the sheet's focus first. */}
-      {details && !covered && !settingsOpen && <DetailsView target={details} />}
+      {details && !covered && !settingsOpen && (
+        <DetailsView key={`${details.kind}:${details.id}`} target={details} />
+      )}
       {watching && <WatchScreen />}
       {playingTitle && <TitleWatch />}
       <SearchPalette />

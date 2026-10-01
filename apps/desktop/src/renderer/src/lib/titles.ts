@@ -112,14 +112,16 @@ export function usePickVersion(): (title: Title, id: string | null) => void {
     if (!title.tmdbId) return;
     const key = `${title.kind}:${title.tmdbId}`;
     const { queryKey } = queries.preferences();
-    const previous = client.getQueryData(queryKey);
-    const { [key]: _old, ...others } = previous?.titleVersions ?? {};
-    const titleVersions = id === null ? others : { ...others, [key]: id };
-    if (previous) client.setQueryData(queryKey, { ...previous, titleVersions });
-    void call("preferences.update", { titleVersions }).then(
-      (saved) => client.setQueryData(queryKey, saved),
-      () => client.invalidateQueries({ queryKey }),
-    );
+    // The picks as saved, so one never replaces the others.
+    void client
+      .ensureQueryData(queries.preferences())
+      .then(async (previous) => {
+        const { [key]: _old, ...others } = previous.titleVersions ?? {};
+        const titleVersions = id === null ? others : { ...others, [key]: id };
+        client.setQueryData(queryKey, { ...previous, titleVersions });
+        client.setQueryData(queryKey, await call("preferences.update", { titleVersions }));
+      })
+      .catch(() => client.invalidateQueries({ queryKey }));
   };
 }
 
