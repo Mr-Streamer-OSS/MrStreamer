@@ -105,7 +105,13 @@ function Content({ details }: { details: TitleDetails }) {
         )}
         {(details.cast.length > 0 || details.directors.length > 0) && (
           <div className="mt-3 max-w-[48rem] text-[0.8125rem] text-muted-foreground">
-            {[details.cast.slice(0, 5).join(", "), details.directors.slice(0, 2).join(", ")]
+            {[
+              details.cast
+                .slice(0, 5)
+                .map((person) => person.name)
+                .join(", "),
+              details.directors.slice(0, 2).join(", "),
+            ]
               .filter(Boolean)
               .join(" · ")}
           </div>

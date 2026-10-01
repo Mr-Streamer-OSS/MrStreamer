@@ -18,7 +18,7 @@ import { WindowBar } from "../../components/WindowBar.tsx";
 import { useNow } from "../../lib/clock.ts";
 import { categoryOf, channelLine, clockTime, progressOf, timeLeft } from "../../lib/format.ts";
 import { queries, useCategoryMap, useLastChannel } from "../../lib/queries.ts";
-import { removeFromContinue, playTitle, useContinueWatching } from "../../lib/titles.ts";
+import { removeFromContinue, useContinueWatching, useResume } from "../../lib/titles.ts";
 import { useRem } from "../../lib/use-rem.ts";
 import { Picture } from "../../player/Picture.tsx";
 import { player, usePlayer } from "../../player/player.ts";
@@ -77,6 +77,7 @@ export function HomeScreen({ active }: { active: boolean }) {
   const newMovies = useNewest("movie", posters);
   const newSeries = useNewest("series", posters);
   const continuing = useContinueWatching();
+  const resume = useResume();
   const playing = usePlayer((state) => state.channel);
   const streaming = usePlayer(
     (state) => state.phase.kind !== "idle" && state.phase.kind !== "failed",
@@ -148,10 +149,10 @@ export function HomeScreen({ active }: { active: boolean }) {
               <StillTile
                 key={entry.key}
                 artworkUrl={entry.artworkUrl}
-                name={entry.now.name}
+                name={entry.title.title}
                 line={entry.line}
                 done={entry.done}
-                onPlay={() => playTitle(entry.now, entry.from)}
+                onPlay={() => resume(entry)}
                 onRemove={() => removeFromContinue(...entry.played)}
               />
             ))}

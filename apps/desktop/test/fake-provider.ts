@@ -94,6 +94,8 @@ export interface FakeProvider {
   readonly titles: FakeTitles;
   /** How many requests for movie and episode files reached the provider, redirects included. */
   fileRequests(): number;
+  /** How many requests for a movie's or series' details reached the provider. */
+  detailRequests(): number;
   /**
    * Makes movie and series list requests answer with this HTTP status, or restores them. "login"
    * answers the two lists with a refused login and HTTP 200, as panels do, while their categories
@@ -155,6 +157,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
   );
   let titleFailure: number | "login" | null = null;
   let fileCount = 0;
+  let detailCount = 0;
   let select = (all: readonly FakeChannel[]): readonly FakeChannel[] => all;
   let catalogueFailure: number | null = null;
   const channels = new Map(
@@ -272,6 +275,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
         })),
       );
     }
+    if (action === "get_vod_info" || action === "get_series_info") detailCount++;
     if (action === "get_vod_info") {
       const movie = movieFiles.get(url.searchParams.get("vod_id") ?? "");
       if (!movie) return json(response, { info: [], movie_data: [] });
@@ -466,6 +470,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     catalogue,
     titles,
     fileRequests: () => fileCount,
+    detailRequests: () => detailCount,
     failTitles(status) {
       titleFailure = status;
     },

@@ -3,7 +3,6 @@
 import { X } from "lucide-react";
 import { useState } from "react";
 import type { Title } from "@mrstreamer/contracts/ondemand";
-import { usePrefetchDetails } from "../lib/titles.ts";
 import { cn } from "../lib/utils.ts";
 import { hueOf } from "./ChannelLogo.tsx";
 import { Progress } from "./Progress.tsx";
@@ -76,10 +75,8 @@ export function PosterTile({
   line?: string;
   onOpen: () => void;
 }) {
-  const prefetch = usePrefetchDetails(title);
   return (
     <button
-      {...prefetch}
       onMouseDown={(event) => event.preventDefault()}
       onClick={onOpen}
       className="group min-w-0 text-left"

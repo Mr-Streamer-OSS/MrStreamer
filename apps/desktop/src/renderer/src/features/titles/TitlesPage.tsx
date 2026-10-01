@@ -28,6 +28,7 @@ import {
   playTitle,
   removeFromContinue,
   useContinueWatching,
+  useResume,
   type ContinueEntry,
 } from "../../lib/titles.ts";
 import { cn } from "../../lib/utils.ts";
@@ -249,6 +250,7 @@ function Rows({
   onOpen: (id: CollectionId) => void;
 }) {
   const continuing = useContinueWatching();
+  const play = useResume();
   const mine = continuing.entries.filter((entry) => entry.title.kind === kind);
   // Titles like the one watched last, by the version that was watched.
   const last = mine[0]?.progress.title;
@@ -272,10 +274,10 @@ function Rows({
               <StillTile
                 key={entry.key}
                 artworkUrl={entry.artworkUrl}
-                name={entry.now.name}
+                name={entry.title.title}
                 line={entry.line}
                 done={entry.done}
-                onPlay={() => playTitle(entry.now, entry.from)}
+                onPlay={() => play(entry)}
                 onRemove={() => removeFromContinue(...entry.played)}
               />
             ))}
@@ -334,6 +336,7 @@ function Featured({ title, resume }: { title: Title; resume: ContinueEntry | nul
   ]
     .filter(Boolean)
     .join(" · ");
+  const resumeEntry = useResume();
   return (
     <section className="relative mb-9 aspect-[21/8] max-h-[26rem] w-full overflow-hidden rounded-2xl">
       <Artwork url={title.backdropUrl} name={title.title} size="full" plain />
@@ -347,9 +350,7 @@ function Featured({ title, resume }: { title: Title; resume: ContinueEntry | nul
               variant="primary"
               size="lg"
               onClick={() =>
-                resume
-                  ? playTitle(resume.now, resume.from)
-                  : playTitle(movieNow(title, title.backdropUrl), 0)
+                resume ? resumeEntry(resume) : playTitle(movieNow(title, title.backdropUrl), 0)
               }
             >
               <Play className="fill-current" />

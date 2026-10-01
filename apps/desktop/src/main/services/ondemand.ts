@@ -1,5 +1,6 @@
 // Movies and series: the catalogue lives in a worker thread (see ../ondemand/catalogue-worker.ts),
-// details come from the provider as a title opens, and playback asks here which file to stream.
+// details come from the provider and TMDB when a title opens, never before, and playback asks
+// here which file to stream.
 // Every call is for the connected subscription; switching accounts clears what the last one had.
 import { join } from "node:path";
 import type { Worker } from "node:worker_threads";
@@ -20,6 +21,7 @@ import type {
 } from "@mrstreamer/contracts/ondemand";
 import { diagnosed } from "@mrstreamer/core/diagnostics";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
+import { tmdb } from "@mrstreamer/core/metadata/tmdb";
 import { movieDetails, seriesDetails } from "@mrstreamer/core/ondemand/details";
 import { DEFAULT_TITLE_LANGUAGE } from "@mrstreamer/core/ondemand/languages";
 import type { ProviderDetails } from "@mrstreamer/core/provider";
@@ -41,8 +43,10 @@ import type {
 import { Settings } from "./preferences.ts";
 import { Subscriptions, type Source } from "./subscription.ts";
 
-/** How many titles' details stay in memory. Opening one again, or Home, then asks no one. */
+/** How many titles' details stay in memory. Opening one again then asks no one. */
 const DETAILS_KEPT = 200;
+/** How long a title's details wait for TMDB; the provider's stand in after that. */
+const ABOUT_TIMEOUT_MS = 4000;
 
 /**
  * How long after a failed first fetch a list asked for fails with it rather than fetching again.
@@ -92,7 +96,10 @@ export class OnDemand extends Context.Service<
       { readonly movies: readonly Title[]; readonly series: readonly Title[] },
       Failed
     >;
+    /** A title's details, for when the viewer opens it: the provider's, with TMDB's. */
     details(kind: TitleKind, id: string): Effect.Effect<TitleDetails, Failed>;
+    /** Titles by the id of any version, from the lists alone. */
+    titles(kind: TitleKind, ids: readonly string[]): Effect.Effect<readonly Title[], Failed>;
     /** A tab's rows; For you starts with titles like `like`, one watched lately. */
     rows(
       kind: TitleKind,
@@ -249,13 +256,30 @@ function make(deps: OnDemandDeps) {
           call("byIds", { key: source.key, language, kind, ids: [id] }),
         );
         if (!title) return yield* new Failed({ error: { kind: "title-not-found", titleId: id } });
-        const raw = yield* Effect.tryPromise({
-          try: (signal) =>
-            kind === "movie"
-              ? source.provider.movieDetails(id, signal)
-              : source.provider.seriesDetails(id, signal),
-          catch: failedWith,
-        }).pipe(diagnosed("details"));
+        const viewer = yield* language;
+        const [raw, about] = yield* Effect.all(
+          [
+            Effect.tryPromise({
+              try: (signal) =>
+                kind === "movie"
+                  ? source.provider.movieDetails(id, signal)
+                  : source.provider.seriesDetails(id, signal),
+              catch: failedWith,
+            }).pipe(diagnosed("details")),
+            // TMDB's overview, artwork and credits; without them, the provider's stand.
+            Effect.tryPromise((signal) =>
+              tmdbKey && title.tmdbId
+                ? tmdb({ key: tmdbKey, ...(deps.tmdbApi ? { api: deps.tmdbApi } : {}) }).about(
+                    kind === "movie" ? "movie" : "tv",
+                    title.tmdbId,
+                    viewer,
+                    AbortSignal.any([signal, AbortSignal.timeout(ABOUT_TIMEOUT_MS)]),
+                  )
+                : Promise.resolve(null),
+            ).pipe(Effect.orElseSucceed(() => null)),
+          ],
+          { concurrency: 2 },
+        );
         // The title as this version: its episodes and its file belong to `id`.
         const version = {
           ...title,
@@ -264,7 +288,10 @@ function make(deps: OnDemandDeps) {
         };
         const found = {
           raw,
-          shown: kind === "movie" ? movieDetails(version, raw) : seriesDetails(version, raw),
+          shown:
+            kind === "movie"
+              ? movieDetails(version, raw, about)
+              : seriesDetails(version, raw, about),
         };
         // Only for the subscription it was asked for.
         if ((yield* subscriptions.source)?.key === source.key) {
@@ -329,6 +356,11 @@ function make(deps: OnDemandDeps) {
 
       details: (kind: TitleKind, id: string) =>
         Effect.map(detailsOf(kind, id), (found) => found.shown),
+
+      titles: (kind: TitleKind, ids: readonly string[]) =>
+        ids.length === 0
+          ? Effect.succeed([])
+          : loaded((source, language) => call("byIds", { key: source.key, language, kind, ids })),
 
       file: (title: TitleRef) =>
         Effect.gen(function* () {

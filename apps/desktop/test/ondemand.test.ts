@@ -87,6 +87,25 @@ describe("movies and series", { timeout: 20_000 }, () => {
     ]);
   });
 
+  it("finds titles by any version's id from the lists, without asking for details", async () => {
+    const { onDemand, provider } = await onDemandApp();
+    const versions = provider.titles.movies.slice(0, 3).map((movie) => String(movie.id));
+
+    const found = await onDemand.titles("movie", [...versions, "404"]);
+
+    expect(found.map((title) => title.versions.map((version) => version.id)).flat()).toEqual(
+      expect.arrayContaining(versions),
+    );
+    expect(provider.detailRequests()).toBe(0);
+    // Without TMDB, a title's details are the provider's.
+    const details = await onDemand.details("movie", versions[0] ?? "");
+    expect(details.cast).toEqual([
+      { name: "Ada Lovelace", role: null, photoUrl: null },
+      { name: "Alan Turing", role: null, photoUrl: null },
+    ]);
+    expect(provider.detailRequests()).toBe(1);
+  });
+
   it("builds a series' seasons from its episodes when the provider lists fewer seasons", async () => {
     const { onDemand } = await onDemandApp();
 

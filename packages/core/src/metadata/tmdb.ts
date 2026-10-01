@@ -28,6 +28,34 @@ export interface TitleNames {
   readonly original: string | null;
 }
 
+/** What a title's details show from TMDB, asked for when the viewer opens it. */
+export interface TitleAbout {
+  readonly overview: string | null;
+  /** Paths on TMDB's image server; `tmdbImage` makes them addresses. */
+  readonly poster: string | null;
+  readonly backdrop: string | null;
+  /** TMDB genre ids; `GENRES` names them. */
+  readonly genres: readonly number[];
+  /** Minutes: the film, or a usual episode. */
+  readonly runtime: number | null;
+  /** The first billed, with the part they play and a portrait. */
+  readonly cast: readonly {
+    readonly name: string;
+    readonly character: string | null;
+    readonly profile: string | null;
+  }[];
+  /** A film's directors, or a series' creators. */
+  readonly directors: readonly string[];
+}
+
+/** How many of the cast a title's details show. */
+const CAST_SHOWN = 12;
+
+/** The address of an image on TMDB's server at a width it serves: 185, 342, 780, 1280. */
+export function tmdbImage(path: string, width: 185 | 342 | 780 | 1280): string {
+  return `https://image.tmdb.org/t/p/w${width}${path}`;
+}
+
 /** A streaming service as TMDB names it, from JustWatch's data. */
 export interface StreamingService {
   readonly id: number;
@@ -101,6 +129,24 @@ const Details = type({
   "vote_count?": "number",
   "belongs_to_collection?": type({ id: "number", name: "string" }).or("null"),
   "backdrop_path?": "string | null",
+});
+
+const About = type({
+  "overview?": "string | null",
+  "poster_path?": "string | null",
+  "backdrop_path?": "string | null",
+  "genres?": type({ id: "number" }).array(),
+  "runtime?": "number | null",
+  "episode_run_time?": "number[]",
+  "created_by?": type({ name: "string" }).array(),
+  "credits?": type({
+    "cast?": type({
+      name: "string",
+      "character?": "string | null",
+      "profile_path?": "string | null",
+    }).array(),
+    "crew?": type({ name: "string", "job?": "string | null" }).array(),
+  }),
 });
 
 const Page = type({
@@ -191,6 +237,43 @@ export function tmdb(options: TmdbOptions) {
         backdrop: body.backdrop_path ?? null,
         name: name !== original || madeIn === language ? name : null,
         original,
+      };
+    },
+
+    /**
+     * What a title's details show, in `language`: its overview, artwork, runtime, cast and
+     * directors or creators. One request, for when the viewer opens the title.
+     */
+    async about(
+      kind: TmdbKind,
+      id: string,
+      language: string,
+      signal?: AbortSignal,
+    ): Promise<TitleAbout> {
+      const body = About(
+        await get(`/${kind}/${id}`, { language, append_to_response: "credits" }, signal),
+      );
+      if (body instanceof type.errors) {
+        throw new TmdbError({ kind: "unavailable", detail: body.summary });
+      }
+      const directors =
+        kind === "tv"
+          ? (body.created_by ?? []).map((person) => person.name)
+          : (body.credits?.crew ?? [])
+              .filter((person) => person.job === "Director")
+              .map((person) => person.name);
+      return {
+        overview: body.overview?.trim() || null,
+        poster: body.poster_path ?? null,
+        backdrop: body.backdrop_path ?? null,
+        genres: (body.genres ?? []).map((genre) => genre.id),
+        runtime: body.runtime || body.episode_run_time?.[0] || null,
+        cast: (body.credits?.cast ?? []).slice(0, CAST_SHOWN).map((person) => ({
+          name: person.name,
+          character: person.character?.trim() || null,
+          profile: person.profile_path ?? null,
+        })),
+        directors: [...new Set(directors)],
       };
     },
 

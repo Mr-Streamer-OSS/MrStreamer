@@ -59,13 +59,22 @@ interface DetailsBase {
   readonly originalTitle: string | null;
   readonly plot: string | null;
   readonly genres: readonly string[];
-  readonly cast: readonly string[];
+  /** The first billed, with the part they play and a portrait when TMDB has them. */
+  readonly cast: readonly Person[];
+  /** A film's directors, or a series' creators. */
   readonly directors: readonly string[];
   /** "1981-05-23", as the provider wrote it. */
   readonly releaseDate: string | null;
   /** Seconds. For a series, the usual length of an episode. */
   readonly duration: number | null;
   readonly backdropUrl: string | null;
+}
+
+export interface Person {
+  readonly name: string;
+  /** The part they play. */
+  readonly role: string | null;
+  readonly photoUrl: string | null;
 }
 
 export interface MovieDetails extends DetailsBase {

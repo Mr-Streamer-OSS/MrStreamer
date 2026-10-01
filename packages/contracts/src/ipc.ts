@@ -76,6 +76,7 @@ export const ipcInputs = {
       limit: "1 <= number.integer <= 500",
     }),
   "ondemand.details": () => type({ kind: titleKind(), id: "string > 0" }),
+  "ondemand.titles": () => type({ kind: titleKind(), ids: "string[]" }),
   "playback.open": () =>
     type({
       channelId: "string",
@@ -141,7 +142,13 @@ export interface IpcOutputs {
   "ondemand.refresh": OnDemandStatus;
   /** Movies and series whose name matches, best first, without titles for adults. */
   "ondemand.search": { readonly movies: readonly Title[]; readonly series: readonly Title[] };
+  /** A title's details, asked for when the viewer opens it: the provider's and TMDB's. */
   "ondemand.details": TitleDetails;
+  /**
+   * Movies or series by the id of any of their versions, from the lists alone, in the order
+   * asked; ids the lists don't have are left out. Asks the provider nothing.
+   */
+  "ondemand.titles": readonly Title[];
   /** A tab's rows; For you starts with titles like `like`, one watched lately. */
   "ondemand.rows": readonly CollectionRow[];
   /** Genres or streaming services as tiles, most stocked first. */
