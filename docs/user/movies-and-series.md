@@ -27,13 +27,13 @@ Settings > Movies & series picks the language, English unless you change it. It 
 
 ## Genres and streaming services
 
-Your provider's lists don't say a film's genre or where else it streams, and name films their own way, so Mr. Streamer asks [TMDB](https://www.themoviedb.org), using the TMDB ids providers list. It asks about each title once, newest first, and fills in names, genres, popularity and services as answers come in. Titles take their usual name in your language from Settings, or the English one where TMDB has no translation, and their details show the original name. Search finds a title by any of these names and by your provider's: on a large subscription that takes about a quarter of an hour the first time, and again once after you choose another language. Meanwhile a ring beside search in the top bar fills up, and goes when the asking stops; hover it for how far it got, or click it for Settings. Which titles each service streams comes from [JustWatch](https://www.justwatch.com), for the country your computer is set to.
+Your provider's lists don't say a film's genre or where else it streams, and name films their own way, so Mr. Streamer asks [TMDB](https://www.themoviedb.org), using the TMDB ids providers list. It asks about each title once, newest first, and fills in names, genres, popularity and services as answers come in: on a large subscription that takes about a quarter of an hour the first time, and again once after you choose another language. Titles take their usual name in your language from Settings, or the English one where TMDB has no translation, and their details show the original name. Search finds a title by any of these names and by your provider's. Meanwhile a ring beside search in the top bar fills up, and goes when the asking stops; hover it for how far it got, or click it for Settings. Which titles each service streams comes from [JustWatch](https://www.justwatch.com), for the country your computer is set to.
 
 Mr. Streamer has its own TMDB key. If TMDB stops accepting it, Settings > Movies & series says so, and you can paste a key of your own there; a free TMDB account gets one.
 
 ## Details
 
-A poster opens its details over the list, which stays where it was: the artwork your provider supplies, the year, length, genres and rating, the plot and the cast. A film's details are those of the version that suits your language best.
+A poster opens its details over the list, which stays where it was: the artwork, the year, length, genres and rating, the story and the cast. They load when you open the title, never before: TMDB's story, artwork and cast in your language where it has them, your provider's otherwise. A title opened before opens at once. A film's details are those of the version that suits your language best.
 
 - **Resume** plays a movie or episode from where you stopped. **From the beginning** starts it again, without asking.
 - **Play** starts something new. For a series it plays the episode you're on: the one you stopped in, the next one after one you finished, or the first.
@@ -53,7 +53,7 @@ How far you got is saved as you go: every minute, and whenever you pause, skip, 
 
 ## Continue watching
 
-Home's first row shows what you were watching: movies you started, and for each series the episode you're on. A title counts as started after two minutes, and as finished in its last few minutes, where the credits run. A finished movie leaves the row; a finished episode stays as **Next: S1 E4** until the series runs out.
+Home's first row shows what you were watching: movies you started, and for each series the episode you're on. A title counts as started after two minutes, and as finished in its last few minutes, where the credits run. A finished movie leaves the row; a finished episode stays as **Next episode**, which plays the episode after it, or opens the series' details when there is none. The row shows what you saved, so it asks your provider nothing until you press play.
 
 ## Keys
 

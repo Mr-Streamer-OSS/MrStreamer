@@ -178,6 +178,35 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
     expect(app.tmdb.detailRequests()).toBe(both);
   });
 
+  it("shows TMDB's overview, artwork and credits in a title's details once it opens", async () => {
+    const app = await metadataApp();
+    const { onDemand } = await app.start();
+    const [movie] = (
+      await onDemand.collection({ kind: "movie", id: "all", offset: 0, limit: 50 })
+    ).titles.filter((title) => title.tmdbId);
+    expect(app.tmdb.aboutRequests()).toBe(0);
+
+    const details = await onDemand.details("movie", movie?.id ?? "");
+
+    expect(details.plot).toMatch(/^TMDB's story of /);
+    expect(details.title.posterUrl).toBe(
+      `https://image.tmdb.org/t/p/w780/poster-${movie?.tmdbId}.jpg`,
+    );
+    expect(details.cast).toEqual([
+      {
+        name: "Alan Actor",
+        role: "The Lead",
+        photoUrl: "https://image.tmdb.org/t/p/w185/alan.jpg",
+      },
+    ]);
+    expect(details.directors).toEqual(["Grace Director"]);
+    // The file's own length stands.
+    expect(details.duration).toBe(6000);
+    // Opening it again asks no one.
+    await onDemand.details("movie", movie?.id ?? "");
+    expect(app.tmdb.aboutRequests()).toBe(1);
+  });
+
   it("fetches nothing without a key", async () => {
     const app = await metadataApp(null);
     const { onDemand } = await app.start();

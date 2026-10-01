@@ -7,6 +7,8 @@ export interface FakeTmdb {
   readonly url: string;
   /** Requests for one title's details so far, in one language or all. */
   detailRequests(language?: string): number;
+  /** Of those, the ones a title's details made as it opened, with its credits. */
+  aboutRequests(): number;
   /** Makes every request answer 401, as for a revoked key, or restores them. */
   refuse(refused: boolean): void;
   /** What the service streams, as TMDB ids, by kind. */
@@ -31,6 +33,7 @@ export function tmdbName(id: number, language: string): { name: string; original
 
 export async function startFakeTmdb(): Promise<FakeTmdb> {
   const details = new Map<string, number>();
+  let about = 0;
   let refused = false;
   const streamed: Record<string, readonly string[]> = { movie: [], tv: [] };
   const json = (response: import("node:http").ServerResponse, body: unknown, status = 200) =>
@@ -41,6 +44,7 @@ export async function startFakeTmdb(): Promise<FakeTmdb> {
     const title = /^\/3\/(movie|tv)\/(\d+)$/.exec(url.pathname);
     if (title) {
       const language = url.searchParams.get("language") ?? "en";
+      if (url.searchParams.get("append_to_response") === "credits") about++;
       details.set(language, (details.get(language) ?? 0) + 1);
       const id = Number(title[2]);
       const { name, original } = tmdbName(id, language);
@@ -55,6 +59,20 @@ export async function startFakeTmdb(): Promise<FakeTmdb> {
         vote_count: 400,
         belongs_to_collection: null,
         backdrop_path: `/backdrop-${id}.jpg`,
+        // What a title's details ask for when it opens.
+        ...(url.searchParams.get("append_to_response") === "credits"
+          ? {
+              overview: `TMDB's story of ${name}.`,
+              poster_path: `/poster-${id}.jpg`,
+              runtime: series ? null : 101,
+              episode_run_time: series ? [44] : undefined,
+              created_by: series ? [{ name: "Ada Creator" }] : undefined,
+              credits: {
+                cast: [{ name: "Alan Actor", character: "The Lead", profile_path: "/alan.jpg" }],
+                crew: [{ name: "Grace Director", job: "Director" }],
+              },
+            }
+          : {}),
       });
     }
     const services = /^\/3\/watch\/providers\/(movie|tv)$/.exec(url.pathname);
@@ -82,6 +100,7 @@ export async function startFakeTmdb(): Promise<FakeTmdb> {
   const { port } = server.address() as { port: number };
   return {
     url: `http://127.0.0.1:${port}/3`,
+    aboutRequests: () => about,
     detailRequests: (language) =>
       language === undefined
         ? [...details.values()].reduce((sum, count) => sum + count, 0)

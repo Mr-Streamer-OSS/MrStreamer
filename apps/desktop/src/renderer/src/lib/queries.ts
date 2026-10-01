@@ -141,6 +141,13 @@ export const queries = {
       staleTime: Infinity,
       enabled: query.trim().length > 0,
     }),
+  /** Titles from the lists, by the id of any version; asks the provider nothing. */
+  titles: (kind: TitleKind, ids: readonly string[]) =>
+    queryOptions({
+      queryKey: ["ondemand", "titles", kind, ids],
+      queryFn: () => call("ondemand.titles", { kind, ids: [...ids] }),
+      enabled: ids.length > 0,
+    }),
   details: (kind: TitleKind, id: string) =>
     queryOptions({
       queryKey: ["ondemand", "details", kind, id],

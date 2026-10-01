@@ -1,10 +1,9 @@
 // Movies and episodes as the views talk about them: how long, how far, what's next, and playing
 // one. The player itself is in ../player/title-player.ts.
-import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Episode, SeriesDetails, Title, TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { TitleProgress } from "@mrstreamer/contracts/viewing";
-import { useUi } from "../app/ui-store.ts";
+import { openDetails, useUi } from "../app/ui-store.ts";
 import { titlePlayer, type NowPlaying } from "../player/title-player.ts";
 import { call } from "./ipc.ts";
 import { queries } from "./queries.ts";
@@ -91,35 +90,6 @@ export function playTitle(now: NowPlaying, from: number): void {
   void titlePlayer.open(now, from);
 }
 
-/** How long the pointer rests on a title, or the keyboard on it, before its details load. */
-const PREFETCH_AFTER_MS = 200;
-
-/**
- * Loads a title's details while the pointer rests on it or the keyboard selects it, so they are
- * there when it opens: the provider takes a second or so to answer. Spread the returned handlers
- * onto the tile.
- */
-export function usePrefetchDetails(title: Title, selected = false) {
-  const client = useQueryClient();
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const stop = () => {
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = null;
-  };
-  const start = () => {
-    stop();
-    timer.current = setTimeout(
-      () => void client.prefetchQuery(queries.details(title.kind, title.id)),
-      PREFETCH_AFTER_MS,
-    );
-  };
-  useEffect(() => {
-    if (selected) start();
-    return stop;
-  }, [selected, title.kind, title.id]);
-  return { onPointerEnter: start, onPointerLeave: stop };
-}
-
 /** Takes movies, or episodes' series, out of Continue watching: every version played. */
 export function removeFromContinue(...titles: readonly TitleRef[]): void {
   for (const title of titles) {
@@ -138,10 +108,7 @@ export interface ContinueEntry {
   readonly progress: TitleProgress;
   /** Every version of it played, which Remove takes out. */
   readonly played: readonly TitleRef[];
-  /** What plays: the same title, or the next episode of a finished one. */
-  readonly now: NowPlaying;
-  readonly from: number;
-  /** "38 min left", "Next: S2 E4". */
+  /** "38 min left", "S2 E3 · 12 min left", "Next episode". */
   readonly line: string;
   /** How far, from 0 to 1; null for a next episode not started. */
   readonly done: number | null;
@@ -149,9 +116,9 @@ export interface ContinueEntry {
 }
 
 /**
- * Continue watching from the viewing record, at most `limit`, with what each tile shows. A
- * finished episode offers the next one; a series with nothing left leaves the list, and so do
- * titles the provider no longer lists and titles for adults.
+ * Continue watching from the viewing record, at most `limit`, with what each tile shows. The
+ * titles come from the lists, so showing the row asks the provider nothing; titles the provider
+ * no longer lists, and titles for adults, are left out. A finished episode offers the next one.
  */
 export function useContinueWatching(limit = Infinity): {
   readonly entries: readonly ContinueEntry[];
@@ -161,52 +128,54 @@ export function useContinueWatching(limit = Infinity): {
   const viewing = useQuery(queries.viewing());
   // All of them, at most CONTINUE_LIMIT: the limit applies to what is left to show.
   const items = viewing.data?.continueWatching ?? [];
-  const details = useQueries({
-    queries: items.map((item) =>
-      item.title.kind === "movie"
-        ? queries.details("movie", item.title.id)
-        : queries.details("series", item.title.seriesId),
+  const ids = (kind: "movie" | "episode") =>
+    items.flatMap((item) =>
+      item.title.kind !== kind
+        ? []
+        : [item.title.kind === "movie" ? item.title.id : item.title.seriesId],
+    );
+  const movies = useQuery(queries.titles("movie", ids("movie")));
+  const series = useQuery(queries.titles("series", ids("episode")));
+  const byVersion = new Map(
+    [...(movies.data ?? []), ...(series.data ?? [])].flatMap((title) =>
+      title.versions.map((version) => [`${title.kind}:${version.id}`, title] as const),
     ),
-  });
-  const loading = viewing.isPending || details.some((each) => each.isPending);
-  const shown = items.flatMap((progress, index): Omit<ContinueEntry, "played">[] => {
-    const found = details[index]?.data;
-    if (!found || found.title.adult) return [];
-    const title = progress.title;
+  );
+  const loading =
+    viewing.isPending ||
+    (movies.isPending && movies.fetchStatus !== "idle") ||
+    (series.isPending && series.fetchStatus !== "idle");
+  const shown = items.flatMap((progress): Omit<ContinueEntry, "played">[] => {
+    const ref = progress.title;
+    const title = byVersion.get(
+      ref.kind === "movie" ? `movie:${ref.id}` : `series:${ref.seriesId}`,
+    );
+    if (!title || title.adult) return [];
     // One entry per film or series, whichever of its versions was played.
-    const film = found.title.tmdbId ?? found.title.id;
-    if (found.kind === "movie" && title.kind === "movie") {
+    const key = `${title.kind}:${title.tmdbId ?? title.id}`;
+    const artworkUrl = title.backdropUrl ?? title.posterUrl;
+    if (ref.kind === "movie") {
       return [
         {
-          key: `movie:${film}`,
-          title: found.title,
+          key,
+          title,
           progress,
-          now: movieNow(found.title, found.backdropUrl),
-          from: resumePoint(progress),
           line: timeLeftOf(progress) ?? "",
           done: progress.position / progress.duration,
-          artworkUrl: found.backdropUrl ?? found.title.posterUrl,
+          artworkUrl,
         },
       ];
     }
-    if (found.kind !== "series" || title.kind !== "episode") return [];
-    const current = found.seasons
-      .flatMap((season) => season.episodes)
-      .find((episode) => episode.id === title.id);
-    const next = progress.finished ? nextEpisode(found, title) : current;
-    if (!next) return [];
     return [
       {
-        key: `series:${film}`,
-        title: found.title,
+        key,
+        title,
         progress,
-        now: episodeNow(found, next),
-        from: progress.finished ? 0 : resumePoint(progress),
         line: progress.finished
-          ? `Next: ${episodeLabel(next.season, next.number)}`
-          : `${episodeLabel(next.season, next.number)} · ${timeLeftOf(progress) ?? ""}`,
+          ? "Next episode"
+          : `${episodeLabel(ref.season, ref.episode)} · ${timeLeftOf(progress) ?? ""}`,
         done: progress.finished ? null : progress.position / progress.duration,
-        artworkUrl: next.stillUrl ?? found.backdropUrl ?? found.title.posterUrl,
+        artworkUrl,
       },
     ];
   });
@@ -222,4 +191,31 @@ export function useContinueWatching(limit = Infinity): {
     );
   }
   return { entries: [...entries.values()].slice(0, limit), loading, error: viewing.error };
+}
+
+/**
+ * Plays a Continue watching entry: a movie at once, where it stopped; an episode, or the one after
+ * a finished one, once the series' details arrive, since only they list the episodes. A series
+ * with nothing after the finished episode opens its details instead.
+ */
+export function useResume(): (entry: ContinueEntry) => void {
+  const client = useQueryClient();
+  return ({ title, progress }) => {
+    const ref = progress.title;
+    if (ref.kind === "movie") {
+      playTitle(movieNow({ ...title, id: ref.id }, title.backdropUrl), resumePoint(progress));
+      return;
+    }
+    const open = () => openDetails({ kind: "series", id: ref.seriesId });
+    void client.fetchQuery(queries.details("series", ref.seriesId)).then((found) => {
+      if (found.kind !== "series") return open();
+      const episodes = found.seasons.flatMap((season) => season.episodes);
+      const current =
+        episodes.find((episode) => episode.id === ref.id) ??
+        episodes.find((episode) => episode.season === ref.season && episode.number === ref.episode);
+      const next = progress.finished ? nextEpisode(found, ref) : current;
+      if (!next) return open();
+      playTitle(episodeNow(found, next), progress.finished ? 0 : resumePoint(progress));
+    }, open);
+  };
 }

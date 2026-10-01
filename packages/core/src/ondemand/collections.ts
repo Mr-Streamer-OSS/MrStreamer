@@ -7,7 +7,7 @@ import type {
   Title,
   TitleKind,
 } from "@mrstreamer/contracts/ondemand";
-import { GENRES, type TitleMetadata } from "../metadata/tmdb.ts";
+import { GENRES, tmdbImage, type TitleMetadata } from "../metadata/tmdb.ts";
 import { suitability, suits } from "./languages.ts";
 
 /** A streaming service and the TMDB ids of what it streams in the viewer's region. */
@@ -52,7 +52,6 @@ const ENOUGH_VOTES = 100;
 /** Top rated: at least this, out of 10. */
 const TOP_RATING = 7.5;
 const DAY_MS = 24 * 60 * 60_000;
-const IMAGES = "https://image.tmdb.org/t/p/w1280";
 
 export interface Collections {
   /** A collection's titles, in `sort` or the collection's own order. */
@@ -84,7 +83,8 @@ export function collections(source: CollectionSource): Collections {
         ? {
             ...title,
             ...(names ? { title: names.name, originalTitle: names.original } : {}),
-            backdropUrl: title.backdropUrl ?? (meta.backdrop ? `${IMAGES}${meta.backdrop}` : null),
+            backdropUrl:
+              title.backdropUrl ?? (meta.backdrop ? tmdbImage(meta.backdrop, 1280) : null),
             genres: genresOf(meta),
           }
         : title;

@@ -17,7 +17,6 @@ import { Artwork } from "../../components/TitleArt.tsx";
 import { appError, describeError } from "../../lib/errors.ts";
 import { useKeyboardMode } from "../../lib/input-mode.ts";
 import { queries } from "../../lib/queries.ts";
-import { usePrefetchDetails } from "../../lib/titles.ts";
 import { useRem } from "../../lib/use-rem.ts";
 import { cn } from "../../lib/utils.ts";
 
@@ -239,10 +238,8 @@ function Grid({
 }
 
 function GridPoster({ title, selected }: { title: Title; selected: boolean }) {
-  const prefetch = usePrefetchDetails(title, selected);
   return (
     <button
-      {...prefetch}
       onMouseDown={(event) => event.preventDefault()}
       onClick={() => openDetails({ kind: title.kind, id: title.id })}
       className="group min-w-0 text-left"

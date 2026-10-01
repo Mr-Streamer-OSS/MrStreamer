@@ -16,7 +16,7 @@ import {
 } from "@mrstreamer/core/ondemand/catalogue";
 import type { CollectionId, Title, TitleKind } from "@mrstreamer/contracts/ondemand";
 import type { OnDemandCatalogue } from "@mrstreamer/core/provider";
-import { tmdb } from "@mrstreamer/core/metadata/tmdb";
+import { tmdb, tmdbImage } from "@mrstreamer/core/metadata/tmdb";
 import { collections, type Collections } from "@mrstreamer/core/ondemand/collections";
 import { readJsonFile, removeFile, writeJsonFile } from "../platform/json-file.ts";
 import { xtreamProvider } from "../providers/xtream.ts";
@@ -171,12 +171,20 @@ function speaking(language: string): void {
   if (loaded) metadata.want(wantedOf(loaded.catalogue), language);
 }
 
-/** A title with TMDB's name for a viewer of `language`, once known. */
+/**
+ * A title with TMDB's name for a viewer of `language` and its backdrop, once known, as
+ * collections show it.
+ */
 function named(title: Title, language: string): Title {
-  const found = title.tmdbId
-    ? metadata.name(title.kind === "movie" ? "movie" : "tv", title.tmdbId, language)
-    : null;
-  return found ? { ...title, title: found.name, originalTitle: found.original } : title;
+  if (!title.tmdbId) return title;
+  const kind = title.kind === "movie" ? "movie" : "tv";
+  const found = metadata.name(kind, title.tmdbId, language);
+  const backdrop = title.backdropUrl ? null : metadata.get(kind, title.tmdbId)?.backdrop;
+  return {
+    ...title,
+    ...(found ? { title: found.name, originalTitle: found.original } : {}),
+    ...(backdrop ? { backdropUrl: tmdbImage(backdrop, 1280) } : {}),
+  };
 }
 
 /** The catalogue as a viewer of `language` sees it. */
