@@ -1,5 +1,5 @@
 import { ChevronLeft, Search, Settings } from "lucide-react";
-import { isMac } from "../app/platform.ts";
+import { isMac, useWindowFullScreen } from "../app/platform.ts";
 import { closeWatch, openView, useUi, type View } from "../app/ui-store.ts";
 import { UpdateNotice } from "../features/updates/UpdateNotice.tsx";
 import { cn } from "../lib/utils.ts";
@@ -23,7 +23,8 @@ function viewLabel(view: View): string {
 /**
  * The top of the window: brand, the pages, how far TMDB has come, search and settings. It is also
  * the window's drag area; macOS draws its traffic lights on the left and Windows its controls on
- * the right. Over Settings, Watch or a title's details, Back to the page underneath takes the
+ * the right, except in full screen, where the bar takes their room. Over Settings, Watch or a
+ * title's details, Back to the page underneath takes the
  * pages' place. `back` overrides where Back goes and what it says, as a playing title does.
  */
 export function WindowBar({
@@ -39,6 +40,8 @@ export function WindowBar({
   const watching = useUi((state) => state.watching);
   const settingsOpen = useUi((state) => state.settings !== null);
   const detailsOpen = useUi((state) => state.details !== null);
+  // In full screen the system's window controls are hidden, and their room goes with them.
+  const controls = !useWindowFullScreen();
   const way =
     back ??
     (settingsOpen
@@ -50,12 +53,13 @@ export function WindowBar({
           : null);
   return (
     <header
-      className={cn("drag flex flex-none items-center gap-1", isMac ? "pr-4" : "pl-4", className)}
+      className={cn("drag flex flex-none items-center gap-1 px-4", className)}
       style={{
         height: WINDOW_BAR.height,
-        ...(isMac
-          ? { paddingLeft: WINDOW_BAR.macInset }
-          : { paddingRight: WINDOW_BAR.windowsInset }),
+        ...(controls &&
+          (isMac
+            ? { paddingLeft: WINDOW_BAR.macInset }
+            : { paddingRight: WINDOW_BAR.windowsInset })),
       }}
     >
       <span className="mr-4 flex items-center gap-2">

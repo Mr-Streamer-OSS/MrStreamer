@@ -211,6 +211,11 @@ export interface IpcEvents {
   "viewing.changed": { readonly sequence: number };
   /** The update moved on, for example a download's progress. */
   "updates.changed": UpdateStatus;
+  /**
+   * Whether the window fills the screen, where the system hides its window controls. Sent when
+   * that changes, and once the page loads.
+   */
+  "window.fullScreen": boolean;
 }
 export type IpcEvent = keyof IpcEvents;
 

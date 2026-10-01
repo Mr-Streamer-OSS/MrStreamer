@@ -85,6 +85,11 @@ function openWindow(closeStreams: () => void): BrowserWindow {
     },
   });
   window.once("ready-to-show", () => window.show());
+  // Full screen hides the traffic lights and the Windows controls; the top bar takes their room.
+  const fullScreen = () => emit(window.webContents, "window.fullScreen", window.isFullScreen());
+  window.on("enter-full-screen", fullScreen);
+  window.on("leave-full-screen", fullScreen);
+  window.webContents.on("did-finish-load", fullScreen);
   window.on("closed", () => {
     // Nothing can be watching once the window is gone, so release the provider connection.
     closeStreams();
