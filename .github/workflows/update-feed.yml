@@ -57,11 +57,18 @@ jobs:
         env:
           ALLOW_REGRESS: ${{ inputs.allow-regress == true }}
         run: |
-          # The site's address, custom domain or not. None before Pages is enabled.
-          site=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq .html_url) || {
+          # The site's address, custom domain or not. None before Pages is enabled; any other
+          # failure stops here, since without the deployed feed the releases could take a
+          # channel back.
+          if site=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq .html_url 2>"$RUNNER_TEMP/pages-error"); then
+            :
+          elif grep -q "HTTP 404" "$RUNNER_TEMP/pages-error"; then
             echo "::warning::No GitHub Pages site found, so deploying will fail. Enable Pages: docs/maintainers/releasing.md#enabling-pages"
             site=""
-          }
+          else
+            echo "::error::Couldn't look up the GitHub Pages site: $(cat "$RUNNER_TEMP/pages-error"). Run this again."
+            exit 1
+          fi
           args=(--out site/updates.json)
           [ -n "$site" ] && args+=(--current "${site%/}/updates.json")
           [ "$ALLOW_REGRESS" = true ] && args+=(--allow-regress)

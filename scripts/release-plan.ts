@@ -474,10 +474,11 @@ async function reportChannels(repo: Repository, request: NightlyRequest): Promis
 }
 
 /**
- * The feed deployed at `url`, or null when there is none yet: no address, 404 or unreachable, as
- * before Pages is enabled. Any other failure throws, so a feed is never published without it.
+ * The feed deployed at `url`, or null when there is none yet: no address, as before Pages is
+ * enabled, or a 404. Any other answer, or none, throws: without the deployed feed, a stale list of
+ * releases could take a channel back.
  */
-async function deployedFeed(url: string | undefined): Promise<UpdateFeed | null> {
+export async function deployedFeed(url: string | undefined): Promise<UpdateFeed | null> {
   if (!url) {
     console.log("No deployed feed given: the releases alone decide.");
     return null;
@@ -487,13 +488,11 @@ async function deployedFeed(url: string | undefined): Promise<UpdateFeed | null>
   latest.searchParams.set("at", String(Date.now()));
   const response = await fetch(latest, { signal: AbortSignal.timeout(20_000) }).catch(
     (error: unknown) => {
-      console.log(
-        `::warning::${url} is unreachable, so the releases alone decide. ${error instanceof Error ? error.message : String(error)}`,
+      throw new Error(
+        `${url} is unreachable, so the deployed feed can't be compared. Run this again. ${error instanceof Error ? error.message : String(error)}`,
       );
-      return null;
     },
   );
-  if (!response) return null;
   if (response.status === 404) {
     console.log(`Nothing is deployed at ${url} yet: the releases alone decide.`);
     return null;
