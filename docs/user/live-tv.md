@@ -29,7 +29,7 @@ While watching, the channel list opens over the left of the picture with the lis
 - **Sound** shows when a channel has more than one sound track. Picking another starts the channel again with it, which takes a moment.
 - **CC** lists the channel's subtitles: DVB subtitles, teletext subtitle pages and closed captions. C turns the last ones you picked on and off.
 
-The languages you pick carry over to other channels, and to movies and series. A channel with subtitles in your language starts with them on.
+The languages you pick carry over to other channels, and to movies and series. A channel in another language starts with subtitles in yours when it has them.
 
 ## Search
 

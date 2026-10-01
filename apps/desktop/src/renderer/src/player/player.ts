@@ -19,7 +19,7 @@ import type {
   StreamSession,
   SubtitleTrack,
 } from "@mrstreamer/contracts/playback";
-import { languageCode } from "@mrstreamer/core/ondemand/tracks";
+import { channelSubtitle } from "@mrstreamer/core/ondemand/tracks";
 import { subtitleDecoder, type SubtitleDecoder } from "@mrstreamer/core/subtitles/decoder";
 import { appError } from "../lib/errors.ts";
 import { call } from "../lib/ipc.ts";
@@ -311,20 +311,16 @@ function classify(upstream: StreamFailure | null, error: EngineError): PlaybackP
 
 /**
  * Reads the stream's tracks from the main process. The first time on a channel, subtitles in the
- * viewer's language come on by themselves, as for movies and episodes.
+ * viewer's language may come on by themselves (see channelSubtitle).
  */
 async function loadTracks(mine: number, sessionId: string): Promise<void> {
   const tracks = await call("playback.tracks", { sessionId }).catch(() => null);
   if (mine !== selection || !tracks) return;
   store.setState({ tracks });
   if (store.getState().subtitle || lastSubtitle) return;
-  const wanted = (await call("preferences.get").catch(() => null))?.subtitleLanguage;
-  if (!wanted || wanted === "off" || mine !== selection) return;
-  const code = languageCode(wanted);
-  const match = tracks.subtitles
-    .filter((track) => track.language === code)
-    .toSorted((a, b) => Number(a.forced) - Number(b.forced))[0];
-  if (match) choose(match);
+  const wanted = (await call("preferences.get").catch(() => null))?.subtitleLanguage ?? null;
+  const match = channelSubtitle(tracks, wanted);
+  if (match && mine === selection) choose(match);
 }
 
 /** A decoder and presenter for the chosen subtitles, from scratch. */

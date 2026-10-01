@@ -135,15 +135,8 @@ export function WatchScreen() {
         return;
       if (ui.searchOpen || ui.settings || ui.updateDialog || !ui.watching) return;
       const now = latest.current;
-      if (now.menu) {
-        // The menu's own keys; Escape closes it.
-        if (event.key === "Escape") {
-          setMenu(null);
-          event.preventDefault();
-          event.stopPropagation();
-        }
-        return;
-      }
+      // The menu's own keys: Escape closes it, and focus goes back to its button.
+      if (now.menu) return;
       const {
         switchBy,
         openChannels,
