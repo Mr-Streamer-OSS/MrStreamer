@@ -47,6 +47,12 @@ export interface Title {
   readonly versions: readonly TitleVersion[];
 }
 
+/** Search results in Movies or Series: the best matches, and how many match in all. */
+export interface TitleMatches {
+  readonly titles: readonly Title[];
+  readonly total: number;
+}
+
 /** One version of a title as the provider lists it, often one per language. */
 export interface TitleVersion {
   readonly id: string;

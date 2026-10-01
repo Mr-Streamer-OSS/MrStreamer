@@ -251,6 +251,7 @@ async function start(): Promise<void> {
       "ondemand.status": () => onDemand.status,
       "ondemand.refresh": () => onDemand.refresh,
       "ondemand.search": ({ query }) => onDemand.search(query),
+      "ondemand.searchKind": ({ kind, query }) => onDemand.searchKind(kind, query),
       "ondemand.details": ({ kind, id }) => onDemand.details(kind, id),
       "ondemand.titles": ({ kind, ids }) => onDemand.titles(kind, ids),
       "ondemand.rows": ({ kind, tab, like }) => onDemand.rows(kind, tab, like),

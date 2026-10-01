@@ -11,13 +11,14 @@ import { Artwork } from "../../components/TitleArt.tsx";
 import { useNow } from "../../lib/clock.ts";
 import { clockTime, timeLeft } from "../../lib/format.ts";
 import { queries, useCategoryMap } from "../../lib/queries.ts";
+import { useDebounced } from "../../lib/use-debounced.ts";
 import { cn } from "../../lib/utils.ts";
 import { titlePlayer } from "../../player/title-player.ts";
 import { watchChannel } from "../live/GuidePage.tsx";
 
 /**
  * Searches channel names across every category, then movies and series, then programmes on now
- * and later today. Opens with ⌘K or Ctrl K.
+ * and later today. Opens with ⌘K or Ctrl K, on what Movies or Series searched for, if anything.
  */
 export function SearchPalette() {
   const open = useUi((state) => state.searchOpen);
@@ -46,7 +47,8 @@ const CHANNEL_RESULTS = 20;
 const TITLE_RESULTS = 6;
 
 function Palette() {
-  const [query, setQuery] = useState("");
+  // Mounted each time it opens.
+  const [query, setQuery] = useState(() => useUi.getState().searchFrom);
   const debounced = useDebounced(query, 120);
   const channels = useQuery(queries.search(debounced));
   const programmes = useQuery(queries.programmes(debounced));
@@ -200,13 +202,4 @@ function Palette() {
       )}
     </>
   );
-}
-
-function useDebounced<T>(value: T, delayMs: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), delayMs);
-    return () => clearTimeout(timer);
-  }, [value, delayMs]);
-  return debounced;
 }

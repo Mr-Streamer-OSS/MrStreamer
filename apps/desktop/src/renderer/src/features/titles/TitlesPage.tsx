@@ -3,8 +3,10 @@
 // the viewer's language; New gathers what was added; Genres and Services are pages of tiles; 4K
 // and All are grids. A row's All, a genre or a service opens its collection, with Back to the tab.
 // Genres and services come from TMDB, so they fill in as its metadata arrives.
-import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, Play } from "lucide-react";
+//   The field at the end of the tabs searches this kind only, by any of a title's names, and
+// shows what it finds in place of the tab; Escape clears it. ⌘K searches everything for the same.
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { ChevronRight, Play, Search } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 import { create } from "zustand";
 import type {
@@ -15,7 +17,7 @@ import type {
   Title,
   TitleKind,
 } from "@mrstreamer/contracts/ondemand";
-import { isTyping } from "../../app/platform.ts";
+import { isMac, isTyping } from "../../app/platform.ts";
 import { openDetails, openView, useUi } from "../../app/ui-store.ts";
 import { Artwork, PosterTile, StillTile } from "../../components/TitleArt.tsx";
 import { Button } from "../../components/ui/button.tsx";
@@ -32,8 +34,9 @@ import {
   useResume,
   type ContinueEntry,
 } from "../../lib/titles.ts";
+import { useDebounced } from "../../lib/use-debounced.ts";
 import { cn } from "../../lib/utils.ts";
-import { CollectionGrid, useCollection } from "./CollectionGrid.tsx";
+import { CollectionGrid, TitleGrid, useCollection } from "./CollectionGrid.tsx";
 
 type Tab = "for-you" | "new" | "genres" | "services" | "4k" | "adult" | "all";
 
@@ -44,12 +47,14 @@ interface Place {
   readonly collectionSort: CollectionSort | null;
   /** How All is sorted. */
   readonly sort: CollectionSort;
+  /** What the field in the tab bar searches for; empty shows the tab. */
+  readonly query: string;
 }
 
 /** Where each kind was, kept while the viewer goes elsewhere and comes back. */
 const usePlace = create<Record<TitleKind, Place>>(() => ({
-  movie: { tab: "for-you", collection: null, collectionSort: null, sort: "added" },
-  series: { tab: "for-you", collection: null, collectionSort: null, sort: "added" },
+  movie: { tab: "for-you", collection: null, collectionSort: null, sort: "added", query: "" },
+  series: { tab: "for-you", collection: null, collectionSort: null, sort: "added", query: "" },
 }));
 
 /** Opens Movies or Series on one collection, with Back to the tab it was on: Home's All. */
@@ -87,19 +92,31 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
     { value: "all", label: kind === "movie" ? "All movies" : "All series" },
   ];
 
-  // Escape leaves an open collection for its tab, one layer at a time.
+  const searching = place.query.trim() !== "";
+  // Escape leaves an open collection, or the search, for the tab, one layer at a time.
   useEffect(() => {
-    if (!active || !place.collection) return;
+    if (!active || (!place.collection && !searching)) return;
     function onKey(event: KeyboardEvent) {
       if (event.key !== "Escape" || event.defaultPrevented || isTyping(event)) return;
       const ui = useUi.getState();
       if (ui.searchOpen || ui.settings || ui.updateDialog || ui.details || ui.playingTitle) return;
-      usePlace.setState((state) => ({ [kind]: { ...state[kind], collection: null } }));
+      usePlace.setState((state) => ({
+        [kind]: state[kind].collection
+          ? { ...state[kind], collection: null }
+          : { ...state[kind], query: "" },
+      }));
       event.preventDefault();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active, place.collection, kind]);
+  }, [active, place.collection, searching, kind]);
+
+  // ⌘K and the search button search everything for what this page searches for.
+  useEffect(() => {
+    if (!active) return;
+    useUi.setState({ searchFrom: place.query.trim() });
+    return () => useUi.setState({ searchFrom: "" });
+  }, [active, place.query]);
 
   const open = (collection: CollectionId) => go({ collection, collectionSort: null });
   const loading = status.data && status.data.fetchedAt === null;
@@ -121,23 +138,27 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
         />
       ) : (
         <>
-          <nav className="flex flex-none gap-6 px-10 pt-2 pb-4 text-[0.9375rem]">
-            {tabs.map((each) => (
-              <button
-                key={each.value}
-                aria-pressed={each.value === tab}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => go({ tab: each.value })}
-                className={cn(
-                  "border-b-2 pb-1",
-                  each.value === tab
-                    ? "border-white font-semibold text-white"
-                    : "border-transparent text-muted-foreground hover:text-white",
-                )}
-              >
-                {each.label}
-              </button>
-            ))}
+          <nav className="flex flex-none items-center gap-6 px-10 pt-2 pb-4 text-[0.9375rem]">
+            {tabs.map((each) => {
+              const shown = !searching && each.value === tab;
+              return (
+                <button
+                  key={each.value}
+                  aria-pressed={shown}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => go({ tab: each.value, query: "" })}
+                  className={cn(
+                    "border-b-2 pb-1",
+                    shown
+                      ? "border-white font-semibold text-white"
+                      : "border-transparent text-muted-foreground hover:text-white",
+                  )}
+                >
+                  {each.label}
+                </button>
+              );
+            })}
+            <SearchField kind={kind} value={place.query} onChange={(query) => go({ query })} />
           </nav>
           {failure ? (
             <div className="px-10 text-[0.9375rem]">
@@ -154,6 +175,8 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
             <p className="px-10 text-[0.9375rem] text-muted-foreground">
               Loading {kind === "movie" ? "movies" : "series"}…
             </p>
+          ) : searching ? (
+            <SearchResults kind={kind} query={place.query.trim()} active={active} />
           ) : tab === "for-you" || tab === "new" ? (
             <Rows kind={kind} tab={tab} onOpen={open} />
           ) : tab === "genres" || tab === "services" ? (
@@ -173,6 +196,95 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
       )}
     </div>
   );
+}
+
+/**
+ * The field at the end of the tabs. Down or Enter hands the keys to the results, Escape clears
+ * it and returns to the tab.
+ */
+function SearchField({
+  kind,
+  value,
+  onChange,
+}: {
+  kind: TitleKind;
+  value: string;
+  onChange: (query: string) => void;
+}) {
+  return (
+    <label className="ml-auto flex h-9 w-[17rem] items-center gap-2 rounded-full bg-white/8 px-3.5 focus-within:bg-white/12">
+      <Search className="size-4 flex-none text-muted-foreground" />
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") onChange("");
+          else if (event.key !== "ArrowDown" && event.key !== "Enter") return;
+          event.currentTarget.blur();
+          event.preventDefault();
+        }}
+        placeholder={kind === "movie" ? "Search movies" : "Search series"}
+        aria-label={kind === "movie" ? "Search movies" : "Search series"}
+        spellCheck={false}
+        className="min-w-0 flex-1 bg-transparent text-[0.875rem] text-foreground outline-none placeholder:text-muted-foreground"
+      />
+    </label>
+  );
+}
+
+/** What the field found, as posters, with how many and a way to search everything. */
+function SearchResults({
+  kind,
+  query,
+  active,
+}: {
+  kind: TitleKind;
+  query: string;
+  active: boolean;
+}) {
+  const debounced = useDebounced(query, 120);
+  const found = useQuery({
+    ...queries.titleSearchIn(kind, debounced),
+    placeholderData: keepPreviousData,
+  });
+  const titles = found.data?.titles ?? [];
+  const total = found.data?.total ?? 0;
+  const noun = kind === "series" ? "series" : total === 1 ? "movie" : "movies";
+  return (
+    <div className="flex min-h-0 flex-1 flex-col pl-10">
+      {found.error ? (
+        <p className="text-sm text-destructive">{describeError(appError(found.error))}</p>
+      ) : (
+        found.data && (
+          <p className="mb-4 text-[0.9375rem] font-medium tabular-nums">
+            {total === 0
+              ? `No ${kind === "series" ? "series" : "movies"} found`
+              : total > titles.length
+                ? `The best ${titles.length} of ${total.toLocaleString()} ${noun}`
+                : `${total.toLocaleString()} ${noun}`}
+          </p>
+        )
+      )}
+      <TitleGrid key={debounced} titles={titles} active={active} caption={searchCaption} />
+      <p className="flex-none py-4 text-[0.8125rem] text-muted-foreground">
+        {kind === "series" ? "Channels, movies" : "Channels, series"} and programmes for “{query}”{" "}
+        <button
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => useUi.setState({ searchOpen: true })}
+          className="ml-1 text-white underline-offset-4 hover:underline"
+        >
+          Search everything {isMac ? "⌘K" : "Ctrl K"}
+        </button>
+      </p>
+    </div>
+  );
+}
+
+/** Under a found poster: the year, and the original name, which search finds it by too. */
+function searchCaption(title: Title): string {
+  return [title.year, title.originalTitle ? `Original: ${title.originalTitle}` : title.genres[0]]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 const SORTS: readonly { value: CollectionSort; label: string }[] = [

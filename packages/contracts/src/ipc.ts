@@ -18,6 +18,7 @@ import {
   type CollectionTile,
   type OnDemandStatus,
   type Title,
+  type TitleMatches,
   type TitleDetails,
 } from "./ondemand.ts";
 import {
@@ -64,6 +65,8 @@ export const ipcInputs = {
   "ondemand.status": none,
   "ondemand.refresh": none,
   "ondemand.search": () => type({ query: "string" }),
+  /** Movies or series only, for the field in their tab bar. */
+  "ondemand.searchKind": () => type({ kind: titleKind(), query: "string" }),
   "ondemand.rows": () =>
     type({ kind: titleKind(), tab: type.enumerated(...ROW_TABS), "like?": "string > 0" }),
   "ondemand.tiles": () => type({ kind: titleKind(), of: "'genres' | 'services'" }),
@@ -144,6 +147,7 @@ export interface IpcOutputs {
   "ondemand.refresh": OnDemandStatus;
   /** Movies and series whose name matches, best first, without titles for adults. */
   "ondemand.search": { readonly movies: readonly Title[]; readonly series: readonly Title[] };
+  "ondemand.searchKind": TitleMatches;
   /** A title's details, asked for when the viewer opens it: the provider's and TMDB's. */
   "ondemand.details": TitleDetails;
   /**

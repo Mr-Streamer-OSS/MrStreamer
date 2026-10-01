@@ -34,6 +34,8 @@ interface UiState {
   /** Watch's channel list is open over the picture. */
   readonly channelsOpen: boolean;
   readonly searchOpen: boolean;
+  /** What search starts with when it opens: what Movies or Series searches for, while shown. */
+  readonly searchFrom: string;
   /** The Settings tab on screen, over the current view; null while Settings is closed. */
   readonly settings: SettingsTab | null;
   /** Set while the login form edits an existing subscription. */
@@ -51,6 +53,7 @@ export const useUi = create<UiState>(() => ({
   details: null,
   channelsOpen: false,
   searchOpen: false,
+  searchFrom: "",
   settings: null,
   editingLogin: false,
   list: { kind: "all" },

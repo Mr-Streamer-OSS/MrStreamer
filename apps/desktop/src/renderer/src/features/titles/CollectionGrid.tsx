@@ -1,5 +1,6 @@
 // A collection as a grid of posters, in rows that fit the width, fetched a page at a time and
-// drawn only where in view. A poster opens its details over the grid, which stays where it was.
+// drawn only where in view; search results use the same grid. A poster opens its details over
+// the grid, which stays where it was.
 //   The arrow keys move the selection through the grid, Page Up and Down by a screen, Home and End
 //   to the ends; Enter opens the title. The pointer only hovers.
 import { useQueries } from "@tanstack/react-query";
@@ -97,17 +98,49 @@ export function CollectionGrid({
   );
 }
 
+/** What a poster says under its name: the year, the first genre and the rating. */
+function describe(title: Title): string {
+  return [title.year, title.genres[0], title.rating ? `★ ${title.rating.toFixed(1)}` : null]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+const nothing = () => {};
+
+/** Titles already at hand, such as search results, as the same grid. */
+export function TitleGrid({
+  titles,
+  active,
+  caption,
+}: {
+  titles: readonly Title[];
+  active: boolean;
+  caption?: (title: Title) => string;
+}) {
+  return (
+    <Grid
+      total={titles.length}
+      titleAt={(index) => titles[index]}
+      onVisible={nothing}
+      active={active}
+      {...(caption ? { caption } : {})}
+    />
+  );
+}
+
 /** The posters in rows that fit the width, drawing only the rows in view. */
 function Grid({
   total,
   titleAt,
   onVisible,
   active,
+  caption = describe,
 }: {
   total: number;
   titleAt: (index: number) => Title | undefined;
   onVisible: (first: number, last: number) => void;
   active: boolean;
+  caption?: (title: Title) => string;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const rem = useRem();
@@ -222,6 +255,7 @@ function Grid({
                 <GridPoster
                   key={index}
                   title={title}
+                  caption={caption(title)}
                   selected={keyboard && active && index === selected}
                 />
               ) : (
@@ -237,7 +271,15 @@ function Grid({
   );
 }
 
-function GridPoster({ title, selected }: { title: Title; selected: boolean }) {
+function GridPoster({
+  title,
+  caption,
+  selected,
+}: {
+  title: Title;
+  caption: string;
+  selected: boolean;
+}) {
   return (
     <button
       onMouseDown={(event) => event.preventDefault()}
@@ -254,11 +296,7 @@ function GridPoster({ title, selected }: { title: Title; selected: boolean }) {
         <Artwork url={title.posterUrl} name={title.title} size="card" />
       </span>
       <span className="mt-2 block truncate text-[0.875rem] font-medium">{title.title}</span>
-      <span className="block truncate text-xs text-muted-foreground">
-        {[title.year, title.genres[0], title.rating ? `★ ${title.rating.toFixed(1)}` : null]
-          .filter(Boolean)
-          .join(" · ")}
-      </span>
+      <span className="block truncate text-xs text-muted-foreground">{caption}</span>
     </button>
   );
 }

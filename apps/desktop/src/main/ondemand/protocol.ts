@@ -10,6 +10,7 @@ import type {
   RowTab,
   Title,
   TitleKind,
+  TitleMatches,
 } from "@mrstreamer/contracts/ondemand";
 import type { XtreamAccount } from "../providers/xtream.ts";
 import type { MetadataStatus } from "./metadata.ts";
@@ -42,6 +43,11 @@ export interface WorkerCalls {
   search: {
     args: { key: string; language: string; query: string };
     result: { readonly movies: readonly Title[]; readonly series: readonly Title[] };
+  };
+  /** Movies or series matching `query`, the best `limit` of them, and how many match. */
+  searchKind: {
+    args: { key: string; language: string; kind: TitleKind; query: string; limit: number };
+    result: TitleMatches;
   };
   /** A tab's rows; For you starts with titles like `like`, a title watched lately. */
   rows: {

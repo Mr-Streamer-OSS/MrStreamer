@@ -87,6 +87,19 @@ describe("movies and series", { timeout: 20_000 }, () => {
     ]);
   });
 
+  it("searches one kind for its page: the best matches, and how many match in all", async () => {
+    const { onDemand } = await onDemandApp({ titles: 1000 });
+
+    const stories = await onDemand.searchKind("movie", "story");
+    expect(stories.titles).toHaveLength(300);
+    expect(stories.total).toBeGreaterThan(300);
+    expect(stories.titles.every((title) => title.kind === "movie" && !title.adult)).toBe(true);
+    expect((await onDemand.searchKind("series", "sound test")).total).toBe(0);
+    expect((await onDemand.searchKind("movie", "sound test")).titles.map((t) => t.title)).toEqual([
+      "TEST | Two sound tracks and subtitles",
+    ]);
+  });
+
   it("finds titles by any version's id from the lists, without asking for details", async () => {
     const { onDemand, provider } = await onDemandApp();
     const versions = provider.titles.movies.slice(0, 3).map((movie) => String(movie.id));
