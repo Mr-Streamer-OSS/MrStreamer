@@ -133,7 +133,12 @@ function make(deps: OnDemandDeps) {
     const keyOf = (preferences: { readonly tmdbKey?: string }) =>
       preferences.tmdbKey?.trim() || deps.tmdbKey;
     let tmdbKey = keyOf(yield* settings.get);
-    let metadataProgress: MetadataProgress = { known: 0, wanted: 0, refused: false };
+    let metadataProgress: MetadataProgress = {
+      known: 0,
+      wanted: 0,
+      refused: false,
+      fetching: false,
+    };
     const worker = yield* Effect.acquireRelease(
       Effect.sync(() =>
         workerClient(
@@ -357,7 +362,7 @@ function make(deps: OnDemandDeps) {
         tmdbKey = next;
         generation++;
         failure = null;
-        metadataProgress = { known: 0, wanted: 0, refused: false };
+        metadataProgress = { known: 0, wanted: 0, refused: false, fetching: false };
         // The next call starts the worker again, with the new key.
         yield* Effect.promise(() => worker.stop());
         yield* publishStatus;

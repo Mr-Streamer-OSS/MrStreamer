@@ -25,6 +25,8 @@ const SAVE_EVERY_MS = 30_000;
 const SERVICES = 12;
 /** Pages read per service and kind, 20 titles each: its most popular 5,000. */
 const SERVICE_PAGES = 250;
+/** Requests in a row TMDB didn't answer before a run stops: offline, or TMDB down. */
+const GIVE_UP_AFTER = 3 * PARALLEL;
 
 const Entry = type({
   at: "number",
@@ -69,6 +71,8 @@ export interface MetadataStatus {
   readonly wanted: number;
   /** TMDB refused the key: nothing more is fetched until it changes. */
   readonly refused: boolean;
+  /** Fetching now; false once a run ends, whether or not every title got an answer. */
+  readonly fetching: boolean;
 }
 
 export interface MetadataDeps {
@@ -107,6 +111,9 @@ export function metadataStore(deps: MetadataDeps) {
   let lastChange = 0;
   /** When TMDB asked to wait until, for every request. */
   let pausedUntil = 0;
+  /** Requests in a row that got no answer; the next run tries again. */
+  let unanswered = 0;
+  const unreachable = () => unanswered >= GIVE_UP_AFTER;
 
   const keyOf = (kind: TmdbKind, id: string) => `${kind}:${id}`;
   const fresh = (at: number, keep: number) => now() - at < keep;
@@ -152,7 +159,7 @@ export function metadataStore(deps: MetadataDeps) {
     let next = 0;
     let slot = now();
     const lane = async () => {
-      while (next < items.length && !refused && !stop()) {
+      while (next < items.length && !refused && !unreachable() && !stop()) {
         const item = items[next++] as T;
         const wait = Math.max(0, slot - now(), pausedUntil - now());
         slot = Math.max(slot, now()) + 1000 / PER_SECOND;
@@ -171,11 +178,16 @@ export function metadataStore(deps: MetadataDeps) {
   async function ask<A>(call: () => Promise<A>): Promise<A | "missing" | null> {
     for (let tries = 0; tries < 3; tries++) {
       try {
-        return await call();
+        const answer = await call();
+        unanswered = 0;
+        return answer;
       } catch (cause) {
         if (!(cause instanceof TmdbError)) return null;
         const failure = cause.failure;
-        if (failure.kind === "missing") return "missing";
+        if (failure.kind === "missing") {
+          unanswered = 0;
+          return "missing";
+        }
         if (failure.kind === "refused") {
           refused = true;
           changed(true);
@@ -187,6 +199,7 @@ export function metadataStore(deps: MetadataDeps) {
         if (tries < 2) await new Promise((done) => setTimeout(done, wait));
       }
     }
+    unanswered++;
     return null;
   }
 
@@ -224,7 +237,7 @@ export function metadataStore(deps: MetadataDeps) {
       for (const service of services.slice(0, SERVICES)) {
         const ids: string[] = [];
         for (let page = 1, pages = 1; page <= Math.min(pages, SERVICE_PAGES); page++) {
-          if (replaced()) return;
+          if (replaced() || unreachable()) return;
           const found = await ask(() => client.onService(kind, service.id, deps.region, page));
           // A page TMDB won't give ends this service's list, not the others'.
           if (!found || found === "missing") break;
@@ -241,6 +254,7 @@ export function metadataStore(deps: MetadataDeps) {
 
   async function run(client: Tmdb): Promise<void> {
     await loading;
+    unanswered = 0;
     // A newer list, as after a refresh or for another account, takes over at once, ahead of
     // the services, a crawl of minutes.
     const list = wanted;
@@ -269,6 +283,8 @@ export function metadataStore(deps: MetadataDeps) {
         }
       })().finally(() => {
         running = null;
+        // The run ended, and with it the fetching the status reported.
+        deps.onChange();
       });
     },
 
@@ -296,7 +312,7 @@ export function metadataStore(deps: MetadataDeps) {
     status(): MetadataStatus {
       // Titles TMDB answered for, including ids it doesn't know.
       const known = wanted.filter((title) => current(title.kind, title.tmdbId)).length;
-      return { known, wanted: wanted.length, refused };
+      return { known, wanted: wanted.length, refused, fetching: running !== null };
     },
 
     /** Writes what changed, after any write in progress, for stopping. */

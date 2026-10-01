@@ -5,6 +5,7 @@ import { UpdateNotice } from "../features/updates/UpdateNotice.tsx";
 import { cn } from "../lib/utils.ts";
 import { WINDOW_BAR } from "../../../shared/window-bar.ts";
 import { Logo } from "./Logo.tsx";
+import { TmdbProgress } from "./TmdbProgress.tsx";
 import { Button } from "./ui/button.tsx";
 
 const VIEWS: readonly { readonly view: View; readonly label: string }[] = [
@@ -20,10 +21,10 @@ function viewLabel(view: View): string {
 }
 
 /**
- * The top of the window: brand, the pages, search and settings. It is also the window's drag
- * area; macOS draws its traffic lights on the left and Windows its controls on the right. Over
- * Settings, Watch or a title's details, Back to the page underneath takes the pages' place.
- * `back` overrides where Back goes and what it says, as a playing title does.
+ * The top of the window: brand, the pages, how far TMDB has come, search and settings. It is also
+ * the window's drag area; macOS draws its traffic lights on the left and Windows its controls on
+ * the right. Over Settings, Watch or a title's details, Back to the page underneath takes the
+ * pages' place. `back` overrides where Back goes and what it says, as a playing title does.
  */
 export function WindowBar({
   className,
@@ -86,6 +87,7 @@ export function WindowBar({
       )}
       <div className="ml-auto flex items-center gap-1.5">
         <UpdateNotice overlay={overlay} />
+        <TmdbProgress overlay={overlay} />
         <Button
           variant={overlay ? "media" : "ghost"}
           size="icon-sm"

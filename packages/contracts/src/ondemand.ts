@@ -116,6 +116,8 @@ export interface MetadataProgress {
   readonly wanted: number;
   /** TMDB refused the key; nothing more arrives until it changes. */
   readonly refused: boolean;
+  /** Titles are being asked about now; false once a run ends, finished or not, as offline. */
+  readonly fetching: boolean;
 }
 
 /** One page of a list, and how long the whole list is. */

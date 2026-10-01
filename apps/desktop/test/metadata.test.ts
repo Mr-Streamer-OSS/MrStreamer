@@ -141,9 +141,27 @@ describe("TMDB metadata store", { timeout: 30_000 }, () => {
     await vi.waitFor(() => expect(tmdb?.detailRequests()).toBeGreaterThan(0));
     // As after a refresh that lists 20 more.
     store.want(titles(1, 60));
-    await vi.waitFor(() => expect(store.status()).toMatchObject({ known: 60, wanted: 60 }), {
+    await vi.waitFor(
+      () => expect(store.status()).toMatchObject({ known: 60, wanted: 60, fetching: false }),
+      { timeout: 20_000 },
+    );
+  });
+
+  it("says it stopped when TMDB can't be reached, with titles still unanswered", async () => {
+    const changes: boolean[] = [];
+    const store = metadataStore({
+      path: join(await tempDir(), "metadata.json.gz"),
+      client: tmdbClient({ key: "test-key", api: "http://127.0.0.1:9/3" }),
+      region: "NL",
+      onChange: () => changes.push(store.status().fetching),
+    });
+    store.want(titles(1, 3));
+    expect(store.status().fetching).toBe(true);
+    await vi.waitFor(() => expect(store.status()).toMatchObject({ known: 0, fetching: false }), {
       timeout: 20_000,
     });
+    // The UI hears that it stopped.
+    expect(changes.at(-1)).toBe(false);
   });
 
   it("leaves out what TMDB said more than six months ago", async () => {

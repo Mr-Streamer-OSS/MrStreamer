@@ -27,7 +27,7 @@ Settings > Movies & series picks the language, English unless you change it. It 
 
 ## Genres and streaming services
 
-Your provider's lists don't say a film's genre or where else it streams, so Mr. Streamer asks [TMDB](https://www.themoviedb.org), using the TMDB ids providers list. It asks about each title once, newest first, and fills in genres, popularity and services as answers come in: on a large subscription that takes about a quarter of an hour the first time. Which titles each service streams comes from [JustWatch](https://www.justwatch.com), for the country your computer is set to.
+Your provider's lists don't say a film's genre or where else it streams, so Mr. Streamer asks [TMDB](https://www.themoviedb.org), using the TMDB ids providers list. It asks about each title once, newest first, and fills in genres, popularity and services as answers come in: on a large subscription that takes about a quarter of an hour the first time. Meanwhile a ring beside search in the top bar fills up, and goes when the asking stops; hover it for how far it got, or click it for Settings. Which titles each service streams comes from [JustWatch](https://www.justwatch.com), for the country your computer is set to.
 
 Mr. Streamer has its own TMDB key. If TMDB stops accepting it, Settings > Movies & series says so, and you can paste a key of your own there; a free TMDB account gets one.
 
