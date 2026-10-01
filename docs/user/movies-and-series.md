@@ -16,13 +16,13 @@ Tabs under the top bar:
 
 A row's **All**, a genre or a service opens the whole list; **Back**, or Escape, returns to the tab. In a list, the arrow keys move through the posters, Enter opens one, and the pointer only hovers.
 
-The rows show titles in your language, or in several, and titles that say nothing about their language unless they were made in another. **All movies**, **All series** and search show everything. Titles your provider marks for adults don't show anywhere.
+Every tab but **All movies** and **All series** shows titles in your language, or in several, and titles with their own sound, such as films with Dutch subtitles, unless they were made in another language. **All movies**, **All series** and search show everything. Titles your provider marks for adults don't show anywhere.
 
 ⌘K (Ctrl K on Windows and Linux) searches movies and series along with channels and programmes.
 
 ## Language
 
-Settings > Movies & series picks the language, English unless you change it. It decides which version of a film shows and plays, the sound a title starts with until you pick another in the player, and what the rows show.
+Settings > Movies & series picks the language, English unless you change it. It decides which version of a film shows and plays, the sound a title starts with until you pick another in the player, and what the tabs show.
 
 ## Genres and streaming services
 
@@ -44,7 +44,7 @@ A poster opens its details over the list, which stays where it was: the artwork 
 The picture fills the window, with the title, a timeline and the controls along the bottom; they fade while you watch and come back when you move the pointer.
 
 - Drag the timeline, or skip back and forward 10 seconds. A skip into what's already loaded is instant; further away, the picture takes a second to catch up.
-- **Audio & subtitles** lists the sound tracks and subtitles the file carries. Your choice of language is remembered, and the next title that has it starts with it. Without a choice, the file's own default sound plays, with subtitles only where the file marks them as forced for that language, such as translations of signs.
+- **Audio & subtitles** lists the sound tracks and subtitles the file carries. Your choice of language is remembered, and the next title that has it starts with it. Until you choose, the sound in your language from Settings > Movies & series plays when the file has it, else the file's own default, with subtitles only where the file marks them as forced for that language, such as translations of signs.
 - **Next episode** plays the next one, whenever you choose. At the end of an episode Mr. Streamer offers it, but never plays it on its own.
 - **Back**, or Escape, returns to the details or the page you came from.
 

@@ -62,21 +62,25 @@ function indexKind(
   const adultCategories = new Set(
     rawCategories.filter((category) => ADULT_CATEGORY.test(category.name)).map(({ id }) => id),
   );
-  // One group per film: the versions sharing a TMDB id, or a row on its own without one.
+  const isAdult = (item: ProviderTitle) =>
+    item.adult || item.categoryIds.some((id) => adultCategories.has(id));
+  // One group per film: the versions sharing a TMDB id, or a row on its own without one. A row
+  // for adults stays on its own, so the film's other versions don't go with it.
   const groups: ProviderTitle[][] = [];
   const byTmdbId = new Map<string, ProviderTitle[]>();
   const seen = new Set<string>();
   for (const item of raw) {
     if (seen.has(item.id)) continue;
     seen.add(item.id);
-    const group = item.tmdbId ? byTmdbId.get(item.tmdbId) : undefined;
+    const key = item.tmdbId && !isAdult(item) ? item.tmdbId : null;
+    const group = key ? byTmdbId.get(key) : undefined;
     if (group) {
       group.push(item);
       continue;
     }
     const created = [item];
     groups.push(created);
-    if (item.tmdbId) byTmdbId.set(item.tmdbId, created);
+    if (key) byTmdbId.set(key, created);
   }
   const titles: Title[] = [];
   /** Every version's name, title by title, for search. */
@@ -85,29 +89,29 @@ function indexKind(
   for (const group of groups) {
     const versions = group.map((item): Version => {
       const name = titleName(item.name, item.releaseDate);
-      // Suitability counts most; the date added only breaks ties, scaled below one point.
-      const rank =
-        group.length === 1 ? 0 : suitability(name.tags, language) + (item.addedAt ?? 0) / 1e14;
-      return { item, name, rank };
+      // With one version there is nothing to choose between.
+      return { item, name, fit: group.length === 1 ? 1 : suitability(name.tags, language) };
     });
-    if (versions.length > 1) versions.sort((a, b) => b.rank - a.rank);
+    // The version suiting the language best first, then the newest.
+    if (versions.length > 1) {
+      versions.sort((a, b) => b.fit - a.fit || (b.item.addedAt ?? 0) - (a.item.addedAt ?? 0));
+    }
     const first = versions[0] as Version;
     // What the first version lacks, another may have; one pass, as most films have one version.
     let year = first.name.year;
     let posterUrl = first.item.posterUrl;
     let backdropUrl = first.item.backdropUrl;
     let rating = 0;
+    // New when a version the viewer would watch arrived, not a dub into another language.
     let addedAt = 0;
-    let adult = false;
-    for (const { item, name } of versions) {
+    let anyAddedAt = 0;
+    for (const { item, name, fit } of versions) {
       year ??= name.year;
       posterUrl ??= item.posterUrl;
       backdropUrl ??= item.backdropUrl;
       rating = Math.max(rating, item.rating ?? 0);
-      addedAt = Math.max(addedAt, item.addedAt ?? 0);
-      if (adult) continue;
-      adult = item.adult;
-      for (const id of item.categoryIds) adult ||= adultCategories.has(id);
+      if (fit > 0) addedAt = Math.max(addedAt, item.addedAt ?? 0);
+      anyAddedAt = Math.max(anyAddedAt, item.addedAt ?? 0);
     }
     const title: Title = {
       kind,
@@ -119,8 +123,8 @@ function indexKind(
       posterUrl,
       backdropUrl,
       rating: rating || null,
-      addedAt: addedAt || null,
-      adult,
+      addedAt: addedAt || anyAddedAt || null,
+      adult: versions.length === 1 && isAdult(first.item),
       tmdbId: first.item.tmdbId ?? null,
       genres: [],
       versions: versions.map(({ item, name }) => ({ id: item.id, tags: name.tags })),
@@ -182,8 +186,8 @@ export function search(
 interface Version {
   readonly item: ProviderTitle;
   readonly name: TitleName;
-  /** Which version comes first: the one suiting the language, then the newest. */
-  readonly rank: number;
+  /** How well it suits the viewer's language: `suitability`. */
+  readonly fit: number;
 }
 
 function once<A>(make: () => A): () => A {

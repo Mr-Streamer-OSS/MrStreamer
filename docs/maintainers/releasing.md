@@ -163,11 +163,11 @@ Forks get no signing secrets, so their pull requests can't run it.
 
 ## TMDB key
 
-Movies and Series take genres, popularity and streaming services from TMDB. The bundle step builds the repository secret `TMDB_API_KEY`, a TMDB API Read Access Token, into the main process's bundle as `MR_STREAMER_TMDB_KEY`. Without the secret, the build succeeds and the app has no key: movies and series show without genres or services until a viewer adds their own in Settings.
+Movies and Series take genres, popularity and streaming services from TMDB. The bundle step passes the repository secret `TMDB_API_KEY`, a TMDB API Read Access Token, to the build as `MR_STREAMER_TMDB_KEY`, which builds it into the main process's bundle. Without the secret, the build succeeds and the app has no key: movies and series show without genres or services until a viewer adds their own in Settings.
 
 The token can be read out of any installer. It only reads TMDB's public data. If it's abused or revoked, regenerate it in the TMDB account's API settings, update the secret, and release; until then, viewers can use their own key.
 
-TMDB's terms ask that the app shows its logo and notice, which Settings > About does, keeps its data no longer than six months, and credits JustWatch where streaming services show.
+TMDB's terms ask that the app shows its logo and notice, which Settings > About does, keeps its data no longer than six months, which the app drops after that, and credits JustWatch for streaming services, which About and the Services tab do.
 
 ## Windows signing
 

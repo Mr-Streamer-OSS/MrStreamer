@@ -12,7 +12,10 @@ export type TitleKind = (typeof TITLE_KINDS)[number];
  */
 export interface Title {
   readonly kind: TitleKind;
-  /** The version shown and played first. Stable within one subscription and language. */
+  /**
+   * The version shown and played first. It can change with the language or when the provider adds
+   * a better suited version, so what is kept refers to versions by their own ids.
+   */
   readonly id: string;
   /** The provider's name of that version, for search: "Blow 2001 (NL)". */
   readonly name: string;

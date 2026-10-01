@@ -8,7 +8,7 @@ import type {
   TitleKind,
 } from "@mrstreamer/contracts/ondemand";
 import { GENRES, type TitleMetadata } from "../metadata/tmdb.ts";
-import { suitability } from "./languages.ts";
+import { suitability, suits } from "./languages.ts";
 
 /** A streaming service and the TMDB ids of what it streams in the viewer's region. */
 export interface ServiceTitles {
@@ -33,10 +33,12 @@ interface Ranked {
   readonly title: Title;
   readonly genres: readonly string[];
   readonly popularity: number;
-  /** TMDB's rating when enough people voted, else the provider's. */
+  /** TMDB's rating once enough people voted, 0 before; the provider's when TMDB has none. */
   readonly rating: number;
-  /** In the viewer's language or several; or, when nothing says how it sounds, not made in another. */
+  /** Its version shown suits the viewer's language: `suits`. */
   readonly suits: boolean;
+  /** The title opening a 4K version that suits the viewer, when it has one. */
+  readonly fourK: Title | null;
 }
 
 /** Votes TMDB needs before its rating counts. */
@@ -78,13 +80,24 @@ export function collections(source: CollectionSource): Collections {
             genres: genresOf(meta),
           }
         : title;
-      const fit = suitability(title.tags, source.language);
+      const fitting = (tags: readonly string[]) =>
+        suits(suitability(tags, source.language), meta?.language, source.language);
+      const fourK = title.versions.find(
+        (version) =>
+          version.tags.some((tag) => tag === "4K" || tag === "UHD") && fitting(version.tags),
+      );
       return {
         title: shown,
         genres: shown.genres,
         popularity: meta?.popularity ?? 0,
-        rating: meta && meta.votes >= ENOUGH_VOTES ? meta.rating : (title.rating ?? 0),
-        suits: fit >= 2 || (fit === 1 && (!meta?.language || meta.language === source.language)),
+        // Providers rate new titles 10 of 10; TMDB's few early votes are no better.
+        rating: meta ? (meta.votes >= ENOUGH_VOTES ? meta.rating : 0) : (title.rating ?? 0),
+        suits: fitting(title.tags),
+        fourK: !fourK
+          ? null
+          : fourK.id === title.id
+            ? shown
+            : { ...shown, id: fourK.id, tags: fourK.tags },
       };
     });
   const suiting = ranked.filter((entry) => entry.suits);
@@ -126,10 +139,8 @@ export function collections(source: CollectionSource): Collections {
       return { entries: suiting.filter((entry) => entry.rating >= TOP_RATING), order: "rating" };
     if (id === "4k") {
       return {
-        entries: suiting.filter((entry) =>
-          entry.title.versions.some((version) =>
-            version.tags.some((tag) => tag === "4K" || tag === "UHD"),
-          ),
+        entries: suiting.flatMap((entry) =>
+          entry.fourK ? [{ ...entry, title: entry.fourK }] : [],
         ),
         order: "added",
       };
@@ -170,10 +181,10 @@ export function collections(source: CollectionSource): Collections {
 
   return {
     list(id, sort) {
-      const { entries, order } = members(id);
-      const key = `${id}|${sort ?? order}`;
+      const key = `${id}|${sort ?? ""}`;
       let list = lists.get(key);
       if (!list) {
+        const { entries, order } = members(id);
         list = entries.toSorted(orders[sort ?? order]).map((entry) => entry.title);
         lists.set(key, list);
       }
@@ -194,7 +205,7 @@ export function collections(source: CollectionSource): Collections {
       return NAMES[id as keyof typeof NAMES] ?? null;
     },
 
-    genres() {
+    genres: once(() => {
       const byGenre = new Map<string, Ranked[]>();
       for (const entry of suiting) {
         for (const genre of entry.genres) {
@@ -206,10 +217,10 @@ export function collections(source: CollectionSource): Collections {
       return [...byGenre]
         .map(([name, entries]) => ({ name, count: entries.length, artwork: artworkOf(entries) }))
         .sort((a, b) => b.count - a.count);
-    },
+    }),
 
-    services() {
-      return source.services
+    services: once(() =>
+      source.services
         .map((service) => {
           const entries = suiting.filter(
             (entry) => entry.title.tmdbId && service.ids.has(entry.title.tmdbId),
@@ -222,9 +233,14 @@ export function collections(source: CollectionSource): Collections {
           };
         })
         .filter((service) => service.count > 0)
-        .sort((a, b) => b.count - a.count);
-    },
+        .sort((a, b) => b.count - a.count),
+    ),
   };
+}
+
+function once<A>(make: () => A): () => A {
+  let value: { readonly made: A } | null = null;
+  return () => (value ??= { made: make() }).made;
 }
 
 const NAMES = {

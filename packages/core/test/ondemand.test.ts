@@ -138,6 +138,63 @@ describe("one title per film", () => {
     expect(shown("nl")).toEqual(["14", "13", "12", "11"]);
   });
 
+  it("keeps a film when one of its versions is for adults", () => {
+    const films = {
+      ...catalogue,
+      movies: [
+        movie("20", "Wicked (NL)", "300", 1),
+        { ...movie("21", "Wicked", "300", 2), adult: true },
+      ],
+    };
+    const titles = indexCatalogue(films, "en").movies.titles;
+    expect(titles.map((title) => [title.id, title.adult])).toEqual([
+      ["20", false],
+      ["21", true],
+    ]);
+  });
+
+  it.each([
+    // "(NL)" keeps the film's own sound, so it beats an unmarked version, which may be a dub.
+    ["en", ["41", "40", "42"]],
+    ["nl", ["42", "41", "40"]],
+  ])("prefers a version with its own sound for %s", (language, order) => {
+    const films = {
+      ...catalogue,
+      movies: [
+        movie("40", "Sessiz Bir Yer", "400", 9),
+        movie("41", "A Quiet Place (NL)", "400", 1),
+        movie("42", "A Quiet Place (NL AUDIO)", "400", 10),
+      ],
+    };
+    const [title] = indexCatalogue(films, language).movies.titles;
+    expect(title?.versions.map((version) => version.id)).toEqual(order);
+  });
+
+  it("counts a film as new or in 4K only by versions the viewer would watch", () => {
+    const day = 86_400_000;
+    const now = Date.UTC(2026, 9, 1);
+    const films = {
+      ...catalogue,
+      movies: [
+        movie("30", "Heat (MULTI)", "600", now - 90 * day),
+        movie("31", "Heat 4K (DE)", "600", now - day),
+        movie("32", "Alien (MULTI)", "601", now - 10 * day),
+        movie("33", "Alien 4K (MULTI)", "601", now - 90 * day),
+      ],
+    };
+    const made = collections({
+      kind: "movie",
+      titles: indexCatalogue(films, "en").movies.titles,
+      language: "en",
+      metadata: () => null,
+      services: [],
+      now,
+    });
+    expect(made.list("new-week")).toEqual([]);
+    // Opening it opens the 4K version.
+    expect(made.list("4k").map((title) => title.id)).toEqual(["33"]);
+  });
+
   it("finds the title by any of its versions, and by any version's name", () => {
     const index = indexCatalogue(catalogue, "en");
     expect(byIds(index, "movie", ["3"]).map((title) => title.id)).toEqual(["2"]);

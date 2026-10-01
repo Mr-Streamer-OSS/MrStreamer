@@ -11,8 +11,9 @@ import {
 } from "@mrstreamer/core/metadata/tmdb";
 import { readJsonFile, writeJsonFile } from "../platform/json-file.ts";
 
-/** Fetched again after this long: inside TMDB's limit of six months. */
+/** Fetched again after this long, and no longer used after six months, TMDB's limit. */
 const KEEP_MS = 150 * 24 * 60 * 60_000;
+const EXPIRE_MS = 182 * 24 * 60 * 60_000;
 /** Which titles each streaming service carries changes often; fetched again after a week. */
 const SERVICES_KEEP_MS = 7 * 24 * 60 * 60_000;
 /** Requests in flight at once, and at most this many a second: TMDB allows about 50. */
@@ -84,18 +85,29 @@ export interface MetadataDeps {
 export function metadataStore(deps: MetadataDeps) {
   const now = deps.now ?? Date.now;
   let file: MetadataFile = { version: 1, entries: {}, services: null };
-  const loading = readJsonFile(deps.path, MetadataFile).then((found) => {
-    if (found) file = found;
-  });
+  // A file that can't be read is like none: everything is fetched again.
+  const loading = readJsonFile(deps.path, MetadataFile).then(
+    (found) => {
+      if (found) file = found;
+    },
+    () => {},
+  );
   let wanted: readonly Wanted[] = [];
   let refused = false;
   let running: Promise<void> | null = null;
   let dirty = false;
+  let saving: Promise<void> = Promise.resolve();
   let lastSave = now();
   let lastChange = 0;
+  /** When TMDB asked to wait until, for every request. */
+  let pausedUntil = 0;
 
   const keyOf = (kind: TmdbKind, id: string) => `${kind}:${id}`;
   const fresh = (at: number, keep: number) => now() - at < keep;
+  const current = (kind: TmdbKind, id: string) => {
+    const entry = file.entries[keyOf(kind, id)];
+    return entry && fresh(entry.at, EXPIRE_MS) ? entry : undefined;
+  };
 
   function changed(force = false): void {
     dirty = true;
@@ -105,23 +117,38 @@ export function metadataStore(deps: MetadataDeps) {
     }
   }
 
-  async function save(): Promise<void> {
-    if (!dirty) return;
-    dirty = false;
-    lastSave = now();
-    await writeJsonFile(deps.path, file).catch(() => {
-      dirty = true;
+  /** Writes what changed, one write at a time, leaving out what is past TMDB's limit. */
+  function save(): Promise<void> {
+    saving = saving.then(async () => {
+      if (!dirty) return;
+      dirty = false;
+      lastSave = now();
+      for (const [key, entry] of Object.entries(file.entries)) {
+        if (!fresh(entry.at, EXPIRE_MS)) delete file.entries[key];
+      }
+      if (file.services && !fresh(file.services.at, EXPIRE_MS)) file.services = null;
+      await writeJsonFile(deps.path, file).catch(() => {
+        dirty = true;
+      });
     });
+    return saving;
   }
 
-  /** Runs `task` for each item, PARALLEL at a time, at most PER_SECOND starts a second. */
-  async function paced<T>(items: readonly T[], task: (item: T) => Promise<void>): Promise<void> {
+  /**
+   * Runs `task` for each item, PARALLEL at a time, at most PER_SECOND starts a second, until
+   * `stop` says to.
+   */
+  async function paced<T>(
+    items: readonly T[],
+    stop: () => boolean,
+    task: (item: T) => Promise<void>,
+  ): Promise<void> {
     let next = 0;
     let slot = now();
     const lane = async () => {
-      while (next < items.length && !refused) {
+      while (next < items.length && !refused && !stop()) {
         const item = items[next++] as T;
-        const wait = Math.max(0, slot - now());
+        const wait = Math.max(0, slot - now(), pausedUntil - now());
         slot = Math.max(slot, now()) + 1000 / PER_SECOND;
         if (wait > 0) await new Promise((done) => setTimeout(done, wait));
         await task(item);
@@ -131,7 +158,10 @@ export function metadataStore(deps: MetadataDeps) {
     await Promise.all(Array.from({ length: PARALLEL }, lane));
   }
 
-  /** Calls TMDB, waiting when it asks to; null when it can't answer now. */
+  /**
+   * Calls TMDB, waiting when it asks to and trying again after a failure; null when it can't
+   * answer now.
+   */
   async function ask<A>(call: () => Promise<A>): Promise<A | "missing" | null> {
     for (let tries = 0; tries < 3; tries++) {
       try {
@@ -145,29 +175,37 @@ export function metadataStore(deps: MetadataDeps) {
           changed(true);
           return null;
         }
-        if (failure.kind !== "busy") return null;
-        await new Promise((done) => setTimeout(done, failure.retryAfter * 1000));
+        const wait = failure.kind === "busy" ? failure.retryAfter * 1000 : 1000 * 2 ** tries;
+        // Every request waits when TMDB asks to, not only this one.
+        if (failure.kind === "busy") pausedUntil = Math.max(pausedUntil, now() + wait);
+        await new Promise((done) => setTimeout(done, wait));
       }
     }
     return null;
   }
 
   async function fetchTitles(client: Tmdb): Promise<void> {
-    const due = wanted
+    const list = wanted;
+    const due = list
       .filter((title) => {
         const entry = file.entries[keyOf(title.kind, title.tmdbId)];
         return !entry || !fresh(entry.at, KEEP_MS);
       })
       .toSorted((a, b) => b.addedAt - a.addedAt);
-    await paced(due, async (title) => {
-      const found = await ask(() => client.details(title.kind, title.tmdbId));
-      if (found === null) return;
-      file.entries[keyOf(title.kind, title.tmdbId)] =
-        found === "missing"
-          ? { at: now(), missing: true }
-          : { at: now(), ...found, genres: [...found.genres] };
-      changed();
-    });
+    // A newer list, as after a refresh or for another account, takes over at once.
+    await paced(
+      due,
+      () => wanted !== list,
+      async (title) => {
+        const found = await ask(() => client.details(title.kind, title.tmdbId));
+        if (found === null) return;
+        file.entries[keyOf(title.kind, title.tmdbId)] =
+          found === "missing"
+            ? { at: now(), missing: true }
+            : { at: now(), ...found, genres: [...found.genres] };
+        changed();
+      },
+    );
   }
 
   async function fetchServices(client: Tmdb): Promise<void> {
@@ -198,23 +236,32 @@ export function metadataStore(deps: MetadataDeps) {
     await loading;
     await fetchTitles(client);
     if (!refused) await fetchServices(client);
-    await save();
     changed(true);
+    await save();
   }
 
   return {
-    /** The titles the catalogue lists; fetches what is missing or old, in the background. */
+    /**
+     * The titles the catalogue lists; fetches what is missing or old, in the background. A list
+     * given while fetching is fetched next.
+     */
     want(titles: readonly Wanted[]): void {
       wanted = titles;
-      if (!deps.client || refused || running) return;
-      running = run(deps.client).finally(() => {
+      const client = deps.client;
+      if (!client || refused || running) return;
+      running = (async () => {
+        for (let done: readonly Wanted[] | null = null; done !== wanted && !refused;) {
+          done = wanted;
+          await run(client);
+        }
+      })().finally(() => {
         running = null;
       });
     },
 
-    /** What TMDB knows about a title, from the store; null before it arrived. */
+    /** What TMDB knows about a title, from the store; null before it arrived or once too old. */
     get(kind: TmdbKind, tmdbId: string): TitleMetadata | null {
-      const entry = file.entries[keyOf(kind, tmdbId)];
+      const entry = current(kind, tmdbId);
       if (!entry || entry.missing) return null;
       return {
         genres: entry.genres ?? [],
@@ -229,25 +276,19 @@ export function metadataStore(deps: MetadataDeps) {
 
     /** The streaming services of the region, each with what it streams. */
     services(kind: TmdbKind): readonly ServiceTitles[] {
-      if (file.services?.region !== deps.region) return [];
+      if (file.services?.region !== deps.region || !fresh(file.services.at, EXPIRE_MS)) return [];
       return file.services[kind].map(({ ids, ...service }) => ({ ...service, ids: new Set(ids) }));
     },
 
     status(): MetadataStatus {
       const known = wanted.filter((title) => {
-        const entry = file.entries[keyOf(title.kind, title.tmdbId)];
+        const entry = current(title.kind, title.tmdbId);
         return entry && !entry.missing;
       }).length;
       return { known, wanted: wanted.length, refused };
     },
 
-    /** Waits for the store to be read, and for the fetching in progress to finish. */
-    async settled(): Promise<void> {
-      await loading;
-      await running;
-    },
-
-    /** Writes what changed, for stopping. */
+    /** Writes what changed, after any write in progress, for stopping. */
     flush: () => save(),
   };
 }

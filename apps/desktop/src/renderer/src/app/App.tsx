@@ -92,7 +92,12 @@ function Shell() {
         ) : view === "live" ? (
           <GuidePage active={pageActive} />
         ) : (
-          <TitlesPage kind={view === "movies" ? "movie" : "series"} active={pageActive} />
+          // Its own page per kind, so one never shows the other's lists while its own load.
+          <TitlesPage
+            key={view}
+            kind={view === "movies" ? "movie" : "series"}
+            active={pageActive}
+          />
         )}
       </div>
       {/* Closed under Settings, whose Escape would otherwise reach the sheet's focus first. */}

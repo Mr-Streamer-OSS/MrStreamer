@@ -1,4 +1,9 @@
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { gzipSync } from "node:zlib";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { tmdb as tmdbClient } from "@mrstreamer/core/metadata/tmdb";
+import { metadataStore, type Wanted } from "../src/main/ondemand/metadata.ts";
 import { OnDemand } from "../src/main/services/ondemand.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { mainLayer } from "../src/main/runtime.ts";
@@ -113,5 +118,56 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
     const { onDemand } = await app.start();
     expect((await onDemand.status()).metadata).toBeNull();
     expect(app.tmdb.detailRequests()).toBe(0);
+  });
+});
+
+describe("TMDB metadata store", { timeout: 30_000 }, () => {
+  const titles = (from: number, count: number): Wanted[] =>
+    Array.from({ length: count }, (_, index) => ({
+      kind: "movie",
+      tmdbId: String(from + index),
+      addedAt: from + index,
+    }));
+
+  it("fetches a list given while an earlier one is being fetched", async () => {
+    tmdb = await startFakeTmdb();
+    const store = metadataStore({
+      path: join(await tempDir(), "metadata.json.gz"),
+      client: tmdbClient({ key: "test-key", api: tmdb.url }),
+      region: "NL",
+      onChange: () => {},
+    });
+    store.want(titles(1, 40));
+    await vi.waitFor(() => expect(tmdb?.detailRequests()).toBeGreaterThan(0));
+    // As after a refresh that lists 20 more.
+    store.want(titles(1, 60));
+    await vi.waitFor(() => expect(store.status()).toMatchObject({ known: 60, wanted: 60 }), {
+      timeout: 20_000,
+    });
+  });
+
+  it("leaves out what TMDB said more than six months ago", async () => {
+    const path = join(await tempDir(), "metadata.json.gz");
+    const day = 86_400_000;
+    const entry = (at: number) => ({ at, genres: [35], language: "en", popularity: 1 });
+    await writeFile(
+      path,
+      gzipSync(
+        JSON.stringify({
+          version: 1,
+          entries: { "movie:1": entry(0), "movie:2": entry(100 * day) },
+        }),
+      ),
+    );
+    const store = metadataStore({
+      path,
+      client: null,
+      region: "NL",
+      onChange: () => {},
+      now: () => 200 * day,
+    });
+    store.want(titles(1, 2));
+    await vi.waitFor(() => expect(store.get("movie", "2")).not.toBeNull());
+    expect(store.get("movie", "1")).toBeNull();
   });
 });

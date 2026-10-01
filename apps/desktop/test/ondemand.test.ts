@@ -114,6 +114,20 @@ describe("movies and series", { timeout: 20_000 }, () => {
     expect(after.failure).toEqual({ kind: "provider-error", status: 503 });
   });
 
+  it("doesn't ask the provider again for every list after the first fetch failed", async () => {
+    const { onDemand, provider } = await onDemandApp();
+    const list = () => onDemand.collection({ kind: "movie", id: "all", offset: 0, limit: 1 });
+    const failed = { error: { kind: "provider-error", status: 503 } };
+    provider.failTitles(503);
+    await expect(list()).rejects.toMatchObject(failed);
+
+    // Lists answer with the failure for a while; refreshing asks again.
+    provider.failTitles(null);
+    await expect(list()).rejects.toMatchObject(failed);
+    await onDemand.refresh();
+    expect((await list()).total).toBeGreaterThan(0);
+  });
+
   it("forgets the last account's titles when the subscription goes", async () => {
     const app = await onDemandApp();
     await app.onDemand.collection({ kind: "movie", id: "all", offset: 0, limit: 1 });

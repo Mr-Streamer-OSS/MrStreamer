@@ -143,9 +143,9 @@ function collectionsOf(found: Loaded, language: string, kind: TitleKind): Collec
       services: metadata.services(tmdbKind),
       now: Date.now(),
     });
-    // Older versions only take memory.
+    // Other languages and older metadata only take memory.
     for (const old of found.collections.keys()) {
-      if (old.endsWith(`|${metadataVersion}`)) continue;
+      if (old.startsWith(`${language}|`) && old.endsWith(`|${metadataVersion}`)) continue;
       found.collections.delete(old);
     }
     found.collections.set(key, made);
@@ -345,6 +345,8 @@ const handlers: {
     reading = null;
     loaded = null;
     emptyBefore.clear();
+    // The account's titles aren't wanted any more.
+    metadata.want([]);
     await writing;
     await Promise.all([removeFile(setup.cachePath), removeFile(legacyCachePath)]);
     return null;

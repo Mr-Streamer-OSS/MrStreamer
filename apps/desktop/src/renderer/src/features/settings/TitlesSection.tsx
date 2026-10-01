@@ -7,6 +7,7 @@ import type { Preferences } from "@mrstreamer/contracts/preferences";
 import { DEFAULT_TITLE_LANGUAGE, TITLE_LANGUAGES } from "@mrstreamer/core/ondemand/languages";
 import { Button } from "../../components/ui/button.tsx";
 import { Input } from "../../components/ui/input.tsx";
+import { appError, describeError } from "../../lib/errors.ts";
 import { call } from "../../lib/ipc.ts";
 import { queries } from "../../lib/queries.ts";
 
@@ -67,8 +68,7 @@ export function TitlesSection() {
           className="flex gap-3"
           onSubmit={(event) => {
             event.preventDefault();
-            if (key.trim()) update.mutate({ tmdbKey: key.trim() });
-            setKey("");
+            if (key.trim()) update.mutate({ tmdbKey: key.trim() }, { onSuccess: () => setKey("") });
           }}
         >
           <Input
@@ -83,6 +83,9 @@ export function TitlesSection() {
             Use
           </Button>
         </form>
+        {update.error && (
+          <p className="mt-3 text-destructive">{describeError(appError(update.error))}</p>
+        )}
         {ownKey && (
           <button
             onMouseDown={(event) => event.preventDefault()}

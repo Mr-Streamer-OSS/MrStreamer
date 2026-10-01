@@ -152,7 +152,7 @@ export function HomeScreen({ active }: { active: boolean }) {
                 line={entry.line}
                 done={entry.done}
                 onPlay={() => playTitle(entry.now, entry.from)}
-                onRemove={() => removeFromContinue(entry.progress.title)}
+                onRemove={() => removeFromContinue(...entry.played)}
               />
             ))}
           </Section>

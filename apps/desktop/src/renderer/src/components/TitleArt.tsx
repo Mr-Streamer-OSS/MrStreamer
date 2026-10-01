@@ -34,8 +34,9 @@ export function Artwork({
   /** Only the tint, where the name already shows beside it. */
   plain?: boolean;
 }) {
-  const [failed, setFailed] = useState(false);
-  if (url && !failed) {
+  // The link that failed to load: a tile shown again for another title tries its own.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  if (url && url !== failedUrl) {
     return (
       <img
         src={sized(url, size)}
@@ -43,7 +44,7 @@ export function Artwork({
         loading="lazy"
         decoding="async"
         draggable={false}
-        onError={() => setFailed(true)}
+        onError={() => setFailedUrl(url)}
         className={cn("size-full object-cover", className)}
       />
     );

@@ -10,6 +10,7 @@ import type {
   MovieDetails,
   SeriesDetails,
   TitleDetails,
+  TitleRef,
 } from "@mrstreamer/contracts/ondemand";
 import type { TitleProgress } from "@mrstreamer/contracts/viewing";
 import { useUi, type DetailsTarget } from "../../app/ui-store.ts";
@@ -131,8 +132,15 @@ function MovieActions({ details }: { details: MovieDetails }) {
       progress={partly ? current : undefined}
       primaryLabel={partly ? "Resume" : "Play"}
       onPrimary={() => playTitle(resumed, resumePoint(partly ? current : undefined))}
-      onBeginning={partly ? () => playTitle(now, 0) : null}
-      onRemove={partly ? () => removeFromContinue(resumed.title) : null}
+      onBeginning={partly ? () => playTitle(resumed, 0) : null}
+      onRemove={
+        partly
+          ? () =>
+              removeFromContinue(
+                ...(progress.data ?? []).flatMap((entry) => (entry.finished ? [] : [entry.title])),
+              )
+          : null
+      }
     />
   );
 }
@@ -169,6 +177,15 @@ function resumeTarget(
   return episode ? { episode, progress: undefined } : null;
 }
 
+/** One episode of each version of a series played, which removing it from Continue watching takes. */
+function seriesPlayed(progress: readonly TitleProgress[]): TitleRef[] {
+  const bySeries = new Map<string, TitleRef>();
+  for (const entry of progress) {
+    if (entry.title.kind === "episode") bySeries.set(entry.title.seriesId, entry.title);
+  }
+  return [...bySeries.values()];
+}
+
 function SeriesActions({ details }: { details: SeriesDetails }) {
   const progress = useQuery(
     queries.progress({ seriesIds: details.title.versions.map((version) => version.id) }),
@@ -188,7 +205,7 @@ function SeriesActions({ details }: { details: SeriesDetails }) {
       primaryLabel={label}
       onPrimary={() => playTitle(now, resumePoint(partly))}
       onBeginning={partly ? () => playTitle(now, 0) : null}
-      onRemove={started ? () => removeFromContinue(now.title) : null}
+      onRemove={started ? () => removeFromContinue(...seriesPlayed(progress.data ?? [])) : null}
     />
   );
 }

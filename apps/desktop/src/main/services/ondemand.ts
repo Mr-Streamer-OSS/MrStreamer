@@ -44,6 +44,12 @@ import { Subscriptions, type Source } from "./subscription.ts";
 /** How many titles' details stay in memory. Opening one again, or Home, then asks no one. */
 const DETAILS_KEPT = 200;
 
+/**
+ * How long after a failed first fetch a list asked for fails with it rather than fetching again.
+ * Every list the UI shows asks again when the status changes, and the failure changes it.
+ */
+const RETRY_AFTER_MS = 60_000;
+
 export interface OnDemandDeps {
   readonly dataDir: string;
   readonly userAgent: string;
@@ -154,7 +160,8 @@ function make(deps: OnDemandDeps) {
       (client) => Effect.promise(() => client.stop()),
     );
     /** Why the latest refresh of this subscription failed, until one succeeds. */
-    let failure: { readonly key: string; readonly error: AppError } | null = null;
+    let failure: { readonly key: string; readonly error: AppError; readonly at: number } | null =
+      null;
     /** Details by subscription, kind and id, oldest first. */
     const details = new Map<string, { raw: ProviderDetails; shown: TitleDetails }>();
 
@@ -189,7 +196,7 @@ function make(deps: OnDemandDeps) {
         Effect.map((worked) => statusOf(worked, source.key)),
         Effect.tapError((failed) =>
           Effect.gen(function* () {
-            failure = { key: source.key, error: failed.error };
+            failure = { key: source.key, error: failed.error, at: Date.now() };
             const worked = yield* call("status", { key: source.key }).pipe(
               Effect.orElseSucceed(() => ({ movies: 0, series: 0, fetchedAt: null })),
             );
@@ -207,7 +214,13 @@ function make(deps: OnDemandDeps) {
       Effect.gen(function* () {
         const source = yield* requireSource;
         const worked = yield* call("status", { key: source.key });
-        if (worked.fetchedAt === null) yield* refresh;
+        if (worked.fetchedAt === null) {
+          // Refresh asks the provider again whenever the viewer does.
+          if (failure?.key === source.key && Date.now() - failure.at < RETRY_AFTER_MS) {
+            return yield* new Failed({ error: failure.error });
+          }
+          yield* refresh;
+        }
         return yield* run(source, yield* language);
       });
 
@@ -347,12 +360,16 @@ function workerClient(start: () => Worker, onEvent: (event: WorkerEvent) => void
   let nextId = 1;
   const pending = new Map<
     number,
-    { resolve: (value: unknown) => void; reject: (cause: unknown) => void }
+    { resolve: (value: unknown) => void; reject: (cause: unknown) => void; worker: Worker }
   >();
 
-  const failAll = (cause: unknown) => {
-    for (const entry of pending.values()) entry.reject(cause);
-    pending.clear();
+  /** Fails the calls `from` was given, and only those: another may have started meanwhile. */
+  const failAll = (from: Worker, cause: unknown) => {
+    for (const [id, entry] of pending) {
+      if (entry.worker !== from) continue;
+      pending.delete(id);
+      entry.reject(cause);
+    }
   };
 
   const running = (): Worker => {
@@ -366,10 +383,10 @@ function workerClient(start: () => Worker, onEvent: (event: WorkerEvent) => void
       if (reply.ok) entry.resolve(reply.value);
       else entry.reject(new Failed({ error: reply.error }));
     });
-    started.on("error", (cause) => failAll(cause));
+    started.on("error", (cause) => failAll(started, cause));
     started.on("exit", () => {
       if (worker === started) worker = null;
-      failAll(new Error("The catalogue worker stopped."));
+      failAll(started, new Error("The catalogue worker stopped."));
     });
     worker = started;
     return started;
@@ -381,8 +398,9 @@ function workerClient(start: () => Worker, onEvent: (event: WorkerEvent) => void
   ): Promise<WorkerCalls[M]["result"]> => {
     const id = nextId++;
     return new Promise((resolve, reject) => {
-      pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
-      running().postMessage({ id, method, args });
+      const to = running();
+      pending.set(id, { resolve: resolve as (value: unknown) => void, reject, worker: to });
+      to.postMessage({ id, method, args });
     });
   };
 
@@ -394,7 +412,7 @@ function workerClient(start: () => Worker, onEvent: (event: WorkerEvent) => void
       // A cache write in progress gets a moment to finish, so the next start reads it.
       const flushed = call("flush", {}).catch(() => null);
       await Promise.race([flushed, new Promise((done) => setTimeout(done, 2000))]);
-      worker = null;
+      if (worker === current) worker = null;
       await current.terminate();
     },
   };

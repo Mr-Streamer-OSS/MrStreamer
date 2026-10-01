@@ -23,6 +23,7 @@ import { cn } from "../../lib/utils.ts";
 
 /** Titles asked for together as rows come into view. */
 const PAGE = 120;
+const FIRST_PAGE: ReadonlySet<number> = new Set([0]);
 const POSTER_REM = 9;
 const GAP_REM = 1.25;
 
@@ -31,20 +32,31 @@ const GAP_REM = 1.25;
  * positions; `load` asks for the pages around the positions in view.
  */
 export function useCollection(kind: TitleKind, id: CollectionId, sort?: CollectionSort) {
-  const [pages, setPages] = useState<ReadonlySet<number>>(() => new Set([0]));
   const listKey = `${kind}:${id}:${sort ?? ""}`;
-  useEffect(() => setPages(new Set([0])), [listKey]);
+  // The pages asked for, of this list only: another list starts again from the first.
+  const [asked, setAsked] = useState<{ key: string; pages: ReadonlySet<number> }>(() => ({
+    key: listKey,
+    pages: FIRST_PAGE,
+  }));
+  const pages = asked.key === listKey ? asked.pages : FIRST_PAGE;
   const loaded = useQueries({
     queries: [...pages].map((page) => queries.collection(kind, id, sort, page * PAGE, PAGE)),
   });
-  const load = useCallback((first: number, last: number) => {
-    // Nothing in view yet, before the grid has measured its rows.
-    if (last < first || last < 0) return;
-    const wanted = [Math.floor(Math.max(0, first) / PAGE), Math.floor(last / PAGE)];
-    setPages((current) =>
-      wanted.every((page) => current.has(page)) ? current : new Set([...current, ...wanted]),
-    );
-  }, []);
+  const load = useCallback(
+    (first: number, last: number) => {
+      // Nothing in view yet, before the grid has measured its rows.
+      if (last < first || last < 0) return;
+      const from = Math.floor(Math.max(0, first) / PAGE);
+      const wanted = Array.from({ length: Math.floor(last / PAGE) - from + 1 }, (_, i) => from + i);
+      setAsked((current) => {
+        const had = current.key === listKey ? current.pages : FIRST_PAGE;
+        return wanted.every((page) => had.has(page)) && current.key === listKey
+          ? current
+          : { key: listKey, pages: new Set([...had, ...wanted]) };
+      });
+    },
+    [listKey],
+  );
   const byPage = new Map([...pages].map((page, index) => [page, loaded[index]?.data]));
   const first = byPage.get(0);
   return {
@@ -131,7 +143,9 @@ function Grid({
   }, [firstRow, lastRow, columns, total, onVisible]);
 
   const keyboard = useKeyboardMode();
-  const [selected, setSelected] = useState(0);
+  const [chosen, setSelected] = useState(0);
+  // Within the list, when it shrank since.
+  const selected = Math.min(chosen, Math.max(total - 1, 0));
   const state = useRef({ selected, columns, total, titleAt, rowsInView: items.length });
   state.current = { selected, columns, total, titleAt, rowsInView: items.length };
   useEffect(() => {
@@ -141,6 +155,8 @@ function Grid({
       if (event.defaultPrevented || isTyping(event) || hasModifier(event) || event.isComposing)
         return;
       if (ui.searchOpen || ui.settings || ui.updateDialog || ui.details || ui.playingTitle) return;
+      // Enter on a focused button, such as a tab, is the button's.
+      if (event.key === "Enter" && event.target instanceof HTMLButtonElement) return;
       const now = state.current;
       const move = (delta: number) => {
         const next = Math.min(Math.max(now.selected + delta, 0), Math.max(now.total - 1, 0));

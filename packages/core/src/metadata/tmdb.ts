@@ -80,6 +80,7 @@ export const GENRES: Readonly<Record<number, readonly string[]>> = {
 };
 
 const API = "https://api.themoviedb.org/3";
+const REQUEST_MS = 15_000;
 
 const Details = type({
   "genres?": type({ id: "number" }).array(),
@@ -128,7 +129,10 @@ export function tmdb(options: TmdbOptions) {
         headers: bearer
           ? { Authorization: `Bearer ${options.key}`, Accept: "application/json" }
           : { Accept: "application/json" },
-        ...(signal ? { signal } : {}),
+        // A request TMDB doesn't answer within this long counts as failed.
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(REQUEST_MS)])
+          : AbortSignal.timeout(REQUEST_MS),
       });
     } catch (cause) {
       if (signal?.aborted) throw cause;
