@@ -4,7 +4,7 @@
 // Extensions and keeps the file's own timestamps, so subtitle cues and the picture share one
 // clock; a one-line report of the first video packet says where on that clock the picture starts.
 import { type } from "arktype";
-import type { Codec } from "@mrstreamer/contracts/playback";
+import type { Codec, SubtitleFormat } from "@mrstreamer/contracts/playback";
 import type { AudioFacts, SubtitleFacts } from "@mrstreamer/core/ondemand/tracks";
 
 export interface TitleProbe {
@@ -21,6 +21,19 @@ export interface TitleProbe {
   readonly subtitles: readonly SubtitleFacts[];
 }
 
+/**
+ * ffprobe's arguments for a file: its streams and format, and its first keyframe decoded, because
+ * only a decoded picture shows the closed captions inside it. Other frames are skipped: decoding
+ * them added about 0.3 s to opening a 4K HEVC file, the keyframe alone 0.08 s.
+ */
+export const PROBE_ARGUMENTS = [
+  ...["-v", "error", "-print_format", "json", "-show_streams", "-show_format", "-show_frames"],
+  // The streams' extradata, where teletext pages are listed.
+  "-show_data",
+  ...["-skip_frame", "nokey", "-read_intervals", "%+#16"],
+  ...["-show_entries", "stream:format:frame=stream_index:frame_side_data=side_data_type"],
+];
+
 /** ffprobe's JSON, built on the first probe rather than while the app starts. */
 function defineProbe() {
   const Stream = type({
@@ -30,23 +43,45 @@ function defineProbe() {
     "pix_fmt?": "string",
     "channels?": "number",
     "tags?": type({ "language?": "string", "title?": "string" }),
+    /** Teletext pages and DVB subtitle pages, as the program table described them, in hex. */
+    "extradata?": "string",
     "disposition?": type({
       "default?": "number",
       "forced?": "number",
       "attached_pic?": "number",
       "hearing_impaired?": "number",
+      "visual_impaired?": "number",
     }),
+  });
+  const Frame = type({
+    "stream_index?": "number",
+    "side_data_list?": type({ "side_data_type?": "string" }).array(),
   });
   return type({
     "streams?": Stream.array(),
     "format?": type({ "duration?": "string", "start_time?": "string" }),
+    "frames?": Frame.array(),
   });
 }
 let Probe: ReturnType<typeof defineProbe> | null = null;
 type Stream = NonNullable<ReturnType<typeof defineProbe>["infer"]["streams"]>[number];
 
-/** Subtitle codecs stored as text, which convert to WebVTT. The rest are pictures. */
-const TEXT_SUBTITLES = new Set(["subrip", "srt", "ass", "ssa", "mov_text", "webvtt", "text"]);
+/** The subtitle codecs the app shows, by how they are carried. Others aren't listed. */
+const SUBTITLE_FORMATS: Readonly<Record<string, SubtitleFormat>> = {
+  subrip: "text",
+  srt: "text",
+  ass: "text",
+  ssa: "text",
+  mov_text: "text",
+  webvtt: "text",
+  text: "text",
+  hdmv_pgs_subtitle: "picture",
+  dvd_subtitle: "picture",
+  dvb_subtitle: "picture",
+  xsub: "picture",
+  dvb_teletext: "teletext",
+  eia_608: "captions",
+};
 
 /** What ffprobe's JSON says about a file, or null when it isn't ffprobe's JSON. */
 export function readProbe(json: unknown): TitleProbe | null {
@@ -71,17 +106,93 @@ export function readProbe(json: unknown): TitleProbe | null {
       .map((stream) => ({
         ...facts(stream),
         channels: stream.channels ?? null,
+        description: stream.disposition?.visual_impaired === 1,
         codec: audioCodec(stream.codec_name),
       })),
-    subtitles: streams
-      .filter((stream) => stream.codec_type === "subtitle")
-      .map((stream) => ({
-        ...facts(stream),
-        forced: stream.disposition?.forced === 1,
-        hearingImpaired: stream.disposition?.hearing_impaired === 1,
-        text: TEXT_SUBTITLES.has(stream.codec_name ?? ""),
-      })),
+    subtitles: [
+      ...streams.flatMap((stream): SubtitleFacts[] => {
+        const format = SUBTITLE_FORMATS[stream.codec_name ?? ""];
+        if (stream.codec_type !== "subtitle" || !format) return [];
+        const subtitle = {
+          ...facts(stream),
+          page: null,
+          format,
+          forced: stream.disposition?.forced === 1,
+          hearingImpaired: stream.disposition?.hearing_impaired === 1,
+        };
+        if (format !== "teletext") return [subtitle];
+        // One track per subtitle page; a stream that names none plays the first page it carries.
+        const pages = teletextPages(stream.extradata, stream.tags?.language);
+        return pages.length === 0 ? [subtitle] : pages.map((page) => ({ ...subtitle, ...page }));
+      }),
+      // Closed captions inside the picture, channel 1, under the picture's own number.
+      ...(video && hasCaptions(probe.frames ?? [], video.index)
+        ? [
+            {
+              id: video.index,
+              language: null,
+              name: null,
+              default: false,
+              page: 1,
+              format: "captions" as const,
+              forced: false,
+              hearingImpaired: false,
+            },
+          ]
+        : []),
+    ],
   };
+}
+
+/** Whether the first decoded pictures carry closed captions. */
+function hasCaptions(
+  frames: readonly { stream_index?: number; side_data_list?: { side_data_type?: string }[] }[],
+  video: number,
+): boolean {
+  return frames.some(
+    (frame) =>
+      frame.stream_index === video &&
+      frame.side_data_list?.some((data) => /closed captions/i.test(data.side_data_type ?? "")),
+  );
+}
+
+/**
+ * The subtitle pages a teletext stream lists: two bytes each, the page type and magazine, then
+ * the page in hex, with the languages in the stream's tag, "dut,eng". Pages of other types, such
+ * as the index, are left out.
+ */
+function teletextPages(
+  extradata: string | undefined,
+  languages: string | undefined,
+): { page: number; language: string | null; hearingImpaired: boolean }[] {
+  const bytes = hexBytes(extradata);
+  const names = (languages ?? "").split(",");
+  const pages = [];
+  for (let offset = 0; offset + 1 < bytes.length; offset += 2) {
+    const kind = bytes[offset]! >> 3;
+    if (kind !== 0x02 && kind !== 0x05) continue;
+    const magazine = bytes[offset]! & 0x07 || 8;
+    const page = magazine * 100 + Number(bytes[offset + 1]!.toString(16));
+    if (!Number.isInteger(page)) continue;
+    pages.push({
+      page,
+      language: names[offset / 2]?.trim() || null,
+      hearingImpaired: kind === 0x05,
+    });
+  }
+  return pages;
+}
+
+/** The bytes of ffprobe's hex dump: "00000000: 1088  .." lines. */
+function hexBytes(dump: string | undefined): number[] {
+  if (!dump) return [];
+  return dump
+    .split("\n")
+    .flatMap(
+      (line) =>
+        /^[0-9a-f]+: ((?:[0-9a-f]{2,4} ?)+)/i.exec(line.trim())?.[1]?.match(/[0-9a-f]{2}/gi) ?? [],
+    )
+    .map((byte) => parseInt(byte, 16));
 }
 
 function facts(stream: Stream) {
@@ -152,7 +263,8 @@ export function titlePlan(
 ): TitlePlan {
   const video = probe.video;
   const sound = probe.audio.find((track) => track.id === run.audio) ?? probe.audio[0] ?? null;
-  const subtitle = probe.subtitles.find((track) => track.id === run.subtitle && track.text) ?? null;
+  const subtitle =
+    probe.subtitles.find((track) => track.id === run.subtitle && track.format === "text") ?? null;
   const copyVideo = video?.codec != null && decoders.has(video.codec);
   const copySound = sound?.codec != null && decoders.has(sound.codec) && run.convertSound !== true;
 

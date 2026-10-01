@@ -250,8 +250,11 @@ async function start(): Promise<void> {
       "ondemand.rows": ({ kind, tab, like }) => onDemand.rows(kind, tab, like),
       "ondemand.tiles": ({ kind, of }) => onDemand.tiles(kind, of),
       "ondemand.collection": (query) => onDemand.collection(query),
-      "playback.open": ({ channelId, decoders, repair }) =>
-        Effect.andThen(nextTurn, playback.open(channelId, decoders, { repair: repair ?? false })),
+      "playback.open": ({ channelId, decoders, repair, audio }) =>
+        Effect.andThen(
+          nextTurn,
+          playback.open(channelId, decoders, { repair: repair ?? false, audio: audio ?? null }),
+        ),
       "playback.openTitle": ({ title, decoders }) =>
         Effect.gen(function* () {
           const turn = yield* nextTurn;
@@ -268,6 +271,7 @@ async function start(): Promise<void> {
       "playback.close": ({ sessionId }) => Effect.as(playback.close(sessionId), null),
       "playback.closeAll": () => Effect.andThen(nextTurn, Effect.as(playback.closeAll, null)),
       "playback.failure": ({ sessionId }) => playback.failure(sessionId),
+      "playback.tracks": ({ sessionId }) => playback.tracks(sessionId),
       "preferences.get": () => settings.get,
       "preferences.update": (patch) =>
         Effect.gen(function* () {

@@ -1,6 +1,6 @@
 // Sound and subtitle tracks as the viewer chooses them: named in their own language ("Deutsch",
 // "Nederlands"), with what sets them apart, and which ones play unless the viewer picks.
-import type { AudioTrack, SubtitleTrack } from "@mrstreamer/contracts/playback";
+import type { AudioTrack, SubtitleFormat, SubtitleTrack } from "@mrstreamer/contracts/playback";
 
 /**
  * ISO 639-2 bibliographic codes, as files often carry them, and the codes Intl knows them by.
@@ -52,12 +52,16 @@ export interface TrackFacts {
 
 export interface AudioFacts extends TrackFacts {
   readonly channels: number | null;
+  /** Describes the picture for viewers who can't see it. */
+  readonly description: boolean;
 }
 
 export interface SubtitleFacts extends TrackFacts {
+  /** A teletext page, DVB subtitle page or caption channel within the track; null for one. */
+  readonly page: number | null;
+  readonly format: SubtitleFormat;
   readonly forced: boolean;
   readonly hearingImpaired: boolean;
-  readonly text: boolean;
 }
 
 /** "English · 5.1", "Español · Stereo · Commentary". */
@@ -65,7 +69,9 @@ export function audioTracks(tracks: readonly AudioFacts[]): AudioTrack[] {
   const labelled = tracks.map((track) => {
     const parts = [languageName(track.language) ?? "Sound", layout(track.channels)];
     if (track.name && /comment/i.test(track.name)) parts.push("Commentary");
-    else if (track.name && /descri/i.test(track.name)) parts.push("Audio description");
+    else if (track.description || (track.name && /descri/i.test(track.name))) {
+      parts.push("Audio description");
+    }
     return { track, label: parts.filter(Boolean).join(" · ") };
   });
   return distinct(labelled).map(({ track, label }) => ({
@@ -76,25 +82,43 @@ export function audioTracks(tracks: readonly AudioFacts[]): AudioTrack[] {
   }));
 }
 
-/** "Nederlands", "English · SDH", "Deutsch · Forced". */
+/** "Nederlands", "English · SDH", "Deutsch · Forced", "Captions". */
 export function subtitleTracks(tracks: readonly SubtitleFacts[]): SubtitleTrack[] {
   const labelled = tracks.map((track) => {
-    const parts = [languageName(track.language) ?? "Subtitles"];
+    const parts = [
+      languageName(track.language) ?? (track.format === "captions" ? "Captions" : "Subtitles"),
+    ];
     if (track.forced || (track.name && /forced/i.test(track.name))) parts.push("Forced");
     if (track.hearingImpaired || (track.name && /\b(sdh|cc)\b|hearing/i.test(track.name))) {
       parts.push("SDH");
     }
     return { track, label: parts.join(" · ") };
   });
-  return distinct(labelled).map(({ track, label }) => ({
+  // Tracks that read the same in different formats, as a channel's teletext and DVB subtitles in
+  // one language, are told apart by format before anything else.
+  const told = labelled.map(({ track, label }) => {
+    const twins = labelled.filter((other) => other.label === label);
+    return twins.some((other) => other.track.format !== track.format)
+      ? { track, label: `${label} · ${FORMAT_NAMES[track.format]}` }
+      : { track, label };
+  });
+  return distinct(told).map(({ track, label }) => ({
     id: track.id,
+    page: track.page,
+    format: track.format,
     language: languageCode(track.language),
     label,
     forced: track.forced || (track.name !== null && /forced/i.test(track.name)),
     default: track.default,
-    text: track.text,
   }));
 }
+
+const FORMAT_NAMES: Record<SubtitleFormat, string> = {
+  text: "Text",
+  picture: "Picture",
+  teletext: "Teletext",
+  captions: "Captions",
+};
 
 /**
  * Tracks that would read the same get the file's own name after them, or a number when it has
@@ -142,19 +166,21 @@ export interface TrackChoice {
 /**
  * The tracks to start with: the remembered sound language when the title has it, else the
  * file's default sound. Subtitles in the remembered language; else only subtitles the file marks
- * as forced for the sound's language, which translate signs and foreign lines.
+ * as forced for the sound's language, which translate signs and foreign lines. Only subtitles in
+ * `formats`, the ones the player shows, are chosen.
  */
 export function chooseTracks(
   audio: readonly AudioTrack[],
   subtitles: readonly SubtitleTrack[],
   choice: TrackChoice,
-): { readonly audio: number | null; readonly subtitle: number | null } {
+  formats: ReadonlySet<SubtitleFormat>,
+): { readonly audio: number | null; readonly subtitle: SubtitleTrack | null } {
   const sound =
     audio.find((track) => choice.audioLanguage && track.language === choice.audioLanguage) ??
     audio.find((track) => track.default) ??
     audio[0] ??
     null;
-  const shown = subtitles.filter((track) => track.text);
+  const shown = subtitles.filter((track) => formats.has(track.format));
   const wanted =
     choice.subtitleLanguage && choice.subtitleLanguage !== "off"
       ? shown.find((track) => track.language === choice.subtitleLanguage && !track.forced)
@@ -163,5 +189,5 @@ export function chooseTracks(
     choice.subtitleLanguage === "off"
       ? undefined
       : shown.find((track) => track.forced && track.language === sound?.language);
-  return { audio: sound?.id ?? null, subtitle: (wanted ?? forced)?.id ?? null };
+  return { audio: sound?.id ?? null, subtitle: wanted ?? forced ?? null };
 }

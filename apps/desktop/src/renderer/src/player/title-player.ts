@@ -7,7 +7,12 @@
 // pause, seek, track change, the end, leaving and hiding the window. Never per frame.
 import { createStore, useStore } from "zustand";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
-import type { AudioTrack, StreamFailure, SubtitleTrack } from "@mrstreamer/contracts/playback";
+import type {
+  AudioTrack,
+  StreamFailure,
+  SubtitleFormat,
+  SubtitleTrack,
+} from "@mrstreamer/contracts/playback";
 import type { Preferences } from "@mrstreamer/contracts/preferences";
 import { DEFAULT_TITLE_LANGUAGE } from "@mrstreamer/core/ondemand/languages";
 import { chooseTracks } from "@mrstreamer/core/ondemand/tracks";
@@ -24,6 +29,9 @@ const CHECKPOINT_MS = 60_000;
 const RELEASE_AFTER_PAUSE_MS = 5 * 60_000;
 /** Waits before each new run after the connection broke. Its length is the attempt limit. */
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000];
+
+/** The subtitle formats the player shows; the others are listed but can't be chosen. */
+export const SHOWN_SUBTITLES: ReadonlySet<SubtitleFormat> = new Set(["text"]);
 
 /** What the view shows about the open title. */
 export interface NowPlaying {
@@ -57,7 +65,7 @@ export interface TitlePlayerState {
   readonly subtitles: readonly SubtitleTrack[];
   readonly audioId: number | null;
   /** The subtitle track on screen, or null for none. */
-  readonly subtitleId: number | null;
+  readonly subtitle: SubtitleTrack | null;
 }
 
 const idle: TitlePlayerState = {
@@ -68,7 +76,7 @@ const idle: TitlePlayerState = {
   audio: [],
   subtitles: [],
   audioId: null,
-  subtitleId: null,
+  subtitle: null,
 };
 
 const store = createStore<TitlePlayerState>(() => idle);
@@ -151,7 +159,7 @@ async function run(start: number, attempt = 0): Promise<void> {
   const mine = ++generation;
   stopEngine();
   released = null;
-  const { audioId, subtitleId, duration } = store.getState();
+  const { audioId, subtitle, duration } = store.getState();
   store.setState({
     phase:
       attempt === 0
@@ -163,7 +171,7 @@ async function run(start: number, attempt = 0): Promise<void> {
     url: session.url,
     start,
     audio: audioId,
-    subtitle: subtitleId,
+    subtitle: subtitle?.id ?? null,
     convertSound,
     duration,
   });
@@ -270,18 +278,23 @@ export const titlePlayer = {
         return;
       }
       session = { id: opened.sessionId, url: opened.url };
-      const chosen = chooseTracks(opened.audio, opened.subtitles, {
-        // The sound picked last, else the movies and series language, English to begin with.
-        audioLanguage:
-          preferences?.audioLanguage ?? preferences?.titleLanguage ?? DEFAULT_TITLE_LANGUAGE,
-        subtitleLanguage: preferences?.subtitleLanguage ?? null,
-      });
+      const chosen = chooseTracks(
+        opened.audio,
+        opened.subtitles,
+        {
+          // The sound picked last, else the movies and series language, English to begin with.
+          audioLanguage:
+            preferences?.audioLanguage ?? preferences?.titleLanguage ?? DEFAULT_TITLE_LANGUAGE,
+          subtitleLanguage: preferences?.subtitleLanguage ?? null,
+        },
+        SHOWN_SUBTITLES,
+      );
       store.setState({
         duration: opened.duration,
         audio: opened.audio,
         subtitles: opened.subtitles,
         audioId: chosen.audio,
-        subtitleId: chosen.subtitle,
+        subtitle: chosen.subtitle,
       });
     } catch (cause) {
       if (mine !== generation) return;
@@ -363,11 +376,10 @@ export const titlePlayer = {
   },
 
   /** Shows another subtitle track, or none, and remembers the choice. */
-  setSubtitle(id: number | null): void {
-    const { subtitles, position } = store.getState();
-    const track = id === null ? null : subtitles.find((each) => each.id === id && each.text);
-    if ((id !== null && !track) || !session) return;
-    store.setState({ subtitleId: track?.id ?? null });
+  setSubtitle(track: SubtitleTrack | null): void {
+    const { position } = store.getState();
+    if ((track && !SHOWN_SUBTITLES.has(track.format)) || !session) return;
+    store.setState({ subtitle: track });
     void call("preferences.update", {
       subtitleLanguage: track ? (track.language ?? null) : "off",
     }).catch(() => {});

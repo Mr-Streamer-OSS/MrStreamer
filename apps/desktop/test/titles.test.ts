@@ -114,12 +114,37 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
       { id: 1, language: "en", label: "English · 5.1", default: true },
       { id: 2, language: "es", label: "Español · Stereo · Commentary", default: false },
     ]);
-    expect(session.subtitles.map(({ label, forced, text }) => [label, forced, text])).toEqual([
-      ["English", false, true],
-      ["Español · Forced", true, true],
+    expect(session.subtitles.map(({ label, forced, format }) => [label, forced, format])).toEqual([
+      ["English", false, "text"],
+      ["Español · Forced", true, "text"],
     ]);
     expect(session.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/title\//);
     expect(session.url).not.toContain("demo");
+    await dispose();
+  });
+
+  it.each([
+    [
+      "TEST | Picture subtitles",
+      [
+        { id: 2, page: null, format: "picture", label: "English", forced: false },
+        { id: 3, page: null, format: "picture", label: "Nederlands · Forced", forced: true },
+      ],
+    ],
+    [
+      "TEST | Broadcast recording",
+      [
+        { id: 3, page: null, format: "picture", label: "Nederlands · Picture", forced: false },
+        { id: 4, page: 888, format: "teletext", label: "Nederlands · Teletext", forced: false },
+        { id: 0, page: 1, format: "captions", label: "Captions", forced: false },
+      ],
+    ],
+  ] as const)("lists every subtitle track of %s, in whatever format", async (name, expected) => {
+    const { open, dispose } = await titles();
+
+    const session = await open(name);
+
+    expect(session.subtitles).toEqual(expected.map((track) => expect.objectContaining(track)));
     await dispose();
   });
 
