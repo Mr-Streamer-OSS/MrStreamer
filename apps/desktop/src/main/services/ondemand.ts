@@ -17,6 +17,7 @@ import type {
   Title,
   TitleDetails,
   TitleKind,
+  TitleMatches,
   TitleRef,
 } from "@mrstreamer/contracts/ondemand";
 import { diagnosed } from "@mrstreamer/core/diagnostics";
@@ -47,6 +48,8 @@ import { Subscriptions, type Source } from "./subscription.ts";
 const DETAILS_KEPT = 200;
 /** How long a title's details wait for TMDB; the provider's stand in after that. */
 const ABOUT_TIMEOUT_MS = 4000;
+/** Search results a Movies or Series page shows; a longer list needs more words. */
+const SEARCH_PAGE = 300;
 
 /**
  * How long after a failed first fetch a list asked for fails with it rather than fetching again.
@@ -96,6 +99,8 @@ export class OnDemand extends Context.Service<
       { readonly movies: readonly Title[]; readonly series: readonly Title[] },
       Failed
     >;
+    /** Movies or series matching `query`: the best SEARCH_PAGE, and how many match. */
+    searchKind(kind: TitleKind, query: string): Effect.Effect<TitleMatches, Failed>;
     /** A title's details, for when the viewer opens it: the provider's, with TMDB's. */
     details(kind: TitleKind, id: string): Effect.Effect<TitleDetails, Failed>;
     /** Titles by the id of any version, from the lists alone. */
@@ -353,6 +358,10 @@ function make(deps: OnDemandDeps) {
         ),
       search: (query: string) =>
         loaded((source, language) => call("search", { key: source.key, language, query })),
+      searchKind: (kind: TitleKind, query: string) =>
+        loaded((source, language) =>
+          call("searchKind", { key: source.key, language, kind, query, limit: SEARCH_PAGE }),
+        ),
 
       details: (kind: TitleKind, id: string) =>
         Effect.map(detailsOf(kind, id), (found) => found.shown),

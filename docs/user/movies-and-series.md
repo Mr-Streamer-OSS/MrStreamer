@@ -19,7 +19,9 @@ A row's **All**, a genre or a service opens the whole list; **Back**, or Escape,
 
 Every tab but **All movies** and **All series** shows titles in your language, or in several, and titles with their own sound, such as films with Dutch subtitles, unless they were made in another language. **All movies**, **All series** and search show everything else. Titles for adults show only in their own tab, never on Home, in another tab or in search.
 
-⌘K (Ctrl K on Windows and Linux) searches movies and series along with channels and programmes.
+The field at the end of the tabs searches movies on Movies and series on Series. It finds a title by the name it shows, by its translations and original name, and by the names your provider gives each version, and shows what it finds as posters in place of the tab. Down or Enter moves to the posters. Escape, or a tab, clears it.
+
+⌘K (Ctrl K on Windows and Linux) searches movies and series along with channels and programmes. Opened from Movies or Series, it starts with what the field searched for; so does **Search everything** under the results.
 
 ## Language
 

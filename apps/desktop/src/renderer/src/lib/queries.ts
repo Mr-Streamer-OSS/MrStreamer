@@ -141,6 +141,14 @@ export const queries = {
       staleTime: Infinity,
       enabled: query.trim().length > 0,
     }),
+  /** Movies or series only, for the field in their tab bar. */
+  titleSearchIn: (kind: TitleKind, query: string) =>
+    queryOptions({
+      queryKey: ["ondemand", "searchKind", kind, query],
+      queryFn: () => call("ondemand.searchKind", { kind, query }),
+      staleTime: Infinity,
+      enabled: query.trim().length > 0,
+    }),
   /** Titles from the lists, by the id of any version; asks the provider nothing. */
   titles: (kind: TitleKind, ids: readonly string[]) =>
     queryOptions({

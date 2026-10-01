@@ -299,6 +299,13 @@ async function refresh(args: WorkerCalls["refresh"]["args"]): Promise<WorkerStat
   }
 }
 
+/** TMDB's names for a title, so search finds it by its translations and its original name too. */
+function aliases(title: Title): string {
+  return title.tmdbId
+    ? metadata.searchName(title.kind === "movie" ? "movie" : "tv", title.tmdbId)
+    : "";
+}
+
 const handlers: {
   [M in keyof WorkerCalls]: (args: WorkerCalls[M]["args"]) => Promise<WorkerCalls[M]["result"]>;
 } = {
@@ -316,14 +323,19 @@ const handlers: {
     const found = await current(key);
     if (!found) return { movies: [], series: [] };
     const index = indexOf(found, language);
-    // TMDB's names count too: the translations and the original.
-    const aliases = (title: Title) =>
-      title.tmdbId
-        ? metadata.searchName(title.kind === "movie" ? "movie" : "tv", title.tmdbId)
-        : "";
     const matches = (kind: TitleKind) =>
       search(index, kind, query, aliases).map((title) => named(title, language));
     return { movies: matches("movie"), series: matches("series") };
+  },
+  searchKind: async ({ key, language, kind, query, limit }) => {
+    speaking(language);
+    const found = await current(key);
+    if (!found) return { titles: [], total: 0 };
+    const matches = search(indexOf(found, language), kind, query, aliases, Infinity);
+    return {
+      titles: matches.slice(0, limit).map((title) => named(title, language)),
+      total: matches.length,
+    };
   },
   rows: async ({ key, language, kind, tab, like }) => {
     speaking(language);

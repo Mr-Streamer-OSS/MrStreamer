@@ -33,7 +33,7 @@ The languages you pick carry over to other channels, and to movies and series. A
 
 ## Search
 
-⌘K (Ctrl K on Windows and Linux) searches every channel, movies and series, and the programmes on now and later today. Pick a channel, or a programme that's on, to watch it. Pick a later programme to read about it, or a movie or series to see its details.
+⌘K (Ctrl K on Windows and Linux) searches every channel, movies and series, and the programmes on now and later today. Pick a channel, or a programme that's on, to watch it. Pick a later programme to read about it, or a movie or series to see its details. Movies and Series also search their own titles from a field in their tabs; see [Movies and series](movies-and-series.md#finding-something).
 
 ## Keys
 
