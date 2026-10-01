@@ -162,6 +162,8 @@ function make(deps: OnDemandDeps) {
     /** Why the latest refresh of this subscription failed, until one succeeds. */
     let failure: { readonly key: string; readonly error: AppError; readonly at: number } | null =
       null;
+    /** Counts restarts of the worker. */
+    let generation = 0;
     /** Details by subscription, kind and id, oldest first. */
     const details = new Map<string, { raw: ProviderDetails; shown: TitleDetails }>();
 
@@ -185,6 +187,8 @@ function make(deps: OnDemandDeps) {
 
     const refresh = Effect.gen(function* () {
       const source = yield* requireSource;
+      // A refresh cut short by restarting the worker, as for a new key, isn't a failure to show.
+      const started = generation;
       return yield* call("refresh", { key: source.key, account: source.account }).pipe(
         diagnosed("titles"),
         Effect.tap((worked) =>
@@ -196,6 +200,7 @@ function make(deps: OnDemandDeps) {
         Effect.map((worked) => statusOf(worked, source.key)),
         Effect.tapError((failed) =>
           Effect.gen(function* () {
+            if (started !== generation) return;
             failure = { key: source.key, error: failed.error, at: Date.now() };
             const worked = yield* call("status", { key: source.key }).pipe(
               Effect.orElseSucceed(() => ({ movies: 0, series: 0, fetchedAt: null })),
@@ -247,7 +252,11 @@ function make(deps: OnDemandDeps) {
           catch: failedWith,
         }).pipe(diagnosed("details"));
         // The title as this version: its episodes and its file belong to `id`.
-        const version = { ...title, id };
+        const version = {
+          ...title,
+          id,
+          tags: title.versions.find((each) => each.id === id)?.tags ?? title.tags,
+        };
         const found = {
           raw,
           shown: kind === "movie" ? movieDetails(version, raw) : seriesDetails(version, raw),
@@ -340,6 +349,8 @@ function make(deps: OnDemandDeps) {
         const next = keyOf(yield* settings.get);
         if (next === tmdbKey) return;
         tmdbKey = next;
+        generation++;
+        failure = null;
         metadataProgress = { known: 0, wanted: 0, refused: false };
         // The next call starts the worker again, with the new key.
         yield* Effect.promise(() => worker.stop());

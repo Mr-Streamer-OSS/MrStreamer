@@ -35,6 +35,8 @@ interface Ranked {
   readonly popularity: number;
   /** TMDB's rating once enough people voted, 0 before; the provider's when TMDB has none. */
   readonly rating: number;
+  /** Rated by enough people on TMDB to count as top rated. */
+  readonly rated: boolean;
   /** Its version shown suits the viewer's language: `suits`. */
   readonly suits: boolean;
   /** The title opening a 4K version that suits the viewer, when it has one. */
@@ -92,6 +94,7 @@ export function collections(source: CollectionSource): Collections {
         popularity: meta?.popularity ?? 0,
         // Providers rate new titles 10 of 10; TMDB's few early votes are no better.
         rating: meta ? (meta.votes >= ENOUGH_VOTES ? meta.rating : 0) : (title.rating ?? 0),
+        rated: Boolean(meta && meta.votes >= ENOUGH_VOTES),
         suits: fitting(title.tags),
         fourK: !fourK
           ? null
@@ -136,7 +139,10 @@ export function collections(source: CollectionSource): Collections {
     if (id === "popular")
       return { entries: suiting.filter((entry) => entry.popularity > 0), order: "popular" };
     if (id === "top-rated")
-      return { entries: suiting.filter((entry) => entry.rating >= TOP_RATING), order: "rating" };
+      return {
+        entries: suiting.filter((entry) => entry.rated && entry.rating >= TOP_RATING),
+        order: "rating",
+      };
     if (id === "4k") {
       return {
         entries: suiting.flatMap((entry) =>

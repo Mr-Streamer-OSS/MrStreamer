@@ -174,7 +174,7 @@ export function useContinueWatching(limit = Infinity): {
     if (!found || found.title.adult) return [];
     const title = progress.title;
     // One entry per film or series, whichever of its versions was played.
-    const film = found.title.versions[0]?.id ?? found.title.id;
+    const film = found.title.tmdbId ?? found.title.id;
     if (found.kind === "movie" && title.kind === "movie") {
       return [
         {

@@ -253,7 +253,9 @@ function Rows({
   }
   const featured = tab === "for-you" ? featuredOf(kind, rows.data ?? []) : null;
   // A featured movie the viewer is part way through resumes.
-  const resume = featured && mine.find((entry) => entry.title.versions[0]?.id === featured.id);
+  const resume =
+    featured &&
+    mine.find((entry) => entry.title.versions.some((version) => version.id === featured.id));
   return (
     <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-10 pb-16">
       {featured && <Featured title={featured} resume={resume ?? null} />}

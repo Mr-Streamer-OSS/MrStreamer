@@ -111,7 +111,7 @@ export interface OnDemandStatus {
 
 /** TMDB's metadata for the catalogue: genres, languages, services. */
 export interface MetadataProgress {
-  /** Titles with metadata, of those listed with a TMDB id. */
+  /** Titles TMDB answered for, of those listed with a TMDB id. */
   readonly known: number;
   readonly wanted: number;
   /** TMDB refused the key; nothing more arrives until it changes. */

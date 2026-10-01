@@ -64,7 +64,7 @@ export interface ServiceTitles extends StreamingService {
 }
 
 export interface MetadataStatus {
-  /** Titles with metadata, and titles the catalogue lists with a TMDB id. */
+  /** Titles TMDB answered for, and titles the catalogue lists with a TMDB id. */
   readonly known: number;
   readonly wanted: number;
   /** TMDB refused the key: nothing more is fetched until it changes. */
@@ -88,7 +88,13 @@ export function metadataStore(deps: MetadataDeps) {
   // A file that can't be read is like none: everything is fetched again.
   const loading = readJsonFile(deps.path, MetadataFile).then(
     (found) => {
-      if (found) file = found;
+      if (!found) return;
+      file = found;
+      // What is past TMDB's limit goes, key or no key.
+      if (Object.values(file.entries).some((entry) => !fresh(entry.at, EXPIRE_MS))) {
+        dirty = true;
+        void save();
+      }
     },
     () => {},
   );
@@ -178,37 +184,36 @@ export function metadataStore(deps: MetadataDeps) {
         const wait = failure.kind === "busy" ? failure.retryAfter * 1000 : 1000 * 2 ** tries;
         // Every request waits when TMDB asks to, not only this one.
         if (failure.kind === "busy") pausedUntil = Math.max(pausedUntil, now() + wait);
-        await new Promise((done) => setTimeout(done, wait));
+        if (tries < 2) await new Promise((done) => setTimeout(done, wait));
       }
     }
     return null;
   }
 
-  async function fetchTitles(client: Tmdb): Promise<void> {
-    const list = wanted;
+  /** Fetches what `list` lacks or holds too old, until `replaced` says a newer list came. */
+  async function fetchTitles(
+    client: Tmdb,
+    list: readonly Wanted[],
+    replaced: () => boolean,
+  ): Promise<void> {
     const due = list
       .filter((title) => {
         const entry = file.entries[keyOf(title.kind, title.tmdbId)];
         return !entry || !fresh(entry.at, KEEP_MS);
       })
       .toSorted((a, b) => b.addedAt - a.addedAt);
-    // A newer list, as after a refresh or for another account, takes over at once.
-    await paced(
-      due,
-      () => wanted !== list,
-      async (title) => {
-        const found = await ask(() => client.details(title.kind, title.tmdbId));
-        if (found === null) return;
-        file.entries[keyOf(title.kind, title.tmdbId)] =
-          found === "missing"
-            ? { at: now(), missing: true }
-            : { at: now(), ...found, genres: [...found.genres] };
-        changed();
-      },
-    );
+    await paced(due, replaced, async (title) => {
+      const found = await ask(() => client.details(title.kind, title.tmdbId));
+      if (found === null) return;
+      file.entries[keyOf(title.kind, title.tmdbId)] =
+        found === "missing"
+          ? { at: now(), missing: true }
+          : { at: now(), ...found, genres: [...found.genres] };
+      changed();
+    });
   }
 
-  async function fetchServices(client: Tmdb): Promise<void> {
+  async function fetchServices(client: Tmdb, replaced: () => boolean): Promise<void> {
     if (file.services?.region === deps.region && fresh(file.services.at, SERVICES_KEEP_MS)) {
       return;
     }
@@ -219,8 +224,10 @@ export function metadataStore(deps: MetadataDeps) {
       for (const service of services.slice(0, SERVICES)) {
         const ids: string[] = [];
         for (let page = 1, pages = 1; page <= Math.min(pages, SERVICE_PAGES); page++) {
+          if (replaced()) return;
           const found = await ask(() => client.onService(kind, service.id, deps.region, page));
-          if (!found || found === "missing") return;
+          // A page TMDB won't give ends this service's list, not the others'.
+          if (!found || found === "missing") break;
           ids.push(...found.ids);
           pages = found.pages;
           await new Promise((done) => setTimeout(done, 1000 / PER_SECOND));
@@ -234,8 +241,12 @@ export function metadataStore(deps: MetadataDeps) {
 
   async function run(client: Tmdb): Promise<void> {
     await loading;
-    await fetchTitles(client);
-    if (!refused) await fetchServices(client);
+    // A newer list, as after a refresh or for another account, takes over at once, ahead of
+    // the services, a crawl of minutes.
+    const list = wanted;
+    const replaced = () => wanted !== list;
+    await fetchTitles(client, list, replaced);
+    if (!refused && !replaced()) await fetchServices(client, replaced);
     changed(true);
     await save();
   }
@@ -248,9 +259,11 @@ export function metadataStore(deps: MetadataDeps) {
     want(titles: readonly Wanted[]): void {
       wanted = titles;
       const client = deps.client;
-      if (!client || refused || running) return;
+      // Nothing listed, as once the account goes, starts nothing; a run in progress stops.
+      if (!client || refused || running || titles.length === 0) return;
       running = (async () => {
-        for (let done: readonly Wanted[] | null = null; done !== wanted && !refused;) {
+        let done: readonly Wanted[] | null = null;
+        while (done !== wanted && wanted.length > 0 && !refused) {
           done = wanted;
           await run(client);
         }
@@ -281,10 +294,8 @@ export function metadataStore(deps: MetadataDeps) {
     },
 
     status(): MetadataStatus {
-      const known = wanted.filter((title) => {
-        const entry = current(title.kind, title.tmdbId);
-        return entry && !entry.missing;
-      }).length;
+      // Titles TMDB answered for, including ids it doesn't know.
+      const known = wanted.filter((title) => current(title.kind, title.tmdbId)).length;
       return { known, wanted: wanted.length, refused };
     },
 

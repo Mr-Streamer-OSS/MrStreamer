@@ -54,8 +54,8 @@ const LANGUAGE_MARKS = new Map<string, (typeof TITLE_LANGUAGES)[number]>(
   TITLE_LANGUAGES.flatMap((language) => language.marks.map((mark) => [mark, language] as const)),
 );
 
-/** Words after a mark that say the sound was replaced: "NL AUDIO", "NL GESPROKEN", "DE DUBBED". */
-const DUBBED = /\b(AUDIO|GESPROKEN|DUB|DUBBED)\b/;
+/** Words after a mark that say the sound was replaced: "NL AUDIO", "NL DUBBED". */
+const DUBBED = /\b(AUDIO|DUB|DUBBED)\b/;
 
 /**
  * How well a version suits a language, from its name's marks:

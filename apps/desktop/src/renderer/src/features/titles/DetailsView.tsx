@@ -132,7 +132,7 @@ function MovieActions({ details }: { details: MovieDetails }) {
       progress={partly ? current : undefined}
       primaryLabel={partly ? "Resume" : "Play"}
       onPrimary={() => playTitle(resumed, resumePoint(partly ? current : undefined))}
-      onBeginning={partly ? () => playTitle(resumed, 0) : null}
+      onBeginning={partly ? () => playTitle(now, 0) : null}
       onRemove={
         partly
           ? () =>
