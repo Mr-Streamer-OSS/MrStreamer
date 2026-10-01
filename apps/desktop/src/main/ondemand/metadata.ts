@@ -1,6 +1,8 @@
 // TMDB's metadata for the catalogue, in the catalogue worker: fetched in the background, newest
-// titles first, kept in metadata.json.gz and refreshed before TMDB's six months run out. Without
-// a key, or with one TMDB refuses, the catalogue works as before, without genres or services.
+// titles first, kept in metadata.json.gz and refreshed before TMDB's six months run out. Each
+// title's name is asked for in the viewer's language and kept per language, so switching back
+// asks nothing. Without a key, or with one TMDB refuses, the catalogue works as before, with the
+// provider's names and without genres or services.
 import { type } from "arktype";
 import {
   TmdbError,
@@ -9,6 +11,7 @@ import {
   type Tmdb,
   type TmdbKind,
 } from "@mrstreamer/core/metadata/tmdb";
+import { normalize } from "@mrstreamer/core/text";
 import { readJsonFile, writeJsonFile } from "../platform/json-file.ts";
 
 /** Fetched again after this long, and no longer used after six months, TMDB's limit. */
@@ -38,6 +41,9 @@ const Entry = type({
   "votes?": "number",
   "collection?": type({ id: "number", name: "string" }).or("null"),
   "backdrop?": "string | null",
+  /** The name by ISO 639-1 language; null where TMDB has no translation. */
+  "names?": type({ "[string]": "string | null" }),
+  "original?": "string | null",
 });
 const ServiceList = type({ id: "number", name: "string", priority: "number", ids: "string[]" });
 const MetadataFile = type({
@@ -103,6 +109,10 @@ export function metadataStore(deps: MetadataDeps) {
     () => {},
   );
   let wanted: readonly Wanted[] = [];
+  /** The viewer's language, which names are asked for in. */
+  let language = "en";
+  /** Each entry's names, folded for search, worked out when first searched. */
+  const searchNames = new Map<string, string>();
   let refused = false;
   let running: Promise<void> | null = null;
   let dirty = false;
@@ -120,6 +130,11 @@ export function metadataStore(deps: MetadataDeps) {
   const current = (kind: TmdbKind, id: string) => {
     const entry = file.entries[keyOf(kind, id)];
     return entry && fresh(entry.at, EXPIRE_MS) ? entry : undefined;
+  };
+  /** Whether TMDB answered for the title, its name in the viewer's language included. */
+  const answered = (kind: TmdbKind, id: string) => {
+    const entry = current(kind, id);
+    return entry !== undefined && (entry.missing === true || entry.names?.[language] !== undefined);
   };
 
   function changed(force = false): void {
@@ -207,21 +222,34 @@ export function metadataStore(deps: MetadataDeps) {
   async function fetchTitles(
     client: Tmdb,
     list: readonly Wanted[],
+    asked: string,
     replaced: () => boolean,
   ): Promise<void> {
     const due = list
       .filter((title) => {
         const entry = file.entries[keyOf(title.kind, title.tmdbId)];
-        return !entry || !fresh(entry.at, KEEP_MS);
+        if (!entry || !fresh(entry.at, KEEP_MS)) return true;
+        return !entry.missing && entry.names?.[asked] === undefined;
       })
       .toSorted((a, b) => b.addedAt - a.addedAt);
     await paced(due, replaced, async (title) => {
-      const found = await ask(() => client.details(title.kind, title.tmdbId));
+      const key = keyOf(title.kind, title.tmdbId);
+      const found = await ask(() => client.details(title.kind, title.tmdbId, asked));
       if (found === null) return;
-      file.entries[keyOf(title.kind, title.tmdbId)] =
-        found === "missing"
-          ? { at: now(), missing: true }
-          : { at: now(), ...found, genres: [...found.genres] };
+      if (found === "missing") {
+        file.entries[key] = { at: now(), missing: true };
+        changed();
+        return;
+      }
+      const { name, original, ...metadata } = found;
+      const names = { ...file.entries[key]?.names, [asked]: name };
+      // Without a translation, the English name stands in, unless the title is English anyway.
+      if (name === null && asked !== "en" && found.language !== "en" && names.en === undefined) {
+        const english = await ask(() => client.details(title.kind, title.tmdbId, "en"));
+        if (english !== null && english !== "missing") names.en = english.name;
+      }
+      file.entries[key] = { at: now(), ...metadata, genres: [...metadata.genres], names, original };
+      searchNames.delete(key);
       changed();
     });
   }
@@ -258,8 +286,9 @@ export function metadataStore(deps: MetadataDeps) {
     // A newer list, as after a refresh or for another account, takes over at once, ahead of
     // the services, a crawl of minutes.
     const list = wanted;
-    const replaced = () => wanted !== list;
-    await fetchTitles(client, list, replaced);
+    const asked = language;
+    const replaced = () => wanted !== list || language !== asked;
+    await fetchTitles(client, list, asked, replaced);
     if (!refused && !replaced()) await fetchServices(client, replaced);
     changed(true);
     await save();
@@ -270,15 +299,20 @@ export function metadataStore(deps: MetadataDeps) {
      * The titles the catalogue lists; fetches what is missing or old, in the background. A list
      * given while fetching is fetched next.
      */
-    want(titles: readonly Wanted[]): void {
+    want(titles: readonly Wanted[], viewerLanguage: string = language): void {
+      language = viewerLanguage;
       wanted = titles;
       const client = deps.client;
       // Nothing listed, as once the account goes, starts nothing; a run in progress stops.
       if (!client || refused || running || titles.length === 0) return;
       running = (async () => {
-        let done: readonly Wanted[] | null = null;
-        while (done !== wanted && wanted.length > 0 && !refused) {
-          done = wanted;
+        // Again for a list or a language that came while fetching.
+        let doneList: readonly Wanted[] | null = null;
+        let doneLanguage: string | null = null;
+        while ((doneList !== wanted || doneLanguage !== language) && wanted.length > 0) {
+          if (refused) break;
+          doneList = wanted;
+          doneLanguage = language;
           await run(client);
         }
       })().finally(() => {
@@ -303,6 +337,43 @@ export function metadataStore(deps: MetadataDeps) {
       };
     },
 
+    /**
+     * A title's name for a viewer of `viewerLanguage`, and its original name when that differs:
+     * the translation, else the name in the language it was made in when that is the viewer's,
+     * else the English name. Null when TMDB hasn't said, so the provider's name stands.
+     */
+    name(
+      kind: TmdbKind,
+      tmdbId: string,
+      viewerLanguage: string,
+    ): { readonly name: string; readonly original: string | null } | null {
+      const entry = current(kind, tmdbId);
+      if (!entry || entry.missing) return null;
+      const original = entry.original ?? null;
+      const madeIn = entry.language ?? null;
+      const name =
+        entry.names?.[viewerLanguage] ??
+        (madeIn === viewerLanguage ? original : null) ??
+        entry.names?.["en"] ??
+        (madeIn === "en" ? original : null) ??
+        original;
+      if (!name) return null;
+      return { name, original: original && original !== name ? original : null };
+    },
+
+    /** Every name TMDB gave a title, folded for search, or "" before it said. */
+    searchName(kind: TmdbKind, tmdbId: string): string {
+      const key = keyOf(kind, tmdbId);
+      let found = searchNames.get(key);
+      if (found === undefined) {
+        const entry = current(kind, tmdbId);
+        const names = Object.values(entry?.names ?? {}).filter((name) => name !== null);
+        found = normalize([...names, entry?.original ?? ""].join(" "));
+        searchNames.set(key, found);
+      }
+      return found;
+    },
+
     /** The streaming services of the region, each with what it streams. */
     services(kind: TmdbKind): readonly ServiceTitles[] {
       if (file.services?.region !== deps.region || !fresh(file.services.at, EXPIRE_MS)) return [];
@@ -311,7 +382,7 @@ export function metadataStore(deps: MetadataDeps) {
 
     status(): MetadataStatus {
       // Titles TMDB answered for, including ids it doesn't know.
-      const known = wanted.filter((title) => current(title.kind, title.tmdbId)).length;
+      const known = wanted.filter((title) => answered(title.kind, title.tmdbId)).length;
       return { known, wanted: wanted.length, refused, fetching: running !== null };
     },
 

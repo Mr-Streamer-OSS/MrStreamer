@@ -1,11 +1,12 @@
-// A stand-in for TMDB's API: every film and series it is asked about exists, with genres that
-// follow from its id, and one streaming service streams the first titles it is told about.
+// A stand-in for TMDB's API: every film and series it is asked about exists, with genres, a
+// language and names that follow from its id (see `tmdbName`), and one streaming service streams
+// the first titles it is told about.
 import { createServer } from "node:http";
 
 export interface FakeTmdb {
   readonly url: string;
-  /** Requests for one title's details so far. */
-  detailRequests(): number;
+  /** Requests for one title's details so far, in one language or all. */
+  detailRequests(language?: string): number;
   /** Makes every request answer 401, as for a revoked key, or restores them. */
   refuse(refused: boolean): void;
   /** What the service streams, as TMDB ids, by kind. */
@@ -13,8 +14,23 @@ export interface FakeTmdb {
   close(): Promise<void>;
 }
 
+/**
+ * The name the fake TMDB gives title `id` in `language`, as TMDB answers: the original when it has
+ * no translation. Every third title was made in Dutch, "Origineel 3", the rest in English,
+ * "Original 1". English translates all but every fifth, "English 3"; Dutch all but every seventh,
+ * "Nederlands 1". Other languages translate nothing.
+ */
+export function tmdbName(id: number, language: string): { name: string; original: string } {
+  const madeIn = id % 3 === 0 ? "nl" : "en";
+  const original = madeIn === "nl" ? `Origineel ${id}` : `Original ${id}`;
+  if (language === madeIn) return { name: original, original };
+  if (language === "en" && id % 5 !== 0) return { name: `English ${id}`, original };
+  if (language === "nl" && id % 7 !== 0) return { name: `Nederlands ${id}`, original };
+  return { name: original, original };
+}
+
 export async function startFakeTmdb(): Promise<FakeTmdb> {
-  let details = 0;
+  const details = new Map<string, number>();
   let refused = false;
   const streamed: Record<string, readonly string[]> = { movie: [], tv: [] };
   const json = (response: import("node:http").ServerResponse, body: unknown, status = 200) =>
@@ -24,9 +40,13 @@ export async function startFakeTmdb(): Promise<FakeTmdb> {
     if (refused) return json(response, { status_code: 7 }, 401);
     const title = /^\/3\/(movie|tv)\/(\d+)$/.exec(url.pathname);
     if (title) {
-      details++;
+      const language = url.searchParams.get("language") ?? "en";
+      details.set(language, (details.get(language) ?? 0) + 1);
       const id = Number(title[2]);
+      const { name, original } = tmdbName(id, language);
+      const series = title[1] === "tv";
       return json(response, {
+        ...(series ? { name, original_name: original } : { title: name, original_title: original }),
         // Odd ids are comedies, even ones dramas; every third is Dutch.
         genres: [{ id: id % 2 ? 35 : 18 }],
         original_language: id % 3 === 0 ? "nl" : "en",
@@ -62,7 +82,10 @@ export async function startFakeTmdb(): Promise<FakeTmdb> {
   const { port } = server.address() as { port: number };
   return {
     url: `http://127.0.0.1:${port}/3`,
-    detailRequests: () => details,
+    detailRequests: (language) =>
+      language === undefined
+        ? [...details.values()].reduce((sum, count) => sum + count, 0)
+        : (details.get(language) ?? 0),
     refuse: (value) => {
       refused = value;
     },

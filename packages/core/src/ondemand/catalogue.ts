@@ -118,6 +118,7 @@ function indexKind(
       id: first.item.id,
       name: first.item.name,
       title: first.name.title,
+      originalTitle: null,
       tags: first.name.tags,
       year,
       posterUrl,
@@ -157,13 +158,16 @@ export function byIds(
 }
 
 /**
- * Titles whose name holds every word of the query. Names that start with it rank first, then
- * names with a word starting with it; ties go to the newest. Titles for adults are left out.
+ * Titles whose name holds every word of the query: the shown name, the provider's names of every
+ * version, and `aliases`, other names already folded, such as TMDB's translations. Names that
+ * start with it rank first, then names with a word starting with it; ties go to the newest.
+ * Titles for adults are left out.
  */
 export function search(
   catalogue: IndexedCatalogue,
   kind: TitleKind,
   query: string,
+  aliases: (title: Title) => string = () => "",
   limit = SEARCH_LIMIT,
 ): Title[] {
   const folded = normalize(query);
@@ -174,8 +178,10 @@ export function search(
   const searchNames = indexed.searchNames();
   const ranked: { title: Title; rank: number }[] = [];
   for (const [index, title] of titles.entries()) {
-    const name = searchNames[index] ?? "";
-    if (title.adult || !words.every((word) => name.includes(word))) continue;
+    if (title.adult) continue;
+    const alias = aliases(title);
+    const name = alias ? `${alias} ${searchNames[index] ?? ""}` : (searchNames[index] ?? "");
+    if (!words.every((word) => name.includes(word))) continue;
     const rank = name.startsWith(folded) ? 0 : ` ${name}`.includes(` ${folded}`) ? 1 : 2;
     ranked.push({ title, rank });
   }

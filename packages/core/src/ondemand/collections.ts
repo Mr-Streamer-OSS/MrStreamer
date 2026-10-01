@@ -23,6 +23,10 @@ export interface CollectionSource {
   readonly titles: readonly Title[];
   readonly language: string;
   readonly metadata: (tmdbId: string) => TitleMetadata | null;
+  /** TMDB's name for a title in the viewer's language, and its original, once known. */
+  readonly names: (
+    tmdbId: string,
+  ) => { readonly name: string; readonly original: string | null } | null;
   readonly services: readonly ServiceTitles[];
   /** Epoch milliseconds, for "this week". */
   readonly now: number;
@@ -75,9 +79,11 @@ export function collections(source: CollectionSource): Collections {
     .filter((title) => !title.adult)
     .map((title): Ranked => {
       const meta = title.tmdbId ? source.metadata(title.tmdbId) : null;
+      const names = title.tmdbId ? source.names(title.tmdbId) : null;
       const shown: Title = meta
         ? {
             ...title,
+            ...(names ? { title: names.name, originalTitle: names.original } : {}),
             backdropUrl: title.backdropUrl ?? (meta.backdrop ? `${IMAGES}${meta.backdrop}` : null),
             genres: genresOf(meta),
           }
