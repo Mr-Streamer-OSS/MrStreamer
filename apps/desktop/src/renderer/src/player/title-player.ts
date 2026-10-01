@@ -308,7 +308,11 @@ export const titlePlayer = {
     save();
     if (engine?.seekWithin(target)) {
       store.setState({ position: target });
-      if (phase.kind === "ended") store.setState({ phase: { kind: "playing" } });
+      // The end left the element paused: playing again starts it.
+      if (phase.kind === "ended") {
+        store.setState({ phase: { kind: "playing" } });
+        void video.play().catch(() => {});
+      }
       return;
     }
     void run(target);
@@ -320,18 +324,29 @@ export const titlePlayer = {
   },
 
   togglePause(): void {
-    const { phase, position } = store.getState();
+    const { phase } = store.getState();
     if (phase.kind === "ended") {
       titlePlayer.seek(0);
     } else if (!engine && released !== null) {
       void run(released);
     } else if (!engine && phase.kind === "failed") {
-      void run(position);
+      titlePlayer.retry();
     } else if (video.paused) {
       void video.play().catch(() => {});
     } else {
       video.pause();
     }
+  },
+
+  /**
+   * Tries a failed title again from where it was: a new run, or opening it again when the first
+   * open failed and left no session.
+   */
+  retry(): void {
+    const { now, phase, position } = store.getState();
+    if (!now || phase.kind !== "failed") return;
+    if (session) void run(position);
+    else void titlePlayer.open(now, position);
   },
 
   /** Plays another sound track from where the title is, and remembers its language. */

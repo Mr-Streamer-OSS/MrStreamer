@@ -3,7 +3,7 @@ import { RotateCw } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import type { SubscriptionSummary } from "@mrstreamer/contracts/subscription";
 import { isTyping } from "../../app/platform.ts";
-import { useUi, type SettingsTab } from "../../app/ui-store.ts";
+import { resetForAccount, useUi, type SettingsTab } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { WindowBar } from "../../components/WindowBar.tsx";
 import { appError, describeError, formatDate } from "../../lib/errors.ts";
@@ -177,7 +177,8 @@ function Subscription() {
     mutationFn: () => call("subscription.remove"),
     onSuccess: async () => {
       player.reset();
-      useUi.setState({ settings: null, list: { kind: "all" }, view: "home", watching: false });
+      resetForAccount();
+      useUi.setState({ settings: null });
       await client.resetQueries();
     },
   });

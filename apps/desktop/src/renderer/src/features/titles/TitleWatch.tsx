@@ -422,7 +422,7 @@ function State({ next }: { next: (() => void) | null }) {
       body = problemBody(phase.problem);
       actions = (
         <>
-          <Button variant="primary" onClick={() => titlePlayer.togglePause()}>
+          <Button variant="primary" onClick={() => titlePlayer.retry()}>
             <RotateCw />
             Retry
           </Button>

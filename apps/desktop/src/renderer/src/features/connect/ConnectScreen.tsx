@@ -4,7 +4,7 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import type { LoginInput } from "@mrstreamer/contracts/ipc";
 import type { SubscriptionSummary } from "@mrstreamer/contracts/subscription";
 import { isMac, isWindows } from "../../app/platform.ts";
-import { useUi } from "../../app/ui-store.ts";
+import { resetForAccount, useUi } from "../../app/ui-store.ts";
 import { Logo } from "../../components/Logo.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { Input } from "../../components/ui/input.tsx";
@@ -31,7 +31,7 @@ export function ConnectScreen({ existing }: { existing: SubscriptionSummary | nu
         existing?.server === connected.server && existing.username === connected.username;
       if (!sameAccount) {
         player.reset();
-        useUi.setState({ list: { kind: "all" }, view: "home", watching: false });
+        resetForAccount();
       }
       useUi.setState({ editingLogin: false });
       await client.resetQueries();
