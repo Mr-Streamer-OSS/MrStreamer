@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/assets/banner.png" alt="Mr. Streamer, with its Movies page" width="100%"></p>
+
 # Mr. Streamer
 
 A desktop player for the IPTV subscription you already have. Connect it once, then watch its live channels with a programme guide, and its movies and series with resume and the next episode. Your login, lists and what you watched stay on your computer.

@@ -64,3 +64,4 @@ Chromium's credits, which hold Node.js's licence too, are 20 MB of HTML from Ele
 
 - App icons come from `apps/desktop/assets/brand/`; `pnpm --filter mrstreamer icons:export` renders `apps/desktop/build/icon.*`.
 - The DMG window background is `apps/desktop/build/dmg-background.png` and its `@2x` twin; `pnpm --filter mrstreamer dmg:background` renders them on a Mac, so the text uses the system font.
+- The README banner, `docs/assets/banner.png`, is 2560 × 800 for sharp screens: the mark and name beside Movies' For you page, captured from the Linux build, which draws no window controls, with Inter as its font and made-up films, posters and backdrop. Never use a provider's catalogue or real posters in it.
