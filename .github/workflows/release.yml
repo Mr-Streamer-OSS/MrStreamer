@@ -1,7 +1,8 @@
 # Builds and publishes releases; docs/maintainers/releasing.md describes the process.
 #
-# - Nightly: checked every 30 minutes, built when main has new commits and the last nightly is at
-#   least six hours old. Started by hand, it builds main right away.
+# - Nightly: checked on every push to main and every 30 minutes, built when main has new commits
+#   and the last nightly is at least six hours old. GitHub starts scheduled runs far less often
+#   than asked, often hours apart, so a merge checks too. Started by hand, it builds main right away.
 # - Stable: by hand. Rebuilds the commit of the tested nightly, or the latest published one, with a
 #   stable version, publishes it as the latest release, then records the version on main.
 # - Dry run: labelling a pull request "release dry run" builds, signs and tests its head commit
@@ -12,6 +13,8 @@
 name: Release
 
 on:
+  push:
+    branches: [main]
   schedule:
     # Away from the top of the hour, when scheduled runs start late.
     - cron: "8,38 * * * *"
@@ -40,8 +43,8 @@ permissions:
 # run waits for the one ahead of it and is never cancelled, so a requested stable release is never
 # dropped. Sharing the queue keeps a nightly from being planned while a stable release builds: it
 # would preview the same version from newer code, and its users would then be offered the stable
-# release and move back to older code. A scheduled nightly decides whether it is due once its turn
-# comes.
+# release and move back to older code. A push or scheduled check decides whether a nightly is due
+# once its turn comes.
 concurrency:
   group: >-
     release-${{ github.event_name == 'pull_request' && format('dry-run-{0}', github.event.pull_request.number)
@@ -91,7 +94,8 @@ jobs:
           RUN: ${{ github.run_number }}
         run: |
           case "$GITHUB_EVENT_NAME/$CHANNEL" in
-            schedule/*)
+            # A push to main asks the same as the schedule: a nightly only when one is due.
+            schedule/* | push/*)
               node scripts/release-plan.ts nightly --ref "$GITHUB_REF" --sha "$GITHUB_SHA" --run "$RUN" --scheduled ;;
             pull_request/*)
               node scripts/release-plan.ts nightly --ref "$GITHUB_REF" --sha "$HEAD_SHA" --run "$RUN" --dry-run ;;

@@ -7,7 +7,7 @@ Releases come from `.github/workflows/release.yml` and live on GitHub Releases. 
 ## What the workflow does
 
 - Triggers:
-  - a scheduled nightly check every 30 minutes
+  - a nightly check on every push to `main`, and every 30 minutes on a schedule. GitHub starts scheduled runs far less often than asked, often hours apart, so the push is what usually finds a nightly due. The version commit a stable release pushes doesn't start one: GitHub starts no runs for pushes made with the workflow's own token.
   - manual `workflow_dispatch` with `channel=nightly`, which builds `main` right away
   - manual `workflow_dispatch` with `channel=stable`, the only way to ship stable
   - the **release dry run** label on a pull request
@@ -42,7 +42,7 @@ Releases come from `.github/workflows/release.yml` and live on GitHub Releases. 
 
 ## Nightly builds
 
-- A scheduled check builds when the last published nightly is at least six hours old and `main` has commits that descend from it. The check runs once the run's turn in the queue comes, so it sees any release published ahead of it.
+- A check, after a push to `main` or on the schedule, builds when the last published nightly is at least six hours old and `main` has commits that descend from it. The check runs once the run's turn in the queue comes, so it sees any release published ahead of it.
   - No nightly yet: builds.
   - Nothing new since the last nightly, or `main` older than it: skipped.
   - `main` no longer contains the last nightly, after its history was rewritten: skipped with a warning. Start a nightly by hand to continue from `main`.
@@ -156,7 +156,7 @@ Forks get no signing secrets, so their pull requests can't run it.
 
 ## First release
 
-1. Merge the workflow to `main`: GitHub runs manual and scheduled workflows from the default branch's copy. The next scheduled check publishes `0.0.1-nightly.<date>.<run>`; start a nightly by hand to have it sooner.
+1. Merge the workflow to `main`: GitHub runs manual and scheduled workflows from the default branch's copy. The merge's own push finds no nightly yet and publishes `0.0.1-nightly.<date>.<run>`; if it doesn't, start a nightly by hand.
 2. [Enable Pages](#enabling-pages) and open the feed: its `nightly` must name the nightly.
 3. Install the nightly on each system and check that the app offers the next one once it's out.
 4. Start a stable release to publish `0.0.1`. On Stable, confirm it's offered and nightlies are not.
