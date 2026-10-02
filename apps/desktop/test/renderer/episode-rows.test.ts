@@ -5,7 +5,7 @@ import { ipc } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Episode, SeriesDetails, Title } from "@mrstreamer/contracts/ondemand";
 import { defaultPreferences } from "@mrstreamer/contracts/preferences";
 import { DetailsView } from "../../src/renderer/src/features/titles/DetailsView.tsx";
@@ -65,8 +65,16 @@ let unmount = () => {};
 afterEach(() => unmount());
 
 const text = () => document.body.textContent ?? "";
-/** Lets React Query pass the answers on. */
-const settled = () => act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+/** Waits until `check` passes, letting React Query pass the answers on meanwhile. */
+const until = (check: () => void) =>
+  vi.waitFor(
+    async () => {
+      await act(() => new Promise((resolve) => setTimeout(resolve, 10)));
+      check();
+    },
+    // A busy suite can take a while; a stuck sheet still fails.
+    { timeout: 5000 },
+  );
 
 describe("a series' episodes", () => {
   it("show TMDB's details for the season shown, and ask for another only once it opens", async () => {
@@ -91,13 +99,14 @@ describe("a series' episodes", () => {
     await act(async () => listed.resolve([series]));
     await act(async () => progress.resolve([]));
     await act(async () => opened.resolve(details));
-    await settled();
 
     // The provider's episodes, with nothing made up while TMDB answers.
-    expect(text()).toContain("Episode 2");
+    await until(() => {
+      expect(text()).toContain("Episode 2");
+      expect(ipc.argsOf("ondemand.season")).toEqual([{ id: "harbour", season: 1 }]);
+    });
     expect(text()).not.toContain("★");
     expect(text()).not.toContain("Directed by");
-    expect(ipc.argsOf("ondemand.season")).toEqual([{ id: "harbour", season: 1 }]);
 
     await act(async () =>
       season.resolve([
@@ -118,9 +127,8 @@ describe("a series' episodes", () => {
         { ...episode(1, 2), rating: null, cast: [], directors: [] },
       ]),
     );
-    await settled();
 
-    expect(text()).toContain("The Ferry");
+    await until(() => expect(text()).toContain("The Ferry"));
     expect(text()).toContain("★ 7.4");
     expect(text()).toContain("Mara takes the night ferry.");
     expect(text()).toContain("Directed by Lotte Smit · With Ana Costa, Joris Wouters");
@@ -132,8 +140,8 @@ describe("a series' episodes", () => {
       (button) => button.textContent === "Season 2",
     );
     await act(async () => tab?.click());
-    await settled();
 
+    await until(() => expect(ipc.argsOf("ondemand.season")).toHaveLength(2));
     expect(ipc.argsOf("ondemand.season")).toEqual([
       { id: "harbour", season: 1 },
       { id: "harbour", season: 2 },
