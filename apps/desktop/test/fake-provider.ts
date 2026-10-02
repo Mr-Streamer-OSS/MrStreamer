@@ -65,6 +65,11 @@ export interface FakeProviderOptions {
    * "afterhours.adult", and "LATE SHOW" and "NIGHT CLUB" in a category named "XXX | ADULTS".
    */
   readonly adultChannels?: boolean;
+  /**
+   * Adds "TEST | Long-running (EN)", the newest series: 20 seasons of 26 episodes, each with a
+   * story and the file facts panels send: 1 MB of details, near a long-running show's on a panel.
+   */
+  readonly longSeries?: boolean;
 }
 
 interface FakeTitle {
@@ -82,8 +87,14 @@ interface FakeTitle {
   readonly tmdb?: string;
 }
 
-/** An episode's file, numbered by its place in the season unless `number` says otherwise. */
-type FakeEpisode = FakeTitle & { readonly number?: number };
+/**
+ * An episode's file, numbered by its place in the season unless `number` says otherwise. `info`
+ * adds to what its details send about it.
+ */
+type FakeEpisode = FakeTitle & {
+  readonly number?: number;
+  readonly info?: Readonly<Record<string, unknown>>;
+};
 
 interface FakeSeries {
   readonly id: number;
@@ -167,7 +178,10 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
   const slotReleaseMs = options.slotReleaseMs ?? 300;
   const streams = options.streams ?? (options.live ? liveStreams : defaultStreams);
   const catalogue = buildCatalogue(options.channels ?? 300, options.adultChannels ?? false);
-  const titles = buildTitles(options.titles ?? 120);
+  const listed = buildTitles(options.titles ?? 120);
+  const titles = options.longSeries
+    ? { ...listed, series: [longSeries(), ...listed.series] }
+    : listed;
   const movieFiles = new Map(titles.movies.map((movie) => [String(movie.id), movie]));
   const episodeFiles = new Map(
     titles.series
@@ -346,6 +360,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
                 info: {
                   duration_secs: 2700,
                   movie_image: `https://image.example/e/${episode.id}.jpg`,
+                  ...episode.info,
                 },
               };
             }),
@@ -845,6 +860,103 @@ function buildTitles(size: number): FakeTitles {
 
 const REGIONS = ["UK", "NL", "BE", "DE", "FR", "US", "ES", "IT", "PL", "PT"];
 const GENRES = ["Entertainment", "Sports", "News", "Kids", "Documentary", "Movies", "Music"];
+/** The series `longSeries` adds: every episode plays the MP4 clip. */
+function longSeries(): FakeSeries {
+  const id = 70_000;
+  const added = 1_790_000_001;
+  return {
+    id,
+    name: "TEST | Long-running (EN)",
+    categoryId: "601",
+    adult: false,
+    added,
+    seasons: Array.from({ length: 20 }, (_season, season) =>
+      Array.from({ length: 26 }, (_episode, place) => ({
+        id: id * 100 + season * 26 + place,
+        name: "",
+        categoryId: "601",
+        adult: false,
+        rating: 0,
+        added,
+        container: "mkv",
+        fixture: "title-h264-aac.mp4",
+        info: {
+          plot: `Season ${season + 1}, part ${place + 1}. ${LONG_STORY}`,
+          air_date: `${2003 + season}-09-${String(1 + place).padStart(2, "0")}`,
+          rating: 7.5,
+          bitrate: 2400,
+          video: PROBED_VIDEO,
+          audio: PROBED_AUDIO,
+        },
+      })),
+    ),
+  };
+}
+
+const LONG_STORY =
+  "An agent goes missing on the eve of a hearing, and the team follows bank records, an " +
+  "abandoned car and a witness who won't talk across three states before the deadline. Back at " +
+  "the office, an old case returns with a new suspect and an old grudge.";
+
+/** The ffprobe facts panels send about an episode's picture and sound. */
+const DISPOSITION = { default: 1, dub: 0, original: 0, comment: 0, lyrics: 0, forced: 0 };
+const PROBED_VIDEO = {
+  index: 0,
+  codec_name: "h264",
+  codec_long_name: "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10",
+  profile: "High",
+  codec_type: "video",
+  codec_tag_string: "[0][0][0][0]",
+  codec_tag: "0x0000",
+  width: 1280,
+  height: 720,
+  coded_width: 1280,
+  coded_height: 720,
+  has_b_frames: 2,
+  sample_aspect_ratio: "1:1",
+  display_aspect_ratio: "16:9",
+  pix_fmt: "yuv420p",
+  level: 31,
+  color_range: "tv",
+  color_space: "bt709",
+  color_transfer: "bt709",
+  color_primaries: "bt709",
+  chroma_location: "left",
+  field_order: "progressive",
+  refs: 1,
+  is_avc: "true",
+  nal_length_size: "4",
+  r_frame_rate: "24000/1001",
+  avg_frame_rate: "24000/1001",
+  time_base: "1/1000",
+  start_pts: 0,
+  start_time: "0.000000",
+  bits_per_raw_sample: "8",
+  disposition: DISPOSITION,
+  tags: { language: "eng", BPS: "2263842", DURATION: "00:42:51.110000000" },
+};
+const PROBED_AUDIO = {
+  index: 1,
+  codec_name: "eac3",
+  codec_long_name: "ATSC A/52B (AC-3, E-AC-3)",
+  codec_type: "audio",
+  codec_tag_string: "[0][0][0][0]",
+  codec_tag: "0x0000",
+  sample_fmt: "fltp",
+  sample_rate: "48000",
+  channels: 6,
+  channel_layout: "5.1(side)",
+  bits_per_sample: 0,
+  r_frame_rate: "0/0",
+  avg_frame_rate: "0/0",
+  time_base: "1/1000",
+  start_pts: 0,
+  start_time: "0.000000",
+  bit_rate: "640000",
+  disposition: DISPOSITION,
+  tags: { language: "eng", BPS: "640000", DURATION: "00:42:51.104000000" },
+};
+
 const WORDS = [
   "Earth",
   "Arena",

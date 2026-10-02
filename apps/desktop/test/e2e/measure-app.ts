@@ -1,6 +1,7 @@
 // Measures a built app against the fake provider at the size of a large subscription: 13,000
-// channels, about 2,000 of them with a guide, and a continuous 720p stream from ffmpeg on every
-// test channel. Prints medians for slice comparisons; see docs/maintainers/testing.md.
+// channels, about 2,000 of them with a guide, a continuous 720p stream from ffmpeg on every test
+// channel, and a series of 520 episodes. Prints medians for slice comparisons, and how many streams
+// each tune, switch and return to Watch opens at the provider; see docs/maintainers/testing.md.
 //
 //   node test/e2e/measure-app.ts [--json results.json] <app executable> [-- extra app arguments]
 //
@@ -31,6 +32,7 @@ const TEST_CHANNELS = ["H.264 + AAC", "H.264 + MP2", "H.264 + MP3", "H.264 + AC-
 const provider = await startFakeProvider({
   channels: 13_000,
   maxConnections: 1,
+  longSeries: true,
   // Every channel plays the same endless 720p programme, encoded as it goes.
   streams: (_channel, out, signal) => {
     const encoder = spawn(
@@ -93,23 +95,28 @@ try {
   await clickText(page, "TEST | Formats and failures");
   await waitFor(() => rowsShown(page));
   for (const channel of TEST_CHANNELS.slice(0, RUNS)) {
+    const requests = provider.streamRequests();
     await timed(
       "time to picture",
       () => clickRow(page, channel),
       () => freshPicture(page),
     );
+    await delay(1000);
+    record("streams opened per tune (count)", provider.streamRequests() - requests);
     await key(page, "Escape", 27);
     await waitFor(() => page.evaluate<boolean>(`!document.querySelector('[data-view="watch"]')`));
   }
   await clickRow(page, TEST_CHANNELS[0]!);
   await waitFor(() => freshPicture(page));
   for (let run = 0; run < RUNS; run++) {
+    const requests = provider.streamRequests();
     await timed(
       "channel switch",
       () => key(page, "ArrowDown", 40),
       () => freshPicture(page),
     );
     await delay(1000);
+    record("streams opened per switch (count)", provider.streamRequests() - requests);
   }
   await key(page, "Escape", 27);
   await clickText(page, "Home");
@@ -131,8 +138,12 @@ try {
   const withPreview = await idle(app);
   record("idle CPU, Home with preview (%)", withPreview.cpu);
   record("memory, Home with preview (MB)", withPreview.memory);
+  // Watch takes over the preview's stream.
+  const requests = provider.streamRequests();
   await clickText(page, "Watch");
   await waitFor(() => page.evaluate<boolean>(`!!document.querySelector('[data-view="watch"]')`));
+  await delay(1000);
+  record("streams opened, Home to Watch (count)", provider.streamRequests() - requests);
   await page.evaluate(`document.querySelector('[aria-label="Stop"]').click()`);
   await key(page, "Escape", 27);
   await delay(3000);
@@ -142,7 +153,8 @@ try {
   page.close();
   await quit(app);
 
-  // Cold starts: the same profile, logged in, with the catalogue and guide on disk.
+  // Cold starts: the same profile, logged in, with the catalogue and guide on disk. Each then
+  // opens the long series, which the app has not asked the provider about since it started.
   for (let run = 0; run < RUNS; run++) {
     port = randomPort();
     const started = performance.now();
@@ -154,6 +166,7 @@ try {
       ),
     );
     record("cold start to Home", performance.now() - started);
+    await openLongSeries(page);
     page.close();
     await quit(app);
   }
@@ -178,6 +191,38 @@ async function timed(
   await act();
   await waitFor(done, 60_000);
   record(name, performance.now() - started);
+}
+
+/**
+ * Opens the long series from All series, the newest first, and times in the window when its name
+ * shows and when the first season's 26 episodes do.
+ */
+async function openLongSeries(page: Page): Promise<void> {
+  await page.evaluate(
+    `[...document.querySelectorAll("header button")].find((b) => b.textContent.trim() === "Series").click()`,
+  );
+  const allTab = `[...document.querySelectorAll("nav button")].find((b) => b.textContent.trim() === "All series")`;
+  await waitFor(() => page.evaluate<boolean>(`!!${allTab}`));
+  await page.evaluate(`${allTab}.click()`);
+  const poster = `[...document.querySelectorAll("button[title]")].find((b) => b.title.includes("Long-running"))`;
+  await waitFor(() => page.evaluate<boolean>(`!!${poster}`));
+  await delay(1000);
+  const shown = await page.evaluate<{ title: number; episodes: number }>(`(async () => {
+    const started = performance.now();
+    const when = (check) => new Promise((resolve) => {
+      const poll = () => (check() ? resolve(performance.now() - started) : setTimeout(poll, 5));
+      poll();
+    });
+    ${poster}.click();
+    const dialog = () => document.querySelector('[role="dialog"]');
+    const title = await when(() => dialog()?.querySelector("h2")?.textContent.includes("Long-running"));
+    const episodes = await when(() => [...(dialog()?.querySelectorAll("button") ?? [])]
+      .filter((row) => /^\\d+$/.test(row.firstElementChild?.textContent.trim() ?? "")).length >= 26);
+    return { title, episodes };
+  })()`);
+  record("long series details, name shown", shown.title);
+  record("long series details, episodes shown", shown.episodes);
+  await key(page, "Escape", 27);
 }
 
 function clickText(page: Page, text: string): Promise<unknown> {
