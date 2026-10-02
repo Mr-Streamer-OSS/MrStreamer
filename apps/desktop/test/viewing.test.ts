@@ -62,6 +62,7 @@ async function viewingApp() {
       played: (title: TitleRef, position: number, duration: number, since = Date.now()) =>
         viewing.recordProgress(randomUUID(), title, position, duration, since),
       remove: (filter: TitleFilter) => viewing.removeFromContinue(randomUUID(), filter),
+      finish: (seriesIds: readonly string[]) => viewing.finishSeries(randomUUID(), seriesIds),
       progress: viewing.progress,
       /** The sequences the UI is told about from now on. */
       changes: () => collect(runtime, viewing.changes),
@@ -217,6 +218,8 @@ describe("viewing record", () => {
     await viewing.played(episode("e1", "s1", 1, 1), 2700, 2700);
     await viewing.played(movie("m2"), 900, 6000);
     await viewing.remove({ movieIds: ["m2"] });
+    await viewing.played(episode("f9", "s2", 1, 9), 2700, 2700);
+    await viewing.finish(["s2"]);
     const before = await viewing.state();
     const series = await viewing.progress({ seriesIds: ["s1"] });
     await app.connect(1);
@@ -427,6 +430,33 @@ describe("how far movies and episodes got", () => {
     await later();
     const resumed = await viewing.played(movie("m1"), 700, 6000);
     expect(resumed.continueWatching.map((entry) => entry.title)).toEqual([movie("m1")]);
+  });
+
+  it("takes a finished series out of Continue watching, every version played, until a play begun afterwards", async () => {
+    const app = await viewingApp();
+    await app.connect(0);
+    const viewing = await app.start();
+    const began = Date.now();
+    // The Dutch version partly watched once, then the English one to its last episode.
+    await viewing.played(episode("nl1", "s1-nl", 1, 1), 600, 2700, began - 60_000);
+    await viewing.played(episode("en2", "s1-en", 1, 2), 2690, 2700, began);
+    await viewing.played(movie("m1"), 600, 6000);
+
+    const finished = await viewing.finish(["s1-nl", "s1-en", "s1-unplayed"]);
+    expect(finished.continueWatching.map((entry) => entry.title)).toEqual([movie("m1")]);
+    // Leaving the end saves that play once more.
+    await viewing.played(episode("en2", "s1-en", 1, 2), 2700, 2700, began);
+
+    const restarted = await app.start();
+    expect((await restarted.state()).continueWatching.map((entry) => entry.title)).toEqual([
+      movie("m1"),
+    ]);
+    await later();
+    const again = await restarted.played(episode("nl1", "s1-nl", 1, 1), 700, 2700);
+    expect(again.continueWatching.map((entry) => entry.title)).toEqual([
+      episode("nl1", "s1-nl", 1, 1),
+      movie("m1"),
+    ]);
   });
 
   it("opens a record from before removal times, keeping what it took out", async () => {

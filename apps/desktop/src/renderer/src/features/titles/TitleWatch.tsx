@@ -1,25 +1,24 @@
 // Playing a movie or an episode: the picture fills the window, with the title, a scrubber and the
 // controls along the bottom, fading when idle. Sound and CC open the file's tracks, and the sliders
-// its speed and the subtitles' timing and look; a series offers its next episode, only when asked.
-// Back returns to where the title was opened.
+// its speed and the subtitles' timing and look; a series offers its next episode, and at an
+// episode's end counts down to it (see title-player.ts). Back returns to where the title was opened.
 //   Space or K pauses, Left and Right skip 10 seconds, Up and Down change the volume, F is full
-//   screen, M mutes, C turns subtitles on or off, N plays the next episode, G and H move subtitles
-//   earlier or later, < and > play slower or faster. While a menu is open, keys are its own:
-//   Escape closes it, then leaves full screen, then goes back.
+//   screen, M mutes, C turns subtitles on or off, N plays the next episode, also during the
+//   countdown, G and H move subtitles earlier or later, < and > play slower or faster. While a menu
+//   is open, keys are its own: Escape closes it, then leaves full screen, then goes back.
 import { Slider as SliderPrimitive } from "@base-ui/react/slider";
-import { useQuery } from "@tanstack/react-query";
 import { Maximize, Minimize, Pause, Play, RotateCcw, RotateCw, SkipForward } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { Episode, SeriesDetails } from "@mrstreamer/contracts/ondemand";
+import type { SeriesDetails } from "@mrstreamer/contracts/ondemand";
+import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import { hasModifier, isTyping } from "../../app/platform.ts";
-import { useUi } from "../../app/ui-store.ts";
+import { openDetails, useUi } from "../../app/ui-store.ts";
 import { Artwork } from "../../components/TitleArt.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { Tooltip } from "../../components/ui/tooltip.tsx";
 import { WindowBar } from "../../components/WindowBar.tsx";
 import { describeError } from "../../lib/errors.ts";
-import { queries } from "../../lib/queries.ts";
-import { clock, episodeLabel, episodeNow, nextEpisode, playTitle } from "../../lib/titles.ts";
+import { clock, runtime } from "../../lib/titles.ts";
 import { cn } from "../../lib/utils.ts";
 import { WINDOW_BAR } from "../../../../shared/window-bar.ts";
 import { Picture } from "../../player/Picture.tsx";
@@ -41,16 +40,26 @@ function leave(): void {
   useUi.setState({ playingTitle: false });
 }
 
+/**
+ * Leaves the title for its series' episodes: the details it was played from when they are still
+ * open underneath, else the details of the version playing.
+ */
+function toEpisodes(series: SeriesDetails): void {
+  const { details } = useUi.getState();
+  const underneath =
+    details?.kind === "series" && series.title.versions.some(({ id }) => id === details.id);
+  leave();
+  if (!underneath) openDetails({ kind: "series", id: series.title.id });
+}
+
 export function TitleWatch() {
   const [awake, wake] = useWake(IDLE_MS);
   const [fullscreen, toggleFullscreen] = useFullscreen();
   const now = useTitlePlayer((state) => state.now);
   const phase = useTitlePlayer((state) => state.phase);
+  const next = useTitlePlayer((state) => state.next);
+  const continued = useTitlePlayer((state) => state.continued);
   const [menu, setMenu] = useState<TrackMenu>(null);
-  const next = useNextEpisode();
-  const playNext = () => {
-    if (next) playTitle(episodeNow(next.series, next.episode), 0);
-  };
 
   // Nothing open any more, as after a live channel took over: back to the page.
   useEffect(() => {
@@ -58,8 +67,8 @@ export function TitleWatch() {
   }, [now]);
 
   // The key handler reads the latest render through a ref; see WatchScreen.
-  const latest = useRef({ menu, toggleFullscreen, wake, playNext });
-  latest.current = { menu, toggleFullscreen, wake, playNext };
+  const latest = useRef({ menu, toggleFullscreen, wake });
+  latest.current = { menu, toggleFullscreen, wake };
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       const ui = useUi.getState();
@@ -97,7 +106,7 @@ export function TitleWatch() {
           titlePlayer.toggleSubtitles();
           break;
         case "n":
-          current.playNext();
+          titlePlayer.playNext();
           break;
         case "g":
         case "G":
@@ -127,7 +136,12 @@ export function TitleWatch() {
 
   if (!now) return null;
   const controlsVisible = awake || phase.kind !== "playing" || menu !== null;
-  const ended = phase.kind === "ended";
+  // An episode's end, and a next episode that didn't start, take the controls' place.
+  const nextUp =
+    now.series &&
+    ((phase.kind === "ended" && next !== undefined) || (phase.kind === "failed" && continued))
+      ? now.series
+      : null;
   return (
     <div
       data-view="title"
@@ -157,14 +171,14 @@ export function TitleWatch() {
           <WindowBar onBack={leave} />
         </div>
       )}
-      {ended && next ? (
-        <NextUp next={next} onNext={playNext} />
+      {nextUp ? (
+        <NextUp series={nextUp} />
       ) : (
         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
-          <State next={next ? playNext : null} />
+          <State />
         </div>
       )}
-      {!(ended && next) && (
+      {!nextUp && (
         <div
           className={cn(
             "no-drag absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-10 pt-28 pb-7 transition-opacity duration-300",
@@ -201,7 +215,7 @@ export function TitleWatch() {
             <div className="ml-auto flex items-center gap-2">
               <Tracks menu={menu} onMenu={setMenu} />
               {next && (
-                <Button variant="media" onClick={playNext}>
+                <Button variant="media" onClick={() => titlePlayer.playNext()}>
                   <SkipForward />
                   Next episode
                 </Button>
@@ -224,19 +238,6 @@ export function TitleWatch() {
       <Flash />
     </div>
   );
-}
-
-/** The episode after the playing one, with its series; null for movies and last episodes. */
-function useNextEpisode(): { series: SeriesDetails; episode: Episode } | null {
-  const now = useTitlePlayer((state) => state.now);
-  const title = now?.title;
-  const series = useQuery({
-    ...queries.details("series", title?.kind === "episode" ? title.seriesId : ""),
-    enabled: title?.kind === "episode",
-  });
-  if (title?.kind !== "episode" || series.data?.kind !== "series") return null;
-  const episode = nextEpisode(series.data, title);
-  return episode ? { series: series.data, episode } : null;
 }
 
 function PlayPause() {
@@ -333,9 +334,10 @@ function Tracks({ menu, onMenu }: { menu: TrackMenu; onMenu: (menu: TrackMenu) =
 }
 
 /** What the picture area says without a picture: starting, reconnecting, failed or finished. */
-function State({ next }: { next: (() => void) | null }) {
+function State() {
   const phase = useTitlePlayer((state) => state.phase);
   const now = useTitlePlayer((state) => state.now);
+  const next = useTitlePlayer((state) => state.next);
   if (!now || phase.kind === "playing" || phase.kind === "paused") return null;
   let body: ReactNode = null;
   let actions: ReactNode = null;
@@ -375,7 +377,7 @@ function State({ next }: { next: (() => void) | null }) {
             Retry
           </Button>
           {next && (
-            <Button variant="secondary" onClick={next}>
+            <Button variant="secondary" onClick={() => titlePlayer.playNext()}>
               <SkipForward />
               Next episode
             </Button>
@@ -410,10 +412,11 @@ function problemTitle(problem: PlaybackProblem): string {
   }
 }
 
-function problemBody(problem: PlaybackProblem): string {
+/** Why it doesn't play, of a "title" or an "episode". */
+function problemBody(problem: PlaybackProblem, what = "title"): string {
   switch (problem.kind) {
     case "unavailable":
-      return "The provider has no file for this title right now.";
+      return `The provider has no file for this ${what} right now.`;
     case "refused":
       return "Another device may be using your connection.";
     case "unsupported":
@@ -427,50 +430,114 @@ function problemBody(problem: PlaybackProblem): string {
   }
 }
 
-/** The end of an episode: the next one, to play when the viewer says so. */
-function NextUp({
-  next,
-  onNext,
-}: {
-  next: { series: SeriesDetails; episode: Episode };
-  onNext: () => void;
-}) {
+/**
+ * An episode's end, in the controls' place: the countdown to the next episode, that episode on
+ * offer once the countdown is cancelled or turned off, the series' last episode, or a next
+ * episode that didn't start. The countdown's number changes once a second; nothing else moves.
+ */
+function NextUp({ series }: { series: SeriesDetails }) {
   const now = useTitlePlayer((state) => state.now);
-  const { episode } = next;
+  const phase = useTitlePlayer((state) => state.phase);
+  const next = useTitlePlayer((state) => state.next);
+  const countdown = useTitlePlayer((state) => state.countdown);
+  if (now?.title.kind !== "episode") return null;
+  if (phase.kind === "failed") {
+    return (
+      <EndOfEpisode
+        artworkUrl={now.artworkUrl}
+        line={now.detail}
+        title="Didn't start"
+        detail={problemBody(phase.problem, "episode")}
+      >
+        <Button variant="primary" size="lg" onClick={() => titlePlayer.retry()}>
+          <RotateCw />
+          Try again
+        </Button>
+        <Button variant="secondary" size="lg" onClick={() => toEpisodes(series)}>
+          Episodes
+        </Button>
+      </EndOfEpisode>
+    );
+  }
+  const finished = `Finished ${episodeLabel(now.title.season, now.title.episode)}`;
+  if (!next) {
+    return (
+      <EndOfEpisode
+        artworkUrl={now.artworkUrl}
+        line={finished}
+        title="That was the last episode"
+        detail={`${now.name} is finished for now.`}
+      >
+        <Button variant="secondary" size="lg" onClick={() => toEpisodes(series)}>
+          Episodes
+        </Button>
+        <Button variant="ghost" size="lg" onClick={leave}>
+          Back
+        </Button>
+      </EndOfEpisode>
+    );
+  }
+  const length = next.duration ? runtime(next.duration) : null;
+  return (
+    <EndOfEpisode
+      artworkUrl={next.stillUrl ?? series.backdropUrl}
+      line={
+        next.season === now.title.season ? finished : `${finished} · Season ${next.season} is next`
+      }
+      title={`${episodeLabel(next.season, next.number)} · ${next.title}`}
+      detail={
+        countdown === null ? (
+          length
+        ) : (
+          <>
+            {length && `${length} · `}
+            <span className="text-foreground">Plays in {countdown}</span>
+          </>
+        )
+      }
+    >
+      <Button variant="primary" size="lg" onClick={() => titlePlayer.playNext()}>
+        <Play className="fill-current" />
+        {countdown === null ? "Next episode" : "Play now"}
+      </Button>
+      {countdown === null ? (
+        <Button variant="secondary" size="lg" onClick={() => toEpisodes(series)}>
+          Episodes
+        </Button>
+      ) : (
+        <Button variant="secondary" size="lg" onClick={() => titlePlayer.cancelNext()}>
+          Cancel
+        </Button>
+      )}
+    </EndOfEpisode>
+  );
+}
+
+/** Next Up's layout: a dimmed still, and along the bottom a line, a title, a detail and actions. */
+function EndOfEpisode({
+  artworkUrl,
+  line,
+  title,
+  detail,
+  children,
+}: {
+  artworkUrl: string | null;
+  line: ReactNode;
+  title: string;
+  detail: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <div className="absolute inset-0 z-10">
       <div className="absolute inset-0 opacity-35">
-        <Artwork
-          url={episode.stillUrl ?? next.series.backdropUrl}
-          name={episode.title}
-          size="full"
-          plain
-        />
+        <Artwork url={artworkUrl} name={title} size="full" plain />
       </div>
       <div className="absolute inset-0 bg-gradient-to-t from-black via-black/60 to-black/20" />
       <div className="absolute bottom-16 left-10 max-w-[44rem]">
-        {now?.detail && (
-          <div className="text-[0.9375rem] text-muted-foreground">
-            Finished {now.detail.split(" · ")[0]}
-          </div>
-        )}
-        <div className="mt-1 text-4xl font-semibold tracking-tight text-balance">
-          Next: {episodeLabel(episode.season, episode.number)} · {episode.title}
-        </div>
-        {episode.duration && (
-          <div className="mt-2 text-[0.9375rem] text-muted-foreground">
-            {Math.round(episode.duration / 60)} min
-          </div>
-        )}
-        <div className="mt-7 flex gap-3">
-          <Button variant="primary" size="lg" onClick={onNext}>
-            <Play className="fill-current" />
-            Next episode
-          </Button>
-          <Button variant="secondary" size="lg" onClick={leave}>
-            Episodes
-          </Button>
-        </div>
+        <div className="text-[0.9375rem] text-muted-foreground">{line}</div>
+        <div className="mt-1 text-4xl font-semibold tracking-tight text-balance">{title}</div>
+        {detail && <div className="mt-2 text-[0.9375rem] text-muted-foreground">{detail}</div>}
+        <div className="mt-7 flex gap-3">{children}</div>
       </div>
     </div>
   );

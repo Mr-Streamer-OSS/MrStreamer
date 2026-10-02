@@ -1,11 +1,13 @@
 // Movies and episodes as the views talk about them: how long, how far, what's next, which version
 // plays, and playing one. The player itself is in ../player/title-player.ts.
 import { isCancelledError, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Episode, SeriesDetails, Title, TitleRef } from "@mrstreamer/contracts/ondemand";
+import type { Title } from "@mrstreamer/contracts/ondemand";
 import type { Preferences } from "@mrstreamer/contracts/preferences";
 import { CONTINUE_LIMIT, type TitleProgress } from "@mrstreamer/contracts/viewing";
+import { nextEpisode } from "@mrstreamer/core/ondemand/details";
+import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import { openDetails, useUi } from "../app/ui-store.ts";
-import { titlePlayer, type NowPlaying } from "../player/title-player.ts";
+import { episodeNow, titlePlayer, type NowPlaying } from "../player/title-player.ts";
 import { call } from "./ipc.ts";
 import { queries } from "./queries.ts";
 
@@ -33,50 +35,13 @@ export function clock(seconds: number): string {
   return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${rest}` : `${minutes}:${rest}`;
 }
 
-/** "S2 E3". Specials, season 0, are "Special 3". */
-export function episodeLabel(season: number, episode: number): string {
-  return season === 0 ? `Special ${episode}` : `S${season} E${episode}`;
-}
-
 /** Where a title starts: where it stopped, a few seconds back, or the beginning. */
 export function resumePoint(progress: TitleProgress | undefined): number {
   if (!progress || progress.finished) return 0;
   return Math.max(0, progress.position - 5);
 }
 
-/** The episode after `current` in the series, crossing into the next season; null at the end. */
-export function nextEpisode(
-  series: SeriesDetails,
-  current: { readonly season: number; readonly episode: number },
-): Episode | null {
-  const episodes = series.seasons.flatMap((season) => season.episodes);
-  const index = episodes.findIndex(
-    (each) => each.season === current.season && each.number === current.episode,
-  );
-  return index === -1 ? null : (episodes[index + 1] ?? null);
-}
-
-function episodeRef(episode: Episode): TitleRef {
-  return {
-    kind: "episode",
-    id: episode.id,
-    seriesId: episode.seriesId,
-    season: episode.season,
-    episode: episode.number,
-  };
-}
-
-/** What the player shows for an episode: the series, and "S2 E3 · Its name". */
-export function episodeNow(series: SeriesDetails, episode: Episode): NowPlaying {
-  return {
-    title: episodeRef(episode),
-    name: series.title.title,
-    detail: `${episodeLabel(episode.season, episode.number)} · ${episode.title}`,
-    artworkUrl: episode.stillUrl ?? series.backdropUrl ?? series.title.posterUrl,
-    originalLanguage: series.title.originalLanguage,
-  };
-}
-
+/** What the player shows for a movie; episodes have `episodeNow` in the player. */
 export function movieNow(title: Title, backdropUrl: string | null): NowPlaying {
   return {
     title: { kind: "movie", id: title.id },

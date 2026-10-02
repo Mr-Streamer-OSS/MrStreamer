@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { byIds, indexCatalogue, search } from "../src/ondemand/catalogue.ts";
 import { collections } from "../src/ondemand/collections.ts";
-import { movieDetails } from "../src/ondemand/details.ts";
+import { movieDetails, nextEpisode, seriesDetails } from "../src/ondemand/details.ts";
 import { suitability, versionLabels } from "../src/ondemand/languages.ts";
 import { episodeName, titleName } from "../src/ondemand/names.ts";
 import { channelSubtitle } from "../src/ondemand/tracks.ts";
@@ -375,5 +375,78 @@ describe("details", () => {
           };
 
     expect(movieDetails(title, provider, about).originalTitle).toBe(shown);
+  });
+});
+
+describe("the next episode", () => {
+  // The provider's rows in another order, with ids and names that sort differently from its
+  // season and episode numbers, specials, and a second file of S1 E2.
+  const rows: [id: string, season: number, number: number, name: string][] = [
+    ["900", 2, 1, "A Second Season"],
+    ["100", 1, 3, "Zebra"],
+    ["300", 0, 1, "Behind the Scenes"],
+    ["700", 1, 1, "Pilot"],
+    ["200", 1, 2, "Middle"],
+    ["201", 1, 2, "Middle"],
+    ["800", 2, 2, "Finale"],
+    ["301", 0, 2, "Bloopers"],
+  ];
+  const series = seriesDetails(
+    {
+      kind: "series",
+      id: "s1",
+      name: "Harbour Lights (NL)",
+      title: "Harbour Lights",
+      originalTitle: null,
+      originalLanguage: null,
+      tags: ["NL"],
+      year: 2024,
+      posterUrl: null,
+      backdropUrl: null,
+      rating: null,
+      addedAt: null,
+      adult: false,
+      tmdbId: null,
+      genres: [],
+      versions: [{ id: "s1", tags: ["NL"] }],
+    },
+    {
+      originalName: null,
+      plot: null,
+      genres: [],
+      cast: [],
+      directors: [],
+      releaseDate: null,
+      duration: null,
+      posterUrl: null,
+      backdropUrl: null,
+      seasons: [],
+      episodes: rows.map(([id, season, number, name]) => ({
+        id,
+        season,
+        number,
+        name,
+        plot: null,
+        duration: null,
+        stillUrl: null,
+        airDate: null,
+        container: "mkv",
+      })),
+      container: null,
+    },
+  );
+
+  it.each([
+    ["the next number in the season", "700", 1, 1, "200"],
+    ["past another file of the same episode", "201", 1, 2, "100"],
+    ["into the next season", "100", 1, 3, "900"],
+    ["found by season and number when the id is gone", "gone", 1, 3, "900"],
+    ["nothing after the last season, specials aside", "800", 2, 2, null],
+    ["only specials after a special", "300", 0, 1, "301"],
+    ["nothing after the last special", "301", 0, 2, null],
+    ["unknown for an episode the series doesn't list", "gone", 3, 1, undefined],
+  ])("is %s", (_, id, season, episode, next) => {
+    const found = nextEpisode(series, { id, season, episode });
+    expect(found ? found.id : found).toBe(next);
   });
 });

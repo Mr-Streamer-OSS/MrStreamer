@@ -31,7 +31,12 @@ export type ViewingEvent =
       readonly since: number;
     }
   /** Taken out of Continue watching: the movie, or the whole series of an episode. */
-  | { readonly type: "title-removed"; readonly title: TitleRef };
+  | { readonly type: "title-removed"; readonly title: TitleRef }
+  /**
+   * The series of `title`, its last episode, watched to the end of what the provider lists. It
+   * leaves Continue watching as a removal does.
+   */
+  | { readonly type: "series-finished"; readonly title: TitleRef };
 
 export type ChannelEvent = Extract<ViewingEvent, { readonly channelId: string }>;
 export type TitleEvent = Extract<ViewingEvent, { readonly title: TitleRef }>;
@@ -55,7 +60,9 @@ export type ViewingCommand =
       readonly since: number;
     }
   /** Movies, and episodes standing for their series, out of Continue watching at once. */
-  | { readonly kind: "remove-titles"; readonly titles: readonly TitleRef[] };
+  | { readonly kind: "remove-titles"; readonly titles: readonly TitleRef[] }
+  /** An episode standing for each version of a series played, whose last episode was watched. */
+  | { readonly kind: "finish-series"; readonly titles: readonly TitleRef[] };
 
 /**
  * One account's favourites and recently watched channels, by the provider's stream ids: one or
@@ -95,6 +102,8 @@ export function decide(state: ViewingState, command: ViewingCommand): ViewingEve
       ];
     case "remove-titles":
       return command.titles.map((title) => ({ type: "title-removed", title }));
+    case "finish-series":
+      return command.titles.map((title) => ({ type: "series-finished", title }));
   }
 }
 

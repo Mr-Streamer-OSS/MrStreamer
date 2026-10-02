@@ -120,6 +120,18 @@ export function GeneralSection() {
             </Checkbox.Indicator>
           </Checkbox.Root>
         </Row>
+        <Row label="Next episode" note="plays after a 10 second countdown">
+          <Checkbox.Root
+            aria-label="Next episode"
+            checked={preferences.data?.autoplayNext ?? true}
+            onCheckedChange={(checked) => update.mutate({ autoplayNext: checked })}
+            className="grid size-4 flex-none place-items-center rounded-[0.25rem] shadow-[inset_0_0_0_1.5px_rgb(255_255_255/45%)] outline-none transition-shadow duration-150 focus-visible:ring-2 focus-visible:ring-ring data-checked:bg-white data-checked:shadow-none"
+          >
+            <Checkbox.Indicator>
+              <Check className="size-3 text-black" strokeWidth={3} />
+            </Checkbox.Indicator>
+          </Checkbox.Root>
+        </Row>
         <Tmdb
           ownKey={Boolean(preferences.data?.tmdbKey)}
           onKey={(tmdbKey, done) => update.mutate({ tmdbKey }, { onSuccess: done })}

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { TitleKind } from "@mrstreamer/contracts/ondemand";
+import { titlePlayer } from "../player/title-player.ts";
 
 /** The page under everything else. Watch, details and playing a title open over it. */
 export type View = "home" | "live" | "movies" | "series";
@@ -72,9 +73,11 @@ export function openView(view: View): void {
 
 /**
  * Home with nothing open over it, for a new account or none: a list, details or a title open
- * before belonged to the account that went.
+ * before belonged to the account that went. The title closes too, with what it had pending, such
+ * as the countdown to its next episode.
  */
 export function resetForAccount(): void {
+  titlePlayer.close();
   useUi.setState((state) => ({
     account: state.account + 1,
     view: "home",
