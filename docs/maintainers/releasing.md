@@ -195,13 +195,6 @@ When the job failed, the release is out anyway. Re-run the job; if it needs a fi
 - The feed job reads the releases (`contents: read`) and deploys to Pages (`pages: write`, `id-token: write`) through the `github-pages` environment.
 - Only the macOS packaging step reads the signing secrets; see [signing](signing.md). The bundle step reads `TMDB_API_KEY`; see [TMDB key](#tmdb-key). CI needs none.
 
-## First release
-
-1. Merge the workflow to `main`: GitHub runs manual and scheduled workflows from the default branch's copy. The merge's own push finds no nightly yet and publishes `0.0.1-nightly.<date>.<run>`; if it doesn't, start a nightly by hand.
-2. [Enable Pages](#enabling-pages) and open the feed: its `nightly` must name the nightly.
-3. Install the nightly on each system and check that the app offers the next one once it's out.
-4. Start a stable release of that nightly to publish `0.0.1`. On Stable, confirm it's offered and nightlies are not.
-
 ## TMDB key
 
 Movies and Series take genres, popularity and streaming services from TMDB. The bundle step passes the repository secret `TMDB_API_KEY`, a TMDB API Read Access Token, to the build as `MR_STREAMER_TMDB_KEY`, which builds it into the main process's bundle. Without the secret, the build succeeds and the app has no key: movies and series show without genres or services until a viewer adds their own in Settings.

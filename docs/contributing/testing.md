@@ -127,12 +127,6 @@ The whole list has about 11,000 channels and loads in about a second. A country'
 
 Streams come and go, so read a failure with that in mind. Of 400 channels picked at random that day, 256 sent a stream. The rest were offline (404), refused outside their country (403, often marked "[Geo-blocked]") or didn't answer, and "[Not 24/7]" channels are off at times. One channel failing says little about the app; several from different hosts failing the same way is worth a look. The guide the index names covers two channels, Al Jazeera English and ANT1 Europe, a day or two ahead, so check guide changes against the fake provider. iptv-org has no movies or series, and no lawful public source offers them yet: on-demand checks stay on the fake provider and fake TMDB until one does.
 
-Microsoft's reviewers get a shorter list instead, in [Mr-Streamer-OSS/certification-playlist](https://github.com/Mr-Streamer-OSS/certification-playlist): five channels that broadcasters stream free on their own watch-live pages, from their own servers, without a guide. Check what reviewers will see against it:
-
-```
-https://raw.githubusercontent.com/Mr-Streamer-OSS/certification-playlist/main/reviewer.m3u
-```
-
 ## App measurements
 
 `node apps/desktop/test/e2e/measure-app.ts [--json results.json] <app executable> [-- app arguments]` drives a built app against the fake provider at the size of a large subscription: 13,000 channels, about 2,000 with a guide, a continuous 720p stream that ffmpeg encodes as it plays, and a series of 20 seasons with 1 MB of details. It prints medians for cold start, time to picture, channel switch, opening the guide, search, opening the series after a start (its name, then its episodes), idle CPU and memory on Home with and without the muted preview, and the installed size, and counts the streams the provider sees opened for each tune, each switch and the return from Home to Watch. A pull request that may change speed or memory records its numbers, against the build before it. It shares its DevTools client and login with the packaged-app test (`apps/desktop/test/e2e/app.ts`). `--json` also writes every run of every measure.
