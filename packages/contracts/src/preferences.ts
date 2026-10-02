@@ -1,4 +1,5 @@
 import { type } from "arktype";
+import { QUALITIES, type Quality } from "./library.ts";
 
 /**
  * Basic viewing preferences that survive restarts. Favourites and recently watched channels live
@@ -42,6 +43,16 @@ export const Preferences = type({
     background: "'box' | 'shadow'",
     position: "'low' | 'high'",
   },
+  /**
+   * The quality live channels start in. `DEFAULT_LIVE_QUALITY` when absent. A new quality needs a
+   * new key, as for `subtitleLook`.
+   */
+  "liveQuality?": type.enumerated(...QUALITIES),
+  /**
+   * The stream the viewer chose for a live channel, by the channel's id: the stream's id. Channels
+   * without one play `liveQuality` automatically.
+   */
+  "channelVariants?": "Record<string, string>",
 });
 export type Preferences = typeof Preferences.infer;
 export type SubtitleLook = NonNullable<Preferences["subtitleLook"]>;
@@ -55,6 +66,9 @@ export const DEFAULT_SUBTITLE_LOOK: SubtitleLook = {
 
 /** `audioLanguage` for the sound in the language a title was made in. */
 export const ORIGINAL_SOUND = "original";
+
+/** The quality live channels start in until the viewer picks another: Full HD. */
+export const DEFAULT_LIVE_QUALITY: Quality = "fhd";
 
 export const defaultPreferences: Preferences = {
   volume: 1,

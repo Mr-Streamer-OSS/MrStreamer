@@ -15,6 +15,7 @@ const channel = (id: string): LiveChannel => ({
   number: null,
   logoUrl: null,
   categoryIds: [],
+  variants: [{ id, name: `NL | ${id}`, tags: [], quality: null }],
 });
 
 const tracksOfA: ChannelTracks = {

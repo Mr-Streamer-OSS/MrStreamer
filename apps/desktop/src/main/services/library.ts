@@ -3,8 +3,8 @@ import { join } from "node:path";
 import { type } from "arktype";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import type { CatalogueStatus, Category, LiveChannel } from "@mrstreamer/contracts/library";
-import { trustedGuideIds } from "@mrstreamer/core/catalogue/guide-ids";
 import { normalizeCatalogue } from "@mrstreamer/core/catalogue/normalize";
+import { liveChannels } from "@mrstreamer/core/catalogue/variants";
 import { diagnosed } from "@mrstreamer/core/diagnostics";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
 import type { GuideChannels } from "@mrstreamer/core/guide/programmes";
@@ -68,10 +68,11 @@ interface IndexedCatalogue {
   readonly outdated: boolean;
   readonly categories: readonly Category[];
   readonly channels: readonly LiveChannel[];
+  /** Channels by their own id and each of their streams'. */
   readonly byId: ReadonlyMap<string, LiveChannel>;
   /** Channels per category id, in provider order. */
   readonly byCategory: ReadonlyMap<string, readonly LiveChannel[]>;
-  /** Normalised names, index-aligned with `channels`. */
+  /** Normalised names of every stream, index-aligned with `channels`. */
   readonly searchNames: readonly string[];
   readonly guide: GuideChannels;
 }
@@ -95,14 +96,21 @@ export class Library extends Context.Service<
     readonly categories: Effect.Effect<readonly Category[], Failed>;
     /**
      * All channels in a category, the best matches for a query across the catalogue, or the
-     * channels with the given ids in that order.
+     * channels with the given ids in that order. An id may be any of a channel's streams'; a
+     * channel shows once.
      */
     channels(filter: {
       readonly categoryId?: string;
       readonly query?: string;
       readonly ids?: readonly string[];
     }): Effect.Effect<readonly LiveChannel[], Failed>;
+    /** The channel by its id or any of its streams'. */
     channel(channelId: string): Effect.Effect<LiveChannel, Failed>;
+    /**
+     * Finds channels by their id or any of their streams', in the catalogue in memory or on disk.
+     * Never fetches one: before the first, it finds none.
+     */
+    readonly lookup: Effect.Effect<(channelId: string) => LiveChannel | undefined>;
     /** Forgets the cached catalogue, for when the subscription changes or goes. */
     readonly clear: Effect.Effect<void>;
     /** The status after every refresh, successful or not. */
@@ -262,7 +270,7 @@ function make(options: LibraryOptions) {
         readonly ids?: readonly string[];
       }) =>
         Effect.map(current, ({ channels, byCategory, byId, searchNames }) => {
-          if (filter.ids) return filter.ids.flatMap((id) => byId.get(id) ?? []);
+          if (filter.ids) return [...new Set(filter.ids.flatMap((id) => byId.get(id) ?? []))];
           const query = normalize(filter.query ?? "");
           if (query) return search(channels, searchNames, query);
           return filter.categoryId === undefined
@@ -277,6 +285,12 @@ function make(options: LibraryOptions) {
             ? Effect.succeed(channel)
             : Effect.fail(new Failed({ error: { kind: "channel-not-found", channelId } }));
         }),
+
+      lookup: Effect.gen(function* () {
+        const source = yield* subscriptions.source;
+        const found = source ? yield* cached(source.key) : null;
+        return (channelId: string) => found?.byId.get(channelId);
+      }),
 
       clear: Effect.gen(function* () {
         catalogue = null;
@@ -304,30 +318,33 @@ function statusOf(catalogue: IndexedCatalogue | null, failure: AppError | null):
 }
 
 function index(file: CatalogueFile, outdated: boolean): IndexedCatalogue {
-  const { categories, channels } = normalizeCatalogue(file);
-  const byCategory = new Map<string, LiveChannel[]>();
+  const { categories, streams } = normalizeCatalogue(file);
+  const { channels, guideIds } = liveChannels(streams);
   const byId = new Map<string, LiveChannel>();
+  const byGuideId = new Map<string, LiveChannel[]>();
   for (const channel of channels) {
     byId.set(channel.id, channel);
-    for (const categoryId of channel.categoryIds) {
+    for (const variant of channel.variants) byId.set(variant.id, channel);
+    const guideId = guideIds.get(channel.id);
+    if (!guideId) continue;
+    const list = byGuideId.get(guideId);
+    if (list) list.push(channel);
+    else byGuideId.set(guideId, [channel]);
+  }
+  // A channel shows in each of its streams' categories, once, where its first stream there is.
+  const byCategory = new Map<string, LiveChannel[]>();
+  const placed = new Set<string>();
+  for (const stream of streams) {
+    const channel = byId.get(stream.id);
+    if (!channel) continue;
+    for (const categoryId of stream.categoryIds) {
+      const key = `${categoryId}\n${channel.id}`;
+      if (placed.has(key)) continue;
+      placed.add(key);
       const list = byCategory.get(categoryId);
       if (list) list.push(channel);
       else byCategory.set(categoryId, [channel]);
     }
-  }
-  const guideIds = trustedGuideIds(
-    file.channels.flatMap(({ id, guideId }) => {
-      const channel = byId.get(id);
-      return channel && guideId ? [{ channel, guideId }] : [];
-    }),
-  );
-  const byGuideId = new Map<string, LiveChannel[]>();
-  for (const [id, guideId] of guideIds) {
-    const channel = byId.get(id);
-    if (!channel) continue;
-    const list = byGuideId.get(guideId);
-    if (list) list.push(channel);
-    else byGuideId.set(guideId, [channel]);
   }
   return {
     key: file.key,
@@ -339,9 +356,11 @@ function index(file: CatalogueFile, outdated: boolean): IndexedCatalogue {
     channels,
     byId,
     byCategory,
-    searchNames: channels.map((channel) => normalize(channel.name)),
+    searchNames: channels.map((channel) =>
+      normalize(channel.variants.map((variant) => variant.name).join(" ")),
+    ),
     guide: {
-      guideIdOf: (channelId) => guideIds.get(channelId) ?? null,
+      guideIdOf: (channelId) => guideIds.get(byId.get(channelId)?.id ?? channelId) ?? null,
       channelsOf: (guideId) => byGuideId.get(guideId) ?? [],
     },
   };

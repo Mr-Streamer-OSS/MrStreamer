@@ -3,7 +3,8 @@
 // connection at a time by default, like most subscriptions. The category "TEST | Formats and
 // failures" streams the recordings in test/fixtures, one codec combination each, plus an offline
 // channel; every other channel streams an empty MPEG-TS program. About half the channels have a
-// guide id, shared by variants of one channel, and xmltv.php serves their programmes.
+// guide id, shared by variants of one channel, and xmltv.php serves their programmes. The last
+// category, "BE | Kwaliteit", lists one channel in Full HD, HD and SD, the Full HD one off air.
 //
 // Movies and series come with their own categories, one of them for adults, and one series is
 // marked for adults in an ordinary category. Their files redirect
@@ -626,8 +627,26 @@ function buildCatalogue(size: number): FakeCatalogue {
       });
     }
   }
+  // One channel in three qualities, as panels list them, of which Full HD is off air.
+  const qualities = String(categories.length + 1);
+  categories.push({ id: qualities, name: "BE | Kwaliteit" });
+  for (const [index, quality] of ["FHD", "HD", "SD"].entries()) {
+    channels.push({
+      streamId: QUALITY_STREAM_IDS + index,
+      num: channels.length + 1,
+      name: `BE | KWALITEIT 1 ${quality}`,
+      categoryId: qualities,
+      hasLogo: false,
+      offline: quality === "FHD",
+      fixture: null,
+      guideId: index === 2 ? null : "kwaliteit1.be",
+    });
+  }
   return { categories, channels };
 }
+
+/** Stream ids of the channel in three qualities, after every other channel's. */
+export const QUALITY_STREAM_IDS = 100_000;
 
 /**
  * The movies that stream the title clips, and what each one tests. `versionOf` makes one another

@@ -3,8 +3,12 @@
 // appends a command's events and the state they add up to in one transaction, and the service
 // tells the UI after the commit.
 //
-// The app supplies three ports: which account is connected, the store, and the lists kept in
-// preferences.json before the record, which the first start imports once.
+// The app supplies four ports: which account is connected, the store, the lists kept in
+// preferences.json before the record, which the first start imports once, and the catalogue's
+// channels. The record keeps the provider's stream ids, as builds before channels with several
+// streams did, and shows them by channel: a list holding two streams of one channel shows it once,
+// by the channel's id. Nothing stored is rewritten, so those builds still read every list.
+import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { TitleProgress, Viewing } from "@mrstreamer/contracts/viewing";
 import * as Clock from "effect/Clock";
@@ -28,6 +32,15 @@ export class ViewingAccount extends Context.Service<
   ViewingAccount,
   { readonly current: Effect.Effect<string | null> }
 >()("mrstreamer/ViewingAccount") {}
+
+/** The connected account's channels, to show lists by channel. */
+export class ViewingChannels extends Context.Service<
+  ViewingChannels,
+  {
+    /** Finds a channel by its id or any of its streams'; none without a catalogue. */
+    readonly lookup: Effect.Effect<(channelId: string) => LiveChannel | undefined>;
+  }
+>()("mrstreamer/ViewingChannels") {}
 
 /** An account's state and how far its record has come. */
 export interface StoredViewing {
@@ -96,11 +109,13 @@ export class ViewingRecord extends Context.Service<
   {
     /** The connected account's favourites and recent channels; empty without an account. */
     readonly state: Effect.Effect<Viewing, Failed>;
+    /** Stars or unstars a channel, by its id or any of its streams', with all its streams. */
     setFavourite(
       commandId: string,
       channelId: string,
       favourite: boolean,
     ): Effect.Effect<Viewing, Failed>;
+    /** Puts a channel first among those watched recently, by its own id. */
     recordWatch(commandId: string, channelId: string): Effect.Effect<Viewing, Failed>;
     /** Remembers how far a movie or episode played, in a play that began at `since`. */
     recordProgress(
@@ -126,9 +141,12 @@ export class ViewingRecord extends Context.Service<
 
 const none: Viewing = { favourites: [], recent: [], continueWatching: [], sequence: 0 };
 
+type ChannelOf = (channelId: string) => LiveChannel | undefined;
+
 function make() {
   return Effect.gen(function* () {
     const account = yield* ViewingAccount;
+    const channels = yield* ViewingChannels;
     const store = yield* ViewingStore;
     const legacy = yield* LegacyViewing;
     const changes = yield* PubSub.unbounded<number>();
@@ -156,50 +174,66 @@ function make() {
       ),
     );
 
-    const shown = (stored: StoredViewing): Viewing => ({
-      favourites: stored.state.favourites,
-      recent: stored.state.recent,
-      continueWatching: stored.continueWatching,
-      sequence: stored.sequence,
-    });
+    const shown = (stored: StoredViewing, channelOf: ChannelOf): Viewing => {
+      const byChannel = (ids: readonly string[]) => [
+        ...new Set(ids.map((id) => channelOf(id)?.id ?? id)),
+      ];
+      return {
+        favourites: byChannel(stored.state.favourites),
+        recent: byChannel(stored.state.recent),
+        continueWatching: stored.continueWatching,
+        sequence: stored.sequence,
+      };
+    };
 
-    const run = (commandId: string, command: ViewingCommand) =>
+    const run = (commandId: string, command: (channelOf: ChannelOf) => ViewingCommand) =>
       Effect.gen(function* () {
         const key = yield* account.current;
         if (!key) return yield* new Failed({ error: { kind: "no-subscription" } });
+        const channelOf = yield* channels.lookup;
         const stored = yield* store.commit({
           account: key,
           commandId,
           at: yield* Clock.currentTimeMillis,
-          decide: (state) => decide(state, command),
+          decide: (state) => decide(state, command(channelOf)),
         });
         yield* PubSub.publish(changes, stored.sequence);
-        return shown(stored);
+        return shown(stored, channelOf);
       });
 
     return {
       state: Effect.gen(function* () {
         const key = yield* account.current;
-        return key ? shown(yield* store.read(key)) : none;
+        return key ? shown(yield* store.read(key), yield* channels.lookup) : none;
       }),
       setFavourite: (commandId: string, channelId: string, favourite: boolean) =>
-        run(commandId, { kind: "set-favourite", channelId, favourite }),
+        run(commandId, (channelOf) => {
+          const channel = channelOf(channelId);
+          const ids = channel ? [channel.id, ...channel.variants.map(({ id }) => id)] : [channelId];
+          return { kind: "set-favourite", channelIds: [...new Set(ids)], favourite };
+        }),
       recordWatch: (commandId: string, channelId: string) =>
-        run(commandId, { kind: "record-watch", channelId }),
+        run(commandId, (channelOf) => ({
+          kind: "record-watch",
+          channelId: channelOf(channelId)?.id ?? channelId,
+        })),
       recordProgress: (
         commandId: string,
         title: TitleRef,
         position: number,
         duration: number,
         since: number,
-      ) => run(commandId, { kind: "record-progress", title, position, duration, since }),
+      ) => run(commandId, () => ({ kind: "record-progress", title, position, duration, since })),
       removeFromContinue: (commandId: string, filter: TitleFilter) =>
         Effect.gen(function* () {
           const key = yield* account.current;
           const played = key ? yield* store.titles(key, filter) : [];
           // Each movie played, and one episode of each series played, which takes the series.
           const titles = new Map(played.map(({ title }) => [removalScope(title), title]));
-          return yield* run(commandId, { kind: "remove-titles", titles: [...titles.values()] });
+          return yield* run(commandId, () => ({
+            kind: "remove-titles",
+            titles: [...titles.values()],
+          }));
         }),
       progress: (filter: TitleFilter) =>
         Effect.gen(function* () {

@@ -4,7 +4,12 @@
 // data folder.
 import { Diagnostics } from "@mrstreamer/core/diagnostics";
 import { Guide, GuideCatalogue, GuideSource } from "@mrstreamer/core/guide/service";
-import { LegacyViewing, ViewingAccount, ViewingRecord } from "@mrstreamer/core/viewing/service";
+import {
+  LegacyViewing,
+  ViewingAccount,
+  ViewingChannels,
+  ViewingRecord,
+} from "@mrstreamer/core/viewing/service";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { diagnosticsLog } from "./platform/diagnostics-log.ts";
@@ -111,6 +116,10 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
           Effect.map(Subscriptions, (subscriptions) => ({
             current: Effect.map(subscriptions.source, (source) => source?.key ?? null),
           })),
+        ),
+        Layer.effect(
+          ViewingChannels,
+          Effect.map(Library, (library) => ({ lookup: library.lookup })),
         ),
         Layer.effect(
           LegacyViewing,

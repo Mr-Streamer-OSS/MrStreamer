@@ -37,7 +37,15 @@ export type ChannelEvent = Extract<ViewingEvent, { readonly channelId: string }>
 export type TitleEvent = Extract<ViewingEvent, { readonly title: TitleRef }>;
 
 export type ViewingCommand =
-  | { readonly kind: "set-favourite"; readonly channelId: string; readonly favourite: boolean }
+  | {
+      readonly kind: "set-favourite";
+      /**
+       * The channel's own id and its streams': any of them among the favourites makes it one.
+       * Adding keeps them all, so the channel stays a favourite while any of its streams is listed.
+       */
+      readonly channelIds: readonly string[];
+      readonly favourite: boolean;
+    }
   | { readonly kind: "record-watch"; readonly channelId: string }
   | {
       readonly kind: "record-progress";
@@ -49,7 +57,10 @@ export type ViewingCommand =
   /** Movies, and episodes standing for their series, out of Continue watching at once. */
   | { readonly kind: "remove-titles"; readonly titles: readonly TitleRef[] };
 
-/** One account's favourites and recently watched channels. */
+/**
+ * One account's favourites and recently watched channels, by the provider's stream ids: one or
+ * more per channel. The service shows them by channel (see ./service.ts).
+ */
 export interface ViewingState {
   /** In the order they were added. */
   readonly favourites: readonly string[];
@@ -63,14 +74,12 @@ export const emptyState: ViewingState = { favourites: [], recent: [] };
 export function decide(state: ViewingState, command: ViewingCommand): ViewingEvent[] {
   switch (command.kind) {
     case "set-favourite": {
-      const is = state.favourites.includes(command.channelId);
-      if (is === command.favourite) return [];
-      return [
-        {
-          type: command.favourite ? "favourite-added" : "favourite-removed",
-          channelId: command.channelId,
-        },
-      ];
+      const listed = state.favourites.filter((id) => command.channelIds.includes(id));
+      if (!command.favourite) {
+        return listed.map((channelId) => ({ type: "favourite-removed", channelId }));
+      }
+      if (listed.length > 0) return [];
+      return command.channelIds.map((channelId) => ({ type: "favourite-added", channelId }));
     }
     case "record-watch":
       return [{ type: "watched", channelId: command.channelId }];

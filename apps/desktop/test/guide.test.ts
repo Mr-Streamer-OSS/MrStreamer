@@ -171,12 +171,12 @@ describe("programme guide", () => {
   });
 
   it("says how many channels it covers, and since when, for Settings", async () => {
-    const { guide, provider } = await connectedGuide();
+    const { guide } = await connectedGuide();
     expect(await guide.status()).toEqual({ channels: 0, fetchedAt: null });
 
     await guide.refresh();
 
-    const ids = provider.catalogue.channels.map((channel) => String(channel.streamId));
+    const ids = (await guide.library.channels({})).map((channel) => channel.id);
     const shown = Object.keys(await guide.listings(ids)).length;
     expect(shown).toBeGreaterThan(0);
     expect(await guide.status()).toEqual({ channels: shown, fetchedAt: NOW });

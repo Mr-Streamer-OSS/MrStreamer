@@ -6,7 +6,10 @@
 //
 // Live: the proxy reads the start of each MPEG-TS stream to learn its codecs. A stream the UI's
 // player decodes passes through untouched; otherwise ffmpeg converts only the tracks it cannot
-// decode.
+// decode. A channel with several streams, one per quality, can be given more than one to try, as
+// Auto is: when the provider doesn't deliver one, the proxy asks for the next, after the request
+// before is over, and never after a refusal, which is the account's. Streams that failed in the
+// last two minutes go last, so reconnecting doesn't wait for one again.
 //
 // Movies and episodes (see ../playback/title.ts): the proxy serves the provider's file to ffprobe
 // and ffmpeg over loopback, answering byte ranges, one upstream request at a time. Each request
@@ -23,6 +26,7 @@ import type { TitleRef } from "@mrstreamer/contracts/ondemand";
 import type {
   ChannelTracks,
   Codec,
+  LivePlaying,
   StreamFailure,
   StreamFormat,
   StreamSession,
@@ -75,14 +79,15 @@ const PROBE_TIMEOUT_MS = 30_000;
 const RUN_START_TIMEOUT_MS = 30_000;
 /** Probes kept for files opened again, such as when resuming. */
 const PROBES_KEPT = 32;
+/** How long a channel's stream that failed goes after its others when Auto tries them again. */
+const FAILED_STREAM_MS = 2 * 60_000;
 
 interface SessionBase {
   readonly id: string;
   readonly token: string;
   /** What the UI's player decodes. */
   readonly decoders: ReadonlySet<Codec>;
-  readonly upstreamUrl: string;
-  /** Requests `upstreamUrl` through the provider, which never sends the login unencrypted. */
+  /** Requests the upstream addresses through the provider, which never sends the login unencrypted. */
   readonly request: Provider["request"];
   /** Aborts every upstream request of this session when its scope closes. */
   readonly closed: AbortController;
@@ -95,6 +100,10 @@ interface SessionBase {
 interface LiveSession extends SessionBase {
   readonly kind: "live";
   readonly channelId: string;
+  /** The channel's streams to try, in order, with their upstream addresses. */
+  readonly variants: readonly { readonly id: string; readonly url: string }[];
+  /** Which stream plays, and those that failed before it: see `Playback.playing`. */
+  delivered: LivePlaying;
   readonly format: StreamFormat;
   /** Re-encode the picture even when the player could decode it; see `open`. */
   readonly repair: boolean;
@@ -113,6 +122,7 @@ interface LiveSession extends SessionBase {
 interface TitleSessionState extends SessionBase {
   readonly kind: "title";
   readonly title: TitleRef;
+  readonly upstreamUrl: string;
   probe: TitleProbe | null;
   /** The upstream request serving ffprobe or ffmpeg. A new one replaces it. */
   source: AbortController | null;
@@ -145,14 +155,16 @@ export class Playback extends Context.Service<
   Playback,
   {
     /**
-     * Opens a stream for a channel. Closes any open stream first. `decoders` lists what the
-     * UI's player decodes; the proxy converts the rest. `repair` re-encodes the picture too, for
-     * a broadcast the player failed to decode: ffmpeg conceals damage that stops the player.
+     * Opens a stream for a channel. Closes any open stream first. `variants` are the channel's
+     * streams to try in turn, the channel's id alone when absent. `decoders` lists what the UI's
+     * player decodes; the proxy converts the rest. `repair` re-encodes the picture too, for a
+     * broadcast the player failed to decode: ffmpeg conceals damage that stops the player.
      */
     open(
       channelId: string,
       decoders: readonly Codec[],
       options?: {
+        readonly variants?: readonly string[];
         readonly repair?: boolean;
         readonly audio?: number | null;
         readonly audioLanguage?: string | null;
@@ -179,6 +191,8 @@ export class Playback extends Context.Service<
      * started, and for movies and episodes.
      */
     tracks(sessionId: string): Effect.Effect<ChannelTracks | null>;
+    /** Which of a channel's streams the session plays; null for movies and episodes. */
+    playing(sessionId: string): Effect.Effect<LivePlaying | null>;
   }
 >()("mrstreamer/Playback") {
   static readonly layer = (deps: PlaybackDeps) => Layer.effect(Playback, make(deps));
@@ -190,6 +204,8 @@ function make(deps: PlaybackDeps) {
     const diagnostics = yield* Diagnostics;
     const scope = yield* Effect.scope;
     const sessions = new Map<string, Session>();
+    /** When channel streams failed, by upstream address, for `FAILED_STREAM_MS`. */
+    const failedAt = new Map<string, number>();
     /** Opens one at a time, so switching fast never leaves two sessions open. */
     const openOne = (yield* Semaphore.make(1)).withPermits(1);
     const { port } = yield* Effect.acquireRelease(
@@ -287,32 +303,18 @@ function make(deps: PlaybackDeps) {
       response.on("close", () => active.abort());
       const signal = AbortSignal.any([session.closed.signal, active.signal]);
 
-      const upstream = await connect(session, {}, signal);
+      const opened = await openVariant(session, signal, (failure) => report("none", failure.kind));
       if (signal.aborted) {
-        if (upstream.ok) void upstream.response.body?.cancel().catch(() => {});
+        if (opened.ok) void opened.reader.cancel().catch(() => {});
         response.destroy();
         return;
       }
-      const failure: StreamFailure | null = !upstream.ok
-        ? upstream.failure
-        : upstream.response.body
-          ? null
-          : { kind: "network", detail: "The provider sent no stream." };
-      if (!upstream.ok || !upstream.response.body || failure) {
-        const shown = failure ?? { kind: "network", detail: "The provider sent no stream." };
-        session.failure = shown;
-        report("none", shown.kind);
-        response.writeHead("status" in shown ? shown.status : 502).end();
+      if (!opened.ok) {
+        session.failure = opened.failure;
+        response.writeHead("status" in opened.failure ? opened.failure.status : 502).end();
         return;
       }
-      const contentType = upstream.response.headers.get("content-type");
-      const reader = upstream.response.body.getReader();
-      const start = await inspectStart(reader, session.decoders);
-      if (signal.aborted) {
-        void reader.cancel().catch(() => {});
-        response.destroy();
-        return;
-      }
+      const { contentType, reader, start } = opened;
       const { layout } = start;
       session.layout = layout;
       session.captions = [];
@@ -371,6 +373,59 @@ function make(deps: PlaybackDeps) {
       convert(deps.ffmpeg, conversion, body, response, session, signal, captionCopy(), (outcome) =>
         report(delivery, outcome),
       );
+    }
+
+    /**
+     * Connects to the session's streams in turn until one sends something, and reads its start.
+     * A stream's request is over before the next one's begins, so the provider sees one at a
+     * time. A refusal ends the turn: it is the account's, such as another device on the
+     * connection, so another stream would be refused too. `failed` hears each failed stream.
+     */
+    async function openVariant(
+      session: LiveSession,
+      signal: AbortSignal,
+      failed: (failure: StreamFailure) => void,
+    ): Promise<
+      | {
+          readonly ok: true;
+          readonly contentType: string | null;
+          readonly reader: ReadableStreamDefaultReader<Uint8Array>;
+          readonly start: StreamStart;
+        }
+      | { readonly ok: false; readonly failure: StreamFailure }
+    > {
+      const noStream: StreamFailure = { kind: "network", detail: "The provider sent no stream." };
+      let failure: StreamFailure = noStream;
+      session.delivered = { variantId: null, failed: [] };
+      for (const variant of session.variants) {
+        const upstream = await connect(session, variant.url, {}, signal);
+        const body = upstream.ok ? upstream.response.body : null;
+        if (signal.aborted) {
+          void body?.cancel().catch(() => {});
+          return { ok: false, failure };
+        }
+        if (upstream.ok && body) {
+          const reader = body.getReader();
+          const start = await inspectStart(reader, session.decoders);
+          // A stream that ends before sending anything has nothing to play.
+          if (signal.aborted || start.head.length > 0 || start.pending) {
+            session.delivered = { ...session.delivered, variantId: variant.id };
+            failedAt.delete(variant.url);
+            const contentType = upstream.response.headers.get("content-type");
+            return { ok: true, contentType, reader, start };
+          }
+          void reader.cancel().catch(() => {});
+        }
+        failure = upstream.ok ? noStream : upstream.failure;
+        failed(failure);
+        session.delivered = {
+          ...session.delivered,
+          failed: [...session.delivered.failed, { variantId: variant.id, failure }],
+        };
+        if (failure.kind === "refused") break;
+        failedAt.set(variant.url, Date.now());
+      }
+      return { ok: false, failure };
     }
 
     /** Pipes the stream through ffmpeg. A conversion that fails counts as an unsupported stream. */
@@ -447,7 +502,13 @@ function make(deps: PlaybackDeps) {
       const headers: Record<string, string> = request.headers.range
         ? { Range: request.headers.range }
         : {};
-      const found = await connect(session, headers, signal, FILE_RETRY_DELAYS_MS);
+      const found = await connect(
+        session,
+        session.upstreamUrl,
+        headers,
+        signal,
+        FILE_RETRY_DELAYS_MS,
+      );
       if (signal.aborted) {
         if (found.ok) void found.response.body?.cancel().catch(() => {});
         response.destroy();
@@ -784,11 +845,12 @@ function make(deps: PlaybackDeps) {
     }
 
     /**
-     * Opens an upstream request, retrying briefly when the provider refuses: it can take a moment
-     * to free the connection of a request we just closed.
+     * Requests `url` through the session's provider, retrying briefly when it refuses: it can take
+     * a moment to free the connection of a request we just closed.
      */
     async function connect(
       session: Session,
+      url: string,
       headers: Readonly<Record<string, string>>,
       signal: AbortSignal,
       retryDelays: readonly number[] = REFUSED_RETRY_DELAYS_MS,
@@ -798,7 +860,7 @@ function make(deps: PlaybackDeps) {
         const timer = setTimeout(() => timeout.abort(), CONNECT_TIMEOUT_MS);
         let response: Response;
         try {
-          response = await session.request(session.upstreamUrl, {
+          response = await session.request(url, {
             headers: { "User-Agent": deps.userAgent, ...headers },
             signal: AbortSignal.any([signal, timeout.signal]),
           });
@@ -833,6 +895,7 @@ function make(deps: PlaybackDeps) {
         channelId: string,
         decoders: readonly Codec[],
         options: {
+          readonly variants?: readonly string[];
           readonly repair?: boolean;
           readonly audio?: number | null;
           readonly audioLanguage?: string | null;
@@ -844,7 +907,14 @@ function make(deps: PlaybackDeps) {
             if (!source) return yield* new Failed({ error: { kind: "no-subscription" } });
             yield* closeAll;
 
-            const upstream = source.provider.liveStream(channelId);
+            const now = Date.now();
+            for (const [url, at] of failedAt) if (now - at > FAILED_STREAM_MS) failedAt.delete(url);
+            // Streams that failed lately go last, in the order they came.
+            const variants = (options.variants?.length ? options.variants : [channelId])
+              .map((id) => ({ id, url: source.provider.liveStream(id).url }))
+              .toSorted((a, b) => Number(failedAt.has(a.url)) - Number(failedAt.has(b.url)));
+            // A provider streams every channel in one format.
+            const { format } = source.provider.liveStream(channelId);
             const id = randomUUID();
             const closed = new AbortController();
             const sessionScope = yield* Scope.fork(scope);
@@ -860,9 +930,10 @@ function make(deps: PlaybackDeps) {
               id,
               token: randomBytes(18).toString("base64url"),
               channelId,
-              upstreamUrl: upstream.url,
+              variants,
+              delivered: { variantId: null, failed: [] },
               request: source.provider.request,
-              format: upstream.format,
+              format,
               decoders: new Set(decoders),
               repair: options.repair ?? false,
               audio: options.audio ?? null,
@@ -876,12 +947,12 @@ function make(deps: PlaybackDeps) {
               failure: null,
             };
             sessions.set(id, session);
-            const extension = upstream.format === "mpegts" ? "ts" : "m3u8";
+            const extension = format === "mpegts" ? "ts" : "m3u8";
             return {
               sessionId: id,
               channelId,
               url: `http://127.0.0.1:${port}/stream/${session.token}.${extension}`,
-              format: upstream.format,
+              format,
             };
           }),
         ),
@@ -951,6 +1022,12 @@ function make(deps: PlaybackDeps) {
           return session?.kind === "live" && session.layout
             ? channelTracks(session.layout, session.captions, session.playing)
             : null;
+        }),
+
+      playing: (sessionId: string) =>
+        Effect.sync(() => {
+          const session = sessions.get(sessionId);
+          return session?.kind === "live" ? session.delivered : null;
         }),
     };
   });

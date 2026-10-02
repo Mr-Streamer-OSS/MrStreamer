@@ -192,6 +192,81 @@ describe("playback", () => {
     await playback.dispose();
   });
 
+  describe("a channel with several streams", () => {
+    it("plays the next stream when the provider has none for the first", async () => {
+      const { provider, playback } = await connectedPlayback();
+      const offline = channelNamed(provider, "TEST | Offline");
+      const [working = ""] = liveChannels(provider);
+
+      const session = await playback.open(offline, LINUX, { variants: [offline, working] });
+      const stream = await firstBytes(session.url);
+
+      expect(stream.status).toBe(200);
+      expect(await playback.playing(session.sessionId)).toEqual({
+        variantId: working,
+        failed: [{ variantId: offline, failure: { kind: "unavailable", status: 404 } }],
+      });
+      // One request each, the second after the first was answered: the subscription allows one.
+      expect(provider.streamRequests()).toBe(2);
+      stream.stop();
+      await playback.dispose();
+    });
+
+    it("tries a chosen stream alone, and says why it failed", async () => {
+      const { provider, playback } = await connectedPlayback();
+      const offline = channelNamed(provider, "TEST | Offline");
+
+      const session = await playback.open(offline, LINUX, { variants: [offline] });
+      const stream = await firstBytes(session.url);
+
+      expect(stream.status).toBe(404);
+      expect(await playback.failure(session.sessionId)).toEqual({
+        kind: "unavailable",
+        status: 404,
+      });
+      expect(await playback.playing(session.sessionId)).toMatchObject({ variantId: null });
+      expect(provider.streamRequests()).toBe(1);
+      await playback.dispose();
+    });
+
+    it("tries no other stream after a refusal, which would refuse it too", async () => {
+      const { provider, playback } = await connectedPlayback();
+      const [one = "", two = "", three = ""] = liveChannels(provider);
+      // Someone else is watching on the only connection.
+      const elsewhere = new AbortController();
+      await fetch(`${provider.url}/live/demo/demo/${three}.ts`, { signal: elsewhere.signal });
+      const before = provider.streamRequests();
+
+      const session = await playback.open(one, LINUX, { variants: [one, two] });
+      const stream = await firstBytes(session.url);
+
+      expect(stream.status).toBe(403);
+      expect(await playback.playing(session.sessionId)).toEqual({
+        variantId: null,
+        failed: [{ variantId: one, failure: { kind: "refused", status: 403 } }],
+      });
+      // The first try and its two retries, all for the first stream.
+      expect(provider.streamRequests() - before).toBe(3);
+      elsewhere.abort();
+      await playback.dispose();
+    });
+
+    it("tries a stream that just failed last, so reconnecting doesn't wait for it", async () => {
+      const { provider, playback } = await connectedPlayback();
+      const offline = channelNamed(provider, "TEST | Offline");
+      const [working = ""] = liveChannels(provider);
+      const first = await playback.open(offline, LINUX, { variants: [offline, working] });
+      (await firstBytes(first.url)).stop();
+
+      const again = await playback.open(offline, LINUX, { variants: [offline, working] });
+      const stream = await firstBytes(again.url);
+
+      expect(await playback.playing(again.sessionId)).toEqual({ variantId: working, failed: [] });
+      stream.stop();
+      await playback.dispose();
+    });
+  });
+
   it("passes a stream the player decodes through unchanged", async () => {
     const { provider, playback } = await connectedPlayback();
 

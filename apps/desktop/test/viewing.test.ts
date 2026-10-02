@@ -6,7 +6,9 @@ import type { TitleRef } from "@mrstreamer/contracts/ondemand";
 import { ViewingRecord, type TitleFilter } from "@mrstreamer/core/viewing/service";
 import { describe, expect, it } from "vitest";
 import { mainLayer } from "../src/main/runtime.ts";
+import { Library } from "../src/main/services/library.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
+import { QUALITY_STREAM_IDS } from "./fake-provider.ts";
 import {
   collect,
   fakeProvider,
@@ -50,6 +52,7 @@ async function viewingApp() {
     };
     const viewing = await promised(runtime, ViewingRecord);
     return {
+      library: await promised(runtime, Library),
       state: viewing.state,
       setFavourite: (channelId: string, favourite: boolean, commandId: string = randomUUID()) =>
         viewing.setFavourite(commandId, channelId, favourite),
@@ -67,6 +70,7 @@ async function viewingApp() {
 
   return {
     dataDir,
+    providers,
     start,
     connect: async (account: 0 | 1) =>
       (await subscriptions()).connect({
@@ -248,6 +252,60 @@ describe("viewing record", () => {
 function later(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 5));
 }
+
+describe("channels with several streams", () => {
+  // The fake provider's channel in Full HD, HD and SD.
+  const fhd = String(QUALITY_STREAM_IDS);
+  const hd = String(QUALITY_STREAM_IDS + 1);
+  const sd = String(QUALITY_STREAM_IDS + 2);
+
+  it("shows lists kept by stream by channel, once each, and unstars every stream of it", async () => {
+    const app = await viewingApp();
+    // Lists as builds before channels joined their streams kept them: by stream.
+    await app.writePreferences({
+      ...settings,
+      favouriteChannelIds: [hd, "gone"],
+      recentChannelIds: [sd, fhd, "gone"],
+    });
+    await app.connect(0);
+    const viewing = await app.start();
+    await viewing.library.refresh();
+
+    expect(await viewing.state()).toMatchObject({
+      favourites: [fhd, "gone"],
+      recent: [fhd, "gone"],
+    });
+    expect((await viewing.setFavourite(fhd, false)).favourites).toEqual(["gone"]);
+  });
+
+  it("keeps a starred channel when the provider drops or reorders its streams", async () => {
+    const app = await viewingApp();
+    await app.connect(0);
+    const viewing = await app.start();
+    await viewing.library.refresh();
+
+    expect((await viewing.setFavourite(sd, true)).favourites).toEqual([fhd]);
+    expect((await viewing.recordWatch(sd)).recent).toEqual([fhd]);
+    // Builds before channels joined their streams, Stable 0.0.3 among them, read the stored
+    // list as it is: they show the channel's three streams, and lose nothing.
+    const db = new DatabaseSync(join(app.dataDir, "mrstreamer.db"));
+    const stored = db.prepare("select favourites from state").get();
+    db.close();
+    expect(JSON.parse(String(stored?.["favourites"]))).toEqual([fhd, hd, sd]);
+
+    const [provider] = app.providers;
+    provider.serveChannels((all) => all.filter(({ streamId }) => String(streamId) !== fhd));
+    await viewing.library.refresh();
+    const { favourites } = await viewing.state();
+    expect(await viewing.library.channels({ ids: favourites })).toMatchObject([
+      { id: hd, title: "Kwaliteit 1", variants: [{ id: hd }, { id: sd }] },
+    ]);
+
+    provider.serveChannels((all) => all.toReversed());
+    await viewing.library.refresh();
+    expect((await viewing.state()).favourites).toEqual([fhd]);
+  });
+});
 
 function movie(id: string): TitleRef {
   return { kind: "movie", id };
