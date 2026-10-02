@@ -24,6 +24,7 @@ import { describeError } from "../../lib/errors.ts";
 import { clock, runtime } from "../../lib/titles.ts";
 import { cn } from "../../lib/utils.ts";
 import { WINDOW_BAR } from "../../../../shared/window-bar.ts";
+import { useTitleSession } from "../../player/media-session.ts";
 import { Picture } from "../../player/Picture.tsx";
 import { player, type PlaybackProblem } from "../../player/player.ts";
 import { titlePlayer, useTitlePlayer, type TitlePlayerState } from "../../player/title-player.ts";
@@ -66,6 +67,7 @@ export function TitleWatch() {
   const next = useTitlePlayer((state) => state.next);
   const continued = useTitlePlayer((state) => state.continued);
   const [menu, setMenu] = useState<TrackMenu>(null);
+  useTitleSession();
 
   // Nothing open any more, as after a live channel took over: back to the page.
   useEffect(() => {

@@ -60,6 +60,7 @@ The picture fills the window below the top bar, with the title, a timeline and t
 - Menus follow the arrow keys. Escape or a click outside closes them without pausing or skipping.
 - **Mini player**, beside full screen, or P, shrinks the window into a small picture in a corner of the screen, on top of other windows. The title plays on where it was, with its subtitles, and the keys work as before. Drag the top of the picture to move it, and its corner to resize it. Escape, a double click or the arrows button puts the window back where it was, full screen included; the cross leaves the title. The countdown to the next episode carries on in it, and the next episode plays there. On a Mac the window and its Dock icon disappear for a moment each time it shrinks or grows back. Linux under Wayland can't keep a window on top, so there the mini player isn't offered.
 - **Next episode**, or N, plays the next one at once.
+- The keyboard's media keys and the system's own controls, Now Playing on a Mac and the media overlay on Windows, show the episode's name, its series and "S1 E3", or the film's name, with TMDB's picture. They play, pause, skip 10 seconds, move along the timeline, and play the next episode when there is one.
 - **Back**, or Escape, returns to the details or the page you came from.
 
 How far you got is saved as you go: every minute, and whenever you pause, skip, change tracks, finish or leave. It's kept per subscription, like favourites.
