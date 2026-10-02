@@ -1,6 +1,7 @@
 // Movies and series: the catalogue lives in a worker thread (see ../ondemand/catalogue-worker.ts),
 // details come from the provider and TMDB when a title opens, never before, TMDB's episodes when
-// their season opens, and playback asks here which file to stream.
+// their season opens, and playback asks here which file to stream. A title's details don't wait
+// for TMDB: what it says joins them once it arrives, and `detailsChanged` says so.
 // Every call is for the connected subscription; switching accounts clears what the last one had.
 import { join } from "node:path";
 import type { Worker } from "node:worker_threads";
@@ -38,6 +39,7 @@ import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
@@ -56,7 +58,7 @@ import { Subscriptions, type Source } from "./subscription.ts";
 const DETAILS_KEPT = 200;
 /** How many seasons TMDB described stay in memory, each in one language. */
 const SEASONS_KEPT = 100;
-/** How long a title's details, or a season, wait for TMDB; the provider's stand in after that. */
+/** How long TMDB gets to describe a title, or a season; the provider's details stand after that. */
 const ABOUT_TIMEOUT_MS = 4000;
 /** Search results a Movies or Series page shows; a longer list needs more words. */
 const SEARCH_PAGE = 300;
@@ -111,7 +113,11 @@ export class OnDemand extends Context.Service<
     >;
     /** Movies or series matching `query`: the best SEARCH_PAGE, and how many match. */
     searchKind(kind: TitleKind, query: string): Effect.Effect<TitleMatches, Failed>;
-    /** A title's details, for when the viewer opens it: the provider's, with TMDB's. */
+    /**
+     * A title's details, for when the viewer opens it: the provider's, with TMDB's once it has
+     * answered. They come as soon as the provider answers; `detailsChanged` says when TMDB's
+     * arrive later.
+     */
     details(kind: TitleKind, id: string): Effect.Effect<TitleDetails, Failed>;
     /**
      * The episodes of season `season` of series version `id`, for when the viewer opens it: the
@@ -141,21 +147,26 @@ export class OnDemand extends Context.Service<
     readonly reconfigure: Effect.Effect<void>;
     /** The status after every refresh, successful or not. */
     readonly changes: Stream.Stream<OnDemandStatus>;
+    /** A title whose details were given before TMDB's arrived, now that they have. */
+    readonly detailsChanged: Stream.Stream<TitleKey>;
   }
 >()("mrstreamer/OnDemand") {
   static readonly layer = (deps: OnDemandDeps) => Layer.effect(OnDemand, make(deps));
 }
 
+/** A movie or series version, by its id. */
+interface TitleKey {
+  readonly kind: TitleKind;
+  readonly id: string;
+}
+
 /**
- * What opening a title downloaded: the provider's details, as of the refresh of the lists that
- * `lists` counts, and TMDB's, with the title as the lists showed it then, for when they no longer
- * list it. `about` is null when TMDB doesn't have the title, and undefined when it didn't answer or
- * there was no key: opening the title again asks again.
+ * What opening a title downloaded from the provider, as of the refresh of the lists that `lists`
+ * counts, with the title as the lists showed it then, for when they no longer list it.
  */
 interface Downloaded {
   readonly raw: ProviderDetails;
   readonly lists: number;
-  readonly about: TitleAbout | null | undefined;
   readonly title: Title;
 }
 
@@ -169,6 +180,8 @@ function make(deps: OnDemandDeps) {
       (preferences) => preferences.titleLanguage ?? DEFAULT_TITLE_LANGUAGE,
     );
     const updates = yield* PubSub.unbounded<OnDemandStatus>();
+    const detailed = yield* PubSub.unbounded<TitleKey>();
+    const scope = yield* Effect.scope;
     /** The TMDB key the worker runs with: the viewer's own, or the app's. */
     const keyOf = (preferences: { readonly tmdbKey?: string }) =>
       preferences.tmdbKey?.trim() || deps.tmdbKey;
@@ -216,6 +229,15 @@ function make(deps: OnDemandDeps) {
     let listsVersion = 0;
     /** What opening a title downloaded, by subscription, language, kind and id, oldest first. */
     const details = new Map<string, Downloaded>();
+    /**
+     * What TMDB said about the titles opened, by the same keys; null where TMDB doesn't have the
+     * title. One it didn't answer about, or had no key for, isn't kept, so opening it asks again.
+     */
+    const abouts = new Map<string, TitleAbout | null>();
+    /** The questions to TMDB about titles on their way, by the same keys. */
+    const asking = new Map<string, Fiber.Fiber<void>>();
+    /** Of those, the ones whose details were given without TMDB's. */
+    const late = new Set<string>();
     /**
      * What TMDB said about the seasons opened, by TMDB id, season and language, oldest first;
      * null where TMDB doesn't have the season.
@@ -294,7 +316,8 @@ function make(deps: OnDemandDeps) {
     /**
      * A title's details: downloaded when it first opens, then kept, and put together each time with
      * the title as the lists show it now, so its name and original language follow TMDB's metadata
-     * as it arrives without downloading anything again.
+     * as it arrives without downloading anything again. TMDB is asked at the same time, and what
+     * it said by the time the provider answered is in them.
      */
     const detailsOf = (kind: TitleKind, id: string) =>
       Effect.gen(function* () {
@@ -305,16 +328,20 @@ function make(deps: OnDemandDeps) {
           call("byIds", { key: source.key, language, kind, ids: [id] }),
         );
         const kept = details.get(cacheKey);
+        const title = listed ?? kept?.title;
+        if (!title) return yield* new Failed({ error: { kind: "title-not-found", titleId: id } });
+        yield* askAbout(source.key, cacheKey, { kind, id }, title);
         const downloaded = kept
           ? yield* renewed(source, kind, id, kept)
-          : yield* download(source, kind, id, listed);
+          : yield* download(source, kind, id, title);
         details.delete(cacheKey);
         // Kept again only for the subscription it was asked for.
         if ((yield* subscriptions.source)?.key === source.key) {
           keep(details, cacheKey, downloaded, DETAILS_KEPT);
         }
-        const { raw, about } = downloaded;
-        const title = listed ?? downloaded.title;
+        if (asking.has(cacheKey)) late.add(cacheKey);
+        const about = abouts.get(cacheKey) ?? null;
+        const { raw } = downloaded;
         // The title as this version: its episodes and its file belong to `id`.
         const version = {
           ...title,
@@ -323,11 +350,16 @@ function make(deps: OnDemandDeps) {
         };
         return {
           raw,
-          about: about ?? null,
+          /** What TMDB said about the title, once the question on its way is answered. */
+          about: Effect.gen(function* () {
+            const asked = asking.get(cacheKey);
+            if (asked) yield* Fiber.join(asked);
+            return abouts.get(cacheKey) ?? null;
+          }),
           shown:
             kind === "movie"
-              ? movieDetails(version, raw, about ?? null)
-              : seriesDetails(version, raw, about ?? null, viewer),
+              ? movieDetails(version, raw, about)
+              : seriesDetails(version, raw, about, viewer),
         };
       });
 
@@ -342,60 +374,68 @@ function make(deps: OnDemandDeps) {
       }).pipe(diagnosed("details"));
 
     /**
-     * TMDB's overview, artwork and credits of a title; without them, the provider's stand. Null
-     * when TMDB doesn't have it, undefined when it didn't answer in time or there is no key.
+     * Asks TMDB about a title in the background, for its overview, artwork and credits, unless it
+     * answered already or is being asked. Its answer is kept for the subscription it was asked
+     * for, and announced when the title's details were given without it.
      */
-    const aboutOf = (kind: TitleKind, title: Title) =>
+    const askAbout = (sourceKey: string, cacheKey: string, ref: TitleKey, title: Title) =>
       Effect.gen(function* () {
-        if (!title.tmdbId) return null;
-        if (!tmdbKey) return undefined;
+        if (abouts.has(cacheKey) || asking.has(cacheKey)) return;
+        if (!title.tmdbId) return keep(abouts, cacheKey, null, DETAILS_KEPT);
+        if (!tmdbKey) return;
         const { tmdbId } = title;
         const client = tmdb({ key: tmdbKey, ...(deps.tmdbApi ? { api: deps.tmdbApi } : {}) });
         const viewer = yield* language;
-        return yield* Effect.tryPromise((signal) =>
-          client
-            .about(
-              kind === "movie" ? "movie" : "tv",
-              tmdbId,
-              viewer,
-              AbortSignal.any([signal, AbortSignal.timeout(ABOUT_TIMEOUT_MS)]),
-            )
-            .catch((cause: unknown) => {
-              if (cause instanceof TmdbError && cause.failure.kind === "missing") return null;
-              throw cause;
-            }),
-        ).pipe(Effect.orElseSucceed(() => undefined));
+        const answered = (about: TitleAbout | null | undefined) =>
+          Effect.gen(function* () {
+            asking.delete(cacheKey);
+            const given = late.delete(cacheKey);
+            if (about === undefined || (yield* subscriptions.source)?.key !== sourceKey) return;
+            keep(abouts, cacheKey, about, DETAILS_KEPT);
+            if (given && about) yield* PubSub.publish(detailed, ref);
+          });
+        // Listed once forked: its answer takes a round trip to TMDB, so it never comes first.
+        const asked = yield* Effect.forkIn(
+          Effect.tryPromise((signal) =>
+            client
+              .about(
+                ref.kind === "movie" ? "movie" : "tv",
+                tmdbId,
+                viewer,
+                AbortSignal.any([signal, AbortSignal.timeout(ABOUT_TIMEOUT_MS)]),
+              )
+              .catch((cause: unknown) => {
+                if (cause instanceof TmdbError && cause.failure.kind === "missing") return null;
+                throw cause;
+              }),
+          ).pipe(
+            Effect.orElseSucceed(() => undefined),
+            Effect.flatMap(answered),
+          ),
+          scope,
+        );
+        asking.set(cacheKey, asked);
       });
 
-    /** Asks the provider and TMDB about a title the lists show, both at once. */
-    const download = (source: Source, kind: TitleKind, id: string, title: Title | undefined) =>
-      Effect.gen(function* () {
-        if (!title) return yield* new Failed({ error: { kind: "title-not-found", titleId: id } });
-        const [raw, about] = yield* Effect.all(
-          [providerDetails(source, kind, id), aboutOf(kind, title)],
-          { concurrency: 2 },
-        );
-        return { raw, lists: listsVersion, about, title };
-      });
+    /** Asks the provider about a title the lists show. */
+    const download = (source: Source, kind: TitleKind, id: string, title: Title) => {
+      const lists = listsVersion;
+      return Effect.map(providerDetails(source, kind, id), (raw) => ({ raw, lists, title }));
+    };
 
     /**
-     * Details kept from an earlier open, with what went stale asked again: the provider's after
-     * the lists were refreshed, keeping the old ones if it fails, and TMDB's when it didn't answer.
+     * Details kept from an earlier open, asked again after the lists were refreshed, as the
+     * provider may list new episodes; if that fails, the old ones stand.
      */
-    const renewed = (source: Source, kind: TitleKind, id: string, kept: Downloaded) =>
-      Effect.gen(function* () {
-        const lists = listsVersion;
-        const [raw, about] = yield* Effect.all(
-          [
-            kept.lists === lists
-              ? Effect.succeed(kept.raw)
-              : providerDetails(source, kind, id).pipe(Effect.orElseSucceed(() => null)),
-            kept.about === undefined ? aboutOf(kind, kept.title) : Effect.succeed(kept.about),
-          ],
-          { concurrency: 2 },
-        );
-        return raw ? { raw, lists, about, title: kept.title } : { ...kept, about };
-      });
+    const renewed = (source: Source, kind: TitleKind, id: string, kept: Downloaded) => {
+      const lists = listsVersion;
+      return kept.lists === lists
+        ? Effect.succeed(kept)
+        : providerDetails(source, kind, id).pipe(
+            Effect.map((raw) => ({ ...kept, raw, lists })),
+            Effect.orElseSucceed(() => kept),
+          );
+    };
 
     /**
      * TMDB's season in one language: kept once TMDB answered, so opening it again asks no one.
@@ -498,18 +538,22 @@ function make(deps: OnDemandDeps) {
           if (!season) {
             return yield* new Failed({ error: { kind: "title-not-found", titleId: id } });
           }
-          const { tmdbId } = shown.title;
-          // TMDB said it as the details opened, if the lists don't know yet.
-          const madeIn = shown.title.originalLanguage ?? about?.language;
+          const { tmdbId, originalLanguage } = shown.title;
           const answers: (readonly EpisodeAbout[])[] = [];
           if (tmdbKey && tmdbId) {
             const client = tmdb({ key: tmdbKey, ...(deps.tmdbApi ? { api: deps.tmdbApi } : {}) });
-            const viewer = yield* language;
-            // Names fall back as titles' do: the viewer's language, English, the series' own. Each
-            // is asked for only while an episode TMDB lists still has no name.
-            const languages = new Set([viewer, "en", ...(madeIn ? [madeIn] : [])]);
-            for (const asked of languages) {
-              const answer = yield* seasonIn(client, tmdbId, number, asked);
+            // Names fall back as titles' do: the viewer's language, English, the series' own,
+            // which TMDB says as the details open if the lists don't know it yet. Each is asked
+            // for only while an episode TMDB lists still has no name.
+            const madeIn = originalLanguage
+              ? Effect.succeed(originalLanguage)
+              : Effect.map(about, (said) => said?.language ?? null);
+            const asked = new Set<string>();
+            for (const next of [language, Effect.succeed("en"), madeIn]) {
+              const wanted = yield* next;
+              if (!wanted || asked.has(wanted)) continue;
+              asked.add(wanted);
+              const answer = yield* seasonIn(client, tmdbId, number, wanted);
               if (!answer) break;
               answers.push(answer);
               if (named(season, answers)) break;
@@ -546,6 +590,9 @@ function make(deps: OnDemandDeps) {
       clear: Effect.gen(function* () {
         failure = null;
         details.clear();
+        abouts.clear();
+        asking.clear();
+        late.clear();
         seasons.clear();
         yield* call("clear", {}).pipe(Effect.ignore);
       }),
@@ -563,6 +610,8 @@ function make(deps: OnDemandDeps) {
       }),
 
       changes: Stream.fromPubSub(updates),
+
+      detailsChanged: Stream.fromPubSub(detailed),
     };
   });
 }

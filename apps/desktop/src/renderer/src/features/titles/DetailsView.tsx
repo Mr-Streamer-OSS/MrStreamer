@@ -5,7 +5,8 @@
 // beside Play, else the one it was opened on, as from the 4K tab, else the one that suits best;
 // the sheet shows that version, so a series lists its episodes. A series opens on the season
 // being watched, and marks the episode. Each episode's row carries everything known about it,
-// TMDB's details once the season shown has its answer.
+// TMDB's details once the season shown has its answer. The title from the lists heads the sheet
+// at once; the rest follows when the provider answers, and TMDB's details when they arrive.
 import { Dialog } from "@base-ui/react/dialog";
 import { Menu } from "@base-ui/react/menu";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
@@ -92,6 +93,12 @@ export function DetailsView({ target }: { target: DetailsTarget }) {
               versions={{ title, playing, picked, automatic }}
               switching={details.isPlaceholderData}
             />
+          ) : title ? (
+            <Header title={title} backdropUrl={title.backdropUrl} facts={factsOf(title)}>
+              <p className="mt-6 text-[0.9375rem] text-muted-foreground">
+                {details.error ? describeError(appError(details.error)) : "Loading…"}
+              </p>
+            </Header>
           ) : (
             <div className="p-10 text-[0.9375rem] text-muted-foreground">
               <Dialog.Title className="sr-only">Details</Dialog.Title>
@@ -121,49 +128,72 @@ function Content({
   /** Another version's details are on their way. */
   switching: boolean;
 }) {
-  const { title } = details;
-  const facts = [
-    details.originalTitle ? `Original title ${details.originalTitle}` : null,
+  return (
+    <Header
+      title={details.title}
+      backdropUrl={details.backdropUrl}
+      facts={factsOf(details.title, details)}
+    >
+      {details.kind === "movie" ? (
+        <MovieActions details={details} versions={versions} switching={switching} />
+      ) : (
+        <SeriesActions details={details} versions={versions} switching={switching} />
+      )}
+      {details.plot && (
+        <p className="mt-6 max-w-[48rem] text-[0.9375rem] leading-relaxed text-foreground/85">
+          {details.plot}
+        </p>
+      )}
+      <Credits details={details} />
+      {details.kind === "series" && (
+        <div inert={switching || undefined}>
+          <Episodes details={details} />
+        </div>
+      )}
+    </Header>
+  );
+}
+
+/** "Original title …", the year, the length or seasons, genres and rating, as far as known. */
+function factsOf(title: Title, details?: TitleDetails): string {
+  return [
+    details?.originalTitle ? `Original title ${details.originalTitle}` : null,
     title.year,
-    details.kind === "movie" && details.duration ? runtime(details.duration) : null,
-    details.kind === "series" && details.seasons.length > 0
+    details?.kind === "movie" && details.duration ? runtime(details.duration) : null,
+    details?.kind === "series" && details.seasons.length > 0
       ? `${details.seasons.length} ${details.seasons.length === 1 ? "season" : "seasons"}`
       : null,
-    details.genres.slice(0, 3).join(", ") || null,
+    (details ?? title).genres.slice(0, 3).join(", ") || null,
     title.rating ? `★ ${title.rating.toFixed(1)}` : null,
-  ].filter(Boolean);
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/** The backdrop, name and facts, with what follows them. */
+function Header({
+  title,
+  backdropUrl,
+  facts,
+  children,
+}: {
+  title: Title;
+  backdropUrl: string | null;
+  facts: string;
+  children: ReactNode;
+}) {
   return (
     <>
       <div className="relative h-[clamp(12rem,32vh,22rem)] overflow-hidden rounded-t-3xl">
-        <Artwork
-          url={details.backdropUrl ?? title.posterUrl}
-          name={title.title}
-          size="full"
-          plain
-        />
+        <Artwork url={backdropUrl ?? title.posterUrl} name={title.title} size="full" plain />
         <div className="absolute inset-0 bg-gradient-to-t from-[#0b0b0c] via-[#0b0b0c]/40 to-transparent" />
       </div>
       <div className="relative -mt-20 px-10 pb-12">
         <Dialog.Title className="text-4xl font-semibold tracking-tight text-balance">
           {title.title}
         </Dialog.Title>
-        <div className="mt-2 text-[0.9375rem] text-muted-foreground">{facts.join(" · ")}</div>
-        {details.kind === "movie" ? (
-          <MovieActions details={details} versions={versions} switching={switching} />
-        ) : (
-          <SeriesActions details={details} versions={versions} switching={switching} />
-        )}
-        {details.plot && (
-          <p className="mt-6 max-w-[48rem] text-[0.9375rem] leading-relaxed text-foreground/85">
-            {details.plot}
-          </p>
-        )}
-        <Credits details={details} />
-        {details.kind === "series" && (
-          <div inert={switching || undefined}>
-            <Episodes details={details} />
-          </div>
-        )}
+        <div className="mt-2 text-[0.9375rem] text-muted-foreground">{facts}</div>
+        {children}
       </div>
     </>
   );

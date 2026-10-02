@@ -21,6 +21,7 @@ import {
   type Title,
   type TitleMatches,
   type TitleDetails,
+  type TitleKind,
 } from "./ondemand.ts";
 import {
   CODECS,
@@ -272,6 +273,8 @@ export interface IpcEvents {
   "guide.updated": null;
   /** The movie and series lists were fetched again, or the fetch failed and kept them. */
   "ondemand.updated": OnDemandStatus;
+  /** TMDB's details of a title arrived after its details were given without them. */
+  "ondemand.detailsChanged": { readonly kind: TitleKind; readonly id: string };
   /** Favourites or recently watched channels changed, up to `sequence`. */
   "viewing.changed": { readonly sequence: number };
   /** The update moved on, for example a download's progress. */
