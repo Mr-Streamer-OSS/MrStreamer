@@ -7,6 +7,9 @@
 #   stable version, publishes it as the latest release, then records the version on main.
 # - Dry run: labelling a pull request "release dry run" builds, signs and tests its head commit
 #   once, keeps the files as workflow artifacts and publishes nothing.
+# - Microsoft Store package: dry runs and stable releases also build the MSIX and test it installed.
+#   It stays a workflow artifact, outside the release and the update feed. Nothing waits for it and
+#   nothing submits it. Nightlies never build it.
 # - After publishing, update-feed.yml points the app's update feed at the new release.
 #
 # Every job checks out the commit the plan resolved, so main moving during a run changes nothing.
@@ -302,6 +305,145 @@ jobs:
             apps/desktop/dist/latest*.yml
           # Dry runs keep their files for testing; a release keeps them on GitHub Releases.
           retention-days: ${{ needs.plan.outputs.dry-run == 'true' && 14 || 3 }}
+          if-no-files-found: error
+
+  # The Microsoft Store package, an MSIX of the same app, for dry runs and stable releases: only
+  # stable releases go to the Store. It waits for the installers, whose run caches ffmpeg, but
+  # nothing waits for it, so it can't hold up a release. Its file stays a workflow artifact, apart
+  # from the release-* artifacts publish attaches: never on the release or in the update feed, and
+  # never submitted to the Store.
+  msix:
+    name: Package Microsoft Store MSIX
+    needs: [plan, bundle, package]
+    if: needs.plan.outputs.dry-run == 'true' || needs.plan.outputs.channel == 'stable'
+    runs-on: windows-2025
+    timeout-minutes: 45
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      SHA: ${{ needs.plan.outputs.sha }}
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/desktop/vendor/ffmpeg/win-x64
+          key: ffmpeg-win-x64-${{ hashFiles('apps/desktop/scripts/build-ffmpeg.sh') }}
+          fail-on-cache-miss: true
+      - run: npm pkg set version="$env:VERSION"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: js-bundle
+          path: apps/desktop/out
+      - name: Build the MSIX
+        run: pnpm exec electron-builder --win appx --x64 --publish never
+
+      # Partner Center's identity exactly, the Store version for this release, and what the app
+      # needs at run time: ffmpeg, ffprobe and the notices Settings > About reads.
+      - name: Check the package
+        run: |
+          $makeappx = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\makeappx.exe" | Sort-Object FullName | Select-Object -Last 1
+          & $makeappx.FullName unpack /p "dist/Mr-Streamer-$env:VERSION-win-x64.msix" /d "$env:RUNNER_TEMP\msix" /o | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          [xml]$manifest = Get-Content "$env:RUNNER_TEMP\msix\AppxManifest.xml"
+          $version = node --input-type=module -e 'import { packageVersion } from "./scripts/msix-version.ts"; console.log(packageVersion(process.argv[1]))' $env:VERSION
+          $checks = @(
+            @("Identity name", $manifest.Package.Identity.Name, "MrStreamerOSS.Mr.Streamer"),
+            @("Publisher", $manifest.Package.Identity.Publisher, "CN=A132E842-C4C9-40BF-83C4-D304E7952C2D"),
+            @("Publisher display name", $manifest.Package.Properties.PublisherDisplayName, "Mr Streamer OSS"),
+            @("Display name", $manifest.Package.Properties.DisplayName, "Mr. Streamer"),
+            @("Application id", $manifest.Package.Applications.Application.Id, "MrStreamer"),
+            @("Architecture", $manifest.Package.Identity.ProcessorArchitecture, "x64"),
+            @("Version", $manifest.Package.Identity.Version, $version)
+          )
+          foreach ($check in $checks) {
+            if ($check[1] -cne $check[2]) { echo "::error::$($check[0]) is '$($check[1])', not '$($check[2])'."; exit 1 }
+          }
+          foreach ($file in "Mr. Streamer.exe", "resources\app.asar", "resources\ffmpeg\ffmpeg.exe",
+              "resources\ffmpeg\ffprobe.exe", "LICENSES.chromium.html", "LICENSE.electron.txt") {
+            if (-not (Test-Path -LiteralPath "$env:RUNNER_TEMP\msix\app\$file")) { echo "::error::The package has no $file."; exit 1 }
+          }
+          $record = "Mr. Streamer $env:VERSION is package $version, built from $env:SHA."
+          Set-Content "dist/Mr-Streamer-$env:VERSION-win-x64.msix.txt" $record
+          Add-Content $env:GITHUB_STEP_SUMMARY $record
+
+      # Windows installs only signed packages. A certificate made here, with the package's
+      # publisher as its subject and trusted on this runner alone, signs a copy to install; the
+      # artifact stays unsigned for the Store to sign. Installing proves nothing about Store trust;
+      # docs/maintainers/signing.md#microsoft-store-package.
+      - name: Install a test-signed copy
+        run: |
+          [xml]$manifest = Get-Content "$env:RUNNER_TEMP\msix\AppxManifest.xml"
+          $cert = New-SelfSignedCertificate -Type Custom -Subject $manifest.Package.Identity.Publisher `
+            -KeyUsage DigitalSignature -CertStoreLocation Cert:\CurrentUser\My `
+            -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3", "2.5.29.19={text}")
+          Export-Certificate -Cert $cert -FilePath "$env:RUNNER_TEMP\test.cer" | Out-Null
+          Import-Certificate -FilePath "$env:RUNNER_TEMP\test.cer" -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1
+          Copy-Item "dist/Mr-Streamer-$env:VERSION-win-x64.msix" "$env:RUNNER_TEMP\test.msix"
+          & $signtool.FullName sign /q /fd SHA256 /sha1 $cert.Thumbprint "$env:RUNNER_TEMP\test.msix"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-AppxPackage "$env:RUNNER_TEMP\test.msix"
+          # Windows derives the family name from the identity: it must be the one Partner Center gave.
+          $family = (Get-AppxPackage MrStreamerOSS.Mr.Streamer).PackageFamilyName
+          if ($family -cne "MrStreamerOSS.Mr.Streamer_5yzg1erdm3xmr") { echo "::error::Installed as $family."; exit 1 }
+
+      # Started by its path, the app runs with the package's identity, as it does from Start.
+      - name: Smoke test the installed package
+        run: |
+          $package = Get-AppxPackage MrStreamerOSS.Mr.Streamer
+          node test/e2e/packaged-app.ts (Join-Path $package.InstallLocation "app\Mr. Streamer.exe")
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # The kit's report goes with the package. Its optional "Blocked executables" test fails: it
+      # flags strings such as "cmd" and "reg" inside Electron's and ffmpeg's files. The overall
+      # result has to pass.
+      - name: Windows App Certification Kit
+        run: |
+          $appcert = "${env:ProgramFiles(x86)}\Windows Kits\10\App Certification Kit\appcert.exe"
+          # The kit takes only a full path for its report.
+          $report = Join-Path (Resolve-Path dist) "Mr-Streamer-$env:VERSION-win-x64.wack.xml"
+          & $appcert reset | Out-Null
+          & $appcert test -appxpackagepath "$env:RUNNER_TEMP\test.msix" -reportoutputpath $report
+          [xml]$xml = Get-Content $report
+          foreach ($test in $xml.SelectNodes("//TEST[RESULT != 'PASS']")) {
+            $optional = if ($test.OPTIONAL -eq "TRUE") { " (optional)" } else { "" }
+            echo "$($test.SelectSingleNode('RESULT').InnerText) $($test.NAME)$optional"
+          }
+          $overall = $xml.REPORT.OVERALL_RESULT
+          Add-Content $env:GITHUB_STEP_SUMMARY "Windows App Certification Kit: $overall"
+          if ($overall -ne "PASS") { echo "::error::The certification kit's result is $overall."; exit 1 }
+
+      # Uninstalling removes what the package wrote to AppData along with it.
+      - name: Uninstall
+        run: |
+          $package = Get-AppxPackage MrStreamerOSS.Mr.Streamer
+          Remove-AppxPackage $package.PackageFullName
+          if (Test-Path "$env:LOCALAPPDATA\Packages\$($package.PackageFamilyName)") {
+            echo "::error::Uninstalling left the package's data behind."
+            exit 1
+          }
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: success() || failure()
+        with:
+          name: msix
+          path: |
+            apps/desktop/dist/*.msix
+            apps/desktop/dist/*.msix.txt
+            apps/desktop/dist/*.wack.xml
+          # A release's package is the one to submit to the Store by hand, so it's kept longer.
+          retention-days: ${{ needs.plan.outputs.dry-run == 'true' && 14 || 90 }}
           if-no-files-found: error
 
   publish:

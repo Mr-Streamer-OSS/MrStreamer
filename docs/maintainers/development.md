@@ -40,7 +40,7 @@ Each installer builds on its own system; the [release workflow](releasing.md) bu
 
 ```sh
 apps/desktop/scripts/build-ffmpeg.sh mac-arm64   # or linux-x64, win-x64
-pnpm dist:mac                                    # or dist:win, dist:linux; installers land in apps/desktop/dist
+pnpm dist:mac                                    # or dist:win, dist:msix, dist:linux; installers land in apps/desktop/dist
 ```
 
 `build-ffmpeg.sh` needs a C compiler, make, nasm, pkg-config, git and curl. On Windows, run it in an MSYS2 MINGW64 shell; on Linux it can also cross-compile the Windows build with mingw-w64. It puts `ffmpeg`, `ffprobe` and their licences in `apps/desktop/vendor/ffmpeg/<target>`, which electron-builder copies into the app. Without them, the app still builds, but streams that need converting, and every movie and episode, report that they can't be played.
@@ -64,7 +64,7 @@ Chromium's credits, which hold Node.js's licence too, are 20 MB of HTML from Ele
 
 ## Artwork
 
-- App icons come from `apps/desktop/assets/brand/`; `pnpm --filter mrstreamer icons:export` renders `apps/desktop/build/icon.*`.
+- App icons come from `apps/desktop/assets/brand/`; `pnpm --filter mrstreamer icons:export` renders `apps/desktop/build/icon.*` and the Store package's logos in `apps/desktop/build/appx`.
 - The DMG window background is `apps/desktop/build/dmg-background.png` and its `@2x` twin; `pnpm --filter mrstreamer dmg:background` renders them on a Mac, so the text uses the system font.
 - The README banner, `docs/assets/banner.png`, is 2560 × 800 for sharp screens: the mark and name beside Movies' For you page, captured from the Linux build, which draws no window controls, with Inter as its font and made-up films, posters and backdrop. Never use a provider's catalogue or real posters in it.
 - The README's screenshots, `docs/assets/live-tv.webp`, `details.webp` and `watching.webp`, are 2560 × 1600 captures of a development build in the same way: the fake provider with its guide, a TMDB stand-in answering with made-up names, stories and people, made-up posters, backdrops and portraits served in place of every image the app asks for, and a short clip of a drawn scene with English and Dutch sound and subtitles in place of the two-track test film. The fake provider's test category is hidden. The same rule holds: nothing from a real provider, film or person.

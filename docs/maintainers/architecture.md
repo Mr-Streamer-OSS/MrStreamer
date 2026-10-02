@@ -29,7 +29,7 @@ apps/desktop         The app, package name mrstreamer
                      controllers, Picture, and the subtitles drawn over it
   src/shared         What main and the renderer share inside the app: window bar sizes
   scripts            Icons, the DMG background, signing, notarization, ffmpeg builds, third-party
-                     notices, guide and viewing record measurements
+                     notices, the Store package's version, guide and viewing record measurements
   test               Service suites, the fake provider, codec and title clips, packaged-app test,
                      measurements
 scripts              Release planning, the update feed and CI signing, run from the repository root

@@ -16,6 +16,7 @@
     "fmt:check": "prettier --check .",
     "dist:mac": "pnpm --filter mrstreamer dist:mac",
     "dist:win": "pnpm --filter mrstreamer dist:win",
+    "dist:msix": "pnpm --filter mrstreamer dist:msix",
     "dist:linux": "pnpm --filter mrstreamer dist:linux"
   },
   "engines": {

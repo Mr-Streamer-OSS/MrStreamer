@@ -34,6 +34,8 @@ Reference: [Store onboarding and name reservation](https://learn.microsoft.com/e
 
 ## 3. Prepare and validate the MSIX
 
+The release workflow builds the package with electron-builder's `appx` target, for dry runs and stable releases, and checks it installed; [releasing](releasing.md#microsoft-store-package) describes the job, the identity it uses and how Store versions are numbered.
+
 - Choose a maintained packaging path that fits the existing Electron bundle; look at current tooling before adding a second app framework. Configure Windows x64 desktop support, the logos, the manifest and the full-trust capabilities the app needs.
 - Keep MSIX build and test artifacts apart from the direct-download update feed. Start with an opt-in packaging or dry-run path, so unfinished Partner Center setup can't break the direct nightlies. Building a package never submits it.
 - Bundle the actual FFmpeg and ffprobe, the third-party notices, the app's own GPL text and the source references. Test that data is written outside the read-only install directory, and test safeStorage, in a real packaged app.
@@ -81,15 +83,15 @@ References: [GitHub Actions for Store updates](https://learn.microsoft.com/en-us
 
 Update this table as work happens. Never record secrets or personal verification data.
 
-| Step                                  | State                | Evidence                                               |
-| ------------------------------------- | -------------------- | ------------------------------------------------------ |
-| Publisher account                     | Done, 2 October 2026 | Apps & Games access verified                           |
-| App reservation and identity          | Done, 2 October 2026 | Mr. Streamer reserved; the identity below              |
-| MSIX and certification kit            | Not started          | The artifact's commit, its source and the kit's result |
-| Privacy, content, transport, licences | Not started          | The policy URL and the recorded decisions              |
-| Private submission                    | Not started          | The right audience and a completed certification       |
-| Store install and update              | Not started          | Wout's acceptance on Windows                           |
-| Automated publishing                  | Deferred             | Set up in the later launch slice                       |
+| Step                                  | State                                   | Evidence                                                                                        |
+| ------------------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Publisher account                     | Done, 2 October 2026                    | Apps & Games access verified                                                                    |
+| App reservation and identity          | Done, 2 October 2026                    | Mr. Streamer reserved; the identity below                                                       |
+| MSIX and certification kit            | Built and checked in CI, 2 October 2026 | Every dry run and stable release records its commit and the kit's result; no stable package yet |
+| Privacy, content, transport, licences | Not started                             | The policy URL and the recorded decisions                                                       |
+| Private submission                    | Not started                             | The right audience and a completed certification                                                |
+| Store install and update              | Not started                             | Wout's acceptance on Windows                                                                    |
+| Automated publishing                  | Deferred                                | Set up in the later launch slice                                                                |
 
 ### Package identity
 
@@ -102,5 +104,7 @@ Copied from Partner Center's Product identity page on 2 October 2026. These valu
 | Package/Properties/PublisherDisplayName | `Mr Streamer OSS`                         |
 | Package family name                     | `MrStreamerOSS.Mr.Streamer_5yzg1erdm3xmr` |
 | Store ID                                | `9N45GG76ZP4T`                            |
+
+The publisher display name has no period on purpose: Partner Center doesn't allow one there.
 
 The reservation lapses if no submission is made within three months, so by early January 2027. The Store's listing links appear once the product is published.

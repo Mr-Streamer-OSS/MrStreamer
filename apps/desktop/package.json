@@ -21,6 +21,7 @@
     "start": "electron-vite preview",
     "dist:mac": "electron-vite build && electron-builder --mac --arm64 --publish never",
     "dist:win": "electron-vite build && electron-builder --win --x64 --publish never",
+    "dist:msix": "electron-vite build && electron-builder --win appx --x64 --publish never",
     "dist:linux": "electron-vite build && electron-builder --linux --publish never",
     "icons:export": "node scripts/export-icons.ts",
     "dmg:background": "electron scripts/export-dmg-background.mjs 1 && electron scripts/export-dmg-background.mjs 2"
