@@ -82,7 +82,7 @@ Verified for GitHub releases. Gate: private Store test.
 - The configuration enables only playback's codecs (see 13), with `--enable-gpl --enable-libx264`, so the program is GPL-2.0-or-later.
 - The release workflow caches the ffmpeg build by the hash of `build-ffmpeg.sh`, so each binary matches the script at its commit.
 
-Open: the toolchains aren't recorded. Mac builds use the runner's Xcode, Linux builds Ubuntu 22.04's GCC in Docker, and Windows builds MSYS2's packages of the day: in 0.0.3, GCC 16.2.0, as the binary says, and whichever MinGW-w64 runtime MSYS2 shipped then. Compilers fall outside the source the GPL asks for, but the MinGW-w64 runtime and winpthreads are linked into `ffmpeg.exe`. Pinning or recording those versions in `README.txt` belongs to whoever next changes `build-ffmpeg.sh`.
+Recorded: `README.txt` now names what built the binaries: the compiler and assembler, the macOS SDK, glibc on Linux, and on Windows the exact MSYS2 packages of GCC, MinGW-w64's runtime and headers, and winpthreads, which are linked into `ffmpeg.exe`. Builds before this change, 0.0.3 included, don't record them; 0.0.3's binary says GCC 16.2.0.
 
 ## 5. The source offer for Store packages
 
@@ -104,7 +104,7 @@ The licence question: FFmpeg and x264 are GPL-2.0-or-later. Version 2, section 3
 
 Gap. Gate: private Store test. Owner: Wout.
 
-The [releasing runbook](releasing.md#recovery) says a bad release can be deleted. Deleting a release deletes the only copy of its FFmpeg and x264 sources, while installs of it remain. GPL-2.0 asks for a three-year offer; GPL-3.0 section 6(d) keeps the source due "for as long as needed to satisfy these requirements". Deciding how long to keep releases, or at least their source archives, is Wout's call; the runbook should then say so.
+The [releasing runbook](releasing.md#recovery) now keeps a bad release with its installers and sources, and only takes its update files away so the feed stops offering it: deleting a release would delete the only copy of its FFmpeg and x264 sources, while installs of it remain. GPL-2.0 asks for a three-year offer; GPL-3.0 section 6(d) keeps the source due "for as long as needed to satisfy these requirements". How long to keep releases, or at least their source archives, is still Wout's call.
 
 ## 7. Store licence terms and copy protection
 

@@ -120,7 +120,7 @@ A failed publication shows on the release run's **Update feed** job but doesn't 
 
 ### Regenerating the feed
 
-Run the **Update feed** workflow on `main`. It rebuilds the feed from the releases as they are now, and the run summary names each channel's release. Tick **allow-regress** only to move a channel to a lower version, after deleting a bad release.
+Run the **Update feed** workflow on `main`. It rebuilds the feed from the releases as they are now, and the run summary names each channel's release. Tick **allow-regress** only to move a channel to a lower version, after taking a bad release's update files away ([recovery](#recovery)).
 
 ### Enabling Pages
 
@@ -176,7 +176,7 @@ When the job failed, the release is out anyway. Re-run the job; if it needs a fi
 - **The version was taken meanwhile:** publishing refuses. The next nightly plans a new version; start a stable release again, with another version if needed.
 - **Finalize failed:** re-run it. It only moves `package.json` forward, so running it late or twice is harmless, and until it succeeds nightlies count from the published stable release.
 - **The feed wasn't updated:** the release run passed, and its **Update feed** job shows why. Fix that, such as [enabling Pages](#enabling-pages), then [regenerate the feed](#regenerating-the-feed). When the job couldn't reach the deployed feed or the Pages API, regenerating once GitHub answers again is enough.
-- **A bad release is out:** publish a fixed one. To stop offering it sooner, delete the release, then regenerate the feed with **allow-regress**. Deleting alone isn't enough: the feed never goes back by itself, so it keeps offering the release, whose files are gone. Neither downgrades anyone who installed it.
+- **A bad release is out:** publish a fixed one. To stop offering it sooner, delete the release's three `latest*.yml` files, then regenerate the feed with **allow-regress**: without them the release counts neither for the feed nor for the app's fallback to GitHub's API, and the feed never goes back by itself. For a stable release, mark the stable release before it as latest too. Keep the release itself, with its installers and its FFmpeg and x264 sources. Whoever installed it is owed those sources under the GPL, and the release holds their only copy. Until a fixed nightly is out, name the nightly to promote when releasing stable, since the latest one is the bad one. None of this downgrades anyone who installed it.
 
 ## Permissions
 
