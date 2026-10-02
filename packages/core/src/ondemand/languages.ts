@@ -5,6 +5,8 @@
 // says the sound is the film's own: "(NL)" on an English film is English with Dutch subtitles,
 // unless it says otherwise, as "(NL AUDIO)".
 
+import { languageName } from "./tracks.ts";
+
 /**
  * Languages to choose from: ISO 639-1 codes, their names, the marks that stand for them, and
  * whether their versions keep the film's own sound, with subtitles.
@@ -93,19 +95,26 @@ export function suits(fit: number, madeIn: string | null | undefined, language: 
 
 /** Marks for every language at once, as a version's menu names them. */
 const MULTI_NAMES: Readonly<Record<string, string>> = {
-  MULTI: "Multi-language",
-  "MULTI AUDIO": "Multi-language",
-  MULTISUB: "Multi-language subtitles",
-  "MULTI SUB": "Multi-language subtitles",
-  VO: "Original language",
+  MULTI: "Several languages",
+  "MULTI AUDIO": "Several languages",
+  MULTISUB: "Several subtitle languages",
+  "MULTI SUB": "Several subtitle languages",
+  VO: "Original sound",
 };
 
 /**
- * What sets a version apart, from its marks, as the provider wrote them: "Nederlands · 4K",
- * "Deutsch audio", "Multi-language · 720p". Without a mark, "Standard". Versions with the same
- * marks are numbered, "Nederlands 2", so each can be told apart.
+ * What each version sounds like, and what it subtitles, from its marks as the provider wrote them
+ * and `madeIn`, the language TMDB says the title was made in: "English sound, Nederlands
+ * subtitles · 1080p", "Deutsch sound", "Several languages · 4K". A mark for a language that
+ * subtitles, as "(NL)", means the title's own sound with those subtitles, unless the title was
+ * made in that language or the mark says the sound was replaced, as "(NL AUDIO)". Without a mark,
+ * "Standard". Versions that read the same are numbered, "Deutsch sound 2", so each can be told
+ * apart.
  */
-export function versionLabels(versions: readonly { readonly tags: readonly string[] }[]): string[] {
+export function versionLabels(
+  versions: readonly { readonly tags: readonly string[] }[],
+  madeIn: string | null,
+): string[] {
   const labels = versions.map(({ tags }) => {
     const parts = tags.map((tag) => {
       const mark = tag.toUpperCase();
@@ -114,9 +123,12 @@ export function versionLabels(versions: readonly { readonly tags: readonly strin
       const space = mark.search(WORD_END);
       const language = LANGUAGE_MARKS.get(space < 0 ? mark : mark.slice(0, space));
       if (!language) return tag;
-      return space >= 0 && DUBBED.test(mark.slice(space))
-        ? `${language.name} audio`
-        : language.name;
+      const dubbed = space >= 0 && DUBBED.test(mark.slice(space));
+      if (language.subtitled && !dubbed && madeIn !== language.code) {
+        const original = (madeIn && languageName(madeIn)) || "Original";
+        return `${original} sound, ${language.name} subtitles`;
+      }
+      return `${language.name} sound`;
     });
     return parts.join(" · ") || "Standard";
   });

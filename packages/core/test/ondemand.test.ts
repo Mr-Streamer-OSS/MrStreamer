@@ -255,7 +255,7 @@ describe("subtitles a channel starts with", () => {
 });
 
 describe("version labels", () => {
-  it("says what sets each version of a film apart, as its marks put it", () => {
+  it("say what each version of a film sounds like and subtitles, as its marks put it", () => {
     const names = [
       "Night Harbour 4K (EN)",
       "Night Harbour 1080p (NL AUDIO)",
@@ -266,21 +266,34 @@ describe("version labels", () => {
       "Night Harbour",
     ];
 
-    expect(versionLabels(names.map((name) => titleName(name)))).toEqual([
-      "English · 4K",
-      "Nederlands audio · 1080p",
-      "Deutsch audio",
-      "Multi-language · 720p",
-      "Nederlands",
+    expect(
+      versionLabels(
+        names.map((name) => titleName(name)),
+        "en",
+      ),
+    ).toEqual([
+      "English sound · 4K",
+      "Nederlands sound · 1080p",
+      "Deutsch sound",
+      "Several languages · 720p",
+      "English sound, Nederlands subtitles",
       "AR",
       "Standard",
     ]);
   });
 
-  it("numbers versions with the same marks", () => {
-    expect(versionLabels([{ tags: ["NL"] }, { tags: ["NL"] }, { tags: [] }])).toEqual([
-      "Nederlands",
-      "Nederlands 2",
+  it.each([
+    ["English", "en", "English sound, Nederlands subtitles"],
+    ["Dutch, so (NL) is its own sound", "nl", "Nederlands sound"],
+    ["a language TMDB hasn't said", null, "Original sound, Nederlands subtitles"],
+  ])("read (NL) on a title made in %s", (_, madeIn, label) => {
+    expect(versionLabels([{ tags: ["NL"] }], madeIn)).toEqual([label]);
+  });
+
+  it("numbers versions that read the same", () => {
+    expect(versionLabels([{ tags: ["DE"] }, { tags: ["DE"] }, { tags: [] }], "en")).toEqual([
+      "Deutsch sound",
+      "Deutsch sound 2",
       "Standard",
     ]);
   });

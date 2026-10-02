@@ -50,6 +50,8 @@ interface Versions {
   readonly title: Title | null;
   readonly playing: string;
   readonly picked: string | null;
+  /** The version Automatic plays, which its line in the menu names. */
+  readonly automatic: string;
 }
 
 export function DetailsView({ target }: { target: DetailsTarget }) {
@@ -64,8 +66,8 @@ export function DetailsView({ target }: { target: DetailsTarget }) {
   });
   const preferences = useQuery(queries.preferences());
   const picked = title ? pickedVersion(title, preferences.data) : null;
-  const playing =
-    picked ?? (title ? automaticVersion(title, progress.data ?? [], target.id) : target.id);
+  const automatic = title ? automaticVersion(title, progress.data ?? [], target.id) : target.id;
+  const playing = picked ?? automatic;
   const known = !listed.isPending && (!title || !progress.isPending) && !preferences.isPending;
   // Another version's details replace these once they arrive; nothing plays from them meanwhile.
   // A new target mounts a new sheet (see App), so these are only ever the same title's.
@@ -82,7 +84,7 @@ export function DetailsView({ target }: { target: DetailsTarget }) {
           {details.data ? (
             <Content
               details={details.data}
-              versions={{ title, playing, picked }}
+              versions={{ title, playing, picked, automatic }}
               switching={details.isPlaceholderData}
             />
           ) : (
@@ -354,10 +356,11 @@ function Actions({
   onBeginning: (() => void) | null;
   onRemove: (() => void) | null;
 }) {
-  const { title, playing } = versions;
+  const { title, playing, automatic } = versions;
   const all = title?.versions ?? [];
-  const labels = versionLabels(all);
-  const label = labels[all.findIndex((version) => version.id === playing)];
+  const labels = versionLabels(all, title?.originalLanguage ?? null);
+  const labelOf = (id: string) => labels[all.findIndex((version) => version.id === id)];
+  const label = labelOf(playing);
   const several = title !== null && all.length > 1;
   return (
     <div className="mt-6">
@@ -382,7 +385,12 @@ function Actions({
             {primaryLabel}
           </Button>
           {several && (
-            <VersionMenu title={title} picked={versions.picked} labels={labels}>
+            <VersionMenu
+              title={title}
+              picked={versions.picked}
+              labels={labels}
+              automatic={labelOf(automatic) ?? null}
+            >
               <ChevronDown />
             </VersionMenu>
           )}
@@ -399,7 +407,7 @@ function Actions({
           </Button>
         )}
       </div>
-      {/* What plays: "English · 4K". A version without marks says nothing. */}
+      {/* What plays: "English sound · 4K". A version without marks says nothing. */}
       {label && (several || label !== "Standard") && (
         <div className="mt-3 text-[0.8125rem] text-muted-foreground">{label}</div>
       )}
@@ -414,11 +422,14 @@ function VersionMenu({
   title,
   picked,
   labels,
+  automatic,
   children,
 }: {
   title: Title;
   picked: string | null;
   labels: readonly string[];
+  /** What Automatic plays. */
+  automatic: string | null;
   children: ReactNode;
 }) {
   const pick = usePickVersion();
@@ -438,12 +449,15 @@ function VersionMenu({
       </Menu.Trigger>
       <Menu.Portal>
         <Menu.Positioner side="bottom" align="start" sideOffset={8} className="z-[60]">
-          <Menu.Popup className="max-h-[60vh] w-[18rem] overflow-y-auto rounded-2xl bg-popover p-2 text-[0.9375rem] shadow-2xl ring-1 ring-white/12 outline-none transition-[opacity,scale] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
+          <Menu.Popup className="max-h-[60vh] w-max min-w-[18rem] max-w-[26rem] overflow-y-auto rounded-2xl bg-popover p-2 text-[0.9375rem] shadow-2xl ring-1 ring-white/12 outline-none transition-[opacity,scale] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
             <Menu.RadioGroup
               value={picked ?? AUTOMATIC}
               onValueChange={(value: string) => pick(title, value === AUTOMATIC ? null : value)}
             >
-              <VersionItem value={AUTOMATIC}>Automatic</VersionItem>
+              <VersionItem value={AUTOMATIC}>
+                Automatic
+                {automatic && <span className="text-muted-foreground"> · {automatic}</span>}
+              </VersionItem>
               {title.versions.map((version, index) => (
                 <VersionItem key={version.id} value={version.id}>
                   {labels[index]}
