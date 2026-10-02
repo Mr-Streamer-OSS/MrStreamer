@@ -195,7 +195,7 @@ async function run(start: number, attempt = 0, paused = false): Promise<void> {
     await started.started;
   } catch (error) {
     if (mine !== generation) return;
-    await recover(mine, start, asEngineError(error), attempt, false);
+    await recover(mine, start, asEngineError(error), attempt, false, paused);
     return;
   }
   if (mine !== generation) return;
@@ -208,13 +208,16 @@ async function run(start: number, attempt = 0, paused = false): Promise<void> {
     save();
   });
   started.onFailure((error) => {
-    if (mine === generation) void recover(mine, started.position(), error, 0, true);
+    if (mine !== generation) return;
+    const paused = store.getState().phase.kind === "paused";
+    void recover(mine, started.position(), error, 0, true, paused);
   });
 }
 
 /**
  * What to do about a run that failed: convert the sound once when a copied one didn't start,
- * start again where it was after the connection broke, or give up and say why.
+ * start again where it was after the connection broke, or give up and say why. A title that was
+ * paused, or was changing tracks while paused, comes back paused.
  */
 async function recover(
   mine: number,
@@ -222,6 +225,7 @@ async function recover(
   error: EngineError,
   attempt: number,
   wasPlaying: boolean,
+  paused: boolean,
 ): Promise<void> {
   const upstream = session
     ? await call("playback.failure", { sessionId: session.id }).catch(() => null)
@@ -230,7 +234,7 @@ async function recover(
   stopEngine();
   if (!upstream && !wasPlaying && !convertSound && error.kind !== "network") {
     convertSound = true;
-    await run(position, attempt);
+    await run(position, attempt, paused);
     return;
   }
   const problem = problemOf(upstream, error);
@@ -243,7 +247,7 @@ async function recover(
     phase: { kind: "reconnecting", attempt: attempt + 1, of: RECONNECT_DELAYS_MS.length },
   });
   await new Promise((resolve) => setTimeout(resolve, delay));
-  if (mine === generation) await run(position, attempt + 1);
+  if (mine === generation) await run(position, attempt + 1, paused);
 }
 
 function problemOf(upstream: StreamFailure | null, error: EngineError): PlaybackProblem {
