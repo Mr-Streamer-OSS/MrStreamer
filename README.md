@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/assets/banner.png" alt="Mr. Streamer, with its Movies page" width="100%"></p>
+<p align="center"><img src="docs/assets/banner.png" alt="Mr. Streamer, with its Home page" width="100%"></p>
 
 # Mr. Streamer
 
