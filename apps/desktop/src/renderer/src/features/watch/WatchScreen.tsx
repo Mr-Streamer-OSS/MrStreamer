@@ -5,11 +5,16 @@
 //   Enter plays, Left swaps to the lists and Right swaps back. Backspace returns to the previous
 //   channel, digits jump to a number, F is full screen, M mutes, C turns subtitles on or off, G
 //   and H move them earlier or later, I shows the details, S stars, Q opens the quality menu of a
-//   channel with several streams. While a menu is open, keys are its own.
+//   channel with several streams, P shrinks the window into the mini player and back. While a
+//   menu is open, keys are its own.
+// In the mini player the picture fills the small window; opening the list puts the window back.
+import { Play, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { hasModifier, isTyping } from "../../app/platform.ts";
+import { miniPlayer, useMiniPlayer } from "../../app/mini-player.ts";
 import { closeWatch, useUi, type ChannelList } from "../../app/ui-store.ts";
+import { Button } from "../../components/ui/button.tsx";
 import { WindowBar } from "../../components/WindowBar.tsx";
 import { useKeyboardMode } from "../../lib/input-mode.ts";
 import { useCategoryMap, useToggleFavourite } from "../../lib/queries.ts";
@@ -29,10 +34,11 @@ import {
 import { ChannelOverlay } from "./ChannelOverlay.tsx";
 import { Flash } from "./Flash.tsx";
 import { useFullscreen, useWake } from "./layout.ts";
+import { MiniControls } from "./MiniPlayer.tsx";
 import { NowPlayingBar } from "./NowPlaying.tsx";
 import { numberEntry, NumberEntry } from "./NumberEntry.tsx";
 import { nudgeSubtitles } from "./PlaybackMenu.tsx";
-import { PlaybackState } from "./PlaybackState.tsx";
+import { PlaybackState, problemTitle } from "./PlaybackState.tsx";
 import type { TrackMenu } from "./TrackMenus.tsx";
 
 /** Controls fade out after this long without input. */
@@ -43,6 +49,7 @@ const NO_CHANNELS: readonly LiveChannel[] = [];
 export function WatchScreen() {
   const [awake, wake] = useWake(IDLE_MS);
   const [fullscreen, toggleFullscreen] = useFullscreen();
+  const mini = useMiniPlayer((state) => state.on);
   const list = useUi((state) => state.list);
   const channelsOpen = useUi((state) => state.channelsOpen);
   const channels = useListChannels(list).channels ?? NO_CHANNELS;
@@ -70,6 +77,8 @@ export function WatchScreen() {
     wake();
   };
   const openChannels = () => {
+    // The list needs the full window.
+    if (miniPlayer.on()) void miniPlayer.leave();
     setPicking(false);
     setSelected(
       Math.max(
@@ -156,6 +165,7 @@ export function WatchScreen() {
           if (numberEntry.active()) numberEntry.cancel();
           else if (now.channelsOpen) closeChannels();
           else if (document.fullscreenElement) void document.exitFullscreen();
+          else if (miniPlayer.on()) void miniPlayer.leave();
           else closeWatch();
           break;
         case "ArrowUp":
@@ -203,7 +213,12 @@ export function WatchScreen() {
           else player.back();
           break;
         case "f":
-          toggleFullscreen();
+          if (miniPlayer.on()) void miniPlayer.leave(true);
+          else toggleFullscreen();
+          break;
+        case "p":
+        case "P":
+          void miniPlayer.toggle();
           break;
         case "m":
           player.toggleMute();
@@ -226,6 +241,8 @@ export function WatchScreen() {
           break;
         case "q":
           if ((now.channel?.variants.length ?? 0) < 2) return;
+          // The menu opens over the full window's controls.
+          if (miniPlayer.on()) void miniPlayer.leave();
           wake();
           setMenu("quality");
           break;
@@ -243,6 +260,59 @@ export function WatchScreen() {
 
   if (!channel) return null;
   const controlsVisible = awake || phase.kind !== "playing" || menu !== null;
+  if (mini) {
+    const playing = phase.kind !== "idle" && phase.kind !== "failed";
+    return (
+      <div
+        data-view="watch"
+        data-mini=""
+        data-controls={controlsVisible ? "" : undefined}
+        onMouseMove={wake}
+        className={cn(
+          "fixed inset-0 z-30 overflow-hidden bg-black",
+          !awake && phase.kind === "playing" && "cursor-none",
+        )}
+      >
+        <Picture
+          active
+          fit="contain"
+          className="absolute inset-0"
+          onClick={wake}
+          onDoubleClick={() => void miniPlayer.leave()}
+        />
+        <MiniControls
+          visible={controlsVisible}
+          status={
+            phase.kind === "playing"
+              ? null
+              : phase.kind === "reconnecting"
+                ? "Connection lost"
+                : phase.kind === "failed"
+                  ? problemTitle(phase.problem, channel)
+                  : channel.title
+          }
+          onClose={closeWatch}
+        >
+          {playing ? (
+            <Button variant="media" size="icon-sm" aria-label="Stop" onClick={() => player.stop()}>
+              <Square className="size-3 fill-current" />
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              size="icon-sm"
+              aria-label="Watch"
+              onClick={() => player.play(channel)}
+            >
+              <Play className="size-3.5 translate-x-px fill-current" />
+            </Button>
+          )}
+        </MiniControls>
+        <NumberEntry onChannel={(target) => player.play(target)} />
+        <Flash />
+      </div>
+    );
+  }
   return (
     <div
       data-view="watch"

@@ -95,6 +95,9 @@ video::-webkit-media-text-track-container,
 [data-view="title"][data-controls] {
   --subtitle-controls: 9rem;
 }
+[data-mini][data-controls] {
+  --subtitle-controls: 3rem;
+}
 :root[data-subtitle-position="high"] {
   --subtitle-raise: 12%;
 }

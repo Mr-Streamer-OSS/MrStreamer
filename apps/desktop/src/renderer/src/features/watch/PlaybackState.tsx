@@ -109,6 +109,11 @@ export function PlaybackState({
   );
 }
 
+/** A problem in a few words, as the mini player says it. */
+export function problemTitle(problem: PlaybackProblem, channel: LiveChannel): string {
+  return problemMessage(problem, channel, () => {}, false).title;
+}
+
 /** What a failed channel says; `playlist` for a channel of a playlist subscription. */
 function problemMessage(
   problem: PlaybackProblem,
