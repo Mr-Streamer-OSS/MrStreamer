@@ -17,7 +17,7 @@ The repository is a pnpm workspace: the app is `apps/desktop`, shared contracts 
 
 ## Running the app
 
-Mr. Streamer needs an Xtream Codes subscription to show anything; use your own. Keep its details out of the repository: the gitignored `.local/` folder is the place for private notes and test access.
+Live TV works without a subscription: on the Connect screen, choose **Use an M3U link** and paste iptv-org's public playlist, `https://iptv-org.github.io/iptv/index.m3u`. [Testing](testing.md#a-real-provider) says what it covers and how to read a channel that fails. Movies and series need a provider that offers them, through an Xtream Codes login. If you use your own subscription, keep its details out of the repository: the gitignored `.local/` folder is the place for private notes and test access.
 
 Genres, streaming services and popularity in Movies and Series come from TMDB. A development build has no key built in: set `MR_STREAMER_TMDB_KEY`, or paste one in Settings > General with **Own key…**. A free TMDB account gets one.
 
@@ -28,7 +28,7 @@ Environment variables for testing:
 | Variable                    | Effect                                                                                                                                                     |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `MR_STREAMER_FFMPEG`        | The ffmpeg to convert streams with, in development and packaged builds; its ffprobe must sit beside it. The tests read it too.                             |
-| `MR_STREAMER_UPDATE_FEED`   | The update feed to read instead of the published one; see [releasing](releasing.md#testing-updates-against-another-feed).                                  |
+| `MR_STREAMER_UPDATE_FEED`   | The update feed to read instead of the published one; see [releasing](../maintainers/releasing.md#testing-updates-against-another-feed).                   |
 | `MR_STREAMER_UPDATE_API`    | A GitHub-compatible API for when the feed is missing, instead of `https://api.github.com`.                                                                 |
 | `MR_STREAMER_UPDATE_CHECKS` | `off` stops the automatic update checks; checking from Settings still works. The packaged-app test and the measurements set it.                            |
 | `MR_STREAMER_TMDB_KEY`      | A TMDB key or read access token. At build time it's built into the app; at run time it replaces the built-in one. A key set in Settings still comes first. |
@@ -36,7 +36,7 @@ Environment variables for testing:
 
 ## Installers
 
-Each installer builds on its own system; the [release workflow](releasing.md) builds all of them. The bundled ffmpeg comes first:
+Each installer builds on its own system; the [release workflow](../maintainers/releasing.md) builds all of them. The bundled ffmpeg comes first:
 
 ```sh
 apps/desktop/scripts/build-ffmpeg.sh mac-arm64   # or linux-x64, win-x64
@@ -45,7 +45,7 @@ pnpm dist:mac                                    # or dist:win, dist:msix, dist:
 
 `build-ffmpeg.sh` needs a C compiler, make, nasm, pkg-config, git and curl. On Windows, run it in an MSYS2 MINGW64 shell; on Linux it can also cross-compile the Windows build with mingw-w64. It puts `ffmpeg`, `ffprobe` and their licences in `apps/desktop/vendor/ffmpeg/<target>`, which electron-builder copies into the app. Without them, the app still builds, but streams that need converting, and every movie and episode, report that they can't be played.
 
-A Mac build signs with a Developer ID from your keychain when one exists and notarizes when `APPLE_API_KEY`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER` are set; see [signing](signing.md). Without a Developer ID, `apps/desktop/scripts/mac-ad-hoc-sign.ts` seals the app ad hoc, so a downloaded copy opens once through System Settings > Privacy & Security > Open Anyway instead of being called damaged.
+A Mac build signs with a Developer ID from your keychain when one exists and notarizes when `APPLE_API_KEY`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER` are set; see [signing](../maintainers/signing.md). Without a Developer ID, `apps/desktop/scripts/mac-ad-hoc-sign.ts` seals the app ad hoc, so a downloaded copy opens once through System Settings > Privacy & Security > Open Anyway instead of being called damaged.
 
 ## Third-party notices
 
@@ -64,7 +64,7 @@ Chromium's credits, which hold Node.js's licence too, are 20 MB of HTML from Ele
 
 ## Artwork
 
-- App icons come from `apps/desktop/assets/brand/`; `pnpm --filter mrstreamer icons:export` renders `apps/desktop/build/icon.*` from `icon.svg` and the Store package's logos in `apps/desktop/build/appx` from `mark.svg` ([releasing](releasing.md#microsoft-store-package) lists them).
+- App icons come from `apps/desktop/assets/brand/`; `pnpm --filter mrstreamer icons:export` renders `apps/desktop/build/icon.*` from `icon.svg` and the Store package's logos in `apps/desktop/build/appx` from `mark.svg` ([releasing](../maintainers/releasing.md#microsoft-store-package) lists them).
 - The DMG window background is `apps/desktop/build/dmg-background.png` and its `@2x` twin; `pnpm --filter mrstreamer dmg:background` renders them on a Mac, so the text uses the system font.
 - The README banner, `docs/assets/banner.png`, is 2560 × 800 for sharp screens: the mark and name, in Inter, beside Home, captured from a development build on a Mac in full screen against the fake provider with made-up channels, programmes and titles. The pictures playing in it are public domain: NASA's views of Earth from the space station on the live channel, and the U.S. National Park Service's Grand Canyon footage for the series being watched. Never use a provider's catalogue, real posters or anything not free to use worldwide in it.
 - The README's screenshots, `docs/assets/live-tv.webp`, `details.webp` and `watching.webp`, are 2560 × 1600 captures of a development build in the same way: the fake provider with its guide, a TMDB stand-in answering with made-up names, stories and people, made-up posters, backdrops and portraits served in place of every image the app asks for, and a short clip of a drawn scene with English and Dutch sound and subtitles in place of the two-track test film. The fake provider's test category is hidden. The same rule holds: nothing from a real provider, film or person.

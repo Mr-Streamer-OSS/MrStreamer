@@ -8,7 +8,7 @@ Outcome: comfortable daily viewing on the Mac and Windows, verified Linux packag
 
 - What users see: [Live TV](../../user/live-tv.md), [Movies and series](../../user/movies-and-series.md), [What plays](../../user/playback.md), [Updates](../../user/updates.md) and the [privacy policy](../../privacy.md).
 - Readiness: the [release readiness record](../release-readiness.md) for licences, content and the launch gates, and the [privacy audit](../privacy-audit.md) behind the policy.
-- How it works: [architecture](../architecture.md), [testing](../testing.md), [releasing](../releasing.md), [signing](../signing.md), and slice 5's [known gaps](05-tracks-languages-and-details.md#known-gaps), carried below.
+- How it works: [architecture](../../contributing/architecture.md), [testing](../../contributing/testing.md), [releasing](../releasing.md), [signing](../signing.md), and slice 5's [known gaps](05-tracks-languages-and-details.md#known-gaps), carried below.
 - Store: [Microsoft Store setup](../microsoft-store.md) owns the dashboard steps, the package identity and the private submission checklist. This handoff owns product scope and acceptance.
 - Baseline: `main` at `87d740e`. Stable 0.0.3, published on 2 October 2026, was built from `d87f835`. Implementation starts from the latest `main`, and each pull request records the commit it started from.
 - The second review covered `6a128ac`. Its fixes, #37 to #44, and the later #46 and #47 merged after it. A merged fix isn't independent verification, so recheck their behaviour on the implementation baseline.
@@ -328,7 +328,7 @@ Slice 5's known gaps:
 | Memory, Home stopped (MB)      | 842       | 851       | 845        | 821       | 831       | 823        |
 | Installed size (MB)            | 261       | 280       | 279        | 297       | 297       | 297        |
 
-Nothing reaches the warning line of `compare-builds.ts` ([testing](../testing.md#app-measurements)): more than 10% worse and beyond the noise of 20 ms, 1 CPU point or 10 MB. A long series shows its name at once (#91), from 77 to 26 ms on the Mac and 299 to 48 ms on the VPS; its episodes still wait for the provider. #91's gain with a slow TMDB isn't exercised here. The Mac's installed size grew 19 MB with Chromium's credits (#54). Idle CPU with Home stopped (+0.4 to 0.5 points) and memory (+3 to 9 MB) moved within noise. The VPS's channel-switch drop is noise; the Mac's stayed flat.
+Nothing reaches the warning line of `compare-builds.ts` ([testing](../../contributing/testing.md#app-measurements)): more than 10% worse and beyond the noise of 20 ms, 1 CPU point or 10 MB. A long series shows its name at once (#91), from 77 to 26 ms on the Mac and 299 to 48 ms on the VPS; its episodes still wait for the provider. #91's gain with a slow TMDB isn't exercised here. The Mac's installed size grew 19 MB with Chromium's credits (#54). Idle CPU with Home stopped (+0.4 to 0.5 points) and memory (+3 to 9 MB) moved within noise. The VPS's channel-switch drop is noise; the Mac's stayed flat.
 
 Every build opens one stream per switch and none from Home to Watch. Tuning opens two for channels with MP2 or MP3 sound in every build, 0.0.3 included; the likely cause is a retry after a refusal while the fake provider frees its slot, unconfirmed.
 

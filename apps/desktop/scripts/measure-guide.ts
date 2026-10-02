@@ -1,4 +1,4 @@
-// Measures the programme guide against the slice 03 budgets: download and index under 3 s, no
+// Measures the programme guide against its budgets: download and index under 3 s, no
 // main-process stall over 50 ms, now and next for a screen of channels under 5 ms, and under 80 MB
 // of memory. Uses a generated guide the size of a large subscription, or a real XMLTV file.
 //

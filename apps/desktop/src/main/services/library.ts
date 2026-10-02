@@ -34,7 +34,7 @@ const SHRINK_CONFIRM_DELAY: Duration.Input = "3 seconds";
 
 // The cache stores the catalogue as the provider sent it, and display names are worked out on
 // load, so improved naming rules apply without fetching again. The newest stable release reads it
-// too (see docs/maintainers/architecture.md), so fields are added without a new version: a file
+// too (see docs/contributing/architecture.md), so fields are added without a new version: a file
 // written before guide ids or the adult flag still loads, and counts as outdated.
 const CachedCatalogue = type({
   version: "4",

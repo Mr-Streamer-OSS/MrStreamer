@@ -27,7 +27,7 @@ In a random sample of 45 channels, 17 didn't answer (off air, or the single conn
 
 ## Candidates
 
-1. **Chromium alone**: mpegts.js into Chromium's decoders, the slice 01 player.
+1. **Chromium alone**: mpegts.js into Chromium's decoders, the first player.
 2. **Chromium plus a bundled ffmpeg**: the design now shipped. Streams Chromium decodes pass through untouched; ffmpeg converts only the tracks it can't, starts streams on a decodable picture, and repairs damaged broadcasts.
 3. **mpv**: the standalone player, as the reference for what libmpv would decode and what it costs. Embedding libmpv in the window was not built: it needs native code per platform to place a video surface under a transparent window, has no Wayland support, and adds libraries to sign and ship.
 
@@ -83,7 +83,7 @@ Windows and Linux budgets follow their measurements on real hardware.
 
 ## Movies and episodes
 
-Slice 04 read the on-demand side of the same subscription: 53,422 movies and 10,440 series. Of the movies, 66 % are MKV, 33 % MP4, 1 % AVI, and a few dozen MPEG-TS, MPEG-PS, M4V and FLV. Every file sits behind a redirect to a CDN that answers byte ranges.
+The on-demand side of the same subscription, read before movies and series were built, held 53,422 movies and 10,440 series. Of the movies, 66 % are MKV, 33 % MP4, 1 % AVI, and a few dozen MPEG-TS, MPEG-PS, M4V and FLV. Every file sits behind a redirect to a CDN that answers byte ranges.
 
 ffprobe through a local range proxy read 17 of 20 sampled files; the other three didn't answer:
 
@@ -107,7 +107,7 @@ libmpv stays the fallback if a format turns up that this can't handle; none has 
 
 ## Subtitles beyond text
 
-Slice 5 shows every subtitle format a stream carries: PGS (Blu-ray), DVD and DivX pictures, DVB subtitles, teletext pages and closed captions (CEA-608), on live channels as well as in movies and episodes. Two ways to show pictures were compared on a 1080p H.264 file with PGS subtitles, using the bundled ffmpeg:
+Mr. Streamer shows every subtitle format a stream carries: PGS (Blu-ray), DVD and DivX pictures, DVB subtitles, teletext pages and closed captions (CEA-608), on live channels as well as in movies and episodes. Two ways to show pictures were compared on a 1080p H.264 file with PGS subtitles, using the bundled ffmpeg:
 
 | Design                                                    | CPU for 6 s of 1080p | Picture              |
 | --------------------------------------------------------- | -------------------- | -------------------- |

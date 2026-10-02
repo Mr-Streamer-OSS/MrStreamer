@@ -10,21 +10,20 @@
 - [Troubleshooting](./user/troubleshooting.md)
 - [Privacy policy](./privacy.md)
 
----
+## Contributing
 
-## Working on Mr. Streamer
+Start with the [contribution policy](../CONTRIBUTING.md).
 
-Start with the [development runbook](./maintainers/development.md) and the [contribution policy](../CONTRIBUTING.md). Planning for the current slice lives in [planning](./maintainers/README.md).
+- [Development](./contributing/development.md): setup, running the app, installers, notices and artwork
+- [Testing](./contributing/testing.md): the suite, the fake provider, a real provider and measurements
+- [Architecture](./contributing/architecture.md)
+- [Playback evaluation](./contributing/playback-evaluation.md): why playback works the way it does
 
-- [Architecture](./maintainers/architecture.md)
-- [Playback evaluation](./maintainers/playback.md)
-- [Privacy audit](./maintainers/privacy-audit.md)
-- [Release readiness](./maintainers/release-readiness.md): licences, content and launch questions
-- [Testing](./maintainers/testing.md)
+## Maintaining
 
-### Runbooks
-
-- [Development and local builds](./maintainers/development.md)
 - [Releasing](./maintainers/releasing.md)
 - [Signing](./maintainers/signing.md)
 - [Microsoft Store setup](./maintainers/microsoft-store.md)
+- [Privacy audit](./maintainers/privacy-audit.md)
+- [Release readiness](./maintainers/release-readiness.md): licences, content and launch questions
+- [Planning](./maintainers/README.md)

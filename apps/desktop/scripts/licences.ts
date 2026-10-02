@@ -8,7 +8,7 @@
 // The build fails when a package declares no licence, has no licence file and no override, ships
 // under a licence missing from COMPATIBLE, refers to a licence in FULL_TEXT without including it,
 // or carries a package that is neither installed nor in the config.
-// docs/maintainers/development.md describes the config.
+// docs/contributing/development.md describes the config.
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { dirname, extname, join } from "node:path";
