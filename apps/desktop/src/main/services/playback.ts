@@ -31,6 +31,7 @@ import type {
 import { audioTracks, languageCode, subtitleTracks } from "@mrstreamer/core/ondemand/tracks";
 import { Diagnostics } from "@mrstreamer/core/diagnostics";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
+import type { Provider } from "@mrstreamer/core/provider";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -81,6 +82,8 @@ interface SessionBase {
   /** What the UI's player decodes. */
   readonly decoders: ReadonlySet<Codec>;
   readonly upstreamUrl: string;
+  /** Requests `upstreamUrl` through the provider, which never sends the login unencrypted. */
+  readonly request: Provider["request"];
   /** Aborts every upstream request of this session when its scope closes. */
   readonly closed: AbortController;
   readonly scope: Scope.Closeable;
@@ -136,7 +139,6 @@ export interface PlaybackDeps {
   readonly ffmpeg: string | null;
   /** The ffprobe that reads what movie files hold, or null when this build has none. */
   readonly ffprobe?: string | null;
-  readonly fetch?: typeof fetch;
 }
 
 export class Playback extends Context.Service<
@@ -187,7 +189,6 @@ function make(deps: PlaybackDeps) {
     const subscriptions = yield* Subscriptions;
     const diagnostics = yield* Diagnostics;
     const scope = yield* Effect.scope;
-    const fetchImpl = deps.fetch ?? fetch;
     const sessions = new Map<string, Session>();
     /** Opens one at a time, so switching fast never leaves two sessions open. */
     const openOne = (yield* Semaphore.make(1)).withPermits(1);
@@ -286,7 +287,7 @@ function make(deps: PlaybackDeps) {
       response.on("close", () => active.abort());
       const signal = AbortSignal.any([session.closed.signal, active.signal]);
 
-      const upstream = await connect(session.upstreamUrl, {}, signal);
+      const upstream = await connect(session, {}, signal);
       if (signal.aborted) {
         if (upstream.ok) void upstream.response.body?.cancel().catch(() => {});
         response.destroy();
@@ -446,7 +447,7 @@ function make(deps: PlaybackDeps) {
       const headers: Record<string, string> = request.headers.range
         ? { Range: request.headers.range }
         : {};
-      const found = await connect(session.upstreamUrl, headers, signal, FILE_RETRY_DELAYS_MS);
+      const found = await connect(session, headers, signal, FILE_RETRY_DELAYS_MS);
       if (signal.aborted) {
         if (found.ok) void found.response.body?.cancel().catch(() => {});
         response.destroy();
@@ -787,7 +788,7 @@ function make(deps: PlaybackDeps) {
      * to free the connection of a request we just closed.
      */
     async function connect(
-      url: string,
+      session: Session,
       headers: Readonly<Record<string, string>>,
       signal: AbortSignal,
       retryDelays: readonly number[] = REFUSED_RETRY_DELAYS_MS,
@@ -797,7 +798,7 @@ function make(deps: PlaybackDeps) {
         const timer = setTimeout(() => timeout.abort(), CONNECT_TIMEOUT_MS);
         let response: Response;
         try {
-          response = await fetchImpl(url, {
+          response = await session.request(session.upstreamUrl, {
             headers: { "User-Agent": deps.userAgent, ...headers },
             signal: AbortSignal.any([signal, timeout.signal]),
           });
@@ -808,7 +809,9 @@ function make(deps: PlaybackDeps) {
               kind: "network",
               detail: timeout.signal.aborted
                 ? "The provider did not answer in time."
-                : String(cause),
+                : cause instanceof Error
+                  ? cause.message
+                  : String(cause),
             },
           };
         } finally {
@@ -858,6 +861,7 @@ function make(deps: PlaybackDeps) {
               token: randomBytes(18).toString("base64url"),
               channelId,
               upstreamUrl: upstream.url,
+              request: source.provider.request,
               format: upstream.format,
               decoders: new Set(decoders),
               repair: options.repair ?? false,
@@ -885,9 +889,8 @@ function make(deps: PlaybackDeps) {
       openTitle: (title: TitleRef, upstreamUrl: string, decoders: readonly Codec[]) =>
         openOne(
           Effect.gen(function* () {
-            if (!(yield* subscriptions.source)) {
-              return yield* new Failed({ error: { kind: "no-subscription" } });
-            }
+            const source = yield* subscriptions.source;
+            if (!source) return yield* new Failed({ error: { kind: "no-subscription" } });
             yield* closeAll;
             const id = randomUUID();
             const closed = new AbortController();
@@ -905,6 +908,7 @@ function make(deps: PlaybackDeps) {
               token: randomBytes(18).toString("base64url"),
               title,
               upstreamUrl,
+              request: source.provider.request,
               decoders: new Set(decoders),
               closed,
               scope: sessionScope,
