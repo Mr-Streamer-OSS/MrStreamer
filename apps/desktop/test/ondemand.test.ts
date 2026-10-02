@@ -222,5 +222,8 @@ describe("movies and series", { timeout: 20_000 }, () => {
     await expect(app.onDemand.search("story")).rejects.toMatchObject({
       error: { kind: "no-subscription" },
     });
+    await expect(app.onDemand.season("80000", 1)).rejects.toMatchObject({
+      error: { kind: "no-subscription" },
+    });
   });
 });

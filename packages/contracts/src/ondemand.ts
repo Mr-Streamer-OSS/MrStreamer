@@ -119,6 +119,20 @@ export interface Episode {
   readonly airDate: string | null;
 }
 
+/**
+ * An episode once the viewer opened its season: TMDB's name in the viewer's language, story,
+ * still, air date, rating and credits where it has them, the provider's otherwise. The file's own
+ * length comes first, since it is what plays.
+ */
+export interface EpisodeDetails extends Episode {
+  /** Out of 10 on TMDB; null before anyone voted, or without TMDB. */
+  readonly rating: number | null;
+  /** The guest stars, with the part they play and a portrait. */
+  readonly cast: readonly Person[];
+  readonly directors: readonly string[];
+  readonly writers: readonly string[];
+}
+
 /** When the movie and series lists were last fetched, and how big they are. */
 export interface OnDemandStatus {
   readonly movies: number;

@@ -254,6 +254,136 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
     const { onDemand } = await app.start();
     expect((await onDemand.status()).metadata).toBeNull();
     expect(app.tmdb.detailRequests()).toBe(0);
+    // A season's episodes are the provider's.
+    const episodes = await onDemand.season(SERIES, 1);
+    expect(episodes.map((episode) => episode.title)).toEqual(["Part 1", "Part 2", "Part 3"]);
+    expect(app.tmdb.seasonRequests()).toEqual([]);
+  });
+});
+
+/**
+ * "TEST | Formats (NL)": three episodes in its first season and two in its second on the provider;
+ * on TMDB, 90000, made in Dutch, four in its first and one in its second.
+ */
+const SERIES = "80000";
+
+describe("episode details", { timeout: 30_000 }, () => {
+  it("asks TMDB about a season only once it opens, for the episodes the provider has", async () => {
+    const app = await metadataApp();
+    const { runtime, onDemand } = await app.start();
+    await (await promised(runtime, Settings)).update({ titleLanguage: "nl" });
+    const details = await onDemand.details("series", SERIES);
+    if (details.kind !== "series") throw new Error("Not a series.");
+    expect(app.tmdb.seasonRequests()).toEqual([]);
+
+    const first = await onDemand.season(SERIES, 1);
+
+    expect(app.tmdb.seasonRequests()).toEqual(["90000/1/nl"]);
+    // The provider's three, not TMDB's fourth.
+    expect(first.map((episode) => episode.id)).toEqual(
+      details.seasons[0]?.episodes.map((episode) => episode.id),
+    );
+    expect(first[0]).toEqual({
+      ...details.seasons[0]?.episodes[0],
+      title: "Origineel 1x1",
+      plot: "TMDB's story of Origineel 1x1.",
+      stillUrl: "https://image.tmdb.org/t/p/w780/still-90000-1-1.jpg",
+      airDate: "2020-01-01",
+      // The file's own length stands.
+      duration: 2700,
+      rating: 8.2,
+      cast: [
+        {
+          name: "Gus Guest",
+          role: "The Visitor",
+          photoUrl: "https://image.tmdb.org/t/p/w185/gus.jpg",
+        },
+      ],
+      directors: ["Dora Director"],
+      writers: ["Wim Writer"],
+    });
+
+    // Opened again, it asks no one; the second season asks once it opens.
+    await onDemand.season(SERIES, 1);
+    const second = await onDemand.season(SERIES, 2);
+    expect(app.tmdb.seasonRequests()).toEqual(["90000/1/nl", "90000/2/nl"]);
+    // TMDB lists one episode there; the provider's other keeps its own details.
+    expect(second.map((episode) => [episode.title, episode.rating])).toEqual([
+      ["Origineel 2x1", 8.2],
+      ["Part 2", null],
+    ]);
+  });
+
+  it("names episodes in the viewer's language, else in English, else in the series' own", async () => {
+    const app = await metadataApp();
+    const { runtime, onDemand } = await app.start();
+    const settings = await promised(runtime, Settings);
+    await settings.update({ titleLanguage: "de" });
+
+    const episodes = await onDemand.season(SERIES, 1);
+
+    // TMDB names none in German, the odd ones in English, and all in Dutch, the series' own.
+    expect(episodes.map((episode) => [episode.title, episode.plot])).toEqual([
+      ["English 1x1", "TMDB's story of English 1x1."],
+      ["Origineel 1x2", "TMDB's story of Origineel 1x2."],
+      ["English 1x3", "TMDB's story of English 1x3."],
+    ]);
+    expect(app.tmdb.seasonRequests()).toEqual(["90000/1/de", "90000/1/en", "90000/1/nl"]);
+
+    // In English, what TMDB said in English and Dutch serves again.
+    await settings.update({ titleLanguage: "en" });
+    const english = await onDemand.season(SERIES, 1);
+    expect(english.map((episode) => episode.title)).toEqual([
+      "English 1x1",
+      "Origineel 1x2",
+      "English 1x3",
+    ]);
+    expect(app.tmdb.seasonRequests()).toHaveLength(3);
+  });
+
+  it("gives each version of a series its own episodes, from the same answers", async () => {
+    const app = await metadataApp();
+    const { onDemand } = await app.start();
+
+    const dutch = await onDemand.season(SERIES, 1);
+    const english = await onDemand.season("79998", 1);
+
+    expect(dutch.map((episode) => [episode.id, episode.title])).toEqual([
+      ["81000", "English 1x1"],
+      ["81001", "Origineel 1x2"],
+      ["81002", "English 1x3"],
+    ]);
+    expect(english.map((episode) => [episode.id, episode.title])).toEqual([
+      ["799980", "English 1x1"],
+      ["799981", "Origineel 1x2"],
+    ]);
+    expect(app.tmdb.seasonRequests()).toEqual(["90000/1/en", "90000/1/nl"]);
+  });
+
+  it("keeps the provider's episodes while TMDB fails or is slow, and asks again later", async () => {
+    const app = await metadataApp();
+    const { onDemand } = await app.start();
+    const titles = async () => (await onDemand.season(SERIES, 1)).map((episode) => episode.title);
+
+    app.tmdb.failSeasons(500);
+    expect(await titles()).toEqual(["Part 1", "Part 2", "Part 3"]);
+    app.tmdb.failSeasons("hold");
+    const started = Date.now();
+    const slow = titles();
+    // Playing an episode doesn't wait for it.
+    await onDemand.file({ kind: "episode", id: "81000", seriesId: SERIES, season: 1, episode: 1 });
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(await slow).toEqual(["Part 1", "Part 2", "Part 3"]);
+    expect(Date.now() - started).toBeLessThan(6000);
+
+    app.tmdb.failSeasons(null);
+    expect(await titles()).toEqual(["English 1x1", "Origineel 1x2", "English 1x3"]);
+    expect(app.tmdb.seasonRequests()).toEqual([
+      "90000/1/en",
+      "90000/1/en",
+      "90000/1/en",
+      "90000/1/nl",
+    ]);
   });
 });
 

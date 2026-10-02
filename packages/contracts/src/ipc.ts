@@ -16,6 +16,7 @@ import {
   type CollectionPage,
   type CollectionRow,
   type CollectionTile,
+  type EpisodeDetails,
   type OnDemandStatus,
   type Title,
   type TitleMatches,
@@ -84,6 +85,8 @@ export const ipcInputs = {
       limit: "1 <= number.integer <= 500",
     }),
   "ondemand.details": () => type({ kind: titleKind(), id: "string > 0" }),
+  /** One season of a series version, by number, asked for when the viewer opens it. */
+  "ondemand.season": () => type({ id: "string > 0", season: "number.integer >= 0" }),
   "ondemand.titles": () => type({ kind: titleKind(), ids: "string[]" }),
   "playback.open": () =>
     type({
@@ -158,6 +161,11 @@ export interface IpcOutputs {
   "ondemand.searchKind": TitleMatches;
   /** A title's details, asked for when the viewer opens it: the provider's and TMDB's. */
   "ondemand.details": TitleDetails;
+  /**
+   * The season's episodes as the provider lists them, in its order, with TMDB's name, story,
+   * still, date, rating and credits where it has them. Asks TMDB about that season alone.
+   */
+  "ondemand.season": readonly EpisodeDetails[];
   /**
    * Movies or series by the id of any of their versions, from the lists alone, in the order
    * asked; ids the lists don't have are left out. Asks the provider nothing.

@@ -1,6 +1,7 @@
 // A stand-in for TMDB's API: every film and series it is asked about exists, with genres, a
-// language and names that follow from its id (see `tmdbName`), and one streaming service streams
-// the first titles it is told about.
+// language and names that follow from its id (see `tmdbName`), every series has two seasons whose
+// episodes are named the same way (see `tmdbEpisodeName`), and one streaming service streams the
+// first titles it is told about.
 import { createServer } from "node:http";
 
 export interface FakeTmdb {
@@ -9,6 +10,10 @@ export interface FakeTmdb {
   detailRequests(language?: string): number;
   /** Of those, the ones a title's details made as it opened, with its credits. */
   aboutRequests(): number;
+  /** Requests for a season's episodes so far, in order: "90000/1/nl", by series, season, language. */
+  seasonRequests(): readonly string[];
+  /** Makes season requests answer with this HTTP status, or never, or restores them with null. */
+  failSeasons(answer: number | "hold" | null): void;
   /** Makes every request answer 401, as for a revoked key, or restores them. */
   refuse(refused: boolean): void;
   /** What the service streams, as TMDB ids, by kind. */
@@ -31,16 +36,73 @@ export function tmdbName(id: number, language: string): { name: string; original
   return { name: original, original };
 }
 
+/**
+ * The name the fake TMDB gives an episode of series `id` in `language`, "Episode 2" where it has
+ * none, as TMDB answers. Series made in Dutch, every third, name theirs "Origineel 1x2", the rest
+ * "Original 1x2". English translates the odd episodes, "English 1x3"; Dutch translates all,
+ * "Nederlands 1x2"; other languages none.
+ */
+function tmdbEpisodeName(id: number, season: number, episode: number, language: string): string {
+  const madeIn = id % 3 === 0 ? "nl" : "en";
+  const numbered = `${season}x${episode}`;
+  if (language === madeIn) return `${madeIn === "nl" ? "Origineel" : "Original"} ${numbered}`;
+  if (language === "en" && episode % 2 === 1) return `English ${numbered}`;
+  if (language === "nl") return `Nederlands ${numbered}`;
+  return `Episode ${episode}`;
+}
+
+/** Episodes per season the fake TMDB lists for every series: four in the first, one in the second. */
+const SEASON_EPISODES = [4, 1];
+
 export async function startFakeTmdb(): Promise<FakeTmdb> {
   const details = new Map<string, number>();
   let about = 0;
   let refused = false;
+  const seasons: string[] = [];
+  let seasonFailure: number | "hold" | null = null;
   const streamed: Record<string, readonly string[]> = { movie: [], tv: [] };
   const json = (response: import("node:http").ServerResponse, body: unknown, status = 200) =>
     response.writeHead(status, { "Content-Type": "application/json" }).end(JSON.stringify(body));
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://tmdb");
     if (refused) return json(response, { status_code: 7 }, 401);
+    const season = /^\/3\/tv\/(\d+)\/season\/(\d+)$/.exec(url.pathname);
+    if (season) {
+      const language = url.searchParams.get("language") ?? "en";
+      const id = Number(season[1]);
+      const number = Number(season[2]);
+      seasons.push(`${id}/${number}/${language}`);
+      if (seasonFailure === "hold") return;
+      if (seasonFailure !== null) return json(response, { status_code: 11 }, seasonFailure);
+      const count = SEASON_EPISODES[number - 1];
+      if (count === undefined) return json(response, { status_code: 34 }, 404);
+      return json(response, {
+        season_number: number,
+        episodes: Array.from({ length: count }, (_, index) => {
+          const episode = index + 1;
+          const name = tmdbEpisodeName(id, number, episode, language);
+          return {
+            episode_number: episode,
+            season_number: number,
+            name,
+            overview: name.startsWith("Episode") ? "" : `TMDB's story of ${name}.`,
+            still_path: `/still-${id}-${number}-${episode}.jpg`,
+            air_date: `2020-0${number}-0${episode}`,
+            runtime: 50,
+            vote_average: 8.2,
+            vote_count: 12,
+            crew: [
+              { name: "Dora Director", job: "Director" },
+              { name: "Wim Writer", job: "Writer" },
+              { name: "Cas Camera", job: "Director of Photography" },
+            ],
+            guest_stars: [
+              { name: "Gus Guest", character: "The Visitor", profile_path: "/gus.jpg" },
+            ],
+          };
+        }),
+      });
+    }
     const title = /^\/3\/(movie|tv)\/(\d+)$/.exec(url.pathname);
     if (title) {
       const language = url.searchParams.get("language") ?? "en";
@@ -101,6 +163,10 @@ export async function startFakeTmdb(): Promise<FakeTmdb> {
   return {
     url: `http://127.0.0.1:${port}/3`,
     aboutRequests: () => about,
+    seasonRequests: () => [...seasons],
+    failSeasons: (answer) => {
+      seasonFailure = answer;
+    },
     detailRequests: (language) =>
       language === undefined
         ? [...details.values()].reduce((sum, count) => sum + count, 0)
@@ -111,6 +177,11 @@ export async function startFakeTmdb(): Promise<FakeTmdb> {
     stream: (kind, ids) => {
       streamed[kind] = ids;
     },
-    close: () => new Promise((resolve) => server.close(() => resolve())),
+    close: () =>
+      new Promise((resolve) => {
+        server.close(() => resolve());
+        // A season held open would keep it from closing.
+        server.closeAllConnections();
+      }),
   };
 }
