@@ -174,8 +174,14 @@ async function playMovie(page: Page): Promise<{ ok: boolean; detail: string }> {
     };
   }
   await key(page, "ArrowRight", 39);
-  await delay(1500);
-  const skipped = await state();
+  // A skip into what's buffered is instant. Further, a new run starts there, and the element's
+  // clock reads 0 until its first picture arrives, about two seconds on a busy machine.
+  let skipped = await state();
+  const skipUntil = Date.now() + 10_000;
+  while (Date.now() < skipUntil && skipped.time < started.time + 9) {
+    await delay(250);
+    skipped = await state();
+  }
   await key(page, "Escape", 27);
   await delay(1500);
   const open = provider.activeStreams();
