@@ -22,7 +22,7 @@ import { appNotices, Licences } from "./services/licences.ts";
 import { Playback } from "./services/playback.ts";
 import { Settings } from "./services/preferences.ts";
 import { Subscriptions } from "./services/subscription.ts";
-import { Updates, type UpdatesDeps } from "./services/updates.ts";
+import { Updates, type UpdatesConfig } from "./services/updates.ts";
 
 export interface MainConfig {
   readonly dataDir: string;
@@ -32,7 +32,7 @@ export interface MainConfig {
   readonly ffmpeg: string | null;
   /** The ffprobe that reads movie files, or null when this build has none. */
   readonly ffprobe?: string | null;
-  readonly updates: Omit<UpdatesDeps, "dataDir">;
+  readonly updates: UpdatesConfig;
   /** Starts the movie and series catalogue's worker thread. */
   readonly catalogueWorker: OnDemandDeps["worker"];
   /** The app's TMDB key, or null in builds without one. */

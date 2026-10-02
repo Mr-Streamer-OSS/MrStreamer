@@ -9,6 +9,9 @@
 // user who installs a stable build stays on Nightly. Switching a nightly build to Stable offers
 // the newest stable release even when it is older, and installs it over the nightly like any
 // update: this device's data stays.
+//
+// A copy installed as an MSIX package, as the Microsoft Store installs it, leaves all of this to
+// the Store, which only carries stable releases: the service offers nothing and opens the Store.
 import { join } from "node:path";
 import { type } from "arktype";
 import type {
@@ -26,6 +29,7 @@ import {
   type Version,
 } from "@mrstreamer/contracts/version";
 import { diagnosed, Diagnostics } from "@mrstreamer/core/diagnostics";
+import { failedWith, type Failed } from "@mrstreamer/core/failure";
 import { DiscoveryFailed, newestOn, type Offer } from "@mrstreamer/core/updates/feed";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -73,16 +77,31 @@ export const DEFAULT_SCHEDULE: CheckSchedule = { first: "20 seconds", every: "4 
 /** Waits after automatic checks that failed in a row, the last one repeating. */
 const RETRY_AFTER = ["15 minutes", "30 minutes", "1 hour", "2 hours", "4 hours"] as const;
 
-export interface UpdatesDeps {
-  readonly dataDir: string;
-  /** The running build's version. */
-  readonly installed: string;
+/** A copy installed from the app's own download: the app finds, downloads and installs updates. */
+export interface DirectUpdates {
   /** Finds releases this platform can install. Rejects with `DiscoveryFailed`. */
   readonly discover: (signal: AbortSignal) => Promise<readonly Offer[]>;
   readonly installer: Installer;
   /** When automatic checks run; null for none, as in most tests. */
   readonly schedule?: CheckSchedule | null;
 }
+
+/**
+ * A copy installed as an MSIX package, as the Microsoft Store installs it. The Store updates it,
+ * so the app never checks, downloads or installs, and needs no installer.
+ */
+export interface StoreUpdates {
+  /** Opens the app's page in the Store, which offers its update there. */
+  readonly openStore: () => Promise<void>;
+}
+
+/** What the app passes in: its version, and who updates this copy. */
+export type UpdatesConfig = {
+  /** The running build's version. */
+  readonly installed: string;
+} & (DirectUpdates | StoreUpdates);
+
+export type UpdatesDeps = UpdatesConfig & { readonly dataDir: string };
 
 export class Updates extends Context.Service<
   Updates,
@@ -111,11 +130,14 @@ export class Updates extends Context.Service<
     readonly restart: Effect.Effect<void>;
     /** Closes the notice for `version`. Settings keeps offering it; a newer version notifies. */
     dismiss(version: string): Effect.Effect<UpdateStatus>;
+    /** Opens the app's page in the Microsoft Store, for a Store copy. Does nothing for a direct one. */
+    readonly openStore: Effect.Effect<void, Failed>;
     /** The status after every change, such as a download's progress. */
     readonly changes: Stream.Stream<UpdateStatus>;
   }
 >()("mrstreamer/Updates") {
-  static readonly layer = (deps: UpdatesDeps) => Layer.effect(Updates, make(deps));
+  static readonly layer = (deps: UpdatesDeps) =>
+    Layer.effect(Updates, "openStore" in deps ? storeManaged(deps) : make(deps));
 }
 
 const SETTINGS_FILE = "updates.json";
@@ -127,7 +149,7 @@ function receives(channel: Channel, version: string): boolean {
   return channel === "nightly" || !parseVersion(version)?.nightly;
 }
 
-function make(deps: UpdatesDeps) {
+function make(deps: UpdatesDeps & DirectUpdates) {
   return Effect.gen(function* () {
     const scope = yield* Effect.scope;
     const diagnostics = yield* Diagnostics;
@@ -170,6 +192,7 @@ function make(deps: UpdatesDeps) {
 
     const snapshot = (): UpdateStatus => ({
       version: deps.installed,
+      distribution: "direct",
       channel,
       update,
       offer: offerOf(target, update),
@@ -400,8 +423,39 @@ function make(deps: UpdatesDeps) {
           return snapshot();
         }),
 
+      openStore: Effect.void,
+
       changes: Stream.fromPubSub(updates),
     };
+  });
+}
+
+/**
+ * Updates for a Store copy, which the Store delivers: nothing here checks, downloads, installs or
+ * changes, and nothing reads or writes updates.json. The one action opens the Store.
+ */
+function storeManaged(deps: UpdatesDeps & StoreUpdates) {
+  const status: UpdateStatus = {
+    version: deps.installed,
+    distribution: "store",
+    channel: "stable",
+    update: { kind: "idle" },
+    offer: null,
+    checked: null,
+    nextCheckAt: null,
+    dismissed: null,
+  };
+  const unchanged = Effect.succeed(status);
+  return Effect.succeed({
+    status: unchanged,
+    check: unchanged,
+    setChannel: () => unchanged,
+    download: unchanged,
+    cancel: Effect.void,
+    restart: Effect.void,
+    dismiss: () => unchanged,
+    openStore: Effect.tryPromise({ try: () => deps.openStore(), catch: failedWith }),
+    changes: Stream.empty,
   });
 }
 

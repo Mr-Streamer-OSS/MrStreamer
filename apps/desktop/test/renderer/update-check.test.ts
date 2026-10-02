@@ -1,23 +1,27 @@
 // @vitest-environment happy-dom
 // Settings > General's Updates: a newer release can come out after the one on offer, so Check now
 // stays beside Download. While an update downloads or waits for its restart, there is nothing to
-// check.
+// check. A copy the Microsoft Store installed leaves updates to the Store.
 import { ipc } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
-import type { UpdatePhase, UpdateStatus } from "@mrstreamer/contracts/updates";
+import type { Distribution, UpdatePhase, UpdateStatus } from "@mrstreamer/contracts/updates";
 import { UpdatesSection } from "../../src/renderer/src/features/updates/UpdatesSection.tsx";
 
 let unmount = () => {};
 afterEach(() => unmount());
 
 /** Settings' update rows for `update`, and the names of their buttons. */
-async function buttonsFor(update: UpdatePhase): Promise<HTMLElement> {
+async function buttonsFor(
+  update: UpdatePhase,
+  distribution: Distribution = "direct",
+): Promise<HTMLElement> {
   ipc.reset();
   const status: UpdateStatus = {
     version: "0.0.3-nightly.20261001.46",
+    distribution,
     channel: "nightly",
     update,
     offer: { version: "0.0.3-nightly.20261002.47", notes: null, page: null },
@@ -53,5 +57,18 @@ describe("checking for updates in Settings", () => {
     { kind: "ready", version: "0.0.3-nightly.20261002.47" } as const,
   ])("isn't offered while an update is $kind", async (update) => {
     expect(named(await buttonsFor(update), "Check now")).toBeUndefined();
+  });
+});
+
+describe("updates for a copy the Microsoft Store installed", () => {
+  it("only opens the Store", async () => {
+    const rows = await buttonsFor({ kind: "idle" }, "store");
+
+    expect([...rows.querySelectorAll("button")].map((button) => button.textContent)).toEqual([
+      "Open Store",
+    ]);
+    expect(rows.querySelector("select")).toBeNull();
+    await act(async () => named(rows, "Open Store")?.click());
+    expect(ipc.argsOf("updates.openStore")).toHaveLength(1);
   });
 });

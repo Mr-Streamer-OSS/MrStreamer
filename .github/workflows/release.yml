@@ -398,12 +398,25 @@ jobs:
           $family = (Get-AppxPackage MrStreamerOSS.Mr.Streamer).PackageFamilyName
           if ($family -cne "MrStreamerOSS.Mr.Streamer_5yzg1erdm3xmr") { echo "::error::Installed as $family."; exit 1 }
 
-      # Started by its path, the app runs with the package's identity, as it does from Start.
+      # Started by its path, the app runs with the package's identity, as it does from Start, so
+      # the test also expects it to leave updates to the Store.
       - name: Smoke test the installed package
         run: |
           $package = Get-AppxPackage MrStreamerOSS.Mr.Streamer
           node test/e2e/packaged-app.ts (Join-Path $package.InstallLocation "app\Mr. Streamer.exe")
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # Started as a user would, a Store copy keeps its data in a folder of its own inside the
+      # package's, apart from a direct copy's; docs/maintainers/architecture.md#data.
+      - name: Check where the Store copy keeps its data
+        run: |
+          $package = Get-AppxPackage MrStreamerOSS.Mr.Streamer
+          Start-Process -FilePath (Join-Path $package.InstallLocation "app\Mr. Streamer.exe")
+          Start-Sleep 15
+          Get-Process "Mr. Streamer" -ErrorAction SilentlyContinue | Stop-Process -Force
+          $own = "$env:LOCALAPPDATA\Packages\$($package.PackageFamilyName)\LocalCache\Roaming\Mr. Streamer Store"
+          if (-not (Test-Path "$own\Local State")) { echo "::error::Nothing in $own."; exit 1 }
+          if (Test-Path "$env:APPDATA\Mr. Streamer Store") { echo "::error::The Store copy wrote to the real AppData."; exit 1 }
 
       # The kit's report goes with the package. Its optional "Blocked executables" test fails: it
       # flags strings such as "cmd" and "reg" inside Electron's and ffmpeg's files. The overall

@@ -93,11 +93,12 @@ ffmpeg -f lavfi -i testsrc2=size=128x72:rate=25 -f lavfi -i sine=frequency=440:s
 
 ## Packaged app
 
-`apps/desktop/test/e2e/packaged-app.ts` starts a built app with a throwaway profile, connects it to the fake provider through the login form, and plays a channel that passes straight through and one the bundled ffmpeg converts. Then it leaves Watch for Home and watches again from there. Then it opens a movie from Movies' All movies tab, which the bundled ffprobe reads and ffmpeg repackages, skips 10 seconds ahead and leaves. Last, it plays the movie with picture subtitles and chooses its English PGS, then its Dutch DVD subtitles, which the bundled ffmpeg sends beside the picture. It passes when both channels show a moving picture with decoded sound, Home plays the same stream muted while Watch plays it with sound, without another request to the provider, the movie plays with sound, skips and holds no connection once left, and both subtitle tracks draw over the picture while due.
+`apps/desktop/test/e2e/packaged-app.ts` starts a built app with a throwaway profile, connects it to the fake provider through the login form, and checks who updates it: the Microsoft Store for an installed MSIX, which runs from `WindowsApps`, the app itself for every other build. Then it plays a channel that passes straight through and one the bundled ffmpeg converts. Then it leaves Watch for Home and watches again from there. Then it opens a movie from Movies' All movies tab, which the bundled ffprobe reads and ffmpeg repackages, skips 10 seconds ahead and leaves. Last, it plays the movie with picture subtitles and chooses its English PGS, then its Dutch DVD subtitles, which the bundled ffmpeg sends beside the picture. It passes when the build names the right updater, both channels show a moving picture with decoded sound, Home plays the same stream muted while Watch plays it with sound, without another request to the provider, the movie plays with sound, skips and holds no connection once left, and both subtitle tracks draw over the picture while due.
 
 ```sh
 node apps/desktop/test/e2e/packaged-app.ts "/Applications/Mr. Streamer.app/Contents/MacOS/Mr. Streamer" -- --use-mock-keychain
 node apps/desktop/test/e2e/packaged-app.ts "$LOCALAPPDATA\Programs\mrstreamer\Mr. Streamer.exe"
+node apps/desktop/test/e2e/packaged-app.ts "$((Get-AppxPackage MrStreamerOSS.Mr.Streamer).InstallLocation)\app\Mr. Streamer.exe"
 xvfb-run -a node apps/desktop/test/e2e/packaged-app.ts "/opt/Mr. Streamer/mrstreamer" -- --no-sandbox
 ```
 

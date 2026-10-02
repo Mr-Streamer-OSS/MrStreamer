@@ -44,11 +44,12 @@ Settings > Subscription > Remove subscription deletes `subscription.json`, `cata
 
 ### Uninstalling
 
-Nothing deletes the data folder.
+Nothing deletes a direct install's data folder. The Microsoft Store package is the exception.
 
 - Windows (NSIS): `deleteAppDataOnUninstall: false` in `electron-builder.yml`. The uninstaller removes `%APPDATA%\Mr. Streamer` only when started with `--delete-app-data`, and never touches `%LOCALAPPDATA%\mrstreamer-updater` (`app-builder-lib` `templates/nsis/uninstaller.nsh`).
 - macOS: moving the app to the Trash leaves the data folder, the Keychain item and the caches.
 - Linux: removing the deb or deleting the AppImage leaves everything in the home folder; package managers never touch it.
+- Windows (Microsoft Store MSIX): the package keeps its data in `Mr. Streamer Store`, which Windows places in `%LOCALAPPDATA%\Packages\MrStreamerOSS.Mr.Streamer_5yzg1erdm3xmr\LocalCache\Roaming`. Uninstalling removes that whole package folder. The release workflow's MSIX job checks both on every test install.
 
 Deleting the data folder removes everything above except the Keychain or keyring item and the update cache.
 
@@ -116,5 +117,5 @@ He doesn't control the provider, artwork hosts, TMDB's or GitHub's own processin
 - macOS Squirrel's staging folder under `~/Library/Caches`.
 - Send a test message to `privacy@mrstreamer.app`.
 - The viewer's own TMDB key stays in plain text in `preferences.json`. Sealing it would make 0.0.3 lose the key after going back to Stable; tracked as a gap.
-- The Microsoft Store package (part 8): where its data folder lives, whether it checks the update feed, and that uninstalling it behaves as described. Store installs get updates from the Store, never from electron-updater.
+- The Microsoft Store package (part 8): the release workflow checks a test-signed install on Windows, its data folder, that it reports Store updates, and that uninstalling removes its data. A Store-delivered install on Wout's PC is still to check.
 - Microsoft's view of HTTP logins (handoff part 6) before Store submission.

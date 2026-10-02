@@ -31,6 +31,14 @@ export type UpdatePhase =
       readonly detail: string;
     };
 
+/**
+ * How this copy was installed, which decides who updates it. A direct copy came from the app's own
+ * download, and the app updates it. A Store copy is an MSIX package, as the Microsoft Store
+ * installs it: only the Store updates it, so the app never checks, downloads or installs, and
+ * offers no channel.
+ */
+export type Distribution = "direct" | "store";
+
 /** The release a check found for the chosen channel. */
 export interface UpdateOffer {
   readonly version: string;
@@ -43,6 +51,7 @@ export interface UpdateOffer {
 export interface UpdateStatus {
   /** The installed version. */
   readonly version: string;
+  readonly distribution: Distribution;
   readonly channel: Channel;
   readonly update: UpdatePhase;
   /** What the last successful check offered; kept while later checks fail. */
