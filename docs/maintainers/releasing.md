@@ -60,7 +60,7 @@ Releases come from `.github/workflows/release.yml`, which plans them and runs `.
 3. Leave the version empty to release the version the nightly previewed (`0.0.2-nightly.*` ships as `0.0.2`), or enter one that sorts after it and every stable release, such as `0.1.0`.
 4. When `main` has commits the latest published nightly doesn't, the run first publishes a nightly of `main`, without waiting six hours, and updates the feed. Nightly users then have every change before Stable users get any of it. That nightly previews the same version as the one you tested, such as `0.0.2-nightly.20261002.31`, so it sorts after it and before the stable release. Its notes list the changes since the previous nightly. The stable release builds only once that nightly is published and the feed names it. When the latest nightly already has `main`'s commit, the run skips this step.
 5. The run rebuilds the tested nightly's exact commit with the stable version, never that of the nightly it just published. The nightly's files carry the nightly version, so they're never reused. Merges to `main` since the tested nightly don't reach the build.
-6. It publishes the release as latest and updates the feed. Stable users are offered it from then on. Nightly users aren't, and get the next nightly. The feed's `nightly` names the stable release until then, as the [feed](#update-feed) explains.
+6. It publishes the release as latest and updates the feed. Stable users are offered it from then on. Nightly users aren't: the feed's `nightly` keeps naming the newest nightly, the one published before the stable release when the run published one.
 7. The finalize job commits `chore(release): prepare vX` to `main`, so `package.json` records the release and later nightlies preview the patch after it.
 8. The run also builds the [Microsoft Store package](#submitting-a-stable-release) for the stable release, to submit by hand. The nightly before it gets none.
 
@@ -110,15 +110,16 @@ The app looks for updates in `updates.json` at the root of the repository's GitH
 }
 ```
 
-- `stable` is the highest stable release. `nightly` is the highest release of either channel. Highest means by version, never by date. Either is `null` when there is none.
-- The app offers each channel only its own releases, and Nightly only a version newer than the installed one. So `nightly` naming a stable release, as it does from a stable release until the next nightly, offers Nightly users nothing.
-- Versions 0.0.3 and earlier offer Nightly users the higher of `stable` and `nightly`, stable or not. They read the same feed, which keeps this format so they behave as before.
+- `stable` is the highest stable release and `nightly` the highest nightly. Highest means by version, never by date. Either is `null` when there is none.
+- The app offers each channel only its own releases, and Nightly only a version newer than the installed one. After a stable release, `nightly` still names the newest nightly, so a Nightly user who missed it before the stable release went out is still offered it.
+- Versions 0.0.3 and earlier offer Nightly users the higher of `stable` and `nightly`, so they still get each stable release and each nightly after it, as before.
+- Feeds deployed before 0.0.4 named the highest release of either channel as `nightly`, a stable release right after one. The next publication replaces such an entry with the highest nightly even when it's lower, since only versions 0.0.3 and earlier took a stable release from `nightly`, and they still find it as `stable`.
 - `files` is the folder electron-updater reads the release's `latest*.yml` and installers from. `notes` is the release body, in Markdown.
 - A release counts only when it's published, its version and pre-release flag name the same channel, and it carries `latest-mac.yml`, `latest.yml` and `latest-linux.yml`. One missing a platform is incomplete and never enters the feed.
 
 `.github/workflows/update-feed.yml` writes the feed with `release-plan.ts feed` and deploys it, with an empty `.nojekyll`, after every published nightly and stable release. Dry runs publish nothing. Publications wait in a queue of their own and are never cancelled, so each reads the releases after the one before it deployed.
 
-The feed never goes back. When the releases name a lower version than the deployed feed, that channel keeps the deployed release, so a late or stale publication can't take users back. Only a run by hand with **allow-regress** moves a channel down. A publication that can't read the deployed feed or look up the Pages site stops instead of publishing from the releases alone; only a 404 for either counts as nothing deployed yet.
+The feed never goes back. Each channel is compared with its own releases. When the releases name a lower version than the deployed feed, that channel keeps the deployed release, so a late or stale publication can't take users back. Only a run by hand with **allow-regress** moves a channel down. A publication that can't read the deployed feed or look up the Pages site stops instead of publishing from the releases alone; only a 404 for either counts as nothing deployed yet.
 
 A failed publication shows on the release run's **Update feed** job but doesn't fail the run, since the release is out by then. Fix the cause, then regenerate the feed. The nightly a stable run publishes first is the exception: its failed publication fails the run before the stable release builds.
 

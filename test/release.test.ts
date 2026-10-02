@@ -14,7 +14,13 @@ import {
   type Repository,
   type StableRequest,
 } from "../scripts/release-plan.ts";
-import { compareVersions, formatVersion, parseVersion } from "../packages/contracts/src/version.ts";
+import {
+  compareVersions,
+  formatVersion,
+  parseVersion,
+  type Channel,
+} from "../packages/contracts/src/version.ts";
+import { newestOn, type Offer } from "../packages/core/src/updates/feed.ts";
 import {
   buildFeed,
   mergeFeeds,
@@ -332,13 +338,13 @@ describe("stable releases", () => {
     expect(() =>
       checkUnreleased(repository({ releases: afterFirst }).repo, plan.version),
     ).not.toThrow();
-    // The feed names the nightly first, then the stable release on both channels as it does today.
-    const offered = (releases: GitHubRelease[]) => {
+    // The feed names the nightly first for Nightly, and keeps it there once the stable release is out.
+    const named = (releases: GitHubRelease[]) => {
       const feed = buildFeed(REPOSITORY, releases, new Date(NOW).toISOString());
       return [feed.stable?.version, feed.nightly?.version];
     };
-    expect(offered(afterFirst)).toEqual(["0.0.0", first.version]);
-    expect(offered([...afterFirst, published(plan.tag, 0, false)])).toEqual(["0.0.1", "0.0.1"]);
+    expect(named(afterFirst)).toEqual(["0.0.0", first.version]);
+    expect(named([...afterFirst, published(plan.tag, 0, false)])).toEqual(["0.0.1", first.version]);
   });
 
   it("are refused when the nightly first would sort after the stable release", async () => {
@@ -516,22 +522,22 @@ describe("publishing", () => {
 describe("update feed", () => {
   const GENERATED = "2026-10-02T12:00:00.000Z";
   const feedOf = (releases: GitHubRelease[]) => buildFeed(REPOSITORY, releases, GENERATED);
-  /** The versions a feed offers on Stable and Nightly. */
-  const offered = (feed: UpdateFeed) => [feed.stable?.version, feed.nightly?.version];
+  /** The versions a feed names for Stable and Nightly. */
+  const named = (feed: UpdateFeed) => [feed.stable?.version, feed.nightly?.version];
 
-  it("offers the highest stable release on Stable, and the highest of all on Nightly", () => {
+  it("names the highest stable release and the highest nightly", () => {
     const releases = [
       published("v0.0.1", 50, false),
       published("v0.0.2-nightly.20261001.20", 30),
       published("v0.0.2", 20, false),
     ];
 
-    expect(offered(feedOf(releases))).toEqual(["0.0.2", "0.0.2"]);
-    expect(offered(feedOf([...releases, published("v0.0.3-nightly.20261002.30", 2)]))).toEqual([
+    expect(named(feedOf(releases))).toEqual(["0.0.2", "0.0.2-nightly.20261001.20"]);
+    expect(named(feedOf([...releases, published("v0.0.3-nightly.20261002.30", 2)]))).toEqual([
       "0.0.2",
       "0.0.3-nightly.20261002.30",
     ]);
-    expect(offered(feedOf([]))).toEqual([undefined, undefined]);
+    expect(named(feedOf([]))).toEqual([undefined, undefined]);
   });
 
   it("points at each release's page, download folder and notes", () => {
@@ -546,7 +552,7 @@ describe("update feed", () => {
         notes: "Notes for v0.0.2",
         platforms: ["latest-mac.yml", "latest.yml", "latest-linux.yml"],
       },
-      nightly: expect.objectContaining({ version: "0.0.2" }),
+      nightly: null,
     });
   });
 
@@ -560,7 +566,7 @@ describe("update feed", () => {
       published("v0.1.0-beta.1", 1),
     ]);
 
-    expect(offered(feed)).toEqual(["0.0.1", "0.0.1"]);
+    expect(named(feed)).toEqual(["0.0.1", undefined]);
   });
 
   it("orders by version, never by date", () => {
@@ -571,7 +577,7 @@ describe("update feed", () => {
       published("v0.0.11-nightly.20261002.39", 1),
     ]);
 
-    expect(offered(feed)).toEqual(["0.0.10", "0.0.11-nightly.20261002.40"]);
+    expect(named(feed)).toEqual(["0.0.10", "0.0.11-nightly.20261002.40"]);
   });
 
   it("never moves a channel to a lower version than the deployed feed names", () => {
@@ -580,14 +586,84 @@ describe("update feed", () => {
       published("v0.0.4-nightly.20261002.9", 1),
     ]);
 
-    expect(offered(mergeFeeds(deployed, feedOf([published("v0.0.2", 20, false)])))).toEqual([
+    expect(named(mergeFeeds(deployed, feedOf([published("v0.0.2", 20, false)])))).toEqual([
       "0.0.3",
       "0.0.4-nightly.20261002.9",
     ]);
-    expect(offered(mergeFeeds(deployed, feedOf([])))).toEqual([
-      "0.0.3",
-      "0.0.4-nightly.20261002.9",
-    ]);
+    expect(named(mergeFeeds(deployed, feedOf([])))).toEqual(["0.0.3", "0.0.4-nightly.20261002.9"]);
+  });
+
+  describe("for every version of the app", () => {
+    /** What the app finds in a feed: one offer per entry, as discovery reads it. */
+    const offersIn = (feed: UpdateFeed): Offer[] =>
+      [feed.stable, feed.nightly].flatMap((entry) => {
+        const version = entry && parseVersion(entry.version);
+        return entry && version
+          ? [{ version, feedUrl: entry.files, notes: entry.notes, page: entry.page }]
+          : [];
+      });
+    /** Versions 0.0.3 and earlier: Nightly takes the highest of all, stable or not. */
+    const newestUpTo003 = (channel: Channel, offers: readonly Offer[]) =>
+      offers
+        .filter((offer) => channel === "nightly" || !offer.version.nightly)
+        .sort((a, b) => compareVersions(b.version, a.version))[0] ?? null;
+    /** The newest release each app finds on Stable and Nightly: 0.0.3 and earlier, then later. */
+    const newest = (feed: UpdateFeed) =>
+      [newestUpTo003, newestOn].flatMap((select) =>
+        (["stable", "nightly"] as const).map((channel) => {
+          const offer = select(channel, offersIn(feed));
+          return offer ? formatVersion(offer.version) : null;
+        }),
+      );
+
+    // Stable 0.0.3, then nightly .110, which Wout tests. main moves on, so the stable run
+    // publishes nightly .120 first, then 0.0.4 from .110's commit.
+    const stable003 = published("v0.0.3", 30, false);
+    const tested = published("v0.0.4-nightly.20261002.110", 8);
+    const first = published("v0.0.4-nightly.20261002.120", 1);
+    const stable004 = published("v0.0.4", 0, false);
+
+    it("find each channel's release before and after a stable run that publishes a nightly first", () => {
+      const before = feedOf([stable003, tested]);
+      const afterFirst = mergeFeeds(before, feedOf([stable003, tested, first]));
+      const afterStable = mergeFeeds(afterFirst, feedOf([stable003, tested, first, stable004]));
+
+      // 0.0.3 and earlier on Stable and Nightly, then later versions on Stable and Nightly.
+      expect(newest(before)).toEqual([
+        "0.0.3",
+        "0.0.4-nightly.20261002.110",
+        "0.0.3",
+        "0.0.4-nightly.20261002.110",
+      ]);
+      expect(newest(afterFirst)).toEqual([
+        "0.0.3",
+        "0.0.4-nightly.20261002.120",
+        "0.0.3",
+        "0.0.4-nightly.20261002.120",
+      ]);
+      expect(newest(afterStable)).toEqual([
+        "0.0.4",
+        "0.0.4",
+        "0.0.4",
+        "0.0.4-nightly.20261002.120",
+      ]);
+    });
+
+    it("move a deployed stable release out of nightly without offering anyone less", () => {
+      // Deployed before 0.0.4: nightly named the highest release of all, stable 0.0.3.
+      const deployed: UpdateFeed = {
+        ...feedOf([stable003]),
+        nightly: feedOf([stable003]).stable,
+      };
+      const next = mergeFeeds(
+        deployed,
+        feedOf([published("v0.0.3-nightly.20261002.62", 40), stable003]),
+      );
+
+      expect(named(next)).toEqual(["0.0.3", "0.0.3-nightly.20261002.62"]);
+      expect(newest(deployed)).toEqual(["0.0.3", "0.0.3", "0.0.3", null]);
+      expect(newest(next)).toEqual(["0.0.3", "0.0.3", "0.0.3", "0.0.3-nightly.20261002.62"]);
+    });
   });
 
   it("takes newer releases and the latest details of the same one", () => {
