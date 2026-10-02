@@ -34,6 +34,8 @@ Reference: [Store onboarding and name reservation](https://learn.microsoft.com/e
 
 ## 3. Prepare and validate the MSIX
 
+The release workflow builds the package with electron-builder's `appx` target, for dry runs and stable releases, and checks it installed; [releasing](releasing.md#microsoft-store-package) describes the job, the identity it uses and how Store versions are numbered.
+
 - Choose a maintained packaging path that fits the existing Electron bundle; look at current tooling before adding a second app framework. Configure Windows x64 desktop support, the logos, the manifest and the full-trust capabilities the app needs.
 - Keep MSIX build and test artifacts apart from the direct-download update feed. Start with an opt-in packaging or dry-run path, so unfinished Partner Center setup can't break the direct nightlies. Building a package never submits it.
 - Bundle the actual FFmpeg and ffprobe, the third-party notices, the app's own GPL text and the source references. Test that data is written outside the read-only install directory, and test safeStorage, in a real packaged app.
@@ -102,5 +104,7 @@ Copied from Partner Center's Product identity page on 2 October 2026. These valu
 | Package/Properties/PublisherDisplayName | `Mr Streamer OSS`                         |
 | Package family name                     | `MrStreamerOSS.Mr.Streamer_5yzg1erdm3xmr` |
 | Store ID                                | `9N45GG76ZP4T`                            |
+
+The publisher display name has no period on purpose: Partner Center doesn't allow one there.
 
 The reservation lapses if no submission is made within three months, so by early January 2027. The Store's listing links appear once the product is published.

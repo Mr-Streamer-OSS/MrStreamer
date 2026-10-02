@@ -1,6 +1,7 @@
 # Installers: an arm64 DMG for Apple silicon Macs (`pnpm dist:mac`, on a Mac), an x64 NSIS installer
 # for Windows 11 (`pnpm dist:win`, on Windows), and an x64 AppImage and deb for Linux
-# (`pnpm dist:linux`, on Linux). The release workflow builds all of them.
+# (`pnpm dist:linux`, on Linux). The release workflow builds all of them, and the Microsoft Store
+# package, an x64 MSIX (`pnpm dist:msix`, on Windows), for dry runs and stable releases.
 # Fixed from the first release on: macOS updates and Keychain access, and Windows installs, are
 # tied to it. Letters only, so Android and iOS accept the same id.
 appId: app.mrstreamer.player
@@ -66,6 +67,26 @@ nsis:
   deleteAppDataOnUninstall: false
   # elevate.exe only helps updates of per-machine installs, so it stays out of the app.
   packElevateHelper: false
+# The Microsoft Store package, an MSIX of the same app; docs/maintainers/releasing.md describes it.
+# The identity is the one Partner Center reserved for the app, exactly as its Product identity page
+# shows it. The application id names the app inside the package, and with the identity makes the id
+# Windows pins and groups it by: neither may change once the Store has the app. Logos come from
+# build/appx (`pnpm icons:export`).
+appx:
+  identityName: MrStreamerOSS.Mr.Streamer
+  publisher: CN=A132E842-C4C9-40BF-83C4-D304E7952C2D
+  # No period, on purpose: Partner Center doesn't allow one in the publisher's name.
+  publisherDisplayName: Mr Streamer OSS
+  displayName: Mr. Streamer
+  applicationId: MrStreamer
+  backgroundColor: "#000000"
+  languages: [en-US]
+  # Windows 11, as for the installer.
+  minVersion: 10.0.22000.0
+  maxVersionTested: 10.0.26100.0
+  artifactName: Mr-Streamer-${version}-win-${arch}.msix
+# The Store's numbering differs from the release version; the script explains it.
+appxManifestCreated: ./scripts/msix-version.ts
 
 linux:
   target:

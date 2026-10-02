@@ -3,8 +3,10 @@
 // build/icon.icns: the same artwork at every size macOS asks for. Shipping it means electron-builder
 //   never runs its own PNG to ICNS converter.
 // build/icon.ico: Windows icon, cropped to the squircle so it fills the tile like other Windows apps.
+// build/appx: the Microsoft Store package's logos, from the same crop. electron-builder's appx target
+//   packs every file there and indexes the scaled ones.
 // Usage: pnpm icons:export
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 
@@ -54,7 +56,57 @@ const pngs = await Promise.all(
   ),
 );
 await writeFile(`${root}build/icon.ico`, ico(sizes, pngs));
-console.log("Wrote build/icon.png, build/icon.icns and build/icon.ico");
+
+// The Store package's logos at 100, 200 and 400 % scale. The app list and taskbar icon also comes
+// at the pixel sizes Windows asks for, unplated, so Windows 11 draws it without a coloured square.
+// Tiles centre the icon on transparency, over the manifest's black background.
+await rm(`${root}build/appx`, { recursive: true, force: true });
+await mkdir(`${root}build/appx`);
+type Logo = { name: string; width: number; height: number; icon: number };
+const square = (name: string, size: number, icon = size): Logo => ({
+  name,
+  width: size,
+  height: size,
+  icon,
+});
+const logos: Logo[] = [
+  ...[16, 24, 32, 48, 256].flatMap((size) => [
+    square(`Square44x44Logo.targetsize-${size}`, size),
+    square(`Square44x44Logo.targetsize-${size}_altform-unplated`, size),
+  ]),
+  ...[1, 2, 4].flatMap((times) => [
+    square(`StoreLogo.scale-${times * 100}`, 50 * times),
+    square(`Square44x44Logo.scale-${times * 100}`, 44 * times),
+    square(`Square150x150Logo.scale-${times * 100}`, 150 * times, 75 * times),
+    {
+      name: `Wide310x150Logo.scale-${times * 100}`,
+      width: 310 * times,
+      height: 150 * times,
+      icon: 75 * times,
+    },
+  ]),
+];
+await Promise.all(
+  logos.map(async ({ name, width, height, icon }) => {
+    const art = await sharp(Buffer.from(windowsSvg), { density: 72 * (icon / 840) * 4 })
+      .resize(icon, icon)
+      .png()
+      .toBuffer();
+    const left = Math.floor((width - icon) / 2);
+    const top = Math.floor((height - icon) / 2);
+    await sharp(art)
+      .extend({
+        left,
+        right: width - icon - left,
+        top,
+        bottom: height - icon - top,
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      })
+      .png()
+      .toFile(`${root}build/appx/${name}.png`);
+  }),
+);
+console.log("Wrote build/icon.png, build/icon.icns, build/icon.ico and build/appx");
 
 /** An ICNS file: a big-endian "icns" header followed by one PNG per element type. */
 function icns(elements: [type: string, png: Buffer][]): Buffer {

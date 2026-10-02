@@ -29,6 +29,7 @@ Releases come from `.github/workflows/release.yml` and live on GitHub Releases. 
   - checks again that the tag is unused and the version sorts after every release it competes with
   - uploads into a draft, which the app can't see, then publishes it; publishing creates the tag on the planned commit
 - Then points the [update feed](#update-feed) at the release. Until then the app doesn't offer it.
+- Dry runs and stable releases also build the [Microsoft Store package](#microsoft-store-package) and test it installed. Nothing waits for it, and it's never attached to the release.
 - Nightlies are pre-releases and never marked latest. Stable releases are marked latest.
 - Runs never cancel each other. Nightlies and stable releases wait in one queue, and each pull request's dry runs in their own, so a requested stable release is never dropped.
 - Sharing the queue keeps a nightly from being planned while a stable release builds. Planned then, it would preview the same version from newer code, and once the stable release published, its users would be offered that release and move back to older code. A stable release waits for a nightly that's running, and the other way round.
@@ -58,6 +59,7 @@ Releases come from `.github/workflows/release.yml` and live on GitHub Releases. 
 4. The run rebuilds the nightly's exact commit with the stable version; the nightly's files carry the nightly version, so they're never reused. Merges to `main` since the nightly don't reach the build.
 5. It publishes the release as latest and updates the feed. Stable users are offered it from then on.
 6. The finalize job commits `chore(release): prepare vX` to `main`, so `package.json` records the release and later nightlies preview the patch after it.
+7. The run also builds the [Microsoft Store package](#submitting-a-stable-release) for the release, to submit by hand.
 
 The plan refuses a stable release when:
 
@@ -132,9 +134,40 @@ A custom domain set there moves the feed to that domain's root. The workflow loo
 
 ## Dry runs
 
-Add the label **release dry run** to a pull request from a branch of this repository. The run builds, signs, notarizes and tests the pull request's head commit like a nightly, keeps the files as workflow artifacts for 14 days and publishes nothing, so no update channel can offer the build. It takes the label off at once; add it again to test a later commit. The plan also logs what a scheduled nightly and a stable release would do on `main` at that moment.
+Add the label **release dry run** to a pull request from a branch of this repository. The run builds, signs, notarizes and tests the pull request's head commit like a nightly, and builds and tests the [Microsoft Store package](#microsoft-store-package) too. It keeps the files as workflow artifacts for 14 days and publishes nothing, so no update channel can offer the build. It takes the label off at once; add it again to test a later commit. The plan also logs what a scheduled nightly and a stable release would do on `main` at that moment.
 
 Forks get no signing secrets, so their pull requests can't run it.
+
+## Microsoft Store package
+
+The Microsoft Store gets an MSIX of the same app for Windows x64, which electron-builder's `appx` target builds from the same files as the installer. The [Store runbook](microsoft-store.md) covers Partner Center and the submission.
+
+- **Identity:** `apps/desktop/electron-builder.yml` holds the identity Partner Center reserved, exactly as its Product identity page shows it, and the application id `MrStreamer`. Windows pins and groups the app by the two together, `MrStreamerOSS.Mr.Streamer_5yzg1erdm3xmr!MrStreamer`, so neither may change after the first submission.
+- **Capabilities:** only `runFullTrust`, which every Electron app needs. Partner Center asks why it's needed. Answer that Mr. Streamer is a desktop app built on Electron, which runs as a full-trust desktop process: it starts its bundled ffmpeg and ffprobe, and plays through a proxy on 127.0.0.1.
+- **Logos:** `pnpm icons:export` renders them from the app icon into `apps/desktop/build/appx`.
+- **Windows versions:** Windows 11 and later, as for the installer.
+- **Building:** the **Package Microsoft Store MSIX** job builds it for dry runs and stable releases, after the installers. Nightlies never build it. Nothing waits for the job, so a failure there can't hold up or undo a release. On a Windows PC, `pnpm dist:msix` builds the same file.
+- **What it keeps:** the job's `msix` artifact holds `Mr-Streamer-<version>-win-x64.msix`, a `.msix.txt` naming the release version, the package version and the commit, and the certification kit's report, `.wack.xml`. Dry runs keep it 14 days, stable releases 90. It never goes on the release, and electron-builder writes no `latest*.yml` for it, so no update channel offers it. Nothing submits it to the Store.
+- **Checks:** the job compares the manifest with Partner Center's identity and the package version, and checks that the package holds the app, ffmpeg, ffprobe and Chromium's and Electron's notices. Then it signs a copy with a throwaway certificate (see [signing](signing.md#microsoft-store-package)), installs it, checks that Windows gives it the reserved package family name, runs the [packaged-app test](testing.md#packaged-app) on it, runs the Windows App Certification Kit, which must pass, and uninstalls it, which must remove its data. The kit's optional "Blocked executables" test fails, because it flags strings such as "cmd" and "reg" inside Electron's and ffmpeg's files; the overall result passes.
+
+### Store versions
+
+The Store reads a four-part version with 0 to 65535 in each part. The first part can't be 0, and the fourth belongs to the Store and must be 0, as Microsoft's [package requirements](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/app-package-requirements) said on 2 October 2026. Releases start at 0, so:
+
+- Only stable releases go to the Store, with 1 added to the major version: 0.0.4 is `1.0.4.0`, 0.1.0 is `1.1.0.0` and 1.0.0 is `2.0.0.0`.
+- The 1 stays added for good. The Store only moves a package up, and without it 1.0.0 would be `1.0.0.0`, below 0.0.9's `1.0.9.0`.
+- A dry run or nightly makes a test package for sideloading, numbered between the stable release before it and the one it previews, with the workflow run last: 0.0.4-nightly.20261002.14 is `1.0.3.14`. The Store refuses a fourth part that isn't 0, so a test package can't be submitted by mistake.
+- The app keeps showing the release version. Settings says 0.0.4 while Windows lists `1.0.4.0`.
+
+`apps/desktop/scripts/msix-version.ts` maps them and writes the result into the manifest. Testing an update through the Store takes two stable releases, such as 0.0.4 and then 0.0.5. The package's `.msix.txt` and the release's tag tie each Store version to its commit.
+
+### Submitting a stable release
+
+1. Release stable as usual.
+2. Download the `msix` artifact from the run. Its `.msix.txt` names the package version and the commit.
+3. Upload the `.msix` in Partner Center as the [runbook](microsoft-store.md) describes.
+
+When the job failed, the release is out anyway. Re-run the job; if it needs a fix, the next stable release brings it.
 
 ## Recovery
 
@@ -171,7 +204,7 @@ TMDB's terms ask that the app shows its logo and notice, which Settings > About 
 
 ## Windows signing
 
-Windows installers are unsigned for now, and SmartScreen warns on first run. Signing belongs in the "Build for Windows" step, with its own secrets and never the Mac certificate; electron-builder signs when `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD` are set. Once signed, set `win.signtoolOptions.publisherName` in `electron-builder.yml` so updates must carry the same publisher.
+Windows installers are unsigned for now, and SmartScreen warns on first run. The Store signs the MSIX it delivers; see [signing](signing.md#microsoft-store-package). Signing the installer belongs in the "Build for Windows" step, with its own secrets and never the Mac certificate; electron-builder signs when `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD` are set. Once signed, set `win.signtoolOptions.publisherName` in `electron-builder.yml` so updates must carry the same publisher.
 
 ## Testing updates against another feed
 

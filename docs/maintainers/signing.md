@@ -1,6 +1,6 @@
 # Signing
 
-Mac releases are signed with a Developer ID, hardened, notarized and stapled, so a downloaded DMG opens without warnings and updates keep access to the Keychain. Windows signing comes later; see [releasing](releasing.md#windows-signing).
+Mac releases are signed with a Developer ID, hardened, notarized and stapled, so a downloaded DMG opens without warnings and updates keep access to the Keychain. Signing the Windows installer comes later; see [releasing](releasing.md#windows-signing). Microsoft signs the [Store package](#microsoft-store-package) it delivers.
 
 ## Credentials
 
@@ -50,3 +50,23 @@ xcrun stapler validate Mr-Streamer-*.dmg
 ```
 
 To sign on your own Mac, keep a Developer ID Application identity in your keychain and set `APPLE_API_KEY` (the path of a .p8), `APPLE_API_KEY_ID` and `APPLE_API_ISSUER` for notarization before `pnpm dist:mac`.
+
+## Microsoft Store package
+
+The release workflow builds the [Store package](releasing.md#microsoft-store-package) unsigned. Partner Center takes it that way, and once it passes certification the Store signs what it delivers with Microsoft's certificate. That needs no certificate of ours; don't buy one for the Store.
+
+Windows only installs a signed package, so the release job signs a copy for its own test. It makes a certificate whose subject is the package's publisher, `CN=A132E842-C4C9-40BF-83C4-D304E7952C2D`, trusts it on that runner alone and installs the copy; the runner and the certificate are gone after the job. The artifact stays unsigned. A package that installs this way shows the package works, not that the Store trusts it.
+
+To try a dry run's package on a Windows PC, do the same in an administrator PowerShell. `signtool` comes with the Windows SDK.
+
+```powershell
+$cert = New-SelfSignedCertificate -Type Custom -Subject "CN=A132E842-C4C9-40BF-83C4-D304E7952C2D" `
+  -KeyUsage DigitalSignature -CertStoreLocation Cert:\CurrentUser\My `
+  -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3", "2.5.29.19={text}")
+Export-Certificate -Cert $cert -FilePath test.cer
+Import-Certificate -FilePath test.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople
+signtool sign /fd SHA256 /sha1 $cert.Thumbprint Mr-Streamer-<version>-win-x64.msix
+Add-AppxPackage Mr-Streamer-<version>-win-x64.msix
+```
+
+Afterwards, remove the package with `Get-AppxPackage MrStreamerOSS.Mr.Streamer | Remove-AppxPackage`, and delete the certificate from both stores: while it's trusted, anything signed with it installs as Mr. Streamer on that PC. Remove a test package before installing Mr. Streamer from the Store too, since both carry the same identity.
