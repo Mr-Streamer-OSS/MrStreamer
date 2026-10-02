@@ -243,6 +243,32 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
     expect(app.tmdb.aboutRequests()).toBe(1);
   });
 
+  it("asks TMDB again for details it couldn't answer, or had no key for", async () => {
+    const app = await metadataApp();
+    const { runtime, onDemand } = await app.start();
+    const [movie] = (
+      await onDemand.collection({ kind: "movie", id: "all", offset: 0, limit: 50 })
+    ).titles.filter((title) => title.tmdbId);
+    const plot = async () => (await onDemand.details("movie", movie?.id ?? "")).plot;
+
+    app.tmdb.refuse(true);
+    expect(await plot()).toMatch(/^The story of /);
+    app.tmdb.refuse(false);
+    expect(await plot()).toMatch(/^TMDB's story of /);
+
+    const keyless = await metadataApp(null);
+    const second = await keyless.start();
+    const [other] = (
+      await second.onDemand.collection({ kind: "movie", id: "all", offset: 0, limit: 50 })
+    ).titles.filter((title) => title.tmdbId);
+    const otherPlot = async () => (await second.onDemand.details("movie", other?.id ?? "")).plot;
+    expect(await otherPlot()).toMatch(/^The story of /);
+    await (await promised(second.runtime, Settings)).update({ tmdbKey: "own-key" });
+    await second.onDemand.reconfigure();
+    expect(await otherPlot()).toMatch(/^TMDB's story of /);
+    await runtime.dispose();
+  });
+
   it("puts details opened early together again with the names TMDB gives later", async () => {
     const app = await metadataApp();
     // TMDB refuses at first, so the lists and the details have only the provider's names.
@@ -276,8 +302,9 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
       title: listed?.title,
       originalLanguage: listed?.originalLanguage,
     });
-    expect(again.plot).toBe(early.plot);
-    expect(app.tmdb.aboutRequests()).toBe(downloads);
+    // TMDB didn't answer then, so it is asked once more, now that it does.
+    expect(again.plot).toMatch(/^TMDB's story of /);
+    expect(app.tmdb.aboutRequests()).toBe(downloads + 1);
   });
 
   it("fetches nothing without a key", async () => {
