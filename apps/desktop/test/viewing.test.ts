@@ -288,6 +288,20 @@ describe("how far movies and episodes got", () => {
     expect((await (await app.start()).state()).continueWatching).toEqual(state.continueWatching);
   });
 
+  it("offers more titles than the row shows, so the ones the UI leaves out don't push others off", async () => {
+    const app = await viewingApp();
+    await app.connect(0);
+    const viewing = await app.start();
+    await viewing.played(movie("ordinary"), 600, 6000);
+    // Twenty-five later ones, as films for adults the row leaves out would be.
+    let state = await viewing.state();
+    for (let index = 0; index < 25; index++)
+      state = await viewing.played(movie(`m${index}`), 600, 6000);
+
+    expect(state.continueWatching).toHaveLength(26);
+    expect(state.continueWatching.at(-1)?.title).toEqual(movie("ordinary"));
+  });
+
   it("keeps a finished episode in Continue watching, so its series offers the next one", async () => {
     const app = await viewingApp();
     await app.connect(0);

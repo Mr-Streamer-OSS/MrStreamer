@@ -3,7 +3,7 @@
 import { isCancelledError, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Episode, SeriesDetails, Title, TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { Preferences } from "@mrstreamer/contracts/preferences";
-import type { TitleProgress } from "@mrstreamer/contracts/viewing";
+import { CONTINUE_LIMIT, type TitleProgress } from "@mrstreamer/contracts/viewing";
 import { openDetails, useUi } from "../app/ui-store.ts";
 import { titlePlayer, type NowPlaying } from "../player/title-player.ts";
 import { call } from "./ipc.ts";
@@ -188,13 +188,13 @@ export interface ContinueEntry {
  * titles come from the lists, so showing the row asks the provider nothing; titles the provider
  * no longer lists, and titles for adults, are left out. A finished episode offers the next one.
  */
-export function useContinueWatching(limit = Infinity): {
+export function useContinueWatching(limit = CONTINUE_LIMIT): {
   readonly entries: readonly ContinueEntry[];
   readonly loading: boolean;
   readonly error: Error | null;
 } {
   const viewing = useQuery(queries.viewing());
-  // All of them, at most CONTINUE_LIMIT: the limit applies to what is left to show.
+  // All the record offers: the limit applies to what is left to show.
   const items = viewing.data?.continueWatching ?? [];
   const ids = (kind: "movie" | "episode") =>
     items.flatMap((item) =>
