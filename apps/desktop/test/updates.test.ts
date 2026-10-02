@@ -1,3 +1,5 @@
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { UpdateFeed } from "@mrstreamer/contracts/update-feed";
 import { parseVersion } from "@mrstreamer/contracts/version";
@@ -156,6 +158,27 @@ describe("update channels", () => {
     expect(status.checked).toMatchObject({ failure: { kind: "http", status: 502 } });
   });
 
+  it("keeps an update on offer when a later check the user asked for fails", async () => {
+    let offline = false;
+    const service = await startUpdates({
+      dataDir: await tempDir(),
+      installed: "0.2.0",
+      discover: async () => {
+        if (offline) throw new DiscoveryFailed({ kind: "offline" }, []);
+        return PUBLISHED;
+      },
+      installer: fakeInstaller().installer,
+    });
+    await service.check();
+    offline = true;
+
+    const status = await service.check();
+
+    expect(status.update).toEqual({ kind: "available", version: "0.2.1" });
+    expect(status.checked).toMatchObject({ failure: { kind: "offline" } });
+    expect((await service.download()).update).toEqual({ kind: "ready", version: "0.2.1" });
+  });
+
   it("keeps the channel the user picked last, however fast they switch", async () => {
     const dataDir = await tempDir();
     const { service } = await updates("0.2.0", PUBLISHED, { dataDir });
@@ -182,6 +205,21 @@ describe("update channels", () => {
     expect(await restarted.check()).toMatchObject({
       dismissed: "0.2.1",
       update: { kind: "available", version: "0.2.1" },
+    });
+  });
+
+  it("keeps what a newer release added to its settings when it saves them", async () => {
+    const dataDir = await tempDir();
+    const file = join(dataDir, "updates.json");
+    await writeFile(file, JSON.stringify({ channel: "stable", dismissed: null, later: [1] }));
+    const { service } = await updates("0.2.0", PUBLISHED, { dataDir });
+
+    await service.dismiss("0.2.1");
+
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
+      channel: "stable",
+      dismissed: "0.2.1",
+      later: [1],
     });
   });
 });

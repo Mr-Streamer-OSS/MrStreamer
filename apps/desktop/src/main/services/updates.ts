@@ -159,8 +159,9 @@ function make(deps: UpdatesDeps) {
     /** The download whose outcome still counts; a channel change can void it. */
     let attempt: object | null = null;
 
+    // Keeps what a newer release added to the file, for when it runs again.
     const save = writeOne(
-      Effect.promise(() => writeJsonFile(settingsPath, { channel, dismissed })),
+      Effect.promise(() => writeJsonFile(settingsPath, { ...stored, channel, dismissed })),
     );
     if (!stored) yield* save;
 
@@ -248,8 +249,11 @@ function make(deps: UpdatesDeps) {
           return result;
         }
         if (!result.ok) {
+          // An update an earlier check found stays on offer; `checked` says this one failed.
           if (manual || update.kind === "checking") {
-            update = { kind: "failed", step: "check", failure: result.failure };
+            update = target
+              ? { kind: "available", version: formatVersion(target.version) }
+              : { kind: "failed", step: "check", failure: result.failure };
           }
           yield* changed;
           return result;

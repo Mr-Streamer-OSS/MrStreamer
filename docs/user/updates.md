@@ -18,7 +18,7 @@ On Linux, installing the deb package asks for your password, because installing 
 
 Settings (⌘, on macOS, Ctrl , on Windows and Linux) > General > **Updates** shows your version, where the update stands: when Mr. Streamer checks next, that it's up to date, or the step the update is at, with the same actions as the top bar, and your channel. **Check now** looks straight away. **What's new** lists the changes in the offered version, each linked to its details.
 
-When a check doesn't work, Settings says why in a few words: you're offline, the update server answered with an error, or GitHub is limiting requests from your network and until when. A check Mr. Streamer made on its own fails quietly and tries again later, sooner at first; an update it found earlier stays available meanwhile.
+When a check doesn't work, Settings says why in a few words: you're offline, the update server answered with an error, or GitHub is limiting requests from your network and until when. A check Mr. Streamer made on its own fails quietly and tries again later, sooner at first. Either way, an update found earlier stays available to download.
 
 ## Install a newer version by hand
 
