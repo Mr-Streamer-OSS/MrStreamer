@@ -138,6 +138,49 @@ describe("credential protection", () => {
     expect(provider.streamRequests()).toBe(1);
   });
 
+  it("connects an address without a scheme over https when the server has it", async () => {
+    const provider = await fakeProvider(LOGIN);
+    const panel = httpsPanel(provider);
+    const { subscriptions } = await app(panel.fetch);
+
+    const connected = await subscriptions.connect({ server: "panel.test", ...LOGIN });
+
+    expect(connected).toMatchObject({ server: "https://panel.test" });
+    expect(panel.asked.every((address) => address.startsWith("https://panel.test/"))).toBe(true);
+  });
+
+  it("asks before an address without a scheme gets the login over http", async () => {
+    const provider = await fakeProvider(LOGIN);
+    const asked: string[] = [];
+    const recording: typeof fetch = (input, init) => {
+      asked.push(String(input));
+      return fetch(input, init);
+    };
+    const { subscriptions } = await app(recording);
+    const address = provider.url.replace("http://", "");
+
+    const error = await failure(subscriptions.connect({ server: address, ...LOGIN }));
+
+    expect(error).toEqual({ kind: "unencrypted-only", server: `https://${address}` });
+    expect(asked.filter((each) => each.startsWith("http:"))).toEqual([]);
+    // What "Connect without encryption" sends.
+    const connected = await subscriptions.connect({ server: `http://${address}`, ...LOGIN });
+    expect(connected).toMatchObject({ server: provider.url });
+  });
+
+  it("doesn't ask when https isn't what failed", async () => {
+    const provider = await fakeProvider(LOGIN);
+    const { subscriptions } = await app(httpsPanel(provider).fetch);
+
+    const refused = await failure(
+      subscriptions.connect({ server: "panel.test", username: LOGIN.username, password: "wrong" }),
+    );
+    const nowhere = await failure(subscriptions.connect({ server: "nowhere.invalid", ...LOGIN }));
+
+    expect(refused).toEqual({ kind: "invalid-login" });
+    expect(nowhere).toMatchObject({ kind: "unreachable", server: "https://nowhere.invalid" });
+  });
+
   it("keeps the login out of the errors the window gets and the diagnostics log", async () => {
     const provider = await fakeProvider(LOGIN);
     // Fetch quotes the address it was given when it can't use it, as it does for one it can't

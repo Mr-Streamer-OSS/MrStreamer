@@ -1,6 +1,7 @@
 // Settings > Subscription, for the one account: how the provider says it stands, asked again
 // when the tab opens, the login, and what was loaded from it, each list with its own refresh, so
-// one that failed can be fetched again alone. The server shows; the password never does.
+// one that failed can be fetched again alone. The server shows, with a note when the login travels
+// over plain http; the password never does.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RotateCw } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -38,7 +39,7 @@ export function SubscriptionSection() {
         </Row>
         <Row label="Expires">{expiry(account.expiresAt)}</Row>
         <Row label="Connections">{connections(account)}</Row>
-        <Row label="Login">
+        <Row label="Login" note={server.startsWith("http:") ? "not encrypted" : undefined}>
           <span className="truncate">
             {username} @ {hostOf(server)}
           </span>

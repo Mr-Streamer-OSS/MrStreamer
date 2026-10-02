@@ -1,6 +1,6 @@
 // Xtream Codes compatible providers (player_api.php). Most IPTV resellers run a panel that speaks this API.
 import { type } from "arktype";
-import { AppFailure } from "@mrstreamer/contracts/errors";
+import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
 import type { LoginInput } from "@mrstreamer/contracts/ipc";
 import type { AccountState, AccountStatus } from "@mrstreamer/contracts/subscription";
 import {
@@ -31,15 +31,27 @@ const DETAILS_TIMEOUT_MS = 20_000;
 /** The whole guide download. Tens of megabytes on large panels. */
 const GUIDE_TIMEOUT_MS = 5 * 60_000;
 
+/** What the user typed, as an account. */
+export interface ParsedLogin {
+  readonly account: XtreamAccount;
+  /**
+   * The address came without http:// or https://, so the account's is https: plain http only
+   * with the viewer's say-so (see `httpsUnavailable`).
+   */
+  readonly schemeless: boolean;
+}
+
 /**
  * Turns what the user typed into an account. The server field also accepts a pasted M3U link
- * (`.../get.php?username=...&password=...`), which carries the login itself.
+ * (`.../get.php?username=...&password=...`), which carries the login itself. An address without a
+ * scheme means https.
  */
-export function parseLogin(input: LoginInput): XtreamAccount {
+export function parseLogin(input: LoginInput): ParsedLogin {
   const raw = input.server.trim();
+  const schemeless = !/^[a-z][a-z0-9+.-]*:\/\//i.test(raw);
   let url: URL;
   try {
-    url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `http://${raw}`);
+    url = new URL(schemeless ? `https://${raw}` : raw);
   } catch {
     throw new AppFailure({
       kind: "incomplete-login",
@@ -65,7 +77,23 @@ export function parseLogin(input: LoginInput): XtreamAccount {
   const path = url.pathname
     .replace(/\/(player_api|get|xmltv|panel_api)\.php$/i, "")
     .replace(/\/+$/, "");
-  return { server: `${url.origin}${path}`, username, password };
+  return { account: { server: `${url.origin}${path}`, username, password }, schemeless };
+}
+
+/** What `describeNetworkError` says when the server's name doesn't resolve. */
+const NAME_NOT_FOUND = "The server name could not be found.";
+
+/**
+ * Whether a failed https login says only that the address has no Xtream API over https, so http
+ * might work: no TLS there, no answer, a certificate that isn't valid, a redirect to http with
+ * the login, or something other than the API. A refused login, an inactive account or a name that
+ * doesn't resolve has nothing to do with https.
+ */
+export function httpsUnavailable(error: AppError): boolean {
+  return (
+    error.kind === "provider-error" ||
+    (error.kind === "unreachable" && error.detail !== NAME_NOT_FOUND)
+  );
 }
 
 /**
@@ -649,7 +677,7 @@ function describeNetworkError(cause: unknown): string {
   switch (code) {
     case "ENOTFOUND":
     case "EAI_AGAIN":
-      return "The server name could not be found.";
+      return NAME_NOT_FOUND;
     case "ECONNREFUSED":
       return "The server refused the connection.";
     case "ECONNRESET":

@@ -21,6 +21,8 @@ export function describeError(error: AppError): string {
         : `The provider reports this subscription as ${error.state}.`;
     case "unreachable":
       return `Can't reach ${error.server.replace(/^https?:\/\//, "")}. ${error.detail}`;
+    case "unencrypted-only":
+      return `${URL.parse(error.server)?.hostname ?? error.server} has no encrypted connection.`;
     case "provider-error":
       return `The provider answered with an error (HTTP ${error.status}).`;
     case "no-subscription":
