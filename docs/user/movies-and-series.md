@@ -58,14 +58,22 @@ The picture fills the window below the top bar, with the title, a timeline and t
 - The sliders button beside them sets the speed, from 0.5× to 2×. Voices keep their pitch. The speed lasts for the title, and carries on when **Next episode** plays the one after.
 - The same button moves subtitles earlier or later in tenths of a second, for this title only, and sets how they look: their size, a box or a shadow behind the text, low or higher up. The look stays for every title and channel. Subtitles drawn as pictures, as on Blu-rays and DVDs, take only size and position.
 - Menus follow the arrow keys. Escape or a click outside closes them without pausing or skipping.
-- **Next episode** plays the next one, whenever you choose. At the end of an episode Mr. Streamer offers it, but never plays it on its own.
+- **Next episode**, or N, plays the next one at once.
 - **Back**, or Escape, returns to the details or the page you came from.
 
 How far you got is saved as you go: every minute, and whenever you pause, skip, change tracks, finish or leave. It's kept per subscription, like favourites.
 
+## The next episode
+
+When an episode ends, the next one plays after ten seconds. The end screen names it, and says when a new season starts, as in "Finished S1 E3 · Season 2 is next". **Play now**, or N, starts it straight away. **Cancel** keeps the end on screen, with **Next episode** and **Episodes**, which opens the series. Leaving, starting something else or switching subscriptions stops the countdown too. To decide each time, turn off **Next episode** in Settings > General.
+
+The next episode is the one your provider numbers next, across seasons, in the version of the series you're watching and with your sound and subtitle languages. Specials only lead to other specials. If it doesn't start, the screen says why: **Try again** asks your provider once more, and **Episodes** opens the series.
+
+After the last episode the screen says the series is finished for now. Watching its last episode into the credits takes the series off Continue watching, every version of it, until you play one of its episodes again.
+
 ## Continue watching
 
-Home's first row shows what you were watching: movies you started, and for each series the episode you're on. A title counts as started after two minutes, and as finished in its last few minutes, where the credits run. A finished movie leaves the row; a finished episode stays as **Next episode**, which plays the episode after it, or opens the series' details when there is none. The row shows what you saved, so it asks your provider nothing until you press play. The × on a tile takes it off the row, as **Remove from Continue watching** does.
+Home's first row shows what you were watching: movies you started, and for each series the episode you're on. A title counts as started after two minutes, and as finished in its last few minutes, where the credits run. A finished movie leaves the row, and so does a series once you watch its last episode. A finished episode stays as **Next episode**, which plays the episode after it, or opens the series' details when there is none. The row shows what you saved, so it asks your provider nothing until you press play. The × on a tile takes it off the row, as **Remove from Continue watching** does.
 
 ## Keys
 
@@ -74,7 +82,7 @@ Home's first row shows what you were watching: movies you started, and for each 
 | Space, K    | Pause and play                        |
 | Left, Right | Back or forward 10 seconds            |
 | Up, Down    | Volume                                |
-| N           | Next episode                          |
+| N           | Next episode, also during a countdown |
 | C           | Subtitles on and off                  |
 | G, H        | Subtitles 0.1 s earlier or later      |
 | <, >        | Slower or faster                      |

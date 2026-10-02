@@ -9,8 +9,12 @@
 // A title can play faster or slower, keeping the pitch (the element's `preservesPitch`, on by
 // default). The speed lasts for the title, and carries on when another episode of its series opens
 // from it, as Next episode does; live channels always play at their own.
+//
+// An episode knows the next one in its series. At its end that one plays after a countdown,
+// unless the viewer turned it off or cancels; Next plays it at once. Watching into the credits of
+// the last episode records that the series is finished.
 import { createStore, useStore } from "zustand";
-import type { TitleRef } from "@mrstreamer/contracts/ondemand";
+import type { Episode, SeriesDetails, TitleRef } from "@mrstreamer/contracts/ondemand";
 import type {
   AudioTrack,
   StreamFailure,
@@ -18,8 +22,11 @@ import type {
   SubtitleTrack,
 } from "@mrstreamer/contracts/playback";
 import { ORIGINAL_SOUND, type Preferences } from "@mrstreamer/contracts/preferences";
+import { nextEpisode } from "@mrstreamer/core/ondemand/details";
 import { DEFAULT_TITLE_LANGUAGE } from "@mrstreamer/core/ondemand/languages";
+import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import { chooseTracks } from "@mrstreamer/core/ondemand/tracks";
+import { isFinished } from "@mrstreamer/core/viewing/titles";
 import { appError } from "../lib/errors.ts";
 import { call } from "../lib/ipc.ts";
 import { titleDecoders } from "./decoders.ts";
@@ -34,6 +41,8 @@ const CHECKPOINT_MS = 60_000;
 const RELEASE_AFTER_PAUSE_MS = 5 * 60_000;
 /** Waits before each new run after the connection broke. Its length is the attempt limit. */
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000];
+/** At the end of an episode, the next one plays after this many seconds. */
+const COUNTDOWN_S = 10;
 
 /** The speeds a title plays at, slowest first; 1 is its own. */
 export const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
@@ -57,6 +66,26 @@ export interface NowPlaying {
   readonly artworkUrl: string | null;
   /** The language it was made in, which "Original language" sound plays; null when unknown. */
   readonly originalLanguage: string | null;
+  /** For episodes: the details of the series version they belong to, which list what comes next. */
+  readonly series?: SeriesDetails;
+}
+
+/** What the player shows for an episode of `series`: the series, and "S2 E3 · Its name". */
+export function episodeNow(series: SeriesDetails, episode: Episode): NowPlaying {
+  return {
+    title: {
+      kind: "episode",
+      id: episode.id,
+      seriesId: episode.seriesId,
+      season: episode.season,
+      episode: episode.number,
+    },
+    name: series.title.title,
+    detail: `${episodeLabel(episode.season, episode.number)} · ${episode.title}`,
+    artworkUrl: episode.stillUrl ?? series.backdropUrl ?? series.title.posterUrl,
+    originalLanguage: series.title.originalLanguage,
+    series,
+  };
 }
 
 type TitlePhase =
@@ -83,6 +112,18 @@ export interface TitlePlayerState {
   /** The subtitle track on screen, or null for none. */
   readonly subtitle: SubtitleTrack | null;
   readonly speed: Speed;
+  /**
+   * For an episode, the one after it in its series: null after the last episode, undefined for
+   * movies and for episodes their series doesn't list.
+   */
+  readonly next: Episode | null | undefined;
+  /** At the end of an episode, the seconds until the next one plays; null without a countdown. */
+  readonly countdown: number | null;
+  /**
+   * Started as the next episode, by the countdown or Next, and not played yet: a failure then
+   * means it didn't start.
+   */
+  readonly continued: boolean;
 }
 
 const idle: TitlePlayerState = {
@@ -95,6 +136,9 @@ const idle: TitlePlayerState = {
   audioId: null,
   subtitle: null,
   speed: 1,
+  next: undefined,
+  countdown: null,
+  continued: false,
 };
 
 const store = createStore<TitlePlayerState>(() => idle);
@@ -125,6 +169,10 @@ let released: number | null = null;
 let holding = false;
 /** The subtitles shown last in this title, which C turns on again. */
 let lastSubtitle: SubtitleTrack | null = null;
+/** Takes a second off the countdown to the next episode. */
+let countdownTimer: ReturnType<typeof setInterval> | null = null;
+/** This play of the last episode has recorded that its series is finished. */
+let seriesFinished = false;
 
 video.addEventListener("timeupdate", () => {
   if (engine) store.setState({ position: engine.position() });
@@ -151,17 +199,53 @@ onLiveStart(() => {
   if (store.getState().now) titlePlayer.close();
 });
 
-/** Saves how far the title got, when there is a title and a length to measure it against. */
+/**
+ * Saves how far the title got, when there is a title and a length to measure it against. Once
+ * the last episode of a series is in its credits, records that the series is finished, after the
+ * progress, so every version played leaves Continue watching, this one included.
+ */
 function save(): void {
-  const { now, position, duration } = store.getState();
+  const { now, position, duration, next } = store.getState();
   if (!now || !duration || position <= 0) return;
-  void call("viewing.recordProgress", {
+  const saved = call("viewing.recordProgress", {
     commandId: crypto.randomUUID(),
     title: now.title,
     position: Math.min(position, duration),
     duration,
     since: openedAt,
-  }).catch(() => {});
+  });
+  if (next === null && now.series && !seriesFinished && isFinished(position, duration)) {
+    seriesFinished = true;
+    const seriesIds = now.series.title.versions.map((version) => version.id);
+    void saved
+      .then(() => call("viewing.finishSeries", { commandId: crypto.randomUUID(), seriesIds }))
+      .catch(() => {});
+  }
+  void saved.catch(() => {});
+}
+
+/** Stops the countdown to the next episode. */
+function stopCountdown(): void {
+  if (countdownTimer) clearInterval(countdownTimer);
+  countdownTimer = null;
+  if (store.getState().countdown !== null) store.setState({ countdown: null });
+}
+
+/**
+ * At the end of an episode with another after it, counts down to that one once a second, unless
+ * the viewer turned that off. The setting is read now, so a change made while it played counts.
+ */
+async function countDown(mine: number): Promise<void> {
+  if (!store.getState().next) return;
+  const preferences = await call("preferences.get").catch((): Preferences | null => null);
+  if (mine !== generation || store.getState().phase.kind !== "ended") return;
+  if (preferences?.autoplayNext === false) return;
+  store.setState({ countdown: COUNTDOWN_S });
+  countdownTimer = setInterval(() => {
+    const left = (store.getState().countdown ?? 0) - 1;
+    if (left > 0) store.setState({ countdown: left });
+    else titlePlayer.playNext();
+  }, 1000);
 }
 
 /** Plays the element at `speed`, and starts each run after this at it too. */
@@ -212,6 +296,7 @@ async function run(start: number, attempt = 0, paused = false): Promise<void> {
   if (!session) return;
   const mine = ++generation;
   stopEngine();
+  stopCountdown();
   released = null;
   holding = paused;
   const { audioId, subtitle, duration } = store.getState();
@@ -243,7 +328,7 @@ async function run(start: number, attempt = 0, paused = false): Promise<void> {
     return;
   }
   if (mine !== generation) return;
-  store.setState({ phase: { kind: video.paused ? "paused" : "playing" } });
+  store.setState({ phase: { kind: video.paused ? "paused" : "playing" }, continued: false });
   // A run that starts paused holds the provider's connection until the release, as a pause does.
   if (video.paused) releaseLater();
   // Only playing moves the title on; a checkpoint while paused would make it look watched later.
@@ -255,6 +340,7 @@ async function run(start: number, attempt = 0, paused = false): Promise<void> {
     const { duration: length } = store.getState();
     store.setState({ phase: { kind: "ended" }, position: length ?? started.position() });
     save();
+    void countDown(mine);
   });
   started.onFailure((error) => {
     if (mine !== generation) return;
@@ -327,9 +413,9 @@ function asEngineError(error: unknown): EngineError {
 export const titlePlayer = {
   /**
    * Opens a title and plays it from `from` seconds: the resume position, or 0 to start at the
-   * beginning. Closes whatever played before, live or on demand.
+   * beginning. Closes whatever played before, live or on demand. `continued` is for `playNext`.
    */
-  async open(now: NowPlaying, from: number): Promise<void> {
+  async open(now: NowPlaying, from: number, continued = false): Promise<void> {
     const before = store.getState();
     const sameSeries =
       before.now?.title.kind === "episode" &&
@@ -343,12 +429,16 @@ export const titlePlayer = {
     openedAt = Date.now();
     convertSound = false;
     lastSubtitle = null;
+    seriesFinished = false;
     store.setState({
       ...idle,
       now,
       phase: { kind: "opening" },
       position: from,
       speed: sameSeries ? before.speed : 1,
+      next:
+        now.series && now.title.kind === "episode" ? nextEpisode(now.series, now.title) : undefined,
+      continued,
     });
     try {
       // The languages chosen last, fresh: a choice in the title before counts.
@@ -403,6 +493,7 @@ export const titlePlayer = {
     const { duration, phase } = store.getState();
     if (!session || phase.kind === "opening") return;
     const target = Math.max(0, Math.min(position, (duration ?? Infinity) - 1));
+    stopCountdown();
     save();
     if (engine?.seekWithin(target)) {
       store.setState({ position: target });
@@ -442,10 +533,26 @@ export const titlePlayer = {
    * open failed and left no session.
    */
   retry(): void {
-    const { now, phase, position } = store.getState();
+    const { now, phase, position, continued } = store.getState();
     if (!now || phase.kind !== "failed") return;
     if (session) void run(position);
-    else void titlePlayer.open(now, position);
+    else void titlePlayer.open(now, position, continued);
+  },
+
+  /**
+   * Plays the episode after the open one from its beginning, in the same version of the series,
+   * once this one has closed: for the countdown, Next, N and the system's next track. Does nothing
+   * for movies, after the last episode, and while the next episode is already starting.
+   */
+  playNext(): void {
+    const { now, next, continued, phase } = store.getState();
+    if (!now?.series || !next || (continued && phase.kind !== "failed")) return;
+    void titlePlayer.open(episodeNow(now.series, next), 0, true);
+  },
+
+  /** Stops the countdown to the next episode, leaving the end on screen. */
+  cancelNext(): void {
+    stopCountdown();
   },
 
   /** Plays another sound track from where the title is, and remembers its language. */
@@ -515,6 +622,7 @@ export const titlePlayer = {
     if (!now) return;
     save();
     generation++;
+    stopCountdown();
     // Still reading the file, before its session is known: stop that too, so no request to the
     // provider outlives the title.
     if (phase.kind === "opening") void call("playback.closeAll").catch(() => {});

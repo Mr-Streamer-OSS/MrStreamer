@@ -339,6 +339,8 @@ async function start(): Promise<void> {
         viewing.recordProgress(commandId, title, position, duration, since),
       "viewing.removeFromContinue": ({ commandId, ...filter }) =>
         viewing.removeFromContinue(commandId, filter),
+      "viewing.finishSeries": ({ commandId, seriesIds }) =>
+        viewing.finishSeries(commandId, seriesIds),
       "viewing.progress": (filter) => viewing.progress(filter),
       "updates.status": () => updates.status,
       "updates.setChannel": ({ channel }) => updates.setChannel(channel),

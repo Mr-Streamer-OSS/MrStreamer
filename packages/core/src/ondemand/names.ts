@@ -58,6 +58,11 @@ export function titleName(raw: string, releaseDate: string | null = null): Title
   return { title: recase(title), tags, year: year ?? yearOf(releaseDate) };
 }
 
+/** "S2 E3". Specials, season 0, are "Special 3". */
+export function episodeLabel(season: number, episode: number): string {
+  return season === 0 ? `Special ${episode}` : `S${season} E${episode}`;
+}
+
 /**
  * An episode's own name: what follows its numbers, "Tbilisi". When nothing does, or only the
  * series name, "Episode 3".

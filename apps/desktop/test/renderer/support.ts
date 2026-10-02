@@ -1,7 +1,8 @@
 // Stands in for the main process in the renderer's tests, which run with happy-dom. Every call is
-// recorded; the preferences answer with the defaults, a call the test holds answers when the test
-// says, and anything else never answers. Tests send its events themselves. Import it first, before the renderer's modules: it also
-// stands in for Media Source Extensions, which happy-dom lacks.
+// recorded; a call the test holds answers when the test says, the preferences otherwise answer
+// with the defaults, and anything else never answers. Tests send its events themselves. Import it
+// first, before the renderer's modules: it also stands in for Media Source Extensions, which
+// happy-dom lacks.
 import type { AppError, Result } from "@mrstreamer/contracts/errors";
 import type {
   BridgeApi,
@@ -20,6 +21,8 @@ export const ipc = {
   /** The arguments of each call to `method` so far. */
   argsOf: (method: IpcMethod): unknown[] =>
     calls.filter((each) => each.method === method).map((each) => each.args),
+  /** The methods called so far, in order. */
+  methods: (): IpcMethod[] => calls.map((each) => each.method),
   /** Holds the next call to `method` until the test answers it. */
   hold<M extends IpcMethod>(method: M) {
     let settle: (result: Result<unknown>) => void = () => {};
@@ -44,10 +47,12 @@ export const ipc = {
 const bridge = {
   invoke(method: IpcMethod, args?: unknown): Promise<Result<unknown>> {
     calls.push({ method, args });
+    const answer = held.get(method)?.shift();
+    if (answer) return answer;
     if (method === "preferences.get") {
       return Promise.resolve({ ok: true, value: defaultPreferences });
     }
-    return held.get(method)?.shift() ?? new Promise(() => {});
+    return new Promise(() => {});
   },
   on(event: string, listener: (payload: unknown) => void) {
     const set = listeners.get(event) ?? new Set();

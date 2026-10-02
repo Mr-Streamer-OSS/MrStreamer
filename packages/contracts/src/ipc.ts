@@ -133,6 +133,8 @@ export const ipcInputs = {
   /** Every version played of the movies and series with these ids. */
   "viewing.removeFromContinue": () =>
     type({ commandId: "string", "movieIds?": "string[]", "seriesIds?": "string[]" }),
+  /** Every version of the series, by id. */
+  "viewing.finishSeries": () => type({ commandId: "string", seriesIds: "string[]" }),
   "viewing.progress": () => type({ "movieIds?": "string[]", "seriesIds?": "string[]" }),
   "updates.status": none,
   "updates.setChannel": () => type({ channel: "'stable' | 'nightly'" }),
@@ -218,6 +220,11 @@ export interface IpcOutputs {
   "viewing.recordProgress": Viewing;
   /** Takes movies and series out of Continue watching until a play begun afterwards. */
   "viewing.removeFromContinue": Viewing;
+  /**
+   * Records that a series' last episode was watched: every version played leaves Continue
+   * watching, as a removal does, until a play begun afterwards.
+   */
+  "viewing.finishSeries": Viewing;
   /** How far the given movies, or every episode of a series, got. */
   "viewing.progress": readonly TitleProgress[];
   "updates.status": UpdateStatus;

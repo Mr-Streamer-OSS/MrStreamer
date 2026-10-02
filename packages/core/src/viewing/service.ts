@@ -132,6 +132,11 @@ export class ViewingRecord extends Context.Service<
      * version played at once, until a play begun afterwards. How far they got stays.
      */
     removeFromContinue(commandId: string, filter: TitleFilter): Effect.Effect<Viewing, Failed>;
+    /**
+     * Records that a series' last episode was watched, by the ids of its versions: every version
+     * played leaves Continue watching, as a removal does, until a play begun afterwards.
+     */
+    finishSeries(commandId: string, seriesIds: readonly string[]): Effect.Effect<Viewing, Failed>;
     /** How far the matching titles got; empty without an account. */
     progress(filter: TitleFilter): Effect.Effect<readonly TitleProgress[], Failed>;
     /**
@@ -208,6 +213,17 @@ function make() {
         return shown(stored, channelOf);
       });
 
+    /**
+     * The titles `filter` matches that the account played: each movie, and one episode of each
+     * version of a series, which stands for the series.
+     */
+    const playedIn = (filter: TitleFilter) =>
+      Effect.gen(function* () {
+        const key = yield* account.current;
+        const played = key ? yield* store.titles(key, filter) : [];
+        return [...new Map(played.map(({ title }) => [removalScope(title), title])).values()];
+      });
+
     return {
       state: Effect.gen(function* () {
         const key = yield* account.current;
@@ -232,16 +248,13 @@ function make() {
         since: number,
       ) => run(commandId, () => ({ kind: "record-progress", title, position, duration, since })),
       removeFromContinue: (commandId: string, filter: TitleFilter) =>
-        Effect.gen(function* () {
-          const key = yield* account.current;
-          const played = key ? yield* store.titles(key, filter) : [];
-          // Each movie played, and one episode of each series played, which takes the series.
-          const titles = new Map(played.map(({ title }) => [removalScope(title), title]));
-          return yield* run(commandId, () => ({
-            kind: "remove-titles",
-            titles: [...titles.values()],
-          }));
-        }),
+        Effect.flatMap(playedIn(filter), (titles) =>
+          run(commandId, () => ({ kind: "remove-titles", titles })),
+        ),
+      finishSeries: (commandId: string, seriesIds: readonly string[]) =>
+        Effect.flatMap(playedIn({ seriesIds }), (titles) =>
+          run(commandId, () => ({ kind: "finish-series", titles })),
+        ),
       progress: (filter: TitleFilter) =>
         Effect.gen(function* () {
           const key = yield* account.current;

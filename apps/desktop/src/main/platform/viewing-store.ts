@@ -172,8 +172,8 @@ function eventOf(
   }
   const payload = row.payload ? TitlePayload(row.payload) : null;
   if (!payload || payload instanceof type.errors) return null;
-  if (row.type === "title-removed") {
-    return { ...base, event: { type: "title-removed", title: payload.title } };
+  if (row.type === "title-removed" || row.type === "series-finished") {
+    return { ...base, event: { type: row.type, title: payload.title } };
   }
   if (row.type === "title-progress" && payload.position !== undefined && payload.duration) {
     return {

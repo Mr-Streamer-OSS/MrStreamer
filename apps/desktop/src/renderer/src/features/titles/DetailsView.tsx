@@ -21,19 +21,19 @@ import type {
   TitleDetails,
 } from "@mrstreamer/contracts/ondemand";
 import type { TitleProgress } from "@mrstreamer/contracts/viewing";
+import { nextEpisode } from "@mrstreamer/core/ondemand/details";
 import { versionLabels } from "@mrstreamer/core/ondemand/languages";
+import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import { useUi, type DetailsTarget } from "../../app/ui-store.ts";
 import { Progress } from "../../components/Progress.tsx";
 import { Artwork } from "../../components/TitleArt.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { appError, describeError } from "../../lib/errors.ts";
 import { queries } from "../../lib/queries.ts";
+import { episodeNow } from "../../player/title-player.ts";
 import {
   automaticVersion,
-  episodeLabel,
-  episodeNow,
   movieNow,
-  nextEpisode,
   pickedVersion,
   resumePoint,
   runtime,

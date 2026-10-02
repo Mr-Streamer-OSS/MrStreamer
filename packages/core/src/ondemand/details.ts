@@ -2,6 +2,7 @@
 // where it has them, the provider's otherwise, and the provider's seasons, episodes and length,
 // which are what plays. Seasons come from the episodes themselves: panels list seasons
 // incompletely, or not at all. An episode gets TMDB's details once the viewer opens its season.
+// The provider's numbers also say which episode comes next.
 import type {
   Episode,
   EpisodeDetails,
@@ -62,6 +63,36 @@ export function seriesDetails(
       };
     });
   return { kind: "series", ...shared(title, details, about), seasons };
+}
+
+/**
+ * The episode after `current` in the series, in the provider's order: by its season and episode
+ * numbers, into the next season after a season's last. Null after the last episode. Specials,
+ * season 0, only lead to other specials, so a finale never leads into them. Another file of the
+ * same episode, as panels list some twice, is passed over. Undefined when the series doesn't list
+ * `current`, as when its details changed since.
+ */
+export function nextEpisode(
+  series: SeriesDetails,
+  current: { readonly id?: string; readonly season: number; readonly episode: number },
+): Episode | null | undefined {
+  const episodes = series.seasons
+    .filter((season) => (season.number === 0) === (current.season === 0))
+    .flatMap((season) => season.episodes);
+  const byId = episodes.findIndex((each) => each.id === current.id);
+  const index =
+    byId === -1
+      ? episodes.findIndex(
+          (each) => each.season === current.season && each.number === current.episode,
+        )
+      : byId;
+  const playing = episodes[index];
+  if (!playing) return undefined;
+  return (
+    episodes
+      .slice(index + 1)
+      .find((each) => each.season !== playing.season || each.number !== playing.number) ?? null
+  );
 }
 
 /**
