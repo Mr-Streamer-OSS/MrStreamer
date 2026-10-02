@@ -3,8 +3,16 @@
 // service picked. electron-updater checks the SHA-512 from the release's update metadata, and on
 // macOS Squirrel accepts only an update signed by the same Developer ID. Squirrel checks that
 // when installing, so a refused update surfaces from `install`.
+import type { OutgoingHttpHeaders } from "node:http";
 import electronUpdater, { type CancellationToken } from "electron-updater";
 import type { Installer } from "../services/updates.ts";
+
+/**
+ * electron-updater sends every request for a release's update metadata with a random id it keeps
+ * in the data folder, for staged rollouts, which releases don't use. Headers set here replace its
+ * own, so the id stays on this device.
+ */
+const HEADERS: OutgoingHttpHeaders = { "x-user-staging-id": "" };
 
 /** The part of electron-updater's autoUpdater this adapter drives. */
 export interface Updater {
@@ -12,6 +20,7 @@ export interface Updater {
   autoInstallOnAppQuit: boolean;
   allowDowngrade: boolean;
   logger: unknown;
+  requestHeaders: OutgoingHttpHeaders | null;
   setFeedURL(options: { provider: "generic"; url: string }): void;
   checkForUpdates(): Promise<{ updateInfo: { version: string } } | null>;
   downloadUpdate(token: CancellationToken): Promise<unknown>;
@@ -25,6 +34,7 @@ export function electronInstaller(updater: Updater = electronUpdater.autoUpdater
   updater.autoDownload = false;
   updater.autoInstallOnAppQuit = false;
   updater.logger = null;
+  updater.requestHeaders = HEADERS;
   /**
    * The download before, until it has stopped. electron-updater shares one check and one
    * download at a time, so a new download waits for a cancelled one to wind down instead of
