@@ -2,10 +2,9 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { AppError } from "@mrstreamer/contracts/errors";
-import { Diagnostics } from "@mrstreamer/core/diagnostics";
 import { Failed } from "@mrstreamer/core/failure";
 import * as Layer from "effect/Layer";
-import { diagnosticsLog } from "../src/main/platform/diagnostics-log.ts";
+import { diagnosticsLogLayer } from "../src/main/platform/diagnostics-log.ts";
 import { Playback } from "../src/main/services/playback.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import type { FakeProvider } from "./fake-provider.ts";
@@ -25,7 +24,7 @@ async function app(fetchImpl: typeof fetch) {
           providerOptions: { userAgent, fetch: fetchImpl },
         }),
       ),
-      Layer.provideMerge(Layer.succeed(Diagnostics, diagnosticsLog(dataDir))),
+      Layer.provideMerge(diagnosticsLogLayer(dataDir)),
     ),
   );
   return {
