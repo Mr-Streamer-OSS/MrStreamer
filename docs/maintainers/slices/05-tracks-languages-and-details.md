@@ -7,7 +7,7 @@ Outcome: live channels and movies and series offer every sound track and every s
 ## Start here
 
 - What users see: [Live TV](../../user/live-tv.md), [Movies and series](../../user/movies-and-series.md), [What plays](../../user/playback.md) and the [README](../../../README.md).
-- How it works: [architecture](../architecture.md#playback) for tracks, live subtitles and captions, [subtitles the app draws](../architecture.md#subtitles-the-app-draws), [titles and versions](../architecture.md#titles-and-versions), [TMDB](../architecture.md#tmdb) and the [data](../architecture.md#data) kept on disk; the [playback evaluation](../playback.md#subtitles-beyond-text) for how subtitles are shown.
+- How it works: [architecture](../../contributing/architecture.md#playback) for tracks, live subtitles and captions, [subtitles the app draws](../../contributing/architecture.md#subtitles-the-app-draws), [titles and versions](../../contributing/architecture.md#titles-and-versions), [TMDB](../../contributing/architecture.md#tmdb) and the [data](../../contributing/architecture.md#data) kept on disk; the [playback evaluation](../../contributing/playback-evaluation.md#subtitles-beyond-text) for how subtitles are shown.
 - Baseline: `main` at `31fe500`, slice 4.5 with the README banner.
 
 ## Decisions
@@ -40,7 +40,7 @@ Wout added one fix while the slice was under way: on the Mac, the top bar didn't
 
 Made while building:
 
-- **Subtitles are drawn over the untouched picture.** Burning picture subtitles in cost 6.55 s of CPU for 6 s of 1080p and re-encoded every copied picture; drawing them costs 0.04 s. The app decodes DVB, PGS, teletext and CEA-608 itself in TypeScript (`@mrstreamer/core/subtitles`), so no native library joins the bundle; ffmpeg gains the DVD and DivX decoders, the DVB subtitle encoder, the `sup` muxer and `filter_units`, about 0.3 MB. The [evaluation](../playback.md#subtitles-beyond-text) has the details.
+- **Subtitles are drawn over the untouched picture.** Burning picture subtitles in cost 6.55 s of CPU for 6 s of 1080p and re-encoded every copied picture; drawing them costs 0.04 s. The app decodes DVB, PGS, teletext and CEA-608 itself in TypeScript (`@mrstreamer/core/subtitles`), so no native library joins the bundle; ffmpeg gains the DVD and DivX decoders, the DVB subtitle encoder, the `sup` muxer and `filter_units`, about 0.3 MB. The [evaluation](../../contributing/playback-evaluation.md#subtitles-beyond-text) has the details.
 - **Live subtitles** come from mpegts.js, which passes teletext and DVB packets on with times on the player's clock. Captions travel inside the pictures, which mpegts.js doesn't pass on, so the proxy copies them into a private stream of their own, listed only once a picture carries them.
 - **Live sound** opens the stream again with the chosen track first in the program table, or converted alone; a channel opened afresh plays the remembered language. Subtitles never reopen anything.
 - **A channel starts with subtitles in the viewer's language only when none of its sound tracks speaks it.** On a channel that does, they are for the hard of hearing, as teletext page 888 on Dutch channels mostly is.
@@ -73,7 +73,7 @@ A second review, of `main` at `6a128ac` on 2 October, with Linux checks and prob
 - Details opened before TMDB's names arrived kept the provider's name and no original language, so Original language sound had nothing to go on (#42).
 - Settings hid Check now while an update was on offer, a regression from #33 (#43).
 
-It also found, by reading the code, that the live Sound menu marked a channel's first track while the sound in the viewer's language played (#44), and that captions sent only as CEA-708 show nothing (see [known gaps](#known-gaps)). The renderer had no tests before #37; its controllers and hooks now have their own, under happy-dom ([testing](../testing.md)).
+It also found, by reading the code, that the live Sound menu marked a channel's first track while the sound in the viewer's language played (#44), and that captions sent only as CEA-708 show nothing (see [known gaps](#known-gaps)). The renderer had no tests before #37; its controllers and hooks now have their own, under happy-dom ([testing](../../contributing/testing.md)).
 
 ## Progress
 
@@ -115,7 +115,7 @@ On Linux, `pnpm dist:linux` at `e54666b` built the deb and the AppImage with the
 
 The release workflow for nightlies .46 and .50 built every installer, signed and notarized the Mac app and checked its signature, and ran the packaged-app test on the installed DMG, setup, deb and AppImage on hosted macOS, Windows and Linux runners. That is a smoke test against the fake provider, not use.
 
-The README's screenshots come from the same kind of run as the checks, with made-up titles, people and artwork ([development](../development.md#artwork)).
+The README's screenshots come from the same kind of run as the checks, with made-up titles, people and artwork ([development](../../contributing/development.md#artwork)).
 
 ## Known gaps
 

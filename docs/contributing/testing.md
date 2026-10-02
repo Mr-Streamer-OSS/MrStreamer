@@ -115,7 +115,7 @@ xvfb-run -a node apps/desktop/test/e2e/packaged-app.ts "/opt/Mr. Streamer/mrstre
 
 The suite, the packaged-app test and the measurements run against the fakes and always will. They must answer the same way every time and offline, and no public provider offers what they exercise: an Xtream API, movies and series, failures on demand, or clips in every format.
 
-Live TV also gets checked in the real app against a real provider: iptv-org's public playlist of channels broadcasters stream for free. It needs no login. Paste this link in the Connect screen's link mode, browse Live TV, then play several https and http channels, switch between them, restart and play again:
+Live TV also gets checked in the real app against a real provider: iptv-org's public playlist of channels broadcasters stream for free. It needs no login. On the Connect screen, choose **Use an M3U link** and paste this link, browse Live TV, then play several https and http channels, switch between them, restart and play again:
 
 ```
 https://iptv-org.github.io/iptv/index.m3u
@@ -135,13 +135,15 @@ https://raw.githubusercontent.com/Mr-Streamer-OSS/certification-playlist/main/re
 
 ## App measurements
 
-`node apps/desktop/test/e2e/measure-app.ts [--json results.json] <app executable> [-- app arguments]` drives a built app against the fake provider at the size of a large subscription: 13,000 channels, about 2,000 with a guide, a continuous 720p stream that ffmpeg encodes as it plays, and a series of 20 seasons with 1 MB of details. It prints medians for cold start, time to picture, channel switch, opening the guide, search, opening the series after a start (its name, then its episodes), idle CPU and memory on Home with and without the muted preview, and the installed size, and counts the streams the provider sees opened for each tune, each switch and the return from Home to Watch. Slice handoffs record its numbers for comparison. It shares its DevTools client and login with the packaged-app test (`apps/desktop/test/e2e/app.ts`). `--json` also writes every run of every measure.
+`node apps/desktop/test/e2e/measure-app.ts [--json results.json] <app executable> [-- app arguments]` drives a built app against the fake provider at the size of a large subscription: 13,000 channels, about 2,000 with a guide, a continuous 720p stream that ffmpeg encodes as it plays, and a series of 20 seasons with 1 MB of details. It prints medians for cold start, time to picture, channel switch, opening the guide, search, opening the series after a start (its name, then its episodes), idle CPU and memory on Home with and without the muted preview, and the installed size, and counts the streams the provider sees opened for each tune, each switch and the return from Home to Watch. A pull request that may change speed or memory records its numbers, against the build before it. It shares its DevTools client and login with the packaged-app test (`apps/desktop/test/e2e/app.ts`). `--json` also writes every run of every measure.
 
-`node apps/desktop/test/e2e/compare-builds.ts [--rounds 3] <baseline> <candidate> [-- app arguments]` measures two builds on one machine, alternating which goes first each round, and prints each measure's median before and after with the change. A machine that drifts during the runs affects both builds alike, which is what makes shared machines usable. Run it by hand when a change may cost speed or memory; releases don't, as it added a quarter of an hour to each. Changes over 10% get a warning when they are also beyond noise: more than 20 ms, a point of CPU or 10 MB. Any extra stream opened gets one too. Measure a warning again, on the same machine or the Mac mini, before calling it a regression. Windows has no `ps`, so it isn't measured.
+`node apps/desktop/test/e2e/compare-builds.ts [--rounds 3] <baseline> <candidate> [-- app arguments]` measures two builds on one machine, alternating which goes first each round, and prints each measure's median before and after with the change. A machine that drifts during the runs affects both builds alike, which is what makes shared machines usable. Run it by hand when a change may cost speed or memory; releases don't, as it added a quarter of an hour to each. Changes over 10% get a warning when they are also beyond noise: more than 20 ms, a point of CPU or 10 MB. Any extra stream opened gets one too. Measure a warning again, on the same machine, before calling it a regression. Windows has no `ps`, so it isn't measured.
 
 ## Guide budgets
 
 `node --expose-gc apps/desktop/scripts/measure-guide.ts` generates a guide the size of a large panel's (1,300 guide channels, 70 programmes each, 36 MB) for a 13,000-channel catalogue, streams it through the guide service and reports download and indexing time, the longest main-process stall, reading from disk after a restart, now and next for 60 channels, search, and memory. `--file guide.xml` measures a real XMLTV file instead; keep provider files in `.local/`.
+
+The budgets: download and indexing under 3 s, no main-process stall over 50 ms, now and next for a screen of channels under 5 ms, and under 80 MB for the guide. Lists stay virtualised at 13,000 channels, and going from Home to Watch opens no extra connection.
 
 ## Viewing record
 
@@ -154,4 +156,4 @@ https://raw.githubusercontent.com/Mr-Streamer-OSS/certification-playlist/main/re
 - **Check:** unused files, exports and dependencies (`pnpm knip`), lint (`pnpm lint`), format, typecheck and the production build.
 - **Test:** the suite, with the system ffmpeg for the conversion tests.
 
-The [release workflow](releasing.md) runs both jobs on the exact commit it releases, next to the packaged-app test on every installed package. CI needs no secrets, so pull requests from forks run it too.
+The [release workflow](../maintainers/releasing.md) runs both jobs on the exact commit it releases, next to the packaged-app test on every installed package. CI needs no secrets, so pull requests from forks run it too.

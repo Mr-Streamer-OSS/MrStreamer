@@ -7,7 +7,7 @@ Outcome: movies and series from the subscription, with resume, seasons, tracks a
 ## Start here
 
 - What users see: [Movies and series](../../user/movies-and-series.md), [Home](../../user/live-tv.md#home), [Updates](../../user/updates.md) and [What plays](../../user/playback.md).
-- How it works: [architecture](../architecture.md#movies-and-series) for the on-demand catalogue, [movies and episodes](../architecture.md#movies-and-episodes) for playback, [viewing record](../architecture.md#viewing-record), [updates](../architecture.md#updates) and [licences](../architecture.md#licences). The [playback evaluation](../playback.md#movies-and-episodes) records the real provider's formats and why every title goes through ffmpeg. [Releasing](../releasing.md#update-feed) covers the feed.
+- How it works: [architecture](../../contributing/architecture.md#movies-and-series) for the on-demand catalogue, [movies and episodes](../../contributing/architecture.md#movies-and-episodes) for playback, [viewing record](../../contributing/architecture.md#viewing-record), [updates](../../contributing/architecture.md#updates) and [licences](../../contributing/architecture.md#licences). The [playback evaluation](../../contributing/playback-evaluation.md#movies-and-episodes) records the real provider's formats and why every title goes through ffmpeg. [Releasing](../releasing.md#update-feed) covers the feed.
 - Baseline: `main` at `a9d169c`, slice 3.5 with the build comparison (#15) and the 0.0.2 version. Stable 0.0.2 (`f26072f`) is the published build before this slice.
 
 ## Decisions
@@ -35,7 +35,7 @@ Open: **where the feed lives.** The app reads `https://mr-streamer-oss.github.io
 
 Made while building:
 
-- **One path for every title:** ffmpeg repackages from the chosen position, for Media Source Extensions. Chromium plays MKV and MP4 faster on its own, but lists no sound tracks, shows no embedded subtitles and plays no E-AC-3 on Linux; the [evaluation](../playback.md#movies-and-episodes) has the numbers.
+- **One path for every title:** ffmpeg repackages from the chosen position, for Media Source Extensions. Chromium plays MKV and MP4 faster on its own, but lists no sound tracks, shows no embedded subtitles and plays no E-AC-3 on Linux; the [evaluation](../../contributing/playback-evaluation.md#movies-and-episodes) has the numbers.
 - **One provider connection:** opening a title closes the live stream, Movies and Series stop the muted preview, and Home restarts it. The title's proxy keeps one upstream request open at a time and retries a refusal, since panels free a closed connection late.
 - **Progress** is an event in the viewing record per account, written every minute and on pause, skip, track change, finish and leaving, never per frame. Continue watching takes the positions from the record and each title's artwork and episodes from its details, which the main process caches while it runs.
 - **The catalogue** loads in a worker thread: the real subscription's 53,000 movies and 10,000 series took 8 s to download and up to 2 s to index, which stalled the main process for 50 to 326 ms on the main thread.

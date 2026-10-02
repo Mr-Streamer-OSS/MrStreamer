@@ -51,7 +51,7 @@ GPL-3.0 section 4 asks that every recipient gets a copy of the licence, and sect
 
 Gaps in 0.0.3, fixed by [#54](https://github.com/Mr-Streamer-OSS/MrStreamer/pull/54) and [#59](https://github.com/Mr-Streamer-OSS/MrStreamer/pull/59). Gate: private Store test.
 
-Every 0.0.3 installer carries the same `out/licences/third-party.json`: 55 notices, from the packages the bundles hold plus Electron, Chromium, Node.js, FFmpeg and x264 ([development](development.md#third-party-notices) describes how it's built).
+Every 0.0.3 installer carries the same `out/licences/third-party.json`: 55 notices, from the packages the bundles hold plus Electron, Chromium, Node.js, FFmpeg and x264 ([development](../contributing/development.md#third-party-notices) describes how it's built).
 
 | Platform | What 0.0.3 ships                                                                                                                    | Gap                                                                                                                                                                                 | Fix |
 | -------- | ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- |
@@ -150,7 +150,7 @@ Decided: Wout confirmed on 2 October 2026 that the API account is registered for
 Verified for the repository; the Store listing was entered from reviewed drafts. Gate: private Store test.
 
 - The README says "A desktop player for the IPTV subscription you already have" and needs the user's own Xtream Codes provider. Nothing in the repository supplies channels, playlists or provider promotions.
-- The README banner and screenshots come from the fake provider with made-up titles, artwork and people, as the [development runbook](development.md#artwork) requires.
+- The README banner and screenshots come from the fake provider with made-up titles, artwork and people, as the [development runbook](../contributing/development.md#artwork) requires.
 - Submission 1's listing ([runbook](microsoft-store.md#submission-1)) opens its description with "It supplies no channels, playlists or subscriptions", as Store policy 10.2.4 asks for dependencies. Its screenshots are the README's three, from the fake provider. Its search terms name the formats it reads, not providers or channels.
 - Certification uses [Mr-Streamer-OSS/certification-playlist](https://github.com/Mr-Streamer-OSS/certification-playlist): five channels that broadcasters stream free on their own watch-live pages. Aggregators, restreams and geo-blocked streams were ruled out. Its README says it holds links only, claims no affiliation, leaves the rights with the broadcasters and gives hello@mrstreamer.app for removal requests. Wout approved its content before it was published.
 - IPTV players such as Smarters present themselves as standalone players for content users bring. That positioning is no exemption from Store policy or provider rights, and Smarters' terms are no template for a GPL licence.

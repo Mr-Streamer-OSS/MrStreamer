@@ -2,7 +2,7 @@
 
 > For maintainers. The [docs index](../README.md) lists every guide.
 
-Work is planned in slices. This page is the roadmap; each slice's handoff in [slices/](slices/) keeps its decisions, evidence and open questions. The current one is [Slice 6: everyday viewing and release readiness](slices/06-everyday-viewing-and-release-readiness.md), implemented and accepted by Wout, with a Store update test still to do. [Stable 0.0.5](https://github.com/Mr-Streamer-OSS/MrStreamer/releases/tag/v0.0.5), published on 2 October 2026 from `9040bb1`, carries it.
+Work is planned in slices. This page is the roadmap; each slice's handoff in [slices/](slices) keeps its decisions, evidence and open questions. The current one is [Slice 6: everyday viewing and release readiness](slices/06-everyday-viewing-and-release-readiness.md), implemented and accepted by Wout, with a Store update test still to do. [Stable 0.0.5](https://github.com/Mr-Streamer-OSS/MrStreamer/releases/tag/v0.0.5), published on 2 October 2026 from `9040bb1`, carries it.
 
 ## Current sequence
 

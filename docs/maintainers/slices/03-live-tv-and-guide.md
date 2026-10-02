@@ -6,7 +6,7 @@ Outcome: quickly find something to watch now, navigate comfortably with a mouse 
 
 ## Start here
 
-- The [decisions](#decisions) below record the approved design. [Architecture](../architecture.md#programme-guide) describes the guide service, the one picture element and input handling; the [Live TV guide](../../user/live-tv.md) describes what users see.
+- The [decisions](#decisions) below record the approved design. [Architecture](../../contributing/architecture.md#programme-guide) describes the guide service, the one picture element and input handling; the [Live TV guide](../../user/live-tv.md) describes what users see.
 - Baseline: Stable `0.0.1` and nightly `0.0.1-nightly.20260929.15`, both from `263950b`. Stable `0.0.1` is published; its source matches the promoted nightly. Returning to Stable keeps the data, including when the Stable version is older.
 - Wout reported successful slice 02 testing on Mac and Windows on 30 September. That is user-reported acceptance, not independently repeated device evidence.
 

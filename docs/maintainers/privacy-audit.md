@@ -77,9 +77,9 @@ No analytics, telemetry or crash upload exists: nothing in the code calls `crash
 
 ## The login
 
-- Every provider request carries it. An https address never sends it over http, redirects included, and an address without a scheme asks before trying http (#53, #56, [architecture](architecture.md#the-login-on-the-wire)).
+- Every provider request carries it. An https address never sends it over http, redirects included, and an address without a scheme asks before trying http (#53, #56, [architecture](../contributing/architecture.md#the-login-on-the-wire)).
 - Errors that reach the window, the console and the diagnostics log cut every address to its origin (`withoutAddresses`). `apps/desktop/test/credentials.test.ts` checks the window's errors and the log after failures whose messages quote the full address.
-- The window never sees provider addresses: playback goes through a loopback proxy with a random token, and ffmpeg reads from that proxy or stdin, so the login never reaches a command line ([architecture](architecture.md#playback)).
+- The window never sees provider addresses: playback goes through a loopback proxy with a random token, and ffmpeg reads from that proxy or stdin, so the login never reaches a command line ([architecture](../contributing/architecture.md#playback)).
 - At rest the password is sealed (see above). The server address and username aren't.
 - A playlist's link can hold a token, so it is sealed like a password, and its query values and user info count as the login when a redirect leaves https (`providers/m3u.ts`). Its stream addresses stay out of `catalogue.json` and the window, as an Xtream login's do.
 

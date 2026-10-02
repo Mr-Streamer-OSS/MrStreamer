@@ -12,7 +12,7 @@ Outcome: play a broader, verified set of the selected subscription's streams on 
 
 ## Progress
 
-Recorded 29 Sep 2026. Measurements and their method are in the [playback evaluation](../playback.md).
+Recorded 29 Sep 2026. Measurements and their method are in the [playback evaluation](../../contributing/playback-evaluation.md).
 
 | Task                      | State                                                                                                                                                                                                                                                          |
 | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

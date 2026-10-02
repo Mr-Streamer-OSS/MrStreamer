@@ -1,7 +1,7 @@
 // Measures a built app against the fake provider at the size of a large subscription: 13,000
 // channels, about 2,000 of them with a guide, a continuous 720p stream from ffmpeg on every test
-// channel, and a series of 520 episodes. Prints medians for slice comparisons, and how many streams
-// each tune, switch and return to Watch opens at the provider; see docs/maintainers/testing.md.
+// channel, and a series of 520 episodes. Prints medians to compare builds, and how many streams
+// each tune, switch and return to Watch opens at the provider; see docs/contributing/testing.md.
 //
 //   node test/e2e/measure-app.ts [--json results.json] <app executable> [-- extra app arguments]
 //

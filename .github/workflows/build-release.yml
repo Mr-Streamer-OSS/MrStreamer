@@ -334,7 +334,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # Started as a user would, a Store copy keeps its data in a folder of its own inside the
-      # package's, apart from a direct copy's; docs/maintainers/architecture.md#data.
+      # package's, apart from a direct copy's; docs/contributing/architecture.md#data.
       - name: Check where the Store copy keeps its data
         run: |
           $package = Get-AppxPackage MrStreamerOSS.Mr.Streamer

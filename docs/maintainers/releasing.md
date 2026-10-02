@@ -1,8 +1,8 @@
 # Releasing
 
-> For maintainers. Using Mr. Streamer? See [docs/user](../user/).
+> For maintainers. Using Mr. Streamer? See [docs/user](../user).
 
-Releases come from `.github/workflows/release.yml`, which plans them and runs `.github/workflows/build-release.yml` for each, and live on GitHub Releases. The app finds them through the [update feed](#update-feed), a small file the workflow publishes to GitHub Pages after each release; see [architecture](architecture.md#updates).
+Releases come from `.github/workflows/release.yml`, which plans them and runs `.github/workflows/build-release.yml` for each, and live on GitHub Releases. The app finds them through the [update feed](#update-feed), a small file the workflow publishes to GitHub Pages after each release; see [architecture](../contributing/architecture.md#updates).
 
 ## What the workflow does
 
@@ -14,7 +14,7 @@ Releases come from `.github/workflows/release.yml`, which plans them and runs `.
 - Manual runs must select `main`; the plan refuses any other branch.
 - The plan job (`scripts/release-plan.ts`) resolves the commit, version and tag before anything builds. For a stable release it also decides whether a [nightly goes first](#stable-releases). Every later job checks out the planned commit, so merges that land during a run never reach its build.
 - `build-release.yml` builds, checks and publishes each release the plan names. On its commit, in parallel:
-  - the [CI](testing.md#ci) Check and Test jobs
+  - the [CI](../contributing/testing.md#ci) Check and Test jobs
   - `bundle` builds the JavaScript once, with the release version, and hands it to every platform as the `js-bundle-<version>` artifact
   - `package` builds each platform on its own runner, from the bundle:
     - the bundled ffmpeg, cached until `apps/desktop/scripts/build-ffmpeg.sh` changes
@@ -22,7 +22,7 @@ Releases come from `.github/workflows/release.yml`, which plans them and runs `.
     - Windows x64: the NSIS installer, unsigned; see [Windows signing](#windows-signing)
     - Linux x64: the AppImage and deb
     - every `latest*.yml` must name the release version
-    - the [packaged-app test](testing.md#packaged-app) runs on the installed DMG, setup, deb and AppImage
+    - the [packaged-app test](../contributing/testing.md#packaged-app) runs on the installed DMG, setup, deb and AppImage
 - Publishes only when every check and platform succeeded:
   - checks that each platform's installers and update metadata are present
   - attaches them with the FFmpeg and x264 sources the GPL requires, `SHA256SUMS.txt`, and the [notes](#release-notes)
@@ -155,7 +155,7 @@ The Microsoft Store gets an MSIX of the same app for Windows x64, which electron
 - **Windows versions:** Windows 11 and later, as for the installer.
 - **Building:** the **Package Microsoft Store MSIX** job builds it for dry runs and stable releases, after the installers. Nightlies never build it. Nothing waits for the job, so a failure there can't hold up or undo a release. On a Windows PC, `pnpm dist:msix` builds the same file.
 - **What it keeps:** the job's `msix` artifact holds `Mr-Streamer-<version>-win-x64.msix`, a `.msix.txt` naming the release version, the package version and the commit, and the certification kit's report, `.wack.xml`. Dry runs keep it 14 days, stable releases 90. It never goes on the release, and electron-builder writes no `latest*.yml` for it, so no update channel offers it. Nothing submits it to the Store.
-- **Checks:** the job compares the manifest with Partner Center's identity and the package version, and checks that the package holds the app, ffmpeg, ffprobe and Chromium's and Electron's notices. Then it signs a copy with a throwaway certificate (see [signing](signing.md#microsoft-store-package)), installs it, checks that Windows gives it the reserved package family name, runs the [packaged-app test](testing.md#packaged-app) on it, runs the Windows App Certification Kit, which must pass, and uninstalls it, which must remove its data. The kit's optional "Blocked executables" test fails, because it flags strings such as "cmd" and "reg" inside Electron's and ffmpeg's files; the overall result passes.
+- **Checks:** the job compares the manifest with Partner Center's identity and the package version, and checks that the package holds the app, ffmpeg, ffprobe and Chromium's and Electron's notices. Then it signs a copy with a throwaway certificate (see [signing](signing.md#microsoft-store-package)), installs it, checks that Windows gives it the reserved package family name, runs the [packaged-app test](../contributing/testing.md#packaged-app) on it, runs the Windows App Certification Kit, which must pass, and uninstalls it, which must remove its data. The kit's optional "Blocked executables" test fails, because it flags strings such as "cmd" and "reg" inside Electron's and ffmpeg's files; the overall result passes.
 
 ### Store versions
 
