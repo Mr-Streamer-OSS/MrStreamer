@@ -1,6 +1,7 @@
 // Stands in for the main process in the renderer's tests, which run with happy-dom. Every call is
 // recorded; the preferences answer with the defaults, a call the test holds answers when the test
-// says, and anything else never answers. Import it first, before the renderer's modules.
+// says, and anything else never answers. Import it first, before the renderer's modules: it also
+// stands in for Media Source Extensions, which happy-dom lacks.
 import type { AppError, Result } from "@mrstreamer/contracts/errors";
 import type { BridgeApi, IpcMethod, IpcOutput } from "@mrstreamer/contracts/ipc";
 import { defaultPreferences } from "@mrstreamer/contracts/preferences";
@@ -39,6 +40,28 @@ const bridge = {
   },
   on: () => () => {},
 };
+
+/**
+ * happy-dom has no Media Source Extensions. This stand-in opens and takes no data, so a title's
+ * run gets as far as its subtitles, and no further.
+ */
+class StandInMediaSource extends EventTarget {
+  static isTypeSupported = () => true;
+  readyState = "closed";
+  constructor() {
+    super();
+    setTimeout(() => {
+      this.readyState = "open";
+      this.dispatchEvent(new Event("sourceopen"));
+    });
+  }
+  endOfStream(): void {}
+}
+Object.assign(globalThis, { MediaSource: StandInMediaSource });
+// The element gets an address for it, as it would for a real one.
+const objectUrl = URL.createObjectURL.bind(URL);
+URL.createObjectURL = (object) =>
+  object instanceof StandInMediaSource ? "blob:stand-in" : objectUrl(object);
 
 // The contract types each method's answer; the stand-in answers whatever the test gives.
 const api: BridgeApi = bridge as unknown as BridgeApi;
