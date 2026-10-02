@@ -165,13 +165,7 @@ async function start(
   // A stream nobody listens to, such as one a channel switch opens just after leaving Watch, is
   // a preview: it doesn't reconnect against another device.
   if (attempt === 0) quiet = preview || !store.getState().audible;
-  if (attempt === 0 && tuned?.id !== channel.id) {
-    if (tuned) store.setState({ previous: tuned });
-    tuned = channel;
-    // Tracks belong to a channel: another one starts with the viewer's languages again.
-    store.setState({ tracks: null, audioId: null, subtitle: null });
-    lastSubtitle = null;
-  }
+  if (attempt === 0) tune(channel);
   release();
   store.setState({
     channel,
@@ -311,6 +305,20 @@ function classify(upstream: StreamFailure | null, error: EngineError): PlaybackP
 }
 
 /**
+ * Makes `channel` the one tuned, when it is another: the one before becomes where Back goes, even
+ * while switching, and the tracks start afresh, with the viewer's languages, for the new channel.
+ */
+function tune(channel: LiveChannel): void {
+  if (tuned?.id === channel.id) return;
+  if (tuned) store.setState({ previous: tuned });
+  tuned = channel;
+  store.setState({ tracks: null, audioId: null, subtitle: null });
+  lastSubtitle = null;
+  shown = null;
+  clearSubtitles(video);
+}
+
+/**
  * Reads the stream's tracks from the main process. The first time on a channel, subtitles in the
  * viewer's language may come on by themselves (see channelSubtitle).
  */
@@ -442,9 +450,7 @@ export const player = {
     cancelZap();
     selection++;
     release();
-    // The channel on screen before this one is where Back goes, even while switching.
-    if (tuned && tuned.id !== channel.id) store.setState({ previous: tuned });
-    tuned = channel;
+    tune(channel);
     store.setState({ channel, phase: { kind: "tuning", since: Date.now() }, stopped: false });
     zapTimer = setTimeout(() => {
       zapTimer = null;
