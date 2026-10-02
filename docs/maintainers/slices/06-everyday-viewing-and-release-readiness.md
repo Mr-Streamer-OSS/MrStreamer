@@ -1,6 +1,6 @@
 # Slice 6: everyday viewing and release readiness
 
-Status: implemented. Parts 1 to 9 and the scope added along the way merged on 2 October 2026 as #48 to #92. [Stable 0.0.4](https://github.com/Mr-Streamer-OSS/MrStreamer/releases/tag/v0.0.4), published the same day from `3cfa1e3`, carries #48 to #84. The Store's first private submission, package `1.0.4.0` from that release, was submitted on 2 October 2026 and is in certification. What remains is Wout's [acceptance](#acceptance-still-to-do) in the installed apps on the Mac, Windows and Linux, a Store install and update once certification passes, the [measurements](#measurements) and the [known gaps](#known-gaps).
+Status: implemented. Parts 1 to 9 and the scope added along the way merged on 2 October 2026 as #48 to #96. [Stable 0.0.5](https://github.com/Mr-Streamer-OSS/MrStreamer/releases/tag/v0.0.5), published the same day from `9040bb1`, carries #48 to #93; Stable 0.0.4 came before it. The Store's first private submission, package `1.0.4.0`, passed certification on 2 October 2026, and submission 2, `1.0.5.0`, is being prepared to test a Store update. What remains is Wout's [acceptance](#acceptance-still-to-do) in the installed apps on the Mac, Windows and Linux, the Store install and update, and the [known gaps](#known-gaps). The [measurements](#measurements) found no regression.
 
 Outcome: comfortable daily viewing on the Mac and Windows, verified Linux packages, and a documented, tested path to a Windows Store build distributed privately. Mr. Streamer stays a free, open-source player for the user's own subscription. The public Store launch waits for the base release's acceptance.
 
@@ -67,7 +67,7 @@ Wout settled these during the slice, all on 2 October 2026:
 | Codec patents        | The approach of VLC, Kodi and mpv: distribute without signing up to patent pools, and accept the risk. No advisor. Revisit on any monetisation, or if a pool makes contact                                                                                                                                                        |
 | Microsoft's guidance | Microsoft support approved, as Wout reports: http logins with the 5A flow (policy 10.5.4), the opt-in adult filter with Live TV following it (11.7 and 11.11.3), and the Individual account as "Mr Streamer OSS" (10.14). No https-only or adult-free Store package is needed. The reply is in Wout's Partner Center support case |
 | Store submission 1   | Private audience, free, and held until Wout selects Publish now. IARC answers describe what the app can show, which rates it 18+. The [runbook](../microsoft-store.md#submission-1) records what was entered and why                                                                                                              |
-| Stable 0.0.4         | Promoted from the approved nightly `0.0.4-nightly.20261002.110`. Later fixes, #89 to #92 among them, wait for 0.0.5, which also tests a Store update                                                                                                                                                                              |
+| Stable 0.0.4         | Promoted from the approved nightly `0.0.4-nightly.20261002.110`. Later fixes, #89 to #92 among them, went into 0.0.5, which also tests a Store update                                                                                                                                                                             |
 
 Working agreements:
 
@@ -270,7 +270,7 @@ Slice 5's known gaps:
 
 | Part                                 | Pull requests                                                                                                                                                                                       |
 | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| This record and the Store runbook    | #48, and this final record                                                                                                                                                                          |
+| This record and the Store runbook    | #48, #93 and this update                                                                                                                                                                            |
 | 1. Review and Continue watching      | #55 removes every version and shows it; the review's findings in #61, #64, #66, #67, #68, #71, #72, #75 and #77                                                                                     |
 | 2. Automatic next episode            | #79, and #84 holds the countdown while Settings is open                                                                                                                                             |
 | 3. Live quality variants             | #65                                                                                                                                                                                                 |
@@ -280,20 +280,22 @@ Slice 5's known gaps:
 | 7. Licences and launch obligations   | #54 Chromium's credits on the Mac, #59 the app's own licence and the build's commit, #62 the readiness record, #74 ffmpeg's toolchain and kept sources; #71 and #82 for content for adults          |
 | 8. MSIX and Store-aware updates      | #57 the package, #70 Store updates and a separate data folder                                                                                                                                       |
 | 9. Microsoft setup and submission    | #49 the wizard and the identity. Submission 1 happened in Partner Center and is recorded in the [runbook](../microsoft-store.md#submission-1)                                                       |
-| 10. Acceptance and documentation     | This record. Wout's acceptance and the measurements are still to come                                                                                                                               |
+| 10. Acceptance and documentation     | #93 and this record; #96 the measurements. Wout's acceptance is still to come                                                                                                                       |
 | Added: login-free playlists          | #81                                                                                                                                                                                                 |
 | Added: the Nightly channel           | #87 offers nightlies only                                                                                                                                                                           |
-| Added: a nightly before stable       | #88                                                                                                                                                                                                 |
+| Added: a nightly before stable       | #88, and #94 lets that nightly be promoted later                                                                                                                                                    |
 | Added: the update feed               | #90 names the highest nightly, #92 gives each Pages deploy its own artifact                                                                                                                         |
 | Added: series                        | #89 one row per episode when the provider lists two files, #91 details as soon as the provider answers                                                                                              |
-| Tests and reliability                | #76 the diagnostics log flushes on disposal, #80, #85 and #86 steady three flaky tests                                                                                                              |
+| Tests and reliability                | #76 the diagnostics log flushes on disposal; #80, #85, #86 and #95 steady four flaky tests                                                                                                          |
 
 ## Releases
 
 - Nightly `0.0.4-nightly.20261002.110`, from `3cfa1e3` (run 36990279380), carries #48 to #84. Wout tested it and chose it for Stable.
 - [Stable 0.0.4](https://github.com/Mr-Streamer-OSS/MrStreamer/releases/tag/v0.0.4), published on 2 October 2026 by run 36998968726, rebuilt `3cfa1e3`. It was the first stable run to publish a nightly first (#88): `0.0.4-nightly.20261002.117`, from `b57faf1`, with #85 to #89. The stable release's feed deploy then failed, because both publications uploaded a Pages artifact with the same name. Running Update feed by hand (run 37000310982) put stable 0.0.4 and nightly .117 in the feed, and #92 fixed the names.
 - The same run built package `1.0.4.0` from `3cfa1e3`. The Windows App Certification Kit passed it overall, and it is Store submission 1.
-- 0.0.5 is next. Its first nightly is the next regular one, with #90 to #92. As the second stable release with a Store package, `1.0.5.0`, it is also the test of a Store update that keeps the data.
+- [Stable 0.0.5](https://github.com/Mr-Streamer-OSS/MrStreamer/releases/tag/v0.0.5), published on 2 October 2026 from `9040bb1`, carries #48 to #93. Wout tested that commit in a local build of `main`. It went out as nightly `0.0.5-nightly.20261002.122` (run 37008249096), then stable run 37009048597, which published no nightly first because .122 already had `main`'s commit. The feed names stable 0.0.5 and nightly .122.
+- The 0.0.5 run built package `1.0.5.0`; the certification kit passed it overall. It is Store submission 2, the test of a Store update that keeps the data.
+- After 0.0.5: #94 lets a stable run promote a nightly that was published first, when it holds the stable commit; #95 steadies a test whose held stream the garbage collector cancelled; #96 adds the measurements below.
 
 ## Evidence
 
@@ -308,7 +310,29 @@ Slice 5's known gaps:
 
 ## Measurements
 
-Pending: the comparison with Stable 0.0.3 on the same machine and fixtures (startup, first picture, channel switching, guide and search, connections and memory) lands here when it's measured.
+`apps/desktop/test/e2e/measure-app.ts`, with #96's additions, compared Stable 0.0.3 (`d87f835`), the released 0.0.4 (`3cfa1e3`) and `main` at `1544904`, the same app source as 0.0.5, built locally with 0.0.4's ffmpeg. It ran against the fake provider, with TMDB on a closed port, so details timings cover the provider only. The builds took turns each round: 5 rounds on the workbench Mac mini (M4), 10 on the VPS with the AppImage under Xvfb. Medians in ms unless marked:
+
+| Measure                        | Mac 0.0.3 | Mac 0.0.4 | Mac `main` | VPS 0.0.3 | VPS 0.0.4 | VPS `main` |
+| ------------------------------ | --------- | --------- | ---------- | --------- | --------- | ---------- |
+| Cold start to Home             | 441       | 450       | 449        | 1881      | 1820      | 1802       |
+| Time to picture                | 1027      | 1028      | 1028       | 1356      | 1330      | 1338       |
+| Channel switch                 | 773       | 775       | 775        | 1243      | 1053      | 1060       |
+| Guide open                     | 21        | 22        | 23         | 59        | 46        | 51         |
+| Guide list of 13,000           | 16        | 14        | 17         | 31        | 25        | 29         |
+| Search                         | 258       | 259       | 259        | 273       | 269       | 273        |
+| Long series, name shown        | 77        | 76        | 26         | 299       | 280       | 48         |
+| Long series, episodes shown    | 77        | 76        | 75         | 300       | 280       | 311        |
+| Idle CPU, Home with preview    | 18.4%     | 19.0%     | 18.4%      | 47%       | 44%       | 42%        |
+| Idle CPU, Home stopped         | 0.2%      | 0.7%      | 0.6%       | 1.4%      | 1.2%      | 1.4%       |
+| Memory, Home with preview (MB) | 851       | 859       | 855        | 970       | 948       | 948        |
+| Memory, Home stopped (MB)      | 842       | 851       | 845        | 821       | 831       | 823        |
+| Installed size (MB)            | 261       | 280       | 279        | 297       | 297       | 297        |
+
+Nothing reaches the warning line of `compare-builds.ts` ([testing](../testing.md#app-measurements)): more than 10% worse and beyond the noise of 20 ms, 1 CPU point or 10 MB. A long series shows its name at once (#91), from 77 to 26 ms on the Mac and 299 to 48 ms on the VPS; its episodes still wait for the provider. #91's gain with a slow TMDB isn't exercised here. The Mac's installed size grew 19 MB with Chromium's credits (#54). Idle CPU with Home stopped (+0.4 to 0.5 points) and memory (+3 to 9 MB) moved within noise. The VPS's channel-switch drop is noise; the Mac's stayed flat.
+
+Every build opens one stream per switch and none from Home to Watch. Tuning opens two for channels with MP2 or MP3 sound in every build, 0.0.3 included; the likely cause is a retry after a refusal while the fake provider frees its slot, unconfirmed.
+
+Caveats: the Mac had another agent's screen capture and an installed app running (load about 2), and the VPS is shared.
 
 ## Acceptance still to do
 
@@ -318,7 +342,7 @@ Wout's checks in the installed apps, on his subscription:
 | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Mac            | The signed 0.0.4, upgraded from 0.0.3 with the data kept. Live and on-demand playback with tracks, quality variants on a real catalogue, next episode, removal from Continue watching across a restart, and the playback menu's speed by ear. The mini player over other apps and over a full-screen app, and how long the window and Dock icon blink. Now Playing and the media keys, with TMDB's artwork |
 | Windows direct | The installed 0.0.4, upgraded from 0.0.3 with the data kept, and the update flow. The same viewing checks. `%APPDATA%\Mr. Streamer\Dictionaries` stays empty (#50). The media overlay and the name it shows. The mini player's title-bar buttons, dragging and resizing it, and a maximized window coming back maximized                                                                                   |
-| Windows Store  | Once certified: install from the testers' link, the Store's signature, launch and bundled playback, Open Store, no EXE updater. Then 0.0.5 as `1.0.5.0` through the Store, keeping the login, preferences, favourites and progress. Installed beside the direct copy, each keeps its own data                                                                                                              |
+| Windows Store  | Once Wout publishes submission 1: install from the testers' link, the Store's signature, launch and bundled playback, Open Store, no EXE updater. Then submission 2, 0.0.5 as `1.0.5.0`, through the Store, keeping the login, preferences, favourites and progress. Installed beside the direct copy, each keeps its own data                                                                             |
 | Linux          | The 0.0.4 AppImage and deb: install, launch, bundled playback, and an AppImage update coming back with the single-instance lock (#66). The mini player is off under Wayland                                                                                                                                                                                                                                |
 
 The [privacy audit's open checks](../privacy-audit.md#open-checks) need the same Mac and Windows machines: the data folder after a session, crash reports and what uninstalling leaves.
