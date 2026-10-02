@@ -2,7 +2,7 @@
 
 > For maintainers. The [slice 6 handoff](slices/06-everyday-viewing-and-release-readiness.md) owns the product scope and acceptance; this runbook owns the Partner Center steps, the package identity and the private submission checklist.
 
-Status: planned for slice 6; nothing is configured or submitted yet. Checked against Microsoft's documentation on 2 October 2026. Check the current dashboard and rules while setting up.
+Status: Wout opened the publisher account and reserved Mr. Streamer on 2 October 2026; the [package identity](#package-identity) is below. Nothing is submitted yet. Checked against Microsoft's documentation on 2 October 2026. Check the current dashboard and rules while setting up.
 
 Goal: a Windows x64 MSIX that a private test audience installs through the Store. The direct-download EXE and GitHub releases carry on as they are. Making the app public in the Store is a later launch action.
 
@@ -11,6 +11,8 @@ Goal: a Windows x64 MSIX that a private test audience installs through the Store
 An agent prepares the package, manifest, assets, notices, certification notes and validation. Wout verifies his identity, accepts the agreements and chooses the publisher details. Secrets and local state stay out of tracked files, and identity documents, testers' email addresses and credentials never go into chat, logs or public artifacts.
 
 Set up the account and reserve the name early, so packaging can use the real identity. The privacy, transport, content and licence gates must pass before submitting. A Store approval isn't legal clearance for the app.
+
+`scripts/setup-microsoft-store.sh` walks Wout through what's left for him in Partner Center: verifying the notification email, creating the testers' group, and the private submission from its readiness check to Submit for certification. Run it from a checkout. It resumes where it stopped, `--list` shows each stage and whether it's done, and a stage's number or name, such as `scripts/setup-microsoft-store.sh submit`, runs that stage again. It keeps its progress in the gitignored `.local/` and never asks for a password, an identity document or a tester's address.
 
 ## 1. Create the publisher account
 
@@ -53,7 +55,7 @@ Give certification instructions and a reliable, lawful demo provider and account
 
 Use the publishing hold options so nothing becomes available by accident. Wout confirms the private audience and approves the exact package and submission before it's submitted or released to testers. This slice authorizes no public Store publication.
 
-Done: the prepared submission holds a validated package and a complete listing, policy, ratings and reviewer instructions, and its visibility is verified private.
+Done: the prepared submission holds a validated package and a complete listing, policy, ratings and reviewer instructions, and its visibility is verified private. The wizard's last three stages walk through this section.
 
 References: [create a submission](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/create-app-submission), [private audience](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/visibility-options) and [publishing holds](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/manage-submission-options#publishing-hold-options).
 
@@ -79,12 +81,26 @@ References: [GitHub Actions for Store updates](https://learn.microsoft.com/en-us
 
 Update this table as work happens. Never record secrets or personal verification data.
 
-| Step                                  | State       | Evidence needed                                        |
-| ------------------------------------- | ----------- | ------------------------------------------------------ |
-| Publisher account                     | Not started | Verified access to Apps & Games                        |
-| App reservation and identity          | Not started | A valid package identity and configuration             |
-| MSIX and certification kit            | Not started | The artifact's commit, its source and the kit's result |
-| Privacy, content, transport, licences | Not started | The policy URL and the recorded decisions              |
-| Private submission                    | Not started | The right audience and a completed certification       |
-| Store install and update              | Not started | Wout's acceptance on Windows                           |
-| Automated publishing                  | Deferred    | Set up in the later launch slice                       |
+| Step                                  | State                | Evidence                                               |
+| ------------------------------------- | -------------------- | ------------------------------------------------------ |
+| Publisher account                     | Done, 2 October 2026 | Apps & Games access verified                           |
+| App reservation and identity          | Done, 2 October 2026 | Mr. Streamer reserved; the identity below              |
+| MSIX and certification kit            | Not started          | The artifact's commit, its source and the kit's result |
+| Privacy, content, transport, licences | Not started          | The policy URL and the recorded decisions              |
+| Private submission                    | Not started          | The right audience and a completed certification       |
+| Store install and update              | Not started          | Wout's acceptance on Windows                           |
+| Automated publishing                  | Deferred             | Set up in the later launch slice                       |
+
+### Package identity
+
+Copied from Partner Center's Product identity page on 2 October 2026. These values are public: every package carries them, and the MSIX packaging uses them exactly.
+
+| Value                                   | Mr. Streamer                              |
+| --------------------------------------- | ----------------------------------------- |
+| Package/Identity/Name                   | `MrStreamerOSS.Mr.Streamer`               |
+| Package/Identity/Publisher              | `CN=A132E842-C4C9-40BF-83C4-D304E7952C2D` |
+| Package/Properties/PublisherDisplayName | `Mr Streamer OSS`                         |
+| Package family name                     | `MrStreamerOSS.Mr.Streamer_5yzg1erdm3xmr` |
+| Store ID                                | `9N45GG76ZP4T`                            |
+
+The reservation lapses if no submission is made within three months, so by early January 2027. The Store's listing links appear once the product is published.
