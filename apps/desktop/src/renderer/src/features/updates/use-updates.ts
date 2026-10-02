@@ -31,6 +31,8 @@ export function useUpdates() {
     setChannel: (channel: Channel) => setChannel.mutate(channel),
     cancel: () => void call("updates.cancel").catch(() => {}),
     dismiss: (version: string) => void call("updates.dismiss", { version }).then(store, () => {}),
+    /** Opens the app's page in the Microsoft Store, which updates a copy it installed. */
+    openStore: () => void call("updates.openStore").catch(() => {}),
     /**
      * Installs and restarts. The call only settles when the app is still running, because the
      * release was refused or the install couldn't start; Settings then shows why.

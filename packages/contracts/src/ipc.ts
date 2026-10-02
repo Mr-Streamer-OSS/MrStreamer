@@ -141,6 +141,7 @@ export const ipcInputs = {
   "updates.cancel": none,
   "updates.restart": none,
   "updates.dismiss": () => type({ version: "string" }),
+  "updates.openStore": none,
   "licences.list": none,
   "licences.text": () => type({ id: "string" }),
 } satisfies Record<keyof IpcOutputs, () => { infer: unknown }>;
@@ -231,6 +232,8 @@ export interface IpcOutputs {
   "updates.restart": null;
   /** Closes the notice for a version; Settings keeps offering it. */
   "updates.dismiss": UpdateStatus;
+  /** Opens the app's page in the Microsoft Store, for a copy the Store updates. */
+  "updates.openStore": null;
   /** Third-party components the app ships, with their licences, by name. */
   "licences.list": readonly ThirdPartyNotice[];
   /** The full notice of one component from `licences.list`, as plain text. */

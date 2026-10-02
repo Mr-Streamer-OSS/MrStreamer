@@ -1,6 +1,7 @@
 // Updates, in Settings > General: the version and where its update stands, with the one action
 // it needs, then the channel, and the offered release's notes. The top bar's notice and these
-// rows share the updates service's state, so an action in either shows in both.
+// rows share the updates service's state, so an action in either shows in both. A copy the
+// Microsoft Store installed gets one row instead, which opens the Store.
 import type { CheckFailure, UpdateStatus } from "@mrstreamer/contracts/updates";
 import type { Channel } from "@mrstreamer/contracts/version";
 import { Button } from "../../components/ui/button.tsx";
@@ -34,8 +35,20 @@ function describeCheckFailure(failure: CheckFailure): string {
 }
 
 export function UpdatesSection() {
-  const { status, setChannel } = useUpdates();
+  const { status, setChannel, openStore } = useUpdates();
   if (!status) return null;
+  // The Microsoft Store updates a copy it installed, and carries one release line.
+  if (status.distribution === "store") {
+    return (
+      <Section title="Updates">
+        <Row label={status.version} note="updated by the Microsoft Store">
+          <Button size="sm" onClick={openStore}>
+            Open Store
+          </Button>
+        </Row>
+      </Section>
+    );
+  }
   return (
     <Section title="Updates">
       <State status={status} />

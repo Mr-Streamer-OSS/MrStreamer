@@ -4,13 +4,14 @@
 
 Mr. Streamer keeps everything on your computer, in one folder:
 
-| System  | Folder                                       |
-| ------- | -------------------------------------------- |
-| macOS   | `~/Library/Application Support/Mr. Streamer` |
-| Windows | `%APPDATA%\Mr. Streamer`                     |
-| Linux   | `~/.config/Mr. Streamer`                     |
+| System                  | Folder                                                                                                  |
+| ----------------------- | ------------------------------------------------------------------------------------------------------- |
+| macOS                   | `~/Library/Application Support/Mr. Streamer`                                                            |
+| Windows                 | `%APPDATA%\Mr. Streamer`                                                                                |
+| Windows, from the Store | `%LOCALAPPDATA%\Packages\MrStreamerOSS.Mr.Streamer_5yzg1erdm3xmr\LocalCache\Roaming\Mr. Streamer Store` |
+| Linux                   | `~/.config/Mr. Streamer`                                                                                |
 
-It holds your subscription with its encrypted password, your preferences, favourites, watch history and how far you got in movies and episodes, copies of your channel list, programme guide and movie and series lists, what TMDB said about your movies and series, your update channel, and a diagnostics log. Chromium's cache of posters and pictures there stays under 64 MB. Uninstalling leaves the folder in place, so a reinstall picks up where you left off. Delete the folder to remove everything but the password's key in your keychain and a downloaded update; the [privacy policy](../privacy.md#deleting-your-data) says where those are.
+It holds your subscription with its encrypted password, your preferences, favourites, watch history and how far you got in movies and episodes, copies of your channel list, programme guide and movie and series lists, what TMDB said about your movies and series, your update channel, and a diagnostics log. Chromium's cache of posters and pictures there stays under 64 MB. Uninstalling leaves the folder in place, so a reinstall picks up where you left off; only the copy from the Microsoft Store takes its folder with it. Delete the folder to remove everything but the password's key in your keychain and a downloaded update; the [privacy policy](../privacy.md#deleting-your-data) says where those are.
 
 Your password is encrypted with a key your system keeps: the macOS Keychain, Windows' user encryption, or the desktop keyring on Linux.
 

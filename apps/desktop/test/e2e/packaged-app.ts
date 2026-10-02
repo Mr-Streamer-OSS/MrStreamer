@@ -1,16 +1,18 @@
-// Smoke test for a built app: connects it to the fake provider through the login form, then plays
-// a stream the player decodes directly and one the bundled ffmpeg has to convert. Then it leaves
-// Watch for Home and comes back, which must keep the one stream rather than open another. Then it
-// plays a movie from Movies, which the bundled ffprobe reads and ffmpeg repackages, skips ahead and
-// leaves it. Last, it shows a movie's PGS subtitles and its DVD subtitles, which the bundled
-// ffmpeg sends beside the picture, as stored and as DVB, for the app to draw.
+// Smoke test for a built app: connects it to the fake provider through the login form and checks
+// who updates the build: the Microsoft Store for an installed MSIX package, which runs from
+// WindowsApps, and the app itself for everything else. Then it plays a stream the player decodes
+// directly and one the bundled ffmpeg has to convert. Then it leaves Watch for Home and comes
+// back, which must keep the one stream rather than open another. Then it plays a movie from
+// Movies, which the bundled ffprobe reads and ffmpeg repackages, skips ahead and leaves it. Last,
+// it shows a movie's PGS subtitles and its DVD subtitles, which the bundled ffmpeg sends beside the
+// picture, as stored and as DVB, for the app to draw.
 //
 //   node test/e2e/packaged-app.ts <app executable> [-- extra app arguments]
 //
-// Passes when both channels show a moving picture with decoded sound, Home and Watch share the
-// stream: muted on Home, with sound in Watch, and no second request to the provider, and the movie
-// plays with sound, skips 10 seconds and lets go of its connection when left, and both subtitle
-// tracks draw over the picture while they are due. The app runs with a
+// Passes when the build names the right updater, both channels show a moving picture with decoded
+// sound, Home and Watch share the stream: muted on Home, with sound in Watch, and no second request
+// to the provider, and the movie plays with sound, skips 10 seconds and lets go of its connection
+// when left, and both subtitle tracks draw over the picture while they are due. The app runs with a
 // throwaway profile and remote debugging on a random port; on macOS pass --use-mock-keychain so
 // the test never touches a real keychain.
 import { mkdtempSync, rmSync } from "node:fs";
@@ -21,6 +23,7 @@ import { connect, delay, key, launch, login, waitFor, type Page } from "./app.ts
 
 const [executable, ...rest] = process.argv.slice(2).filter((arg) => arg !== "--");
 if (!executable) throw new Error("Usage: node test/e2e/packaged-app.ts <app executable> [-- args]");
+const updater = /[\\/]WindowsApps[\\/]/i.test(executable) ? "store" : "direct";
 
 const CHANNELS = ["TEST | H.264 + AAC", "TEST | H.264 + MP2"];
 const port = 20000 + Math.floor(Math.random() * 20000);
@@ -33,6 +36,14 @@ try {
   const page = await connect(port);
   await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
   await login(page, provider);
+  const status = await page.evaluate<{ value?: { distribution: string } }>(
+    `window.mrStreamer.invoke("updates.status")`,
+  );
+  const distribution = status.value?.distribution ?? "nothing";
+  console.log(
+    `${distribution === updater ? "PASS" : "FAIL"} Updates: ${distribution}, for a ${updater} build`,
+  );
+  failed ||= distribution !== updater;
   for (const channel of CHANNELS) {
     const result = await play(page, channel);
     console.log(`${result.ok ? "PASS" : "FAIL"} ${channel}: ${result.detail}`);

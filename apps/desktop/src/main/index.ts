@@ -47,6 +47,20 @@ const UPDATE_API = process.env["MR_STREAMER_UPDATE_API"] ?? "https://api.github.
 const REPOSITORY = "Mr-Streamer-OSS/MrStreamer";
 
 /**
+ * A copy installed as an MSIX package, from the Microsoft Store or sideloaded, runs with the
+ * package's identity. The Store updates it, so the app never does, and it keeps a data folder of
+ * its own: Windows lets a package change files that a direct install left in AppData, while
+ * keeping the files it creates to itself, so sharing that folder would mix two profiles. An
+ * explicit --user-data-dir, as tests pass, still wins.
+ */
+const storeCopy = process.windowsStore === true;
+if (storeCopy && !app.commandLine.hasSwitch("user-data-dir")) {
+  app.setPath("userData", join(app.getPath("appData"), "Mr. Streamer Store"));
+}
+/** The app's page in the Microsoft Store, by the Store ID Partner Center gave it. */
+const STORE_PAGE = "ms-windows-store://pdp/?ProductId=9N45GG76ZP4T";
+
+/**
  * Chromium's own cache, mostly posters and backdrops, on disk at most this big; the oldest go
  * first. Artwork shown this session stays in memory either way.
  */
@@ -145,20 +159,23 @@ async function start(): Promise<void> {
       ...(process.env["MR_STREAMER_TMDB_API"]
         ? { tmdbApi: process.env["MR_STREAMER_TMDB_API"] }
         : {}),
-      updates: {
-        installed: app.getVersion(),
-        discover: discovery({
-          feedUrl: UPDATE_FEED,
-          api: UPDATE_API,
-          repository: REPOSITORY,
-          metadataFile: metadataFileFor(process.platform),
-          userAgent,
-          // A test feed serves its own files.
-          ...(process.env["MR_STREAMER_UPDATE_FEED"] ? { filesFrom: "" } : {}),
-        }),
-        installer: electronInstaller(),
-        schedule: process.env["MR_STREAMER_UPDATE_CHECKS"] === "off" ? null : DEFAULT_SCHEDULE,
-      },
+      // A Store copy never creates electron-updater's updater.
+      updates: storeCopy
+        ? { installed: app.getVersion(), openStore: () => shell.openExternal(STORE_PAGE) }
+        : {
+            installed: app.getVersion(),
+            discover: discovery({
+              feedUrl: UPDATE_FEED,
+              api: UPDATE_API,
+              repository: REPOSITORY,
+              metadataFile: metadataFileFor(process.platform),
+              userAgent,
+              // A test feed serves its own files.
+              ...(process.env["MR_STREAMER_UPDATE_FEED"] ? { filesFrom: "" } : {}),
+            }),
+            installer: electronInstaller(),
+            schedule: process.env["MR_STREAMER_UPDATE_CHECKS"] === "off" ? null : DEFAULT_SCHEDULE,
+          },
     }),
   );
   const {
@@ -330,6 +347,7 @@ async function start(): Promise<void> {
       "updates.cancel": () => Effect.as(updates.cancel, null),
       "updates.restart": () => Effect.as(updates.restart, null),
       "updates.dismiss": ({ version }) => updates.dismiss(version),
+      "updates.openStore": () => Effect.as(updates.openStore, null),
       "licences.list": () => licences.list,
       "licences.text": ({ id }) => licences.text(id),
     },

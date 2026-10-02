@@ -1,6 +1,6 @@
 # Updates and channels
 
-Mr. Streamer looks for updates on its own, a little after it starts and then every four hours. It never downloads or restarts without you: you download an update, and then choose when to restart into it. Your login, preferences, favourites and history stay through every update.
+Mr. Streamer looks for updates on its own, a little after it starts and then every four hours, unless [the Microsoft Store installed it](#installed-from-the-microsoft-store). It never downloads or restarts without you: you download an update, and then choose when to restart into it. Your login, preferences, favourites and history stay through every update.
 
 ## When an update is available
 
@@ -23,6 +23,14 @@ When a check doesn't work, Settings says why in a few words: you're offline, the
 ## Install a newer version by hand
 
 **GitHub ›** beside an offered update in Settings opens its release. You can also take any installer from the [Releases page](https://github.com/Mr-Streamer-OSS/MrStreamer/releases) and install it over the old one, as the [README](../../README.md#download) describes. Mr. Streamer keeps its data in a folder of its own (see [Troubleshooting](troubleshooting.md#where-your-data-is)), so everything carries over.
+
+## Installed from the Microsoft Store
+
+The Microsoft Store updates a copy you installed from it, so Mr. Streamer never looks for updates or downloads them, and shows no update notice. Settings > General > **Updates** shows your version, updated by the Microsoft Store, and **Open Store** opens Mr. Streamer's page there. The Store only carries stable releases, so there's no channel to choose.
+
+Windows lists the Store copy with 1 added to the first number of the version, such as 1.0.4.0 for Mr. Streamer 0.0.4, because the Store doesn't take a 0 there.
+
+The Store copy and a copy installed from the setup file are separate. Each keeps its own login, preferences, favourites and history, and neither reads or changes the other's. Moving from the setup file to the Store copy starts fresh: you sign in again, and your favourites, history and progress stay with the other copy. Store updates keep its data. Uninstalling it removes its data, as Windows does for every Store app.
 
 ## Stable and Nightly
 

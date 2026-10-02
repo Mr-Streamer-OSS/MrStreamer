@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { UpdateFeed } from "@mrstreamer/contracts/update-feed";
@@ -366,6 +366,30 @@ describe("in-app updates", () => {
       kind: "ready",
       version: "0.3.0",
     });
+  });
+});
+
+describe("a copy the Microsoft Store installed", () => {
+  it("leaves updates to the Store, and opens it when asked", async () => {
+    const dataDir = await tempDir();
+    let opened = 0;
+    const service = await startUpdates({
+      dataDir,
+      installed: "0.0.4",
+      openStore: async () => {
+        opened++;
+      },
+    });
+
+    const checked = await service.check();
+    const switched = await service.setChannel("nightly");
+    await service.download();
+    await service.openStore();
+
+    expect(checked).toMatchObject({ distribution: "store", update: { kind: "idle" }, offer: null });
+    expect(switched.channel).toBe("stable");
+    expect(opened).toBe(1);
+    expect(await readdir(dataDir)).toEqual([]);
   });
 });
 
