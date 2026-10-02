@@ -354,6 +354,7 @@ describe("details", () => {
         ? null
         : {
             original: tmdbOriginal,
+            language: null,
             overview: null,
             poster: null,
             backdrop: null,

@@ -1,15 +1,17 @@
 // A movie's or series' details as the UI shows them: TMDB's overview, artwork, genres and credits
 // where it has them, the provider's otherwise, and the provider's seasons, episodes and length,
 // which are what plays. Seasons come from the episodes themselves: panels list seasons
-// incompletely, or not at all.
+// incompletely, or not at all. An episode gets TMDB's details once the viewer opens its season.
 import type {
   Episode,
+  EpisodeDetails,
   MovieDetails,
+  Person,
   Season,
   SeriesDetails,
   Title,
 } from "@mrstreamer/contracts/ondemand";
-import { GENRES, tmdbImage, type TitleAbout } from "../metadata/tmdb.ts";
+import { GENRES, tmdbImage, type EpisodeAbout, type TitleAbout } from "../metadata/tmdb.ts";
 import type { ProviderDetails } from "../provider.ts";
 import { episodeName, titleName } from "./names.ts";
 
@@ -62,6 +64,48 @@ export function seriesDetails(
   return { kind: "series", ...shared(title, details, about), seasons };
 }
 
+/**
+ * A season's episodes with TMDB's worked in, matched by number. The provider's episodes are what
+ * exists and plays, in its order: episodes only TMDB lists stay out, and one TMDB lacks keeps the
+ * provider's. `answers` are TMDB's season in the viewer's language, then in the languages an
+ * episode's name falls back to, as titles' names do: English, then the series' own. Without a
+ * name in any, the provider's stands. The provider's story comes before one in another language.
+ */
+export function seasonEpisodes(
+  season: Season,
+  answers: readonly (readonly EpisodeAbout[])[],
+): EpisodeDetails[] {
+  const [viewer, ...others] = answers.map(
+    (answer) => new Map(answer.map((episode) => [episode.number, episode])),
+  );
+  return season.episodes.map((episode): EpisodeDetails => {
+    const own = viewer?.get(episode.number);
+    const fallbacks = others.flatMap((answer) => answer.get(episode.number) ?? []);
+    const known = own ?? fallbacks[0];
+    return {
+      ...episode,
+      title: own?.name ?? fallbacks.find((each) => each.name)?.name ?? episode.title,
+      plot:
+        own?.overview ?? episode.plot ?? fallbacks.find((each) => each.overview)?.overview ?? null,
+      duration: episode.duration ?? (known?.runtime ? known.runtime * 60 : null),
+      stillUrl: known?.still ? tmdbImage(known.still, 780) : episode.stillUrl,
+      airDate: known?.airDate ?? episode.airDate,
+      rating: known?.rating ?? null,
+      cast: (known?.cast ?? []).map(person),
+      directors: known?.directors ?? [],
+      writers: known?.writers ?? [],
+    };
+  });
+}
+
+function person(about: TitleAbout["cast"][number]): Person {
+  return {
+    name: about.name,
+    role: about.character,
+    photoUrl: about.profile ? tmdbImage(about.profile, 185) : null,
+  };
+}
+
 function shared(title: Title, details: ProviderDetails, about: TitleAbout | null) {
   const poster = about?.poster ? tmdbImage(about.poster, 780) : null;
   const backdrop = about?.backdrop ? tmdbImage(about.backdrop, 1280) : null;
@@ -82,11 +126,7 @@ function shared(title: Title, details: ProviderDetails, about: TitleAbout | null
     plot: about?.overview ?? details.plot,
     genres: genres.length > 0 ? genres : details.genres,
     cast: about?.cast.length
-      ? about.cast.map((person) => ({
-          name: person.name,
-          role: person.character,
-          photoUrl: person.profile ? tmdbImage(person.profile, 185) : null,
-        }))
+      ? about.cast.map(person)
       : details.cast.map((name) => ({ name, role: null, photoUrl: null })),
     directors: about?.directors.length ? about.directors : details.directors,
     releaseDate: details.releaseDate,

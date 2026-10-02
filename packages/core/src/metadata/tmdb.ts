@@ -1,7 +1,8 @@
 // The Movie Database (TMDB): what it knows about a film or series, by the TMDB id that Xtream
-// Codes lists carry, and which titles each streaming service carries in a region. The app keeps
-// only what its collections need. TMDB's terms ask for its logo and notice in the app, data
-// cached no longer than six months, and JustWatch named beside streaming services.
+// Codes lists carry, a series' episodes season by season, and which titles each streaming service
+// carries in a region. The app keeps only what its collections need. TMDB's terms ask for its
+// logo and notice in the app, data cached no longer than six months, and JustWatch named beside
+// streaming services.
 import { type } from "arktype";
 
 /** What the app keeps about one film or series. */
@@ -32,6 +33,8 @@ export interface TitleNames {
 export interface TitleAbout {
   /** The name in the language it was made in. */
   readonly original: string | null;
+  /** ISO 639-1: the language it was made in. */
+  readonly language: string | null;
   readonly overview: string | null;
   /** Paths on TMDB's image server; `tmdbImage` makes them addresses. */
   readonly poster: string | null;
@@ -50,8 +53,39 @@ export interface TitleAbout {
   readonly directors: readonly string[];
 }
 
+/** What TMDB says about one episode, asked for when the viewer opens its season. */
+export interface EpisodeAbout {
+  readonly number: number;
+  /** The name in the language asked for; null when TMDB has no translation into it. */
+  readonly name: string | null;
+  readonly overview: string | null;
+  /** A path on TMDB's image server. */
+  readonly still: string | null;
+  /** "2016-07-15". */
+  readonly airDate: string | null;
+  /** Minutes. */
+  readonly runtime: number | null;
+  /** Out of 10; null before anyone voted. */
+  readonly rating: number | null;
+  /** The guest stars, with the part they play and a portrait. */
+  readonly cast: TitleAbout["cast"];
+  readonly directors: readonly string[];
+  readonly writers: readonly string[];
+}
+
 /** How many of the cast a title's details show. */
 const CAST_SHOWN = 12;
+
+/** Crew jobs that count as directing and writing an episode. */
+const DIRECTING: ReadonlySet<string> = new Set(["Director"]);
+const WRITING: ReadonlySet<string> = new Set(["Writer", "Teleplay", "Screenplay", "Story"]);
+
+/**
+ * What TMDB names an episode it has no translation for, in the languages viewers pick: "Episode
+ * 3", "Aflevering 3", "Folge 3".
+ */
+const UNNAMED_EPISODE =
+  /^(?:episode|épisode|episodio|episódio|aflevering|folge|odcinek|bölüm)\s+(\d+)$/iu;
 
 /** The address of an image on TMDB's server at a width it serves: 185, 342, 780, 1280. */
 export function tmdbImage(path: string, width: 185 | 342 | 780 | 1280): string {
@@ -136,6 +170,7 @@ const Details = type({
 const About = type({
   "original_title?": "string | null",
   "original_name?": "string | null",
+  "original_language?": "string | null",
   "overview?": "string | null",
   "poster_path?": "string | null",
   "backdrop_path?": "string | null",
@@ -152,6 +187,29 @@ const About = type({
     "crew?": type({ name: "string", "job?": "string | null" }).array(),
   }),
 });
+
+/** A season's episodes, built on first use: the app starts without needing it. */
+const defineSeasonEpisodes = () =>
+  type({
+    episodes: type({
+      episode_number: "number",
+      "name?": "string | null",
+      "overview?": "string | null",
+      "still_path?": "string | null",
+      "air_date?": "string | null",
+      "runtime?": "number | null",
+      "vote_average?": "number",
+      "vote_count?": "number",
+      "guest_stars?": type({
+        name: "string",
+        "character?": "string | null",
+        "profile_path?": "string | null",
+      }).array(),
+      "crew?": type({ name: "string", "job?": "string | null" }).array(),
+    }).array(),
+  });
+let definedSeasonEpisodes: ReturnType<typeof defineSeasonEpisodes> | null = null;
+const seasonEpisodes = () => (definedSeasonEpisodes ??= defineSeasonEpisodes());
 
 const Page = type({
   page: "number",
@@ -268,6 +326,7 @@ export function tmdb(options: TmdbOptions) {
               .map((person) => person.name);
       return {
         original: (body.original_title ?? body.original_name)?.trim() || null,
+        language: body.original_language || null,
         overview: body.overview?.trim() || null,
         poster: body.poster_path ?? null,
         backdrop: body.backdrop_path ?? null,
@@ -280,6 +339,50 @@ export function tmdb(options: TmdbOptions) {
         })),
         directors: [...new Set(directors)],
       };
+    },
+
+    /**
+     * A series' season as TMDB lists it, in `language`: each episode's name, overview, still, air
+     * date, runtime, rating and credits. One request, for when the viewer opens the season. TMDB
+     * names an episode it has no translation for "Episode 3"; that counts as no name.
+     */
+    async season(
+      id: string,
+      season: number,
+      language: string,
+      signal?: AbortSignal,
+    ): Promise<readonly EpisodeAbout[]> {
+      const body = seasonEpisodes()(await get(`/tv/${id}/season/${season}`, { language }, signal));
+      if (body instanceof type.errors) {
+        throw new TmdbError({ kind: "unavailable", detail: body.summary });
+      }
+      return body.episodes.map((episode): EpisodeAbout => {
+        const name = episode.name?.trim() || null;
+        const unnamed = name && UNNAMED_EPISODE.exec(name);
+        const credited = (jobs: ReadonlySet<string>) => [
+          ...new Set(
+            (episode.crew ?? [])
+              .filter((person) => jobs.has(person.job ?? ""))
+              .map((person) => person.name),
+          ),
+        ];
+        return {
+          number: episode.episode_number,
+          name: unnamed && Number(unnamed[1]) === episode.episode_number ? null : name,
+          overview: episode.overview?.trim() || null,
+          still: episode.still_path ?? null,
+          airDate: episode.air_date?.trim() || null,
+          runtime: episode.runtime || null,
+          rating: episode.vote_count ? (episode.vote_average ?? null) : null,
+          cast: (episode.guest_stars ?? []).slice(0, CAST_SHOWN).map((person) => ({
+            name: person.name,
+            character: person.character?.trim() || null,
+            profile: person.profile_path ?? null,
+          })),
+          directors: credited(DIRECTING),
+          writers: credited(WRITING),
+        };
+      });
     },
 
     /** The streaming services TMDB knows in a region, most prominent first. */

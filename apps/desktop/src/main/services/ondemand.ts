@@ -1,6 +1,6 @@
 // Movies and series: the catalogue lives in a worker thread (see ../ondemand/catalogue-worker.ts),
-// details come from the provider and TMDB when a title opens, never before, and playback asks
-// here which file to stream.
+// details come from the provider and TMDB when a title opens, never before, TMDB's episodes when
+// their season opens, and playback asks here which file to stream.
 // Every call is for the connected subscription; switching accounts clears what the last one had.
 import { join } from "node:path";
 import type { Worker } from "node:worker_threads";
@@ -11,9 +11,11 @@ import type {
   CollectionRow,
   CollectionSort,
   CollectionTile,
+  EpisodeDetails,
   MetadataProgress,
   OnDemandStatus,
   RowTab,
+  Season,
   Title,
   TitleDetails,
   TitleKind,
@@ -22,8 +24,14 @@ import type {
 } from "@mrstreamer/contracts/ondemand";
 import { diagnosed } from "@mrstreamer/core/diagnostics";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
-import { tmdb, type TitleAbout } from "@mrstreamer/core/metadata/tmdb";
-import { movieDetails, seriesDetails } from "@mrstreamer/core/ondemand/details";
+import {
+  tmdb,
+  TmdbError,
+  type EpisodeAbout,
+  type TitleAbout,
+  type Tmdb,
+} from "@mrstreamer/core/metadata/tmdb";
+import { movieDetails, seasonEpisodes, seriesDetails } from "@mrstreamer/core/ondemand/details";
 import { DEFAULT_TITLE_LANGUAGE } from "@mrstreamer/core/ondemand/languages";
 import type { ProviderDetails } from "@mrstreamer/core/provider";
 import * as Clock from "effect/Clock";
@@ -46,7 +54,9 @@ import { Subscriptions, type Source } from "./subscription.ts";
 
 /** How many titles' details stay in memory. Opening one again then asks no one. */
 const DETAILS_KEPT = 200;
-/** How long a title's details wait for TMDB; the provider's stand in after that. */
+/** How many seasons TMDB described stay in memory, each in one language. */
+const SEASONS_KEPT = 100;
+/** How long a title's details, or a season, wait for TMDB; the provider's stand in after that. */
 const ABOUT_TIMEOUT_MS = 4000;
 /** Search results a Movies or Series page shows; a longer list needs more words. */
 const SEARCH_PAGE = 300;
@@ -103,6 +113,11 @@ export class OnDemand extends Context.Service<
     searchKind(kind: TitleKind, query: string): Effect.Effect<TitleMatches, Failed>;
     /** A title's details, for when the viewer opens it: the provider's, with TMDB's. */
     details(kind: TitleKind, id: string): Effect.Effect<TitleDetails, Failed>;
+    /**
+     * The episodes of season `season` of series version `id`, for when the viewer opens it: the
+     * provider's, with TMDB's details.
+     */
+    season(id: string, season: number): Effect.Effect<readonly EpisodeDetails[], Failed>;
     /** Titles by the id of any version, from the lists alone. */
     titles(kind: TitleKind, ids: readonly string[]): Effect.Effect<readonly Title[], Failed>;
     /** A tab's rows; For you starts with titles like `like`, one watched lately. */
@@ -190,6 +205,11 @@ function make(deps: OnDemandDeps) {
       string,
       { raw: ProviderDetails; about: TitleAbout | null; title: Title }
     >();
+    /**
+     * What TMDB said about the seasons opened, by TMDB id, season and language, oldest first;
+     * null where TMDB doesn't have the season.
+     */
+    const seasons = new Map<string, readonly EpisodeAbout[] | null>();
 
     const requireSource = Effect.flatMap(subscriptions.source, (source) =>
       source
@@ -266,12 +286,10 @@ function make(deps: OnDemandDeps) {
           call("byIds", { key: source.key, language, kind, ids: [id] }),
         );
         const downloaded = details.get(cacheKey) ?? (yield* download(source, kind, id, listed));
-        // Most recently used last.
         details.delete(cacheKey);
-        // Only for the subscription it was asked for.
+        // Kept again only for the subscription it was asked for.
         if ((yield* subscriptions.source)?.key === source.key) {
-          details.set(cacheKey, downloaded);
-          if (details.size > DETAILS_KEPT) details.delete(details.keys().next().value ?? "");
+          keep(details, cacheKey, downloaded, DETAILS_KEPT);
         }
         const { raw, about } = downloaded;
         const title = listed ?? downloaded.title;
@@ -283,6 +301,7 @@ function make(deps: OnDemandDeps) {
         };
         return {
           raw,
+          about,
           shown:
             kind === "movie"
               ? movieDetails(version, raw, about)
@@ -319,6 +338,37 @@ function make(deps: OnDemandDeps) {
           { concurrency: 2 },
         );
         return { raw, about, title };
+      });
+
+    /**
+     * TMDB's season in one language: kept once TMDB answered, so opening it again asks no one.
+     * Null when TMDB doesn't have it, or didn't answer in time; that isn't kept, so opening the
+     * season again asks again.
+     */
+    const seasonIn = (client: Tmdb, tmdbId: string, season: number, asked: string) =>
+      Effect.gen(function* () {
+        const cacheKey = `${tmdbId}|${season}|${asked}`;
+        // A season TMDB doesn't have is kept as null.
+        const kept = seasons.get(cacheKey);
+        const answer =
+          kept !== undefined
+            ? kept
+            : yield* Effect.tryPromise((signal) =>
+                client
+                  .season(
+                    tmdbId,
+                    season,
+                    asked,
+                    AbortSignal.any([signal, AbortSignal.timeout(ABOUT_TIMEOUT_MS)]),
+                  )
+                  .catch((cause: unknown) => {
+                    if (cause instanceof TmdbError && cause.failure.kind === "missing") return null;
+                    throw cause;
+                  }),
+              ).pipe(Effect.orElseSucceed(() => undefined));
+        if (answer === undefined) return null;
+        keep(seasons, cacheKey, answer, SEASONS_KEPT);
+        return answer;
       });
 
     const status = Effect.gen(function* () {
@@ -381,6 +431,36 @@ function make(deps: OnDemandDeps) {
       details: (kind: TitleKind, id: string) =>
         Effect.map(detailsOf(kind, id), (found) => found.shown),
 
+      season: (id: string, number: number) =>
+        Effect.gen(function* () {
+          const { shown, about } = yield* detailsOf("series", id);
+          const season =
+            shown.kind === "series"
+              ? shown.seasons.find((each) => each.number === number)
+              : undefined;
+          if (!season) {
+            return yield* new Failed({ error: { kind: "title-not-found", titleId: id } });
+          }
+          const { tmdbId } = shown.title;
+          // TMDB said it as the details opened, if the lists don't know yet.
+          const madeIn = shown.title.originalLanguage ?? about?.language;
+          const answers: (readonly EpisodeAbout[])[] = [];
+          if (tmdbKey && tmdbId) {
+            const client = tmdb({ key: tmdbKey, ...(deps.tmdbApi ? { api: deps.tmdbApi } : {}) });
+            const viewer = yield* language;
+            // Names fall back as titles' do: the viewer's language, English, the series' own. Each
+            // is asked for only while an episode TMDB lists still has no name.
+            const languages = new Set([viewer, "en", ...(madeIn ? [madeIn] : [])]);
+            for (const asked of languages) {
+              const answer = yield* seasonIn(client, tmdbId, number, asked);
+              if (!answer) break;
+              answers.push(answer);
+              if (named(season, answers)) break;
+            }
+          }
+          return seasonEpisodes(season, answers);
+        }),
+
       titles: (kind: TitleKind, ids: readonly string[]) =>
         ids.length === 0
           ? Effect.succeed([])
@@ -409,6 +489,7 @@ function make(deps: OnDemandDeps) {
       clear: Effect.gen(function* () {
         failure = null;
         details.clear();
+        seasons.clear();
         yield* call("clear", {}).pipe(Effect.ignore);
       }),
 
@@ -427,6 +508,25 @@ function make(deps: OnDemandDeps) {
       changes: Stream.fromPubSub(updates),
     };
   });
+}
+
+/** Keeps `value` as the most recently used, dropping the least recently used beyond `limit`. */
+function keep<V>(map: Map<string, V>, key: string, value: V, limit: number): void {
+  map.delete(key);
+  map.set(key, value);
+  if (map.size > limit) map.delete(map.keys().next().value ?? "");
+}
+
+/** Whether every episode of `season` that TMDB lists has a name in one of its answers. */
+function named(season: Season, answers: readonly (readonly EpisodeAbout[])[]): boolean {
+  const [first = []] = answers;
+  return season.episodes.every(
+    (episode) =>
+      !first.some((each) => each.number === episode.number) ||
+      answers.some((answer) =>
+        answer.some((each) => each.number === episode.number && each.name !== null),
+      ),
+  );
 }
 
 /**

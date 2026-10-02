@@ -9,8 +9,9 @@
 // marked for adults in an ordinary category. Their files redirect
 // to another address, as real panels do, and answer byte ranges; each open file holds a
 // connection slot like a live stream. The "TEST" movies and the "TEST | Formats" series stream the
-// title clips in test/fixtures; every other title streams the MP4 clip. One TEST movie comes in
-// two versions sharing a TMDB id, as providers list a film once per language.
+// title clips in test/fixtures; every other title streams the MP4 clip. One TEST movie and the
+// "TEST | Formats" series come in two versions sharing a TMDB id, as providers list a title once
+// per language.
 import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Writable } from "node:stream";
@@ -82,6 +83,8 @@ interface FakeSeries {
   readonly added: number;
   /** Episodes per season, in order. */
   readonly seasons: readonly (readonly FakeTitle[])[];
+  /** The TMDB id it shares with another version of the series, when it is one. */
+  readonly tmdb?: string;
 }
 
 interface FakeTitles {
@@ -274,7 +277,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
           category_id: series.categoryId,
           category_ids: [Number(series.categoryId)],
           is_adult: series.adult ? 1 : 0,
-          tmdb: String(series.id + 10_000),
+          tmdb: series.tmdb ?? String(series.id + 10_000),
         })),
       );
     }
@@ -732,6 +735,21 @@ function buildTitles(size: number): FakeTitles {
           episode(81_011, "title-h264-aac.mp4", "mp4"),
         ],
       ],
+    },
+    {
+      // Another version of the one above, with two of its episodes.
+      id: 79_998,
+      name: "TEST | Formats (EN)",
+      categoryId: "601",
+      adult: false,
+      added: base - 500,
+      seasons: [
+        [
+          episode(799_980, "title-h264-aac.mp4", "mp4"),
+          episode(799_981, "title-h264-aac.mp4", "mp4"),
+        ],
+      ],
+      tmdb: "90000",
     },
     {
       id: 79_999,
