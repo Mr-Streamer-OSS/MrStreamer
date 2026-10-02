@@ -114,6 +114,30 @@ configure=(
   { tail -n 20 ffbuild/config.log >&2; exit 1; })
 make -C ffmpeg -j"$jobs" >/dev/null
 
+# What built the binaries, for the build instructions that come with the GPL's source: the
+# compiler and assembler, and the C runtime. The Windows binaries link MinGW-w64's runtime and
+# winpthreads in, so their exact packages count most.
+compiler=$(sed -n 's/^CC=//p' ffmpeg/ffbuild/config.mak)
+toolchain=$("$compiler" --version | sed -n 1p)
+case $target in
+  mac-arm64)
+    toolchain+="; macOS SDK $(xcrun --show-sdk-version), for macOS $MACOSX_DEPLOYMENT_TARGET and later"
+    ;;
+  linux-x64)
+    toolchain+="; $(nasm --version | sed -n 1p); $(ldd --version | sed -n 1p)"
+    ;;
+  win-x64)
+    toolchain+="; $(nasm --version | sed -n 1p)"
+    if command -v pacman >/dev/null; then
+      packages=$(pacman -Q | grep -E '^mingw-w64-x86_64-(gcc|crt|headers|winpthreads)' || true)
+      toolchain+="; MSYS2 packages ${packages//$'\n'/, }"
+    else
+      runtime=$(printf '#include <_mingw.h>\n__MINGW64_VERSION_STR\n' | "$compiler" -E -P - | sed -n '$p')
+      toolchain+="; MinGW-w64 runtime $runtime"
+    fi
+    ;;
+esac
+
 rm -rf "$out"
 mkdir -p "$out"
 for program in ffmpeg ffprobe; do
@@ -133,5 +157,6 @@ the GNU GPL, version 2 or later.
 Sources: https://ffmpeg.org/releases/$archive (SHA-256 $FFMPEG_SHA256)
          https://code.videolan.org/videolan/x264/-/tree/$X264_COMMIT
 Configuration: ${features[*]}
+Built with: $toolchain
 EOF
 du -h "$out/ffmpeg$exe" "$out/ffprobe$exe"
