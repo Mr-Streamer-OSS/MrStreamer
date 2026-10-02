@@ -37,7 +37,7 @@ The languages you pick carry over to other channels, and to movies and series. A
 
 ### Quality
 
-Channels start in Full HD, or the nearest quality the channel has, lower first. Change that in Settings > General > Live TV. If a quality doesn't start, Automatic tries the next, at most three, one after another, and the line under the programme says so: "Full HD didn't start, playing HD". If the provider refuses the stream, which usually means another device is using your connection, it stops there.
+Channels start in Full HD, or the nearest quality the channel has, lower first. Change that in Settings > General > Live TV. If your provider has no stream for a quality right now, or doesn't answer, Automatic tries the next, at most three, one after another, and the line under the programme says so: "Full HD didn't start, playing HD". If the provider refuses the stream, which usually means another device is using your connection, it stops there.
 
 Pick a quality in the menu and that channel keeps it. When it doesn't start, Mr. Streamer says so and offers another instead of switching on its own. **Use Automatic** in the menu, or **Reset** in Settings for every channel, goes back to Automatic.
 
