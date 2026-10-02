@@ -25,4 +25,5 @@ Start with the [contribution policy](../CONTRIBUTING.md).
 - [Signing](./maintainers/signing.md)
 - [Microsoft Store submissions](./maintainers/microsoft-store.md)
 - [Licences and sources](./maintainers/licences.md)
-- [Planning](./maintainers/README.md)
+
+Priorities, status and acceptance live in the maintainers' [GitHub project](https://github.com/orgs/Mr-Streamer-OSS/projects/1).
