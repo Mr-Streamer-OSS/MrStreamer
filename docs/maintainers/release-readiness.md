@@ -28,7 +28,7 @@ Statuses: **verified**, **gap** (a known problem, with its fix or owner) and **o
 | 9   | TMDB and JustWatch attribution                         | Verified                                  | Private Store test | Agent (licences)   |
 | 10  | TMDB API account and commercial use                    | Open                                      | Public launch      | Wout               |
 | 11  | Branding, listing copy and demo assets                 | Verified for the repository; listing open | Private Store test | Agent (MSIX), Wout |
-| 12  | The dedicated adult tab and Store content policy       | Open                                      | Private Store test | Wout               |
+| 12  | The dedicated adult tab and Store content policy       | Resolved                                  | Private Store test | Wout               |
 | 13  | Codec patents                                          | Open                                      | Public launch      | Wout               |
 | 14  | Belgian publisher classification and disclosures       | Open                                      | Public launch      | Wout               |
 | 15  | Benelux and EU brand clearance                         | Open                                      | Public launch      | Wout               |
@@ -156,14 +156,14 @@ Verified for the repository; the Store listing is open. Gate: private Store test
 
 ## 12. The dedicated adult tab
 
-Open until the Live TV filter lands. Gate: private Store test. Owner: Wout; Microsoft support has answered.
+Resolved: Microsoft support confirmed the opt-in filter, and Live TV follows it. Gate: private Store test. Owner: Wout.
 
 What the app does, from the code on `main`:
 
 - Titles count as for adults when the provider sets `is_adult` on a movie or series (`apps/desktop/src/main/providers/xtream.ts`), or when the category's name holds one of a short list of whole words (`packages/core/src/adult.ts`, `isAdultCategory`): XXX, porn, porno, 18+, +18, and adult in English, French, Spanish and Portuguese, Italian, German and Dutch, with their plurals. "Adult Swim", a cartoon channel, isn't one, and rating words such as "mature" aren't on the list.
 - So the gating depends on the provider's flags and category names. Slice 6's current-state review found categories the earlier rule missed, "+18", "ADULTOS +18", "FR| ADULTES", "PORNO", "DE| ERWACHSENE" and "NL| VOLWASSENEN"; the list now reads them, and `packages/core/test/catalogue.test.ts` holds the names it must and mustn't match. A provider answering `[]` for its categories keeps the categories from before, so it no longer unmarks them. A category named in another language, or a first fetch without categories, still depends on the provider's flags.
-- They're hidden by default. Settings > General > "Titles for adults · in their own tab, never on Home or in search" turns on an Adults tab in Movies and Series with the provider's names and posters (`adultTitles`, off when absent). They never appear on Home, in search or in Continue watching. There is no PIN or age check.
-- Live TV has no such filter. `is_adult` is read for movies and series only, so a provider's adult live categories, channel names, logos and guide show in Live TV, the guide and search like any other.
+- They're hidden by default. Settings > General > "For adults · titles in their own tab, channels only in Live TV" turns on an Adults tab in Movies and Series with the provider's names and posters (`adultTitles`, off when absent). They never appear on Home, in search or in Continue watching. There is no PIN or age check.
+- Live TV follows the same setting, by the same rule: a channel is for adults when the provider sets `is_adult` on its stream, or its category's name says so (`apps/desktop/src/main/services/library.ts`). While the setting is off, no list, category, favourite, recent channel, guide row or search shows it, and the last channel watched can't reopen it. With it on, it shows in Live TV's lists and guide only: never on Home, in its backdrop or preview, or in channel or programme search.
 - Ordinary mature-rated films, horror or an 18-rated drama, appear like any other film unless the provider marks them or their category as adult.
 - TMDB is asked about titles for adults only while the setting is on (see 10).
 
@@ -177,7 +177,7 @@ The question for Microsoft, as precisely as it can be put: Mr. Streamer hosts an
 
 Microsoft support confirmed on 2 October 2026 (reported by Wout; reply kept in his Partner Center support case) that the opt-in filter meets 11.7 and 11.11.3, with Live TV following the same setting.
 
-Decided by Wout on 2 October 2026: Live TV follows the "Titles for adults" setting in every build, with the same category rule, so adult channels hide by default too. Every distribution keeps the Adults tab. This item is resolved once the Live TV filter lands; until then Live TV shows adult channels as described above.
+Decided by Wout on 2 October 2026: Live TV follows the setting in every build, with the same category rule, so adult channels hide by default too. Every distribution keeps the Adults tab. The Live TV filter landed in slice 6, which resolves this item.
 
 ## 13. Codec patents
 

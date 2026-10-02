@@ -25,6 +25,11 @@ export interface LiveChannel {
   readonly categoryIds: readonly string[];
   /** Its streams, in the provider's order. */
   readonly variants: readonly ChannelVariant[];
+  /**
+   * For adults: one of its streams is marked so, or sits in a category named for adults. Shown
+   * only in Live TV, and only while Settings shows titles for adults.
+   */
+  readonly adult?: true;
 }
 
 /** How sharp a stream's picture is, best first: 4K, Full HD, HD and SD. */

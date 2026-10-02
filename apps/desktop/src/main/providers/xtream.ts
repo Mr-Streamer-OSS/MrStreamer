@@ -334,6 +334,7 @@ const StreamRow = type({
   "category_id?": loose,
   "category_ids?": "(string | number)[] | null",
   "epg_channel_id?": "string | null",
+  "is_adult?": "number | string | boolean | null",
 });
 
 /**
@@ -612,6 +613,7 @@ function toChannel(raw: unknown): ProviderChannel[] {
       logoUrl: row.stream_icon && /^https?:\/\//i.test(row.stream_icon) ? row.stream_icon : null,
       categoryIds,
       guideId: row.epg_channel_id?.trim() || null,
+      adult: isTruthy(row.is_adult),
     },
   ];
 }

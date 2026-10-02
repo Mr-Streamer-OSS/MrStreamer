@@ -132,7 +132,8 @@ export function searchAt(
   const matches: ProgrammeMatch[] = [];
   for (const { guideId, folded, programme } of index.titles) {
     if (programme.stop <= at || !words.every((word) => folded.includes(word))) continue;
-    const channel = channels.channelsOf(guideId)[0];
+    // Channels for adults show only in Live TV's lists, never in search.
+    const channel = channels.channelsOf(guideId).find((each) => !each.adult);
     if (channel) matches.push({ channel, programme });
   }
   const onNow = (match: ProgrammeMatch) => (match.programme.start <= at ? 0 : 1);

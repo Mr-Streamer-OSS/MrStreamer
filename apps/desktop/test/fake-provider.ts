@@ -29,6 +29,8 @@ export interface FakeChannel {
   readonly fixture: string | null;
   /** The channel's id in the guide, or null. */
   readonly guideId: string | null;
+  /** Flagged for adults. */
+  readonly adult?: boolean;
 }
 
 interface FakeCatalogue {
@@ -58,6 +60,11 @@ export interface FakeProviderOptions {
   readonly guideIdOf?: (channel: FakeChannel) => string | null;
   /** About how many movies and series to list, besides the test titles. */
   readonly titles?: number;
+  /**
+   * Adds channels for adults: "AFTER HOURS", flagged in an ordinary category, with guide id
+   * "afterhours.adult", and "LATE SHOW" and "NIGHT CLUB" in a category named "XXX | ADULTS".
+   */
+  readonly adultChannels?: boolean;
 }
 
 interface FakeTitle {
@@ -156,7 +163,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
   const maxConnections = options.maxConnections ?? 1;
   const slotReleaseMs = options.slotReleaseMs ?? 300;
   const streams = options.streams ?? (options.live ? liveStreams : defaultStreams);
-  const catalogue = buildCatalogue(options.channels ?? 300);
+  const catalogue = buildCatalogue(options.channels ?? 300, options.adultChannels ?? false);
   const titles = buildTitles(options.titles ?? 120);
   const movieFiles = new Map(titles.movies.map((movie) => [String(movie.id), movie]));
   const episodeFiles = new Map(
@@ -361,6 +368,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
           stream_icon: channel.hasLogo ? `${origin}/logos/${channel.streamId}.svg` : "",
           category_id: channel.categoryId,
           category_ids: [Number(channel.categoryId)],
+          is_adult: channel.adult ? 1 : 0,
           // Panels send null or "" for channels without a guide.
           epg_channel_id:
             (options.guideIdOf ?? ((each) => each.guideId))(channel) ??
@@ -577,7 +585,7 @@ const liveStreams: StreamSource = (channel, out, signal) => {
 };
 
 /** Builds a catalogue of roughly `size` channels. The same size always gives the same catalogue. */
-function buildCatalogue(size: number): FakeCatalogue {
+function buildCatalogue(size: number, adultChannels: boolean): FakeCatalogue {
   const random = mulberry32(size);
   const pick = (items: readonly string[]): string =>
     items[Math.floor(random() * items.length)] ?? items[0] ?? "";
@@ -649,6 +657,25 @@ function buildCatalogue(size: number): FakeCatalogue {
       fixture: null,
       guideId: index === 2 ? null : "kwaliteit1.be",
     });
+  }
+  if (adultChannels) {
+    const adult = String(categories.length + 1);
+    categories.push({ id: adult, name: "XXX | ADULTS" });
+    const add = (streamId: number, name: string, categoryId: string, flagged: boolean) =>
+      channels.push({
+        streamId,
+        num: channels.length + 1,
+        name,
+        categoryId,
+        hasLogo: false,
+        offline: false,
+        fixture: "h264-aac.mpegts",
+        guideId: flagged ? "afterhours.adult" : null,
+        ...(flagged ? { adult: true } : {}),
+      });
+    add(4000, "AFTER HOURS", "2", true);
+    add(4001, "LATE SHOW", adult, false);
+    add(4002, "NIGHT CLUB", adult, false);
   }
   return { categories, channels };
 }

@@ -22,6 +22,8 @@ Each subscription keeps its own favourites and watch history. Connecting another
 
 Providers often list a channel once per quality: "VRT 1 FHD", "VRT 1 HD", "VRT 1 SD". Mr. Streamer shows those as one channel, with its qualities after the name, when they are surely the same channel: same name, same region and language, and the same category or one named only for a quality, such as "BE | 4K". Anything less certain stays a row of its own. A channel you starred, or watched, under one of its qualities is the same favourite and the same history entry.
 
+Channels your provider marks for adults, or files in a category named for adults, stay hidden until you turn on **For adults** in Settings > General. Then they show in Live TV's lists and the guide, but never on Home or in search.
+
 Programme information comes from your provider. Many providers only cover some channels, and some cover none; those channels show their name and category instead. Some providers file unrelated channels under one channel's guide; Mr. Streamer leaves those channels without programmes rather than show the wrong ones. The guide updates every six hours.
 
 ## Watching

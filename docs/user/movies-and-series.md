@@ -12,7 +12,7 @@ Tabs under the top bar:
 - **New** has what your provider added this week and this month, and recent releases.
 - **Genres** and **Services** show a tile for each genre and streaming service. Open one for its titles.
 - **4K** lists titles with a 4K version, when your provider has any, and plays that version.
-- **Adults** lists the titles your provider marks for adults, once you turn on **Titles for adults** in Settings > General.
+- **Adults** lists the titles your provider marks for adults, once you turn on **For adults** in Settings > General.
 - **All movies** and **All series** list everything, sorted by date added, popularity, rating or name.
 
 A row's **All**, a genre or a service opens the whole list; **Back**, or Escape, returns to the tab. In a list, the arrow keys move through the posters, Enter opens one, and the pointer only hovers.

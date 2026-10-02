@@ -36,6 +36,15 @@ const TILE_REM = 13;
 const POSTER_REM = 8.5;
 const GAP_REM = 1;
 
+/** Channels without those for adults, which show only in Live TV. */
+function ordinary(channels: readonly LiveChannel[] | undefined): readonly LiveChannel[] {
+  return channels?.filter((channel) => !channel.adult) ?? NO_CHANNELS;
+}
+
+function notForAdults(channel: LiveChannel | null): LiveChannel | null {
+  return channel?.adult ? null : channel;
+}
+
 /** Opens a list in Live TV. */
 function browse(list: ChannelList): void {
   showList(list);
@@ -50,8 +59,8 @@ export function HomeScreen({ active }: { active: boolean }) {
   const viewing = useQuery(queries.viewing());
   const favouriteIds = viewing.data?.favourites ?? NO_IDS;
   const recentIds = viewing.data?.recent ?? NO_IDS;
-  const favourites = useQuery(queries.channelsById(favouriteIds)).data ?? NO_CHANNELS;
-  const recent = useQuery(queries.channelsById(recentIds)).data ?? NO_CHANNELS;
+  const favourites = ordinary(useQuery(queries.channelsById(favouriteIds)).data);
+  const recent = ordinary(useQuery(queries.channelsById(recentIds)).data);
   const categoryId =
     list.kind === "category" ? list.id : (preferences.data?.lastCategoryId ?? null);
   const category = categoryId ? categoryMap.get(categoryId) : undefined;
@@ -59,9 +68,9 @@ export function HomeScreen({ active }: { active: boolean }) {
   const categoryList: ChannelList = category
     ? { kind: "category", id: category.id }
     : { kind: "all" };
-  const inCategory =
-    useQuery({ ...queries.channels(category?.id ?? null), enabled: categories.isSuccess }).data ??
-    NO_CHANNELS;
+  const inCategory = ordinary(
+    useQuery({ ...queries.channels(category?.id ?? null), enabled: categories.isSuccess }).data,
+  );
   const status = useQuery(queries.libraryStatus());
 
   const [grid, width] = useWidth();
@@ -80,11 +89,11 @@ export function HomeScreen({ active }: { active: boolean }) {
   const continuing = useContinueWatching();
   const resume = useResume();
   const removal = useRemoveFromContinue();
-  const playing = usePlayer((state) => state.channel);
+  const playing = notForAdults(usePlayer((state) => state.channel));
   const streaming = usePlayer(
     (state) => state.phase.kind !== "idle" && state.phase.kind !== "failed",
   );
-  const last = useLastChannel();
+  const last = notForAdults(useLastChannel());
   const ids = useMemo(
     () => [
       ...new Set(
