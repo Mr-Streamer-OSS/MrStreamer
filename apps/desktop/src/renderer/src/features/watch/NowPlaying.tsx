@@ -17,17 +17,26 @@ import { Progress } from "../../components/Progress.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { Tooltip } from "../../components/ui/tooltip.tsx";
 import { PlaybackMenu } from "./PlaybackMenu.tsx";
+import { QualityMenu } from "./QualityMenu.tsx";
 import { TrackMenus, type TrackMenu } from "./TrackMenus.tsx";
 import { useNow } from "../../lib/clock.ts";
 import { channelLine, clockTime, progressOf, techLine, timeLeft } from "../../lib/format.ts";
-import { queries, useFavouriteIds, useToggleFavourite } from "../../lib/queries.ts";
+import { qualityName } from "../../lib/quality.ts";
+import {
+  queries,
+  useChooseQuality,
+  useFavouriteIds,
+  useToggleFavourite,
+} from "../../lib/queries.ts";
 import { cn } from "../../lib/utils.ts";
+import type { StreamInfo } from "../../player/engine.ts";
 import { player, usePlayer } from "../../player/player.ts";
+import { useChannelQuality } from "./quality.ts";
 import { VolumeControl } from "./VolumeControl.tsx";
 
 interface NowPlayingProps {
   channel: LiveChannel;
-  /** The sound or subtitle menu open over the controls. */
+  /** The sound, subtitle or quality menu open over the controls. */
   menu: TrackMenu;
   onMenu: (menu: TrackMenu) => void;
   categories: ReadonlyMap<string, Category>;
@@ -53,19 +62,25 @@ export function NowPlayingBar({ visible, ...props }: NowPlayingProps & { visible
   );
 }
 
-/** Programme first: its title, time left and what's next. The channel stands in without a guide. */
+/**
+ * Programme first: its title, time left and what's next. The channel stands in without a guide.
+ * Once it plays, the line says the provider's quality and what the decoder reports, and when
+ * Automatic had to play another stream.
+ */
 function Details({ channel, categories }: NowPlayingProps) {
   const playing = usePlayer(
     (state) => state.phase.kind === "playing" && state.channel?.id === channel.id,
   );
   const listing = useQuery(queries.listings([channel.id])).data?.[channel.id];
   const now = useNow();
-  const tech = useTechLine(playing);
+  const tech = techLine(useStreamInfo(playing));
+  const quality = useChannelQuality(channel);
   const current = listing?.now ?? null;
   const next = listing?.next ?? null;
   const line = current
     ? [channel.title, `Until ${clockTime(current.stop, now)}`, timeLeft(current, now)]
-    : [channelLine(channel, categories), ...channel.tags];
+    : [channelLine(channel, categories)];
+  const fellBack = quality.fellBack;
   return (
     <div className="flex min-w-0 items-center gap-5">
       <ChannelLogo channel={channel} className="h-12 w-18" />
@@ -74,7 +89,15 @@ function Details({ channel, categories }: NowPlayingProps) {
           {current?.title ?? channel.title}
         </div>
         <div className="mt-1 truncate text-sm text-foreground/85">
-          {[...line, tech].filter(Boolean).join(" · ")}
+          {[...line, playing && quality.playing && qualityName(quality.playing), tech]
+            .filter(Boolean)
+            .join(" · ")}
+          {fellBack && (
+            <span className="text-white">
+              {" · "}
+              {qualityName(fellBack.from)} didn't start, playing {qualityName(fellBack.to)}
+            </span>
+          )}
         </div>
         {current && <Progress value={progressOf(current, now)} className="mt-2 w-64" />}
         {next && (
@@ -101,6 +124,12 @@ function Controls({
   const subtitle = usePlayer((state) => state.subtitle);
   const active = usePlayer((state) => state.phase.kind !== "idle" && state.phase.kind !== "failed");
   const previous = usePlayer((state) => state.previous);
+  const playing = usePlayer(
+    (state) => state.phase.kind === "playing" && state.channel?.id === channel.id,
+  );
+  const height = useStreamInfo(playing)?.height ?? null;
+  const quality = useChannelQuality(channel);
+  const chooseQuality = useChooseQuality();
   const favourite = useFavouriteIds().has(channel.id);
   const toggleFavourite = useToggleFavourite();
   return (
@@ -182,6 +211,18 @@ function Controls({
           onOpenChange={(next) => onMenu(next ? "playback" : null)}
         />
       )}
+      {channel.variants.length > 1 && (
+        <QualityMenu
+          channel={channel}
+          chosen={quality.chosen}
+          automatic={quality.automatic}
+          playing={quality.playing}
+          height={height}
+          open={menu === "quality"}
+          onOpenChange={(open) => onMenu(open ? "quality" : null)}
+          onChoose={(variantId) => chooseQuality(channel, variantId)}
+        />
+      )}
       <VolumeControl />
       <Tooltip label={fullscreen ? "Exit full screen" : "Full screen"}>
         <Button variant="media" size="icon" aria-label="Full screen" onClick={onToggleFullscreen}>
@@ -193,17 +234,17 @@ function Controls({
 }
 
 /** Resolution, frame rate and audio of the playing stream, read once playback settles. */
-function useTechLine(playing: boolean): string {
-  const [line, setLine] = useState("");
+function useStreamInfo(playing: boolean): StreamInfo | null {
+  const [info, setInfo] = useState<StreamInfo | null>(null);
   useEffect(() => {
     if (!playing) {
-      setLine("");
+      setInfo(null);
       return;
     }
-    const read = () => setLine(techLine(player.info()));
+    const read = () => setInfo(player.info());
     read();
     const timer = setTimeout(read, 1500);
     return () => clearTimeout(timer);
   }, [playing]);
-  return line;
+  return info;
 }

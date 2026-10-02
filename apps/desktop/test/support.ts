@@ -27,7 +27,8 @@ export async function fakeProvider(options: FakeProviderOptions = {}): Promise<F
 
 export async function tempDir(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "mr-streamer-test-"));
-  cleanups.push(() => rm(dir, { recursive: true, force: true }));
+  // The diagnostics log may still append a line a step took, as the runtime that took it closes.
+  cleanups.push(() => rm(dir, { recursive: true, force: true, maxRetries: 3 }));
   return dir;
 }
 

@@ -1,4 +1,5 @@
-// What the picture area says when there is no picture: idle, tuning, reconnecting or failed.
+// What the picture area says when there is no picture: idle, tuning, reconnecting or failed. A
+// quality chosen for the channel that fails says so, and offers another instead of playing it.
 import { Play, RotateCw, SkipForward } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
@@ -6,7 +7,10 @@ import { useUi } from "../../app/ui-store.ts";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { describeError } from "../../lib/errors.ts";
+import { qualityName } from "../../lib/quality.ts";
+import { useChooseQuality } from "../../lib/queries.ts";
 import { player, usePlayer, type PlaybackProblem } from "../../player/player.ts";
+import { useChannelQuality } from "./quality.ts";
 
 interface Message {
   readonly title: string;
@@ -24,6 +28,8 @@ export function PlaybackState({
   onNext: () => void;
 }) {
   const phase = usePlayer((state) => state.phase);
+  const quality = useChannelQuality(channel);
+  const chooseQuality = useChooseQuality();
   if (phase.kind === "playing") return null;
 
   let message: Message;
@@ -57,6 +63,30 @@ export function PlaybackState({
         <Button variant="ghost" onClick={() => player.stop()}>
           Stop
         </Button>
+      ),
+    };
+  } else if (quality.chosen && !["refused", "app"].includes(phase.problem.kind)) {
+    // The chosen quality stays chosen: no other stream plays without asking.
+    const chosen = qualityName(quality.chosen);
+    const { alternative } = quality;
+    message = {
+      title: `${chosen} didn't start`,
+      body: `${channel.title}'s ${chosen} stream failed. Your choice stays ${chosen} for this channel.`,
+      actions: (
+        <>
+          <Button variant="primary" onClick={() => player.retry()}>
+            <RotateCw />
+            Retry
+          </Button>
+          {alternative && (
+            <Button variant="secondary" onClick={() => chooseQuality(channel, alternative.id)}>
+              {qualityName(alternative)}
+            </Button>
+          )}
+          <Button variant="secondary" onClick={() => chooseQuality(channel, null)}>
+            Automatic
+          </Button>
+        </>
       ),
     };
   } else {

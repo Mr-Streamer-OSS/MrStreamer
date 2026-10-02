@@ -1,5 +1,5 @@
-// The guide's channel list: a row per channel with its number, logo and name, what's on now with
-// progress and time left, and what's next. The chevron opens the rest of the day under the row.
+// The guide's channel list: a row per channel with its number, logo and name, the qualities of a
+// channel with several streams, what's on now with progress and time left, and what's next. The chevron opens the rest of the day under the row.
 // Rows ask the guide for programmes only as they come into view.
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -11,6 +11,7 @@ import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Progress } from "../../components/Progress.tsx";
 import { useNow } from "../../lib/clock.ts";
 import { clockTime, progressOf, timeLeft } from "../../lib/format.ts";
+import { qualitiesLine } from "../../lib/quality.ts";
 import { queries } from "../../lib/queries.ts";
 import { useRem } from "../../lib/use-rem.ts";
 import { cn } from "../../lib/utils.ts";
@@ -158,6 +159,7 @@ function ChannelRow({
             {channel.title}
           </span>
           {playing && <span className="size-1.5 flex-none rounded-full bg-white" />}
+          <span className="flex-none text-xs text-muted-foreground">{qualitiesLine(channel)}</span>
         </span>
         <span className="flex min-w-0 flex-1 items-center gap-4">
           {current && (

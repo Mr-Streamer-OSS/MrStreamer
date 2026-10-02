@@ -119,15 +119,11 @@ export function streamsToPlay(
   preferences: Pick<Preferences, "liveQuality" | "channelVariants">,
   asked?: string,
 ): readonly ChannelVariant[] {
-  const find = (id: string | undefined) => channel.variants.find((variant) => variant.id === id);
   if (asked !== undefined) {
-    const variant = find(asked);
+    const variant = channel.variants.find(({ id }) => id === asked);
     return variant ? [variant] : [];
   }
-  // A choice is kept under the channel's id then, which may since be another of its streams'.
-  const chosen = channel.variants
-    .map((variant) => find(preferences.channelVariants?.[variant.id]))
-    .find((variant) => variant !== undefined);
+  const chosen = chosenVariant(channel, preferences.channelVariants);
   if (chosen) return [chosen];
   const preferred = QUALITIES.indexOf(preferences.liveQuality ?? DEFAULT_LIVE_QUALITY);
   const rank = ({ quality }: ChannelVariant) => {
@@ -136,6 +132,22 @@ export function streamsToPlay(
     return lower >= 0 ? lower : QUALITIES.length - lower;
   };
   return channel.variants.toSorted((a, b) => rank(a) - rank(b)).slice(0, AUTO_TRIES);
+}
+
+/**
+ * The stream the viewer chose for a channel, or null for Automatic. A choice is kept under the
+ * channel's id then, which may since be another of its streams'; one the channel no longer lists
+ * counts as none.
+ */
+export function chosenVariant(
+  channel: LiveChannel,
+  choices: Preferences["channelVariants"],
+): ChannelVariant | null {
+  for (const { id } of channel.variants) {
+    const chosen = channel.variants.find((variant) => variant.id === choices?.[id]);
+    if (chosen) return chosen;
+  }
+  return null;
 }
 
 /**
