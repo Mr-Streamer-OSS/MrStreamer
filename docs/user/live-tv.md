@@ -35,6 +35,7 @@ While watching, the channel list opens over the left of the picture with the lis
 - The sliders button beside them moves teletext subtitles and captions earlier or later, until you switch channel, and sets how subtitles look, as for [movies and series](movies-and-series.md#watching). Live channels play at their own speed.
 - **Quality** shows on a channel with several qualities and says which one plays. Q opens it.
 - **Mini player**, beside full screen, or P, shrinks the window into a small picture on top of other windows, as for [movies and series](movies-and-series.md#watching). Up and Down still switch channel; opening the list puts the window back.
+- The keyboard's media keys and the system's own controls show the programme, the channel and its logo. Pause or stop there stops the channel, and **Watch** starts it again. Next and previous do nothing, so a tap on your headphones never changes channel.
 
 The languages you pick carry over to other channels, and to movies and series. A channel in another language starts with subtitles in yours when it has them.
 

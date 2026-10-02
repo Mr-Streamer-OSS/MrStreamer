@@ -20,6 +20,7 @@ import { useKeyboardMode } from "../../lib/input-mode.ts";
 import { useCategoryMap, useToggleFavourite } from "../../lib/queries.ts";
 import { cn } from "../../lib/utils.ts";
 import { WINDOW_BAR } from "../../../../shared/window-bar.ts";
+import { useLiveSession } from "../../player/media-session.ts";
 import { Picture } from "../../player/Picture.tsx";
 import { player, usePlayer } from "../../player/player.ts";
 import { useOpenGroups } from "../live/ListPicker.tsx";
@@ -64,6 +65,7 @@ export function WatchScreen() {
   const [selected, setSelected] = useState(0);
   const [entry, setEntry] = useState(0);
   const [menu, setMenu] = useState<TrackMenu>(null);
+  useLiveSession(channel);
 
   // Nothing to watch, as after switching accounts: back to the page.
   useEffect(() => {
