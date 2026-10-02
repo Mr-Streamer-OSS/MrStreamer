@@ -20,6 +20,8 @@ detectUpdateChannel: false
 extraResources:
   - from: vendor/ffmpeg/${os}-${arch}
     to: ffmpeg
+# Keeps Chromium's credits, which hold Node.js's licence too, in Mac builds. See the script.
+afterExtract: ./scripts/mac-credits.ts
 # Seals Mac builds with an ad hoc signature, so they open without a Developer ID. See the script.
 afterPack: ./scripts/mac-ad-hoc-sign.ts
 
@@ -32,12 +34,6 @@ mac:
       arch: [arm64]
   category: public.app-category.entertainment
   icon: build/icon.icns
-  # Chromium's credits, Node.js's licence among them, which Electron's download keeps next to the
-  # app, where no installer takes them; Settings > About reads them from Resources. Linux and
-  # Windows installers keep them next to the executable.
-  extraResources:
-    - from: dist/mac-${arch}/LICENSES.chromium.html
-      to: LICENSES.chromium.html
   # Signs with a Developer ID from the login keychain when one exists; otherwise the afterPack
   # hook's ad hoc signature stays.
   # Notarization runs only when APPLE_API_KEY, APPLE_API_KEY_ID and APPLE_API_ISSUER are set.
@@ -68,6 +64,8 @@ nsis:
   perMachine: false
   shortcutName: Mr. Streamer
   deleteAppDataOnUninstall: false
+  # elevate.exe only helps updates of per-machine installs, so it stays out of the app.
+  packElevateHelper: false
 
 linux:
   target:

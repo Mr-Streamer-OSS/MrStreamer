@@ -58,7 +58,7 @@ Settings > About lists what the installers ship and under which licences. `pnpm 
 
 The build fails and lists every problem when a package declares no licence, has no licence file and no override, refers to Apache-2.0 or the GPL without including its text, carries a package that is neither installed nor under `embedded`, or uses a licence missing from `COMPATIBLE` in `scripts/licences.ts`. Read a licence's terms before adding it there.
 
-Chromium's credits, which hold Node.js's licence too, are 20 MB of HTML from Electron's download: next to the executable on Linux and Windows, in the app's Resources on macOS, where `electron-builder.yml` copies them. The main process turns them into plain text when the UI asks for Chromium or Node.js. `pnpm dev` serves the renderer instead of bundling it, so development shows the notices of the last `pnpm build`.
+Chromium's credits, which hold Node.js's licence too, are 20 MB of HTML from Electron's download: next to the executable on Linux and Windows, in the app's Resources on macOS, where `apps/desktop/scripts/mac-credits.ts` moves them. The main process turns them into plain text when the UI asks for Chromium or Node.js. `pnpm dev` serves the renderer instead of bundling it, so development shows the notices of the last `pnpm build`.
 
 ## Artwork
 
