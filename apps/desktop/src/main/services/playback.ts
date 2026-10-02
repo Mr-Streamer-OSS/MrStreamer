@@ -909,12 +909,16 @@ function make(deps: PlaybackDeps) {
 
             const now = Date.now();
             for (const [url, at] of failedAt) if (now - at > FAILED_STREAM_MS) failedAt.delete(url);
-            // Streams that failed lately go last, in the order they came.
-            const variants = (options.variants?.length ? options.variants : [channelId])
-              .map((id) => ({ id, url: source.provider.liveStream(id).url }))
+            // Streams that failed lately go last, in the order they came. The player picks its
+            // engine by the format before the stream starts, so those of another format than the
+            // first's stay out.
+            const streams = (options.variants?.length ? options.variants : [channelId])
+              .map((id) => ({ id, ...source.provider.liveStream(id) }))
               .toSorted((a, b) => Number(failedAt.has(a.url)) - Number(failedAt.has(b.url)));
-            // A provider streams every channel in one format.
-            const { format } = source.provider.liveStream(channelId);
+            const format = streams[0]?.format ?? "mpegts";
+            const variants = streams.flatMap(({ id, url, format: other }) =>
+              other === format ? [{ id, url }] : [],
+            );
             const id = randomUUID();
             const closed = new AbortController();
             const sessionScope = yield* Scope.fork(scope);
