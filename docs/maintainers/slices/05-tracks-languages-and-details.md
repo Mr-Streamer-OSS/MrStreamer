@@ -1,6 +1,6 @@
 # Slice 5: tracks, languages, versions and details
 
-Status: built and merged on 1 October 2026, #21 to #35, on `main` after `31fe500`. No release carries it yet: nightly `0.0.3-nightly.20261001.43` was built from `31fe500`, the review baseline. [Known gaps](#known-gaps) lists what remains open, Windows and everyday use on real streams first.
+Status: merged on 1 October 2026, #21 to #36, and shipped in nightly `0.0.3-nightly.20261001.46`, built from `6a128ac`. A second review on 2 October found seven more problems, fixed in #37 to #43, with a follow-up in #44. Nightly `0.0.3-nightly.20261002.50` carries #37; the next nightly carries the rest. [Known gaps](#known-gaps) lists what remains open, use on a real subscription on the Mac and Windows first.
 
 Outcome: live channels and movies and series offer every sound track and every subtitle format they carry, picture subtitles, teletext and captions included. Titles take their usual name in the viewer's language, a film's version can be picked and is remembered, Movies and Series search their own titles, details load only when a title opens and show the cast, and Settings gathers the content languages and updates under General, beside a clearer Subscription.
 
@@ -63,6 +63,18 @@ The six findings, fixed first:
 
 Each later part had a pre-PR audit, and fixed what it found before filing: live subtitles in Home's and the guide's muted previews, hard-of-hearing subtitles turning on by themselves on domestic channels, the details sheet showing the previous title while another loaded, a version pick replacing the other picks when the preferences hadn't loaded, provider names with version marks shown as original titles, and title details asked for again after a list refresh.
 
+A second review, of `main` at `6a128ac` on 2 October, with Linux checks and probes of the services and controllers, found seven problems the tests had missed, each fixed and tested on its own:
+
+- A Continue watching resume still waiting for a series' details reopened the last account's series after the subscription was removed or replaced (#37).
+- Turning CC off on a movie cleared the line on screen, but the next one showed again while the menu said Off (#38).
+- Switching channels with Up and Down kept the last channel's sound track and subtitles (#39).
+- A paused movie whose new track needed a second try, converting its sound or reconnecting, started playing (#40).
+- A film opened from the 4K tab played its HD version (#41).
+- Details opened before TMDB's names arrived kept the provider's name and no original language, so Original language sound had nothing to go on (#42).
+- Settings hid Check now while an update was on offer, a regression from #33 (#43).
+
+It also found, by reading the code, that the live Sound menu marked a channel's first track while the sound in the viewer's language played (#44), and that captions sent only as CEA-708 show nothing (see [known gaps](#known-gaps)). The renderer had no tests before #37; its controllers and hooks now have their own, under happy-dom ([testing](../testing.md)).
+
 ## Progress
 
 | Part                             | Pull request                                                                      |
@@ -80,10 +92,13 @@ Each later part had a pre-PR audit, and fixed what it found before filing: live 
 | Settings > General               | #33                                                                               |
 | Settings > Subscription          | #34                                                                               |
 | README and docs                  | #35                                                                               |
+| A nightly checked on every push  | #36                                                                               |
+| Second review                    | #37 to #43, and #44 for the live Sound menu                                       |
+| This record                      | #45                                                                               |
 
 ## Evidence
 
-Every pull request passed `pnpm knip`, `pnpm lint`, `pnpm fmt:check`, `pnpm typecheck` and `pnpm test` locally and in CI: 241 tests across 17 files at the end, from 207 at the baseline. The packaged-app test passes on a development build, choosing the PGS and DVD subtitles under CC. #25's release dry run built and ran the packaged app with the bundled ffmpeg on macOS, Windows and Linux, picture subtitles included.
+Every pull request passed `pnpm knip`, `pnpm lint`, `pnpm fmt:check`, `pnpm typecheck` and `pnpm test` locally and in CI: 258 tests across 24 files after the second review, from 207 at the baseline. The packaged-app test passes on a development build, choosing the PGS and DVD subtitles under CC. #25's release dry run built and ran the packaged app with the bundled ffmpeg on macOS, Windows and Linux, picture subtitles included.
 
 Driven in Electron on Linux against the fake provider, and the fake TMDB where names, cast or original languages mattered:
 
@@ -98,12 +113,14 @@ On the workbench Mac mini, macOS 26.5.1, a development build with Homebrew's ffm
 
 On Linux, `pnpm dist:linux` at `e54666b` built the deb and the AppImage with the bundled ffmpeg and ffprobe, and the packaged-app test passed all five steps on the AppImage.
 
+The release workflow for nightlies .46 and .50 built every installer, signed and notarized the Mac app and checked its signature, and ran the packaged-app test on the installed DMG, setup, deb and AppImage on hosted macOS, Windows and Linux runners. That is a smoke test against the fake provider, not use.
+
 The README's screenshots come from the same kind of run as the checks, with made-up titles, people and artwork ([development](../development.md#artwork)).
 
 ## Known gaps
 
-- **Windows** hasn't run this slice at all: the workbench has no Windows machine, and only #25's release dry run built and tested it there.
-- **Everyday use:** everything above ran against the fake provider. The nightly that carries slice 5 is the first build to use on a real subscription, on the Mac and on Windows: live subtitles and Sound on a real channel, picture subtitles from a real Blu-ray rip, versions, and Settings. The Mac runs were a development build, not the signed app, and the green button wasn't pressed by hand.
+- **Use on the Mac and Windows:** everything above ran against the fake provider. Windows ran only the release workflow's packaged-app test on a hosted runner, and the Mac checks ran on a development build. No use of the signed Mac app or the Windows nightly on a real subscription is recorded yet: live subtitles and Sound on a real channel, picture subtitles from a real Blu-ray rip, track changes while paused, versions, Settings, and an upgrade from the nightly before. The green button wasn't pressed by hand.
+- **CEA-708 captions** are left out: the decoder reads CEA-608, which most broadcasts with captions also carry. A channel or file that sends captions only as CEA-708 shows none. Supporting them needs a real fixture first.
 - The subtitle fixtures are generated: no real broadcast with teletext or captions, and no real Blu-ray PGS, has been played.
 - After a skip, picture subtitles, teletext and captions already on screen show again only from their next change; live subtitles turned on show from the next line.
 - Another live sound track starts the channel again, a moment's break.

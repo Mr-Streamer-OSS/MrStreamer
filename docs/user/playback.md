@@ -41,6 +41,7 @@ A movie starts about a second after you choose it. Skipping into what's already 
 - Live subtitles show from their next line after you turn them on, and another sound track starts the channel again.
 - Surround sound that needs converting plays as stereo.
 - After you skip in a movie or episode, picture subtitles, teletext and captions already on screen at that moment show again from the next line.
+- Closed captions come from the CEA-608 data most broadcasts carry. A channel or file that sends captions only in the newer CEA-708 form shows none.
 - Converting an HEVC or Xvid picture uses much more of your computer's processor than playing it as it is.
 - A damaged broadcast can take more than ten seconds to start, while Mr. Streamer retries it with the picture re-encoded.
 - Interlaced channels that play directly, common in European HD broadcasts, aren't deinterlaced; fast motion can show fine horizontal lines.
