@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 // A channel's sound and subtitle tracks are its own: switching channels, with a click or the
 // arrow keys, starts the next one with the viewer's languages rather than the last one's tracks.
+// Captions have no language, so picking them leaves the remembered subtitle language as it was.
 import { ipc } from "./support.ts";
 import { describe, expect, it } from "vitest";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
-import type { ChannelTracks } from "@mrstreamer/contracts/playback";
+import type { ChannelTracks, SubtitleTrack } from "@mrstreamer/contracts/playback";
 import { player } from "../../src/renderer/src/player/player.ts";
 
 const channel = (id: string): LiveChannel => ({
@@ -84,4 +85,27 @@ describe("switching channels", () => {
     },
     10_000,
   );
+});
+
+describe("picking subtitles", () => {
+  it("remembers a language, Off, and nothing for captions", () => {
+    ipc.reset();
+    const captions: SubtitleTrack = {
+      id: 0x1ff0,
+      page: 1,
+      format: "captions",
+      language: null,
+      label: "Captions",
+      forced: false,
+      default: false,
+    };
+    player.setSubtitle(tracksOfA.subtitles[0]!);
+    player.setSubtitle(captions);
+    player.setSubtitle(null);
+
+    expect(ipc.argsOf("preferences.update")).toEqual([
+      { subtitleLanguage: "nl" },
+      { subtitleLanguage: "off" },
+    ]);
+  });
 });

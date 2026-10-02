@@ -52,12 +52,6 @@ export function TitleWatch() {
     if (next) playTitle(episodeNow(next.series, next.episode), 0);
   };
 
-  // A title plays with sound, at the viewer's volume.
-  useEffect(() => {
-    player.setAudible(true);
-    return () => player.setAudible(false);
-  }, []);
-
   // Nothing open any more, as after a live channel took over: back to the page.
   useEffect(() => {
     if (!now) useUi.setState({ playingTitle: false });

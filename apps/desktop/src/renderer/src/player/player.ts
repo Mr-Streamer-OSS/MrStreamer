@@ -401,6 +401,16 @@ function choose(track: SubtitleTrack | null): void {
   restartSubtitles();
 }
 
+/**
+ * Remembers the subtitles picked, in a channel or a title, for the next ones: their language, or
+ * none. Captions have no language, so picking them keeps the one remembered before.
+ */
+export function rememberSubtitles(track: SubtitleTrack | null): void {
+  const language = track ? track.language : "off";
+  if (language === null) return;
+  void call("preferences.update", { subtitleLanguage: language }).catch(() => {});
+}
+
 function applyVolume(): void {
   const { volume, muted, audible } = store.getState();
   video.volume = volume;
@@ -564,9 +574,7 @@ export const player = {
   /** Shows a subtitle track, or none, and remembers the choice. */
   setSubtitle(track: SubtitleTrack | null): void {
     choose(track);
-    void call("preferences.update", {
-      subtitleLanguage: track ? (track.language ?? null) : "off",
-    }).catch(() => {});
+    rememberSubtitles(track);
   },
 
   /** C: subtitles off, or back on: the ones chosen last on this channel, else the first. */
