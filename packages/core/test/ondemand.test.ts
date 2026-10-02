@@ -378,20 +378,18 @@ describe("details", () => {
   });
 });
 
-describe("the next episode", () => {
-  // The provider's rows in another order, with ids and names that sort differently from its
-  // season and episode numbers, specials, and a second file of S1 E2.
-  const rows: [id: string, season: number, number: number, name: string][] = [
-    ["900", 2, 1, "A Second Season"],
-    ["100", 1, 3, "Zebra"],
-    ["300", 0, 1, "Behind the Scenes"],
-    ["700", 1, 1, "Pilot"],
-    ["200", 1, 2, "Middle"],
-    ["201", 1, 2, "Middle"],
-    ["800", 2, 2, "Finale"],
-    ["301", 0, 2, "Bloopers"],
-  ];
-  const series = seriesDetails(
+/** A Dutch version of a series whose provider lists these files, as `seriesDetails` shows it. */
+function seriesOf(
+  files: readonly (readonly [
+    id: string,
+    season: number,
+    number: number,
+    name: string,
+    addedAt?: number,
+  ])[],
+  language = "en",
+) {
+  return seriesDetails(
     {
       kind: "series",
       id: "s1",
@@ -421,7 +419,7 @@ describe("the next episode", () => {
       posterUrl: null,
       backdropUrl: null,
       seasons: [],
-      episodes: rows.map(([id, season, number, name]) => ({
+      episodes: files.map(([id, season, number, name, addedAt]) => ({
         id,
         season,
         number,
@@ -430,15 +428,73 @@ describe("the next episode", () => {
         duration: null,
         stillUrl: null,
         airDate: null,
+        addedAt: addedAt ?? null,
         container: "mkv",
       })),
       container: null,
     },
+    null,
+    language,
   );
+}
+
+describe("a series' episodes", () => {
+  it.each([
+    [
+      "the newest of two files",
+      [
+        ["10", 1, 1, "Harbour Lights - S01E01 - Pilot", 100],
+        ["11", 1, 1, "Harbour Lights - S01E01 - Pilot", 200],
+      ],
+      "11",
+    ],
+    [
+      "the newest of two files, listed first",
+      [
+        ["11", 1, 1, "Harbour Lights - S01E01 - Pilot", 200],
+        ["10", 1, 1, "Harbour Lights - S01E01 - Pilot", 100],
+      ],
+      "11",
+    ],
+    [
+      "the file in the viewer's language over a newer dub",
+      [
+        ["10", 1, 1, "Harbour Lights - S01E01 - Pilot (EN)", 100],
+        ["11", 1, 1, "Harbour Lights - S01E01 - Pilot (DE)", 200],
+      ],
+      "10",
+    ],
+  ] as const)("show one row per episode: %s", (_, files, shown) => {
+    const series = seriesOf([...files, ["20", 1, 2, "Harbour Lights - S01E02 - Ashore"]]);
+
+    expect(
+      series.seasons.flatMap((season) =>
+        season.episodes.map((episode) => [episode.id, episode.number]),
+      ),
+    ).toEqual([
+      [shown, 1],
+      ["20", 2],
+    ]);
+  });
+});
+
+describe("the next episode", () => {
+  // The provider's rows in another order, with ids and names that sort differently from its
+  // season and episode numbers, specials, and a second file of S1 E2.
+  const series = seriesOf([
+    ["900", 2, 1, "A Second Season"],
+    ["100", 1, 3, "Zebra"],
+    ["300", 0, 1, "Behind the Scenes"],
+    ["700", 1, 1, "Pilot"],
+    ["200", 1, 2, "Middle"],
+    ["201", 1, 2, "Middle"],
+    ["800", 2, 2, "Finale"],
+    ["301", 0, 2, "Bloopers"],
+  ]);
 
   it.each([
     ["the next number in the season", "700", 1, 1, "200"],
-    ["past another file of the same episode", "201", 1, 2, "100"],
+    ["the one after, from a file of the same episode the series doesn't show", "201", 1, 2, "100"],
     ["into the next season", "100", 1, 3, "900"],
     ["found by season and number when the id is gone", "gone", 1, 3, "900"],
     ["nothing after the last season, specials aside", "800", 2, 2, null],

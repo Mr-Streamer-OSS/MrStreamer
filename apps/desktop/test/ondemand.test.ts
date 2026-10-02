@@ -182,6 +182,27 @@ describe("movies and series", { timeout: 20_000 }, () => {
     });
   });
 
+  it("shows one row for an episode the provider lists twice, and still plays the other file", async () => {
+    const { onDemand } = await onDemandApp();
+
+    const details = await onDemand.details("series", "80000");
+
+    if (details.kind !== "series") throw new Error("Not a series.");
+    expect(details.seasons[0]?.episodes.map((episode) => [episode.id, episode.number])).toEqual([
+      ["81000", 1],
+      ["81001", 2],
+      ["81002", 3],
+    ]);
+    const file = await onDemand.file({
+      kind: "episode",
+      id: "81003",
+      seriesId: "80000",
+      season: 1,
+      episode: 2,
+    });
+    expect(file.container).toBe("mp4");
+  });
+
   it("keeps the lists after a restart without asking the provider again", async () => {
     const app = await onDemandApp();
     const before = await app.onDemand.collection({

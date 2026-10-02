@@ -82,6 +82,9 @@ interface FakeTitle {
   readonly tmdb?: string;
 }
 
+/** An episode's file, numbered by its place in the season unless `number` says otherwise. */
+type FakeEpisode = FakeTitle & { readonly number?: number };
+
 interface FakeSeries {
   readonly id: number;
   readonly name: string;
@@ -90,7 +93,7 @@ interface FakeSeries {
   readonly adult: boolean;
   readonly added: number;
   /** Episodes per season, in order. */
-  readonly seasons: readonly (readonly FakeTitle[])[];
+  readonly seasons: readonly (readonly FakeEpisode[])[];
   /** The TMDB id it shares with another version of the series, when it is one. */
   readonly tmdb?: string;
 }
@@ -331,17 +334,21 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
         episodes: Object.fromEntries(
           series.seasons.map((episodes, index) => [
             String(index + 1),
-            episodes.map((episode, number) => ({
-              id: String(episode.id),
-              episode_num: number + 1,
-              season: index + 1,
-              title: `${series.name} - S${String(index + 1).padStart(2, "0")}E${String(number + 1).padStart(2, "0")} - Part ${number + 1}`,
-              container_extension: episode.container,
-              info: {
-                duration_secs: 2700,
-                movie_image: `https://image.example/e/${episode.id}.jpg`,
-              },
-            })),
+            episodes.map((episode, place) => {
+              const number = episode.number ?? place + 1;
+              return {
+                id: String(episode.id),
+                episode_num: number,
+                season: index + 1,
+                title: `${series.name} - S${String(index + 1).padStart(2, "0")}E${String(number).padStart(2, "0")} - Part ${number}`,
+                container_extension: episode.container,
+                added: String(episode.added),
+                info: {
+                  duration_secs: 2700,
+                  movie_image: `https://image.example/e/${episode.id}.jpg`,
+                },
+              };
+            }),
           ]),
         ),
       });
@@ -783,6 +790,8 @@ function buildTitles(size: number): FakeTitles {
           episode(81_000, "title-h264-eac3-subs.mkv", "mkv"),
           episode(81_001, "title-h264-aac.mp4", "mp4"),
           episode(81_002, "title-h264-aac.mp4", "mp4"),
+          // An older file of episode 2, listed beside it as some panels do.
+          { ...episode(81_003, "title-h264-aac.mp4", "mp4"), number: 2, added: base - 100 },
         ],
         [
           episode(81_010, "title-h264-aac.mp4", "mp4"),

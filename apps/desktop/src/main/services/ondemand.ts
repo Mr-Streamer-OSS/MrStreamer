@@ -299,7 +299,8 @@ function make(deps: OnDemandDeps) {
     const detailsOf = (kind: TitleKind, id: string) =>
       Effect.gen(function* () {
         const source = yield* requireSource;
-        const cacheKey = `${source.key}|${yield* language}|${kind}|${id}`;
+        const viewer = yield* language;
+        const cacheKey = `${source.key}|${viewer}|${kind}|${id}`;
         const [listed] = yield* loaded((_, language) =>
           call("byIds", { key: source.key, language, kind, ids: [id] }),
         );
@@ -326,7 +327,7 @@ function make(deps: OnDemandDeps) {
           shown:
             kind === "movie"
               ? movieDetails(version, raw, about ?? null)
-              : seriesDetails(version, raw, about ?? null),
+              : seriesDetails(version, raw, about ?? null, viewer),
         };
       });
 

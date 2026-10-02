@@ -1,8 +1,8 @@
 // A movie's or series' details as the UI shows them: TMDB's overview, artwork, genres and credits
 // where it has them, the provider's otherwise, and the provider's seasons, episodes and length,
 // which are what plays. Seasons come from the episodes themselves: panels list seasons
-// incompletely, or not at all. An episode gets TMDB's details once the viewer opens its season.
-// The provider's numbers also say which episode comes next.
+// incompletely, or not at all, and some episodes twice. An episode gets TMDB's details once the
+// viewer opens its season. The provider's numbers also say which episode comes next.
 import type {
   Episode,
   EpisodeDetails,
@@ -13,7 +13,8 @@ import type {
   Title,
 } from "@mrstreamer/contracts/ondemand";
 import { GENRES, tmdbImage, type EpisodeAbout, type TitleAbout } from "../metadata/tmdb.ts";
-import type { ProviderDetails } from "../provider.ts";
+import type { ProviderDetails, ProviderEpisode } from "../provider.ts";
+import { suitability } from "./languages.ts";
 import { episodeName, titleName } from "./names.ts";
 
 export function movieDetails(
@@ -24,16 +25,25 @@ export function movieDetails(
   return { kind: "movie", ...shared(title, details, about) };
 }
 
+/**
+ * A series version's details for a viewer of `language`. One row per episode: where the provider
+ * lists two files of the same season and number, as some panels do, the one shown is picked as a
+ * title's version is (`preferredFile`). The other still plays by its id, as from Continue watching.
+ */
 export function seriesDetails(
   title: Title,
   details: ProviderDetails,
-  about: TitleAbout | null = null,
+  about: TitleAbout | null,
+  language: string,
 ): SeriesDetails {
-  const bySeason = new Map<number, Episode[]>();
-  const seen = new Set<string>();
+  const files = new Map<string, ProviderEpisode>();
   for (const episode of details.episodes) {
-    if (seen.has(episode.id)) continue;
-    seen.add(episode.id);
+    const key = `${episode.season}:${episode.number}`;
+    const other = files.get(key);
+    if (!other || preferredFile(episode, other, language)) files.set(key, episode);
+  }
+  const bySeason = new Map<number, Episode[]>();
+  for (const episode of files.values()) {
     const shown: Episode = {
       id: episode.id,
       seriesId: title.id,
@@ -66,11 +76,22 @@ export function seriesDetails(
 }
 
 /**
+ * Whether `file` suits a viewer of `language` better than `other`, a file of the same episode: as
+ * with versions, by the marks in its name, then the newest.
+ */
+function preferredFile(file: ProviderEpisode, other: ProviderEpisode, language: string): boolean {
+  const fit =
+    suitability(titleName(file.name).tags, language) -
+    suitability(titleName(other.name).tags, language);
+  return fit > 0 || (fit === 0 && (file.addedAt ?? 0) > (other.addedAt ?? 0));
+}
+
+/**
  * The episode after `current` in the series, in the provider's order: by its season and episode
  * numbers, into the next season after a season's last. Null after the last episode. Specials,
- * season 0, only lead to other specials, so a finale never leads into them. Another file of the
- * same episode, as panels list some twice, is passed over. Undefined when the series doesn't list
- * `current`, as when its details changed since.
+ * season 0, only lead to other specials, so a finale never leads into them. `current` is found by
+ * id, else by its numbers, as a second file of an episode is, which the details don't show.
+ * Undefined when the series doesn't list it, as when its details changed since.
  */
 export function nextEpisode(
   series: SeriesDetails,
@@ -86,13 +107,8 @@ export function nextEpisode(
           (each) => each.season === current.season && each.number === current.episode,
         )
       : byId;
-  const playing = episodes[index];
-  if (!playing) return undefined;
-  return (
-    episodes
-      .slice(index + 1)
-      .find((each) => each.season !== playing.season || each.number !== playing.number) ?? null
-  );
+  if (index === -1) return undefined;
+  return episodes[index + 1] ?? null;
 }
 
 /**
