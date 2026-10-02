@@ -75,7 +75,9 @@ input {
 
 /*
  * Subtitles, text and pictures alike, show only in Watch and a playing title, not in the muted
- * previews, and rise above the player's controls while they show.
+ * previews, and rise above the player's controls while they show. The viewer's look sets their
+ * size (`--subtitle-scale`, which player/subtitles.ts also draws pictures at), a shadow in place
+ * of the box behind text, and a higher place for both.
  */
 video::-webkit-media-text-track-container,
 [data-subtitles] {
@@ -85,14 +87,26 @@ video::-webkit-media-text-track-container,
 [data-view] [data-subtitles] {
   visibility: visible;
   transition: translate 150ms;
+  translate: 0 calc(-1 * var(--subtitle-raise, 0%) - var(--subtitle-controls, 0rem));
 }
-[data-view="watch"][data-controls] video::-webkit-media-text-track-container,
-[data-view="watch"][data-controls] [data-subtitles] {
-  translate: 0 -5.5rem;
+[data-view="watch"][data-controls] {
+  --subtitle-controls: 5.5rem;
 }
-[data-view="title"][data-controls] video::-webkit-media-text-track-container,
-[data-view="title"][data-controls] [data-subtitles] {
-  translate: 0 -9rem;
+[data-view="title"][data-controls] {
+  --subtitle-controls: 9rem;
+}
+:root[data-subtitle-position="high"] {
+  --subtitle-raise: 12%;
+}
+[data-view] video::cue {
+  font-size: calc(var(--subtitle-scale, 1) * 100%);
+}
+:root[data-subtitle-background="shadow"] [data-view] video::cue {
+  background-color: transparent;
+  text-shadow:
+    0 0 0.1em #000,
+    0 0 0.25em #000,
+    0.05em 0.05em 0.1em #000;
 }
 
 ::-webkit-scrollbar {

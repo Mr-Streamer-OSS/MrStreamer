@@ -2,6 +2,13 @@
 // teletext and captions, goes on its subtitle track as cues, which Chromium lays out under the
 // picture. Pictures, PGS and DVB, go on a canvas over the picture: cues on a metadata track show
 // and hide them, so the element's own clock times them and nothing repaints in between.
+//
+// The viewer's timing and look live here rather than on the cues, so they hold for whichever track
+// shows, after every seek and every new run. Text cues keep the times their file gave them and
+// show `delay` seconds later; pictures keep theirs. The look is CSS on the cues (styles.css), and
+// a scale when pictures are drawn; how high subtitles sit is CSS for both.
+import { createStore, useStore } from "zustand";
+import { DEFAULT_SUBTITLE_LOOK, type SubtitleLook } from "@mrstreamer/contracts/preferences";
 import {
   isBlank,
   type SubtitleChange,
@@ -12,6 +19,30 @@ import {
 const OPEN_END_S = 60 * 60;
 /** Cues this far behind the position are let go, pictures with their pixels. */
 const KEEP_BEHIND_S = 30;
+/** How far G and H move text subtitles, and how far they go at most either way. */
+export const TIMING_STEP_S = 0.1;
+const TIMING_LIMIT_S = 30;
+/** Each size against Chromium's own for text, and the pictures' drawn size. */
+const SCALES: Record<SubtitleLook["size"], number> = { small: 0.8, medium: 1, large: 1.3 };
+
+interface SubtitleSettings {
+  /** Seconds text subtitles show after the time their file gives; negative shows them earlier. */
+  readonly delay: number;
+  readonly look: SubtitleLook;
+}
+
+const settings = createStore<SubtitleSettings>(() => ({
+  delay: 0,
+  look: DEFAULT_SUBTITLE_LOOK,
+}));
+
+/** Reads the subtitles' timing and look in a component. */
+export function useSubtitleSettings<T>(selector: (state: SubtitleSettings) => T): T {
+  return useStore(settings, selector);
+}
+
+/** The times a text cue's file gave it, which the viewer's timing moves it from. */
+const textTimes = new WeakMap<TextTrackCue, { start: number; end: number }>();
 
 /** The canvas pictures are drawn on. Picture.tsx keeps it over the video, wherever that goes. */
 export const subtitleCanvas = document.createElement("canvas");
@@ -75,6 +106,51 @@ function release(): void {
   drawn = null;
 }
 
+/** Puts a text cue on `video`'s subtitle track: from `start` to `end` on the file's clock. */
+export function addTextCue(
+  video: HTMLVideoElement,
+  start: number,
+  end: number,
+  text: string,
+): VTTCue {
+  const { delay } = settings.getState();
+  const cue = new VTTCue(start + delay, end + delay, text);
+  textTimes.set(cue, { start, end });
+  subtitleTrack(video).addCue(cue);
+  return cue;
+}
+
+/**
+ * Shows text subtitles `delay` seconds after the time their file gives, or before it when
+ * negative: those on the track now and every one to come, until a new title or channel. Rounded to
+ * tenths, as G and H step.
+ */
+export function setSubtitleDelay(video: HTMLVideoElement, delay: number): void {
+  const rounded = Math.round(Math.min(TIMING_LIMIT_S, Math.max(-TIMING_LIMIT_S, delay)) * 10) / 10;
+  settings.setState({ delay: rounded });
+  for (const cue of [...(subtitleTrack(video).cues ?? [])]) {
+    const times = textTimes.get(cue);
+    if (!times) continue;
+    cue.startTime = times.start + rounded;
+    cue.endTime = times.end + rounded;
+  }
+}
+
+/** The text subtitles' timing now: seconds after the time their file gives. */
+export function subtitleDelay(): number {
+  return settings.getState().delay;
+}
+
+/** Applies a look to every subtitle, shown now or later; kept until the viewer picks another. */
+export function setSubtitleLook(look: SubtitleLook): void {
+  settings.setState({ look });
+  const root = document.documentElement;
+  root.style.setProperty("--subtitle-scale", String(SCALES[look.size]));
+  root.dataset["subtitleBackground"] = look.background;
+  root.dataset["subtitlePosition"] = look.position;
+  repaint();
+}
+
 /**
  * Shows decoded subtitles on `video`: each change from its time on, until the next one or the
  * time it ends, whichever comes first. `offset` moves times onto the element's clock.
@@ -90,7 +166,13 @@ export function subtitlePresenter(video: HTMLVideoElement, offset = 0) {
     show(change: SubtitleChange): void {
       const at = change.at - offset;
       if (open) {
-        open.endTime = Math.max(open.startTime, at);
+        const times = textTimes.get(open);
+        if (times) {
+          times.end = Math.max(times.start, at);
+          open.endTime = times.end + settings.getState().delay;
+        } else {
+          open.endTime = Math.max(open.startTime, at);
+        }
         open = null;
       }
       // Cues shown long ago go, so a long film or a channel left on all day doesn't keep every one.
@@ -102,8 +184,7 @@ export function subtitlePresenter(video: HTMLVideoElement, offset = 0) {
       if (isBlank(change.screen)) return;
       const end = change.until === null ? at + OPEN_END_S : change.until - offset;
       if (change.screen.kind === "text") {
-        const cue = new VTTCue(at, end, change.screen.lines.join("\n"));
-        text.addCue(cue);
+        const cue = addTextCue(video, at, end, change.screen.lines.join("\n"));
         open = change.until === null ? cue : null;
         return;
       }
@@ -150,7 +231,8 @@ async function drawable(screen: SubtitleScreen): Promise<Drawable | null> {
 
 /**
  * Draws the pictures on screen over the video's picture: the subtitles' canvas stretched over
- * the area the picture fills, as broadcasts mean it, whatever its own shape.
+ * the area the picture fills, as broadcasts mean it, whatever its own shape. A size other than
+ * medium grows or shrinks them from the middle of the picture's foot, where subtitles sit.
  */
 function paint(video: HTMLVideoElement): void {
   const canvas = subtitleCanvas;
@@ -176,20 +258,25 @@ function paint(video: HTMLVideoElement): void {
   const top = (height - area.height) / 2;
   const x = area.width / drawn.width;
   const y = area.height / drawn.height;
+  const size = SCALES[settings.getState().look.size];
+  const foot = { x: left + area.width / 2, y: top + area.height };
   context.imageSmoothingQuality = "high";
   for (const image of drawn.images) {
     context.drawImage(
       image.bitmap,
-      left + image.x * x,
-      top + image.y * y,
-      image.bitmap.width * x,
-      image.bitmap.height * y,
+      foot.x + (left + image.x * x - foot.x) * size,
+      foot.y + (top + image.y * y - foot.y) * size,
+      image.bitmap.width * x * size,
+      image.bitmap.height * y * size,
     );
   }
 }
 
-// The canvas follows the element's size; it is drawn again only then and at each change.
-new ResizeObserver(() => {
+/** Draws the canvas again for the video it covers, wherever Picture put the two. */
+function repaint(): void {
   const video = subtitleCanvas.previousElementSibling;
   if (video instanceof HTMLVideoElement) paint(video);
-}).observe(subtitleCanvas);
+}
+
+// The canvas follows the element's size; it is drawn again only then and at each change.
+new ResizeObserver(repaint).observe(subtitleCanvas);

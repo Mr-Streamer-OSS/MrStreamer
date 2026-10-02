@@ -33,8 +33,25 @@ export const Preferences = type({
    * version's id. Titles without one play the version that suits them best.
    */
   "titleVersions?": "Record<string, string>",
+  /**
+   * How subtitles look: their size, a box or a shadow behind text, and how high they sit. A new
+   * choice needs a new key: a release that meets a value it doesn't know drops the whole file.
+   */
+  "subtitleLook?": {
+    size: "'small' | 'medium' | 'large'",
+    background: "'box' | 'shadow'",
+    position: "'low' | 'high'",
+  },
 });
 export type Preferences = typeof Preferences.infer;
+export type SubtitleLook = NonNullable<Preferences["subtitleLook"]>;
+
+/** Subtitles as Chromium draws text cues: its own size, on a box, at the foot of the picture. */
+export const DEFAULT_SUBTITLE_LOOK: SubtitleLook = {
+  size: "medium",
+  background: "box",
+  position: "low",
+};
 
 /** `audioLanguage` for the sound in the language a title was made in. */
 export const ORIGINAL_SOUND = "original";

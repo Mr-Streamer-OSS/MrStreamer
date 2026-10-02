@@ -13,7 +13,11 @@
 import { createStore, useStore } from "zustand";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
-import { ORIGINAL_SOUND } from "@mrstreamer/contracts/preferences";
+import {
+  DEFAULT_SUBTITLE_LOOK,
+  ORIGINAL_SOUND,
+  type Preferences,
+} from "@mrstreamer/contracts/preferences";
 import type {
   ChannelTracks,
   StreamFailure,
@@ -34,7 +38,12 @@ import {
   type EngineName,
   type StreamInfo,
 } from "./engine.ts";
-import { clearSubtitles, subtitlePresenter } from "./subtitles.ts";
+import {
+  clearSubtitles,
+  setSubtitleDelay,
+  setSubtitleLook,
+  subtitlePresenter,
+} from "./subtitles.ts";
 
 /** Waits before each reconnect attempt after a stream breaks. Its length is the attempt limit. */
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000];
@@ -306,7 +315,8 @@ function classify(upstream: StreamFailure | null, error: EngineError): PlaybackP
 
 /**
  * Makes `channel` the one tuned, when it is another: the one before becomes where Back goes, even
- * while switching, and the tracks start afresh, with the viewer's languages, for the new channel.
+ * while switching, and the tracks and subtitle timing start afresh, with the viewer's languages,
+ * for the new channel.
  */
 function tune(channel: LiveChannel): void {
   if (tuned?.id === channel.id) return;
@@ -316,6 +326,7 @@ function tune(channel: LiveChannel): void {
   lastSubtitle = null;
   shown = null;
   clearSubtitles(video);
+  setSubtitleDelay(video, 0);
 }
 
 /**
@@ -383,10 +394,11 @@ export const player = {
   /** The video element every view shows the picture in. */
   element: video,
 
-  /** Restores the saved volume. Call once before the first `play`. */
-  hydrate(preferences: { volume: number; muted: boolean }): void {
+  /** Restores the saved volume and subtitle look. Call once before the first `play`. */
+  hydrate(preferences: Preferences): void {
     store.setState({ volume: preferences.volume, muted: preferences.muted });
     applyVolume();
+    setSubtitleLook(preferences.subtitleLook ?? DEFAULT_SUBTITLE_LOOK);
   },
 
   play(channel: LiveChannel): void {
