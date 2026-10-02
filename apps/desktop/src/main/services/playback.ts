@@ -396,8 +396,11 @@ function make(deps: PlaybackDeps) {
     > {
       const noStream: StreamFailure = { kind: "network", detail: "The provider sent no stream." };
       let failure: StreamFailure = noStream;
-      session.delivered = { variantId: null, failed: [] };
-      for (const variant of session.variants) {
+      // A session that played a stream keeps it: a player asking again, as hls.js does for a
+      // playlist, gets that stream or none.
+      const kept = session.delivered.variantId;
+      const variants = kept ? session.variants.filter(({ id }) => id === kept) : session.variants;
+      for (const variant of variants) {
         const upstream = await connect(session, variant.url, {}, signal);
         const body = upstream.ok ? upstream.response.body : null;
         if (signal.aborted) {
@@ -418,10 +421,12 @@ function make(deps: PlaybackDeps) {
         }
         failure = upstream.ok ? noStream : upstream.failure;
         failed(failure);
-        session.delivered = {
-          ...session.delivered,
-          failed: [...session.delivered.failed, { variantId: variant.id, failure }],
-        };
+        if (!kept) {
+          session.delivered = {
+            ...session.delivered,
+            failed: [...session.delivered.failed, { variantId: variant.id, failure }],
+          };
+        }
         if (failure.kind === "refused") break;
         failedAt.set(variant.url, Date.now());
       }

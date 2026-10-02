@@ -47,7 +47,7 @@ export function liveChannels(streams: readonly NormalizedStream[]): LiveChannels
   );
   const alike = new Map<string, NormalizedStream[]>();
   for (const stream of streams) {
-    const key = JSON.stringify([identity(stream.title), stream.language]);
+    const key = `${identity(stream.title)}\n${stream.language ?? ""}`;
     const list = alike.get(key);
     if (list) list.push(stream);
     else alike.set(key, [stream]);
@@ -60,6 +60,8 @@ export function liveChannels(streams: readonly NormalizedStream[]): LiveChannels
   };
   const together = new Map<NormalizedStream, readonly NormalizedStream[]>();
   for (const candidates of alike.values()) {
+    // Most streams are a channel of their own.
+    if (candidates.length === 1) continue;
     for (const regional of partition(candidates, regionOf)) {
       for (const group of partition(regional, (stream) => stream.topics)) {
         const guideIds = new Set(group.flatMap((stream) => guideChannel(trusted.get(stream.id))));
@@ -77,7 +79,7 @@ export function liveChannels(streams: readonly NormalizedStream[]): LiveChannels
     if (group[0] !== stream) continue;
     const channel = joined(stream, group);
     channels.push(channel);
-    const guideId = group.flatMap((each) => trusted.get(each.id) ?? [])[0];
+    const guideId = group.map((each) => trusted.get(each.id)).find(Boolean);
     if (guideId) guideIds.set(channel.id, guideId);
   }
   return { channels, guideIds };
@@ -89,6 +91,7 @@ export function liveChannels(streams: readonly NormalizedStream[]): LiveChannels
  * (576p)" does.
  */
 export function qualityOf(tags: readonly string[]): Quality | null {
+  if (tags.length === 0) return null;
   const lines = new Set(
     tags.flatMap((tag): Quality[] => {
       const count = Number(/^(\d{3,4})p$/.exec(tag)?.[1]);
