@@ -24,7 +24,7 @@ import { appError } from "../lib/errors.ts";
 import { call } from "../lib/ipc.ts";
 import { titleDecoders } from "./decoders.ts";
 import type { EngineError } from "./engine.ts";
-import { onLiveStart, player, type PlaybackProblem } from "./player.ts";
+import { onLiveStart, player, rememberSubtitles, type PlaybackProblem } from "./player.ts";
 import { clearSubtitles, setSubtitleDelay } from "./subtitles.ts";
 import { titleEngine, type TitleEngine } from "./title-engine.ts";
 
@@ -121,6 +121,8 @@ let checkpoint: ReturnType<typeof setInterval> | null = null;
 let releaseTimer: ReturnType<typeof setTimeout> | null = null;
 /** Where a run stopped for a long pause resumes from. */
 let released: number | null = null;
+/** The run starting now holds its first picture: a skip or track change while paused made it. */
+let holding = false;
 /** The subtitles shown last in this title, which C turns on again. */
 let lastSubtitle: SubtitleTrack | null = null;
 
@@ -131,8 +133,7 @@ video.addEventListener("pause", () => {
   if (!engine || store.getState().phase.kind !== "playing") return;
   store.setState({ phase: { kind: "paused" } });
   save();
-  if (releaseTimer) clearTimeout(releaseTimer);
-  releaseTimer = setTimeout(releaseRun, RELEASE_AFTER_PAUSE_MS);
+  releaseLater();
 });
 video.addEventListener("play", () => {
   if (releaseTimer) clearTimeout(releaseTimer);
@@ -176,6 +177,24 @@ function stopEngine(): void {
   checkpoint = null;
 }
 
+/** Ends the run if the title is still paused in a while, however it came to be paused. */
+function releaseLater(): void {
+  if (releaseTimer) clearTimeout(releaseTimer);
+  releaseTimer = setTimeout(releaseRun, RELEASE_AFTER_PAUSE_MS);
+}
+
+/**
+ * Whether the viewer has the title paused: paused now, or starting a run that holds its picture.
+ * A second skip or track change before that run starts keeps it paused too.
+ */
+function pausedByViewer(): boolean {
+  const { phase } = store.getState();
+  return (
+    phase.kind === "paused" ||
+    (holding && (phase.kind === "starting" || phase.kind === "reconnecting"))
+  );
+}
+
 /** Ends the run after a long pause; playing again starts one where it stopped. */
 function releaseRun(): void {
   // Not at the end: the element pauses just before it ends, and the end screen stays.
@@ -194,6 +213,7 @@ async function run(start: number, attempt = 0, paused = false): Promise<void> {
   const mine = ++generation;
   stopEngine();
   released = null;
+  holding = paused;
   const { audioId, subtitle, duration } = store.getState();
   store.setState({
     phase:
@@ -224,7 +244,12 @@ async function run(start: number, attempt = 0, paused = false): Promise<void> {
   }
   if (mine !== generation) return;
   store.setState({ phase: { kind: video.paused ? "paused" : "playing" } });
-  checkpoint = setInterval(save, CHECKPOINT_MS);
+  // A run that starts paused holds the provider's connection until the release, as a pause does.
+  if (video.paused) releaseLater();
+  // Only playing moves the title on; a checkpoint while paused would make it look watched later.
+  checkpoint = setInterval(() => {
+    if (store.getState().phase.kind === "playing") save();
+  }, CHECKPOINT_MS);
   started.onEnded(() => {
     if (mine !== generation) return;
     const { duration: length } = store.getState();
@@ -389,7 +414,7 @@ export const titlePlayer = {
       return;
     }
     // A skip while paused stays paused, on the new picture.
-    void run(target, 0, phase.kind === "paused");
+    void run(target, 0, pausedByViewer());
   },
 
   /** Skips back or forward by `seconds`. */
@@ -433,7 +458,7 @@ export const titlePlayer = {
       void call("preferences.update", { audioLanguage: track.language }).catch(() => {});
     }
     save();
-    void run(position, 0, store.getState().phase.kind === "paused");
+    void run(position, 0, pausedByViewer());
   },
 
   /** Shows another subtitle track, or none, and remembers the choice. */
@@ -442,9 +467,7 @@ export const titlePlayer = {
     if ((track && !SHOWN_SUBTITLES.has(track.format)) || !session) return;
     store.setState({ subtitle: track });
     if (track) lastSubtitle = track;
-    void call("preferences.update", {
-      subtitleLanguage: track ? (track.language ?? null) : "off",
-    }).catch(() => {});
+    rememberSubtitles(track);
     // Turning subtitles off is instant, and stays off; showing others needs a new run.
     if (!track) {
       if (engine) engine.hideSubtitles();
@@ -452,7 +475,7 @@ export const titlePlayer = {
       return;
     }
     save();
-    void run(position, 0, store.getState().phase.kind === "paused");
+    void run(position, 0, pausedByViewer());
   },
 
   /** C: subtitles off, or back on: the ones chosen last in this title, else the first. */

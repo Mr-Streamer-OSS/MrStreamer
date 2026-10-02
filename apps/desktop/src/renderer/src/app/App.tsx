@@ -58,6 +58,10 @@ function Shell() {
   const details = useUi((state) => state.details);
   const settingsOpen = useUi((state) => state.settings !== null);
   const covered = watching || playingTitle;
+  // Watch and a playing title play sound, at the viewer's volume; the page underneath goes back to
+  // a muted preview. One place decides, so a channel picked over a playing title, which opens Watch
+  // before the title has gone, keeps its sound.
+  useEffect(() => player.setAudible(covered), [covered]);
   usePreview(covered, view);
   // The login form replaces everything: nothing may keep playing, or holding the connection, behind it.
   useEffect(

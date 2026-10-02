@@ -58,12 +58,6 @@ export function WatchScreen() {
   const [entry, setEntry] = useState(0);
   const [menu, setMenu] = useState<TrackMenu>(null);
 
-  // Watch plays sound; the page underneath goes back to a muted preview.
-  useEffect(() => {
-    player.setAudible(true);
-    return () => player.setAudible(false);
-  }, []);
-
   // Nothing to watch, as after switching accounts: back to the page.
   useEffect(() => {
     if (!channel) closeWatch();

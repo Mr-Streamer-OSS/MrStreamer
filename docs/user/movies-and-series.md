@@ -31,7 +31,7 @@ Settings > General has three languages for movies and series:
 - **Audio in** is the sound a title starts with: a language, or **Original language**, the one it was made in. Until you set it, it follows Titles in.
 - **Subtitles** are **Off**, **Only when forced**, which shows only subtitles a file marks as forced for its sound, such as translations of signs, or a language.
 
-Picking a sound track or subtitles in the player sets Audio in or Subtitles to its language, so the next title starts the same way.
+Picking a sound track or subtitles in the player sets Audio in or Subtitles to its language, so the next title starts the same way. Captions have no language, so picking them leaves Subtitles as it was.
 
 ## Genres and streaming services
 
