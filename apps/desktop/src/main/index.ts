@@ -385,4 +385,19 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-void start();
+// One copy per profile: a second would keep its own copy of the settings and write over the
+// first's. Opening the app again brings the running copy's window forward instead.
+if (app.requestSingleInstanceLock()) {
+  app.on("second-instance", () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  });
+  // Quitting hands the profile on at once: an update's AppImage starts its new copy just before
+  // this one quits.
+  app.on("before-quit", () => app.releaseSingleInstanceLock());
+  void start();
+} else {
+  app.quit();
+}
