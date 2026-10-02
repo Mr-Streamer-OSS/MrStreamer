@@ -19,6 +19,7 @@ Start with the [development runbook](./maintainers/development.md) and the [cont
 - [Architecture](./maintainers/architecture.md)
 - [Playback evaluation](./maintainers/playback.md)
 - [Privacy audit](./maintainers/privacy-audit.md)
+- [Release readiness](./maintainers/release-readiness.md): licences, content and launch questions
 - [Testing](./maintainers/testing.md)
 
 ### Runbooks
