@@ -61,6 +61,11 @@ export interface TitleSession {
 export interface ChannelTracks {
   readonly audio: readonly AudioTrack[];
   readonly subtitles: readonly SubtitleTrack[];
+  /**
+   * The sound track the stream plays, by id: the one asked for, else the one in the viewer's
+   * language, else the channel's first. Null when the channel has none.
+   */
+  readonly playing: number | null;
 }
 
 export interface AudioTrack {

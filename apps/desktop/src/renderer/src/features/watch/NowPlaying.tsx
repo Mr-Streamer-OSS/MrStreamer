@@ -164,7 +164,7 @@ function Controls({
       {tracks && (
         <TrackMenus
           audio={tracks.audio}
-          audioId={audioId}
+          audioId={audioId ?? tracks.playing}
           subtitles={tracks.subtitles}
           subtitle={subtitle}
           open={menu}

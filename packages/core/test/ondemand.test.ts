@@ -238,13 +238,17 @@ describe("subtitles a channel starts with", () => {
     ["none when turned off", ["en"], "off", null],
     ["none when never chosen", ["en"], null, null],
   ])("%s", (_, audio, remembered, language) => {
-    const tracks = { audio: audio.map(sound), subtitles: [subtitles("nl")] };
+    const tracks = { audio: audio.map(sound), subtitles: [subtitles("nl")], playing: 1 };
 
     expect(channelSubtitle(tracks, remembered)?.language ?? null).toBe(language);
   });
 
   it("prefers full subtitles to forced ones", () => {
-    const tracks = { audio: [sound("en")], subtitles: [subtitles("nl", true), subtitles("nl")] };
+    const tracks = {
+      audio: [sound("en")],
+      subtitles: [subtitles("nl", true), subtitles("nl")],
+      playing: 1,
+    };
 
     expect(channelSubtitle(tracks, "nl")?.forced).toBe(false);
   });
