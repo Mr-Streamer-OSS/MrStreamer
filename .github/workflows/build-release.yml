@@ -470,6 +470,7 @@ jobs:
     needs: publish
     uses: ./.github/workflows/update-feed.yml
     with:
+      release: ${{ inputs.version }}
       continue-on-error: ${{ !inputs.feed-required }}
     permissions:
       contents: read
