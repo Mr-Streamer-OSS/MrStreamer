@@ -1,7 +1,9 @@
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import type { Diagnostic } from "@mrstreamer/core/diagnostics";
+import { Diagnostics, type Diagnostic } from "@mrstreamer/core/diagnostics";
 import { Guide } from "@mrstreamer/core/guide/service";
+import * as Effect from "effect/Effect";
+import * as ManagedRuntime from "effect/ManagedRuntime";
 import { describe, expect, it, vi } from "vitest";
 import { diagnosticsLog } from "../src/main/platform/diagnostics-log.ts";
 import { mainLayer } from "../src/main/runtime.ts";
@@ -57,6 +59,20 @@ describe("diagnostics", () => {
     for (const secret of [new URL(provider.url).host, "s3cret-pass", "demo", "H.264 + AAC"]) {
       expect(log).not.toContain(secret);
     }
+  });
+
+  it("has every line on disk once the app's runtime closes", async () => {
+    const dataDir = await tempDir();
+    const runtime = ManagedRuntime.make(mainLayer(testConfig(dataDir)));
+    await runtime.runPromise(
+      Effect.map(Diagnostics, (log) => log.record({ op: "start", ms: 7, outcome: "ok" })),
+    );
+
+    await runtime.dispose();
+
+    expect(await entries(dataDir)).toContainEqual(
+      expect.objectContaining({ op: "start", ms: 7, outcome: "ok" }),
+    );
   });
 
   it("keeps the log and the one before it, each at most 512 KB", async () => {
