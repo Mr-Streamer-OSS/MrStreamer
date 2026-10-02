@@ -42,6 +42,7 @@ const channels: LiveChannel[] = Array.from({ length: CHANNELS }, (_, index) => (
   number: index + 1,
   logoUrl: null,
   categoryIds: [],
+  variants: [{ id: String(index), name: `Channel ${index}`, tags: [], quality: null }],
 }));
 const guideIdOf = new Map<string, string>();
 const byGuideId = new Map<string, LiveChannel[]>();

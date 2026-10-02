@@ -25,6 +25,7 @@ import {
 import {
   CODECS,
   type ChannelTracks,
+  type LivePlaying,
   type StreamFailure,
   type StreamSession,
   type TitleSession,
@@ -91,6 +92,11 @@ export const ipcInputs = {
   "playback.open": () =>
     type({
       channelId: "string",
+      /**
+       * The channel's stream to play, by id, instead of the one chosen before or Auto's. Only it
+       * is tried.
+       */
+      "variant?": "string",
       decoders: decoders(),
       "repair?": "boolean",
       /** The sound track to play, by PID; the channel's first otherwise. */
@@ -103,6 +109,7 @@ export const ipcInputs = {
   "playback.closeAll": none,
   "playback.failure": () => type({ sessionId: "string" }),
   "playback.tracks": () => type({ sessionId: "string" }),
+  "playback.playing": () => type({ sessionId: "string" }),
   "preferences.get": none,
   "preferences.update": () => Preferences.partial(),
   "viewing.get": none,
@@ -192,6 +199,8 @@ export interface IpcOutputs {
   "playback.failure": StreamFailure | null;
   /** A playing channel's sound and subtitle tracks; null until its stream has started. */
   "playback.tracks": ChannelTracks | null;
+  /** Which of a channel's streams its session plays, and those that failed first. */
+  "playback.playing": LivePlaying | null;
   "preferences.get": Preferences;
   "preferences.update": Preferences;
   /** Favourites and recently watched channels of the connected account. */

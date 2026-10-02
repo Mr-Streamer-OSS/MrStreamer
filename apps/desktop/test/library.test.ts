@@ -4,6 +4,7 @@ import * as Layer from "effect/Layer";
 import { describe, expect, it } from "vitest";
 import { Library } from "../src/main/services/library.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
+import { QUALITY_STREAM_IDS } from "./fake-provider.ts";
 import {
   collect,
   fakeProvider,
@@ -53,7 +54,9 @@ describe("live library", () => {
       channel.name.startsWith("#####"),
     );
     expect(separators.length).toBeGreaterThan(0);
-    expect(all).toHaveLength(provider.catalogue.channels.length - separators.length);
+    expect(all.flatMap((channel) => channel.variants)).toHaveLength(
+      provider.catalogue.channels.length - separators.length,
+    );
     expect(all.some((channel) => channel.name.startsWith("#####"))).toBe(false);
     expect(categories[0]).toEqual({
       id: "1",
@@ -106,6 +109,30 @@ describe("live library", () => {
       { name: "TEST | H.264 + AC-3 DVB" },
       { name: "TEST | H.264 + E-AC-3" },
     ]);
+  });
+
+  it("shows a channel's qualities as one channel, found by any of its streams' ids", async () => {
+    const { library } = await connectedLibrary();
+    const fhd = String(QUALITY_STREAM_IDS);
+    const hd = String(QUALITY_STREAM_IDS + 1);
+    const sd = String(QUALITY_STREAM_IDS + 2);
+
+    const found = await library.channels({ query: "kwaliteit" });
+
+    expect(found).toMatchObject([
+      {
+        id: fhd,
+        title: "Kwaliteit 1",
+        tags: [],
+        variants: [
+          { id: fhd, tags: ["FHD"], quality: "fhd" },
+          { id: hd, tags: ["HD"], quality: "hd" },
+          { id: sd, tags: ["SD"], quality: "sd" },
+        ],
+      },
+    ]);
+    expect(await library.channel(sd)).toEqual(found[0]);
+    expect(await library.channels({ ids: [sd, hd, fhd] })).toEqual(found);
   });
 
   it("serves the cached catalogue after a restart without the provider", async () => {

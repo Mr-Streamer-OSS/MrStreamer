@@ -9,6 +9,8 @@
 //   - A trailing "(…)" goes only when it repeats the category or its region, or held only tags.
 //   - Names in capitals get title case; names with any lowercase keep the provider's casing.
 //   - Nothing ends up worse than the raw name: when cleaning leaves too little, the name stays.
+// Each stream keeps what tells it apart from another of the same title, its region, language and
+// categories, so ./variants.ts can join the streams of one channel.
 import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
 import { normalize as fold } from "../text.ts";
 import type { LiveCatalogue } from "../provider.ts";
@@ -16,7 +18,22 @@ import { leadingFlag, regionForCode, regionForName } from "./regions.ts";
 
 export interface NormalizedCatalogue {
   readonly categories: readonly Omit<Category, "channelCount">[];
-  readonly channels: readonly LiveChannel[];
+  readonly streams: readonly NormalizedStream[];
+}
+
+/** One stream of the provider's list, named as the app shows it. */
+export interface NormalizedStream extends Omit<LiveChannel, "variants"> {
+  /** The provider's guide id. */
+  readonly guideId: string | null;
+  /** "Belgium": its own prefix's region, else its category's. Null when neither names one. */
+  readonly region: string | null;
+  /** The language after its own or its category's region, "FR" for "BE - FR |". */
+  readonly language: string | null;
+  /**
+   * What its categories hold, by region and name without quality words: "Belgium|vlaanderen" for
+   * "BE | VLAANDEREN HD". A category named only for a quality, "BE | 4K", holds no topic.
+   */
+  readonly topics: readonly string[];
 }
 
 /** Share of names that must carry a region prefix before prefixes count as the catalogue's style. */
@@ -31,6 +48,9 @@ const NAME_PREFIX = /^(\p{L}[\p{L} .'&-]{2,30}?)\s*[|:┃│»]\s*/u;
 /** Quality and format markers, as whole words anywhere in a channel name. */
 const QUALITY =
   /(?<![\p{L}\p{N}])(8K|4K|UHD|FHD|HD\+?|SD|HEVC|H\.?265|HDR|RAW|50\s?FPS|60\s?FPS|\d{3,4}p)(?![\p{L}\p{N}])/giu;
+
+/** Where a quality tag was, while a channel's title is cleaned. */
+const TAG = "";
 
 /** Brands and formats that keep their capitals when a name is recased. */
 // prettier-ignore
@@ -65,6 +85,9 @@ interface ParsedName {
 interface ShownCategory extends Omit<Category, "channelCount"> {
   /** The region of the category's prefix, grouped or not, for matching its channels' prefixes. */
   readonly region: string | null;
+  readonly language: string | null;
+  /** See `NormalizedStream.topics`; null for a category named only for a quality. */
+  readonly topic: string | null;
 }
 
 export function normalizeCatalogue(catalogue: LiveCatalogue): NormalizedCatalogue {
@@ -74,7 +97,14 @@ export function normalizeCatalogue(catalogue: LiveCatalogue): NormalizedCatalogu
   const regionUse = countBy(named.map(({ name }) => name.region));
 
   const shown = named.map(({ category, name }): ShownCategory => {
-    const base = { id: category.id, name: category.name, region: name.region };
+    const subject = fold((name.region === null ? name.text : name.rest).replace(QUALITY, " "));
+    const base = {
+      id: category.id,
+      name: category.name,
+      region: name.region,
+      language: name.language,
+      topic: subject ? `${name.region ?? ""}|${subject}` : null,
+    };
     const whole = { ...base, group: null, title: recase(name.text) };
     if (!prefixStyle || name.region === null) return whole;
     const title = recase(name.rest || name.text) + (name.language ? ` (${name.language})` : "");
@@ -95,7 +125,7 @@ export function normalizeCatalogue(catalogue: LiveCatalogue): NormalizedCatalogu
   const prefixedChannels = kept.filter(({ name }) => recognised(name)).length;
   const channelPrefixStyle = prefixedChannels >= kept.length * PREFIX_STYLE_SHARE;
 
-  const channels = kept.map(({ channel, name }): LiveChannel => {
+  const streams = kept.map(({ channel, name }): NormalizedStream => {
     const own = channel.categoryIds.flatMap((id) => categoryById.get(id) ?? []);
     const strip =
       name.region !== null &&
@@ -110,17 +140,27 @@ export function normalizeCatalogue(catalogue: LiveCatalogue): NormalizedCatalogu
           fold(category.title) === folded || (region !== null && region === category.region),
       );
     };
+    const placed = own.find((category) => category.region !== null);
     return {
       id: channel.id,
       name: channel.name,
       number: channel.number,
       logoUrl: channel.logoUrl,
       categoryIds: channel.categoryIds,
+      guideId: channel.guideId,
       ...channelTitle(strip ? name.rest : name.text, name.text, repeatsCategory),
+      region: recognised(name) ? name.region : (placed?.region ?? null),
+      language: name.language ?? placed?.language ?? null,
+      topics: own.flatMap((category) => category.topic ?? []),
     };
   });
 
-  return { categories: shown.map(({ region: _region, ...category }) => category), channels };
+  return {
+    categories: shown.map(
+      ({ region: _region, language: _language, topic: _topic, ...category }) => category,
+    ),
+    streams,
+  };
 }
 
 /** Decorative entries between channel groups: "##### UK SPORTS #####", "━━━ NL ━━━", "== NL ==". */
@@ -192,14 +232,18 @@ function channelTitle(
         .toUpperCase()
         .replace(/(\d)P$/, "$1p");
       if (!tags.includes(normalized)) tags.push(normalized);
-      return " ";
+      return TAG;
     })
+    // Joiners between removed tags, or a tag and an end ("FHD + HEVC"). One beside the name is
+    // the name's: "Canal+ HD", "Bloomberg TV + (2160p)".
+    .replace(/(?<=^|)\s*[+&/]\s*(?=|$)/g, " ")
+    .replaceAll(TAG, " ")
     .replace(/[([]\s*[)\]]/g, " ")
     .replace(/\s*[([]([^()[\]]*)[)\]]\s*$/, (match, inner: string) =>
       repeatsCategory(inner) ? "" : match,
     )
-    // Separators and decoration at either end, and joiners a removed tag left behind ("HEVC + AAC").
-    .replace(/^(?:[\s|:\-–.·•●★✦►]|[+&/]\s)+|(?:[\s|:\-–.·•●★✦►]|\s[+&/])+$/g, "")
+    // Separators and decoration at either end.
+    .replace(/^[\s|:\-–.·•●★✦►]+|[\s|:\-–.·•●★✦►]+$/g, "")
     .replace(/\s{2,}/g, " ");
   // Never worse than the provider's own name: a title with no letters or digits left is not one.
   if (!/[\p{L}\p{N}]/u.test(title)) return { title: recase(fallback), tags: [] };

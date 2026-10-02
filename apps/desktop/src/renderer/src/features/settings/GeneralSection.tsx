@@ -1,4 +1,5 @@
-// Settings > General: the content preferences, then Updates. Movies and series show in one
+// Settings > General: the content preferences, then Updates. Live channels start in a quality,
+// Full HD unless chosen otherwise, and channels can keep their own. Movies and series show in one
 // language, play their sound in another, or in the language they were made in, and show
 // subtitles in a third, only forced ones or none; picking a track in the player sets these too.
 // TMDB is where names, genres, popularity and streaming services come from. The app has its own
@@ -7,13 +8,19 @@ import { Checkbox } from "@base-ui/react/checkbox";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check } from "lucide-react";
 import { useState } from "react";
-import { ORIGINAL_SOUND, type Preferences } from "@mrstreamer/contracts/preferences";
+import { QUALITIES } from "@mrstreamer/contracts/library";
+import {
+  DEFAULT_LIVE_QUALITY,
+  ORIGINAL_SOUND,
+  type Preferences,
+} from "@mrstreamer/contracts/preferences";
 import { DEFAULT_TITLE_LANGUAGE, TITLE_LANGUAGES } from "@mrstreamer/core/ondemand/languages";
 import { languageName } from "@mrstreamer/core/ondemand/tracks";
 import { Button } from "../../components/ui/button.tsx";
 import { Input } from "../../components/ui/input.tsx";
 import { appError, describeError } from "../../lib/errors.ts";
 import { call } from "../../lib/ipc.ts";
+import { preferenceName } from "../../lib/quality.ts";
 import { queries } from "../../lib/queries.ts";
 import { UpdatesSection } from "../updates/UpdatesSection.tsx";
 import { Row, Section, Select } from "./Rows.tsx";
@@ -42,8 +49,34 @@ export function GeneralSection() {
   const audio = preferences.data?.audioLanguage ?? titles;
   const subtitles = preferences.data?.subtitleLanguage ?? FORCED;
 
+  const ownQualities = Object.keys(preferences.data?.channelVariants ?? {}).length;
+
   return (
     <>
+      <Section title="Live TV">
+        <Row label="Quality" note="Automatic tries the nearest if one fails">
+          <Select
+            label="Quality"
+            value={preferences.data?.liveQuality ?? DEFAULT_LIVE_QUALITY}
+            options={QUALITIES.map((quality) => ({
+              value: quality,
+              label: preferenceName(quality),
+            }))}
+            onChange={(liveQuality) => update.mutate({ liveQuality })}
+          />
+        </Row>
+        {ownQualities > 0 && (
+          <Row label="Channels with their own quality" note={ownQualities}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => update.mutate({ channelVariants: {} })}
+            >
+              Reset
+            </Button>
+          </Row>
+        )}
+      </Section>
       <Section title="Movies and series">
         <Row label="Titles in">
           <Select

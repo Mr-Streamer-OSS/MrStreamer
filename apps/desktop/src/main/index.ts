@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { app, BrowserWindow, Menu, safeStorage, session, shell } from "electron";
 import type { IpcEvent, IpcEvents } from "@mrstreamer/contracts/ipc";
+import { streamsToPlay } from "@mrstreamer/core/catalogue/variants";
 import { Diagnostics } from "@mrstreamer/core/diagnostics";
 import { Failed } from "@mrstreamer/core/failure";
 import { Guide } from "@mrstreamer/core/guide/service";
@@ -264,15 +265,23 @@ async function start(): Promise<void> {
       "ondemand.rows": ({ kind, tab, like }) => onDemand.rows(kind, tab, like),
       "ondemand.tiles": ({ kind, of }) => onDemand.tiles(kind, of),
       "ondemand.collection": (query) => onDemand.collection(query),
-      "playback.open": ({ channelId, decoders, repair, audio, audioLanguage }) =>
-        Effect.andThen(
-          nextTurn,
-          playback.open(channelId, decoders, {
+      "playback.open": ({ channelId, variant, decoders, repair, audio, audioLanguage }) =>
+        Effect.gen(function* () {
+          yield* nextTurn;
+          const channel = yield* library.channel(channelId);
+          const variants = streamsToPlay(channel, yield* settings.get, variant).map(({ id }) => id);
+          if (variants.length === 0) {
+            return yield* new Failed({
+              error: { kind: "channel-not-found", channelId: variant ?? channelId },
+            });
+          }
+          return yield* playback.open(channel.id, decoders, {
+            variants,
             repair: repair ?? false,
             audio: audio ?? null,
             audioLanguage: audioLanguage ?? null,
-          }),
-        ),
+          });
+        }),
       "playback.openTitle": ({ title, decoders }) =>
         Effect.gen(function* () {
           const turn = yield* nextTurn;
@@ -290,6 +299,7 @@ async function start(): Promise<void> {
       "playback.closeAll": () => Effect.andThen(nextTurn, Effect.as(playback.closeAll, null)),
       "playback.failure": ({ sessionId }) => playback.failure(sessionId),
       "playback.tracks": ({ sessionId }) => playback.tracks(sessionId),
+      "playback.playing": ({ sessionId }) => playback.playing(sessionId),
       "preferences.get": () => settings.get,
       "preferences.update": (patch) =>
         Effect.gen(function* () {

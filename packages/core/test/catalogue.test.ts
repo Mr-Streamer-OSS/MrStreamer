@@ -1,5 +1,7 @@
+import type { ChannelVariant, LiveChannel, Quality } from "@mrstreamer/contracts/library";
 import { describe, expect, it } from "vitest";
 import { normalizeCatalogue } from "../src/catalogue/normalize.ts";
+import { liveChannels, qualityOf, streamsToPlay } from "../src/catalogue/variants.ts";
 import type { LiveCatalogue } from "../src/provider.ts";
 
 /** A raw catalogue from category names and [channel name, category index] pairs. */
@@ -25,7 +27,7 @@ function categoriesOf(raw: LiveCatalogue) {
 }
 
 function channelsOf(raw: LiveCatalogue) {
-  return normalizeCatalogue(raw).channels.map((channel) => [channel.title, channel.tags]);
+  return normalizeCatalogue(raw).streams.map((stream) => [stream.title, stream.tags]);
 }
 
 // The same rules have to read every provider's style, so the cases below come from several.
@@ -151,6 +153,7 @@ describe("channels", () => {
         ["SKY SPORT BUNDESLIGA ᴴᴰ", 2],
         ["DAZN F1 ʰᵉᵛᶜ", 2],
         ["13TH STREET HD", 2],
+        ["DE | SKY SPORT 1 FHD + HEVC", 2],
         ["IT | Sky Calcio 251 HD", 2],
         ["UK: BBC ONE HD", 3],
         ["UK: HD", 3],
@@ -167,6 +170,7 @@ describe("channels", () => {
       ["Sky Sport Bundesliga", ["HD"]],
       ["DAZN F1", ["HEVC"]],
       ["13th Street", ["HD"]],
+      ["Sky Sport 1", ["FHD", "HEVC"]],
       ["Sky Calcio 251", ["HD"]],
       ["BBC One", ["HD"]],
       // Cleaning would leave nothing, so the provider's name stays.
@@ -212,5 +216,197 @@ describe("channels", () => {
       ["#1 Hits", []],
       ["A-Z Channel", []],
     ]);
+  });
+});
+
+/** A raw catalogue from category names and [channel name, category index, guide id] triples. */
+function guided(
+  categories: readonly string[],
+  channels: readonly (readonly [string, number, string?])[],
+): LiveCatalogue {
+  return {
+    categories: catalogue(categories).categories,
+    channels: channels.map(([name, category, guideId], index) => ({
+      id: String(100 + index),
+      name,
+      number: index + 1,
+      logoUrl: null,
+      categoryIds: [String(category)],
+      guideId: guideId ?? null,
+    })),
+  };
+}
+
+/** Each channel's title with the provider's names of its streams. */
+function joined(raw: LiveCatalogue) {
+  return liveChannels(normalizeCatalogue(raw).streams).channels.map(
+    (channel): [string, string[]] => [channel.title, channel.variants.map(({ name }) => name)],
+  );
+}
+
+describe("channels with several streams", () => {
+  it("joins one channel's qualities and backups, also from a category for a quality alone", () => {
+    const raw = guided(
+      ["BE | VLAANDEREN", "BE | VLAANDEREN HD", "BE | 4K", "BE | SPORT"],
+      [
+        ["BE | VRT 1 FHD", 0, "VRT1.be"],
+        ["BE | VTM HD", 0],
+        ["BE | VRT 1 SD", 1],
+        ["BE | VRT 1 4K", 2],
+        ["EUROSPORT 1 FHD", 3],
+        ["EUROSPORT 1 FHD²", 3],
+      ],
+    );
+
+    const { channels, guideIds } = liveChannels(normalizeCatalogue(raw).streams);
+
+    expect(joined(raw)).toEqual([
+      ["VRT 1", ["BE | VRT 1 FHD", "BE | VRT 1 SD", "BE | VRT 1 4K"]],
+      ["VTM", ["BE | VTM HD"]],
+      ["Eurosport 1", ["EUROSPORT 1 FHD", "EUROSPORT 1 FHD²"]],
+    ]);
+    expect(channels[0]).toMatchObject({
+      id: "100",
+      tags: [],
+      categoryIds: ["0", "1", "2"],
+      variants: [{ quality: "fhd" }, { quality: "sd" }, { quality: "uhd" }],
+    });
+    expect(channels[1]).toMatchObject({ tags: ["HD"] });
+    // Streams without a guide id share the channel's.
+    expect(guideIds.get("100")).toBe("VRT1.be");
+  });
+
+  it("keeps apart streams that may be another channel", () => {
+    const raw = guided(
+      [
+        "BE | VLAANDEREN",
+        "BE | SPORT",
+        "BE - FR | WALLONIE",
+        "BE | 4K",
+        "UK | ENTERTAINMENT",
+        "NL | ALGEMEEN",
+        "CA | FRENCH",
+        "CA | ENGLISH",
+      ],
+      [
+        // Another region, and another language.
+        ["UK: BBC ONE HD", 4],
+        ["NL: BBC ONE FHD", 5],
+        ["BE - FR | RTBF LA UNE HD", 2],
+        ["BE | RTBF LA UNE FHD", 0],
+        // Other categories, and one for a quality alone beside both.
+        ["BE | EÉN HD", 0],
+        ["BE | EÉN FHD", 1],
+        ["BE | EÉN 4K", 3],
+        ["CA | DISCOVERY HD", 6],
+        ["CA | DISCOVERY FHD", 7],
+        // Names that differ in a symbol or a space.
+        ["NL: CANAL+ HD", 5],
+        ["NL: CANAL FHD", 5],
+        ["NL: BLOOMBERG TV + FHD", 5],
+        ["NL: BLOOMBERG TV HD", 5],
+        ["NL: NPO1 HD", 5],
+        ["NL: NPO 1 FHD", 5],
+        // Guide ids that disagree.
+        ["NL: RTL 4 HD", 5, "RTL4.nl"],
+        ["NL: RTL 4 FHD", 5, "RTL4Gooi.nl"],
+      ],
+    );
+
+    expect(joined(raw).every(([, names]) => names.length === 1)).toBe(true);
+    expect(joined(raw).map(([title]) => title)).toContain("Bloomberg TV +");
+  });
+
+  // Invented names in the style of a public playlist: the country and the feed in the guide id,
+  // the picture's lines in the name.
+  it("joins a playlist's SD and HD feeds of a channel, and keeps other feeds and countries apart", () => {
+    const raw = guided(
+      ["General", "News"],
+      [
+        ["Brabo (576p)", 0, "Brabo.be@SD"],
+        ["Brabo HD (1080p)", 0, "Brabo.be@HD"],
+        ["Kade One North (540p) [Geo-blocked]", 0, "KadeOne.uk@North"],
+        ["Kade One North HD (720p) [Geo-blocked]", 0, "KadeOne.uk@NorthHD"],
+        ["Kade One (720p)", 0, "KadeOne.uk@East"],
+        ["Kade One (720p)", 0, "KadeOne.uk@West"],
+        ["Daily 24 (576p)", 1, "Daily24.in@SD"],
+        ["Daily 24 HD", 1, "Daily24HD.pk@SD"],
+      ],
+    );
+
+    expect(joined(raw)).toEqual([
+      ["Brabo", ["Brabo (576p)", "Brabo HD (1080p)"]],
+      [
+        "Kade One North [Geo-blocked]",
+        ["Kade One North (540p) [Geo-blocked]", "Kade One North HD (720p) [Geo-blocked]"],
+      ],
+      ["Kade One", ["Kade One (720p)"]],
+      ["Kade One", ["Kade One (720p)"]],
+      ["Daily 24", ["Daily 24 (576p)"]],
+      ["Daily 24", ["Daily 24 HD"]],
+    ]);
+  });
+});
+
+describe("quality", () => {
+  it.each([
+    [["FHD"], "fhd"],
+    [["1080p"], "fhd"],
+    [["HD", "1080p"], "fhd"],
+    [["4K", "UHD"], "uhd"],
+    [["HD+"], "hd"],
+    [["HD", "HEVC"], "hd"],
+    [["576p"], "sd"],
+    [[], null],
+    [["HEVC"], null],
+    [["RAW", "50FPS"], null],
+    [["HD", "576p"], null],
+    [["SD", "1080p"], null],
+  ] as const)("reads %j as %s", (tags, quality) => {
+    expect(qualityOf(tags)).toBe(quality);
+  });
+});
+
+describe("which stream plays", () => {
+  const variant = (id: string, quality: Quality | null): ChannelVariant => ({
+    id,
+    name: id,
+    tags: [],
+    quality,
+  });
+  const channel = (...variants: ChannelVariant[]): LiveChannel => ({
+    id: variants[0]?.id ?? "",
+    name: "",
+    title: "",
+    tags: [],
+    number: null,
+    logoUrl: null,
+    categoryIds: [],
+    variants,
+  });
+  const ids = (variants: readonly ChannelVariant[]) => variants.map(({ id }) => id);
+  const all = channel(
+    variant("uhd", "uhd"),
+    variant("unknown", null),
+    variant("sd", "sd"),
+    variant("hd", "hd"),
+    variant("fhd", "fhd"),
+    variant("fhd-backup", "fhd"),
+  );
+
+  it("starts Auto at the preferred quality, then lower ones, higher ones and unknown, three at most", () => {
+    expect(ids(streamsToPlay(all, {}))).toEqual(["fhd", "fhd-backup", "hd"]);
+    expect(ids(streamsToPlay(all, { liveQuality: "sd" }))).toEqual(["sd", "hd", "fhd"]);
+    expect(ids(streamsToPlay(all, { liveQuality: "uhd" }))).toEqual(["uhd", "fhd", "fhd-backup"]);
+    const sparse = channel(variant("u", null), variant("4k", "uhd"), variant("s", "sd"));
+    expect(ids(streamsToPlay(sparse, {}))).toEqual(["s", "4k", "u"]);
+  });
+
+  it("plays a chosen stream alone, kept under any of the channel's streams", () => {
+    expect(ids(streamsToPlay(all, { channelVariants: { hd: "sd" } }))).toEqual(["sd"]);
+    expect(ids(streamsToPlay(all, {}, "unknown"))).toEqual(["unknown"]);
+    // A stream the channel no longer lists: Auto when it was remembered, none when asked for.
+    expect(ids(streamsToPlay(all, { channelVariants: { uhd: "gone" } }))).toHaveLength(3);
+    expect(streamsToPlay(all, {}, "gone")).toEqual([]);
   });
 });

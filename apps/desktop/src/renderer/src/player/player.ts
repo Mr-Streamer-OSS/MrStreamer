@@ -3,6 +3,9 @@
 // Every `play` call starts a new selection. Anything that resolves for an older selection is
 // dropped, so a slow channel can never replace the one the viewer picked after it.
 //
+// The main process picks which of a channel's streams plays: the quality chosen for it, else
+// Automatic, which may pass a stream that doesn't start. Once one plays, the controller asks which.
+//
 // A channel's sound and subtitle tracks come from its program table once the stream starts.
 // Another sound track opens the stream again with it; subtitles are decoded here from the
 // stream's private data, timed on the element's clock, and shown over the picture.
@@ -20,6 +23,7 @@ import {
 } from "@mrstreamer/contracts/preferences";
 import type {
   ChannelTracks,
+  LivePlaying,
   StreamFailure,
   StreamSession,
   SubtitleTrack,
@@ -94,6 +98,13 @@ export interface PlayerState {
   readonly audioId: number | null;
   /** The subtitles on screen, or null for none. */
   readonly subtitle: SubtitleTrack | null;
+  /** Which of the channel's streams plays, once it started, and those that failed first. */
+  readonly stream: LivePlaying | null;
+  /**
+   * Automatic played another of the channel's streams because the first didn't start. Kept until
+   * the channel changes or another quality is chosen.
+   */
+  readonly fellBack: { readonly from: string; readonly to: string } | null;
 }
 
 const store = createStore<PlayerState>(() => ({
@@ -107,6 +118,8 @@ const store = createStore<PlayerState>(() => ({
   tracks: null,
   audioId: null,
   subtitle: null,
+  stream: null,
+  fellBack: null,
 }));
 
 /** Reads player state in a component. */
@@ -182,6 +195,7 @@ async function start(
       attempt === 0
         ? { kind: "tuning", since: Date.now() }
         : { kind: "reconnecting", attempt, of: RECONNECT_DELAYS_MS.length },
+    stream: null,
   });
 
   let session: StreamSession;
@@ -230,6 +244,7 @@ async function start(
   }
 
   store.setState({ phase: { kind: "playing", engine: engine.name } });
+  void loadStream(mine, session.sessionId);
   void loadTracks(mine, session.sessionId);
   setTimeout(() => void loadTracks(mine, session.sessionId), TRACKS_AGAIN_MS);
   void call("viewing.recordWatch", { commandId: crypto.randomUUID(), channelId: channel.id }).catch(
@@ -322,11 +337,21 @@ function tune(channel: LiveChannel): void {
   if (tuned?.id === channel.id) return;
   if (tuned) store.setState({ previous: tuned });
   tuned = channel;
-  store.setState({ tracks: null, audioId: null, subtitle: null });
+  store.setState({ tracks: null, audioId: null, subtitle: null, fellBack: null });
   lastSubtitle = null;
   shown = null;
   clearSubtitles(video);
   setSubtitleDelay(video, 0);
+}
+
+/** Reads which of the channel's streams plays, and notes when Automatic passed one by. */
+async function loadStream(mine: number, sessionId: string): Promise<void> {
+  const stream = await call("playback.playing", { sessionId }).catch(() => null);
+  if (mine !== selection || !stream) return;
+  const [failed] = stream.failed;
+  const fellBack =
+    failed && stream.variantId ? { from: failed.variantId, to: stream.variantId } : null;
+  store.setState(fellBack ? { stream, fellBack } : { stream });
 }
 
 /**
@@ -480,6 +505,12 @@ export const player = {
   retry(): void {
     const { channel } = store.getState();
     if (channel) void start(channel, 0);
+  },
+
+  /** Opens the current channel again after its quality was chosen, forgetting a fallback. */
+  reopen(): void {
+    store.setState({ fellBack: null });
+    player.retry();
   },
 
   stop(): void {

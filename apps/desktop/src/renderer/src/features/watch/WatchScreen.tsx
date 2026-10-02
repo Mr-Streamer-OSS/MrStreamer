@@ -4,8 +4,8 @@
 //   Up and Down switch channel, or move in the open list. Enter or Left opens the list; in it,
 //   Enter plays, Left swaps to the lists and Right swaps back. Backspace returns to the previous
 //   channel, digits jump to a number, F is full screen, M mutes, C turns subtitles on or off, G
-//   and H move them earlier or later, I shows the details, S stars. While a menu is open, keys are
-//   its own.
+//   and H move them earlier or later, I shows the details, S stars, Q opens the quality menu of a
+//   channel with several streams. While a menu is open, keys are its own.
 import { useEffect, useRef, useState } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { hasModifier, isTyping } from "../../app/platform.ts";
@@ -229,6 +229,11 @@ export function WatchScreen() {
         case "s":
         case "S":
           if (now.channel) toggleFavourite(now.channel.id);
+          break;
+        case "q":
+          if ((now.channel?.variants.length ?? 0) < 2) return;
+          wake();
+          setMenu("quality");
           break;
         default:
           return;

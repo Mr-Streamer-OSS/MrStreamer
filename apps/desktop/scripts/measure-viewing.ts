@@ -8,7 +8,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { parseArgs } from "node:util";
-import { LegacyViewing, ViewingAccount, ViewingRecord } from "@mrstreamer/core/viewing/service";
+import {
+  LegacyViewing,
+  ViewingAccount,
+  ViewingChannels,
+  ViewingRecord,
+} from "@mrstreamer/core/viewing/service";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
@@ -31,6 +36,7 @@ async function start() {
       Layer.provide(
         Layer.mergeAll(
           Layer.succeed(ViewingAccount, { current: Effect.succeed("measure") }),
+          Layer.succeed(ViewingChannels, { lookup: Effect.succeed(() => undefined) }),
           Layer.succeed(LegacyViewing, { take: Effect.succeed(null), drop: Effect.void }),
           viewingStoreLayer(dataDir),
         ),

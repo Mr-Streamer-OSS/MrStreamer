@@ -20,6 +20,8 @@ Your subscription may allow a single connection. Home then uses it as soon as it
 
 Each subscription keeps its own favourites and watch history. Connecting another one hides them, and they come back when you connect the first one again.
 
+Providers often list a channel once per quality: "VRT 1 FHD", "VRT 1 HD", "VRT 1 SD". Mr. Streamer shows those as one channel, with its qualities after the name, when they are surely the same channel: same name, same region and language, and the same category or one named only for a quality, such as "BE | 4K". Anything less certain stays a row of its own. A channel you starred, or watched, under one of its qualities is the same favourite and the same history entry.
+
 Programme information comes from your provider. Many providers only cover some channels, and some cover none; those channels show their name and category instead. Some providers file unrelated channels under one channel's guide; Mr. Streamer leaves those channels without programmes rather than show the wrong ones. The guide updates every six hours.
 
 ## Watching
@@ -29,8 +31,17 @@ While watching, the channel list opens over the left of the picture with the lis
 - **Sound** shows when a channel has more than one sound track. Picking another starts the channel again with it, which takes a moment.
 - **CC** lists the channel's subtitles: DVB subtitles, teletext subtitle pages and closed captions. C turns the last ones you picked on and off.
 - The sliders button beside them moves teletext subtitles and captions earlier or later, until you switch channel, and sets how subtitles look, as for [movies and series](movies-and-series.md#watching). Live channels play at their own speed.
+- **Quality** shows on a channel with several qualities and says which one plays. Q opens it.
 
 The languages you pick carry over to other channels, and to movies and series. A channel in another language starts with subtitles in yours when it has them.
+
+### Quality
+
+Channels start in Full HD, or the nearest quality the channel has, lower first. Change that in Settings > General > Live TV. If your provider has no stream for a quality right now, or doesn't answer, Automatic tries the next, at most three, one after another, and the line under the programme says so: "Full HD didn't start, playing HD". If the provider refuses the stream, which usually means another device is using your connection, it stops there.
+
+Pick a quality in the menu and that channel keeps it. When it doesn't start, Mr. Streamer says so and offers another instead of switching on its own. **Use Automatic** in the menu, or **Reset** in Settings for every channel, goes back to Automatic.
+
+The quality is the word your provider puts in the channel's name. The resolution beside it is what the picture actually is. A channel whose name gives no quality says "Not labelled".
 
 ## Search
 
@@ -51,4 +62,5 @@ The languages you pick carry over to other channels, and to movies and series. A
 | Backspace          |                                                                | The previous channel                        |
 | C                  |                                                                | Subtitles on and off                        |
 | G, H               |                                                                | Subtitles 0.1 s earlier or later            |
+| Q                  |                                                                | The quality menu                            |
 | F, M, I            |                                                                | Full screen, mute, show the details         |

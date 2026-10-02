@@ -1,0 +1,238 @@
+// Which of the provider's streams are one channel, and which of them to play. Panels list a channel
+// once per quality ("VRT 1 FHD", "VRT 1 HD", "VRT 1 SD"), with backups ("FHD²") and sometimes in a
+// category of their own ("BE | 4K"). Streams join only when they are surely the same channel:
+//   - Their titles agree once quality markers are gone, case and accents aside but not spaces or
+//     symbols: "Canal+" is not "Canal", nor "VRT1" "VRT 1".
+//   - Their regions agree, and their languages: "BE - FR | RTBF La Une" stays apart from "BE |
+//     RTBF La Une".
+//   - Their categories hold the same, quality words aside: "BE | VLAANDEREN" and "BE | VLAANDEREN
+//     HD" do, "CA | FRENCH" and "CA | ENGLISH" don't. A stream in a category named only for a
+//     quality joins the title's streams when they form one group, and stays with its kind otherwise.
+//   - Their trusted guide ids don't disagree. A shared guide id joins nothing by itself: panels file
+//     unrelated channels under one (see ./guide-ids.ts).
+// Anything less certain stays apart, as the provider lists it.
+import {
+  QUALITIES,
+  type ChannelVariant,
+  type LiveChannel,
+  type Quality,
+} from "@mrstreamer/contracts/library";
+import { DEFAULT_LIVE_QUALITY, type Preferences } from "@mrstreamer/contracts/preferences";
+import { trustedGuideIds } from "./guide-ids.ts";
+import type { NormalizedStream } from "./normalize.ts";
+import { regionForCode } from "./regions.ts";
+
+/** How many of a channel's streams Auto tries, one after another, before it gives up. */
+const AUTO_TRIES = 3;
+
+/** Markers that say how sharp the picture is. The rest, "HEVC" or "RAW", say nothing about it. */
+// prettier-ignore
+const RESOLUTIONS: Readonly<Record<string, Quality>> = {
+  "8K": "uhd", "4K": "uhd", UHD: "uhd", FHD: "fhd", HD: "hd", "HD+": "hd", SD: "sd",
+};
+
+export interface LiveChannels {
+  /** In the provider's order, each where its first stream is. */
+  readonly channels: readonly LiveChannel[];
+  /** The guide id of each channel that has one to trust, by channel id. */
+  readonly guideIds: ReadonlyMap<string, string>;
+}
+
+/** The catalogue's channels, each with its streams. */
+export function liveChannels(streams: readonly NormalizedStream[]): LiveChannels {
+  const trusted = trustedGuideIds(
+    streams.flatMap((stream) =>
+      stream.guideId ? [{ channel: stream, guideId: stream.guideId }] : [],
+    ),
+  );
+  const alike = new Map<string, NormalizedStream[]>();
+  for (const stream of streams) {
+    const key = `${identity(stream.title)}\n${stream.language ?? ""}`;
+    const list = alike.get(key);
+    if (list) list.push(stream);
+    else alike.set(key, [stream]);
+  }
+  // A stream's region is its name's or category's, else the country of its guide id: VRT1.be.
+  const regionOf = (stream: NormalizedStream): string[] => {
+    const country = /\.([a-z]{2})(?:@[^.@]*)?$/i.exec(trusted.get(stream.id) ?? "")?.[1];
+    const region = stream.region ?? (country ? regionForCode(country) : null);
+    return region ? [region] : [];
+  };
+  const together = new Map<NormalizedStream, readonly NormalizedStream[]>();
+  for (const candidates of alike.values()) {
+    // Most streams are a channel of their own.
+    if (candidates.length === 1) continue;
+    for (const regional of partition(candidates, regionOf)) {
+      for (const group of partition(regional, (stream) => stream.topics)) {
+        const guideIds = new Set(group.flatMap((stream) => guideChannel(trusted.get(stream.id))));
+        for (const part of guideIds.size > 1 ? group.map((stream) => [stream]) : [group]) {
+          for (const stream of part) together.set(stream, part);
+        }
+      }
+    }
+  }
+
+  const channels: LiveChannel[] = [];
+  const guideIds = new Map<string, string>();
+  for (const stream of streams) {
+    const group = together.get(stream) ?? [stream];
+    if (group[0] !== stream) continue;
+    const channel = joined(stream, group);
+    channels.push(channel);
+    const guideId = group.map((each) => trusted.get(each.id)).find(Boolean);
+    if (guideId) guideIds.set(channel.id, guideId);
+  }
+  return { channels, guideIds };
+}
+
+/**
+ * What a stream's markers say about its picture: "FHD" and "1080p" are Full HD. A line count is
+ * the more precise, so "HD (1080p)" is Full HD. Null when they say nothing, or disagree, as "HD
+ * (576p)" does.
+ */
+export function qualityOf(tags: readonly string[]): Quality | null {
+  if (tags.length === 0) return null;
+  const lines = new Set(
+    tags.flatMap((tag): Quality[] => {
+      const count = Number(/^(\d{3,4})p$/.exec(tag)?.[1]);
+      if (!count) return [];
+      return [count >= 2160 ? "uhd" : count >= 1080 ? "fhd" : count >= 720 ? "hd" : "sd"];
+    }),
+  );
+  const named = new Set(tags.flatMap((tag) => RESOLUTIONS[tag] ?? []));
+  const [measured, ...more] = lines;
+  if (more.length > 0) return null;
+  if (!measured) return named.size === 1 ? ([...named][0] ?? null) : null;
+  // "HD" also stands for high definition in general, which Full HD is.
+  const fits = [...named].every(
+    (quality) => quality === measured || (quality === "hd" && measured === "fhd"),
+  );
+  return fits ? measured : null;
+}
+
+/**
+ * The streams to try for a channel, in order. A stream asked for by id, or else the one the viewer
+ * chose for the channel before (`channelVariants`), is tried alone; a stream asked for that the
+ * channel doesn't have gives none. Otherwise Auto's: the preferred quality, then lower ones from the
+ * best down, then higher ones from the nearest up, then those whose quality is unknown, at most
+ * `AUTO_TRIES`. Equals keep the provider's order, so a backup follows its main stream.
+ */
+export function streamsToPlay(
+  channel: LiveChannel,
+  preferences: Pick<Preferences, "liveQuality" | "channelVariants">,
+  asked?: string,
+): readonly ChannelVariant[] {
+  if (asked !== undefined) {
+    const variant = channel.variants.find(({ id }) => id === asked);
+    return variant ? [variant] : [];
+  }
+  const chosen = chosenVariant(channel, preferences.channelVariants);
+  if (chosen) return [chosen];
+  const preferred = QUALITIES.indexOf(preferences.liveQuality ?? DEFAULT_LIVE_QUALITY);
+  const rank = ({ quality }: ChannelVariant) => {
+    if (quality === null) return 2 * QUALITIES.length;
+    const lower = QUALITIES.indexOf(quality) - preferred;
+    return lower >= 0 ? lower : QUALITIES.length - lower;
+  };
+  return channel.variants.toSorted((a, b) => rank(a) - rank(b)).slice(0, AUTO_TRIES);
+}
+
+/**
+ * The stream the viewer chose for a channel, or null for Automatic. A choice is kept under the
+ * channel's id then, which may since be another of its streams'; one the channel no longer lists
+ * counts as none.
+ */
+export function chosenVariant(
+  channel: LiveChannel,
+  choices: Preferences["channelVariants"],
+): ChannelVariant | null {
+  for (const { id } of channel.variants) {
+    const chosen = channel.variants.find((variant) => variant.id === choices?.[id]);
+    if (chosen) return chosen;
+  }
+  return null;
+}
+
+/**
+ * A title as streams compare it: lowercase, without accents, and with punctuation as spaces, except
+ * the symbols that tell channels apart: "Canal+", "E!".
+ */
+function identity(title: string): string {
+  return title
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}+!&]+/gu, " ")
+    .trim();
+}
+
+/**
+ * Splits streams into groups by what `keysOf` says about them: their regions, or their
+ * categories' topics. Streams sharing a key join, also through a third. Those without one join the
+ * one group there is, or form their own beside several: a stream that doesn't say is never the
+ * reason two that differ join.
+ */
+function partition(
+  streams: readonly NormalizedStream[],
+  keysOf: (stream: NormalizedStream) => readonly string[],
+): (readonly NormalizedStream[])[] {
+  if (streams.length === 1) return [streams];
+  const groups: { keys: Set<string>; streams: Set<NormalizedStream> }[] = [];
+  const unsaid: NormalizedStream[] = [];
+  for (const stream of streams) {
+    const keys = keysOf(stream);
+    if (keys.length === 0) {
+      unsaid.push(stream);
+      continue;
+    }
+    const group = { keys: new Set(keys), streams: new Set([stream]) };
+    for (const other of groups.filter((each) => keys.some((key) => each.keys.has(key)))) {
+      for (const key of other.keys) group.keys.add(key);
+      for (const each of other.streams) group.streams.add(each);
+      groups.splice(groups.indexOf(other), 1);
+    }
+    groups.push(group);
+  }
+  const only = groups.length === 1 ? groups[0] : undefined;
+  if (only) for (const stream of unsaid) only.streams.add(stream);
+  else if (unsaid.length > 0) groups.push({ keys: new Set(), streams: new Set(unsaid) });
+  // In the provider's order, which the first stream of each group keeps.
+  return groups.map((group) => streams.filter((stream) => group.streams.has(stream)));
+}
+
+/**
+ * The guide channel an id names, its feed's quality aside. Playlists name feeds after "@", and
+ * one channel's SD and HD feeds are one channel: "BBCOne.uk@ScotlandHD" is "BBCOne.uk@Scotland",
+ * "Arirang.kr@HD" is "Arirang.kr". "@East" and "@West" stay apart.
+ */
+function guideChannel(guideId: string | undefined): string[] {
+  if (!guideId) return [];
+  return [
+    guideId.replace(/@(.*?)(?:SD|HD|FHD|UHD|4K)?$/i, (_, feed: string) => feed && `@${feed}`),
+  ];
+}
+
+/** One channel of the streams in `group`, the first of them `first`. */
+function joined(first: NormalizedStream, group: readonly NormalizedStream[]): LiveChannel {
+  return {
+    id: group.map((stream) => stream.id).reduce(lower),
+    name: first.name,
+    title: first.title,
+    tags: first.tags.filter((tag) => group.every((stream) => stream.tags.includes(tag))),
+    number: first.number,
+    logoUrl: group.find((stream) => stream.logoUrl)?.logoUrl ?? null,
+    categoryIds: [...new Set(group.flatMap((stream) => stream.categoryIds))],
+    variants: group.map((stream) => ({
+      id: stream.id,
+      name: stream.name,
+      tags: stream.tags,
+      quality: qualityOf(stream.tags),
+    })),
+  };
+}
+
+/** The lower of two stream ids: by number when both are numbers, as Xtream's are. */
+function lower(a: string, b: string): string {
+  const numbers = /^\d+$/.test(a) && /^\d+$/.test(b);
+  return (numbers ? Number(b) < Number(a) : b < a) ? b : a;
+}

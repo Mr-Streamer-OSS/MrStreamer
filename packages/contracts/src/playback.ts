@@ -57,6 +57,17 @@ export interface TitleSession {
   readonly subtitles: readonly SubtitleTrack[];
 }
 
+/**
+ * Which of a channel's streams a live session plays. Auto tries the next stream when the provider
+ * doesn't deliver one; a chosen stream is the only one tried.
+ */
+export interface LivePlaying {
+  /** The stream that plays, by id, or null while none has started or when none could. */
+  readonly variantId: string | null;
+  /** The streams tried before it, in order, with why the provider didn't deliver them. */
+  readonly failed: readonly { readonly variantId: string; readonly failure: StreamFailure }[];
+}
+
 /** The sound and subtitle tracks of a playing channel, from its program table. */
 export interface ChannelTracks {
   readonly audio: readonly AudioTrack[];

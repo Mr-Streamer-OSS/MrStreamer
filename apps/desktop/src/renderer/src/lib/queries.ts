@@ -9,6 +9,7 @@ import type {
   TitleKind,
 } from "@mrstreamer/contracts/ondemand";
 import type { Viewing } from "@mrstreamer/contracts/viewing";
+import { player } from "../player/player.ts";
 import { call, listen } from "./ipc.ts";
 
 /** Listings move on as programmes end; asking again each minute is enough for progress. */
@@ -224,6 +225,32 @@ export function useToggleFavourite(): (channelId: string) => void {
   );
 }
 
+/**
+ * Remembers which of a channel's streams plays, or Automatic with null, and opens the channel again
+ * with it once saved.
+ */
+export function useChooseQuality(): (channel: LiveChannel, variantId: string | null) => void {
+  const client = useQueryClient();
+  return useCallback(
+    (channel: LiveChannel, variantId: string | null) => {
+      void (async () => {
+        const preferences = await client.fetchQuery(queries.preferences());
+        // A choice kept under another of the channel's streams' ids goes too.
+        const others = Object.entries(preferences.channelVariants ?? {}).filter(
+          ([id]) => !channel.variants.some((variant) => variant.id === id),
+        );
+        const channelVariants = Object.fromEntries(
+          variantId === null ? others : [...others, [channel.id, variantId]],
+        );
+        const saved = await call("preferences.update", { channelVariants });
+        client.setQueryData(queries.preferences().queryKey, saved);
+        if (player.current()?.id === channel.id) player.reopen();
+      })().catch(() => {});
+    },
+    [client],
+  );
+}
+
 /** Keeps the latest viewing state: an answer can arrive after a later change's event. */
 function keepViewing(client: QueryClient, viewing: Viewing): void {
   client.setQueryData(queries.viewing().queryKey, (cached) =>
@@ -259,6 +286,8 @@ export function useCategoryMap(): ReadonlyMap<string, Category> {
 export function syncLibraryUpdates(client: QueryClient): () => void {
   return listen("library.updated", () => {
     void client.invalidateQueries({ queryKey: ["library"] });
+    // Favourites and history show by channel, and a new catalogue can join a channel's streams.
+    void client.invalidateQueries({ queryKey: queries.viewing().queryKey });
   });
 }
 

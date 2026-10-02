@@ -10,7 +10,7 @@ import { Tooltip } from "../../components/ui/tooltip.tsx";
 import { cn } from "../../lib/utils.ts";
 
 /** Which menu is open over the controls, so Escape closes it before anything else. */
-export type TrackMenu = "sound" | "subtitles" | "playback" | null;
+export type TrackMenu = "sound" | "subtitles" | "playback" | "quality" | null;
 
 export function TrackMenus({
   audio,
@@ -100,6 +100,7 @@ export function TrackMenus({
 export function Menu({
   label,
   on = false,
+  text = false,
   open,
   onOpenChange,
   trigger,
@@ -107,6 +108,8 @@ export function Menu({
 }: {
   label: string;
   on?: boolean;
+  /** The button holds words rather than an icon. */
+  text?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   trigger: ReactNode;
@@ -120,9 +123,10 @@ export function Menu({
           render={
             <Button
               variant={on ? "primary" : "media"}
-              size="icon"
+              size={text ? "default" : "icon"}
               aria-label={label}
               aria-pressed={on}
+              className={cn(text && "px-3.5 font-semibold")}
             />
           }
         >
