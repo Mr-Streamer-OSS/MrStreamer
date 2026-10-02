@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { byIds, indexCatalogue, search } from "../src/ondemand/catalogue.ts";
 import { collections } from "../src/ondemand/collections.ts";
 import { movieDetails } from "../src/ondemand/details.ts";
-import { versionLabels } from "../src/ondemand/languages.ts";
+import { suitability, versionLabels } from "../src/ondemand/languages.ts";
 import { episodeName, titleName } from "../src/ondemand/names.ts";
 import { channelSubtitle } from "../src/ondemand/tracks.ts";
 import { continueWatching, isFinished, type TitleRow } from "../src/viewing/titles.ts";
@@ -289,6 +289,15 @@ describe("version labels", () => {
     ["a language TMDB hasn't said", null, "Original sound, Nederlands subtitles"],
   ])("read (NL) on a title made in %s", (_, madeIn, label) => {
     expect(versionLabels([{ tags: ["NL"] }], madeIn)).toEqual([label]);
+  });
+
+  it("read a mark for subtitles as the title's own sound, whatever the language", () => {
+    const tags = titleName("Squid Game (ENG SUB)").tags;
+
+    expect(versionLabels([{ tags }], "ko")).toEqual(["한국어 sound, English subtitles"]);
+    // It suits English viewers, and isn't dubbed for German ones.
+    expect(suitability(tags, "en")).toBe(4);
+    expect(suitability(tags, "de")).toBe(suitability(["NL"], "de"));
   });
 
   it("numbers versions that read the same", () => {
