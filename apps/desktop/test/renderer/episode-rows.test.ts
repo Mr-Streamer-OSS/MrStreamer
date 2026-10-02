@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 // A series' details list the provider's episodes at once, and TMDB's details for the season
-// shown once they come: the other seasons ask for nothing until their tab opens.
+// shown once they come: the other seasons ask for nothing until their tab opens. The sheet shows
+// the title from the lists while the provider answers, and TMDB's details once they arrive.
 import { ipc } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
@@ -9,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Episode, SeriesDetails, Title } from "@mrstreamer/contracts/ondemand";
 import { defaultPreferences } from "@mrstreamer/contracts/preferences";
 import { DetailsView } from "../../src/renderer/src/features/titles/DetailsView.tsx";
+import { syncOnDemand } from "../../src/renderer/src/lib/queries.ts";
 
 const series: Title = {
   kind: "series",
@@ -146,5 +148,49 @@ describe("a series' episodes", () => {
       { id: "harbour", season: 1 },
       { id: "harbour", season: 2 },
     ]);
+  });
+});
+
+describe("a series' details", () => {
+  it("head the sheet with the listed title at once, and take TMDB's once they arrive", async () => {
+    ipc.reset();
+    const listed = ipc.hold("ondemand.titles");
+    const progress = ipc.hold("viewing.progress");
+    const provider = ipc.hold("ondemand.details");
+    const withTmdb = ipc.hold("ondemand.details");
+    const client = new QueryClient();
+    client.setQueryData(["preferences"], defaultPreferences);
+    const stopSync = syncOnDemand(client);
+    const root = createRoot(document.createElement("div"));
+    await act(async () =>
+      root.render(
+        createElement(
+          QueryClientProvider,
+          { client },
+          createElement(DetailsView, { target: { kind: "series", id: "harbour" } }),
+        ),
+      ),
+    );
+    unmount = () => {
+      stopSync();
+      act(() => root.unmount());
+    };
+    await act(async () => listed.resolve([series]));
+    await act(async () => progress.resolve([]));
+
+    // The lists' title while the provider answers.
+    await until(() => expect(text()).toContain("Night Harbour"));
+    expect(text()).toContain("2024");
+    expect(text()).toContain("Loading…");
+
+    await act(async () => provider.resolve({ ...details, plot: "All about Night Harbour." }));
+    await until(() => expect(text()).toContain("All about Night Harbour."));
+    expect(text()).toContain("Episode 2");
+
+    // TMDB's arrive after the provider's: the main process says so, and the sheet reads them.
+    await act(async () => ipc.emit("ondemand.detailsChanged", { kind: "series", id: "harbour" }));
+    await act(async () => withTmdb.resolve({ ...details, plot: "TMDB's story of Night Harbour." }));
+    await until(() => expect(text()).toContain("TMDB's story of Night Harbour."));
+    expect(text()).not.toContain("All about Night Harbour.");
   });
 });

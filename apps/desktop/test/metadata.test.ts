@@ -9,7 +9,7 @@ import { Subscriptions } from "../src/main/services/subscription.ts";
 import { mainLayer } from "../src/main/runtime.ts";
 import { Settings } from "../src/main/services/preferences.ts";
 import { startFakeTmdb, tmdbName, type FakeTmdb } from "./fake-tmdb.ts";
-import { fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+import { collect, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 
 let tmdb: FakeTmdb | null = null;
 afterEach(async () => {
@@ -214,16 +214,24 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
     expect(app.tmdb.detailRequests()).toBe(both);
   });
 
-  it("shows TMDB's overview, artwork and credits in a title's details once it opens", async () => {
+  it("gives a title's details without waiting for TMDB, and says when TMDB's arrive", async () => {
     const app = await metadataApp();
-    const { onDemand } = await app.start();
+    const { runtime, onDemand } = await app.start();
     const [movie] = (
       await onDemand.collection({ kind: "movie", id: "all", offset: 0, limit: 50 })
     ).titles.filter((title) => title.tmdbId);
+    const id = movie?.id ?? "";
     expect(app.tmdb.aboutRequests()).toBe(0);
+    const changed = await collect(runtime, onDemand.detailsChanged);
+    app.tmdb.holdAbout(true);
 
-    const details = await onDemand.details("movie", movie?.id ?? "");
+    const early = await onDemand.details("movie", id);
 
+    expect(early.plot).toMatch(/^The story of /);
+    await vi.waitFor(() => expect(app.tmdb.aboutRequests()).toBe(1));
+    app.tmdb.holdAbout(false);
+    await vi.waitFor(() => expect(changed).toEqual([{ kind: "movie", id }]));
+    const details = await onDemand.details("movie", id);
     expect(details.plot).toMatch(/^TMDB's story of /);
     expect(details.title.posterUrl).toBe(
       `https://image.tmdb.org/t/p/w780/poster-${movie?.tmdbId}.jpg`,
@@ -254,7 +262,7 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
     app.tmdb.refuse(true);
     expect(await plot()).toMatch(/^The story of /);
     app.tmdb.refuse(false);
-    expect(await plot()).toMatch(/^TMDB's story of /);
+    await vi.waitFor(async () => expect(await plot()).toMatch(/^TMDB's story of /));
 
     const keyless = await metadataApp(null);
     const second = await keyless.start();
@@ -265,7 +273,7 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
     expect(await otherPlot()).toMatch(/^The story of /);
     await (await promised(second.runtime, Settings)).update({ tmdbKey: "own-key" });
     await second.onDemand.reconfigure();
-    expect(await otherPlot()).toMatch(/^TMDB's story of /);
+    await vi.waitFor(async () => expect(await otherPlot()).toMatch(/^TMDB's story of /));
     await runtime.dispose();
   });
 
@@ -280,6 +288,8 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
     const id = movie?.id ?? "";
     const early = await onDemand.details("movie", id);
     expect(early.title).toMatchObject({ title: movie?.title, originalLanguage: null });
+    // Refused too.
+    await vi.waitFor(() => expect(app.tmdb.aboutRequests()).toBe(1));
 
     // A key TMDB accepts: names arrive in the lists, in the background.
     app.tmdb.refuse(false);
@@ -296,14 +306,17 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
     );
     const downloads = app.tmdb.aboutRequests();
 
-    const again = await onDemand.details("movie", id);
+    // TMDB didn't answer then, so it is asked once more, now that it does.
+    const again = await vi.waitFor(async () => {
+      const details = await onDemand.details("movie", id);
+      expect(details.plot).toMatch(/^TMDB's story of /);
+      return details;
+    });
 
     expect(again.title).toMatchObject({
       title: listed?.title,
       originalLanguage: listed?.originalLanguage,
     });
-    // TMDB didn't answer then, so it is asked once more, now that it does.
-    expect(again.plot).toMatch(/^TMDB's story of /);
     expect(app.tmdb.aboutRequests()).toBe(downloads + 1);
   });
 

@@ -291,9 +291,15 @@ export function syncLibraryUpdates(client: QueryClient): () => void {
   });
 }
 
-/** Reads movies and series again once the main process has fetched new lists. */
+/**
+ * Reads movies and series again once the main process has fetched new lists, and a title's
+ * details once TMDB's arrived after them.
+ */
 export function syncOnDemand(client: QueryClient): () => void {
-  return listen("ondemand.updated", () => {
+  const stopDetails = listen("ondemand.detailsChanged", ({ kind, id }) => {
+    void client.invalidateQueries({ queryKey: queries.details(kind, id).queryKey });
+  });
+  const stopLists = listen("ondemand.updated", () => {
     // Lists change with a refresh and as TMDB's metadata arrives. A season shown is read again
     // the next time it shows, not each time more metadata arrives.
     void client.invalidateQueries({
@@ -304,6 +310,10 @@ export function syncOnDemand(client: QueryClient): () => void {
     // again, they are put together anew from what the main process kept, with nothing downloaded.
     void client.invalidateQueries({ queryKey: ["ondemand", "details"], refetchType: "none" });
   });
+  return () => {
+    stopDetails();
+    stopLists();
+  };
 }
 
 /** Asks for programmes again once the main process has a new guide. */
