@@ -1,7 +1,7 @@
-// Third-party notices for Settings > About: what the installers ship and under which licences.
-// The build writes the list to out/licences/third-party.json (scripts/licences.ts). Chromium's
-// credits page, which also holds Node.js's licence, comes with Electron itself: about 20 MB of
-// HTML, read and turned into plain text only when the UI asks for one of the two.
+// Notices for Settings > About: what the installers ship, the app itself included, and under which
+// licences. The build writes the list to out/licences/third-party.json (scripts/licences.ts).
+// Chromium's credits page, which also holds Node.js's licence, comes with Electron itself: about
+// 20 MB of HTML, read and turned into plain text only when the UI asks for one of the two.
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -46,7 +46,7 @@ export function appNotices(): NoticeFiles {
 export class Licences extends Context.Service<
   Licences,
   {
-    /** Every third-party component the app ships, sorted by name, without the texts. */
+    /** Every component the app ships, itself included, sorted by name, without the texts. */
     readonly list: Effect.Effect<readonly ThirdPartyNotice[], Failed>;
     /** The full notice of a component from `list`, as plain text. */
     text(id: string): Effect.Effect<string, Failed>;

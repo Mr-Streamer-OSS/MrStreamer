@@ -1,0 +1,13 @@
+Mr. Streamer {app}
+Copyright © 2026 Wout Stiens
+
+Mr. Streamer is free software: you can redistribute it and/or modify it
+under the terms of the GNU General Public License, version 3, as published
+by the Free Software Foundation.
+
+Mr. Streamer is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. The licence follows.
+
+Its source is at https://github.com/Mr-Streamer-OSS/MrStreamer, and
+Settings > About links to the commit this build comes from.

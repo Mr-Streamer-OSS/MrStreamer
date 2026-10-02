@@ -54,11 +54,13 @@ Settings > About lists what the installers ship and under which licences. `pnpm 
 - `packages`: packages the installers carry without a bundled module. Electron, and Tailwind for the base styles in the CSS.
 - `overrides`: help for a package, with a `why`. `licence` for one that declares none, `files` to show instead of its own, or `standardText` to add the licence's standard text from `apps/desktop/licences/standard`, for a package without a licence file (with the author from its package.json) or with a notice that only refers to its licence.
 - `embedded`: packages built into another package's prebuilt files and not installed, which the source maps reveal, under that package's `name@version`. Upgrading it fails the build until someone checks the entry and renames it.
-- `components`: Chromium, Node.js, FFmpeg and x264. `{app}` is the version being built, `{FFMPEG_VERSION}` and `{X264_COMMIT}` come from `build-ffmpeg.sh`, and the app fills `{chrome}` and `{node}` from the Electron it runs on.
+- `components`: Chromium, Node.js, FFmpeg, x264, the MinGW-w64 runtime that the Windows ffmpeg links in, and Mr. Streamer itself, with the GPL-3.0 text from the repository's `LICENSE`. `{app}` is the version being built, `{FFMPEG_VERSION}` and `{X264_COMMIT}` come from `build-ffmpeg.sh`, and the app fills `{chrome}` and `{node}` from the Electron it runs on.
 
 The build fails and lists every problem when a package declares no licence, has no licence file and no override, refers to Apache-2.0 or the GPL without including its text, carries a package that is neither installed nor under `embedded`, or uses a licence missing from `COMPATIBLE` in `scripts/licences.ts`. Read a licence's terms before adding it there.
 
 Chromium's credits, which hold Node.js's licence too, are 20 MB of HTML from Electron's download: next to the executable on Linux and Windows, in the app's Resources on macOS, where `apps/desktop/scripts/mac-credits.ts` moves them. The main process turns them into plain text when the UI asks for Chromium or Node.js. `pnpm dev` serves the renderer instead of bundling it, so development shows the notices of the last `pnpm build`.
+
+`pnpm build` also builds in the commit it comes from, `git rev-parse HEAD`, as `__BUILD_COMMIT__`. Settings > About links to that commit as the build's source. Outside a git checkout of this repository, such as an unpacked source archive, it's empty and About links only to the repository.
 
 ## Artwork
 

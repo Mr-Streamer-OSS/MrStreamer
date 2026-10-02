@@ -1,6 +1,7 @@
-// About's open-source licences: every third-party component the app ships, with its licence and
-// its full notice, readable offline. The build generates the list (scripts/licences.ts). A long
-// notice, such as Chromium's credits, shows through a virtualised list of its lines.
+// About's open-source licences: the app's own and every third-party component it ships, each with
+// its licence and full notice, readable offline. The build generates the list
+// (scripts/licences.ts). A long notice, such as Chromium's credits, shows through a virtualised
+// list of its lines.
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useMemo, useRef, useState } from "react";
