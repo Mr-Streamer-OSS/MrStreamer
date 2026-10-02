@@ -1,6 +1,6 @@
 # Updates and channels
 
-Mr. Streamer looks for updates on its own, a little after it starts and then every four hours. It never downloads or restarts without you: you download an update, and then choose when to restart into it. Your login, preferences, favourites and history stay through every update. A copy from the Microsoft Store is the exception: [the Store updates it](#installed-from-the-microsoft-store).
+Mr. Streamer looks for updates on its own, a little after it starts and then every four hours, unless [the Microsoft Store installed it](#installed-from-the-microsoft-store). It never downloads or restarts without you: you download an update, and then choose when to restart into it. Your login, preferences, favourites and history stay through every update.
 
 ## When an update is available
 
