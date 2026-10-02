@@ -3,7 +3,8 @@
 // "(MULTI)", "(GER)". Those marks are a convention, not a field, so a version without one counts
 // as unknown rather than wrong. Where films are subtitled rather than dubbed, as in Dutch, a mark
 // says the sound is the film's own: "(NL)" on an English film is English with Dutch subtitles,
-// unless it says otherwise, as "(NL AUDIO)".
+// unless it says otherwise, as "(NL AUDIO)". A mark followed by "SUB" names the subtitles in any
+// language: "(ENG SUB)" is the film's own sound with English subtitles.
 
 import { languageName } from "./tracks.ts";
 
@@ -58,12 +59,30 @@ const LANGUAGE_MARKS = new Map<string, (typeof TITLE_LANGUAGES)[number]>(
 
 /** Words after a mark that say the sound was replaced: "NL AUDIO", "NL DUBBED". */
 const DUBBED = /\b(AUDIO|DUB|DUBBED)\b/;
+/** Words after a mark that say it names the subtitles: "ENG SUB", "GER SUBS". */
+const SUBTITLED = /\b(SUBS?|SUBBED|SUBTITLED)\b/;
+
+/**
+ * A mark's language, and whether it keeps the film's own sound with subtitles in that language:
+ * `named` so, as "ENG SUB", or for a language that subtitles, unless the sound was replaced.
+ */
+function markOf(tag: string) {
+  const mark = tag.toUpperCase();
+  // "NL AUDIO" and "DE-DUBBED" are their first word.
+  const space = mark.search(WORD_END);
+  const language = LANGUAGE_MARKS.get(space < 0 ? mark : mark.slice(0, space));
+  const rest = space < 0 ? "" : mark.slice(space);
+  const named = SUBTITLED.test(rest);
+  const subtitles = named || (language?.subtitled === true && !DUBBED.test(rest));
+  return { mark, language, subtitles, named };
+}
 
 /**
  * How well a version suits a language, from its name's marks:
  * - 4 in that language
  * - 3 in several
- * - 2 marked for a language that subtitles, so likely with its own sound, as "(NL)"
+ * - 2 marked for a language that subtitles, so likely with its own sound, as "(NL)", or marked
+ *   for subtitles, as "(ENG SUB)"
  * - 1 when nothing says what it sounds like
  * - 0 dubbed into another language
  */
@@ -72,13 +91,10 @@ export function suitability(tags: readonly string[], language: string): number {
   let subtitled = false;
   let dubbed = false;
   for (const tag of tags) {
-    const mark = tag.toUpperCase();
-    // "NL AUDIO" and "DE-DUBBED" are their first word.
-    const space = mark.search(WORD_END);
-    const marked = LANGUAGE_MARKS.get(space < 0 ? mark : mark.slice(0, space));
+    const { mark, language: marked, subtitles } = markOf(tag);
     if (marked?.code === language) return 4;
     if (MULTI.has(mark)) multi = true;
-    else if (marked?.subtitled && !(space >= 0 && DUBBED.test(mark.slice(space)))) subtitled = true;
+    else if (marked && subtitles) subtitled = true;
     else if (marked) dubbed = true;
   }
   return multi ? 3 : subtitled ? 2 : dubbed ? 0 : 1;
@@ -107,7 +123,8 @@ const MULTI_NAMES: Readonly<Record<string, string>> = {
  * and `madeIn`, the language TMDB says the title was made in: "English sound, Nederlands
  * subtitles · 1080p", "Deutsch sound", "Several languages · 4K". A mark for a language that
  * subtitles, as "(NL)", means the title's own sound with those subtitles, unless the title was
- * made in that language or the mark says the sound was replaced, as "(NL AUDIO)". Without a mark,
+ * made in that language or the mark says the sound was replaced, as "(NL AUDIO)". A mark for
+ * subtitles, as "(ENG SUB)", means the title's own sound with those subtitles. Without a mark,
  * "Standard". Versions that read the same are numbered, "Deutsch sound 2", so each can be told
  * apart.
  */
@@ -117,14 +134,11 @@ export function versionLabels(
 ): string[] {
   const labels = versions.map(({ tags }) => {
     const parts = tags.map((tag) => {
-      const mark = tag.toUpperCase();
+      const { mark, language, subtitles, named } = markOf(tag);
       const multi = MULTI_NAMES[mark];
       if (multi) return multi;
-      const space = mark.search(WORD_END);
-      const language = LANGUAGE_MARKS.get(space < 0 ? mark : mark.slice(0, space));
       if (!language) return tag;
-      const dubbed = space >= 0 && DUBBED.test(mark.slice(space));
-      if (language.subtitled && !dubbed && madeIn !== language.code) {
+      if (subtitles && (named || madeIn !== language.code)) {
         const original = (madeIn && languageName(madeIn)) || "Original";
         return `${original} sound, ${language.name} subtitles`;
       }
