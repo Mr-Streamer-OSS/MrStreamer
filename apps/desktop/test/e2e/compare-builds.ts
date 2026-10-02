@@ -20,8 +20,11 @@ import { connect, delay, launch } from "./app.ts";
 
 /** How much worse a median may get before the report warns. */
 const BUDGET = 0.1;
-/** Differences smaller than this are noise, whatever share they are: a point of CPU, 10 MB, 20 ms. */
-const NOISE = { "%": 1, MB: 10, ms: 20 };
+/**
+ * Differences smaller than this are noise, whatever share they are: a point of CPU, 10 MB, 20 ms.
+ * Every extra stream opened at the provider counts.
+ */
+const NOISE = { "%": 1, MB: 10, ms: 20, count: 0 };
 /** What measure-app.ts writes with `--json`: every run of every measure. */
 const Results = type({ "[string]": "number[]" });
 
@@ -75,7 +78,8 @@ for (const measure of Object.keys(runs.baseline[0] ?? {})) {
   const before = median(runs.baseline.flatMap((run) => run[measure] ?? []));
   const after = median(runs.candidate.flatMap((run) => run[measure] ?? []));
   const change = before > 0 ? (after - before) / before : 0;
-  const over = change > BUDGET && after - before > NOISE[unitOf(measure)];
+  // From none, such as streams opened returning to Watch, any more is worse.
+  const over = (before === 0 || change > BUDGET) && after - before > NOISE[unitOf(measure)];
   if (over)
     worse.push(`${measure}: ${shown(measure, before)} before, ${shown(measure, after)} now`);
   const percent = `${change >= 0 ? "+" : ""}${Math.round(change * 100)}%`;
@@ -129,5 +133,6 @@ function shown(measure: string, value: number): string {
 function unitOf(measure: string): keyof typeof NOISE {
   if (measure.includes("(%)")) return "%";
   if (measure.includes("(MB)")) return "MB";
+  if (measure.includes("(count)")) return "count";
   return "ms";
 }
