@@ -4,5 +4,14 @@
     "lib": ["ES2024", "ESNext.Disposable"],
     "types": ["node"]
   },
-  "include": ["electron.vite.config.ts", "src/main", "src/preload", "src/shared", "scripts", "test"]
+  "include": [
+    "electron.vite.config.ts",
+    "src/main",
+    "src/preload",
+    "src/shared",
+    "scripts",
+    "test"
+  ],
+  // The renderer's tests run with a DOM, and are checked with the renderer.
+  "exclude": ["test/renderer"]
 }

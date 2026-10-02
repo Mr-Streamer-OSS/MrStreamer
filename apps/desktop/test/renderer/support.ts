@@ -1,0 +1,46 @@
+// Stands in for the main process in the renderer's tests, which run with happy-dom. Every call is
+// recorded; the preferences answer with the defaults, a call the test holds answers when the test
+// says, and anything else never answers. Import it first, before the renderer's modules.
+import type { AppError, Result } from "@mrstreamer/contracts/errors";
+import type { BridgeApi, IpcMethod, IpcOutput } from "@mrstreamer/contracts/ipc";
+import { defaultPreferences } from "@mrstreamer/contracts/preferences";
+
+const held = new Map<IpcMethod, Promise<Result<unknown>>[]>();
+const calls: { readonly method: IpcMethod; readonly args: unknown }[] = [];
+
+export const ipc = {
+  /** The arguments of each call to `method` so far. */
+  argsOf: (method: IpcMethod): unknown[] =>
+    calls.filter((each) => each.method === method).map((each) => each.args),
+  /** Holds the next call to `method` until the test answers it. */
+  hold<M extends IpcMethod>(method: M) {
+    let settle: (result: Result<unknown>) => void = () => {};
+    const answer = new Promise<Result<unknown>>((resolve) => (settle = resolve));
+    held.set(method, [...(held.get(method) ?? []), answer]);
+    return {
+      resolve: (value: IpcOutput<M>) => settle({ ok: true, value }),
+      reject: (error: AppError) => settle({ ok: false, error }),
+    };
+  },
+  /** Forgets the calls and held answers of the test before. */
+  reset(): void {
+    calls.length = 0;
+    held.clear();
+  },
+};
+
+const bridge = {
+  invoke(method: IpcMethod, args?: unknown): Promise<Result<unknown>> {
+    calls.push({ method, args });
+    if (method === "preferences.get") {
+      return Promise.resolve({ ok: true, value: defaultPreferences });
+    }
+    return held.get(method)?.shift() ?? new Promise(() => {});
+  },
+  on: () => () => {},
+};
+
+// The contract types each method's answer; the stand-in answers whatever the test gives.
+const api: BridgeApi = bridge as unknown as BridgeApi;
+Object.assign(window, { mrStreamer: api });
+Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
