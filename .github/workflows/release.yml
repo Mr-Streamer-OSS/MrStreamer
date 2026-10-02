@@ -411,7 +411,8 @@ jobs:
       - name: Windows App Certification Kit
         run: |
           $appcert = "${env:ProgramFiles(x86)}\Windows Kits\10\App Certification Kit\appcert.exe"
-          $report = "dist/Mr-Streamer-$env:VERSION-win-x64.wack.xml"
+          # The kit takes only a full path for its report.
+          $report = Join-Path (Resolve-Path dist) "Mr-Streamer-$env:VERSION-win-x64.wack.xml"
           & $appcert reset | Out-Null
           & $appcert test -appxpackagepath "$env:RUNNER_TEMP\test.msix" -reportoutputpath $report
           [xml]$xml = Get-Content $report
