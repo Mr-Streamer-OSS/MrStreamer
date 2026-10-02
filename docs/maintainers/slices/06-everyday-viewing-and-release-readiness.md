@@ -1,6 +1,6 @@
 # Slice 6: everyday viewing and release readiness
 
-Status: implemented. Parts 1 to 9 and the scope added along the way merged on 2 October 2026 as #48 to #96. [Stable 0.0.5](https://github.com/Mr-Streamer-OSS/MrStreamer/releases/tag/v0.0.5), published the same day from `9040bb1`, carries #48 to #93; Stable 0.0.4 came before it. The Store's first private submission, package `1.0.4.0`, passed certification on 2 October 2026, and submission 2, `1.0.5.0`, is being prepared to test a Store update. What remains is Wout's [acceptance](#acceptance-still-to-do) in the installed apps on the Mac, Windows and Linux, the Store install and update, and the [known gaps](#known-gaps). The [measurements](#measurements) found no regression.
+Status: implemented. Parts 1 to 9 and the scope added along the way merged on 2 October 2026 as #48 to #96. [Stable 0.0.5](https://github.com/Mr-Streamer-OSS/MrStreamer/releases/tag/v0.0.5), published the same day from `9040bb1`, carries #48 to #93; Stable 0.0.4 came before it. Wout [accepted](#acceptance) it on the Mac, Windows and Linux on 2 October 2026. The Store's first private submission, package `1.0.4.0`, passed certification, was published privately and installed on his PC from the testers' link the same day. What remains is the Store update test with submission 2, `1.0.5.0`, two Store checks that go with it, and the [known gaps](#known-gaps). The [measurements](#measurements) found no regression.
 
 Outcome: comfortable daily viewing on the Mac and Windows, verified Linux packages, and a documented, tested path to a Windows Store build distributed privately. Mr. Streamer stays a free, open-source player for the user's own subscription. The public Store launch waits for the base release's acceptance.
 
@@ -254,7 +254,7 @@ Slice 5's known gaps:
 
 | Gap                                                       | Disposition                                                                                                                  |
 | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Use on the Mac and Windows with a real subscription       | Tracked: Wout's [acceptance](#acceptance-still-to-do) in the installed apps                                                  |
+| Use on the Mac and Windows with a real subscription       | Accepted by Wout on 2 October 2026, with Linux ([acceptance](#acceptance))                                                   |
 | CEA-708 captions                                          | Tracked: no lawful fixture that carries CEA-708 alone                                                                        |
 | Generated subtitle fixtures only                          | Tracked: needs lawful real samples                                                                                           |
 | Subtitles after a skip                                    | Partly verified: a skip within what's loaded draws at once. A skip that starts a new run is still a [known gap](#known-gaps) |
@@ -280,7 +280,7 @@ Slice 5's known gaps:
 | 7. Licences and launch obligations   | #54 Chromium's credits on the Mac, #59 the app's own licence and the build's commit, #62 the readiness record, #74 ffmpeg's toolchain and kept sources; #71 and #82 for content for adults          |
 | 8. MSIX and Store-aware updates      | #57 the package, #70 Store updates and a separate data folder                                                                                                                                       |
 | 9. Microsoft setup and submission    | #49 the wizard and the identity. Submission 1 happened in Partner Center and is recorded in the [runbook](../microsoft-store.md#submission-1)                                                       |
-| 10. Acceptance and documentation     | #93 and this record; #96 the measurements. Wout's acceptance is still to come                                                                                                                       |
+| 10. Acceptance and documentation     | #93 and this record; #96 the measurements. Wout's acceptance on 2 October 2026                                                                                                                      |
 | Added: login-free playlists          | #81                                                                                                                                                                                                 |
 | Added: the Nightly channel           | #87 offers nightlies only                                                                                                                                                                           |
 | Added: a nightly before stable       | #88, and #94 lets that nightly be promoted later                                                                                                                                                    |
@@ -293,7 +293,7 @@ Slice 5's known gaps:
 - Nightly `0.0.4-nightly.20261002.110`, from `3cfa1e3` (run 36990279380), carries #48 to #84. Wout tested it and chose it for Stable.
 - [Stable 0.0.4](https://github.com/Mr-Streamer-OSS/MrStreamer/releases/tag/v0.0.4), published on 2 October 2026 by run 36998968726, rebuilt `3cfa1e3`. It was the first stable run to publish a nightly first (#88): `0.0.4-nightly.20261002.117`, from `b57faf1`, with #85 to #89. The stable release's feed deploy then failed, because both publications uploaded a Pages artifact with the same name. Running Update feed by hand (run 37000310982) put stable 0.0.4 and nightly .117 in the feed, and #92 fixed the names.
 - The same run built package `1.0.4.0` from `3cfa1e3`. The Windows App Certification Kit passed it overall, and it is Store submission 1.
-- [Stable 0.0.5](https://github.com/Mr-Streamer-OSS/MrStreamer/releases/tag/v0.0.5), published on 2 October 2026 from `9040bb1`, carries #48 to #93. Wout tested that commit in a local build of `main`. It went out as nightly `0.0.5-nightly.20261002.122` (run 37008249096), then stable run 37009048597, which published no nightly first because .122 already had `main`'s commit. The feed names stable 0.0.5 and nightly .122.
+- [Stable 0.0.5](https://github.com/Mr-Streamer-OSS/MrStreamer/releases/tag/v0.0.5), published on 2 October 2026 from `9040bb1`, carries #48 to #93. Wout tested that commit in a local build of `main` and as nightly .122. It went out as nightly `0.0.5-nightly.20261002.122` (run 37008249096), then stable run 37009048597, which published no nightly first because .122 already had `main`'s commit. The feed names stable 0.0.5 and nightly .122.
 - The 0.0.5 run built package `1.0.5.0`; the certification kit passed it overall. It is Store submission 2, the test of a Store update that keeps the data.
 - After 0.0.5: #94 lets a stable run promote a nightly that was published first, when it holds the stable commit; #95 steadies a test whose held stream the garbage collector cancelled; #96 adds the measurements below.
 
@@ -334,18 +334,19 @@ Every build opens one stream per switch and none from Home to Watch. Tuning open
 
 Caveats: the Mac had another agent's screen capture and an installed app running (load about 2), and the VPS is shared.
 
-## Acceptance still to do
+## Acceptance
 
-Wout's checks in the installed apps, on his subscription:
+On 2 October 2026 Wout tested, on the Mac, Windows and Linux: nightly `0.0.4-nightly.20261002.117` from `b57faf1`, then nightly `0.0.5-nightly.20261002.122` from `9040bb1`, the release code of Stable 0.0.5, besides a local build of `main` at that commit. He accepted them, with no failures reported. That is his overall acceptance; no result per check is recorded.
 
-| Platform       | To check                                                                                                                                                                                                                                                                                                                                                                                                   |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Mac            | The signed 0.0.4, upgraded from 0.0.3 with the data kept. Live and on-demand playback with tracks, quality variants on a real catalogue, next episode, removal from Continue watching across a restart, and the playback menu's speed by ear. The mini player over other apps and over a full-screen app, and how long the window and Dock icon blink. Now Playing and the media keys, with TMDB's artwork |
-| Windows direct | The installed 0.0.4, upgraded from 0.0.3 with the data kept, and the update flow. The same viewing checks. `%APPDATA%\Mr. Streamer\Dictionaries` stays empty (#50). The media overlay and the name it shows. The mini player's title-bar buttons, dragging and resizing it, and a maximized window coming back maximized                                                                                   |
-| Windows Store  | Once Wout publishes submission 1: install from the testers' link, the Store's signature, launch and bundled playback, Open Store, no EXE updater. Then submission 2, 0.0.5 as `1.0.5.0`, through the Store, keeping the login, preferences, favourites and progress. Installed beside the direct copy, each keeps its own data                                                                             |
-| Linux          | The 0.0.4 AppImage and deb: install, launch, bundled playback, and an AppImage update coming back with the single-instance lock (#66). The mini player is off under Wayland                                                                                                                                                                                                                                |
+Windows Store: submission 1, `1.0.4.0`, was published to the private audience and installed on Wout's PC from the testers' link, and it worked.
 
-The [privacy audit's open checks](../privacy-audit.md#open-checks) need the same Mac and Windows machines: the data folder after a session, crash reports and what uninstalling leaves.
+Still to do, on Windows:
+
+- The Store update: submission 2, 0.0.5 as `1.0.5.0`, through the Store, keeping the login, preferences, favourites and progress, and never running the EXE updater.
+- The Store copy beside the direct EXE, each keeping its own data.
+- General > Updates in the Store copy: the one row, "updated by the Microsoft Store", and Open Store opening the product page.
+
+The [privacy audit's open checks](../privacy-audit.md#open-checks) list what is still worth looking at on the Mac and Windows: the data folder after a session, crash reports and what uninstalling leaves.
 
 ## Known gaps
 
