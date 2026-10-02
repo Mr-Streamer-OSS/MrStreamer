@@ -14,6 +14,7 @@ import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
 import { Failed } from "../failure.ts";
+import { removalScope } from "./titles.ts";
 import {
   decide,
   importEvents,
@@ -101,15 +102,19 @@ export class ViewingRecord extends Context.Service<
       favourite: boolean,
     ): Effect.Effect<Viewing, Failed>;
     recordWatch(commandId: string, channelId: string): Effect.Effect<Viewing, Failed>;
-    /** Remembers how far a movie or episode played. */
+    /** Remembers how far a movie or episode played, in a play that began at `since`. */
     recordProgress(
       commandId: string,
       title: TitleRef,
       position: number,
       duration: number,
+      since: number,
     ): Effect.Effect<Viewing, Failed>;
-    /** Takes a movie, or an episode's whole series, out of Continue watching until played again. */
-    removeFromContinue(commandId: string, title: TitleRef): Effect.Effect<Viewing, Failed>;
+    /**
+     * Takes movies and series out of Continue watching by the ids of their versions, every
+     * version played at once, until a play begun afterwards. How far they got stays.
+     */
+    removeFromContinue(commandId: string, filter: TitleFilter): Effect.Effect<Viewing, Failed>;
     /** How far the matching titles got; empty without an account. */
     progress(filter: TitleFilter): Effect.Effect<readonly TitleProgress[], Failed>;
     /** The sequence after each committed change. */
@@ -181,10 +186,21 @@ function make() {
         run(commandId, { kind: "set-favourite", channelId, favourite }),
       recordWatch: (commandId: string, channelId: string) =>
         run(commandId, { kind: "record-watch", channelId }),
-      recordProgress: (commandId: string, title: TitleRef, position: number, duration: number) =>
-        run(commandId, { kind: "record-progress", title, position, duration }),
-      removeFromContinue: (commandId: string, title: TitleRef) =>
-        run(commandId, { kind: "remove-title", title }),
+      recordProgress: (
+        commandId: string,
+        title: TitleRef,
+        position: number,
+        duration: number,
+        since: number,
+      ) => run(commandId, { kind: "record-progress", title, position, duration, since }),
+      removeFromContinue: (commandId: string, filter: TitleFilter) =>
+        Effect.gen(function* () {
+          const key = yield* account.current;
+          const played = key ? yield* store.titles(key, filter) : [];
+          // Each movie played, and one episode of each series played, which takes the series.
+          const titles = new Map(played.map(({ title }) => [removalScope(title), title]));
+          return yield* run(commandId, { kind: "remove-titles", titles: [...titles.values()] });
+        }),
       progress: (filter: TitleFilter) =>
         Effect.gen(function* () {
           const key = yield* account.current;

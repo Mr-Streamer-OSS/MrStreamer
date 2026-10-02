@@ -6,6 +6,8 @@
 //
 // Older builds read this file too, as when someone goes back to an earlier nightly: they skip
 // event types they don't know, leave the titles table alone, and insert events without a payload.
+// Builds with movies and series before `removed_at`, Stable 0.0.3 among them, write title rows
+// without it, and read `hidden` as this one writes it.
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -30,6 +32,7 @@ import {
 import {
   continueWatching,
   progressed,
+  removalScope,
   removedKeys,
   type TitleRow,
 } from "@mrstreamer/core/viewing/titles";
@@ -65,6 +68,7 @@ const SCHEMA = `
     finished integer not null,
     at integer not null,
     hidden integer not null,
+    removed_at integer,
     primary key (account, key)
   );
   create index if not exists titles_by_time on titles (account, at);
@@ -90,6 +94,7 @@ const TitlePayload = type("string.json.parse").pipe(
     title: TitleRef,
     "position?": "number >= 0",
     "duration?": "number > 0",
+    "since?": "number",
   }),
 );
 const StateRow = type({ favourites: "string", recent: "string", sequence: "number" });
@@ -100,6 +105,7 @@ const TitleRowShape = type({
   finished: "number",
   at: "number",
   hidden: "number",
+  "removed_at?": "number | null",
 });
 
 /** The viewing store in `dataDir`, open until the runtime closes. */
@@ -127,14 +133,18 @@ function open(path: string): DatabaseSync {
   try {
     db.exec("pragma journal_mode = wal; pragma synchronous = normal;");
     db.exec(SCHEMA);
-    // Records from before movies and series lack the payload column. Checked and added under the
-    // write lock, since two copies of the app can start at once.
+    // Records from before movies and series lack the payload column, and later ones the time a
+    // title left Continue watching. Checked and added under the write lock, since two copies of the
+    // app can start at once.
     db.exec("begin immediate");
     try {
-      const columns = db.prepare("pragma table_info(events)").all();
-      if (!columns.some((column) => column["name"] === "payload")) {
-        db.exec("alter table events add column payload text");
-      }
+      const has = (table: string, name: string) =>
+        db
+          .prepare(`pragma table_info(${table})`)
+          .all()
+          .some((column) => column["name"] === name);
+      if (!has("events", "payload")) db.exec("alter table events add column payload text");
+      if (!has("titles", "removed_at")) db.exec("alter table titles add column removed_at integer");
       db.exec("commit");
     } catch (cause) {
       db.exec("rollback");
@@ -173,6 +183,7 @@ function eventOf(
         title: payload.title,
         position: payload.position,
         duration: payload.duration,
+        since: payload.since ?? row.at,
       },
     };
   }
@@ -184,6 +195,7 @@ function rebuild(db: DatabaseSync): void {
   transaction(db, () => {
     const states = new Map<string, { state: ViewingState; sequence: number }>();
     const titles = new Map<string, Map<string, TitleRow>>();
+    const removals = new Map<string, Map<string, number>>();
     for (const raw of db.prepare("select * from events order by sequence").all()) {
       const read = eventOf(raw);
       if (!read) continue;
@@ -192,7 +204,9 @@ function rebuild(db: DatabaseSync): void {
       if (isTitleEvent(event)) {
         let rows = titles.get(account);
         if (!rows) titles.set(account, (rows = new Map()));
-        foldTitle(rows, event, at);
+        let removed = removals.get(account);
+        if (!removed) removals.set(account, (removed = new Map()));
+        foldTitle(rows, removed, event, at);
         states.set(account, { state: before.state, sequence });
       } else {
         states.set(account, { state: apply(before.state, event), sequence });
@@ -209,15 +223,25 @@ function rebuild(db: DatabaseSync): void {
   });
 }
 
-/** Applies a title event to rows held in memory, as the rebuild does. */
-function foldTitle(rows: Map<string, TitleRow>, event: TitleEvent, at: number): void {
+/**
+ * Applies a title event to rows held in memory, as the rebuild does. `removals` holds when each
+ * movie and series last left Continue watching, by `removalScope`.
+ */
+function foldTitle(
+  rows: Map<string, TitleRow>,
+  removals: Map<string, number>,
+  event: TitleEvent,
+  at: number,
+): void {
+  const scope = removalScope(event.title);
   if (event.type === "title-progress") {
-    rows.set(titleKey(event.title), progressed(event.title, event.position, event.duration, at));
+    rows.set(titleKey(event.title), progressed(event, at, removals.get(scope) ?? null));
     return;
   }
+  removals.set(scope, at);
   for (const key of removedKeys(event.title, [...rows.values()])) {
     const row = rows.get(key);
-    if (row) rows.set(key, { ...row, hidden: true });
+    if (row) rows.set(key, { ...row, hidden: true, removedAt: at });
   }
 }
 
@@ -234,7 +258,11 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
     recentTitles: db.prepare("select * from titles where account = ? order by at desc limit ?"),
     seriesTitles: db.prepare("select * from titles where account = ? and series_id = ?"),
     title: db.prepare("select * from titles where account = ? and key = ?"),
-    hide: db.prepare("update titles set hidden = 1 where account = ? and key = ?"),
+    hide: db.prepare("update titles set hidden = 1, removed_at = ? where account = ? and key = ?"),
+    // The movie's row, or every row of the episode's series.
+    removedAt: db.prepare(
+      "select max(removed_at) as removed_at from titles where account = ? and (key = ? or series_id = ?)",
+    ),
   };
 
   const titleRows = (rows: readonly unknown[]): TitleRow[] =>
@@ -249,6 +277,7 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
           finished: row.finished === 1,
           at: row.at,
           hidden: row.hidden === 1,
+          removedAt: row.removed_at ?? null,
         },
       ];
     });
@@ -296,13 +325,17 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
       if (!title) {
         state = apply(state, event);
       } else if (event.type === "title-progress") {
-        saveTitle(db, account, progressed(event.title, event.position, event.duration, at));
+        const seriesId = event.title.kind === "episode" ? event.title.seriesId : null;
+        const removed = statements.removedAt.get(account, titleKey(event.title), seriesId);
+        const removedAt =
+          typeof removed?.["removed_at"] === "number" ? removed["removed_at"] : null;
+        saveTitle(db, account, progressed(event, at, removedAt));
       } else {
         const rows =
           event.title.kind === "episode"
             ? titleRows(statements.seriesTitles.all(account, event.title.seriesId))
             : [];
-        for (const key of removedKeys(event.title, rows)) statements.hide.run(account, key);
+        for (const key of removedKeys(event.title, rows)) statements.hide.run(at, account, key);
       }
     }
     if (events.length === 0) return stored;
@@ -321,7 +354,9 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
             return row ? [row] : [];
           }),
         ];
-        return titleRows(rows).map(({ hidden: _hidden, ...progress }) => progress);
+        return titleRows(rows).map(
+          ({ hidden: _hidden, removedAt: _removedAt, ...progress }) => progress,
+        );
       }),
     commit: ({ account, commandId, at, decide }) =>
       attempt(() =>
@@ -347,7 +382,12 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
 function payloadOf(event: TitleEvent): string {
   return JSON.stringify(
     event.type === "title-progress"
-      ? { title: event.title, position: event.position, duration: event.duration }
+      ? {
+          title: event.title,
+          position: event.position,
+          duration: event.duration,
+          since: event.since,
+        }
       : { title: event.title },
   );
 }
@@ -360,7 +400,7 @@ function save(db: DatabaseSync, account: string, state: ViewingState, sequence: 
 
 function saveTitle(db: DatabaseSync, account: string, row: TitleRow): void {
   db.prepare(
-    "insert or replace into titles (account, key, title, series_id, position, duration, finished, at, hidden) values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "insert or replace into titles (account, key, title, series_id, position, duration, finished, at, hidden, removed_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   ).run(
     account,
     titleKey(row.title),
@@ -371,6 +411,7 @@ function saveTitle(db: DatabaseSync, account: string, row: TitleRow): void {
     row.finished ? 1 : 0,
     row.at,
     row.hidden ? 1 : 0,
+    row.removedAt,
   );
 }
 

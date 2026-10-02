@@ -97,6 +97,11 @@ export function useTitlePlayer<T>(selector: (state: TitlePlayerState) => T): T {
 const video = player.element;
 /** The open session: its id and the address runs play from. */
 let session: { readonly id: string; readonly url: string } | null = null;
+/**
+ * When the open title began to play, epoch milliseconds. Its checkpoints bring back a title taken
+ * out of Continue watching only when this play began after the removal.
+ */
+let openedAt = 0;
 let engine: TitleEngine | null = null;
 /** Voids the runs of an earlier open or run, like the live player's selection. */
 let generation = 0;
@@ -144,6 +149,7 @@ function save(): void {
     title: now.title,
     position: Math.min(position, duration),
     duration,
+    since: openedAt,
   }).catch(() => {});
 }
 
@@ -284,6 +290,7 @@ export const titlePlayer = {
     titlePlayer.close();
     player.suspend();
     const mine = ++generation;
+    openedAt = Date.now();
     convertSound = false;
     lastSubtitle = null;
     store.setState({ ...idle, now, phase: { kind: "opening" }, position: from });

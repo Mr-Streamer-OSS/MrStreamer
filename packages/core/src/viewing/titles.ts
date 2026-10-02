@@ -14,8 +14,13 @@ const MIN_CREDITS_SECONDS = 30;
 
 /** What the store keeps per title and account. */
 export interface TitleRow extends TitleProgress {
-  /** Taken out of Continue watching; playing it again brings it back. */
+  /** Taken out of Continue watching, until a play begun after `removedAt`. */
   readonly hidden: boolean;
+  /**
+   * When the movie, or the episode's series, last left Continue watching: epoch milliseconds. Null
+   * when it never did, or when a build without it wrote the row.
+   */
+  readonly removedAt: number | null;
 }
 
 /** Whether a position is in the credits, or past the end. */
@@ -24,21 +29,36 @@ export function isFinished(position: number, duration: number): boolean {
   return duration > 0 && position >= duration - credits;
 }
 
-/** The row after a checkpoint at `position`. Playing a title again shows it again. */
+/**
+ * The row after a checkpoint at `position`, from a play that began at `since`. `removedAt` is when
+ * the movie, or the episode's series, last left Continue watching. A play begun after that shows
+ * it again; the checkpoints of one already going then, as every minute while it plays, leave it out.
+ */
 export function progressed(
-  title: TitleRef,
-  position: number,
-  duration: number,
+  checkpoint: {
+    readonly title: TitleRef;
+    readonly position: number;
+    readonly duration: number;
+    readonly since: number;
+  },
   at: number,
+  removedAt: number | null,
 ): TitleRow {
+  const { title, position, duration, since } = checkpoint;
   return {
     title,
     position: Math.max(0, Math.min(position, duration)),
     duration,
     finished: isFinished(position, duration),
     at,
-    hidden: false,
+    hidden: removedAt !== null && since <= removedAt,
+    removedAt,
   };
+}
+
+/** What taking `title` out of Continue watching applies to: the movie, or the episode's series. */
+export function removalScope(title: TitleRef): string {
+  return title.kind === "movie" ? titleKey(title) : `series:${title.seriesId}`;
 }
 
 /**
@@ -78,5 +98,5 @@ export function continueWatching(rows: readonly TitleRow[]): TitleProgress[] {
   return [...movies, ...series]
     .sort((a, b) => b.at - a.at)
     .slice(0, CONTINUE_LIMIT)
-    .map(({ hidden: _hidden, ...progress }) => progress);
+    .map(({ hidden: _hidden, removedAt: _removedAt, ...progress }) => progress);
 }

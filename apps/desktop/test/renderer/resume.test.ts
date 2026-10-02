@@ -43,7 +43,6 @@ function entryOf(id: string): ContinueEntry {
       finished: false,
       at: 1,
     },
-    played: [],
     line: "S1 E2",
     done: 0.2,
     artworkUrl: null,

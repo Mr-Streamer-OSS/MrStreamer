@@ -116,8 +116,12 @@ export const ipcInputs = {
       title: TitleRef,
       position: "number >= 0",
       duration: "number > 0",
+      /** When this play of the title began: epoch milliseconds. */
+      since: "number",
     }),
-  "viewing.removeFromContinue": () => type({ commandId: "string", title: TitleRef }),
+  /** Every version played of the movies and series with these ids. */
+  "viewing.removeFromContinue": () =>
+    type({ commandId: "string", "movieIds?": "string[]", "seriesIds?": "string[]" }),
   "viewing.progress": () => type({ "movieIds?": "string[]", "seriesIds?": "string[]" }),
   "updates.status": none,
   "updates.setChannel": () => type({ channel: "'stable' | 'nightly'" }),
@@ -198,7 +202,7 @@ export interface IpcOutputs {
   "viewing.recordWatch": Viewing;
   /** Remembers how far a movie or episode played. */
   "viewing.recordProgress": Viewing;
-  /** Takes a movie, or an episode's series, out of Continue watching until it plays again. */
+  /** Takes movies and series out of Continue watching until a play begun afterwards. */
   "viewing.removeFromContinue": Viewing;
   /** How far the given movies, or every episode of a series, got. */
   "viewing.progress": readonly TitleProgress[];

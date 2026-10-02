@@ -29,8 +29,8 @@ import {
   movieNow,
   pickedVersion,
   playTitle,
-  removeFromContinue,
   useContinueWatching,
+  useRemoveFromContinue,
   useResume,
   type ContinueEntry,
 } from "../../lib/titles.ts";
@@ -363,6 +363,7 @@ function Rows({
 }) {
   const continuing = useContinueWatching();
   const play = useResume();
+  const removal = useRemoveFromContinue();
   const mine = continuing.entries.filter((entry) => entry.title.kind === kind);
   // Titles like the one watched last, by the version that was watched.
   const last = mine[0]?.progress.title;
@@ -381,19 +382,26 @@ function Rows({
       {featured && <Featured title={featured} resume={resume ?? null} />}
       <div className="space-y-9">
         {tab === "for-you" && mine.length > 0 && (
-          <Section title="Continue watching" tileRem={STILL_REM}>
-            {mine.map((entry) => (
-              <StillTile
-                key={entry.key}
-                artworkUrl={entry.artworkUrl}
-                name={entry.title.title}
-                line={entry.line}
-                done={entry.done}
-                onPlay={() => play(entry)}
-                onRemove={() => removeFromContinue(...entry.played)}
-              />
-            ))}
-          </Section>
+          <div>
+            <Section title="Continue watching" tileRem={STILL_REM}>
+              {mine.map((entry) => (
+                <StillTile
+                  key={entry.key}
+                  artworkUrl={entry.artworkUrl}
+                  name={entry.title.title}
+                  line={entry.line}
+                  done={entry.done}
+                  onPlay={() => play(entry)}
+                  onRemove={() => removal.mutate(entry.title)}
+                />
+              ))}
+            </Section>
+            {removal.error && (
+              <p className="mt-3 text-sm text-destructive">
+                {describeError(appError(removal.error))}
+              </p>
+            )}
+          </div>
         )}
         {(rows.data ?? []).map((row) => (
           <Section
