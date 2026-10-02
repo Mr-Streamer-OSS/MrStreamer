@@ -212,6 +212,43 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
     expect(app.tmdb.aboutRequests()).toBe(1);
   });
 
+  it("puts details opened early together again with the names TMDB gives later", async () => {
+    const app = await metadataApp();
+    // TMDB refuses at first, so the lists and the details have only the provider's names.
+    app.tmdb.refuse(true);
+    const { runtime, onDemand } = await app.start();
+    const [movie] = (
+      await onDemand.collection({ kind: "movie", id: "all", offset: 0, limit: 50 })
+    ).titles.filter((title) => title.tmdbId);
+    const id = movie?.id ?? "";
+    const early = await onDemand.details("movie", id);
+    expect(early.title).toMatchObject({ title: movie?.title, originalLanguage: null });
+
+    // A key TMDB accepts: names arrive in the lists, in the background.
+    app.tmdb.refuse(false);
+    const settings = await promised(runtime, Settings);
+    await settings.update({ tmdbKey: "another-key" });
+    await onDemand.reconfigure();
+    const listed = await vi.waitFor(
+      async () => {
+        const [title] = await onDemand.titles("movie", [id]);
+        expect(title?.originalLanguage).not.toBeNull();
+        return title;
+      },
+      { timeout: 20_000 },
+    );
+    const downloads = app.tmdb.aboutRequests();
+
+    const again = await onDemand.details("movie", id);
+
+    expect(again.title).toMatchObject({
+      title: listed?.title,
+      originalLanguage: listed?.originalLanguage,
+    });
+    expect(again.plot).toBe(early.plot);
+    expect(app.tmdb.aboutRequests()).toBe(downloads);
+  });
+
   it("fetches nothing without a key", async () => {
     const app = await metadataApp(null);
     const { onDemand } = await app.start();

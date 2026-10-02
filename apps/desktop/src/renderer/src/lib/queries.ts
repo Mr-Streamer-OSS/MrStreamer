@@ -256,11 +256,14 @@ export function syncLibraryUpdates(client: QueryClient): () => void {
 /** Reads movies and series again once the main process has fetched new lists. */
 export function syncOnDemand(client: QueryClient): () => void {
   return listen("ondemand.updated", () => {
-    // Lists change with a refresh and as TMDB's metadata arrives; a title's details don't.
+    // Lists change with a refresh and as TMDB's metadata arrives.
     void client.invalidateQueries({
       queryKey: ["ondemand"],
       predicate: (query) => query.queryKey[1] !== "details",
     });
+    // So do the names and languages details show. Open details keep what they show; opened
+    // again, they are put together anew from what the main process kept, with nothing downloaded.
+    void client.invalidateQueries({ queryKey: ["ondemand", "details"], refetchType: "none" });
   });
 }
 
