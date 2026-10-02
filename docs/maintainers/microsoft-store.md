@@ -83,15 +83,15 @@ References: [GitHub Actions for Store updates](https://learn.microsoft.com/en-us
 
 Update this table as work happens. Never record secrets or personal verification data.
 
-| Step                                  | State                | Evidence                                               |
-| ------------------------------------- | -------------------- | ------------------------------------------------------ |
-| Publisher account                     | Done, 2 October 2026 | Apps & Games access verified                           |
-| App reservation and identity          | Done, 2 October 2026 | Mr. Streamer reserved; the identity below              |
-| MSIX and certification kit            | Not started          | The artifact's commit, its source and the kit's result |
-| Privacy, content, transport, licences | Not started          | The policy URL and the recorded decisions              |
-| Private submission                    | Not started          | The right audience and a completed certification       |
-| Store install and update              | Not started          | Wout's acceptance on Windows                           |
-| Automated publishing                  | Deferred             | Set up in the later launch slice                       |
+| Step                                  | State                                   | Evidence                                                                                        |
+| ------------------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Publisher account                     | Done, 2 October 2026                    | Apps & Games access verified                                                                    |
+| App reservation and identity          | Done, 2 October 2026                    | Mr. Streamer reserved; the identity below                                                       |
+| MSIX and certification kit            | Built and checked in CI, 2 October 2026 | Every dry run and stable release records its commit and the kit's result; no stable package yet |
+| Privacy, content, transport, licences | Not started                             | The policy URL and the recorded decisions                                                       |
+| Private submission                    | Not started                             | The right audience and a completed certification                                                |
+| Store install and update              | Not started                             | Wout's acceptance on Windows                                                                    |
+| Automated publishing                  | Deferred                                | Set up in the later launch slice                                                                |
 
 ### Package identity
 
