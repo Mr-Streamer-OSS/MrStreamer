@@ -107,6 +107,11 @@ export interface Provider {
   liveCatalogue(signal?: AbortSignal): Promise<LiveCatalogue>;
   /** Upstream stream location for a channel. Contains credentials, so it stays in the main process. */
   liveStream(channelId: string): { readonly url: string; readonly format: StreamFormat };
+  /**
+   * Requests an address `liveStream` or `titleFile` gave, the way `providerFetch` does: never
+   * sending the login unencrypted after an https address.
+   */
+  request(url: string, init?: RequestInit): Promise<Response>;
   /** The provider's programme guide, an XMLTV document, as it downloads. */
   liveGuide(signal?: AbortSignal): Promise<ReadableStream<Uint8Array>>;
   onDemandCatalogue(signal?: AbortSignal): Promise<OnDemandCatalogue>;
@@ -123,4 +128,82 @@ export interface Provider {
 export interface ProviderOptions {
   readonly userAgent: string;
   readonly fetch?: typeof fetch;
+}
+
+const REDIRECTS: ReadonlySet<number> = new Set([301, 302, 303, 307, 308]);
+/** As many redirects as fetch follows. */
+const MAX_REDIRECTS = 20;
+
+/**
+ * Fetch for a provider's addresses, which carry `login`, its username and password. It follows
+ * GET redirects itself and refuses one that `exposesLogin`, so an https address never sends the
+ * login unencrypted. Its errors name no address beyond its origin.
+ */
+export function providerFetch(fetchImpl: typeof fetch, login: readonly string[]) {
+  return async (url: string, init: RequestInit = {}): Promise<Response> => {
+    try {
+      const start = new URL(url);
+      let target = start;
+      for (let redirects = 0; ; redirects++) {
+        const response = await fetchImpl(target.href, { ...init, redirect: "manual" });
+        const location = REDIRECTS.has(response.status) ? response.headers.get("location") : null;
+        if (location === null) return response;
+        void response.body?.cancel().catch(() => {});
+        if (redirects === MAX_REDIRECTS) throw new TypeError("It redirected too many times.");
+        const next = new URL(location, target);
+        if (exposesLogin(start, next, login)) {
+          throw new TypeError(
+            "It redirected to an unencrypted address with your login in it, so Mr. Streamer stopped.",
+          );
+        }
+        target = next;
+      }
+    } catch (cause) {
+      throw withoutAddress(cause);
+    }
+  };
+}
+
+/**
+ * Whether following a redirect to `target` sends the login unencrypted when the request started
+ * at an https address: an http target whose user info, path segments or query values hold the
+ * username or the password. One that holds neither, such as a stream's address with a token of
+ * its own, is followed. The stricter rule, never following https to http, would be
+ * `start.protocol === "https:" && target.protocol === "http:"`.
+ */
+function exposesLogin(start: URL, target: URL, login: readonly string[]): boolean {
+  if (start.protocol !== "https:" || target.protocol !== "http:") return false;
+  const parts = [
+    ...[target.username, target.password, ...target.pathname.split("/")].map(decoded),
+    ...target.searchParams.values(),
+  ];
+  return login.some((secret) => secret !== "" && parts.includes(secret));
+}
+
+function decoded(text: string): string {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * `text` with every web address cut to its origin, `http://host:8080/…`: provider addresses carry
+ * the login in their path and query, and messages from fetch can quote them.
+ */
+export function withoutAddresses(text: string): string {
+  return text.replace(/\b([a-z][a-z\d+.-]*):\/\/[^\s"'<>]+/gi, (address, scheme: string) => {
+    const origin = URL.parse(address)?.origin;
+    return origin && origin !== "null" ? `${origin}/…` : `${scheme}://…`;
+  });
+}
+
+/** What was thrown, or when its message quotes an address, a TypeError saying it without one. */
+function withoutAddress(cause: unknown): unknown {
+  const messages = [cause, cause instanceof Error ? cause.cause : null].map((each) =>
+    each instanceof Error ? each.message : "",
+  );
+  if (!messages.some((message) => message.includes("://"))) return cause;
+  return new TypeError(withoutAddresses(messages[0] ?? ""));
 }

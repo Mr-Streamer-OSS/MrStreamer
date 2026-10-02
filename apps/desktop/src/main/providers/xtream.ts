@@ -3,16 +3,18 @@ import { type } from "arktype";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import type { LoginInput } from "@mrstreamer/contracts/ipc";
 import type { AccountState, AccountStatus } from "@mrstreamer/contracts/subscription";
-import type {
-  LiveCatalogue,
-  OnDemandCatalogue,
-  Provider,
-  ProviderCategory,
-  ProviderChannel,
-  ProviderDetails,
-  ProviderEpisode,
-  ProviderOptions,
-  ProviderTitle,
+import {
+  providerFetch,
+  withoutAddresses,
+  type LiveCatalogue,
+  type OnDemandCatalogue,
+  type Provider,
+  type ProviderCategory,
+  type ProviderChannel,
+  type ProviderDetails,
+  type ProviderEpisode,
+  type ProviderOptions,
+  type ProviderTitle,
 } from "@mrstreamer/core/provider";
 
 export interface XtreamAccount {
@@ -66,9 +68,12 @@ export function parseLogin(input: LoginInput): XtreamAccount {
   return { server: `${url.origin}${path}`, username, password };
 }
 
-/** Creates a provider for an Xtream account. */
+/**
+ * Creates a provider for an Xtream account. Every address it requests or gives out carries the
+ * login, so its requests go through `providerFetch` and its errors name the server only.
+ */
 export function xtreamProvider(account: XtreamAccount, options: ProviderOptions): Provider {
-  const fetchImpl = options.fetch ?? fetch;
+  const fetchImpl = providerFetch(options.fetch ?? fetch, [account.username, account.password]);
   const credentials = new URLSearchParams({
     username: account.username,
     password: account.password,
@@ -253,6 +258,8 @@ export function xtreamProvider(account: XtreamAccount, options: ProviderOptions)
         container: null,
       };
     },
+
+    request: fetchImpl,
 
     titleFile(kind, id, container) {
       const user = encodeURIComponent(account.username);
@@ -650,7 +657,20 @@ function describeNetworkError(cause: unknown): string {
     case "ETIMEDOUT":
     case "UND_ERR_CONNECT_TIMEOUT":
       return "The server did not answer in time.";
+    // An https address on a server that speaks only http.
+    case "ERR_SSL_WRONG_VERSION_NUMBER":
+    case "ERR_SSL_PACKET_LENGTH_TOO_LONG":
+      return "The server doesn't offer an encrypted connection at this address.";
+    case "DEPTH_ZERO_SELF_SIGNED_CERT":
+    case "SELF_SIGNED_CERT_IN_CHAIN":
+    case "UNABLE_TO_VERIFY_LEAF_SIGNATURE":
+    case "UNABLE_TO_GET_ISSUER_CERT_LOCALLY":
+    case "CERT_HAS_EXPIRED":
+    case "ERR_TLS_CERT_ALTNAME_INVALID":
+      return "The server's certificate isn't valid for this address.";
     default:
-      return inner?.message ?? (cause instanceof Error ? cause.message : String(cause));
+      return withoutAddresses(
+        inner?.message ?? (cause instanceof Error ? cause.message : String(cause)),
+      );
   }
 }

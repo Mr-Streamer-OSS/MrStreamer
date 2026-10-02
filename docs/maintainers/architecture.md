@@ -59,6 +59,10 @@ Everything lives in Electron's `userData` folder, named after the product, not t
 
 Chromium keeps its own cache there too, mostly posters and backdrops; `index.ts` caps it at 64 MB on disk, and artwork is asked for at the width it shows at (`components/TitleArt.tsx`).
 
+## The login on the wire
+
+Xtream panels take the login in every address: the API and the guide in the query, streams and files in the path. Every request to the provider goes through `providerFetch` in `@mrstreamer/core/provider`: the adapter's own, and the proxy's through `Provider.request`. It follows redirects itself. After an https address it refuses a redirect to an http address whose path, query or user info holds the username or the password (`exposesLogin`), so the login never travels unencrypted once the viewer typed https. A redirect to http that carries only a token of its own, as panels send for streams, is followed; refusing every https-to-http redirect would be a one-line change there. The error says why, and nothing falls back to http. Its errors, and the adapter's, cut any address they quote to its origin (`withoutAddresses`), so a message from fetch can't carry the login to the window, the console or the diagnostics log. An address typed without a scheme still means http, and one typed with `http://` stays http.
+
 ## Catalogue
 
 The library fetches categories and channels, indexes them in memory and caches the provider's raw answer; display names are worked out on load, so naming rules improve without a refetch. A refresh replaces the catalogue only when it looks complete: an empty answer never does, and one with less than half the channels only when a second fetch agrees. A failed refresh keeps the catalogue and reports the failure in the status. Favourites and history refer to provider ids, so renamed or reordered channels keep them.
