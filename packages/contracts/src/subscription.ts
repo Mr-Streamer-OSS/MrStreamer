@@ -12,14 +12,22 @@ export interface AccountStatus {
 }
 
 export interface SubscriptionSummary {
-  readonly kind: "xtream";
-  /** Normalised server origin, for example `http://line.example.tv:8080`. */
+  /** An Xtream Codes login, or an M3U playlist link without one, which has live TV only. */
+  readonly kind: "xtream" | "m3u";
+  /** Identifies the account: the same login or link gives the same id. Holds no secret. */
+  readonly id: string;
+  /**
+   * Normalised server origin, for example `http://line.example.tv:8080`. For a playlist, its
+   * link's origin: the link itself stays in the main process.
+   */
   readonly server: string;
+  /** Empty for a playlist. */
   readonly username: string;
   readonly account: AccountStatus;
   /**
-   * True when the saved password can no longer be read, for example after the keychain denied
-   * access. The subscription stays, but nothing plays until the user enters the password again.
+   * True when the saved password, or a playlist's link, can no longer be read, for example after
+   * the keychain denied access. The subscription stays, but nothing plays until the user enters
+   * it again.
    */
   readonly needsPassword: boolean;
 }

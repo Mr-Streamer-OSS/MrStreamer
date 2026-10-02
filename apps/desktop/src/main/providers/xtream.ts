@@ -33,7 +33,9 @@ const GUIDE_TIMEOUT_MS = 5 * 60_000;
 
 /** What the user typed, as an account. */
 export interface ParsedLogin {
-  readonly account: XtreamAccount;
+  /** An Xtream login, or the link of a playlist without one (see ./m3u.ts). */
+  readonly account:
+    ({ readonly kind: "xtream" } & XtreamAccount) | { readonly kind: "m3u"; readonly link: string };
   /**
    * The address came without http:// or https://, so the account's is https: plain http only
    * with the viewer's say-so (see `httpsUnavailable`).
@@ -42,9 +44,10 @@ export interface ParsedLogin {
 }
 
 /**
- * Turns what the user typed into an account. The server field also accepts a pasted M3U link
- * (`.../get.php?username=...&password=...`), which carries the login itself. An address without a
- * scheme means https.
+ * Turns what the user typed into an account. The server field also accepts a pasted M3U link: an
+ * Xtream panel's (`.../get.php?username=...&password=...`) carries the login itself, and any other
+ * playlist's, without a login in the fields either, is a playlist. An address without a scheme
+ * means https.
  */
 export function parseLogin(input: LoginInput): ParsedLogin {
   const raw = input.server.trim();
@@ -67,17 +70,25 @@ export function parseLogin(input: LoginInput): ParsedLogin {
 
   const username = input.username.trim() || url.searchParams.get("username")?.trim() || "";
   const password = input.password || url.searchParams.get("password") || "";
+  // A server address alone, as the login form sends one without its login, is no playlist.
+  const serverOnly = url.pathname === "/" && !url.search;
+  if (!username && !password && !serverOnly) {
+    return { account: { kind: "m3u", link: url.href }, schemeless };
+  }
   if (!username || !password) {
     throw new AppFailure({
       kind: "incomplete-login",
-      detail: "Enter a username and password, or paste an M3U link that contains them.",
+      detail: "Enter a username and password, or paste an M3U link.",
     });
   }
 
   const path = url.pathname
     .replace(/\/(player_api|get|xmltv|panel_api)\.php$/i, "")
     .replace(/\/+$/, "");
-  return { account: { server: `${url.origin}${path}`, username, password }, schemeless };
+  return {
+    account: { kind: "xtream", server: `${url.origin}${path}`, username, password },
+    schemeless,
+  };
 }
 
 /** What `describeNetworkError` says when the server's name doesn't resolve. */
@@ -296,7 +307,7 @@ export function xtreamProvider(account: XtreamAccount, options: ProviderOptions)
       return `${account.server}/${folder}/${user}/${pass}/${encodeURIComponent(id)}.${encodeURIComponent(container)}`;
     },
 
-    liveStream(channelId) {
+    async liveStream(channelId) {
       const user = encodeURIComponent(account.username);
       const pass = encodeURIComponent(account.password);
       return {
@@ -668,7 +679,8 @@ function toInteger(value: string | number | null | undefined): number | null {
   return Number.isInteger(number) ? number : null;
 }
 
-function describeNetworkError(cause: unknown): string {
+/** Why a request to a provider failed, in a sentence that names no address beyond its origin. */
+export function describeNetworkError(cause: unknown): string {
   if (cause instanceof DOMException && cause.name === "TimeoutError")
     return "The server did not answer in time.";
   // fetch wraps the socket error: TypeError("fetch failed", { cause: Error { code } }).

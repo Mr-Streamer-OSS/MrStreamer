@@ -1,7 +1,9 @@
+import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, Search, Settings } from "lucide-react";
 import { isMac, useWindowFullScreen } from "../app/platform.ts";
-import { closeWatch, openView, useUi, type View } from "../app/ui-store.ts";
+import { closeWatch, isLivePage, openView, useUi, type View } from "../app/ui-store.ts";
 import { UpdateNotice } from "../features/updates/UpdateNotice.tsx";
+import { queries } from "../lib/queries.ts";
 import { cn } from "../lib/utils.ts";
 import { WINDOW_BAR } from "../../../shared/window-bar.ts";
 import { Logo } from "./Logo.tsx";
@@ -24,6 +26,8 @@ const VIEWS: readonly { readonly view: View; readonly label: string }[] = [
  */
 export function WindowBar({ className, onBack }: { className?: string; onBack?: () => void }) {
   const view = useUi((state) => state.view);
+  // A playlist has live TV only.
+  const liveOnly = useQuery(queries.subscription()).data?.kind === "m3u";
   const watching = useUi((state) => state.watching);
   const settingsOpen = useUi((state) => state.settings !== null);
   const detailsOpen = useUi((state) => state.details !== null);
@@ -63,7 +67,7 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
           Back
         </button>
       ) : (
-        VIEWS.map((entry) => (
+        (liveOnly ? VIEWS.filter((entry) => isLivePage(entry.view)) : VIEWS).map((entry) => (
           <button
             key={entry.view}
             aria-current={entry.view === view ? "page" : undefined}

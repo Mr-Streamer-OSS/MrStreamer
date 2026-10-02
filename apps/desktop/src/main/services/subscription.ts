@@ -1,4 +1,6 @@
-// The one connected subscription: validated with the provider, stored with a sealed password.
+// The one connected subscription: validated with the provider, stored with a sealed password, or
+// for a playlist, a sealed link.
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { type } from "arktype";
 import type { LoginInput } from "@mrstreamer/contracts/ipc";
@@ -12,25 +14,34 @@ import * as Layer from "effect/Layer";
 import * as Semaphore from "effect/Semaphore";
 import { readJsonFile, removeFile, writeJsonFile } from "../platform/json-file.ts";
 import type { Secrets } from "../platform/secrets.ts";
-import {
-  httpsUnavailable,
-  parseLogin,
-  xtreamProvider,
-  type XtreamAccount,
-} from "../providers/xtream.ts";
+import { providerFor, type ProviderAccount } from "../providers/account.ts";
+import { httpsUnavailable, parseLogin } from "../providers/xtream.ts";
 
+const AccountRecord = type({
+  state: "'active' | 'expired' | 'banned' | 'disabled' | 'unknown'",
+  expiresAt: "string | null",
+  maxConnections: "number | null",
+  activeConnections: "number | null",
+});
+
+// A playlist is a kind releases before it don't know: they read the file as no subscription, show
+// Connect and leave the file alone until another login replaces it.
 const StoredSubscription = type({
   version: "1",
   kind: "'xtream'",
   server: "string",
   username: "string",
   sealedPassword: "string",
-  account: {
-    state: "'active' | 'expired' | 'banned' | 'disabled' | 'unknown'",
-    expiresAt: "string | null",
-    maxConnections: "number | null",
-    activeConnections: "number | null",
-  },
+  account: AccountRecord,
+}).or({
+  version: "1",
+  kind: "'m3u'",
+  /** Where the playlist comes from, to show: its origin. The link itself is sealed. */
+  server: "string",
+  /** Tells playlists apart without the link: `m3u:` and part of the link's SHA-256. */
+  key: "string",
+  sealedLink: "string",
+  account: AccountRecord,
 });
 type StoredSubscription = typeof StoredSubscription.infer;
 
@@ -38,14 +49,22 @@ type StoredSubscription = typeof StoredSubscription.infer;
 export interface Source {
   readonly key: string;
   readonly provider: Provider;
-  /** The login itself, for a worker thread that builds its own copy of the provider. */
-  readonly account: XtreamAccount;
+  /** The login or link itself, for a worker thread that builds its own copy of the provider. */
+  readonly account: ProviderAccount;
+}
+
+interface Provided {
+  readonly provider: Provider;
+  readonly account: ProviderAccount;
 }
 
 interface Connected {
   readonly stored: StoredSubscription;
-  /** Null when the saved password cannot be read any more; the user has to enter it again. */
-  readonly provider: { readonly provider: Provider; readonly account: XtreamAccount } | null;
+  /**
+   * Null when the saved password or link cannot be read any more; the user has to enter it
+   * again.
+   */
+  readonly provider: Provided | null;
 }
 
 export interface SubscriptionDeps {
@@ -97,7 +116,7 @@ function make(deps: SubscriptionDeps) {
       current ??= readJsonFile(path, StoredSubscription).then((stored) => {
         if (!stored) return null;
         try {
-          return connected(stored, deps.secrets.open(stored.sealedPassword));
+          return { stored, provider: connected(stored, deps.secrets.open(sealedOf(stored))) };
         } catch {
           // A new signature, a reset keychain or a denied prompt all end here.
           return { stored, provider: null };
@@ -106,18 +125,20 @@ function make(deps: SubscriptionDeps) {
       return current;
     });
 
-    function connected(stored: StoredSubscription, password: string): Connected {
-      const account = { server: stored.server, username: stored.username, password };
-      return {
-        stored,
-        provider: { provider: xtreamProvider(account, deps.providerOptions), account },
-      };
+    /** The provider of a stored subscription, from its password or link `secret`. */
+    function connected(stored: StoredSubscription, secret: string): Provided {
+      const account: ProviderAccount =
+        stored.kind === "xtream"
+          ? { kind: "xtream", server: stored.server, username: stored.username, password: secret }
+          : { kind: "m3u", link: secret };
+      return { provider: providerFor(account, deps.providerOptions), account };
     }
 
-    const save = (stored: StoredSubscription, password: string) =>
+    /** Stores the subscription and keeps `provided`, which holds what a playlist read last. */
+    const save = (stored: StoredSubscription, provided: Provided) =>
       Effect.gen(function* () {
         yield* Effect.promise(() => writeJsonFile(path, stored));
-        const next = connected(stored, password);
+        const next = { stored, provider: provided };
         current = Promise.resolve(next);
         return summary(next);
       });
@@ -132,30 +153,43 @@ function make(deps: SubscriptionDeps) {
             try: () => parseLogin(login),
             catch: failedWith,
           });
+          const provider = providerFor(account, deps.providerOptions);
           const status = yield* Effect.tryPromise({
-            try: (signal) => xtreamProvider(account, deps.providerOptions).authenticate(signal),
+            try: (signal) => provider.authenticate(signal),
             catch: failedWith,
           }).pipe(
             // An address typed without a scheme goes to http only once the viewer agrees: the
-            // login would travel unencrypted.
+            // login would travel unencrypted. A playlist without a login keeps the https answer.
             Effect.mapError((failed) =>
-              schemeless && httpsUnavailable(failed.error)
+              account.kind === "xtream" && schemeless && httpsUnavailable(failed.error)
                 ? new Failed({ error: { kind: "unencrypted-only", server: account.server } })
                 : failed,
             ),
           );
-          const sealedPassword = yield* Effect.try({
-            try: () => deps.secrets.seal(account.password),
+          // The link of a playlist can hold a token, so it is sealed like a password.
+          const sealed = yield* Effect.try({
+            try: () =>
+              deps.secrets.seal(account.kind === "xtream" ? account.password : account.link),
             catch: failedWith,
           });
-          const stored: StoredSubscription = {
-            version: 1,
-            kind: "xtream",
-            server: account.server,
-            username: account.username,
-            sealedPassword,
-            account: status,
-          };
+          const stored: StoredSubscription =
+            account.kind === "xtream"
+              ? {
+                  version: 1,
+                  kind: "xtream",
+                  server: account.server,
+                  username: account.username,
+                  sealedPassword: sealed,
+                  account: status,
+                }
+              : {
+                  version: 1,
+                  kind: "m3u",
+                  server: new URL(account.link).origin,
+                  key: `m3u:${createHash("sha256").update(account.link).digest("hex").slice(0, 16)}`,
+                  sealedLink: sealed,
+                  account: status,
+                };
           return yield* writeOne(
             Effect.gen(function* () {
               if (change !== changes) {
@@ -166,28 +200,24 @@ function make(deps: SubscriptionDeps) {
                   },
                 });
               }
-              return yield* save(stored, account.password);
+              return yield* save(stored, { provider, account });
             }),
           );
         }).pipe(diagnosed("connect")),
 
       recheck: Effect.gen(function* () {
         const subscription = yield* load;
-        const provider = subscription?.provider?.provider;
-        if (!subscription || !provider) return subscription ? summary(subscription) : null;
+        const provided = subscription?.provider;
+        if (!subscription || !provided) return subscription ? summary(subscription) : null;
         const account = yield* Effect.tryPromise({
-          try: (signal) => provider.authenticate(signal),
+          try: (signal) => provided.provider.authenticate(signal),
           catch: failedWith,
         });
         return yield* writeOne(
           Effect.gen(function* () {
             const latest = yield* load;
             if (latest !== subscription) return latest ? summary(latest) : null;
-            const password = yield* Effect.try({
-              try: () => deps.secrets.open(subscription.stored.sealedPassword),
-              catch: failedWith,
-            });
-            return yield* save({ ...subscription.stored, account }, password);
+            return yield* save({ ...subscription.stored, account }, provided);
           }),
         );
       }),
@@ -213,17 +243,25 @@ function make(deps: SubscriptionDeps) {
   });
 }
 
-/** What changes when the login does: the server and the username. */
-function keyOf({ server, username }: StoredSubscription): string {
-  return `${server}|${username}`;
-}
-
 function summary({ stored, provider }: Connected): SubscriptionSummary {
   return {
     kind: stored.kind,
+    id: keyOf(stored),
     server: stored.server,
-    username: stored.username,
+    username: stored.kind === "xtream" ? stored.username : "",
     account: stored.account,
     needsPassword: provider === null,
   };
+}
+
+/**
+ * Identifies the account, and changes when the login does: the server and the username, or a
+ * playlist's fingerprint. Its caches and its viewing record are kept under it.
+ */
+function keyOf(stored: StoredSubscription): string {
+  return stored.kind === "xtream" ? `${stored.server}|${stored.username}` : stored.key;
+}
+
+function sealedOf(stored: StoredSubscription): string {
+  return stored.kind === "xtream" ? stored.sealedPassword : stored.sealedLink;
 }

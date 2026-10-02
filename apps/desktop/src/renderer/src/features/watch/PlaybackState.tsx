@@ -1,5 +1,6 @@
 // What the picture area says when there is no picture: idle, tuning, reconnecting or failed. A
 // quality chosen for the channel that fails says so, and offers another instead of playing it.
+import { useQuery } from "@tanstack/react-query";
 import { Play, RotateCw, SkipForward } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
@@ -8,7 +9,7 @@ import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { describeError } from "../../lib/errors.ts";
 import { qualityName } from "../../lib/quality.ts";
-import { useChooseQuality } from "../../lib/queries.ts";
+import { queries, useChooseQuality } from "../../lib/queries.ts";
 import { player, usePlayer, type PlaybackProblem } from "../../player/player.ts";
 import { useChannelQuality } from "./quality.ts";
 
@@ -30,6 +31,7 @@ export function PlaybackState({
   const phase = usePlayer((state) => state.phase);
   const quality = useChannelQuality(channel);
   const chooseQuality = useChooseQuality();
+  const playlist = useQuery(queries.subscription()).data?.kind === "m3u";
   if (phase.kind === "playing") return null;
 
   let message: Message;
@@ -90,7 +92,7 @@ export function PlaybackState({
       ),
     };
   } else {
-    message = problemMessage(phase.problem, channel, onNext);
+    message = problemMessage(phase.problem, channel, onNext, playlist);
   }
 
   return (
@@ -107,10 +109,12 @@ export function PlaybackState({
   );
 }
 
+/** What a failed channel says; `playlist` for a channel of a playlist subscription. */
 function problemMessage(
   problem: PlaybackProblem,
   channel: LiveChannel,
   onNext: () => void,
+  playlist: boolean,
 ): Message {
   const retry = (
     <Button variant="primary" onClick={() => player.retry()}>
@@ -139,7 +143,10 @@ function problemMessage(
     case "refused":
       return {
         title: "Stream refused",
-        body: "The provider refused this stream. Another device may be using your connection.",
+        // Public playlists list channels that refuse viewers outside their country.
+        body: playlist
+          ? "It may not be offered in your country."
+          : "The provider refused this stream. Another device may be using your connection.",
         actions: (
           <>
             {retry}

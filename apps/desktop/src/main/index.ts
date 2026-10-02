@@ -247,7 +247,7 @@ async function start(): Promise<void> {
         Effect.gen(function* () {
           const previous = yield* subscriptions.get;
           const connected = yield* subscriptions.connect(login);
-          if (previous?.server !== connected.server || previous.username !== connected.username) {
+          if (previous?.id !== connected.id) {
             yield* playback.closeAll;
             yield* forgetAccount;
           }
