@@ -51,7 +51,7 @@ A poster opens its details over the list, which stays where it was: the artwork,
 
 ## Watching
 
-The picture fills the window, with the title, a timeline and the controls along the bottom; they fade while you watch and come back when you move the pointer.
+The picture fills the window below the top bar, with the title, a timeline and the controls along the bottom; they fade while you watch and come back when you move the pointer.
 
 - Drag the timeline, or skip back and forward 10 seconds. A skip into what's already loaded is instant; further away, the picture takes a second to catch up.
 - **Sound** lists the sound tracks the file carries, and **CC** its subtitles. C turns the last ones you picked on and off, and a paused title stays paused while it changes. Your choice of language is remembered, and the next title or channel that has it starts with it, as **Audio in** and **Subtitles** in Settings > General describe. When the file has no sound in that language, its own default plays.

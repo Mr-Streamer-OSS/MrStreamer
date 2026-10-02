@@ -27,7 +27,7 @@ function noticed(status: UpdateStatus): boolean {
   }
 }
 
-export function UpdateNotice({ overlay }: { overlay: boolean }) {
+export function UpdateNotice() {
   const { status } = useUpdates();
   const open = useUi((state) => state.updateDialog === "panel");
   if (!status || (!noticed(status) && !open)) return null;
@@ -47,7 +47,7 @@ export function UpdateNotice({ overlay }: { overlay: boolean }) {
     >
       <Popover.Trigger
         render={
-          <Button variant={overlay ? "media" : "ghost"} size="sm" className="text-white">
+          <Button variant="ghost" size="sm" className="text-white">
             {update.kind === "available" && (
               <span aria-hidden className="size-1.5 rounded-full bg-white" />
             )}

@@ -81,7 +81,6 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
     (place.tab === "4k" && fourK.data?.total === 0) ||
     (place.tab === "adult" && adult.data?.total === 0);
   const tab = emptied ? "for-you" : place.tab;
-  const label = kind === "movie" ? "Movies" : "Series";
   const tabs: readonly { value: Tab; label: string }[] = [
     { value: "for-you", label: "For you" },
     { value: "new", label: "New" },
@@ -126,7 +125,7 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
     <div className="flex h-full flex-col">
       <WindowBar
         className="bg-black"
-        {...(place.collection ? { back: { label, onBack: () => go({ collection: null }) } } : {})}
+        {...(place.collection ? { onBack: () => go({ collection: null }) } : {})}
       />
       {place.collection ? (
         <Collection
