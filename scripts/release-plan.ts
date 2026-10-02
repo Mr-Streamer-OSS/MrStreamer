@@ -14,7 +14,9 @@
 // counting from that package.json or the
 // newest stable release, whichever is newer, so a stable release that main has not recorded yet
 // never makes later nightlies sort below it. A stable release rebuilds the commit of the tested
-// nightly it is given, as the version that nightly previewed unless another is given. When main
+// nightly it is given, as the version that nightly previewed unless another is given. A nightly
+// from before the newest stable release qualifies only when it holds that release's commit, such
+// as the nightly a stable run publishes first, and needs a version given. When main
 // has commits no published nightly holds, the stable run publishes a nightly of main first, so
 // Nightly users have every change before Stable users get any of it.
 //
@@ -119,7 +121,10 @@ export interface NightlyRequest {
 
 /** `sha`, `run`, `now` and `recorded` plan the nightly a stable run may publish first. */
 export interface StableRequest extends Omit<NightlyRequest, "scheduled" | "dryRun"> {
-  /** Replaces the version the nightly previewed; the commit stays the nightly's. */
+  /**
+   * Replaces the version the nightly previewed; the commit stays the nightly's. Required when the
+   * newest stable release already has or passed that version.
+   */
   readonly version?: string | undefined;
   /** The tested nightly to promote, by version or tag. Required. */
   readonly nightly: string;
@@ -189,6 +194,35 @@ export async function planStable(repo: Repository, request: StableRequest): Prom
     );
   }
 
+  const previousStable = repo.releases
+    .filter((release) => !release.draft && !release.prerelease)
+    .flatMap((release) => {
+      const parsed = parseVersion(release.tag);
+      return parsed && !parsed.nightly ? [parsed] : [];
+    })
+    .sort(compareVersions)
+    .at(-1);
+  // Nightlies count from the newest stable release, so one sorting before it was planned before
+  // that release was out and can hold older code than stable users have. The nightly a stable run
+  // publishes first sorts before that release too, yet holds its commit and more: what decides is
+  // whether the nightly's commit contains the stable release's.
+  if (previousStable && compareVersions(previewed, previousStable) < 0) {
+    const stableTag = tagOf(previousStable);
+    const holds = await repo.compare(stableTag, nightly.tag);
+    if (holds !== "ahead" && holds !== "identical") {
+      throw new Error(
+        `${nightly.tag} came before ${stableTag} and lacks its commit, so it can hold older code. Promote a nightly that contains ${stableTag}.`,
+      );
+    }
+    // The version it previewed is out already, or sorts before one that is.
+    if (!request.version) {
+      const next = { ...previousStable, patch: previousStable.patch + 1 };
+      throw new Error(
+        `${stableTag} is out already, so enter the version to release ${nightly.tag} as, such as ${formatVersion(next)}.`,
+      );
+    }
+  }
+
   const version = request.version ? parseVersion(request.version) : { ...previewed, nightly: null };
   if (!version || version.nightly) {
     throw new Error(`"${request.version}" is not a stable version such as 0.1.0.`);
@@ -199,21 +233,6 @@ export async function planStable(repo: Repository, request: StableRequest): Prom
     );
   }
   assertUnreleased(releasedVersions(repo), version);
-  const previousStable = repo.releases
-    .filter((release) => !release.draft && !release.prerelease)
-    .flatMap((release) => {
-      const parsed = parseVersion(release.tag);
-      return parsed && !parsed.nightly ? [parsed] : [];
-    })
-    .sort(compareVersions)
-    .at(-1);
-  // Nightlies count from the newest stable release, so one sorting before it was planned before
-  // that release was out and can hold older code than stable users have.
-  if (previousStable && compareVersions(previewed, previousStable) < 0) {
-    throw new Error(
-      `${nightly.tag} came before ${tagOf(previousStable)}, so it can hold older code. Promote a nightly built after it.`,
-    );
-  }
   const nightlyFirst = await nightlyBefore(repo, request);
   if (nightlyFirst && compareVersions(parseVersion(nightlyFirst.version)!, version) >= 0) {
     throw new Error(

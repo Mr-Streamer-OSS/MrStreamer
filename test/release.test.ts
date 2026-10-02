@@ -391,20 +391,62 @@ describe("stable releases", () => {
     expect(await planStable(repo, promote(latest))).toMatchObject({ previousTag: "v0.0.0" });
   });
 
-  it("are refused for a released version, or one that would sort before the nightly", async () => {
-    const { repo } = promotion([published("v0.0.1", 2, false)]);
+  it("are refused for a version that would sort before the nightly", async () => {
+    const { repo } = promotion();
 
-    await expect(planStable(repo, promote(latest))).rejects.toThrow("v0.0.1 already exists");
     await expect(planStable(repo, promote(latest, { version: "0.0.0" }))).rejects.toThrow(
       "would sort before v0.0.1-nightly.20261002.30",
     );
   });
 
-  it("are refused for a nightly from before the newest stable release, whatever the version", async () => {
-    const { repo } = promotion([published("v0.0.1", 2, false)]);
+  // A stable run of 0.0.1 published `latest` first, from main, then 0.0.1 from an older commit.
+  // `holds` says how `latest` relates to 0.0.1; main has moved on since.
+  const afterStable = (holds: History) =>
+    repository({
+      releases: [published(older, 30), published(latest, 8), published("v0.0.1", 2, false)],
+      commits: { [latest]: "nightly-commit" },
+      histories: {
+        "nightly-commit...main": "ahead",
+        [`v0.0.1...${latest}`]: holds,
+        [`${latest}...head`]: "ahead",
+      },
+    }).repo;
 
-    await expect(planStable(repo, promote(older, { version: "0.1.0" }))).rejects.toThrow(
-      `${older} came before v0.0.1`,
+  it("are refused for a nightly from before the newest stable release that lacks its commit, whatever the version", async () => {
+    for (const holds of ["behind", "diverged"] as const) {
+      await expect(
+        planStable(afterStable(holds), promote(latest, { version: "0.1.0" })),
+      ).rejects.toThrow(`${latest} came before v0.0.1 and lacks its commit`);
+    }
+  });
+
+  it("promote a nightly from before the newest stable release that contains its commit", async () => {
+    for (const holds of ["ahead", "identical"] as const) {
+      expect(await planStable(afterStable(holds), promote(latest, { version: "0.0.2" }))).toEqual({
+        channel: "stable",
+        version: "0.0.2",
+        tag: "v0.0.2",
+        sha: "nightly-commit",
+        previousTag: "v0.0.1",
+        nightlyFirst: {
+          channel: "nightly",
+          version: "0.0.2-nightly.20261002.40",
+          tag: "v0.0.2-nightly.20261002.40",
+          sha: "head",
+          previousTag: latest,
+        },
+      });
+    }
+  });
+
+  it("need the version entered to promote a nightly from before the newest stable release", async () => {
+    const repo = afterStable("ahead");
+
+    await expect(planStable(repo, promote(latest))).rejects.toThrow(
+      `v0.0.1 is out already, so enter the version to release ${latest} as, such as 0.0.2`,
+    );
+    await expect(planStable(repo, promote(latest, { version: "0.0.1" }))).rejects.toThrow(
+      "v0.0.1 already exists",
     );
   });
 });
