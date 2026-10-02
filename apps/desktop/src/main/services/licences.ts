@@ -26,7 +26,7 @@ const CREDITS = "LICENSES.chromium.html";
 /**
  * This app's notices: the manifest next to out/main, in development and inside app.asar, and the
  * credits page from Electron's download. On Linux and Windows electron-builder keeps it next to
- * the executable; on macOS electron-builder.yml copies it into the app's Resources.
+ * the executable; on macOS scripts/mac-credits.ts moves it into the app's Resources.
  */
 export function appNotices(): NoticeFiles {
   const executable = process.execPath;
