@@ -237,9 +237,12 @@ async function start(): Promise<void> {
           yield* Effect.forkDetach(refreshGuide);
           return connected;
         }),
-      "subscription.remove": () =>
+      "subscription.remove": ({ eraseViewing }) =>
         Effect.gen(function* () {
           yield* playback.closeAll;
+          // First, so a record that can't be erased leaves the subscription to try again.
+          const key = yield* subscriptions.key;
+          if (eraseViewing && key) yield* viewing.erase(key);
           yield* subscriptions.remove;
           yield* forgetAccount;
           return null;

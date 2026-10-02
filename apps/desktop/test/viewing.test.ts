@@ -65,6 +65,12 @@ async function viewingApp() {
       progress: viewing.progress,
       /** The sequences the UI is told about from now on. */
       changes: () => collect(runtime, viewing.changes),
+      /** What Remove subscription does with its box ticked. Returns the account's key. */
+      erase: async () => {
+        const key = (await running?.subscriptions.key()) ?? "";
+        await viewing.erase(key);
+        return key;
+      },
     };
   };
 
@@ -478,5 +484,46 @@ describe("how far movies and episodes got", () => {
 
     await expect(viewing.state()).rejects.toMatchObject({ error: { kind: "unexpected" } });
     expect(await app.readPreferences()).toMatchObject({ favouriteChannelIds: ["f1"] });
+  });
+});
+
+describe("erasing an account's record", () => {
+  it("deletes its favourites, history and progress for good, and only its own", async () => {
+    const app = await viewingApp();
+    await app.connect(1);
+    const viewing = await app.start();
+    await viewing.setFavourite("z", true);
+    await viewing.played(movie("m9"), 600, 6000);
+    const other = await viewing.state();
+    await app.connect(0);
+    await viewing.setFavourite("a", true);
+    await viewing.recordWatch("a");
+    await viewing.played(movie("m1"), 600, 6000);
+    await viewing.played(episode("e1", "s1", 1, 1), 600, 2700);
+    await viewing.remove({ movieIds: ["m1"] });
+
+    const key = await viewing.erase();
+
+    const empty = { favourites: [], recent: [], continueWatching: [] };
+    expect(await viewing.state()).toMatchObject(empty);
+    expect(await viewing.progress({ movieIds: ["m1"], seriesIds: ["s1"] })).toEqual([]);
+    // Nothing of it stays in the file, for this build or an older one to find.
+    const file = Buffer.concat(
+      await Promise.all(
+        ["mrstreamer.db", "mrstreamer.db-wal"].map((name) =>
+          readFile(join(app.dataDir, name)).catch(() => Buffer.alloc(0)),
+        ),
+      ),
+    );
+    expect(file.includes(key)).toBe(false);
+
+    // What a change to the rules does: the next start rebuilds everything from the events.
+    const db = new DatabaseSync(join(app.dataDir, "mrstreamer.db"));
+    db.exec("delete from state; delete from titles; delete from meta where key = 'state-version';");
+    db.close();
+    const restarted = await app.start();
+    expect(await restarted.state()).toMatchObject(empty);
+    await app.connect(1);
+    expect(await restarted.state()).toEqual(other);
   });
 });

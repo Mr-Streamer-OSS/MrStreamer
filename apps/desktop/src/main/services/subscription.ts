@@ -71,6 +71,11 @@ export class Subscriptions extends Context.Service<
     readonly remove: Effect.Effect<void>;
     /** The provider behind the subscription, or null without one or its password. */
     readonly source: Effect.Effect<Source | null>;
+    /**
+     * The subscription's `Source.key`, also while its password can't be read: what its viewing
+     * record is kept under. Null without a subscription.
+     */
+    readonly key: Effect.Effect<string | null>;
   }
 >()("mrstreamer/Subscriptions") {
   static readonly layer = (deps: SubscriptionDeps) => Layer.effect(Subscriptions, make(deps));
@@ -197,13 +202,20 @@ function make(deps: SubscriptionDeps) {
         );
       }),
 
-      source: Effect.map(load, (subscription): Source | null => {
-        if (!subscription?.provider) return null;
-        const { server, username } = subscription.stored;
-        return { key: `${server}|${username}`, ...subscription.provider };
-      }),
+      source: Effect.map(load, (subscription): Source | null =>
+        subscription?.provider
+          ? { key: keyOf(subscription.stored), ...subscription.provider }
+          : null,
+      ),
+
+      key: Effect.map(load, (subscription) => (subscription ? keyOf(subscription.stored) : null)),
     };
   });
+}
+
+/** What changes when the login does: the server and the username. */
+function keyOf({ server, username }: StoredSubscription): string {
+  return `${server}|${username}`;
 }
 
 function summary({ stored, provider }: Connected): SubscriptionSummary {

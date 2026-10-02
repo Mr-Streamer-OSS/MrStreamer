@@ -376,6 +376,23 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
           return true;
         }),
       ),
+    // The events go too, so no rebuild, here or in an older build, brings anything back. SQLite
+    // zeroes what it deletes, and the checkpoint moves it out of the write-ahead log, so the
+    // account's key and titles don't linger in the file either.
+    erase: (account) =>
+      attempt(() => {
+        db.exec("pragma secure_delete = on");
+        try {
+          transaction(db, () => {
+            for (const table of ["events", "state", "titles"]) {
+              db.prepare(`delete from ${table} where account = ?`).run(account);
+            }
+          });
+        } finally {
+          db.exec("pragma secure_delete = off");
+        }
+        db.exec("pragma wal_checkpoint(truncate)");
+      }),
   };
 }
 
@@ -437,5 +454,11 @@ function attempt<A>(run: () => A): Effect.Effect<A, Failed> {
 /** A store for when the database can't open: every call reports why. */
 function unavailable(detail: string): ViewingStore["Service"] {
   const fail = Effect.fail(new Failed({ error: { kind: "unexpected", detail } }));
-  return { read: () => fail, titles: () => fail, commit: () => fail, importOnce: () => fail };
+  return {
+    read: () => fail,
+    titles: () => fail,
+    commit: () => fail,
+    importOnce: () => fail,
+    erase: () => fail,
+  };
 }

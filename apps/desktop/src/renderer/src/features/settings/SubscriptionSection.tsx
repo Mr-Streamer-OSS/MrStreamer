@@ -2,8 +2,9 @@
 // when the tab opens, the login, and what was loaded from it, each list with its own refresh, so
 // one that failed can be fetched again alone. The server shows, with a note when the login travels
 // over plain http; the password never does.
+import { Checkbox } from "@base-ui/react/checkbox";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { RotateCw } from "lucide-react";
+import { Check, RotateCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import type { SubscriptionSummary } from "@mrstreamer/contracts/subscription";
@@ -161,11 +162,16 @@ function List({
 }
 
 /** Takes the login and everything loaded with it off this device, once confirmed. */
+/**
+ * Remove subscription, confirmed inline. Favourites, history and progress stay for when the
+ * account connects again, unless the viewer ticks the box to delete them too.
+ */
 function Remove() {
   const client = useQueryClient();
   const [confirming, setConfirming] = useState(false);
+  const [eraseViewing, setEraseViewing] = useState(false);
   const remove = useMutation({
-    mutationFn: () => call("subscription.remove"),
+    mutationFn: () => call("subscription.remove", { eraseViewing }),
     onSuccess: async () => {
       player.reset();
       resetForAccount();
@@ -189,11 +195,29 @@ function Remove() {
       <p className="mb-3 text-[0.9375rem]">
         Remove the login, and the lists loaded with it, from this device?
       </p>
+      <label className="mb-4 flex w-fit items-center gap-3 text-[0.9375rem]">
+        <Checkbox.Root
+          checked={eraseViewing}
+          onCheckedChange={setEraseViewing}
+          className="grid size-4 flex-none place-items-center rounded-[0.25rem] shadow-[inset_0_0_0_1.5px_rgb(255_255_255/45%)] outline-none transition-shadow duration-150 focus-visible:ring-2 focus-visible:ring-ring data-checked:bg-white data-checked:shadow-none"
+        >
+          <Checkbox.Indicator>
+            <Check className="size-3 text-black" strokeWidth={3} />
+          </Checkbox.Indicator>
+        </Checkbox.Root>
+        Also delete favourites, history and progress
+      </label>
       <div className="flex gap-3">
         <Button variant="destructive" disabled={remove.isPending} onClick={() => remove.mutate()}>
           Remove
         </Button>
-        <Button variant="ghost" onClick={() => setConfirming(false)}>
+        <Button
+          variant="ghost"
+          onClick={() => {
+            setConfirming(false);
+            setEraseViewing(false);
+          }}
+        >
           Keep
         </Button>
       </div>
