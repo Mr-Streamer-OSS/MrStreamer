@@ -419,6 +419,7 @@ function defineTitleSchemas() {
     "season?": loose,
     "title?": "string | null",
     "container_extension?": "string | null",
+    "added?": loose,
     "info?": type({
       "movie_image?": "string | null",
       "plot?": "string | null",
@@ -516,6 +517,7 @@ function toEpisode(raw: unknown): ProviderEpisode[] {
       duration: seconds(row.info?.duration_secs) ?? clockSeconds(row.info?.duration),
       stillUrl: url(row.info?.movie_image),
       airDate: row.info?.air_date?.trim() || row.info?.releasedate?.trim() || null,
+      addedAt: epochSeconds(row.added),
       container: row.container_extension?.trim() || "mp4",
     },
   ];
