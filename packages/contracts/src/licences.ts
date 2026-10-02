@@ -1,6 +1,6 @@
-// Third-party notices for what the installers ship, as Settings > About lists them. The build
-// writes them to out/licences/third-party.json (apps/desktop/scripts/licences.ts), and the main
-// process reads that file when the UI asks.
+// Notices for what the installers ship, the app itself included, as Settings > About lists them.
+// The build writes them to out/licences/third-party.json (apps/desktop/scripts/licences.ts), and
+// the main process reads that file when the UI asks.
 import { type } from "arktype";
 
 const Notice = type({
@@ -15,7 +15,7 @@ const Notice = type({
   homepage: "string | null",
 });
 
-/** A third-party component the installers carry: a bundled package, Electron, FFmpeg and so on. */
+/** A component the installers carry: a bundled package, Electron, FFmpeg, the app itself. */
 export type ThirdPartyNotice = typeof Notice.infer;
 
 /**

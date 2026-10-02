@@ -1,4 +1,5 @@
-// Third-party notices for what the installers ship, for Settings > About. electron.vite.config.ts
+// Notices for what the installers ship, for Settings > About: every third-party component, and the
+// app's own licence, which licences.config.json adds like a component. electron.vite.config.ts
 // notes the modules each bundle holds; once main, preload and renderer are written, this finds the
 // packages they come from, reads their licence files, adds what licences.config.json describes and
 // writes out/licences/third-party.json, which electron-builder packages with the rest of out/.
@@ -20,9 +21,9 @@ type Notice = NoticeManifest["notices"][number];
 /**
  * Licences whose code may ship with the app's own under GPL-3.0: the FSF lists each as compatible
  * with version 3 (Apache-2.0 with version 3 only, MPL-2.0 through its secondary licence clause,
- * LGPL by conversion to the GPL); BlueOak-1.0.0 is a permissive licence with only a notice
- * condition. GPL-2.0-only is missing on purpose: it can't combine with GPL-3.0. Anything new needs
- * a look at its terms before it goes on the list.
+ * LGPL by conversion to the GPL, ZPL-2.1 too); BlueOak-1.0.0, dtoa and SunPro are permissive
+ * licences with only a notice condition. GPL-2.0-only is missing on purpose: it can't combine with
+ * GPL-3.0. Anything new needs a look at its terms before it goes on the list.
  */
 const COMPATIBLE = new Set([
   "0BSD",
@@ -33,6 +34,7 @@ const COMPATIBLE = new Set([
   "BSL-1.0",
   "CC-BY-4.0",
   "CC0-1.0",
+  "dtoa",
   "GPL-2.0-or-later",
   "GPL-3.0-only",
   "GPL-3.0-or-later",
@@ -45,8 +47,10 @@ const COMPATIBLE = new Set([
   "MIT-0",
   "MPL-2.0",
   "Python-2.0",
+  "SunPro",
   "Unlicense",
   "Zlib",
+  "ZPL-2.1",
 ]);
 
 /**
@@ -108,7 +112,10 @@ const Config = type({
    * package that carries them.
    */
   embedded: { "[string]": Component.array() },
-  /** What no bundle shows: Chromium and Node.js inside Electron, the ffmpeg in resources/ffmpeg. */
+  /**
+   * What no bundle shows: Chromium and Node.js inside Electron, the ffmpeg in resources/ffmpeg with
+   * the MinGW-w64 runtime in its Windows build, and the app itself.
+   */
   components: Component.array(),
 });
 

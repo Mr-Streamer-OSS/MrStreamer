@@ -17,6 +17,7 @@ const TABS: readonly { value: SettingsTab; label: string }[] = [
 ];
 
 const REPOSITORY_URL = "https://github.com/Mr-Streamer-OSS/MrStreamer";
+const PRIVACY_URL = "https://mrstreamer.app/privacy";
 
 /**
  * Settings, a page over the current view, so a channel keeps playing underneath. Opens with ⌘,
@@ -83,7 +84,10 @@ export function SettingsPage() {
   );
 }
 
-/** The installed version, where the project lives, its licences and how to report a bug. */
+/**
+ * The installed version, where the project lives, the commit the build comes from, its licences,
+ * the privacy policy and how to report a bug.
+ */
 function About() {
   const { status } = useUpdates();
   const rows: [string, ReactNode][] = [
@@ -95,7 +99,16 @@ function About() {
     [
       "Source",
       <>
-        <Link href={REPOSITORY_URL}>GitHub</Link> · GPL-3.0
+        <Link href={REPOSITORY_URL}>GitHub</Link>
+        {__BUILD_COMMIT__ && (
+          <>
+            {" · "}
+            <Link href={`${REPOSITORY_URL}/tree/${__BUILD_COMMIT__}`}>
+              {__BUILD_COMMIT__.slice(0, 7)}
+            </Link>
+          </>
+        )}
+        {" · GPL-3.0"}
       </>,
     ],
     [
@@ -108,6 +121,7 @@ function About() {
         Open-source licences
       </button>,
     ],
+    ["Privacy", <Link href={PRIVACY_URL}>mrstreamer.app/privacy</Link>],
   ];
   return (
     <section>

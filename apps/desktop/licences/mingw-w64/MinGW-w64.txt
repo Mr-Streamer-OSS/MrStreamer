@@ -1,0 +1,10 @@
+MinGW-w64 runtime and winpthreads, in the Windows build
+
+On Windows, Mr. Streamer's ffmpeg.exe and ffprobe.exe are built with MSYS2's
+MinGW-w64 toolchain and statically linked against the MinGW-w64 runtime and
+its winpthreads library. Parts of both are under licences that ask for their
+notices in binary distributions; they follow, the runtime's first. The Mac
+and Linux builds don't contain them.
+
+The script that builds ffmpeg:
+https://github.com/Mr-Streamer-OSS/MrStreamer/blob/v{app}/apps/desktop/scripts/build-ffmpeg.sh

@@ -127,7 +127,7 @@ The main process runs every service on one [Effect](https://effect.website) runt
 | `Updates`       | `services/updates.ts`              | The release channel, checks, downloads and the install                                                                                                                   |
 | `Guide`         | `@mrstreamer/core/guide/service`   | The programme guide                                                                                                                                                      |
 | `ViewingRecord` | `@mrstreamer/core/viewing/service` | Favourites, watch history and title progress                                                                                                                             |
-| `Licences`      | `services/licences.ts`             | Third-party notices for Settings > About                                                                                                                                 |
+| `Licences`      | `services/licences.ts`             | The app's and third-party notices for About                                                                                                                              |
 
 A service is a `Context.Service` class with a `layer`, and reaches the others through the context rather than callbacks. Services whose rules run without the platform live in `packages/core` and ask for what they need through ports, services of their own that the app supplies: the guide's are `GuideSource` (the subscription and its download), `GuideCatalogue` (guide ids) and `GuideStore` (the saved document, `platform/guide-store.ts`). The others live in the app. Every expected failure is a `Failed` from `@mrstreamer/core/failure`, carrying the `AppError` the UI shows; a provider adapter's `AppFailure` keeps its error, anything else counts as unexpected.
 
@@ -215,4 +215,4 @@ The app never downloads or installs on its own; see the [user guide](../user/upd
 
 ## Licences
 
-`scripts/licences.ts` writes `out/licences/third-party.json` during the build from the packages the bundles actually contain, plus Electron, Chromium, Node.js, FFmpeg and x264; [development](development.md#third-party-notices) describes it. `services/licences.ts` reads it for Settings > About, and turns Chromium's credits page into text on request.
+`scripts/licences.ts` writes `out/licences/third-party.json` during the build from the packages the bundles actually contain, plus Electron, Chromium, Node.js, FFmpeg, x264, the MinGW-w64 runtime in the Windows ffmpeg and the app's own GPL-3.0 text; [development](development.md#third-party-notices) describes it. `services/licences.ts` reads it for Settings > About, and turns Chromium's credits page into text on request. About's Source row links to the commit the build comes from, `__BUILD_COMMIT__` from `electron.vite.config.ts`.

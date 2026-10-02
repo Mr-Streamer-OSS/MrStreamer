@@ -88,6 +88,26 @@
       "source": "https://github.com/Mr-Streamer-OSS/MrStreamer/releases/download/v{app}/x264-{X264_COMMIT}.tar.gz",
       "homepage": "https://www.videolan.org/developers/x264.html",
       "files": ["licences/ffmpeg/x264.txt", "licences/ffmpeg/x264-COPYING"]
+    },
+    {
+      "name": "MinGW-w64 runtime",
+      "version": "MSYS2",
+      "licence": "ZPL-2.1 AND dtoa AND SunPro AND MIT AND BSD-3-Clause",
+      "source": "https://sourceforge.net/projects/mingw-w64/",
+      "homepage": "https://www.mingw-w64.org",
+      "files": [
+        "licences/mingw-w64/MinGW-w64.txt",
+        "licences/mingw-w64/COPYING.MinGW-w64-runtime.txt",
+        "licences/mingw-w64/winpthreads-COPYING"
+      ]
+    },
+    {
+      "name": "Mr. Streamer",
+      "version": "{app}",
+      "licence": "GPL-3.0-only",
+      "source": "https://github.com/Mr-Streamer-OSS/MrStreamer",
+      "homepage": "https://mrstreamer.app",
+      "files": ["licences/mr-streamer.txt", "../../LICENSE"]
     }
   ]
 }
