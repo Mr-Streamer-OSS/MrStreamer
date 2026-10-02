@@ -2,7 +2,7 @@
 // title counts as finished, and what Continue watching shows. The viewing store keeps one row per
 // title and account and runs these on it.
 import { titleKey, type TitleRef } from "@mrstreamer/contracts/ondemand";
-import { CONTINUE_LIMIT, type TitleProgress } from "@mrstreamer/contracts/viewing";
+import { CONTINUE_OFFERED, type TitleProgress } from "@mrstreamer/contracts/viewing";
 
 /** A title counts as started, and shows in Continue watching, after this many seconds. */
 export const STARTED_SECONDS = 120;
@@ -75,7 +75,7 @@ export function removedKeys(title: TitleRef, rows: readonly TitleRow[]): string[
 /**
  * Continue watching from an account's rows: movies started and not finished, and for each series
  * the episode played last, finished or not, so its next one can be offered. Hidden rows stay out.
- * Most recent first.
+ * Most recent first, at most `CONTINUE_OFFERED`.
  */
 export function continueWatching(rows: readonly TitleRow[]): TitleProgress[] {
   const latestPerSeries = new Map<string, TitleRow>();
@@ -97,6 +97,6 @@ export function continueWatching(rows: readonly TitleRow[]): TitleProgress[] {
   );
   return [...movies, ...series]
     .sort((a, b) => b.at - a.at)
-    .slice(0, CONTINUE_LIMIT)
+    .slice(0, CONTINUE_OFFERED)
     .map(({ hidden: _hidden, removedAt: _removedAt, ...progress }) => progress);
 }
