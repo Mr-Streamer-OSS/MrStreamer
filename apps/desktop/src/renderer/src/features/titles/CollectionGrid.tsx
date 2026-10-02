@@ -94,6 +94,7 @@ export function CollectionGrid({
       titleAt={listed.titleAt}
       onVisible={listed.load}
       active={active}
+      asked={id === "4k"}
     />
   );
 }
@@ -135,13 +136,17 @@ function Grid({
   onVisible,
   active,
   caption = describe,
+  asked = false,
 }: {
   total: number;
   titleAt: (index: number) => Title | undefined;
   onVisible: (first: number, last: number) => void;
   active: boolean;
   caption?: (title: Title) => string;
+  /** Each poster is the version the grid asks for, as the 4K tab's are their 4K versions. */
+  asked?: boolean;
 }) {
+  const open = (title: Title) => openDetails({ kind: title.kind, id: title.id, asked });
   const box = useRef<HTMLDivElement>(null);
   const rem = useRem();
   const [width, setWidth] = useState(0);
@@ -222,7 +227,7 @@ function Grid({
           break;
         case "Enter": {
           const title = now.titleAt(now.selected);
-          if (title) openDetails({ kind: title.kind, id: title.id });
+          if (title) open(title);
           break;
         }
         default:
@@ -257,6 +262,7 @@ function Grid({
                   title={title}
                   caption={caption(title)}
                   selected={keyboard && active && index === selected}
+                  onOpen={() => open(title)}
                 />
               ) : (
                 <div key={index}>
@@ -275,15 +281,17 @@ function GridPoster({
   title,
   caption,
   selected,
+  onOpen,
 }: {
   title: Title;
   caption: string;
   selected: boolean;
+  onOpen: () => void;
 }) {
   return (
     <button
       onMouseDown={(event) => event.preventDefault()}
-      onClick={() => openDetails({ kind: title.kind, id: title.id })}
+      onClick={onOpen}
       className="group min-w-0 text-left"
       title={title.name}
     >
