@@ -101,6 +101,8 @@ interface LiveSession extends SessionBase {
   readonly audioLanguage: string | null;
   /** The tracks the stream carries, once it has been inspected. */
   layout: StreamLayout | null;
+  /** The sound track the stream plays, by PID, once the delivery is planned. */
+  playing: number | null;
   /** The caption channels found in the pictures so far, 1 and 3. */
   captions: readonly number[];
 }
@@ -324,6 +326,7 @@ function make(deps: PlaybackDeps) {
         (session.audioLanguage
           ? layout?.audio.find((track) => languageCode(track.language) === session.audioLanguage)
           : undefined);
+      session.playing = (chosen ?? layout?.audio[0])?.pid ?? null;
       const conversion = layout
         ? planConversion(layout, session.decoders, {
             repair: session.repair,
@@ -861,6 +864,7 @@ function make(deps: PlaybackDeps) {
               audio: options.audio ?? null,
               audioLanguage: options.audioLanguage ?? null,
               layout: null,
+              playing: null,
               captions: [],
               closed,
               scope: sessionScope,
@@ -941,7 +945,7 @@ function make(deps: PlaybackDeps) {
         Effect.sync(() => {
           const session = sessions.get(sessionId);
           return session?.kind === "live" && session.layout
-            ? channelTracks(session.layout, session.captions)
+            ? channelTracks(session.layout, session.captions, session.playing)
             : null;
         }),
     };
@@ -1120,8 +1124,13 @@ async function* filtered(
 }
 
 /** The tracks a channel's program table names, and its captions, as the UI lists them. */
-function channelTracks(layout: StreamLayout, captions: readonly number[]): ChannelTracks {
+function channelTracks(
+  layout: StreamLayout,
+  captions: readonly number[],
+  playing: number | null,
+): ChannelTracks {
   return {
+    playing,
     audio: audioTracks(
       layout.audio.map((track, index) => ({
         id: track.pid,

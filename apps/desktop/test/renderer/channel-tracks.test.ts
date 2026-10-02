@@ -33,6 +33,7 @@ const tracksOfA: ChannelTracks = {
       default: false,
     },
   ],
+  playing: 201,
 };
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

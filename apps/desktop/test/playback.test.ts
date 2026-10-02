@@ -233,6 +233,7 @@ describe("playback", () => {
         // Found in the pictures as they passed.
         expect.objectContaining({ id: 0x1ff0, page: 1, format: "captions", label: "Captions" }),
       ],
+      playing: 0x101,
     });
     await playback.dispose();
   });
@@ -278,10 +279,11 @@ describe("playback", () => {
     );
     const received = streamIds(Buffer.from(await (await fetch(session.url)).arrayBuffer()));
 
-    // The player plays the first sound track the program table lists.
+    // The player plays the first sound track the program table lists, which the tracks name.
     expect(received.filter((stream) => stream.type === "audio").map((stream) => stream.id)).toEqual(
       [0x102, 0x101],
     );
+    expect(await playback.tracks(session.sessionId)).toMatchObject({ playing: 0x102 });
     expect(received.map((stream) => stream.id)).toContain(0x300);
     await playback.dispose();
   });
