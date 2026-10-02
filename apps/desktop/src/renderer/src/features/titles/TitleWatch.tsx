@@ -19,6 +19,7 @@ import { describeError } from "../../lib/errors.ts";
 import { queries } from "../../lib/queries.ts";
 import { clock, episodeLabel, episodeNow, nextEpisode, playTitle } from "../../lib/titles.ts";
 import { cn } from "../../lib/utils.ts";
+import { WINDOW_BAR } from "../../../../shared/window-bar.ts";
 import { Picture } from "../../player/Picture.tsx";
 import { player, type PlaybackProblem } from "../../player/player.ts";
 import { titlePlayer, useTitlePlayer } from "../../player/title-player.ts";
@@ -128,21 +129,23 @@ export function TitleWatch() {
         !controlsVisible && "cursor-none",
       )}
     >
+      {/* In a window the picture starts below the bar, so the bar never draws on it. */}
       <Picture
         active
         fit="contain"
-        className="absolute inset-0"
+        className="absolute inset-x-0 bottom-0"
+        style={{ top: fullscreen ? 0 : WINDOW_BAR.height }}
         onClick={() => titlePlayer.togglePause()}
         onDoubleClick={toggleFullscreen}
       />
       {!fullscreen && (
         <div
           className={cn(
-            "absolute inset-x-0 top-0 z-30 bg-gradient-to-b from-black/70 to-transparent transition-opacity duration-300",
+            "absolute inset-x-0 top-0 z-30 transition-opacity duration-300",
             controlsVisible ? "opacity-100" : "pointer-events-none opacity-0",
           )}
         >
-          <WindowBar overlay back={{ label: now.name, onBack: leave }} />
+          <WindowBar onBack={leave} />
         </div>
       )}
       {ended && next ? (

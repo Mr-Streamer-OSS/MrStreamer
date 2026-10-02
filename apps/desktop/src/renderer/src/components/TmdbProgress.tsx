@@ -11,7 +11,7 @@ import { Tooltip } from "./ui/tooltip.tsx";
 const RADIUS = 8;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
-export function TmdbProgress({ overlay }: { overlay: boolean }) {
+export function TmdbProgress() {
   const status = useQuery(queries.onDemandStatus());
   const metadata = status.data?.metadata;
   if (!metadata?.fetching || metadata.refused || metadata.known >= metadata.wanted) return null;
@@ -20,7 +20,7 @@ export function TmdbProgress({ overlay }: { overlay: boolean }) {
   return (
     <Tooltip label={label} side="bottom">
       <Button
-        variant={overlay ? "media" : "ghost"}
+        variant="ghost"
         size="icon-sm"
         aria-label={label}
         onClick={() => useUi.setState({ settings: "general" })}
