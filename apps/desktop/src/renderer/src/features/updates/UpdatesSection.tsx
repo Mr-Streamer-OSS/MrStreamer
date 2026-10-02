@@ -132,9 +132,10 @@ function State({ status }: { status: UpdateStatus }) {
             Try again
           </Button>
         )}
-        {!busy && update.kind !== "available" && (
+        {/* Checking stays at hand beside an offer: a newer release may be out since. */}
+        {!busy && (
           <Button
-            variant="secondary"
+            variant={update.kind === "available" ? "ghost" : "secondary"}
             size="sm"
             disabled={update.kind === "checking"}
             onClick={check}
