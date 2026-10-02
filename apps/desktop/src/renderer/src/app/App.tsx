@@ -141,9 +141,13 @@ function usePreview(covered: boolean, view: View): void {
   const failed = usePlayer((state) => state.phase.kind === "failed");
   const last = useLastChannel();
   const channel = playing ?? last;
+  // Channels for adults show only in Live TV, while Settings shows them, so none plays behind
+  // Home, nor behind the guide once they are turned off.
+  const adults = useQuery(queries.preferences()).data?.adultTitles ?? false;
+  const previews = PREVIEWS[view] && !(channel?.adult && (view === "home" || !adults));
   useEffect(() => {
     if (covered) return;
-    if (!PREVIEWS[view]) {
+    if (!previews) {
       player.setAudible(false);
       if (!failed) player.suspend();
       return;
@@ -151,5 +155,5 @@ function usePreview(covered: boolean, view: View): void {
     if (!visible) {
       if (!audible && !failed) player.suspend();
     } else if (channel) player.preview(channel);
-  }, [covered, view, visible, audible, failed, channel]);
+  }, [covered, previews, visible, audible, failed, channel]);
 }

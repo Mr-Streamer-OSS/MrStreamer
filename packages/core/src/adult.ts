@@ -1,5 +1,6 @@
 // Which provider categories are for adults, by their names. Providers set `is_adult` on some
 // titles and channels and not on others, so a category named for adults marks everything in it.
+// Movies and series and live channels go by the same rule.
 //
 // The list is short on purpose: whole words that, in a category's name, only mean content for
 // adults, in the languages of the panels seen so far. Ordinary mature-rated films aren't meant:
@@ -39,14 +40,14 @@ export function isAdultCategory(name: string): boolean {
 }
 
 /**
- * Whether an item is for adults: marked so by the provider, or in a category named for adults
- * among `categories`.
+ * Whether a title or channel is for adults: marked so by the provider, or in a category named for
+ * adults among `categories`.
  */
 export function adultIn(
   categories: readonly ProviderCategory[],
-): (item: { readonly adult: boolean; readonly categoryIds: readonly string[] }) => boolean {
+): (item: { readonly adult?: boolean; readonly categoryIds: readonly string[] }) => boolean {
   const adult = new Set(
     categories.filter((category) => isAdultCategory(category.name)).map(({ id }) => id),
   );
-  return (item) => item.adult || item.categoryIds.some((id) => adult.has(id));
+  return (item) => item.adult === true || item.categoryIds.some((id) => adult.has(id));
 }

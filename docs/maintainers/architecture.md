@@ -74,6 +74,10 @@ The library fetches categories and channels, indexes them in memory and caches t
 
 Each stream keeps the provider's guide id (`epg_channel_id` on Xtream panels, `tvg-id` in playlists). Quality variants of one channel usually share it, but panels also file unrelated channels under one id: Wout's lists nine Flemish channels under `PlayCrime.be`. `@mrstreamer/core/catalogue/guide-ids` keeps an id for a stream only when its name matches the id, or when every stream sharing it is the same channel under another name or quality. The guide's own channel names don't count: panels copy them from their stream list. On Wout's provider this keeps 1,978 of 2,073 channels with programmes. A cache saved before guide ids existed still loads, and counts as due for a refresh at the next start.
 
+### Channels for adults
+
+A channel is for adults when one of its streams is: the provider sets `is_adult` on it, where its live list has the field, or it sits in a category named for adults, by the same rule as movies and series (`@mrstreamer/core/adult`). The library marks such a channel `adult` and, while `adultTitles` in the preferences is off, serves a view without it, nor categories left empty without it: no list, category, favourite or recent entry, channel by id, guide row or count shows it, so the last channel can't reopen it on start. With the setting on, Live TV's lists and guide show it, but channel search and programme search still leave it out, and Home leaves it out of its rows and its backdrop and plays no preview of it. The viewing record's lookup sees every channel, so favourites and history keep their entries either way. A cached catalogue from before the flag counts as outdated, so the next start refreshes it.
+
 ### Channels with several streams
 
 Panels list a channel once per quality, "VRT 1 FHD", "VRT 1 HD", "VRT 1 SD", with backups ("FHD²") and sometimes a category for a quality ("BE | 4K"). `@mrstreamer/core/catalogue/variants` makes one `LiveChannel` of streams that are surely one channel, its `variants`, and leaves anything less certain apart:

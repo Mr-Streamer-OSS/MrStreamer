@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { type } from "arktype";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import type { CatalogueStatus, Category, LiveChannel } from "@mrstreamer/contracts/library";
+import { adultIn } from "@mrstreamer/core/adult";
 import { normalizeCatalogue } from "@mrstreamer/core/catalogue/normalize";
 import { liveChannels } from "@mrstreamer/core/catalogue/variants";
 import { diagnosed } from "@mrstreamer/core/diagnostics";
@@ -19,6 +20,7 @@ import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
 import { readJsonFile, removeFile, writeJsonFile } from "../platform/json-file.ts";
+import { Settings } from "./preferences.ts";
 import { Subscriptions, type Source } from "./subscription.ts";
 
 /** How many results a search returns. Enough to scroll, small enough to send per keystroke. */
@@ -33,7 +35,7 @@ const SHRINK_CONFIRM_DELAY: Duration.Input = "3 seconds";
 // The cache stores the catalogue as the provider sent it, and display names are worked out on
 // load, so improved naming rules apply without fetching again. The newest stable release reads it
 // too (see docs/maintainers/architecture.md), so fields are added without a new version: a file
-// written before guide ids still loads, and counts as outdated.
+// written before guide ids or the adult flag still loads, and counts as outdated.
 const CachedCatalogue = type({
   version: "4",
   /** Which subscription produced this catalogue. */
@@ -47,11 +49,14 @@ const CachedCatalogue = type({
     logoUrl: "string | null",
     categoryIds: "string[]",
     "guideId?": "string | null",
+    "adult?": "boolean",
   }).array(),
 }).pipe((file) => ({
   ...file,
   channels: file.channels.map((channel) => ({ ...channel, guideId: channel.guideId ?? null })),
-  outdated: file.channels.some((channel) => channel.guideId === undefined),
+  outdated: file.channels.some(
+    (channel) => channel.guideId === undefined || channel.adult === undefined,
+  ),
 }));
 
 /** What the disk cache holds. */
@@ -123,6 +128,7 @@ export class Library extends Context.Service<
 function make(options: LibraryOptions) {
   return Effect.gen(function* () {
     const subscriptions = yield* Subscriptions;
+    const settings = yield* Settings;
     const scope = yield* Effect.scope;
     const updates = yield* PubSub.unbounded<CatalogueStatus>();
     const cachePath = join(options.dataDir, "catalogue.json");
@@ -160,6 +166,17 @@ function make(options: LibraryOptions) {
       if (catalogue?.key !== source.key) return yield* switched;
       return catalogue;
     });
+
+    /**
+     * The catalogue as Live TV shows it: channels for adults only while Settings shows titles for
+     * adults, and never in search.
+     */
+    const shown = (found: IndexedCatalogue) =>
+      Effect.map(settings.get, (preferences) => ({
+        lists: preferences.adultTitles ? found : withoutAdults(found),
+        search: withoutAdults(found),
+      }));
+    const visible = Effect.flatMap(current, shown);
 
     const fetchAndStore = (source: Source) =>
       Effect.gen(function* () {
@@ -251,35 +268,36 @@ function make(options: LibraryOptions) {
           );
         }),
 
-      guideChannels: Effect.map(current, (found) => found.guide),
+      guideChannels: Effect.map(visible, ({ lists }) => lists.guide),
 
       status: Effect.gen(function* () {
         const source = yield* subscriptions.source;
         if (!source) return statusOf(null, null);
+        const found = yield* cached(source.key);
         return statusOf(
-          yield* cached(source.key),
+          found && (yield* shown(found)).lists,
           failure?.key === source.key ? failure.error : null,
         );
       }),
 
-      categories: Effect.map(current, (found) => found.categories),
+      categories: Effect.map(visible, ({ lists }) => lists.categories),
 
       channels: (filter: {
         readonly categoryId?: string;
         readonly query?: string;
         readonly ids?: readonly string[];
       }) =>
-        Effect.map(current, ({ channels, byCategory, byId, searchNames }) => {
+        Effect.map(visible, ({ lists: { channels, byCategory, byId }, search: searched }) => {
           if (filter.ids) return [...new Set(filter.ids.flatMap((id) => byId.get(id) ?? []))];
           const query = normalize(filter.query ?? "");
-          if (query) return search(channels, searchNames, query);
+          if (query) return search(searched.channels, searched.searchNames, query);
           return filter.categoryId === undefined
             ? channels
             : (byCategory.get(filter.categoryId) ?? []);
         }),
 
       channel: (channelId: string) =>
-        Effect.flatMap(current, ({ byId }) => {
+        Effect.flatMap(visible, ({ lists: { byId } }) => {
           const channel = byId.get(channelId);
           return channel
             ? Effect.succeed(channel)
@@ -319,7 +337,16 @@ function statusOf(catalogue: IndexedCatalogue | null, failure: AppError | null):
 
 function index(file: CatalogueFile, outdated: boolean): IndexedCatalogue {
   const { categories, streams } = normalizeCatalogue(file);
-  const { channels, guideIds } = liveChannels(streams);
+  const logical = liveChannels(streams);
+  const { guideIds } = logical;
+  // A channel is for adults when one of its streams is.
+  const isAdult = adultIn(file.categories);
+  const adultStreams = new Set(file.channels.filter(isAdult).map((channel) => channel.id));
+  const channels = logical.channels.map((channel): LiveChannel =>
+    channel.variants.some((variant) => adultStreams.has(variant.id))
+      ? { ...channel, adult: true }
+      : channel,
+  );
   const byId = new Map<string, LiveChannel>();
   const byGuideId = new Map<string, LiveChannel[]>();
   for (const channel of channels) {
@@ -364,6 +391,38 @@ function index(file: CatalogueFile, outdated: boolean): IndexedCatalogue {
       channelsOf: (guideId) => byGuideId.get(guideId) ?? [],
     },
   };
+}
+
+/** The catalogue without channels for adults, kept per catalogue once worked out. */
+const adultless = new WeakMap<IndexedCatalogue, IndexedCatalogue>();
+
+/** The catalogue without channels for adults, nor the categories left empty without them. */
+function withoutAdults(found: IndexedCatalogue): IndexedCatalogue {
+  if (!found.channels.some((channel) => channel.adult)) return found;
+  const known = adultless.get(found);
+  if (known) return known;
+  const kept = (channel: LiveChannel | undefined) => channel !== undefined && !channel.adult;
+  const keep = [...found.channels.keys()].filter((at) => kept(found.channels[at]));
+  const byCategory = new Map(
+    [...found.byCategory].map(([id, channels]) => [id, channels.filter(kept)] as const),
+  );
+  const made: IndexedCatalogue = {
+    ...found,
+    categories: found.categories
+      .map((category) => ({ ...category, channelCount: byCategory.get(category.id)?.length ?? 0 }))
+      .filter((category) => category.channelCount > 0),
+    channels: found.channels.filter(kept),
+    byId: new Map([...found.byId].filter(([, channel]) => kept(channel))),
+    byCategory,
+    searchNames: keep.map((at) => found.searchNames[at] ?? ""),
+    guide: {
+      guideIdOf: (channelId) =>
+        kept(found.byId.get(channelId)) ? found.guide.guideIdOf(channelId) : null,
+      channelsOf: (guideId) => found.guide.channelsOf(guideId).filter(kept),
+    },
+  };
+  adultless.set(found, made);
+  return made;
 }
 
 /**

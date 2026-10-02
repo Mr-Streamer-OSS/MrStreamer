@@ -18,6 +18,8 @@ export interface ProviderChannel {
   readonly categoryIds: readonly string[];
   /** The channel's id in the provider's programme guide, when it has one. */
   readonly guideId: string | null;
+  /** Marked for adults by the provider, where its list says so. */
+  readonly adult?: boolean;
 }
 
 /**

@@ -5,6 +5,7 @@ import * as TestClock from "effect/testing/TestClock";
 import { describe, expect, it, vi } from "vitest";
 import { mainLayer } from "../src/main/runtime.ts";
 import { Library } from "../src/main/services/library.ts";
+import { Settings } from "../src/main/services/preferences.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import {
   fakeGuide,
@@ -52,6 +53,7 @@ async function connectedGuide(options: FakeProviderOptions = {}) {
       status: () => run(guide.status),
       clear: () => run(guide.clear),
       library: await promised(runtime, Library),
+      settings: await promised(runtime, Settings),
       /**
        * Moves the clock on a quarter of an hour at a time, letting each check the guide runs on
        * its own finish before the next.
@@ -197,6 +199,20 @@ describe("programme guide", () => {
     expect(later).toEqual(later.toSorted((a, b) => a - b));
     expect(matches.some((match) => match.channel.id === guided)).toBe(true);
     expect(await guide.search("  ")).toEqual([]);
+  });
+
+  it("lists a channel for adults' programmes only while Settings shows it, and never finds them", async () => {
+    const { guide } = await connectedGuide({ adultChannels: true });
+    await guide.refresh();
+    // "AFTER HOURS", for adults, with guide id afterhours.adult.
+    const nowOn = async () => (await guide.listings(["4000"]))["4000"]?.now?.title;
+    expect(await nowOn()).toBeUndefined();
+
+    await guide.settings.update({ adultTitles: true });
+    const title = (await nowOn()) ?? "";
+
+    expect(title).not.toBe("");
+    expect((await guide.search(title)).some((match) => match.channel.id === "4000")).toBe(false);
   });
 
   it("keeps the guide across a restart without downloading it again", async () => {

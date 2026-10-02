@@ -43,6 +43,12 @@ export function GeneralSection() {
       if (LIST_CHANGES.some((key) => key in patch)) {
         await client.invalidateQueries({ queryKey: ["ondemand"] });
       }
+      // Live TV's channels for adults, and their programmes, follow the same setting. Reset rather
+      // than read again, so a channel now hidden doesn't stay on from before.
+      if ("adultTitles" in patch) {
+        await client.resetQueries({ queryKey: ["library"] });
+        await client.resetQueries({ queryKey: ["guide"] });
+      }
     },
   });
   const titles = preferences.data?.titleLanguage ?? DEFAULT_TITLE_LANGUAGE;
@@ -108,9 +114,9 @@ export function GeneralSection() {
             }
           />
         </Row>
-        <Row label="Titles for adults" note="in their own tab, never on Home or in search">
+        <Row label="For adults" note="titles in their own tab, channels only in Live TV">
           <Checkbox.Root
-            aria-label="Titles for adults"
+            aria-label="For adults"
             checked={preferences.data?.adultTitles ?? false}
             onCheckedChange={(checked) => update.mutate({ adultTitles: checked })}
             className="grid size-4 flex-none place-items-center rounded-[0.25rem] shadow-[inset_0_0_0_1.5px_rgb(255_255_255/45%)] outline-none transition-shadow duration-150 focus-visible:ring-2 focus-visible:ring-ring data-checked:bg-white data-checked:shadow-none"

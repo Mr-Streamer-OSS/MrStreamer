@@ -3,6 +3,7 @@ import { join } from "node:path";
 import * as Layer from "effect/Layer";
 import { describe, expect, it } from "vitest";
 import { Library } from "../src/main/services/library.ts";
+import { Settings } from "../src/main/services/preferences.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { QUALITY_STREAM_IDS } from "./fake-provider.ts";
 import {
@@ -19,28 +20,32 @@ import {
  * A library on a connected fake provider, and the statuses it reports. `restart` starts another
  * on the same data folder.
  */
-async function connectedLibrary(channels = 300) {
-  const provider = await fakeProvider({ channels });
+async function connectedLibrary(channels = 300, adultChannels = false) {
+  const provider = await fakeProvider({ channels, adultChannels });
   const dataDir = await tempDir();
   const start = async () => {
     const runtime = runtimeFor(
       Library.layer({ dataDir, confirmDelay: 0 }).pipe(
         Layer.provideMerge(
-          Subscriptions.layer({ dataDir, secrets: testSecrets, providerOptions: { userAgent } }),
+          Layer.mergeAll(
+            Subscriptions.layer({ dataDir, secrets: testSecrets, providerOptions: { userAgent } }),
+            Settings.layer(dataDir),
+          ),
         ),
       ),
     );
     const library = await promised(runtime, Library);
     return {
       library,
+      settings: await promised(runtime, Settings),
       subscriptions: await promised(runtime, Subscriptions),
       updates: await collect(runtime, library.changes),
     };
   };
-  const { library, subscriptions, updates } = await start();
+  const { library, settings, subscriptions, updates } = await start();
   await subscriptions.connect({ server: provider.url, username: "demo", password: "demo" });
   const restart = async () => (await start()).library;
-  return { provider, dataDir, library, updates, restart };
+  return { provider, dataDir, library, settings, updates, restart };
 }
 
 describe("live library", () => {
@@ -255,6 +260,33 @@ describe("live library", () => {
     await expect(library.channel(second.id)).rejects.toMatchObject({
       error: { kind: "channel-not-found" },
     });
+  });
+
+  it("keeps channels for adults to Live TV's lists while Settings shows them, and out of search", async () => {
+    const { library, settings } = await connectedLibrary(300, true);
+    // One flagged by the provider in an ordinary category, two in a category named for adults.
+    const names = ["AFTER HOURS", "LATE SHOW", "NIGHT CLUB"];
+    const all = async () => (await library.channels({})).map((channel) => channel.name);
+    const ids = ["4000"];
+    const adultCategory = async () =>
+      (await library.categories()).find((category) => category.name === "XXX | ADULTS");
+
+    expect((await all()).filter((name) => names.includes(name))).toEqual([]);
+    expect(await adultCategory()).toBeUndefined();
+    expect(await library.channels({ ids })).toEqual([]);
+    await expect(library.channel("4000")).rejects.toMatchObject({
+      error: { kind: "channel-not-found" },
+    });
+    expect((await library.guideChannels()).channelsOf("afterhours.adult")).toEqual([]);
+
+    await settings.update({ adultTitles: true });
+
+    expect((await all()).filter((name) => names.includes(name))).toEqual(names);
+    expect(await adultCategory()).toMatchObject({ channelCount: 2 });
+    expect((await library.channels({ ids })).map((channel) => channel.adult)).toEqual([true]);
+    expect((await library.guideChannels()).channelsOf("afterhours.adult")).toHaveLength(1);
+    expect(await library.channels({ query: "night club" })).toEqual([]);
+    expect(await library.channels({ query: "after hours" })).toEqual([]);
   });
 
   it("reports a missing channel", async () => {
