@@ -1,8 +1,7 @@
 // The main process's services, assembled once from Layers. The app makes one runtime from
 // `mainLayer` at start and disposes of it when quitting: that stops background work and downloads,
 // closes streams and the proxy, and closes the database. Their diagnostics go to a log in the
-// data folder.
-import { Diagnostics } from "@mrstreamer/core/diagnostics";
+// data folder, and disposing waits for the lines still being written.
 import { Guide, GuideCatalogue, GuideSource } from "@mrstreamer/core/guide/service";
 import {
   LegacyViewing,
@@ -12,7 +11,7 @@ import {
 } from "@mrstreamer/core/viewing/service";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { diagnosticsLog } from "./platform/diagnostics-log.ts";
+import { diagnosticsLogLayer } from "./platform/diagnostics-log.ts";
 import { guideStoreLayer } from "./platform/guide-store.ts";
 import type { Secrets } from "./platform/secrets.ts";
 import { viewingStoreLayer } from "./platform/viewing-store.ts";
@@ -134,6 +133,6 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
   );
   return Layer.mergeAll(guide, viewing).pipe(
     Layer.provideMerge(services),
-    Layer.provideMerge(Layer.succeed(Diagnostics, diagnosticsLog(dataDir))),
+    Layer.provideMerge(diagnosticsLogLayer(dataDir)),
   );
 }
