@@ -54,7 +54,11 @@ function channelNamed(provider: FakeProvider, name: string): string {
   return String(channel.streamId);
 }
 
-/** Reads the first bytes of a stream, then leaves the response open like a player would. */
+/**
+ * Reads the first bytes of a stream, then leaves the response open like a player would. Hold a
+ * stream open through here: Node cancels a response whose body was never read once it is garbage
+ * collected, which would free the provider's connection mid-test.
+ */
 async function firstBytes(
   url: string,
 ): Promise<{ status: number; bytes: number; stop: () => void }> {
@@ -177,18 +181,15 @@ describe("playback", () => {
     const { provider, playback } = await connectedPlayback();
     const [one = "", two = ""] = liveChannels(provider);
     // Someone else is watching on the only connection.
-    const elsewhere = new AbortController();
-    const other = await fetch(`${provider.url}/live/demo/demo/${two}.ts`, {
-      signal: elsewhere.signal,
-    });
-    expect(other.status).toBe(200);
+    const elsewhere = await firstBytes(`${provider.url}/live/demo/demo/${two}.ts`);
+    expect(elsewhere.status).toBe(200);
 
     const session = await playback.open(one, LINUX);
     const stream = await firstBytes(session.url);
 
     expect(stream.status).toBe(403);
     expect(await playback.failure(session.sessionId)).toEqual({ kind: "refused", status: 403 });
-    elsewhere.abort();
+    elsewhere.stop();
     await playback.dispose();
   });
 
@@ -233,8 +234,8 @@ describe("playback", () => {
       const { provider, playback } = await connectedPlayback();
       const [one = "", two = "", three = ""] = liveChannels(provider);
       // Someone else is watching on the only connection.
-      const elsewhere = new AbortController();
-      await fetch(`${provider.url}/live/demo/demo/${three}.ts`, { signal: elsewhere.signal });
+      const elsewhere = await firstBytes(`${provider.url}/live/demo/demo/${three}.ts`);
+      expect(elsewhere.status).toBe(200);
       const before = provider.streamRequests();
 
       const session = await playback.open(one, LINUX, { variants: [one, two] });
@@ -247,7 +248,7 @@ describe("playback", () => {
       });
       // The first try and its two retries, all for the first stream.
       expect(provider.streamRequests() - before).toBe(3);
-      elsewhere.abort();
+      elsewhere.stop();
       await playback.dispose();
     });
 
