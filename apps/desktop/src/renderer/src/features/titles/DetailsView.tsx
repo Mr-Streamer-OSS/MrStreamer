@@ -16,7 +16,6 @@ import type {
   SeriesDetails,
   Title,
   TitleDetails,
-  TitleRef,
 } from "@mrstreamer/contracts/ondemand";
 import type { TitleProgress } from "@mrstreamer/contracts/viewing";
 import { versionLabels } from "@mrstreamer/core/ondemand/languages";
@@ -33,12 +32,13 @@ import {
   movieNow,
   nextEpisode,
   pickedVersion,
-  removeFromContinue,
   resumePoint,
   runtime,
   timeLeftOf,
   playTitle,
+  useInContinueWatching,
   usePickVersion,
+  useRemoveFromContinue,
 } from "../../lib/titles.ts";
 import { cn } from "../../lib/utils.ts";
 
@@ -243,6 +243,8 @@ function MovieActions({
   const current = progress.data?.toSorted((a, b) => b.at - a.at)[0];
   const partly = current && !current.finished && current.position > 0;
   const now = movieNow({ ...details.title, id: versions.playing }, details.backdropUrl);
+  const removal = useRemoveFromContinue();
+  const listed = useInContinueWatching(details.title);
   return (
     <Actions
       versions={versions}
@@ -251,14 +253,8 @@ function MovieActions({
       primaryLabel={partly ? "Resume" : "Play"}
       onPrimary={() => playTitle(now, resumePoint(partly ? current : undefined))}
       onBeginning={partly ? () => playTitle(now, 0) : null}
-      onRemove={
-        partly
-          ? () =>
-              removeFromContinue(
-                ...(progress.data ?? []).flatMap((entry) => (entry.finished ? [] : [entry.title])),
-              )
-          : null
-      }
+      onRemove={listed ? () => removal.mutate(details.title) : null}
+      removeError={removal.error}
     />
   );
 }
@@ -295,15 +291,6 @@ function resumeTarget(
   return episode ? { episode, progress: undefined } : null;
 }
 
-/** One episode of each version of a series played, which removing it from Continue watching takes. */
-function seriesPlayed(progress: readonly TitleProgress[]): TitleRef[] {
-  const bySeries = new Map<string, TitleRef>();
-  for (const entry of progress) {
-    if (entry.title.kind === "episode") bySeries.set(entry.title.seriesId, entry.title);
-  }
-  return [...bySeries.values()];
-}
-
 function SeriesActions({
   details,
   versions,
@@ -316,6 +303,8 @@ function SeriesActions({
   const progress = useQuery(
     queries.progress({ seriesIds: details.title.versions.map((version) => version.id) }),
   );
+  const removal = useRemoveFromContinue();
+  const listed = useInContinueWatching(details.title);
   const target = resumeTarget(details, progress.data ?? []);
   if (!target) {
     return <p className="mt-6 text-[0.9375rem] text-muted-foreground">No episodes yet.</p>;
@@ -324,7 +313,6 @@ function SeriesActions({
   const partly = target.progress && target.progress.position > 0 ? target.progress : undefined;
   const label = `${partly ? "Resume" : "Play"} ${episodeLabel(episode.season, episode.number)}`;
   const now = episodeNow(details, episode);
-  const started = (progress.data?.length ?? 0) > 0;
   return (
     <Actions
       versions={versions}
@@ -333,7 +321,8 @@ function SeriesActions({
       primaryLabel={label}
       onPrimary={() => playTitle(now, resumePoint(partly))}
       onBeginning={partly ? () => playTitle(now, 0) : null}
-      onRemove={started ? () => removeFromContinue(...seriesPlayed(progress.data ?? [])) : null}
+      onRemove={listed ? () => removal.mutate(details.title) : null}
+      removeError={removal.error}
     />
   );
 }
@@ -346,6 +335,7 @@ function Actions({
   onPrimary,
   onBeginning,
   onRemove,
+  removeError,
 }: {
   versions: Versions;
   /** Another version's details are on their way: nothing plays until they're here. */
@@ -354,7 +344,10 @@ function Actions({
   primaryLabel: string;
   onPrimary: () => void;
   onBeginning: (() => void) | null;
+  /** Shown while Continue watching holds the title. */
   onRemove: (() => void) | null;
+  /** Why the last removal failed. */
+  removeError: Error | null;
 }) {
   const { title, playing, automatic } = versions;
   const all = title?.versions ?? [];
@@ -410,6 +403,9 @@ function Actions({
       {/* What plays: "English sound · 4K". A version without marks says nothing. */}
       {label && (several || label !== "Standard") && (
         <div className="mt-3 text-[0.8125rem] text-muted-foreground">{label}</div>
+      )}
+      {removeError && (
+        <p className="mt-3 text-sm text-destructive">{describeError(appError(removeError))}</p>
       )}
     </div>
   );

@@ -1,6 +1,6 @@
 // Movies and episodes as the views talk about them: how long, how far, what's next, which version
 // plays, and playing one. The player itself is in ../player/title-player.ts.
-import { isCancelledError, useQuery, useQueryClient } from "@tanstack/react-query";
+import { isCancelledError, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Episode, SeriesDetails, Title, TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { Preferences } from "@mrstreamer/contracts/preferences";
 import type { TitleProgress } from "@mrstreamer/contracts/viewing";
@@ -141,13 +141,32 @@ export function playTitle(now: NowPlaying, from: number): void {
   void titlePlayer.open(now, from);
 }
 
-/** Takes movies, or episodes' series, out of Continue watching: every version played. */
-export function removeFromContinue(...titles: readonly TitleRef[]): void {
-  for (const title of titles) {
-    void call("viewing.removeFromContinue", { commandId: crypto.randomUUID(), title }).catch(
-      () => {},
-    );
-  }
+/**
+ * Takes a movie or series out of Continue watching, every version of it played, and keeps how far
+ * it got for a later Resume. The lists update once the main process has it; `error` says why the
+ * last removal failed.
+ */
+export function useRemoveFromContinue() {
+  return useMutation({
+    mutationFn: (title: Title) => {
+      const ids = title.versions.map((version) => version.id);
+      return call("viewing.removeFromContinue", {
+        commandId: crypto.randomUUID(),
+        ...(title.kind === "movie" ? { movieIds: ids } : { seriesIds: ids }),
+      });
+    },
+  });
+}
+
+/** Whether Continue watching holds a version of `title`, which Remove would take out. */
+export function useInContinueWatching(title: Title): boolean {
+  const viewing = useQuery(queries.viewing());
+  const ids = new Set(title.versions.map((version) => version.id));
+  return (viewing.data?.continueWatching ?? []).some(({ title: played }) =>
+    played.kind === "movie"
+      ? title.kind === "movie" && ids.has(played.id)
+      : title.kind === "series" && ids.has(played.seriesId),
+  );
 }
 
 /** One Continue watching entry, ready to show and play. */
@@ -157,8 +176,6 @@ export interface ContinueEntry {
   readonly title: Title;
   /** What the viewer played last. */
   readonly progress: TitleProgress;
-  /** Every version of it played, which Remove takes out. */
-  readonly played: readonly TitleRef[];
   /** "38 min left", "S2 E3 · 12 min left", "Next episode". */
   readonly line: string;
   /** How far, from 0 to 1; null for a next episode not started. */
@@ -196,7 +213,7 @@ export function useContinueWatching(limit = Infinity): {
     viewing.isPending ||
     (movies.isPending && movies.fetchStatus !== "idle") ||
     (series.isPending && series.fetchStatus !== "idle");
-  const shown = items.flatMap((progress): Omit<ContinueEntry, "played">[] => {
+  const shown = items.flatMap((progress): ContinueEntry[] => {
     const ref = progress.title;
     const title = byVersion.get(
       ref.kind === "movie" ? `movie:${ref.id}` : `series:${ref.seriesId}`,
@@ -233,13 +250,7 @@ export function useContinueWatching(limit = Infinity): {
   // Most recent first, so the version played last stands for the rest.
   const entries = new Map<string, ContinueEntry>();
   for (const entry of shown) {
-    const earlier = entries.get(entry.key);
-    entries.set(
-      entry.key,
-      earlier
-        ? { ...earlier, played: [...earlier.played, entry.progress.title] }
-        : { ...entry, played: [entry.progress.title] },
-    );
+    if (!entries.has(entry.key)) entries.set(entry.key, entry);
   }
   return { entries: [...entries.values()].slice(0, limit), loading, error: viewing.error };
 }

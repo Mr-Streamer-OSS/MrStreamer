@@ -305,10 +305,10 @@ async function start(): Promise<void> {
           settings.update({ lastChannelId: channelId }),
           viewing.recordWatch(commandId, channelId),
         ),
-      "viewing.recordProgress": ({ commandId, title, position, duration }) =>
-        viewing.recordProgress(commandId, title, position, duration),
-      "viewing.removeFromContinue": ({ commandId, title }) =>
-        viewing.removeFromContinue(commandId, title),
+      "viewing.recordProgress": ({ commandId, title, position, duration, since }) =>
+        viewing.recordProgress(commandId, title, position, duration, since),
+      "viewing.removeFromContinue": ({ commandId, ...filter }) =>
+        viewing.removeFromContinue(commandId, filter),
       "viewing.progress": (filter) => viewing.progress(filter),
       "updates.status": () => updates.status,
       "updates.setChannel": ({ channel }) => updates.setChannel(channel),

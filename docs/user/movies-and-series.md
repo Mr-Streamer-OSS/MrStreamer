@@ -47,7 +47,7 @@ A poster opens its details over the list, which stays where it was: the artwork,
 - **Play** starts something new. For a series it plays the episode you're on: the one you stopped in, the next one after one you finished, or the first.
 - The arrow beside **Play** shows when there are several versions, each named for what you hear and read, such as "English sound, Nederlands subtitles" or "Deutsch sound · 4K", from the marks in your provider's list and the language the title was made in; the line under the buttons says which one plays, and **Automatic** shows which it picks. **Automatic** plays the 4K version of a title opened from the 4K tab, carries on in the version you were watching, or else plays the one that suits your language. Pick another and that title plays it from then on, from Home and the lists too, and a series lists its episodes. How far you got carries over. Picks belong to your subscription and go when you connect another.
 - A series opens on the season you're watching. Watched episodes have a check mark, and one you stopped in shows how far you got. Click an episode to play it.
-- **Remove from Continue watching** takes the title off Home's row. It comes back when you play it again.
+- **Remove from Continue watching** takes the title off Home's row, every version of it, and the button goes. How far you got stays, so **Resume** carries on. The title comes back to the row when you play it again.
 
 ## Watching
 
@@ -62,7 +62,7 @@ How far you got is saved as you go: every minute, and whenever you pause, skip, 
 
 ## Continue watching
 
-Home's first row shows what you were watching: movies you started, and for each series the episode you're on. A title counts as started after two minutes, and as finished in its last few minutes, where the credits run. A finished movie leaves the row; a finished episode stays as **Next episode**, which plays the episode after it, or opens the series' details when there is none. The row shows what you saved, so it asks your provider nothing until you press play.
+Home's first row shows what you were watching: movies you started, and for each series the episode you're on. A title counts as started after two minutes, and as finished in its last few minutes, where the credits run. A finished movie leaves the row; a finished episode stays as **Next episode**, which plays the episode after it, or opens the series' details when there is none. The row shows what you saved, so it asks your provider nothing until you press play. The × on a tile takes it off the row, as **Remove from Continue watching** does.
 
 ## Keys
 

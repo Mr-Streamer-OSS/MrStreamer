@@ -16,9 +16,10 @@ import { PosterTile, StillTile } from "../../components/TitleArt.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { WindowBar } from "../../components/WindowBar.tsx";
 import { useNow } from "../../lib/clock.ts";
+import { appError, describeError } from "../../lib/errors.ts";
 import { categoryOf, channelLine, clockTime, progressOf, timeLeft } from "../../lib/format.ts";
 import { queries, useCategoryMap, useLastChannel } from "../../lib/queries.ts";
-import { removeFromContinue, useContinueWatching, useResume } from "../../lib/titles.ts";
+import { useContinueWatching, useRemoveFromContinue, useResume } from "../../lib/titles.ts";
 import { useRem } from "../../lib/use-rem.ts";
 import { Picture } from "../../player/Picture.tsx";
 import { player, usePlayer } from "../../player/player.ts";
@@ -78,6 +79,7 @@ export function HomeScreen({ active }: { active: boolean }) {
   const newSeries = useNewest("series", posters);
   const continuing = useContinueWatching();
   const resume = useResume();
+  const removal = useRemoveFromContinue();
   const playing = usePlayer((state) => state.channel);
   const streaming = usePlayer(
     (state) => state.phase.kind !== "idle" && state.phase.kind !== "failed",
@@ -144,19 +146,26 @@ export function HomeScreen({ active }: { active: boolean }) {
       />
       <div ref={grid} className="space-y-9 px-10 pt-2 pb-16">
         {entries.length > 0 && (
-          <Section title="Continue watching" tileRem={TILE_REM}>
-            {entries.map((entry) => (
-              <StillTile
-                key={entry.key}
-                artworkUrl={entry.artworkUrl}
-                name={entry.title.title}
-                line={entry.line}
-                done={entry.done}
-                onPlay={() => resume(entry)}
-                onRemove={() => removeFromContinue(...entry.played)}
-              />
-            ))}
-          </Section>
+          <div>
+            <Section title="Continue watching" tileRem={TILE_REM}>
+              {entries.map((entry) => (
+                <StillTile
+                  key={entry.key}
+                  artworkUrl={entry.artworkUrl}
+                  name={entry.title.title}
+                  line={entry.line}
+                  done={entry.done}
+                  onPlay={() => resume(entry)}
+                  onRemove={() => removal.mutate(entry.title)}
+                />
+              ))}
+            </Section>
+            {removal.error && (
+              <p className="mt-3 text-sm text-destructive">
+                {describeError(appError(removal.error))}
+              </p>
+            )}
+          </div>
         )}
         {shown.favourites.length > 0 && (
           <Section

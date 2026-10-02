@@ -18,12 +18,17 @@ export type ViewingEvent =
   | { readonly type: "favourite-added"; readonly channelId: string }
   | { readonly type: "favourite-removed"; readonly channelId: string }
   | { readonly type: "watched"; readonly channelId: string }
-  /** A movie or episode played up to `position` of `duration` seconds. */
+  /**
+   * A movie or episode played up to `position` of `duration` seconds, in a play that began at
+   * `since`, epoch milliseconds. Builds before `since` wrote none: theirs read as a play begun when
+   * the event was saved.
+   */
   | {
       readonly type: "title-progress";
       readonly title: TitleRef;
       readonly position: number;
       readonly duration: number;
+      readonly since: number;
     }
   /** Taken out of Continue watching: the movie, or the whole series of an episode. */
   | { readonly type: "title-removed"; readonly title: TitleRef };
@@ -39,8 +44,10 @@ export type ViewingCommand =
       readonly title: TitleRef;
       readonly position: number;
       readonly duration: number;
+      readonly since: number;
     }
-  | { readonly kind: "remove-title"; readonly title: TitleRef };
+  /** Movies, and episodes standing for their series, out of Continue watching at once. */
+  | { readonly kind: "remove-titles"; readonly titles: readonly TitleRef[] };
 
 /** One account's favourites and recently watched channels. */
 export interface ViewingState {
@@ -74,10 +81,11 @@ export function decide(state: ViewingState, command: ViewingCommand): ViewingEve
           title: command.title,
           position: command.position,
           duration: command.duration,
+          since: command.since,
         },
       ];
-    case "remove-title":
-      return [{ type: "title-removed", title: command.title }];
+    case "remove-titles":
+      return command.titles.map((title) => ({ type: "title-removed", title }));
   }
 }
 
