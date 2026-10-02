@@ -60,6 +60,37 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
     expect(app.tmdb.detailRequests()).toBe(asked);
   });
 
+  it("asks TMDB about titles for adults only while Settings shows them", async () => {
+    const app = await metadataApp();
+    const { runtime, onDemand } = await app.start();
+    const asked = async (wanted: number) =>
+      vi.waitFor(
+        async () => {
+          const { metadata } = await onDemand.status();
+          expect(metadata).toMatchObject({ wanted, known: wanted });
+        },
+        { timeout: 20_000 },
+      );
+    await vi.waitFor(async () =>
+      expect((await onDemand.status()).metadata?.wanted).toBeGreaterThan(0),
+    );
+    const ordinary = (await onDemand.status()).metadata?.wanted ?? 0;
+    await asked(ordinary);
+    expect(app.tmdb.detailRequests()).toBe(ordinary);
+
+    await (await promised(runtime, Settings)).update({ adultTitles: true });
+    const forAdults = (
+      await Promise.all(
+        (["movie", "series"] as const).map((kind) =>
+          onDemand.collection({ kind, id: "adult", offset: 0, limit: 1000 }),
+        ),
+      )
+    ).flatMap((page) => page.titles.filter((title) => title.tmdbId));
+    expect(forAdults.length).toBeGreaterThan(0);
+    await asked(ordinary + forAdults.length);
+    expect(app.tmdb.detailRequests()).toBe(ordinary + forAdults.length);
+  });
+
   it("stops asking when TMDB refuses the key, and says so", async () => {
     const app = await metadataApp();
     app.tmdb.refuse(true);

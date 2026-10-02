@@ -4,6 +4,7 @@
 // language versions of one film, which share a TMDB id, become one title that shows the version
 // suiting the viewer's language.
 import type { Title, TitleKind } from "@mrstreamer/contracts/ondemand";
+import { adultIn } from "../adult.ts";
 import type { OnDemandCatalogue, ProviderCategory, ProviderTitle } from "../provider.ts";
 import { normalize } from "../text.ts";
 import { suitability } from "./languages.ts";
@@ -11,9 +12,6 @@ import { titleName, type TitleName } from "./names.ts";
 
 /** How many titles of each kind a search returns. */
 export const SEARCH_LIMIT = 60;
-
-/** Category names that say the category is for adults: "XXX | FOR ADULTS", "ADULT 18+". */
-const ADULT_CATEGORY = /(?<![\p{L}\p{N}])(xxx|adults?|18\+|porn)(?![\p{L}\p{N}])/iu;
 
 interface IndexedKind {
   readonly titles: readonly Title[];
@@ -59,11 +57,7 @@ function indexKind(
   language: string,
 ): IndexedKind {
   // The adult flag is a standard field; a category named for adults also counts.
-  const adultCategories = new Set(
-    rawCategories.filter((category) => ADULT_CATEGORY.test(category.name)).map(({ id }) => id),
-  );
-  const isAdult = (item: ProviderTitle) =>
-    item.adult || item.categoryIds.some((id) => adultCategories.has(id));
+  const isAdult = adultIn(rawCategories);
   // One group per film: the versions sharing a TMDB id, or a row on its own without one. A row
   // for adults stays on its own, so the film's other versions don't go with it.
   const groups: ProviderTitle[][] = [];

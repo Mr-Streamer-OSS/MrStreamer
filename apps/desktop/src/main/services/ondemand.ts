@@ -223,6 +223,12 @@ function make(deps: OnDemandDeps) {
         catch: (cause) => (cause instanceof Failed ? cause : failedWith(cause)),
       });
 
+    /** The worker's status for `key`, telling it whether the viewer shows titles for adults. */
+    const askStatus = (key: string) =>
+      Effect.flatMap(settings.get, (preferences) =>
+        call("status", { key, adults: preferences.adultTitles ?? false }),
+      );
+
     const statusOf = (worked: WorkerStatus, key: string): OnDemandStatus => ({
       ...worked,
       failure: failure?.key === key ? failure.error : null,
@@ -246,7 +252,7 @@ function make(deps: OnDemandDeps) {
           Effect.gen(function* () {
             if (started !== generation) return;
             failure = { key: source.key, error: failed.error, at: Date.now() };
-            const worked = yield* call("status", { key: source.key }).pipe(
+            const worked = yield* askStatus(source.key).pipe(
               Effect.orElseSucceed(() => ({ movies: 0, series: 0, fetchedAt: null })),
             );
             yield* PubSub.publish(updates, statusOf(worked, source.key));
@@ -262,7 +268,7 @@ function make(deps: OnDemandDeps) {
     const loaded = <A>(run: (source: Source, language: string) => Effect.Effect<A, Failed>) =>
       Effect.gen(function* () {
         const source = yield* requireSource;
-        const worked = yield* call("status", { key: source.key });
+        const worked = yield* askStatus(source.key);
         if (worked.fetchedAt === null) {
           // Refresh asks the provider again whenever the viewer does.
           if (failure?.key === source.key && Date.now() - failure.at < RETRY_AFTER_MS) {
@@ -374,7 +380,7 @@ function make(deps: OnDemandDeps) {
     const status = Effect.gen(function* () {
       const source = yield* subscriptions.source;
       if (!source) return { movies: 0, series: 0, fetchedAt: null, failure: null, metadata: null };
-      const worked = yield* call("status", { key: source.key }).pipe(
+      const worked = yield* askStatus(source.key).pipe(
         Effect.orElseSucceed(() => ({ movies: 0, series: 0, fetchedAt: null })),
       );
       return statusOf(worked, source.key);
@@ -390,7 +396,7 @@ function make(deps: OnDemandDeps) {
         Effect.gen(function* () {
           const source = yield* subscriptions.source;
           if (!source) return false;
-          const worked = yield* call("status", { key: source.key }).pipe(
+          const worked = yield* askStatus(source.key).pipe(
             Effect.orElseSucceed(() => ({ fetchedAt: null })),
           );
           const now = yield* Clock.currentTimeMillis;

@@ -15,6 +15,7 @@ import {
   type IndexedCatalogue,
 } from "@mrstreamer/core/ondemand/catalogue";
 import type { CollectionId, Title, TitleKind } from "@mrstreamer/contracts/ondemand";
+import { adultIn } from "@mrstreamer/core/adult";
 import type { OnDemandCatalogue } from "@mrstreamer/core/provider";
 import { tmdb, tmdbImage } from "@mrstreamer/core/metadata/tmdb";
 import { collections, type Collections } from "@mrstreamer/core/ondemand/collections";
@@ -49,15 +50,25 @@ const metadata = metadataStore({
   },
 });
 
-/** Every TMDB id the catalogue lists, once, with when it was added. */
+/**
+ * Whether the viewer shows titles for adults, as the main process says with each status call:
+ * TMDB is asked about them only then.
+ */
+let adults = false;
+
+/**
+ * Every TMDB id the catalogue lists, once, with when it was added. Titles for adults count only
+ * while the viewer shows them.
+ */
 function wantedOf(catalogue: OnDemandCatalogue): Wanted[] {
   const found = new Map<string, Wanted>();
-  for (const [kind, titles] of [
-    ["movie", catalogue.movies],
-    ["tv", catalogue.series],
+  for (const [kind, titles, categories] of [
+    ["movie", catalogue.movies, catalogue.movieCategories],
+    ["tv", catalogue.series, catalogue.seriesCategories],
   ] as const) {
+    const isAdult = adultIn(categories);
     for (const title of titles) {
-      if (!title.tmdbId) continue;
+      if (!title.tmdbId || (!adults && isAdult(title))) continue;
       const key = `${kind}:${title.tmdbId}`;
       const addedAt = title.addedAt ?? 0;
       if ((found.get(key)?.addedAt ?? -1) < addedAt) {
@@ -160,6 +171,13 @@ function collectionsOf(found: Loaded, language: string, kind: TitleKind): Collec
 const ROW_TITLES = 24;
 /** Streaming services For you shows as rows, most stocked first. */
 const SERVICE_ROWS = 3;
+
+/** Notes whether the viewer shows titles for adults; turning it on asks TMDB about them. */
+function showing(shown: boolean): void {
+  if (shown === adults) return;
+  adults = shown;
+  if (loaded) metadata.want(wantedOf(loaded.catalogue), viewerLanguage);
+}
 
 /**
  * Notes the viewer's language from a call; a new one asks TMDB for names in it, in the
@@ -285,11 +303,25 @@ async function refresh(args: WorkerCalls["refresh"]["args"]): Promise<WorkerStat
       });
     }
     if (abort.signal.aborted) throw new AppFailure({ kind: "unexpected", detail: "Stopped." });
+    // A category list that comes back empty keeps the one before: panels answer an overloaded
+    // request with an empty list too, and without its names, titles only a category marks for
+    // adults would show everywhere.
+    const kept: OnDemandCatalogue = {
+      ...catalogue,
+      movieCategories:
+        catalogue.movieCategories.length > 0 || !before
+          ? catalogue.movieCategories
+          : before.catalogue.movieCategories,
+      seriesCategories:
+        catalogue.seriesCategories.length > 0 || !before
+          ? catalogue.seriesCategories
+          : before.catalogue.seriesCategories,
+    };
     const fetchedAt = Date.now();
-    const status = statusOf(remember(args.key, fetchedAt, catalogue));
+    const status = statusOf(remember(args.key, fetchedAt, kept));
     // Written after answering, so the lists show without waiting for the disk. A write cut short
     // by quitting leaves the previous lists for the next start, which refreshes them when due.
-    persist({ version: 2, key: args.key, fetchedAt, ...catalogue });
+    persist({ version: 2, key: args.key, fetchedAt, ...kept });
     return status;
   })();
   const running = { key: args.key, done, abort };
@@ -311,7 +343,10 @@ function aliases(title: Title): string {
 const handlers: {
   [M in keyof WorkerCalls]: (args: WorkerCalls[M]["args"]) => Promise<WorkerCalls[M]["result"]>;
 } = {
-  status: async ({ key }) => statusOf(await current(key)),
+  status: async ({ key, adults: shown }) => {
+    showing(shown);
+    return statusOf(await current(key));
+  },
   refresh,
   byIds: async ({ key, language, kind, ids }) => {
     speaking(language);

@@ -74,6 +74,27 @@ describe("movies and series", { timeout: 20_000 }, () => {
     expect((await series("adult")).titles.map((title) => title.title)).toEqual(["After Dark"]);
   });
 
+  it("keeps titles only their category marks for adults out when the categories come back empty", async () => {
+    const { onDemand, provider } = await onDemandApp();
+    const adultInAll = async () =>
+      (
+        await onDemand.collection({
+          kind: "movie",
+          id: "all",
+          sort: "title",
+          offset: 0,
+          limit: 1000,
+        })
+      ).titles.some((title) => title.name.startsWith("Adult Film"));
+    expect(await adultInAll()).toBe(false);
+
+    provider.emptyTitleCategories(true);
+    await onDemand.refresh();
+
+    expect(await adultInAll()).toBe(false);
+    expect((await onDemand.search("adult film")).movies).toEqual([]);
+  });
+
   it("searches movies and series by any words of their names", async () => {
     const { onDemand } = await onDemandApp();
 

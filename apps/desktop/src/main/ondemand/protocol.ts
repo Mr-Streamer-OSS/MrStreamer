@@ -33,7 +33,8 @@ export interface WorkerStatus {
 
 /** Each call and what it answers. */
 export interface WorkerCalls {
-  status: { args: { key: string }; result: WorkerStatus };
+  /** Also says whether the viewer shows titles for adults, which TMDB is asked about only then. */
+  status: { args: { key: string; adults: boolean }; result: WorkerStatus };
   /** Fetches both lists from the provider and keeps them when they look complete. */
   refresh: { args: { key: string; account: XtreamAccount }; result: WorkerStatus };
   byIds: {
