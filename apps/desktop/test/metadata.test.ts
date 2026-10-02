@@ -300,8 +300,9 @@ describe("episode details", { timeout: 30_000 }, () => {
         },
       ],
       directors: ["Dora Director"],
-      writers: ["Wim Writer"],
     });
+    // Four people rated the third: too few to show.
+    expect(first.map((episode) => episode.rating)).toEqual([8.2, 8.2, null]);
 
     // Opened again, it asks no one; the second season asks once it opens.
     await onDemand.season(SERIES, 1);

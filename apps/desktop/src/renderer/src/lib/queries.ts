@@ -166,6 +166,15 @@ export const queries = {
       staleTime: 30 * 60_000,
     }),
   /**
+   * The episodes of a series version's season with TMDB's details, for when it shows. Read again
+   * each time it shows: the main process keeps what TMDB said, and asks again what it didn't.
+   */
+  season: (id: string, season: number) =>
+    queryOptions({
+      queryKey: ["ondemand", "season", id, season],
+      queryFn: () => call("ondemand.season", { id, season }),
+    }),
+  /**
    * How far movies, or every episode of series, got: each id a language version of one title.
    * Kept current by `syncViewing`.
    */
@@ -256,10 +265,11 @@ export function syncLibraryUpdates(client: QueryClient): () => void {
 /** Reads movies and series again once the main process has fetched new lists. */
 export function syncOnDemand(client: QueryClient): () => void {
   return listen("ondemand.updated", () => {
-    // Lists change with a refresh and as TMDB's metadata arrives.
+    // Lists change with a refresh and as TMDB's metadata arrives. A season shown is read again
+    // the next time it shows, not each time more metadata arrives.
     void client.invalidateQueries({
       queryKey: ["ondemand"],
-      predicate: (query) => query.queryKey[1] !== "details",
+      predicate: (query) => query.queryKey[1] !== "details" && query.queryKey[1] !== "season",
     });
     // So do the names and languages details show. Open details keep what they show; opened
     // again, they are put together anew from what the main process kept, with nothing downloaded.
