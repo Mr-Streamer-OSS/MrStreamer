@@ -2,7 +2,7 @@
 
 > For maintainers. Using Mr. Streamer? See [docs/user](../user/).
 
-Releases come from `.github/workflows/release.yml` and live on GitHub Releases. The app finds them through the [update feed](#update-feed), a small file the workflow publishes to GitHub Pages after each release; see [architecture](architecture.md#updates).
+Releases come from `.github/workflows/release.yml`, which plans them and runs `.github/workflows/build-release.yml` for each, and live on GitHub Releases. The app finds them through the [update feed](#update-feed), a small file the workflow publishes to GitHub Pages after each release; see [architecture](architecture.md#updates).
 
 ## What the workflow does
 
@@ -12,10 +12,10 @@ Releases come from `.github/workflows/release.yml` and live on GitHub Releases. 
   - manual `workflow_dispatch` with `channel=stable`, the only way to ship stable
   - the **release dry run** label on a pull request
 - Manual runs must select `main`; the plan refuses any other branch.
-- The plan job (`scripts/release-plan.ts`) resolves the commit, version and tag before anything builds. Every later job checks out that commit, so merges that land during a run never reach its build.
-- On that commit, in parallel:
+- The plan job (`scripts/release-plan.ts`) resolves the commit, version and tag before anything builds. For a stable release it also decides whether a [nightly goes first](#stable-releases). Every later job checks out the planned commit, so merges that land during a run never reach its build.
+- `build-release.yml` builds, checks and publishes each release the plan names. On its commit, in parallel:
   - the [CI](testing.md#ci) Check and Test jobs
-  - `bundle` builds the JavaScript once, with the release version, and hands it to every platform as the `js-bundle` artifact
+  - `bundle` builds the JavaScript once, with the release version, and hands it to every platform as the `js-bundle-<version>` artifact
   - `package` builds each platform on its own runner, from the bundle:
     - the bundled ffmpeg, cached until `apps/desktop/scripts/build-ffmpeg.sh` changes
     - macOS arm64: the DMG, and the ZIP that in-app updates install. Signed with the Developer ID, notarized and stapled (`apps/desktop/scripts/notarize-dmg.ts`), then checked for signature, team, hardened runtime, Gatekeeper and both tickets. Missing secrets or a failed notarization fail the run.
@@ -33,6 +33,7 @@ Releases come from `.github/workflows/release.yml` and live on GitHub Releases. 
 - Nightlies are pre-releases and never marked latest. Stable releases are marked latest.
 - Runs never cancel each other. Nightlies and stable releases wait in one queue, and each pull request's dry runs in their own, so a requested stable release is never dropped.
 - Sharing the queue keeps a nightly from being planned while a stable release builds. Planned then, it would preview the same version as the stable release, from newer code, and sort before it. A stable release waits for a nightly that's running, and the other way round.
+- The nightly a stable run publishes first is part of that run, not a run of its own, so it never waits in the queue behind the run that needs it.
 
 ## Versions
 
@@ -50,31 +51,34 @@ Releases come from `.github/workflows/release.yml` and live on GitHub Releases. 
 - Drafts and pre-releases without a nightly version don't count as the last nightly.
 - A nightly started by hand skips both conditions.
 - The version commit after a stable release counts as new, so a nightly follows each stable release.
+- A stable run publishes a nightly of `main` first when the latest nightly lacks commits `main` has; see [stable releases](#stable-releases).
 
 ## Stable releases
 
-1. Test the latest nightly: install it, update an existing install to it, and play a few channels.
-2. Run the Release workflow on `main` with channel **stable**. Enter the nightly you tested, such as `0.0.2-nightly.20260930.30` or its tag, so a nightly published after your test can't ship untested. Left empty, the run promotes the latest nightly.
+1. Test a nightly: install it, update an existing install to it, and play a few channels.
+2. Run the Release workflow on `main` with channel **stable**. Enter the nightly you tested, such as `0.0.2-nightly.20260930.30` or its tag. It's required: the plan refuses a stable run without it, so a nightly published after your test can't ship untested.
 3. Leave the version empty to release the version the nightly previewed (`0.0.2-nightly.*` ships as `0.0.2`), or enter one that sorts after it and every stable release, such as `0.1.0`.
-4. The run rebuilds the nightly's exact commit with the stable version; the nightly's files carry the nightly version, so they're never reused. Merges to `main` since the nightly don't reach the build.
-5. It publishes the release as latest and updates the feed. Stable users are offered it from then on. Nightly users aren't, and get the next nightly.
-6. The finalize job commits `chore(release): prepare vX` to `main`, so `package.json` records the release and later nightlies preview the patch after it.
-7. The run also builds the [Microsoft Store package](#submitting-a-stable-release) for the release, to submit by hand.
+4. When `main` has commits the latest published nightly doesn't, the run first publishes a nightly of `main`, without waiting six hours, and updates the feed. Nightly users then have every change before Stable users get any of it. That nightly previews the same version as the one you tested, such as `0.0.2-nightly.20261002.31`, so it sorts after it and before the stable release. Its notes list the changes since the previous nightly. The stable release builds only once that nightly is published and the feed names it. When the latest nightly already has `main`'s commit, the run skips this step.
+5. The run rebuilds the tested nightly's exact commit with the stable version, never that of the nightly it just published. The nightly's files carry the nightly version, so they're never reused. Merges to `main` since the tested nightly don't reach the build.
+6. It publishes the release as latest and updates the feed. Stable users are offered it from then on. Nightly users aren't, and get the next nightly. The feed's `nightly` names the stable release until then, as the [feed](#update-feed) explains.
+7. The finalize job commits `chore(release): prepare vX` to `main`, so `package.json` records the release and later nightlies preview the patch after it.
+8. The run also builds the [Microsoft Store package](#submitting-a-stable-release) for the stable release, to submit by hand. The nightly before it gets none.
 
 The plan refuses a stable release when:
 
-- no nightly is published
+- no nightly is entered
 - the nightly entered is a draft, has no release, or isn't a nightly version
 - `main` doesn't contain the nightly's commit
 - the nightly came before the newest stable release, so it can hold older code
 - the version is already released or would sort before the nightly
+- the nightly to publish first would sort after the stable release, which happens only when `package.json` on `main` records a version no release has
 
 ## Release notes
 
 `release-plan.ts notes` lists every pull request merged between the previous release of the same channel and the commit the run builds, each once, oldest first:
 
 - Stable: from the previous stable release to the promoted nightly's commit, covering every nightly in between. Pull requests merged to `main` after that commit are left out.
-- Nightly: from the previous nightly to its own commit.
+- Nightly: from the previous nightly to its own commit, also for the nightly a stable run publishes first.
 - A channel's first release lists everything up to its commit.
 
 Commits pushed without a pull request, such as the version commit, aren't listed.
@@ -116,7 +120,7 @@ The app looks for updates in `updates.json` at the root of the repository's GitH
 
 The feed never goes back. When the releases name a lower version than the deployed feed, that channel keeps the deployed release, so a late or stale publication can't take users back. Only a run by hand with **allow-regress** moves a channel down. A publication that can't read the deployed feed or look up the Pages site stops instead of publishing from the releases alone; only a 404 for either counts as nothing deployed yet.
 
-A failed publication shows on the release run's **Update feed** job but doesn't fail the run, since the release is out by then. Fix the cause, then regenerate the feed.
+A failed publication shows on the release run's **Update feed** job but doesn't fail the run, since the release is out by then. Fix the cause, then regenerate the feed. The nightly a stable run publishes first is the exception: its failed publication fails the run before the stable release builds.
 
 ### Regenerating the feed
 
@@ -134,7 +138,7 @@ A custom domain set there moves the feed to that domain's root. The workflow loo
 
 ## Dry runs
 
-Add the label **release dry run** to a pull request from a branch of this repository. The run builds, signs, notarizes and tests the pull request's head commit like a nightly, and builds and tests the [Microsoft Store package](#microsoft-store-package) too. It keeps the files as workflow artifacts for 14 days and publishes nothing, so no update channel can offer the build. It takes the label off at once; add it again to test a later commit. The plan also logs what a scheduled nightly and a stable release would do on `main` at that moment.
+Add the label **release dry run** to a pull request from a branch of this repository. The run builds, signs, notarizes and tests the pull request's head commit like a nightly, and builds and tests the [Microsoft Store package](#microsoft-store-package) too. It keeps the files as workflow artifacts for 14 days and publishes nothing, so no update channel can offer the build. `build-release.yml` never publishes for a pull request, whatever the plan says, and a dry run never plans a nightly first. It takes the label off at once; add it again to test a later commit. The plan also logs what a scheduled nightly and a stable release of the latest nightly would do on `main` at that moment, including any nightly that would go first.
 
 Forks get no signing secrets, so their pull requests can't run it.
 
@@ -172,11 +176,12 @@ When the job failed, the release is out anyway. Re-run the job; if it needs a fi
 ## Recovery
 
 - **A check or platform failed:** nothing was published. Re-run the failed jobs to retry the same commit and version, or fix it on `main` and let the next nightly pick it up. For stable, promote a nightly that has the fix.
+- **The nightly before a stable release failed:** the stable release hasn't built. Re-run the failed jobs, after fixing the cause when its feed failed; the stable release builds once the nightly is published and the feed names it.
 - **Publishing failed:** re-run the failed jobs. A broken attempt leaves at most a draft, which the next attempt deletes first.
 - **The version was taken meanwhile:** publishing refuses. The next nightly plans a new version; start a stable release again, with another version if needed.
 - **Finalize failed:** re-run it. It only moves `package.json` forward, so running it late or twice is harmless, and until it succeeds nightlies count from the published stable release.
 - **The feed wasn't updated:** the release run passed, and its **Update feed** job shows why. Fix that, such as [enabling Pages](#enabling-pages), then [regenerate the feed](#regenerating-the-feed). When the job couldn't reach the deployed feed or the Pages API, regenerating once GitHub answers again is enough.
-- **A bad release is out:** publish a fixed one. To stop offering it sooner, delete the release's three `latest*.yml` files, then regenerate the feed with **allow-regress**: without them the release counts neither for the feed nor for the app's fallback to GitHub's API, and the feed never goes back by itself. For a stable release, mark the stable release before it as latest too. Keep the release itself, with its installers and its FFmpeg and x264 sources. Whoever installed it is owed those sources under the GPL, and the release holds their only copy. Until a fixed nightly is out, name the nightly to promote when releasing stable, since the latest one is the bad one. None of this downgrades anyone who installed it.
+- **A bad release is out:** publish a fixed one. To stop offering it sooner, delete the release's three `latest*.yml` files, then regenerate the feed with **allow-regress**: without them the release counts neither for the feed nor for the app's fallback to GitHub's API, and the feed never goes back by itself. For a stable release, mark the stable release before it as latest too. Keep the release itself, with its installers and its FFmpeg and x264 sources. Whoever installed it is owed those sources under the GPL, and the release holds their only copy. None of this downgrades anyone who installed it.
 
 ## Permissions
 
@@ -192,7 +197,7 @@ When the job failed, the release is out anyway. Re-run the job; if it needs a fi
 1. Merge the workflow to `main`: GitHub runs manual and scheduled workflows from the default branch's copy. The merge's own push finds no nightly yet and publishes `0.0.1-nightly.<date>.<run>`; if it doesn't, start a nightly by hand.
 2. [Enable Pages](#enabling-pages) and open the feed: its `nightly` must name the nightly.
 3. Install the nightly on each system and check that the app offers the next one once it's out.
-4. Start a stable release to publish `0.0.1`. On Stable, confirm it's offered and nightlies are not.
+4. Start a stable release of that nightly to publish `0.0.1`. On Stable, confirm it's offered and nightlies are not.
 
 ## TMDB key
 
