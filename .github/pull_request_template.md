@@ -7,6 +7,6 @@ features, refactors or other large changes are closed.
 
 **Fix:** <!-- what changed and why that fixes it -->
 
-**Checked:** <!-- how you verified it; pnpm fmt:check, typecheck and test pass -->
+**Checked:** <!-- how you verified it; pnpm knip, lint, fmt:check, typecheck and test pass -->
 
 - [ ] This is a small bug fix, as CONTRIBUTING.md describes.
