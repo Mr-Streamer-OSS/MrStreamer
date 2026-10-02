@@ -26,7 +26,9 @@ const LIST_CHANGES = ["titleLanguage", "adultTitles", "tmdbKey"] as const;
 
 export function GeneralSection() {
   const client = useQueryClient();
-  const preferences = useQuery(queries.preferences());
+  // Read afresh each time Settings opens: the players save the languages picked in them without
+  // going through this cache.
+  const preferences = useQuery({ ...queries.preferences(), refetchOnMount: "always" });
   const update = useMutation({
     mutationFn: (patch: Partial<Preferences>) => call("preferences.update", patch),
     onSuccess: async (saved, patch) => {
