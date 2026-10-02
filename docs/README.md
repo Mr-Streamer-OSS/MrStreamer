@@ -8,6 +8,7 @@
 - [Updates and channels](./user/updates.md)
 - [What plays](./user/playback.md)
 - [Troubleshooting](./user/troubleshooting.md)
+- [Privacy policy](./privacy.md)
 
 ---
 
