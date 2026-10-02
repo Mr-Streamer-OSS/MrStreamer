@@ -22,7 +22,7 @@ import type {
 } from "@mrstreamer/contracts/ondemand";
 import { diagnosed } from "@mrstreamer/core/diagnostics";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
-import { tmdb } from "@mrstreamer/core/metadata/tmdb";
+import { tmdb, type TitleAbout } from "@mrstreamer/core/metadata/tmdb";
 import { movieDetails, seriesDetails } from "@mrstreamer/core/ondemand/details";
 import { DEFAULT_TITLE_LANGUAGE } from "@mrstreamer/core/ondemand/languages";
 import type { ProviderDetails } from "@mrstreamer/core/provider";
@@ -181,8 +181,15 @@ function make(deps: OnDemandDeps) {
       null;
     /** Counts restarts of the worker. */
     let generation = 0;
-    /** Details by subscription, kind and id, oldest first. */
-    const details = new Map<string, { raw: ProviderDetails; shown: TitleDetails }>();
+    /**
+     * What opening a title downloaded, by subscription, language, kind and id, oldest first: the
+     * provider's details and TMDB's, with the title as the lists showed it then, for when they no
+     * longer list it.
+     */
+    const details = new Map<
+      string,
+      { raw: ProviderDetails; about: TitleAbout | null; title: Title }
+    >();
 
     const requireSource = Effect.flatMap(subscriptions.source, (source) =>
       source
@@ -246,20 +253,46 @@ function make(deps: OnDemandDeps) {
         return yield* run(source, yield* language);
       });
 
+    /**
+     * A title's details: downloaded when it first opens, then kept, and put together each time with
+     * the title as the lists show it now, so its name and original language follow TMDB's metadata
+     * as it arrives without downloading anything again.
+     */
     const detailsOf = (kind: TitleKind, id: string) =>
       Effect.gen(function* () {
         const source = yield* requireSource;
         const cacheKey = `${source.key}|${yield* language}|${kind}|${id}`;
-        const cached = details.get(cacheKey);
-        if (cached) {
-          // Most recently used last.
-          details.delete(cacheKey);
-          details.set(cacheKey, cached);
-          return cached;
-        }
-        const [title] = yield* loaded((_, language) =>
+        const [listed] = yield* loaded((_, language) =>
           call("byIds", { key: source.key, language, kind, ids: [id] }),
         );
+        const downloaded = details.get(cacheKey) ?? (yield* download(source, kind, id, listed));
+        // Most recently used last.
+        details.delete(cacheKey);
+        // Only for the subscription it was asked for.
+        if ((yield* subscriptions.source)?.key === source.key) {
+          details.set(cacheKey, downloaded);
+          if (details.size > DETAILS_KEPT) details.delete(details.keys().next().value ?? "");
+        }
+        const { raw, about } = downloaded;
+        const title = listed ?? downloaded.title;
+        // The title as this version: its episodes and its file belong to `id`.
+        const version = {
+          ...title,
+          id,
+          tags: title.versions.find((each) => each.id === id)?.tags ?? title.tags,
+        };
+        return {
+          raw,
+          shown:
+            kind === "movie"
+              ? movieDetails(version, raw, about)
+              : seriesDetails(version, raw, about),
+        };
+      });
+
+    /** Asks the provider and TMDB about a title the lists show, both at once. */
+    const download = (source: Source, kind: TitleKind, id: string, title: Title | undefined) =>
+      Effect.gen(function* () {
         if (!title) return yield* new Failed({ error: { kind: "title-not-found", titleId: id } });
         const viewer = yield* language;
         const [raw, about] = yield* Effect.all(
@@ -285,25 +318,7 @@ function make(deps: OnDemandDeps) {
           ],
           { concurrency: 2 },
         );
-        // The title as this version: its episodes and its file belong to `id`.
-        const version = {
-          ...title,
-          id,
-          tags: title.versions.find((each) => each.id === id)?.tags ?? title.tags,
-        };
-        const found = {
-          raw,
-          shown:
-            kind === "movie"
-              ? movieDetails(version, raw, about)
-              : seriesDetails(version, raw, about),
-        };
-        // Only for the subscription it was asked for.
-        if ((yield* subscriptions.source)?.key === source.key) {
-          details.set(cacheKey, found);
-          if (details.size > DETAILS_KEPT) details.delete(details.keys().next().value ?? "");
-        }
-        return found;
+        return { raw, about, title };
       });
 
     const status = Effect.gen(function* () {

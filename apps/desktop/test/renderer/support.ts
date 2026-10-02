@@ -1,12 +1,19 @@
 // Stands in for the main process in the renderer's tests, which run with happy-dom. Every call is
 // recorded; the preferences answer with the defaults, a call the test holds answers when the test
-// says, and anything else never answers. Import it first, before the renderer's modules: it also
+// says, and anything else never answers. Tests send its events themselves. Import it first, before the renderer's modules: it also
 // stands in for Media Source Extensions, which happy-dom lacks.
 import type { AppError, Result } from "@mrstreamer/contracts/errors";
-import type { BridgeApi, IpcMethod, IpcOutput } from "@mrstreamer/contracts/ipc";
+import type {
+  BridgeApi,
+  IpcEvent,
+  IpcEvents,
+  IpcMethod,
+  IpcOutput,
+} from "@mrstreamer/contracts/ipc";
 import { defaultPreferences } from "@mrstreamer/contracts/preferences";
 
 const held = new Map<IpcMethod, Promise<Result<unknown>>[]>();
+const listeners = new Map<string, Set<(payload: unknown) => void>>();
 const calls: { readonly method: IpcMethod; readonly args: unknown }[] = [];
 
 export const ipc = {
@@ -23,6 +30,10 @@ export const ipc = {
       reject: (error: AppError) => settle({ ok: false, error }),
     };
   },
+  /** Sends an event from the main process. */
+  emit<E extends IpcEvent>(event: E, payload: IpcEvents[E]): void {
+    for (const listener of listeners.get(event) ?? []) listener(payload);
+  },
   /** Forgets the calls and held answers of the test before. */
   reset(): void {
     calls.length = 0;
@@ -38,7 +49,12 @@ const bridge = {
     }
     return held.get(method)?.shift() ?? new Promise(() => {});
   },
-  on: () => () => {},
+  on(event: string, listener: (payload: unknown) => void) {
+    const set = listeners.get(event) ?? new Set();
+    set.add(listener);
+    listeners.set(event, set);
+    return () => set.delete(listener);
+  },
 };
 
 /**
