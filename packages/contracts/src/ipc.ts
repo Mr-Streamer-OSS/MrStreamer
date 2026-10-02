@@ -146,6 +146,8 @@ export const ipcInputs = {
   "updates.openStore": none,
   "licences.list": none,
   "licences.text": () => type({ id: "string" }),
+  "window.miniPlayerAvailable": none,
+  "window.setMiniPlayer": () => type({ on: "boolean" }),
 } satisfies Record<keyof IpcOutputs, () => { infer: unknown }>;
 
 /** What each IPC method resolves to when it succeeds. */
@@ -245,6 +247,13 @@ export interface IpcOutputs {
   "licences.list": readonly ThirdPartyNotice[];
   /** The full notice of one component from `licences.list`, as plain text. */
   "licences.text": string;
+  /** Whether the window can float over others as a mini player; Wayland keeps no window on top. */
+  "window.miniPlayerAvailable": boolean;
+  /**
+   * Shrinks the window to a small picture that stays on top of other windows, or puts it back
+   * where and as it was. Resolves once the window has moved.
+   */
+  "window.setMiniPlayer": null;
 }
 
 export type IpcMethod = keyof IpcOutputs;

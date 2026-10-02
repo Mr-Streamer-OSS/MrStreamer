@@ -58,6 +58,7 @@ The picture fills the window below the top bar, with the title, a timeline and t
 - The sliders button beside them sets the speed, from 0.5× to 2×. Voices keep their pitch. The speed lasts for the title, and carries on when **Next episode** plays the one after.
 - The same button moves subtitles earlier or later in tenths of a second, for this title only, and sets how they look: their size, a box or a shadow behind the text, low or higher up. The look stays for every title and channel. Subtitles drawn as pictures, as on Blu-rays and DVDs, take only size and position.
 - Menus follow the arrow keys. Escape or a click outside closes them without pausing or skipping.
+- **Mini player**, beside full screen, or P, shrinks the window into a small picture in a corner of the screen, on top of other windows. The title plays on where it was, with its subtitles, and the keys work as before. Drag the top of the picture to move it, and its corner to resize it. Escape, a double click or the arrows button puts the window back where it was, full screen included; the cross leaves the title. The countdown to the next episode carries on in it, and the next episode plays there. On a Mac the window and its Dock icon disappear for a moment each time it shrinks or grows back. Linux under Wayland can't keep a window on top, so there the mini player isn't offered.
 - **Next episode**, or N, plays the next one at once.
 - **Back**, or Escape, returns to the details or the page you came from.
 
@@ -87,6 +88,7 @@ Home's first row shows what you were watching: movies you started, and for each 
 | G, H        | Subtitles 0.1 s earlier or later      |
 | <, >        | Slower or faster                      |
 | F, M        | Full screen, mute                     |
+| P           | Mini player, and back                 |
 | Escape      | Close a menu, leave full screen, back |
 
 ## One connection

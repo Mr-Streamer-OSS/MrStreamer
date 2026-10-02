@@ -4,13 +4,16 @@
 // episode's end counts down to it (see title-player.ts). Back returns to where the title was opened.
 //   Space or K pauses, Left and Right skip 10 seconds, Up and Down change the volume, F is full
 //   screen, M mutes, C turns subtitles on or off, N plays the next episode, also during the
-//   countdown, G and H move subtitles earlier or later, < and > play slower or faster. While a menu
-//   is open, keys are its own: Escape closes it, then leaves full screen, then goes back.
+//   countdown, G and H move subtitles earlier or later, < and > play slower or faster, P shrinks
+//   the window into the mini player and back. While a menu is open, keys are its own: Escape
+//   closes it, then leaves full screen or the mini player, then goes back.
+// In the mini player the picture fills the small window, with a few controls along its foot.
 import { Slider as SliderPrimitive } from "@base-ui/react/slider";
 import { Maximize, Minimize, Pause, Play, RotateCcw, RotateCw, SkipForward } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { SeriesDetails } from "@mrstreamer/contracts/ondemand";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
+import { miniPlayer, useMiniPlayer } from "../../app/mini-player.ts";
 import { hasModifier, isTyping } from "../../app/platform.ts";
 import { openDetails, useUi } from "../../app/ui-store.ts";
 import { Artwork } from "../../components/TitleArt.tsx";
@@ -23,9 +26,10 @@ import { cn } from "../../lib/utils.ts";
 import { WINDOW_BAR } from "../../../../shared/window-bar.ts";
 import { Picture } from "../../player/Picture.tsx";
 import { player, type PlaybackProblem } from "../../player/player.ts";
-import { titlePlayer, useTitlePlayer } from "../../player/title-player.ts";
+import { titlePlayer, useTitlePlayer, type TitlePlayerState } from "../../player/title-player.ts";
 import { Flash } from "../watch/Flash.tsx";
 import { useFullscreen, useWake } from "../watch/layout.ts";
+import { MiniControls, MiniPlayerButton } from "../watch/MiniPlayer.tsx";
 import { nudgeSubtitles, PlaybackMenu, stepSpeed } from "../watch/PlaybackMenu.tsx";
 import { TrackMenus, type TrackMenu } from "../watch/TrackMenus.tsx";
 import { VolumeControl } from "../watch/VolumeControl.tsx";
@@ -55,6 +59,8 @@ function toEpisodes(series: SeriesDetails): void {
 export function TitleWatch() {
   const [awake, wake] = useWake(IDLE_MS);
   const [fullscreen, toggleFullscreen] = useFullscreen();
+  const mini = useMiniPlayer((state) => state.on);
+  const countdown = useTitlePlayer((state) => state.countdown);
   const now = useTitlePlayer((state) => state.now);
   const phase = useTitlePlayer((state) => state.phase);
   const next = useTitlePlayer((state) => state.next);
@@ -97,7 +103,12 @@ export function TitleWatch() {
           break;
         }
         case "f":
-          current.toggleFullscreen();
+          if (miniPlayer.on()) void miniPlayer.leave(true);
+          else current.toggleFullscreen();
+          break;
+        case "p":
+        case "P":
+          void miniPlayer.toggle();
           break;
         case "m":
           player.toggleMute();
@@ -120,6 +131,7 @@ export function TitleWatch() {
           break;
         case "Escape":
           if (document.fullscreenElement) void document.exitFullscreen();
+          else if (miniPlayer.on()) void miniPlayer.leave();
           else leave();
           break;
         default:
@@ -142,6 +154,52 @@ export function TitleWatch() {
     ((phase.kind === "ended" && next !== undefined) || (phase.kind === "failed" && continued))
       ? now.series
       : null;
+  if (mini) {
+    return (
+      <div
+        data-view="title"
+        data-mini=""
+        data-controls={controlsVisible ? "" : undefined}
+        onMouseMove={wake}
+        className={cn(
+          "fixed inset-0 z-30 overflow-hidden bg-black",
+          !controlsVisible && "cursor-none",
+        )}
+      >
+        <Picture
+          active
+          fit="contain"
+          className="absolute inset-0"
+          onClick={() => titlePlayer.togglePause()}
+          onDoubleClick={() => void miniPlayer.leave()}
+        />
+        <MiniControls
+          visible={controlsVisible}
+          status={miniStatus(phase, countdown)}
+          onClose={leave}
+        >
+          <Button
+            variant="media"
+            size="icon-sm"
+            aria-label="Back 10 seconds"
+            onClick={() => titlePlayer.skip(-SKIP_S)}
+          >
+            <RotateCcw />
+          </Button>
+          <PlayPause size="icon-sm" />
+          <Button
+            variant="media"
+            size="icon-sm"
+            aria-label="Forward 10 seconds"
+            onClick={() => titlePlayer.skip(SKIP_S)}
+          >
+            <RotateCw />
+          </Button>
+        </MiniControls>
+        <Flash />
+      </div>
+    );
+  }
   return (
     <div
       data-view="title"
@@ -221,6 +279,7 @@ export function TitleWatch() {
                 </Button>
               )}
               <VolumeControl />
+              <MiniPlayerButton />
               <Tooltip label={fullscreen ? "Exit full screen" : "Full screen"}>
                 <Button
                   variant="media"
@@ -240,7 +299,7 @@ export function TitleWatch() {
   );
 }
 
-function PlayPause() {
+function PlayPause({ size = "icon" }: { size?: "icon" | "icon-sm" }) {
   const phase = useTitlePlayer((state) => state.phase);
   const paused = phase.kind !== "playing";
   const label = phase.kind === "ended" ? "Play again" : paused ? "Play" : "Pause";
@@ -248,7 +307,7 @@ function PlayPause() {
     <Tooltip label={label}>
       <Button
         variant="primary"
-        size="icon"
+        size={size}
         aria-label={label}
         onClick={() => titlePlayer.togglePause()}
       >
@@ -393,6 +452,23 @@ function State() {
       {actions && <div className="mt-7 flex items-center gap-3">{actions}</div>}
     </div>
   );
+}
+
+/**
+ * What the mini player says when there's no picture, in a few words, the countdown to the next
+ * episode included; null while it plays.
+ */
+function miniStatus(phase: TitlePlayerState["phase"], countdown: number | null): string | null {
+  switch (phase.kind) {
+    case "reconnecting":
+      return "Connection lost";
+    case "failed":
+      return problemTitle(phase.problem);
+    case "ended":
+      return countdown === null ? "Finished" : `Next episode plays in ${countdown}`;
+    default:
+      return null;
+  }
 }
 
 function problemTitle(problem: PlaybackProblem): string {

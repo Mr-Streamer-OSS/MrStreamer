@@ -16,6 +16,7 @@ import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Progress } from "../../components/Progress.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { Tooltip } from "../../components/ui/tooltip.tsx";
+import { MiniPlayerButton } from "./MiniPlayer.tsx";
 import { PlaybackMenu } from "./PlaybackMenu.tsx";
 import { QualityMenu } from "./QualityMenu.tsx";
 import { TrackMenus, type TrackMenu } from "./TrackMenus.tsx";
@@ -224,6 +225,7 @@ function Controls({
         />
       )}
       <VolumeControl />
+      <MiniPlayerButton />
       <Tooltip label={fullscreen ? "Exit full screen" : "Full screen"}>
         <Button variant="media" size="icon" aria-label="Full screen" onClick={onToggleFullscreen}>
           {fullscreen ? <Minimize /> : <Maximize />}

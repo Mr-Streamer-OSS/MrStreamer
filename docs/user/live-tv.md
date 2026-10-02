@@ -32,6 +32,7 @@ While watching, the channel list opens over the left of the picture with the lis
 - **CC** lists the channel's subtitles: DVB subtitles, teletext subtitle pages and closed captions. C turns the last ones you picked on and off.
 - The sliders button beside them moves teletext subtitles and captions earlier or later, until you switch channel, and sets how subtitles look, as for [movies and series](movies-and-series.md#watching). Live channels play at their own speed.
 - **Quality** shows on a channel with several qualities and says which one plays. Q opens it.
+- **Mini player**, beside full screen, or P, shrinks the window into a small picture on top of other windows, as for [movies and series](movies-and-series.md#watching). Up and Down still switch channel; opening the list puts the window back.
 
 The languages you pick carry over to other channels, and to movies and series. A channel in another language starts with subtitles in yours when it has them.
 
@@ -64,3 +65,4 @@ The quality is the word your provider puts in the channel's name. The resolution
 | G, H               |                                                                | Subtitles 0.1 s earlier or later            |
 | Q                  |                                                                | The quality menu                            |
 | F, M, I            |                                                                | Full screen, mute, show the details         |
+| P                  |                                                                | Mini player, and back                       |

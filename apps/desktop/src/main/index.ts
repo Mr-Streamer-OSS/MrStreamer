@@ -14,6 +14,7 @@ import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Stream from "effect/Stream";
 import { WINDOW_BAR } from "../shared/window-bar.ts";
 import { emit, registerIpc } from "./ipc.ts";
+import { miniPlayer, miniPlayerAvailable } from "./mini-player.ts";
 import { electronInstaller } from "./platform/installer.ts";
 import { removeUnfinishedWrites } from "./platform/json-file.ts";
 import { keychainSecrets } from "./platform/secrets.ts";
@@ -71,13 +72,16 @@ app.commandLine.appendSwitch("disk-cache-size", String(DISK_CACHE_BYTES));
 const CATALOGUE_MAX_AGE = "12 hours";
 
 let mainWindow: BrowserWindow | null = null;
+/** The smallest the window gets, except as the mini player. */
+const MIN_SIZE = { minWidth: 960, minHeight: 600 } as const;
+/** Each window's mini player, which remembers where the window was. */
+const miniPlayers = new WeakMap<BrowserWindow, ReturnType<typeof miniPlayer>>();
 
 function openWindow(closeStreams: () => void): BrowserWindow {
   const window = new BrowserWindow({
     width: 1280,
     height: 800,
-    minWidth: 960,
-    minHeight: 600,
+    ...MIN_SIZE,
     show: false,
     backgroundColor: "#000000",
     // The picture fills the window. macOS keeps its traffic lights top left; Windows draws its
@@ -115,6 +119,7 @@ function openWindow(closeStreams: () => void): BrowserWindow {
     return { action: "deny" };
   });
   window.webContents.on("will-navigate", (event) => event.preventDefault());
+  miniPlayers.set(window, miniPlayer(window, MIN_SIZE));
 
   const devServer = process.env["ELECTRON_RENDERER_URL"];
   if (devServer) void window.loadURL(devServer);
@@ -352,6 +357,13 @@ async function start(): Promise<void> {
       "updates.openStore": () => Effect.as(updates.openStore, null),
       "licences.list": () => licences.list,
       "licences.text": ({ id }) => licences.text(id),
+      "window.miniPlayerAvailable": () => Effect.succeed(miniPlayerAvailable()),
+      "window.setMiniPlayer": ({ on }) =>
+        Effect.promise(async () => {
+          const mini = mainWindow && miniPlayers.get(mainWindow);
+          await mini?.set(on);
+          return null;
+        }),
     },
     (sender) => sender === mainWindow?.webContents,
   );
