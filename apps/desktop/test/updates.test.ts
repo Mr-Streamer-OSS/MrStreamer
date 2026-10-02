@@ -111,19 +111,55 @@ describe("update channels", () => {
     });
   });
 
-  it("offers Nightly users the newest build of either channel", async () => {
+  it("offers Nightly users the newest nightly, never a stable release", async () => {
     const { service } = await updates("0.3.0-nightly.20261001.10", [...PUBLISHED, offer("v0.3.0")]);
 
-    expect((await service.check()).update).toEqual({ kind: "available", version: "0.3.0" });
+    expect((await service.check()).update).toEqual({
+      kind: "available",
+      version: "0.3.0-nightly.20261002.14",
+    });
   });
 
-  it("keeps a Nightly user on Nightly after installing a stable release", async () => {
+  it("keeps a stable build on Nightly until a newer nightly is out", async () => {
     const dataDir = await tempDir();
     await (await updates("0.3.0-nightly.20261002.14", [], { dataDir })).service.status();
 
-    const afterUpdate = await updates("0.3.0", [], { dataDir });
+    const stableBuild = await updates("0.3.0", [...PUBLISHED, offer("v0.3.0")], { dataDir });
+    const later = await updates(
+      "0.3.0",
+      [...PUBLISHED, offer("v0.3.0"), offer("v0.3.1-nightly.20261003.15")],
+      { dataDir },
+    );
 
-    expect((await afterUpdate.service.status()).channel).toBe("nightly");
+    expect(await stableBuild.service.check()).toMatchObject({
+      channel: "nightly",
+      update: { kind: "current" },
+    });
+    expect((await later.service.check()).update).toEqual({
+      kind: "available",
+      version: "0.3.1-nightly.20261003.15",
+    });
+  });
+
+  it("offers a stable build switched to Nightly only a newer nightly", async () => {
+    const { service } = await updates("0.3.0", [...PUBLISHED, offer("v0.3.0")]);
+
+    expect((await service.setChannel("nightly")).update).toEqual({ kind: "current" });
+    expect((await service.setChannel("stable")).update).toEqual({ kind: "current" });
+  });
+
+  it("offers a nightly just below a stable release the next nightly, or on Stable that release", async () => {
+    const published = [...PUBLISHED, offer("v0.3.0"), offer("v0.3.1-nightly.20261003.15")];
+    const { service } = await updates("0.3.0-nightly.20261002.14", published);
+
+    expect((await service.check()).update).toEqual({
+      kind: "available",
+      version: "0.3.1-nightly.20261003.15",
+    });
+    expect((await service.setChannel("stable")).update).toEqual({
+      kind: "available",
+      version: "0.3.0",
+    });
   });
 
   it("takes a Nightly user who switches to Stable to the newest stable release, older or not", async () => {
@@ -357,15 +393,18 @@ describe("in-app updates", () => {
     expect(fake.installs()).toBe(0);
   });
 
-  it("keeps a downloaded stable release when a Nightly user switches to Stable", async () => {
-    const { service } = await updates("0.3.0-nightly.20261001.10", [...PUBLISHED, offer("v0.3.0")]);
+  it("drops a downloaded stable release when the user switches to Nightly, and offers Nightly instead", async () => {
+    const fake = fakeInstaller();
+    const { service } = await updates("0.2.0", PUBLISHED, { installer: fake.installer });
     await service.check();
     await service.download();
 
-    expect((await service.setChannel("stable")).update).toEqual({
-      kind: "ready",
-      version: "0.3.0",
+    expect((await service.setChannel("nightly")).update).toEqual({
+      kind: "available",
+      version: "0.3.0-nightly.20261002.14",
     });
+    await service.restart();
+    expect(fake.installs()).toBe(0);
   });
 });
 
@@ -694,6 +733,27 @@ describe("finding releases", () => {
     ]);
     expect(found[0]?.feedUrl).toBe("https://github.com/owner/app/releases/download/v0.2.1");
     expect(requests).toEqual([FEED_URL]);
+  });
+
+  it("offers a Nightly user nothing from a feed whose nightly is a stable release", async () => {
+    // The feed names the highest release of all as nightly, for versions up to 0.0.3.
+    const { fetchImpl } = sources({
+      feed: () =>
+        json({
+          schema: 1,
+          generated: "2026-10-02T10:00:00Z",
+          stable: feedEntry("0.3.0"),
+          nightly: feedEntry("0.3.0"),
+        }),
+    });
+    const service = await startUpdates({
+      dataDir: await tempDir(),
+      installed: "0.3.0-nightly.20261001.10",
+      discover: find(fetchImpl),
+      installer: fakeInstaller().installer,
+    });
+
+    expect((await service.check()).update).toEqual({ kind: "current" });
   });
 
   it("skips a feed entry without this platform's update metadata", async () => {

@@ -23,7 +23,10 @@ export interface UpdateFeed {
   readonly generated: string;
   /** The highest stable release. */
   readonly stable: FeedRelease | null;
-  /** The highest release of all: Nightly users receive stable releases too. */
+  /**
+   * The highest release of all. Versions 0.0.3 and earlier offer it to Nightly users even when
+   * it's a stable release; later versions offer Nightly users nightlies only, and skip it then.
+   */
   readonly nightly: FeedRelease | null;
 }
 

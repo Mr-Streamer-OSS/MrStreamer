@@ -93,11 +93,6 @@ export interface Plan {
    * for a stable one, the previous nightly for a nightly. Null for a channel's first release.
    */
   readonly previousTag: string | null;
-  /**
-   * For a stable release: the published nightlies that sort after the nightly it promotes. Their
-   * users are offered this release, which lacks their changes, until the next nightly.
-   */
-  readonly leftOut?: readonly string[];
 }
 
 export interface Skip {
@@ -183,7 +178,7 @@ export async function planStable(repo: Repository, request: StableRequest): Prom
   }
   if (compareVersions(version, previewed) <= 0) {
     throw new Error(
-      `${formatVersion(version)} would sort before ${nightly.tag}, the nightly it promotes, so nightly users would never be offered it.`,
+      `${formatVersion(version)} would sort before ${nightly.tag}, the nightly it promotes.`,
     );
   }
   assertUnreleased(releasedVersions(repo), version);
@@ -202,19 +197,12 @@ export async function planStable(repo: Repository, request: StableRequest): Prom
       `${nightly.tag} came before ${tagOf(previousStable)}, so it can hold older code. Promote a nightly built after it.`,
     );
   }
-  const leftOut = repo.releases
-    .filter(isPublishedNightly)
-    .map((release) => parseVersion(release.tag)!)
-    .filter((other) => compareVersions(other, previewed) > 0 && compareVersions(other, version) < 0)
-    .sort(compareVersions)
-    .map(tagOf);
   return {
     channel: "stable",
     version: formatVersion(version),
     tag: tagOf(version),
     sha,
     previousTag: previousStable ? tagOf(previousStable) : null,
-    leftOut,
   };
 }
 
@@ -439,11 +427,6 @@ function outputPlan(plan: Plan | Skip): void {
   summary(
     `${plan.channel === "stable" ? "Stable" : "Nightly"} ${plan.version} from \`${plan.sha}\``,
   );
-  if (plan.leftOut && plan.leftOut.length > 0) {
-    console.log(
-      `::warning::${plan.leftOut.join(", ")} came after the nightly this release promotes. Their users are offered ${plan.version} too, without their changes, until the next nightly.`,
-    );
-  }
   output({
     skip: "false",
     channel: plan.channel,

@@ -258,18 +258,16 @@ describe("stable releases", () => {
       tag: "v0.0.1",
       sha: "nightly-commit",
       previousTag: null,
-      leftOut: [],
     });
   });
 
-  it("promote the tested nightly when given, by version or tag, and name the later ones", async () => {
+  it("promote the tested nightly when given, by version or tag", async () => {
     const { repo } = promotion();
 
     for (const nightly of ["0.0.1-nightly.20261001.20", older]) {
       expect(await planStable(repo, { ref: MAIN, nightly })).toMatchObject({
         version: "0.0.1",
         sha: "older-commit",
-        leftOut: [latest],
       });
     }
   });

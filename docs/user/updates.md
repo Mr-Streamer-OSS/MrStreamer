@@ -35,9 +35,9 @@ The Store copy and a copy installed from the setup file are separate. Each keeps
 ## Stable and Nightly
 
 - **Stable** gets tested releases only.
-- **Nightly** gets new builds first, up to four a day when there are changes, and every stable release too. Nightly builds can have rough edges.
+- **Nightly** gets new builds first, up to four a day when there are changes. It never offers a stable release: each stable release is a tested nightly, so the nightlies carry its changes. Nightly builds can have rough edges.
 
-The version you download sets your channel on first launch. After that, only **Channel** under **Updates** in Settings changes it. Installing a stable release while on Nightly keeps you on Nightly.
+The version you download sets your channel on first launch. After that, only **Channel** under **Updates** in Settings changes it. Installing a stable release while on Nightly keeps you on Nightly, and Mr. Streamer offers the next nightly once one is out. Nightly never offers a version older than yours. The same goes when you switch a stable release to Nightly.
 
 ## Going back to Stable
 
