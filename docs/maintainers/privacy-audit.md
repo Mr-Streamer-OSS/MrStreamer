@@ -115,7 +115,7 @@ He doesn't control the provider, the servers a playlist names, artwork hosts, TM
 | The diagnostics log never leaves the computer unless the viewer attaches it                                                                        | `platform/diagnostics-log.ts`; no network client reads it                                                                                                                  |
 | Controller Wout Stiens, Belgium, publishing as Mr Streamer OSS; contact `privacy@mrstreamer.app`; the policy at `https://mrstreamer.app/privacy`   | Wout's inputs, 2 October; after #60 merged, the URL answered 302 and then 200 with the policy on GitHub (GitHub's code pages answered 503 and 504 for a few minutes first) |
 | Email and hosting providers process messages and website visits on the publisher's behalf                                                          | Cloudflare (DNS, redirects, Email Routing) and GitHub, as above                                                                                                            |
-| A Microsoft Store copy gets its updates from the Store                                                                                             | Planned in part 8; check against the Store package before it ships                                                                                                         |
+| A Microsoft Store copy gets its updates from the Store                                                                                             | #70; the packaged-app test reads "store" on the installed MSIX. A Store-delivered install is still to check                                                                |
 | Requests about data the publisher holds get an answer within a month                                                                               | GDPR Article 12(3); the publisher's commitment                                                                                                                             |
 
 ## Open checks
@@ -124,4 +124,4 @@ He doesn't control the provider, the servers a playlist names, artwork hosts, TM
 - macOS Squirrel's staging folder under `~/Library/Caches`.
 - The viewer's own TMDB key stays in plain text in `preferences.json`. Sealing it would make 0.0.3 lose the key after going back to Stable; tracked as a gap.
 - The Microsoft Store package (part 8): the release workflow checks a test-signed install on Windows, its data folder, that it reports Store updates, and that uninstalling removes its data. A Store-delivered install on Wout's PC is still to check.
-- Microsoft's view of HTTP logins (handoff part 6) before Store submission.
+- Microsoft's view of HTTP logins: settled before submission 1. Microsoft support accepted the flow that asks before http (policy 10.5.4), as Wout reports.
