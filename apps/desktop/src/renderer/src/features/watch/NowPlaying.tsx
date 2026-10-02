@@ -16,6 +16,7 @@ import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Progress } from "../../components/Progress.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { Tooltip } from "../../components/ui/tooltip.tsx";
+import { PlaybackMenu } from "./PlaybackMenu.tsx";
 import { TrackMenus, type TrackMenu } from "./TrackMenus.tsx";
 import { useNow } from "../../lib/clock.ts";
 import { channelLine, clockTime, progressOf, techLine, timeLeft } from "../../lib/format.ts";
@@ -171,6 +172,14 @@ function Controls({
           onOpenChange={onMenu}
           onAudio={(id) => player.setAudio(id)}
           onSubtitle={(track) => player.setSubtitle(track)}
+        />
+      )}
+      {tracks && (
+        <PlaybackMenu
+          subtitles={tracks.subtitles}
+          subtitle={subtitle}
+          open={menu === "playback"}
+          onOpenChange={(next) => onMenu(next ? "playback" : null)}
         />
       )}
       <VolumeControl />

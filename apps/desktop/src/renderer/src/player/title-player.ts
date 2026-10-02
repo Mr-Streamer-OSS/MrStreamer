@@ -5,6 +5,10 @@
 //
 // How far the title got is saved as the viewer goes: every minute while playing, and at each
 // pause, seek, track change, the end, leaving and hiding the window. Never per frame.
+//
+// A title can play faster or slower, keeping the pitch (the element's `preservesPitch`, on by
+// default). The speed lasts for the title, and carries on when another episode of its series opens
+// from it, as Next episode does; live channels always play at their own.
 import { createStore, useStore } from "zustand";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
 import type {
@@ -21,7 +25,7 @@ import { call } from "../lib/ipc.ts";
 import { titleDecoders } from "./decoders.ts";
 import type { EngineError } from "./engine.ts";
 import { onLiveStart, player, type PlaybackProblem } from "./player.ts";
-import { clearSubtitles } from "./subtitles.ts";
+import { clearSubtitles, setSubtitleDelay } from "./subtitles.ts";
 import { titleEngine, type TitleEngine } from "./title-engine.ts";
 
 /** How often progress is saved while a title plays. */
@@ -30,6 +34,10 @@ const CHECKPOINT_MS = 60_000;
 const RELEASE_AFTER_PAUSE_MS = 5 * 60_000;
 /** Waits before each new run after the connection broke. Its length is the attempt limit. */
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000];
+
+/** The speeds a title plays at, slowest first; 1 is its own. */
+export const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
+export type Speed = (typeof SPEEDS)[number];
 
 /** The subtitle formats the player shows: all of them. */
 const SHOWN_SUBTITLES: ReadonlySet<SubtitleFormat> = new Set([
@@ -74,6 +82,7 @@ export interface TitlePlayerState {
   readonly audioId: number | null;
   /** The subtitle track on screen, or null for none. */
   readonly subtitle: SubtitleTrack | null;
+  readonly speed: Speed;
 }
 
 const idle: TitlePlayerState = {
@@ -85,6 +94,7 @@ const idle: TitlePlayerState = {
   subtitles: [],
   audioId: null,
   subtitle: null,
+  speed: 1,
 };
 
 const store = createStore<TitlePlayerState>(() => idle);
@@ -153,6 +163,12 @@ function save(): void {
   }).catch(() => {});
 }
 
+/** Plays the element at `speed`, and starts each run after this at it too. */
+function playAt(speed: number): void {
+  video.defaultPlaybackRate = speed;
+  video.playbackRate = speed;
+}
+
 function stopEngine(): void {
   engine?.destroy();
   engine = null;
@@ -197,6 +213,8 @@ async function run(start: number, attempt = 0, paused = false): Promise<void> {
     paused,
   });
   engine = started;
+  // Starting a run loads the element afresh, which sets its rate to the default one.
+  playAt(store.getState().speed);
   try {
     await started.started;
   } catch (error) {
@@ -287,13 +305,26 @@ export const titlePlayer = {
    * beginning. Closes whatever played before, live or on demand.
    */
   async open(now: NowPlaying, from: number): Promise<void> {
+    const before = store.getState();
+    const sameSeries =
+      before.now?.title.kind === "episode" &&
+      now.title.kind === "episode" &&
+      before.now.title.seriesId === now.title.seriesId;
     titlePlayer.close();
+    // Subtitle timing belongs to a file; a new title starts on time.
+    setSubtitleDelay(video, 0);
     player.suspend();
     const mine = ++generation;
     openedAt = Date.now();
     convertSound = false;
     lastSubtitle = null;
-    store.setState({ ...idle, now, phase: { kind: "opening" }, position: from });
+    store.setState({
+      ...idle,
+      now,
+      phase: { kind: "opening" },
+      position: from,
+      speed: sameSeries ? before.speed : 1,
+    });
     try {
       // The languages chosen last, fresh: a choice in the title before counts.
       const [opened, preferences] = await Promise.all([
@@ -435,6 +466,26 @@ export const titlePlayer = {
     if (next) titlePlayer.setSubtitle(next);
   },
 
+  /** Plays at `speed` from now on, keeping the pitch. */
+  setSpeed(speed: Speed): void {
+    if (!store.getState().now) return;
+    store.setState({ speed });
+    playAt(speed);
+  },
+
+  /** < and >: the next speed down or up; returns the speed now. */
+  stepSpeed(direction: -1 | 1): Speed {
+    const { speed } = store.getState();
+    const next = SPEEDS[SPEEDS.indexOf(speed) + direction] ?? speed;
+    titlePlayer.setSpeed(next);
+    return next;
+  },
+
+  /** The title player's state now, for key handlers that read it once. */
+  state(): TitlePlayerState {
+    return store.getState();
+  },
+
   /** Saves how far the title got, then closes it and its provider connection. */
   close(): void {
     const { now, phase } = store.getState();
@@ -450,6 +501,9 @@ export const titlePlayer = {
     released = null;
     if (session) void call("playback.close", { sessionId: session.id }).catch(() => {});
     session = null;
+    // The element plays live channels next, at their own speed and their subtitles on time.
+    playAt(1);
+    setSubtitleDelay(video, 0);
     store.setState(idle);
   },
 };

@@ -3,14 +3,14 @@
 // Off and every subtitle track; C turns the last choice on and off.
 import { Popover } from "@base-ui/react/popover";
 import { AudioLines, Captions } from "lucide-react";
-import type { ReactNode } from "react";
+import { useRef, type KeyboardEvent, type ReactNode } from "react";
 import type { AudioTrack, SubtitleTrack } from "@mrstreamer/contracts/playback";
 import { Button } from "../../components/ui/button.tsx";
 import { Tooltip } from "../../components/ui/tooltip.tsx";
 import { cn } from "../../lib/utils.ts";
 
 /** Which menu is open over the controls, so Escape closes it before anything else. */
-export type TrackMenu = "sound" | "subtitles" | null;
+export type TrackMenu = "sound" | "subtitles" | "playback" | null;
 
 export function TrackMenus({
   audio,
@@ -91,7 +91,13 @@ export function TrackMenus({
   );
 }
 
-function Menu({
+/**
+ * A menu over the player's controls, opened by a button. While it's open a click elsewhere only
+ * closes it, so the same click can't also pause, skip or change channel. Opened by the keyboard,
+ * it starts on the item chosen, by the pointer on none; Up and Down move between items
+ * (`data-item`), Home and End to the first and last.
+ */
+export function Menu({
   label,
   on = false,
   open,
@@ -106,8 +112,9 @@ function Menu({
   trigger: ReactNode;
   children: ReactNode;
 }) {
+  const popup = useRef<HTMLDivElement>(null);
   return (
-    <Popover.Root open={open} onOpenChange={onOpenChange}>
+    <Popover.Root open={open} onOpenChange={onOpenChange} modal>
       <Tooltip label={label}>
         <Popover.Trigger
           render={
@@ -122,12 +129,22 @@ function Menu({
           {trigger}
         </Popover.Trigger>
       </Tooltip>
-      <Popover.Portal>
+      {/* Over Watch, so the backdrop that takes clicks outside the menu covers the controls too. */}
+      <Popover.Portal className="relative z-[60]">
         <Popover.Positioner side="top" align="end" sideOffset={10} className="z-[60]">
           {/* Focus goes back to the button only for the keyboard: a pointer pick would open
               its tooltip, which stays after the controls hide. */}
           <Popover.Popup
+            ref={popup}
+            aria-label={label}
+            initialFocus={(openType) =>
+              (openType === "keyboard" && popup.current && chosenItem(popup.current)) ||
+              popup.current
+            }
             finalFocus={(closeType) => closeType === "keyboard"}
+            onKeyDown={(event) => {
+              if (!event.defaultPrevented) moveFocus(event);
+            }}
             className="max-h-[60vh] w-[18rem] overflow-y-auto rounded-2xl bg-popover p-2 text-[0.9375rem] shadow-2xl ring-1 ring-white/12 outline-none transition-[opacity,scale] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0"
           >
             {children}
@@ -138,7 +155,37 @@ function Menu({
   );
 }
 
-function Choice({
+/** The item a menu opens on: the one chosen, else the first. */
+function chosenItem(popup: HTMLElement): HTMLElement | null {
+  return (
+    popup.querySelector<HTMLElement>("[data-item][aria-pressed=true]") ??
+    popup.querySelector<HTMLElement>("[data-item]")
+  );
+}
+
+/** Up, Down, Home and End move focus between a menu's items, round from the last to the first. */
+function moveFocus(event: KeyboardEvent<HTMLDivElement>): void {
+  const items = [
+    ...event.currentTarget.querySelectorAll<HTMLElement>("[data-item]:not(:disabled)"),
+  ];
+  const at = items.findIndex((item) => item === document.activeElement);
+  const target =
+    event.key === "ArrowDown"
+      ? (items[at + 1] ?? items[0])
+      : event.key === "ArrowUp"
+        ? (items[at - 1] ?? items.at(-1))
+        : event.key === "Home"
+          ? items[0]
+          : event.key === "End"
+            ? items.at(-1)
+            : undefined;
+  if (!target) return;
+  event.preventDefault();
+  target.focus();
+}
+
+/** One of a menu's choices, marked when chosen. */
+export function Choice({
   chosen,
   onChoose,
   children,
@@ -149,11 +196,12 @@ function Choice({
 }) {
   return (
     <button
+      data-item
       aria-pressed={chosen}
       onMouseDown={(event) => event.preventDefault()}
       onClick={onChoose}
       className={cn(
-        "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left",
+        "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left outline-none focus-visible:bg-white/10",
         chosen ? "text-white" : "text-foreground/80 hover:bg-white/6",
       )}
     >

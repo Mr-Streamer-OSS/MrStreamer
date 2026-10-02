@@ -3,8 +3,9 @@
 // leaving; Escape closes it, then leaves full screen, then goes back to the page underneath.
 //   Up and Down switch channel, or move in the open list. Enter or Left opens the list; in it,
 //   Enter plays, Left swaps to the lists and Right swaps back. Backspace returns to the previous
-//   channel, digits jump to a number, F is full screen, M mutes, C turns subtitles on or off, I
-//   shows the details, S stars. While a sound or subtitle menu is open, keys are its own.
+//   channel, digits jump to a number, F is full screen, M mutes, C turns subtitles on or off, G
+//   and H move them earlier or later, I shows the details, S stars. While a menu is open, keys are
+//   its own.
 import { useEffect, useRef, useState } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { hasModifier, isTyping } from "../../app/platform.ts";
@@ -26,9 +27,11 @@ import {
   type ListEntry,
 } from "../live/lists.ts";
 import { ChannelOverlay } from "./ChannelOverlay.tsx";
+import { Flash } from "./Flash.tsx";
 import { useFullscreen, useWake } from "./layout.ts";
 import { NowPlayingBar } from "./NowPlaying.tsx";
 import { numberEntry, NumberEntry } from "./NumberEntry.tsx";
+import { nudgeSubtitles } from "./PlaybackMenu.tsx";
 import { PlaybackState } from "./PlaybackState.tsx";
 import type { TrackMenu } from "./TrackMenus.tsx";
 
@@ -214,6 +217,12 @@ export function WatchScreen() {
         case "c":
           player.toggleSubtitles();
           break;
+        case "g":
+        case "G":
+        case "h":
+        case "H":
+          nudgeSubtitles(player.state().subtitle, event.key.toLowerCase() === "g" ? -1 : 1);
+          break;
         case "i":
           wake();
           break;
@@ -299,6 +308,7 @@ export function WatchScreen() {
         onMenu={setMenu}
       />
       <NumberEntry onChannel={(target) => player.play(target)} />
+      <Flash />
     </div>
   );
 }

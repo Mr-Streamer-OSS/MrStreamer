@@ -1,9 +1,11 @@
 // Playing a movie or an episode: the picture fills the window, with the title, a scrubber and the
-// controls along the bottom, fading when idle. Sound and CC open the file's tracks; a series
-// offers its next episode, only when asked. Back returns to where the title was opened.
+// controls along the bottom, fading when idle. Sound and CC open the file's tracks, and the sliders
+// its speed and the subtitles' timing and look; a series offers its next episode, only when asked.
+// Back returns to where the title was opened.
 //   Space or K pauses, Left and Right skip 10 seconds, Up and Down change the volume, F is full
-//   screen, M mutes, C turns subtitles on or off, N plays the next episode. Escape closes a track
-//   menu, then leaves full screen, then goes back.
+//   screen, M mutes, C turns subtitles on or off, N plays the next episode, G and H move subtitles
+//   earlier or later, < and > play slower or faster. While a menu is open, keys are its own:
+//   Escape closes it, then leaves full screen, then goes back.
 import { Slider as SliderPrimitive } from "@base-ui/react/slider";
 import { useQuery } from "@tanstack/react-query";
 import { Maximize, Minimize, Pause, Play, RotateCcw, RotateCw, SkipForward } from "lucide-react";
@@ -23,7 +25,9 @@ import { WINDOW_BAR } from "../../../../shared/window-bar.ts";
 import { Picture } from "../../player/Picture.tsx";
 import { player, type PlaybackProblem } from "../../player/player.ts";
 import { titlePlayer, useTitlePlayer } from "../../player/title-player.ts";
+import { Flash } from "../watch/Flash.tsx";
 import { useFullscreen, useWake } from "../watch/layout.ts";
+import { nudgeSubtitles, PlaybackMenu, stepSpeed } from "../watch/PlaybackMenu.tsx";
 import { TrackMenus, type TrackMenu } from "../watch/TrackMenus.tsx";
 import { VolumeControl } from "../watch/VolumeControl.tsx";
 
@@ -70,6 +74,8 @@ export function TitleWatch() {
       if (ui.searchOpen || ui.settings || ui.updateDialog || !ui.playingTitle) return;
       const current = latest.current;
       current.wake();
+      // The menu's own keys: Escape closes it, and focus goes back to its button.
+      if (current.menu) return;
       switch (event.key) {
         case " ":
         case "k":
@@ -99,8 +105,17 @@ export function TitleWatch() {
         case "n":
           current.playNext();
           break;
+        case "g":
+        case "G":
+        case "h":
+        case "H":
+          nudgeSubtitles(titlePlayer.state().subtitle, event.key.toLowerCase() === "g" ? -1 : 1);
+          break;
+        case "<":
+        case ">":
+          stepSpeed(event.key === "<" ? -1 : 1);
+          break;
         case "Escape":
-          if (current.menu) return;
           if (document.fullscreenElement) void document.exitFullscreen();
           else leave();
           break;
@@ -212,6 +227,7 @@ export function TitleWatch() {
           </div>
         </div>
       )}
+      <Flash />
     </div>
   );
 }
@@ -298,17 +314,27 @@ function Tracks({ menu, onMenu }: { menu: TrackMenu; onMenu: (menu: TrackMenu) =
   const subtitles = useTitlePlayer((state) => state.subtitles);
   const audioId = useTitlePlayer((state) => state.audioId);
   const subtitle = useTitlePlayer((state) => state.subtitle);
+  const speed = useTitlePlayer((state) => state.speed);
   return (
-    <TrackMenus
-      audio={audio}
-      audioId={audioId}
-      subtitles={subtitles}
-      subtitle={subtitle}
-      open={menu}
-      onOpenChange={onMenu}
-      onAudio={(id) => titlePlayer.setAudio(id)}
-      onSubtitle={(track) => titlePlayer.setSubtitle(track)}
-    />
+    <>
+      <TrackMenus
+        audio={audio}
+        audioId={audioId}
+        subtitles={subtitles}
+        subtitle={subtitle}
+        open={menu}
+        onOpenChange={onMenu}
+        onAudio={(id) => titlePlayer.setAudio(id)}
+        onSubtitle={(track) => titlePlayer.setSubtitle(track)}
+      />
+      <PlaybackMenu
+        speed={{ value: speed, onChange: (next) => titlePlayer.setSpeed(next) }}
+        subtitles={subtitles}
+        subtitle={subtitle}
+        open={menu === "playback"}
+        onOpenChange={(next) => onMenu(next ? "playback" : null)}
+      />
+    </>
   );
 }
 

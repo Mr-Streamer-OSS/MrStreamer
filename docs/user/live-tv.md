@@ -28,6 +28,7 @@ While watching, the channel list opens over the left of the picture with the lis
 
 - **Sound** shows when a channel has more than one sound track. Picking another starts the channel again with it, which takes a moment.
 - **CC** lists the channel's subtitles: DVB subtitles, teletext subtitle pages and closed captions. C turns the last ones you picked on and off.
+- The sliders button beside them moves teletext subtitles and captions earlier or later, until you switch channel, and sets how subtitles look, as for [movies and series](movies-and-series.md#watching). Live channels play at their own speed.
 
 The languages you pick carry over to other channels, and to movies and series. A channel in another language starts with subtitles in yours when it has them.
 
@@ -49,4 +50,5 @@ The languages you pick carry over to other channels, and to movies and series. A
 | Escape             | Home                                                           | Close the list, leave full screen, go back  |
 | Backspace          |                                                                | The previous channel                        |
 | C                  |                                                                | Subtitles on and off                        |
+| G, H               |                                                                | Subtitles 0.1 s earlier or later            |
 | F, M, I            |                                                                | Full screen, mute, show the details         |

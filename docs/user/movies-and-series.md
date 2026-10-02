@@ -55,6 +55,9 @@ The picture fills the window below the top bar, with the title, a timeline and t
 
 - Drag the timeline, or skip back and forward 10 seconds. A skip into what's already loaded is instant; further away, the picture takes a second to catch up.
 - **Sound** lists the sound tracks the file carries, and **CC** its subtitles. C turns the last ones you picked on and off, and a paused title stays paused while it changes. Your choice of language is remembered, and the next title or channel that has it starts with it, as **Audio in** and **Subtitles** in Settings > General describe. When the file has no sound in that language, its own default plays.
+- The sliders button beside them sets the speed, from 0.5× to 2×. Voices keep their pitch. The speed lasts for the title, and carries on when **Next episode** plays the one after.
+- The same button moves subtitles earlier or later in tenths of a second, for this title only, and sets how they look: their size, a box or a shadow behind the text, low or higher up. The look stays for every title and channel. Subtitles drawn as pictures, as on Blu-rays and DVDs, take only size and position.
+- Menus follow the arrow keys. Escape or a click outside closes them without pausing or skipping.
 - **Next episode** plays the next one, whenever you choose. At the end of an episode Mr. Streamer offers it, but never plays it on its own.
 - **Back**, or Escape, returns to the details or the page you came from.
 
@@ -73,6 +76,8 @@ Home's first row shows what you were watching: movies you started, and for each 
 | Up, Down    | Volume                                |
 | N           | Next episode                          |
 | C           | Subtitles on and off                  |
+| G, H        | Subtitles 0.1 s earlier or later      |
+| <, >        | Slower or faster                      |
 | F, M        | Full screen, mute                     |
 | Escape      | Close a menu, leave full screen, back |
 

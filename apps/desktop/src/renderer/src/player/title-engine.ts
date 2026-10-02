@@ -10,7 +10,7 @@
 import { subtitleDecoder, type SubtitleCodec } from "@mrstreamer/core/subtitles/decoder";
 import type { EngineError, StreamInfo } from "./engine.ts";
 import { readMp4Start } from "./mp4.ts";
-import { clearSubtitles, subtitlePresenter, subtitleTrack } from "./subtitles.ts";
+import { addTextCue, clearSubtitles, subtitlePresenter, subtitleTrack } from "./subtitles.ts";
 import { webvttReader } from "./webvtt.ts";
 
 /** Stop reading once this much is buffered ahead, and read again below the second value. */
@@ -299,9 +299,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
       const add = (cues: ReturnType<typeof reader.push>) => {
         // The track is shared with the next run, which may have started already.
         if (subtitlesSignal.aborted) return;
-        for (const cue of cues) {
-          subtitles.addCue(new VTTCue(cue.start - origin, cue.end - origin, cue.text));
-        }
+        for (const cue of cues) addTextCue(video, cue.start - origin, cue.end - origin, cue.text);
       };
       for await (const chunk of response.body)
         add(reader.push(decoder.decode(chunk, { stream: true })));
