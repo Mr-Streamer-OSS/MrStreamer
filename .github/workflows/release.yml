@@ -32,7 +32,7 @@ on:
         options: [nightly, stable]
         default: nightly
       version:
-        description: Stable version, such as 0.1.0. Empty releases the version the nightly previewed.
+        description: Stable version, such as 0.1.0. Empty releases the version the nightly previewed, unless a stable release has it already.
         type: string
         required: false
       nightly:
