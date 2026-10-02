@@ -113,6 +113,9 @@ async function start(): Promise<void> {
     // Windows has no app menu to keep; macOS needs its default menu for Edit shortcuts like paste.
     Menu.setApplicationMenu(null);
     app.setAppUserModelId(APP_ID);
+    // Nothing checks spelling, so Chromium has no reason to download a dictionary from Google.
+    // macOS uses its own spellchecker and downloads nothing.
+    session.defaultSession.setSpellCheckerLanguages([]);
   }
   if (process.platform === "linux" && safeStorage.getSelectedStorageBackend() === "basic_text") {
     // No keyring (GNOME Keyring or KWallet) to hold the key. Like Chromium's own passwords, the
