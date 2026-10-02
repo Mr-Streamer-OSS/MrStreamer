@@ -2,7 +2,7 @@
 
 > For maintainers. The [slice 6 handoff](slices/06-everyday-viewing-and-release-readiness.md) owns the product scope and acceptance; this runbook owns the Partner Center steps, the package identity and the private submission checklist.
 
-Status: Wout opened the publisher account and reserved Mr. Streamer on 2 October 2026; the [package identity](#package-identity) is below. [Submission 1](#submission-1), package `1.0.4.0` from Stable 0.0.4, went in the same day for a private audience and passed certification; Wout publishes it to the testers. Submission 2, `1.0.5.0` from Stable 0.0.5, is being prepared to test a Store update. Checked against Microsoft's documentation and dashboard on 2 October 2026. Check the current dashboard and rules while setting up.
+Status: Wout opened the publisher account and reserved Mr. Streamer on 2 October 2026; the [package identity](#package-identity) is below. [Submission 1](#submission-1), package `1.0.4.0` from Stable 0.0.4, went in the same day for a private audience, passed certification, was published to the testers and installed on Wout's PC. Submission 2, `1.0.5.0` from Stable 0.0.5, is being prepared to test a Store update. Checked against Microsoft's documentation and dashboard on 2 October 2026. Check the current dashboard and rules while setting up.
 
 Goal: a Windows x64 MSIX that a private test audience installs through the Store. The direct-download EXE and GitHub releases carry on as they are. Making the app public in the Store is a later launch action.
 
@@ -90,8 +90,9 @@ Update this table as work happens. Never record secrets or personal verification
 | Notification email                    | Verified, 2 October 2026                  | Action Center > My Preferences                                                                                                   |
 | MSIX and certification kit            | Validated, 2 October 2026                 | `1.0.4.0` from `3cfa1e3`, run 36998968726: identity and contents checked, installed test-signed, kit PASS                        |
 | Privacy, content, transport, licences | Done for the private test, 2 October 2026 | The policy live at `https://mrstreamer.app/privacy`; Microsoft's guidance received; the [readiness record](release-readiness.md) |
-| Private submission                    | Certified, 2 October 2026                 | Submission 1: Private audience with the testers' group, publishing hold set; Ready to publish                                    |
-| Store install and update              | Pending                                   | Install from the testers' link once published; submission 2, `1.0.5.0` (kit PASS), being prepared; Wout's acceptance on Windows  |
+| Private submission                    | Published, 2 October 2026                 | Submission 1: Private audience with the testers' group, certified, then published privately                                      |
+| Store install                         | Done, 2 October 2026                      | `1.0.4.0` installed on Wout's PC from the testers' link, and it worked                                                           |
+| Store update                          | Pending                                   | Submission 2, `1.0.5.0` (kit PASS), being prepared; the data kept, beside the direct copy, and Open Store                        |
 | Automated publishing                  | Deferred                                  | Set up in the later launch slice                                                                                                 |
 
 ### Package identity
@@ -161,4 +162,13 @@ English (United States) only, entered from these drafts:
 - The `runFullTrust` justification, entered from this draft: Mr. Streamer is an Electron app, which runs as a full-trust Win32 process, and every Electron app packaged as MSIX needs the capability. It starts its bundled ffmpeg and ffprobe as child processes and serves playback through a local proxy on 127.0.0.1. It installs no drivers or services, doesn't start with Windows and writes only to its own data folder.
 - Notes for certification live under Supplemental info > Additional Testing Information. Its Description field won't save with a link in it, and its Credentials table refused the link too. So the notes say how to find the playlist instead: open the public repository Mr-Streamer-OSS/certification-playlist on GitHub, open `reviewer.m3u`, choose Raw and copy the address. Then connect with "Use an M3U link" and no login, and play any of the five channels: Al Jazeera English, DW English, DW Español, DW Arabic and ABC News Australia. The notes also say the demo is live TV only, without a guide, that Movies and Series need a provider that offers them, that titles and channels for adults stay hidden until Settings > General > For adults, and that the app asks before sending a login over http. No credentials were entered.
 
-Submitted for certification on 2 October 2026, and certified the same day: Ready to publish, with the hold leaving the moment to Wout. Publishing reaches only the private audience.
+Submitted for certification on 2 October 2026 and certified the same day. Wout then published it, which reaches only the private audience, and installed it on his PC from the testers' link.
+
+### Media for later submissions
+
+Decided by Wout on 2 October 2026:
+
+- Logos: direction B, the bare hat drawn white on true black tiles, with plated and unplated app list icons for both themes (#98). They ship from 0.0.6, so the 0.0.5 package keeps the old logos.
+- Hero image: H1.
+- README banner: R1, Home with public-domain pictures (#99).
+- Trailer: being remade as a short marketing piece led by the message, for a later submission.

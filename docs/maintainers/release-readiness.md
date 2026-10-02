@@ -33,7 +33,7 @@ Statuses: **verified**, **gap** (a known problem, with its fix or owner), **open
 | 11  | Branding, listing copy and demo assets                 | Verified; listing entered from drafts | Private Store test | Agent (MSIX), Wout |
 | 12  | The dedicated adult tab and Store content policy       | Resolved with Microsoft               | Private Store test | Wout               |
 | 13  | Codec patents                                          | Decided: risk accepted                | Public launch      | Wout               |
-| 14  | Belgian publisher classification and disclosures       | Open                                  | Public launch      | Wout               |
+| 14  | Belgian publisher classification and disclosures       | Decided: private individual           | Public launch      | Wout               |
 | 15  | Benelux and EU brand clearance                         | Decided: approved without a search    | Public launch      | Wout               |
 
 ## 1. The app's own GPL-3.0 text
@@ -208,12 +208,20 @@ Who licenses these formats, should the decision be revisited:
 
 ## 14. Belgian publisher classification and disclosures
 
-Open. Microsoft accepted the Individual account for the Store; the Belgian classification is still to settle. Gate: public launch. Owner: Wout.
+Decided by Wout on 2 October 2026: he publishes as a private individual. Gate: public launch. Owner: Wout.
+
+He confirmed that Mr. Streamer brings no income (no donations, sponsors, ads or paid features), has no link to his job or to an existing business, and is published by him personally, not through an organisation. So:
+
+- no enterprise registration or VAT;
+- the Individual Partner Center account is the right one, as Microsoft support also accepted;
+- the disclosures are the public contact addresses (hello@ and privacy@mrstreamer.app) and the privacy policy's controller line.
+
+Any income, a link to a business or an organisation as publisher reopens this item. The facts it was decided on:
 
 - Wout describes Mr. Streamer as a free, non-commercial hobby project and opened an Individual Partner Center account in Belgium ([Microsoft Store setup](microsoft-store.md)). A free hobby release doesn't by itself require incorporating or registering for VAT.
-- Store policy 10.14 requires a Company account "for organizations, businesses, and any person acting in relation to their trade or profession", or when "a reasonable consumer would interpret your application or publisher name to be that of a business entity". The reserved publisher display name is `Mr Streamer OSS`. Microsoft support accepted the Individual account with that name on 2 October 2026, as Wout reports. The Belgian side below stays open.
+- Store policy 10.14 requires a Company account "for organizations, businesses, and any person acting in relation to their trade or profession", or when "a reasonable consumer would interpret your application or publisher name to be that of a business entity". The reserved publisher display name is `Mr Streamer OSS`. Microsoft support accepted the Individual account with that name on 2 October 2026, as Wout reports.
 - The EU Digital Services Act asks marketplaces to verify traders, any person "acting in relation to his or her trade, company, business, or profession" ([Microsoft's page](https://learn.microsoft.com/en-us/windows/apps/publish/store-business-verification-reqs)). A Company account must give customer support contact details, which Microsoft shows on the product page in some regions.
-- The FPS Economy's [guidelines on e-commerce information](https://economie.fgov.be/sites/default/files/Files/Entreprises/guidelines-obligations-information-dans-le-cadre-du-e-commerce.pdf) (28 September 2026) apply to enterprises concluding distance contracts where the consumer pays or promises a price: name, address, email, phone and enterprise number. Mr. Streamer charges nothing. Whether Book XII's information duties for information society services reach a free app is open.
+- The FPS Economy's [guidelines on e-commerce information](https://economie.fgov.be/sites/default/files/Files/Entreprises/guidelines-obligations-information-dans-le-cadre-du-e-commerce.pdf) (28 September 2026) apply to enterprises concluding distance contracts where the consumer pays or promises a price: name, address, email, phone and enterprise number. Mr. Streamer charges nothing. Whether Book XII's information duties for information society services reach a free app by a private individual was left there; the disclosures above are what Wout chose.
 - Today the deb names "Wout Stiens <hello@mrstreamer.app>" as maintainer, the installers carry "Copyright © 2026 Wout Stiens", and the [privacy policy](../privacy.md) names the data controller as "Wout Stiens, Belgium, publishing as Mr Streamer OSS", with privacy@mrstreamer.app. It also says "Mr Streamer OSS is based in Belgium" and speaks as "we", which bears on the 10.14 question above.
 
 Any monetisation, a business setup or an organisation as publisher reopens this row: enterprise registration, VAT, a Company account and the disclosures above.
