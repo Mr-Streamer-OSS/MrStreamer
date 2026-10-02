@@ -93,7 +93,6 @@ export function seasonEpisodes(
       rating: known?.rating ?? null,
       cast: (known?.cast ?? []).map(person),
       directors: known?.directors ?? [],
-      writers: known?.writers ?? [],
     };
   });
 }

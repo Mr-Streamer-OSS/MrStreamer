@@ -10,7 +10,7 @@ export interface FakeTmdb {
   detailRequests(language?: string): number;
   /** Of those, the ones a title's details made as it opened, with its credits. */
   aboutRequests(): number;
-  /** Requests for a season's episodes so far, in order: "90000/1/nl", by series, season, language. */
+  /** Season requests so far, in order, by series, season and language: "90000/1/nl". */
   seasonRequests(): readonly string[];
   /** Makes season requests answer with this HTTP status, or never, or restores them with null. */
   failSeasons(answer: number | "hold" | null): void;
@@ -51,7 +51,7 @@ function tmdbEpisodeName(id: number, season: number, episode: number, language: 
   return `Episode ${episode}`;
 }
 
-/** Episodes per season the fake TMDB lists for every series: four in the first, one in the second. */
+/** Episodes per season the fake TMDB lists for every series: four, then one. */
 const SEASON_EPISODES = [4, 1];
 
 export async function startFakeTmdb(): Promise<FakeTmdb> {
@@ -90,7 +90,8 @@ export async function startFakeTmdb(): Promise<FakeTmdb> {
             air_date: `2020-0${number}-0${episode}`,
             runtime: 50,
             vote_average: 8.2,
-            vote_count: 12,
+            // Too few votes on the third for a rating that says much.
+            vote_count: episode === 3 ? 4 : 12,
             crew: [
               { name: "Dora Director", job: "Director" },
               { name: "Wim Writer", job: "Writer" },

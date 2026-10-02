@@ -65,20 +65,18 @@ export interface EpisodeAbout {
   readonly airDate: string | null;
   /** Minutes. */
   readonly runtime: number | null;
-  /** Out of 10; null before anyone voted. */
+  /** Out of 10; null until RATED_AFTER people voted. */
   readonly rating: number | null;
   /** The guest stars, with the part they play and a portrait. */
   readonly cast: TitleAbout["cast"];
   readonly directors: readonly string[];
-  readonly writers: readonly string[];
 }
 
 /** How many of the cast a title's details show. */
 const CAST_SHOWN = 12;
 
-/** Crew jobs that count as directing and writing an episode. */
-const DIRECTING: ReadonlySet<string> = new Set(["Director"]);
-const WRITING: ReadonlySet<string> = new Set(["Writer", "Teleplay", "Screenplay", "Story"]);
+/** How many votes an episode's rating needs before it counts: fewer say little. */
+const RATED_AFTER = 5;
 
 /**
  * What TMDB names an episode it has no translation for, in the languages viewers pick: "Episode
@@ -343,8 +341,9 @@ export function tmdb(options: TmdbOptions) {
 
     /**
      * A series' season as TMDB lists it, in `language`: each episode's name, overview, still, air
-     * date, runtime, rating and credits. One request, for when the viewer opens the season. TMDB
-     * names an episode it has no translation for "Episode 3"; that counts as no name.
+     * date, runtime, rating, guest stars and directors. One request, for when the viewer opens the
+     * season. TMDB names an episode it has no translation for "Episode 3"; that counts as no
+     * name.
      */
     async season(
       id: string,
@@ -359,13 +358,6 @@ export function tmdb(options: TmdbOptions) {
       return body.episodes.map((episode): EpisodeAbout => {
         const name = episode.name?.trim() || null;
         const unnamed = name && UNNAMED_EPISODE.exec(name);
-        const credited = (jobs: ReadonlySet<string>) => [
-          ...new Set(
-            (episode.crew ?? [])
-              .filter((person) => jobs.has(person.job ?? ""))
-              .map((person) => person.name),
-          ),
-        ];
         return {
           number: episode.episode_number,
           name: unnamed && Number(unnamed[1]) === episode.episode_number ? null : name,
@@ -373,14 +365,19 @@ export function tmdb(options: TmdbOptions) {
           still: episode.still_path ?? null,
           airDate: episode.air_date?.trim() || null,
           runtime: episode.runtime || null,
-          rating: episode.vote_count ? (episode.vote_average ?? null) : null,
+          rating: (episode.vote_count ?? 0) >= RATED_AFTER ? (episode.vote_average ?? null) : null,
           cast: (episode.guest_stars ?? []).slice(0, CAST_SHOWN).map((person) => ({
             name: person.name,
             character: person.character?.trim() || null,
             profile: person.profile_path ?? null,
           })),
-          directors: credited(DIRECTING),
-          writers: credited(WRITING),
+          directors: [
+            ...new Set(
+              (episode.crew ?? [])
+                .filter((person) => person.job === "Director")
+                .map((person) => person.name),
+            ),
+          ],
         };
       });
     },

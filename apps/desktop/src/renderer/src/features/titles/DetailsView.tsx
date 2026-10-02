@@ -3,7 +3,9 @@
 // episodes. Resume is the main action for anything partly watched, and From the beginning plays
 // at once, without asking. A title with several versions plays the one picked with the arrow
 // beside Play, else the one it was opened on, as from the 4K tab, else the one that suits best;
-// the sheet shows that version, so a series lists its episodes. A series opens on the season being watched, and marks the episode.
+// the sheet shows that version, so a series lists its episodes. A series opens on the season
+// being watched, and marks the episode. Each episode's row carries everything known about it,
+// TMDB's details once the season shown has its answer.
 import { Dialog } from "@base-ui/react/dialog";
 import { Menu } from "@base-ui/react/menu";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
@@ -11,6 +13,7 @@ import { Check, ChevronDown, Play, RotateCcw, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import type {
   Episode,
+  EpisodeDetails,
   MovieDetails,
   Person,
   SeriesDetails,
@@ -482,6 +485,34 @@ function VersionItem({ value, children }: { value: string; children: ReactNode }
   );
 }
 
+/** Guest stars an episode's row names. */
+const GUESTS_SHOWN = 2;
+
+const airDay = new Intl.DateTimeFormat(undefined, {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  timeZone: "UTC",
+});
+
+/** "5 Mar 2024" from "2024-03-05"; a date written another way stays as it is. */
+function airDate(text: string): string {
+  const day = /^(\d{4})-(\d{2})-(\d{2})/.exec(text);
+  return day ? airDay.format(Date.UTC(Number(day[1]), Number(day[2]) - 1, Number(day[3]))) : text;
+}
+
+/** "Directed by Lotte Smit · With Ana Costa, Eva Vos", or "" when TMDB named no one. */
+function creditsOf(episode: Partial<EpisodeDetails>): string {
+  const directors = episode.directors ?? [];
+  const guests = (episode.cast ?? []).slice(0, GUESTS_SHOWN).map((person) => person.name);
+  return [
+    directors.length > 0 ? `Directed by ${directors.join(", ")}` : null,
+    guests.length > 0 ? `With ${guests.join(", ")}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 function Episodes({ details }: { details: SeriesDetails }) {
   const progress = useQuery(
     queries.progress({ seriesIds: details.title.versions.map((version) => version.id) }),
@@ -502,7 +533,14 @@ function Episodes({ details }: { details: SeriesDetails }) {
   const [picked, setSeason] = useState<number | null>(null);
   const season = picked ?? target?.episode.season ?? details.seasons[0]?.number ?? 1;
   const shown = details.seasons.find((each) => each.number === season) ?? details.seasons[0];
+  // TMDB's details for the season shown, asked for as it shows. The provider's episodes stand
+  // until they come, and the rows grow once, together.
+  const enriched = useQuery({
+    ...queries.season(details.title.id, shown?.number ?? season),
+    enabled: shown !== undefined,
+  });
   if (!shown) return null;
+  const episodes: readonly (Episode & Partial<EpisodeDetails>)[] = enriched.data ?? shown.episodes;
   return (
     <section className="mt-10">
       {details.seasons.length > 1 && (
@@ -526,18 +564,26 @@ function Episodes({ details }: { details: SeriesDetails }) {
         </div>
       )}
       <div>
-        {shown.episodes.map((episode) => {
+        {episodes.map((episode) => {
           const done =
             byEpisode.get(episode.id) ?? byNumber.get(`${episode.season}:${episode.number}`);
           const current = target?.episode.id === episode.id;
           const partly = done && !done.finished && done.position > 0 ? done : undefined;
+          const facts = [
+            episode.airDate ? airDate(episode.airDate) : null,
+            timeLeftOf(partly) ?? (episode.duration ? runtime(episode.duration) : null),
+          ]
+            .filter(Boolean)
+            .join(" · ");
+          const credits = creditsOf(episode);
           return (
             <button
               key={episode.id}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => playTitle(episodeNow(details, episode), resumePoint(partly))}
+              // Rows hold their top as they grow, so what is in view stays put.
               className={cn(
-                "grid w-full grid-cols-[2.5rem_11rem_minmax(0,1fr)_auto] items-center gap-4 rounded-xl px-2 py-3 text-left hover:bg-white/5",
+                "grid w-full grid-cols-[2.5rem_12.5rem_minmax(0,1fr)_auto] items-start gap-4 rounded-xl px-2 py-3 text-left hover:bg-white/5",
                 current && "bg-white/[0.04]",
               )}
             >
@@ -548,26 +594,35 @@ function Episodes({ details }: { details: SeriesDetails }) {
                 <Artwork
                   url={episode.stillUrl}
                   name={episode.title}
-                  size="card"
+                  size="wide"
                   className="text-[0.625rem]"
                 />
               </span>
               <span className="min-w-0">
-                <span className="block truncate text-[0.9375rem] font-medium">{episode.title}</span>
-                <span className="block truncate text-xs text-muted-foreground">
-                  {[
-                    timeLeftOf(partly) ?? (episode.duration ? runtime(episode.duration) : null),
-                    episode.airDate,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
+                <span className="flex items-baseline gap-3">
+                  <span className="min-w-0 flex-1 truncate text-[0.9375rem] font-medium">
+                    {episode.title}
+                  </span>
+                  {episode.rating != null && (
+                    <span className="flex-none text-[0.8125rem] text-muted-foreground">
+                      ★ {episode.rating.toFixed(1)}
+                    </span>
+                  )}
                 </span>
+                {facts && (
+                  <span className="block truncate text-xs text-muted-foreground">{facts}</span>
+                )}
                 {partly && (
                   <Progress value={partly.position / partly.duration} className="mt-2 w-40" />
                 )}
                 {episode.plot && (
-                  <span className="mt-1 line-clamp-2 block text-[0.8125rem] text-muted-foreground">
+                  <span className="mt-1 line-clamp-3 block text-[0.8125rem] text-foreground/85">
                     {episode.plot}
+                  </span>
+                )}
+                {credits && (
+                  <span className="mt-1 block truncate text-xs text-muted-foreground">
+                    {credits}
                   </span>
                 )}
               </span>
