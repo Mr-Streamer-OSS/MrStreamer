@@ -6,8 +6,9 @@
 // GitHub Releases.
 //
 // A release counts only when its version and channel agree and it carries this platform's update
-// metadata. Stable takes the highest stable release; Nightly the highest of all. Highest by
-// version order, never by date, so a build published late cannot replace a newer one.
+// metadata. Each channel takes its own highest release: Stable never sees a nightly and Nightly
+// never sees a stable release. Highest by version order, never by date, so a build published late
+// cannot replace a newer one.
 import { type } from "arktype";
 import type { CheckFailure } from "@mrstreamer/contracts/updates";
 import { readFeed } from "@mrstreamer/contracts/update-feed";
@@ -54,11 +55,15 @@ export class DiscoveryFailed extends Error {
   }
 }
 
-/** The newest release a channel receives, whether or not it is newer than the installed one. */
+/**
+ * The newest release a channel receives, whether or not it is newer than the installed one. A
+ * channel receives only its own releases: a stable release is a promoted nightly, so the nightlies
+ * after it already hold its changes.
+ */
 export function newestOn(channel: Channel, offers: readonly Offer[]): Offer | null {
   return (
     offers
-      .filter((offer) => channel === "nightly" || !offer.version.nightly)
+      .filter((offer) => channelOf(offer.version) === channel)
       .sort((a, b) => compareVersions(b.version, a.version))[0] ?? null
   );
 }

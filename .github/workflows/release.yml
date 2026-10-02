@@ -45,9 +45,8 @@ permissions:
 # Nightlies and stable releases share one queue, and each pull request's dry runs have their own. A
 # run waits for the one ahead of it and is never cancelled, so a requested stable release is never
 # dropped. Sharing the queue keeps a nightly from being planned while a stable release builds: it
-# would preview the same version from newer code, and its users would then be offered the stable
-# release and move back to older code. A push or scheduled check decides whether a nightly is due
-# once its turn comes.
+# would preview the same version as the stable release, from newer code, and sort before it. A
+# push or scheduled check decides whether a nightly is due once its turn comes.
 concurrency:
   group: >-
     release-${{ github.event_name == 'pull_request' && format('dry-run-{0}', github.event.pull_request.number)

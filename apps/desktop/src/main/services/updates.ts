@@ -5,10 +5,11 @@
 // when GitHub asks. The user can check at any time. Nothing downloads or installs on its own: the
 // user downloads, then confirms the restart, and a download never restarts the app.
 //
+// Each channel offers only its own releases, and Nightly only one newer than the installed build.
 // The first run stores the build's own channel; after that only the user changes it, so a Nightly
-// user who installs a stable build stays on Nightly. Switching a nightly build to Stable offers
-// the newest stable release even when it is older, and installs it over the nightly like any
-// update: this device's data stays.
+// user who installs a stable build stays on Nightly and waits for the next nightly. Switching a
+// nightly build to Stable offers the newest stable release even when it is older, and installs it
+// over the nightly like any update: this device's data stays.
 //
 // A copy installed as an MSIX package, as the Microsoft Store installs it, leaves all of this to
 // the Store, which only carries stable releases: the service offers nothing and opens the Store.
@@ -115,8 +116,8 @@ export class Updates extends Context.Service<
     readonly check: Effect.Effect<UpdateStatus>;
     /**
      * Changes the channel and checks what it offers. An update the new channel doesn't receive,
-     * such as a nightly after switching to Stable, is dropped: its download stops, and a
-     * downloaded one won't install.
+     * such as a nightly after switching to Stable or a stable release after switching to
+     * Nightly, is dropped: its download stops, and a downloaded one won't install.
      */
     setChannel(next: Channel): Effect.Effect<UpdateStatus>;
     /**
@@ -144,9 +145,10 @@ const SETTINGS_FILE = "updates.json";
 /** updates.json: the channel, and the version whose notice was closed. */
 const SettingsFile = type({ channel: "'stable' | 'nightly'", "dismissed?": "string | null" });
 
-/** Whether a channel receives `version`: Nightly receives everything, Stable only stable releases. */
+/** Whether a channel receives `version`: each receives only its own releases. */
 function receives(channel: Channel, version: string): boolean {
-  return channel === "nightly" || !parseVersion(version)?.nightly;
+  const parsed = parseVersion(version);
+  return parsed !== null && channelOf(parsed) === channel;
 }
 
 function make(deps: UpdatesDeps & DirectUpdates) {
@@ -282,7 +284,8 @@ function make(deps: UpdatesDeps & DirectUpdates) {
           return result;
         }
         const newest = newestOn(channel, result.offers);
-        // A nightly build on Stable goes to the newest stable release, older or not.
+        // A nightly build on Stable goes to the newest stable release, older or not. Nightly
+        // never goes back, so a stable build on Nightly waits for a newer nightly.
         const offered =
           newest &&
           (compareVersions(newest.version, installed) > 0 ||

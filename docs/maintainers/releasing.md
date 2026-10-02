@@ -32,14 +32,14 @@ Releases come from `.github/workflows/release.yml` and live on GitHub Releases. 
 - Dry runs and stable releases also build the [Microsoft Store package](#microsoft-store-package) and test it installed. Nothing waits for it, and it's never attached to the release.
 - Nightlies are pre-releases and never marked latest. Stable releases are marked latest.
 - Runs never cancel each other. Nightlies and stable releases wait in one queue, and each pull request's dry runs in their own, so a requested stable release is never dropped.
-- Sharing the queue keeps a nightly from being planned while a stable release builds. Planned then, it would preview the same version from newer code, and once the stable release published, its users would be offered that release and move back to older code. A stable release waits for a nightly that's running, and the other way round.
+- Sharing the queue keeps a nightly from being planned while a stable release builds. Planned then, it would preview the same version as the stable release, from newer code, and sort before it. A stable release waits for a nightly that's running, and the other way round.
 
 ## Versions
 
 - Stable: `0.0.1`
 - Nightly: `0.0.2-nightly.20261002.14`, the stable version it previews, the UTC date and the workflow run number
 
-`package.json` on `main` holds the newest stable release, `0.0.0` before the first. A nightly previews the next patch. It counts from the newest stable release instead when `main` hasn't recorded that one yet, so a nightly always sorts after every published release. It sorts before the stable release it previews, which is how nightly users are offered that release.
+`package.json` on `main` holds the newest stable release, `0.0.0` before the first. A nightly previews the next patch. It counts from the newest stable release instead when `main` hasn't recorded that one yet, so a nightly always sorts after every published release. It sorts before the stable release it previews. The app offers Nightly users nightlies only, so they never get that release; they already have its changes. Versions 0.0.3 and earlier still offer it to them, as the [feed](#update-feed) explains.
 
 ## Nightly builds
 
@@ -57,7 +57,7 @@ Releases come from `.github/workflows/release.yml` and live on GitHub Releases. 
 2. Run the Release workflow on `main` with channel **stable**. Enter the nightly you tested, such as `0.0.2-nightly.20260930.30` or its tag, so a nightly published after your test can't ship untested. Left empty, the run promotes the latest nightly.
 3. Leave the version empty to release the version the nightly previewed (`0.0.2-nightly.*` ships as `0.0.2`), or enter one that sorts after it and every stable release, such as `0.1.0`.
 4. The run rebuilds the nightly's exact commit with the stable version; the nightly's files carry the nightly version, so they're never reused. Merges to `main` since the nightly don't reach the build.
-5. It publishes the release as latest and updates the feed. Stable users are offered it from then on.
+5. It publishes the release as latest and updates the feed. Stable users are offered it from then on. Nightly users aren't, and get the next nightly.
 6. The finalize job commits `chore(release): prepare vX` to `main`, so `package.json` records the release and later nightlies preview the patch after it.
 7. The run also builds the [Microsoft Store package](#submitting-a-stable-release) for the release, to submit by hand.
 
@@ -68,8 +68,6 @@ The plan refuses a stable release when:
 - `main` doesn't contain the nightly's commit
 - the nightly came before the newest stable release, so it can hold older code
 - the version is already released or would sort before the nightly
-
-Nightlies published after the one you promote sort before the stable release, so their users are offered it too, without those nightlies' changes. The plan warns when that happens. Start a nightly by hand once the release is out to bring them forward.
 
 ## Release notes
 
@@ -108,7 +106,9 @@ The app looks for updates in `updates.json` at the root of the repository's GitH
 }
 ```
 
-- `stable` is the highest stable release. `nightly` is the highest release of either channel, since Nightly users receive stable releases too. Highest means by version, never by date. Either is `null` when there is none.
+- `stable` is the highest stable release. `nightly` is the highest release of either channel. Highest means by version, never by date. Either is `null` when there is none.
+- The app offers each channel only its own releases, and Nightly only a version newer than the installed one. So `nightly` naming a stable release, as it does from a stable release until the next nightly, offers Nightly users nothing.
+- Versions 0.0.3 and earlier offer Nightly users the higher of `stable` and `nightly`, stable or not. They read the same feed, which keeps this format so they behave as before.
 - `files` is the folder electron-updater reads the release's `latest*.yml` and installers from. `notes` is the release body, in Markdown.
 - A release counts only when it's published, its version and pre-release flag name the same channel, and it carries `latest-mac.yml`, `latest.yml` and `latest-linux.yml`. One missing a platform is incomplete and never enters the feed.
 

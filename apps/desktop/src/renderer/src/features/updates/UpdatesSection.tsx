@@ -54,11 +54,7 @@ export function UpdatesSection() {
       <State status={status} />
       <Row
         label="Channel"
-        note={
-          status.channel === "nightly"
-            ? "newest builds, and every stable release"
-            : "tested releases"
-        }
+        note={status.channel === "nightly" ? "newest builds" : "tested releases"}
       >
         <Select label="Channel" value={status.channel} options={CHANNELS} onChange={setChannel} />
       </Row>
