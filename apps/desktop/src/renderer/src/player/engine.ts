@@ -149,7 +149,13 @@ function mpegtsError(type: unknown, detail: unknown, info: unknown): EngineError
 }
 
 function hlsEngine(video: HTMLVideoElement, url: string): Engine {
-  const hls = new Hls({ enableWorker: true });
+  // Watch offers no subtitles for HLS, so none show on their own: hls.js would turn on a
+  // stream's default subtitles and its captions, with no way to turn them off.
+  const hls = new Hls({ enableWorker: true, enableCEA708Captions: false });
+  hls.subtitleDisplay = false;
+  hls.on(Hls.Events.SUBTITLE_TRACK_SWITCH, (_event, data) => {
+    if (data.id !== -1) hls.subtitleTrack = -1;
+  });
   const life = lifecycle(video, () => hls.destroy());
   hls.on(Hls.Events.ERROR, (_event, data) => {
     if (!data.fatal) return;

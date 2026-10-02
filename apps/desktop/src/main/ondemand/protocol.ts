@@ -12,7 +12,7 @@ import type {
   TitleKind,
   TitleMatches,
 } from "@mrstreamer/contracts/ondemand";
-import type { XtreamAccount } from "../providers/xtream.ts";
+import type { ProviderAccount } from "../providers/account.ts";
 import type { MetadataStatus } from "./metadata.ts";
 
 /** What the worker needs once: where the caches live and how to introduce itself. */
@@ -36,7 +36,7 @@ export interface WorkerCalls {
   /** Also says whether the viewer shows titles for adults, which TMDB is asked about only then. */
   status: { args: { key: string; adults: boolean }; result: WorkerStatus };
   /** Fetches both lists from the provider and keeps them when they look complete. */
-  refresh: { args: { key: string; account: XtreamAccount }; result: WorkerStatus };
+  refresh: { args: { key: string; account: ProviderAccount }; result: WorkerStatus };
   byIds: {
     args: { key: string; language: string; kind: TitleKind; ids: readonly string[] };
     result: readonly Title[];

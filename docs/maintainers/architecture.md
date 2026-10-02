@@ -10,18 +10,19 @@ packages/core        @mrstreamer/core: rules that run without Electron, React or
                      names and regions, trusted guide ids, the XMLTV reader, the guide and viewing
                      record services, movie and series names, their catalogue, languages,
                      collections and tracks, TMDB's client, update discovery, the provider port,
-                     text folding, and the subtitle decoders: DVB, PGS, teletext, CEA-608.
+                     the M3U playlist reader, text folding, and the subtitle decoders: DVB, PGS,
+                     teletext, CEA-608.
                      Depends on contracts.
 apps/desktop         The app, package name mrstreamer
   src/main           Electron main process
-    providers        The Xtream Codes adapter
+    providers        The Xtream Codes and M3U playlist adapters
     services         Subscriptions, library, movies and series, playback proxy, settings
                      (preferences.json), updates, licences
     ondemand         The worker thread that holds the movie and series catalogue and TMDB's
                      metadata
-    playback         Stream inspection, the clean start, the sound track choice, captions copied
-                     out of the pictures and ffmpeg conversion behind the proxy; probing and
-                     ffmpeg runs for movies and episodes
+    playback         Stream inspection, HLS playlists through the proxy, the clean start, the
+                     sound track choice, captions copied out of the pictures and ffmpeg
+                     conversion behind the proxy; probing and ffmpeg runs for movies and episodes
     platform         Keychain-backed secrets, atomic JSON files, the guide and viewing stores, the
                      electron-updater installer, the diagnostics log
   src/preload        The typed bridge exposed to the UI
@@ -48,7 +49,7 @@ A Store copy, an installed MSIX, names its folder `Mr. Streamer Store` instead (
 
 | File                | Owner                                                                                                                                                                                                                                                                                                                                                |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `subscription.json` | `services/subscription.ts`; the password is sealed with `safeStorage`                                                                                                                                                                                                                                                                                |
+| `subscription.json` | `services/subscription.ts`; the password, or a playlist's whole link, is sealed with `safeStorage`                                                                                                                                                                                                                                                   |
 | `preferences.json`  | `services/preferences.ts`: volume, mute, last channel and category, the sound and subtitle languages from General, or the tracks picked last, the language for movies and series, the versions picked, the viewer's TMDB key, whether titles for adults show, how subtitles look, the quality live channels start in and the streams picked for some |
 | `mrstreamer.db`     | `platform/viewing-store.ts`: the viewing record, favourites, watch history and title progress per account                                                                                                                                                                                                                                            |
 | `catalogue.json`    | `services/library.ts`: the last good catalogue, as the provider sent it                                                                                                                                                                                                                                                                              |
@@ -86,6 +87,12 @@ Panels list a channel once per quality, "VRT 1 FHD", "VRT 1 HD", "VRT 1 SD", wit
 A channel's id is the lowest of its streams' ids, so the provider reordering them changes nothing, and the library finds a channel by any of its streams' ids. It shows in every category one of its streams is in, where its first stream there is; search reads every stream's name; its guide id is its first stream's trusted one. Its `tags` are those every stream carries. On the public iptv-org playlist of 2 October 2026, 11,152 entries make 11,009 channels: 143 channels with an SD and an HD feed, while 14 pairs with one name stay apart, as different countries, regional feeds or a separate 4K channel.
 
 A stream's `quality` is what its name says (`qualityOf`): 4K, UHD, 8K and 2160p are 4K, FHD and 1080p Full HD, HD and 720p HD, SD and lower line counts SD. A line count is the more precise, so "HD (1080p)" is Full HD. Markers that say nothing about the picture, as "HEVC" or "RAW", or disagree, as "HD (576p)", leave it null, which the UI shows as "Not labelled". A playlist's `@SD` feed says nothing either: those are often 1080p.
+
+## Playlists
+
+A link the Connect screen gets without a login, in the fields or in its query, is a playlist (`parseLogin`): an M3U file such as iptv-org's, with live TV only. A server address alone, without a path, still asks for the login. `providers/m3u.ts` reads it as it downloads, a piece at a time, with `@mrstreamer/core/playlist/m3u`, and `@mrstreamer/core/playlist/catalogue` turns its entries into the catalogue every adapter gives. Groups are categories, several to an entry when `group-title` separates them with ";", as iptv-org does. The tvg-id is the guide id, `@Feed` included, and names stay exactly as written, so the catalogue reads "(720p)" and "[Geo-blocked]" from them as it does from a panel's names. A stream's id is its tvg-id, else its name, so favourites and history follow it across refreshes; the catalogue joins the streams of one channel as it does a panel's, as "Colors (576p)" and "Colors HD (1080p)". Entries no player here plays are left out: DASH and addresses other than http(s), 136 of iptv-org's 11,152. On one machine, reading that 2.5 MB list into the library took 620 to 730 ms and held the main process 56 ms at most, against 510 to 530 ms and 160 ms for the fake panel's 13,000 channels.
+
+The link can hold a token, so `subscription.json` keeps it sealed like a password, with its origin to show and `m3u:` plus part of its SHA-256 as the account's id, under which the caches and the viewing record keep its data. Stream addresses stay out of `catalogue.json` for the same reason: the adapter holds them from its last read, and reads the playlist again for a channel the library loaded from disk after a restart. Each request for a channel's stream carries the User-Agent and Referer its entry names, in its attributes or `#EXTVLCOPT` lines. The guide is the XMLTV document the header names (`x-tvg-url`, `url-tvg`), unpacked when it is gzip; a playlist that names none has no guide. Movies and series answer empty, and the top bar shows Home and Live TV only. Releases before playlists read a playlist's `subscription.json` as no subscription and show Connect, leaving every file as it is.
 
 ## Movies and series
 
@@ -133,17 +140,17 @@ An episode gets TMDB's details only when the viewer opens its season (`ondemand.
 
 The main process runs every service on one [Effect](https://effect.website) runtime (`effect` 4, pinned to a release candidate). `apps/desktop/src/main/runtime.ts` assembles them from Layers in `mainLayer`. `index.ts` makes the runtime at start, forwards each service's changes to the window, and registers the IPC handlers: each returns an Effect, and `ipc.ts` runs it on the runtime.
 
-| Service         | Where                              | Owns                                                                                                                                                                     |
-| --------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `Subscriptions` | `services/subscription.ts`         | The login, its sealed password, the provider behind it, and the account's status: asked at startup and again when Settings > Subscription opens (`subscription.recheck`) |
-| `Settings`      | `services/preferences.ts`          | `preferences.json`                                                                                                                                                       |
-| `Library`       | `services/library.ts`              | The catalogue, its cache and refreshes                                                                                                                                   |
-| `OnDemand`      | `services/ondemand.ts`             | Movies and series, through the catalogue worker                                                                                                                          |
-| `Playback`      | `services/playback.ts`             | Stream sessions and the loopback proxy                                                                                                                                   |
-| `Updates`       | `services/updates.ts`              | The release channel, checks, downloads and the install                                                                                                                   |
-| `Guide`         | `@mrstreamer/core/guide/service`   | The programme guide                                                                                                                                                      |
-| `ViewingRecord` | `@mrstreamer/core/viewing/service` | Favourites, watch history and title progress                                                                                                                             |
-| `Licences`      | `services/licences.ts`             | The app's and third-party notices for About                                                                                                                              |
+| Service         | Where                              | Owns                                                                                                                                                                                                      |
+| --------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Subscriptions` | `services/subscription.ts`         | The login with its sealed password, or a playlist's sealed link, the provider behind it, and the account's status: asked at startup and again when Settings > Subscription opens (`subscription.recheck`) |
+| `Settings`      | `services/preferences.ts`          | `preferences.json`                                                                                                                                                                                        |
+| `Library`       | `services/library.ts`              | The catalogue, its cache and refreshes                                                                                                                                                                    |
+| `OnDemand`      | `services/ondemand.ts`             | Movies and series, through the catalogue worker                                                                                                                                                           |
+| `Playback`      | `services/playback.ts`             | Stream sessions and the loopback proxy                                                                                                                                                                    |
+| `Updates`       | `services/updates.ts`              | The release channel, checks, downloads and the install                                                                                                                                                    |
+| `Guide`         | `@mrstreamer/core/guide/service`   | The programme guide                                                                                                                                                                                       |
+| `ViewingRecord` | `@mrstreamer/core/viewing/service` | Favourites, watch history and title progress                                                                                                                                                              |
+| `Licences`      | `services/licences.ts`             | The app's and third-party notices for About                                                                                                                                                               |
 
 A service is a `Context.Service` class with a `layer`, and reaches the others through the context rather than callbacks. Services whose rules run without the platform live in `packages/core` and ask for what they need through ports, services of their own that the app supplies: the guide's are `GuideSource` (the subscription and its download), `GuideCatalogue` (guide ids) and `GuideStore` (the saved document, `platform/guide-store.ts`). The others live in the app. Every expected failure is a `Failed` from `@mrstreamer/core/failure`, carrying the `AppError` the UI shows; a provider adapter's `AppFailure` keeps its error, anything else counts as unexpected.
 
@@ -171,7 +178,7 @@ The UI reads `viewing.get` and sends `viewing.setFavourite`, `viewing.recordWatc
 
 ## Programme guide
 
-`@mrstreamer/core/guide/service` downloads the provider's XMLTV (`xmltv.php` on Xtream panels) and keeps it separate from the catalogue and playback: listings are empty until a guide loads, and nothing waits for one. `@mrstreamer/core/guide/xmltv` reads the document as it arrives, from the network or from `guide.xml` after a restart. It searches the bytes and decodes one programme at a time, so the strings it keeps don't hold on to the chunks they came in. Programmes that already ended are dropped; a programme without an end runs until the next one, and overlaps are cut. Titles are folded for search as they arrive, and the last step yields to the event loop every 50 channels.
+`@mrstreamer/core/guide/service` downloads the provider's XMLTV (`xmltv.php` on Xtream panels, the document a playlist's header names) and keeps it separate from the catalogue and playback: listings are empty until a guide loads, and nothing waits for one. `@mrstreamer/core/guide/xmltv` reads the document as it arrives, from the network or from `guide.xml` after a restart. It searches the bytes and decodes one programme at a time, so the strings it keeps don't hold on to the chunks they came in. Programmes that already ended are dropped; a programme without an end runs until the next one, and overlaps are cut. Titles are folded for search as they arrive, and the last step yields to the event loop every 50 channels.
 
 A download replaces the guide only when it completes and lists programmes; otherwise the last guide stays. The main process downloads after connecting a subscription and at startup; the service itself checks every 15 minutes and downloads when the guide is six hours old. Switching accounts clears it: the download in progress stops, and a load or download that finishes afterwards changes nothing. Indexing and lookups are plain functions in `@mrstreamer/core/guide/programmes`.
 
@@ -203,6 +210,8 @@ The UI never sees provider URLs; they contain the login. `playback.open` returns
 4. **Delivers**: straight through when nothing converts, otherwise through the bundled ffmpeg reading stdin, so the upstream URL never reaches a command line.
 
 If the player still fails to decode the picture, the player controller retries once with `repair`, which re-encodes the picture and conceals broadcast damage.
+
+Playlists list most channels as HLS (`.m3u8`), which hls.js plays instead of mpegts.js. The proxy serves it playlist by playlist (`playback/hls.ts`): each playlist the player loads comes back with its addresses, variants, renditions, segments and keys, replaced by proxy addresses with an id each (`/stream/<token>/<id>`), so the player still sees no provider address, and segments pass through as they arrive. Each request the player makes is one upstream request without retries, which hls.js makes itself, and closing the session aborts them all. A session keeps the playlists a multivariant playlist names for its whole life, and up to 10,000 segment addresses, the oldest going first: broadcasters list two hours of segments in each playlist, and rewriting one of those, every few seconds, takes about 20 ms. Nothing inspects or converts HLS, so it has no Sound or CC menu. hls.js plays the stream's default sound and turns off its subtitles and captions, which would otherwise show with no way to hide them.
 
 Closed captions travel inside the pictures, in SEI messages, which mpegts.js reads but doesn't pass on. On their way out, after any conversion, `playback/caption-stream.ts` copies each picture's CEA-608 pairs into a private data stream on PID 0x1FF0, with the picture's time, in display order: pictures arrive in decoding order, and B-frames reorder them. The program table lists that stream once a picture carries captions, so a channel without them passes unchanged, and `playback.tracks` lists the caption channels found. mpegts.js passes private data on with times on the player's clock, as it does teletext and DVB subtitles.
 

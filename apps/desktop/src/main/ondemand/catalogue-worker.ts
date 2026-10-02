@@ -20,7 +20,7 @@ import type { OnDemandCatalogue } from "@mrstreamer/core/provider";
 import { tmdb, tmdbImage } from "@mrstreamer/core/metadata/tmdb";
 import { collections, type Collections } from "@mrstreamer/core/ondemand/collections";
 import { readJsonFile, removeFile, writeJsonFile } from "../platform/json-file.ts";
-import { xtreamProvider } from "../providers/xtream.ts";
+import { providerFor } from "../providers/account.ts";
 import { metadataStore, type Wanted } from "./metadata.ts";
 import type {
   WorkerCalls,
@@ -281,7 +281,7 @@ async function refresh(args: WorkerCalls["refresh"]["args"]): Promise<WorkerStat
   refreshing?.abort.abort();
   const abort = new AbortController();
   const done = (async () => {
-    const provider = xtreamProvider(args.account, { userAgent: setup.userAgent });
+    const provider = providerFor(args.account, { userAgent: setup.userAgent });
     const catalogue = await provider.onDemandCatalogue(abort.signal);
     const before = await current(args.key);
     // An empty list doesn't replace one that had titles, unless it comes twice in a row, as for

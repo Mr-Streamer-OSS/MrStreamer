@@ -4,6 +4,8 @@
 
 Mr. Streamer plays live channels your provider delivers as MPEG-TS, the format most Xtream Codes providers use, and radio channels that send plain MP3 or AAC audio.
 
+An M3U playlist lists most channels as HLS, addresses ending in `.m3u8`. Those play as they arrive, without converting: H.264 video with AAC or MP3 sound everywhere, and HEVC on macOS. They play their default sound and show no subtitles. Mr. Streamer leaves out playlist entries it can't play at all: DASH (`.mpd`) and addresses that don't start with `http` or `https`, such as `rtmp`.
+
 Most channels play directly. For the rest, Mr. Streamer converts only what the player can't handle, on your computer, while you watch:
 
 | The channel sends                                                  | What happens                                                                  |
@@ -51,7 +53,7 @@ A movie starts about a second after you choose it. Skipping into what's already 
 Mr. Streamer tells you why:
 
 - **Channel unavailable**: the provider has no stream for that channel right now. Try again later or pick another channel.
-- **Stream refused**: the provider turned the stream down, usually because another device uses your subscription's connection.
+- **Stream refused**: the provider turned the stream down, usually because another device uses your subscription's connection. On a public playlist it usually means the channel isn't offered in your country.
 - **Couldn't reconnect**: the stream stopped arriving and reconnecting didn't help, often a network problem.
 - **Can't play this channel** or **Can't play this title**: it uses a format Mr. Streamer can't play or convert. Please [report it](https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose) with its name and the details shown.
 - **Not available**: the provider has no file for that movie or episode right now; some providers list titles whose files are gone.

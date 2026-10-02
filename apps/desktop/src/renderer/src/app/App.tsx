@@ -15,7 +15,7 @@ import { cn } from "../lib/utils.ts";
 import { player, usePlayer } from "../player/player.ts";
 import { titlePlayer } from "../player/title-player.ts";
 import { hasModifier } from "./platform.ts";
-import { useUi, type View } from "./ui-store.ts";
+import { isLivePage, useUi, type View } from "./ui-store.ts";
 
 export function App() {
   const subscription = useQuery(queries.subscription());
@@ -43,16 +43,17 @@ export function App() {
   if (!subscription.data || subscription.data.needsPassword || editingLogin) {
     return <ConnectScreen existing={subscription.data} />;
   }
-  return <Shell />;
+  return <Shell liveOnly={subscription.data.kind === "m3u"} />;
 }
 
 /**
  * The page (Home, Live TV, Movies or Series), with details, Watch and a playing title opening over
  * it. The page stays laid out underneath, so leaving any of them finds it scrolled where it was,
- * and takes no input meanwhile. Search and settings are available everywhere.
+ * and takes no input meanwhile. Search and settings are available everywhere. A subscription with
+ * live TV only, a playlist, has no Movies or Series: Home stands in for them.
  */
-function Shell() {
-  const view = useUi((state) => state.view);
+function Shell({ liveOnly }: { liveOnly: boolean }) {
+  const view = useUi((state) => (liveOnly && !isLivePage(state.view) ? "home" : state.view));
   const watching = useUi((state) => state.watching);
   const playingTitle = useUi((state) => state.playingTitle);
   const details = useUi((state) => state.details);

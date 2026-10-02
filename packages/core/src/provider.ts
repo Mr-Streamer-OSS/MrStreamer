@@ -98,6 +98,14 @@ export interface ProviderEpisode {
   readonly container: string;
 }
 
+/** Where a channel streams from, and how. */
+export interface LiveStream {
+  readonly url: string;
+  readonly format: StreamFormat;
+  /** Headers the stream wants on every request, such as a playlist's User-Agent or Referer. */
+  readonly headers?: Readonly<Record<string, string>>;
+}
+
 /**
  * One connected subscription. Adapters translate a provider's API into the catalogue model and
  * throw `AppFailure` with a specific error when the provider refuses or cannot be reached.
@@ -105,8 +113,11 @@ export interface ProviderEpisode {
 export interface Provider {
   authenticate(signal?: AbortSignal): Promise<AccountStatus>;
   liveCatalogue(signal?: AbortSignal): Promise<LiveCatalogue>;
-  /** Upstream stream location for a channel. Contains credentials, so it stays in the main process. */
-  liveStream(channelId: string): { readonly url: string; readonly format: StreamFormat };
+  /**
+   * Upstream stream location for a channel. Contains credentials, so it stays in the main process.
+   * A playlist may first read itself again, as after a restart that loaded channels from disk.
+   */
+  liveStream(channelId: string, signal?: AbortSignal): Promise<LiveStream>;
   /**
    * Requests an address `liveStream` or `titleFile` gave, the way `providerFetch` does: never
    * sending the login unencrypted after an https address.

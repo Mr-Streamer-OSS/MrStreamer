@@ -5,6 +5,11 @@ import { titlePlayer } from "../player/title-player.ts";
 /** The page under everything else. Watch, details and playing a title open over it. */
 export type View = "home" | "live" | "movies" | "series";
 
+/** Whether a page stays for a subscription with live TV only, as a playlist is: Home and Live TV. */
+export function isLivePage(view: View): boolean {
+  return view === "home" || view === "live";
+}
+
 /** The tabs of the Settings page, and the licences About opens. */
 export type SettingsTab = "general" | "subscription" | "about" | "licences";
 

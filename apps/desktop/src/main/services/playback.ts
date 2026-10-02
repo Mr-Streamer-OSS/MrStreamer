@@ -9,7 +9,9 @@
 // decode. A channel with several streams, one per quality, can be given more than one to try, as
 // Auto is: when the provider doesn't deliver one, the proxy asks for the next, after the request
 // before is over, and never after a refusal, which is the account's. Streams that failed in the
-// last two minutes go last, so reconnecting doesn't wait for one again.
+// last two minutes go last, so reconnecting doesn't wait for one again. An HLS stream, as
+// playlists list them, passes through playlist by playlist and segment by segment, its addresses
+// replaced by the proxy's (see ../playback/hls.ts).
 //
 // Movies and episodes (see ../playback/title.ts): the proxy serves the provider's file to ffprobe
 // and ffmpeg over loopback, answering byte ranges, one upstream request at a time. Each request
@@ -46,6 +48,13 @@ import { createCleanStart } from "../playback/clean-start.ts";
 import { ffmpegArguments, planConversion, type Conversion } from "../playback/convert.ts";
 import { createInspector, type Inspection, type StreamLayout } from "../playback/inspect.ts";
 import { CAPTION_PID, createCaptionCopy } from "../playback/caption-stream.ts";
+import {
+  hlsAddresses,
+  isMultivariant,
+  PLAYLIST_START,
+  rewritePlaylist,
+  startsPlaylist,
+} from "../playback/hls.ts";
 import { createAudioChoice } from "../playback/program-table.ts";
 import { captionsInPicture } from "@mrstreamer/core/subtitles/captions";
 import { pgsSegments } from "@mrstreamer/core/subtitles/pgs";
@@ -71,6 +80,8 @@ const REFUSED_RETRY_DELAYS_MS = [500, 1500];
 const FILE_RETRY_DELAYS_MS = [150, 400, 1000, 2000];
 /** Video codecs whose streams start on a keyframe; see ../playback/clean-start.ts. */
 const CLEAN_START_CODECS: ReadonlySet<Codec> = new Set(["h264", "hevc", "hevc-10bit"]);
+/** The longest HLS playlist the proxy reads; live ones are a few kilobytes. */
+const PLAYLIST_LIMIT = 4 * 1024 * 1024;
 /** How much of a stream the proxy reads, at most, before deciding how to deliver it. */
 const INSPECT_LIMIT = { bytes: 2 * 1024 * 1024, ms: 2500 };
 /** How long ffprobe may take to read what a movie's file holds. */
@@ -100,11 +111,20 @@ interface SessionBase {
 interface LiveSession extends SessionBase {
   readonly kind: "live";
   readonly channelId: string;
-  /** The channel's streams to try, in order, with their upstream addresses. */
-  readonly variants: readonly { readonly id: string; readonly url: string }[];
+  /**
+   * The channel's streams to try, in order, with their upstream addresses and the headers each
+   * wants on every request, such as a playlist's User-Agent.
+   */
+  readonly variants: readonly {
+    readonly id: string;
+    readonly url: string;
+    readonly headers: Readonly<Record<string, string>>;
+  }[];
   /** Which stream plays, and those that failed before it: see `Playback.playing`. */
   delivered: LivePlaying;
   readonly format: StreamFormat;
+  /** HLS: the upstream addresses its playlists named, by the id in their proxy address. */
+  readonly hls: ReturnType<typeof hlsAddresses> | null;
   /** Re-encode the picture even when the player could decode it; see `open`. */
   readonly repair: boolean;
   /** The sound track chosen by PID, or null for the channel's first. */
@@ -244,8 +264,9 @@ function make(deps: PlaybackDeps) {
         return;
       }
       const url = new URL(request.url ?? "/", base);
-      // /stream/<token>.ts, /source/<token>, /title/<token>.mp4, /report/<token>/<run>/<what>,
-      // /cues/<token>/<run>, /packets/<token>/<run>
+      // /stream/<token>.ts, /stream/<token>.m3u8 and its /stream/<token>/<address id>,
+      // /source/<token>, /title/<token>.mp4, /report/<token>/<run>/<what>, /cues/<token>/<run>,
+      // /packets/<token>/<run>
       const route =
         /^\/(stream|source|title|report|cues|packets)\/([\w-]+)(?:\.\w+)?(?:\/([\w-]+))?(?:\/(cues|packets|start))?$/.exec(
           url.pathname,
@@ -257,8 +278,10 @@ function make(deps: PlaybackDeps) {
         return;
       }
       if (session.kind === "live") {
-        if (route[1] === "stream") await serveLive(session, response);
-        else response.writeHead(410).end();
+        if (route[1] !== "stream") response.writeHead(410).end();
+        else if (session.hls) {
+          await serveHls(session, session.hls, route[3] ?? null, url, request, response);
+        } else await serveLive(session, response);
         return;
       }
       switch (route[1]) {
@@ -401,7 +424,7 @@ function make(deps: PlaybackDeps) {
       const kept = session.delivered.variantId;
       const variants = kept ? session.variants.filter(({ id }) => id === kept) : session.variants;
       for (const variant of variants) {
-        const upstream = await connect(session, variant.url, {}, signal);
+        const upstream = await connect(session, variant.url, variant.headers, signal);
         const body = upstream.ok ? upstream.response.body : null;
         if (signal.aborted) {
           void body?.cancel().catch(() => {});
@@ -431,6 +454,178 @@ function make(deps: PlaybackDeps) {
         failedAt.set(variant.url, Date.now());
       }
       return { ok: false, failure };
+    }
+
+    /**
+     * An HLS stream: the playlist the channel names (`id` null), or an address one of its
+     * playlists named. Playlists go to the player with their addresses pointed here; the rest
+     * passes through as it arrives. Each request the player makes is one upstream request, without
+     * retries, which hls.js makes itself; closing the session aborts every one of them. The
+     * channel's playlist tries its streams in turn, as `openVariant` does.
+     */
+    async function serveHls(
+      session: LiveSession,
+      addresses: ReturnType<typeof hlsAddresses>,
+      id: string | null,
+      url: URL,
+      request: IncomingMessage,
+      response: ServerResponse,
+    ): Promise<void> {
+      const started = performance.now();
+      const report = (outcome: "ok" | StreamFailure["kind"]) =>
+        diagnostics.record({
+          op: "stream",
+          ms: Math.round(performance.now() - started),
+          delivery: outcome === "ok" ? "direct" : "none",
+          outcome,
+        });
+      const noStream: StreamFailure = { kind: "network", detail: "The provider sent no stream." };
+      const ended = new AbortController();
+      response.on("close", () => ended.abort());
+      const signal = AbortSignal.any([session.closed.signal, ended.signal]);
+      const range: Record<string, string> = request.headers.range
+        ? { Range: request.headers.range }
+        : {};
+      // With what the player adds: delivery directives (_HLS_msn) to a low-latency playlist.
+      const requestFor = (address: string, headers: Readonly<Record<string, string>>) => {
+        const upstreamUrl = new URL(address);
+        for (const [name, value] of url.searchParams) upstreamUrl.searchParams.set(name, value);
+        return connect(session, upstreamUrl.href, { ...headers, ...range }, signal, []);
+      };
+
+      try {
+        if (id !== null) {
+          const address = addresses.addressOf(id);
+          if (!address) {
+            response.writeHead(410).end();
+            return;
+          }
+          const variant =
+            session.variants.find((each) => each.id === session.delivered.variantId) ??
+            session.variants[0];
+          const upstream = await requestFor(address, variant?.headers ?? {});
+          const opened = upstream.ok ? await readStart(upstream.response, address) : null;
+          if (signal.aborted) {
+            void opened?.reader.cancel().catch(() => {});
+            response.destroy();
+          } else if (!opened) {
+            const failure = upstream.ok ? noStream : upstream.failure;
+            session.failure = failure;
+            response.writeHead("status" in failure ? failure.status : 502).end();
+          } else if (opened.playlist) {
+            await sendPlaylist(session, addresses, opened, response);
+          } else {
+            await passOn(opened, response);
+          }
+          return;
+        }
+
+        const kept = session.delivered.variantId;
+        const variants = kept
+          ? session.variants.filter((each) => each.id === kept)
+          : session.variants;
+        let failure: StreamFailure = noStream;
+        for (const variant of variants) {
+          const upstream = await requestFor(variant.url, variant.headers);
+          const opened = upstream.ok ? await readStart(upstream.response, variant.url) : null;
+          if (signal.aborted) {
+            void opened?.reader.cancel().catch(() => {});
+            response.destroy();
+            return;
+          }
+          if (opened?.playlist) {
+            session.delivered = { ...session.delivered, variantId: variant.id };
+            failedAt.delete(variant.url);
+            await sendPlaylist(session, addresses, opened, response);
+            // Once per session: the player reloads a live playlist every few seconds.
+            if (!kept) report("ok");
+            return;
+          }
+          void opened?.reader.cancel().catch(() => {});
+          failure = !upstream.ok
+            ? upstream.failure
+            : opened
+              ? {
+                  kind: "unsupported",
+                  detail: "The channel's address doesn't answer with an HLS playlist.",
+                }
+              : noStream;
+          report(failure.kind);
+          if (!kept) {
+            session.delivered = {
+              ...session.delivered,
+              failed: [...session.delivered.failed, { variantId: variant.id, failure }],
+            };
+          }
+          if (failure.kind === "refused") break;
+          failedAt.set(variant.url, Date.now());
+        }
+        session.failure = failure;
+        response.writeHead("status" in failure ? failure.status : 502).end();
+      } catch (cause) {
+        if (!signal.aborted) {
+          session.failure = {
+            kind: "network",
+            detail: cause instanceof Error ? cause.message : String(cause),
+          };
+        }
+        response.destroy();
+      }
+    }
+
+    /** Sends a playlist on, whole, with its addresses pointed at the proxy. */
+    async function sendPlaylist(
+      session: LiveSession,
+      addresses: ReturnType<typeof hlsAddresses>,
+      opened: Started,
+      response: ServerResponse,
+    ): Promise<void> {
+      const parts = [...opened.parts];
+      let size = parts.reduce((sum, part) => sum + part.byteLength, 0);
+      for (let next = await opened.reader.read(); !next.done; next = await opened.reader.read()) {
+        size += next.value.byteLength;
+        if (size > PLAYLIST_LIMIT) throw new Error("The playlist is too long.");
+        parts.push(next.value);
+      }
+      const text = Buffer.concat(parts).toString("utf8");
+      // A multivariant playlist's variants and renditions stay for the session.
+      const pin = isMultivariant(text);
+      const playlist = rewritePlaylist(
+        text,
+        opened.url,
+        (target) => `${base}/stream/${session.token}/${addresses.idOf(target, pin)}`,
+      );
+      session.failure = null;
+      response.writeHead(200, { "Content-Type": "application/vnd.apple.mpegurl" });
+      response.end(playlist);
+    }
+
+    /** Passes a segment, key or other file on as it arrives, at the player's pace. */
+    async function passOn(opened: Started, response: ServerResponse): Promise<void> {
+      const { answer } = opened;
+      const passed: Record<string, string> = {};
+      // fetch unpacks a compressed answer, so its length no longer holds.
+      const unpacked = answer.headers.has("content-encoding");
+      for (const name of ["content-type", "content-length", "content-range"]) {
+        const value = answer.headers.get(name);
+        if (value !== null && !(unpacked && name === "content-length")) passed[name] = value;
+      }
+      response.writeHead(answer.status, passed);
+      for (const part of opened.parts) response.write(part);
+      for (let next = await opened.reader.read(); !next.done; next = await opened.reader.read()) {
+        if (!response.write(next.value)) {
+          await new Promise<void>((resume) => {
+            const resumed = () => {
+              response.off("drain", resumed);
+              response.off("close", resumed);
+              resume();
+            };
+            response.on("drain", resumed);
+            response.on("close", resumed);
+          });
+        }
+      }
+      response.end();
     }
 
     /** Pipes the stream through ffmpeg. A conversion that fails counts as an unsupported stream. */
@@ -917,12 +1112,20 @@ function make(deps: PlaybackDeps) {
             // Streams that failed lately go last, in the order they came. The player picks its
             // engine by the format before the stream starts, so those of another format than the
             // first's stay out.
-            const streams = (options.variants?.length ? options.variants : [channelId])
-              .map((id) => ({ id, ...source.provider.liveStream(id) }))
-              .toSorted((a, b) => Number(failedAt.has(a.url)) - Number(failedAt.has(b.url)));
+            const listed = yield* Effect.forEach(
+              options.variants?.length ? options.variants : [channelId],
+              (id) =>
+                Effect.tryPromise({
+                  try: (signal) => source.provider.liveStream(id, signal),
+                  catch: failedWith,
+                }).pipe(Effect.map((stream) => ({ id, ...stream }))),
+            );
+            const streams = listed.toSorted(
+              (a, b) => Number(failedAt.has(a.url)) - Number(failedAt.has(b.url)),
+            );
             const format = streams[0]?.format ?? "mpegts";
-            const variants = streams.flatMap(({ id, url, format: other }) =>
-              other === format ? [{ id, url }] : [],
+            const variants = streams.flatMap(({ id, url, format: other, headers }) =>
+              other === format ? [{ id, url, headers: headers ?? {} }] : [],
             );
             const id = randomUUID();
             const closed = new AbortController();
@@ -943,6 +1146,7 @@ function make(deps: PlaybackDeps) {
               delivered: { variantId: null, failed: [] },
               request: source.provider.request,
               format,
+              hls: format === "hls" ? hlsAddresses() : null,
               decoders: new Set(decoders),
               repair: options.repair ?? false,
               audio: options.audio ?? null,
@@ -1270,4 +1474,37 @@ function classify(status: number): StreamFailure {
   }
   if (status === 404 || status === 410) return { kind: "unavailable", status };
   return { kind: "provider-error", status };
+}
+
+/** An HLS response, read until its first bytes say whether it is a playlist. */
+interface Started {
+  readonly answer: Response;
+  /** Where its relative addresses start from: where it came from after redirects. */
+  readonly url: string;
+  readonly reader: ReadableStreamDefaultReader<Uint8Array>;
+  /** What was read so far. */
+  readonly parts: readonly Uint8Array[];
+  readonly playlist: boolean;
+}
+
+/** The start of `answer`, requested at `address`, or null without a body. */
+async function readStart(answer: Response, address: string): Promise<Started | null> {
+  if (!answer.body) return null;
+  const reader = answer.body.getReader();
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  // The first bytes can arrive a few at a time.
+  for (let next = await reader.read(); !next.done;) {
+    parts.push(next.value);
+    size += next.value.byteLength;
+    if (size >= PLAYLIST_START) break;
+    next = await reader.read();
+  }
+  return {
+    answer,
+    url: answer.url || address,
+    reader,
+    parts,
+    playlist: startsPlaylist(Buffer.concat(parts)),
+  };
 }

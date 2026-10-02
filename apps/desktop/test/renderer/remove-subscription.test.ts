@@ -14,6 +14,7 @@ afterEach(() => unmount());
 
 const subscription: SubscriptionSummary = {
   kind: "xtream",
+  id: "https://line.example.tv|demo",
   server: "https://line.example.tv",
   username: "demo",
   account: { state: "active", expiresAt: null, maxConnections: 1, activeConnections: 0 },

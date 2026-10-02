@@ -6,7 +6,7 @@
 
 Connect it once, then watch its live channels with a programme guide, and its movies and series with resume and the next episode, in the languages you choose. Your login, lists and what you watched stay on your computer.
 
-Mr. Streamer works with providers that offer Xtream Codes access: a server address, username and password, or an M3U link that contains them.
+Mr. Streamer works with providers that offer Xtream Codes access: a server address, username and password, or an M3U link that contains them. An M3U playlist link without a login brings live TV only.
 
 ## Download
 
@@ -51,7 +51,7 @@ The pictures above come from a test provider with made-up titles and artwork.
 
 ## Getting started
 
-1. Enter your provider's server address, username and password, or paste the M3U link your provider sent. Mr. Streamer checks the login and loads your channels; movies and series follow. An address without `http://` or `https://` connects encrypted when the server allows it; otherwise Mr. Streamer asks before sending your login unencrypted.
+1. Enter your provider's server address, username and password, or paste the M3U link your provider sent. Mr. Streamer checks the login and loads your channels; movies and series follow. A playlist link without a login loads its channels only. An address without `http://` or `https://` connects encrypted when the server allows it; otherwise Mr. Streamer asks before sending your login unencrypted.
 2. **Live TV** lists every channel with what's on now and next. Click one to watch; the list opens over the picture to switch.
 3. **Movies** and **Series** open on For you. A poster opens its details; **Play** or **Resume** starts it.
 4. In Settings (⌘, or Ctrl ,), **General** sets the languages for titles, sound and subtitles, and your update channel; **Subscription** shows your account and refreshes its lists.
@@ -60,7 +60,7 @@ Mr. Streamer looks for updates after it starts and every four hours. When one is
 
 ## Limits
 
-- One subscription at a time, from a provider with Xtream Codes access.
+- One subscription at a time: Xtream Codes access, or an M3U playlist for live TV.
 - No recording, downloads or casting to a TV.
 - Surround sound that needs converting plays as stereo, and converting a picture uses much more of your computer's processor than playing it as it is.
 - Choosing another sound track on a live channel starts the channel again for a moment.

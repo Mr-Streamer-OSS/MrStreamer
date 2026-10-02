@@ -10,7 +10,7 @@ Data controller: Wout Stiens, Belgium, publishing as Mr Streamer OSS. Contact: p
 
 - Mr. Streamer sends us nothing. It has no account, no analytics, no telemetry and no crash reporting.
 - Your login, settings, favourites and viewing history are stored only on your computer.
-- To play anything, the app connects to your provider, which receives your login and can see what you watch. Images and film information come from other services, and update checks go to GitHub.
+- To play anything, the app connects to the provider or playlist you add, and the servers it points to. They can see what you watch, and a provider receives your login. Images and film information come from other services, and update checks go to GitHub.
 - If your provider has no encrypted address, your login is sent unencrypted. The app tells you before it does this.
 
 ## Data stored on your computer
@@ -26,7 +26,7 @@ Mr. Streamer keeps its data in one folder:
 
 The folder contains:
 
-- your subscription: the server address, your username, and your password. The password is encrypted with a key held by your system: the macOS Keychain, your Windows account, or GNOME Keyring or KWallet on Linux. On Linux without a keyring, a fixed key is used, so other programs running under your account can read the password. The server address and username are not encrypted.
+- your subscription: the server address, your username, and your password, or the link of a playlist you added, which has no password. The password and the playlist link are encrypted with a key held by your system: the macOS Keychain, your Windows account, or GNOME Keyring or KWallet on Linux. On Linux without a keyring, a fixed key is used, so other programs running under your account can read them. The server address and username are not encrypted, and neither is the address of the server a playlist comes from.
 - your preferences, including your own TMDB key if you entered one. This key is not encrypted.
 - your favourites, the channels you watched, and your progress in movies and episodes
 - copies of your provider's channel list, programme guide, and movie and series lists
@@ -35,7 +35,7 @@ The folder contains:
 - a diagnostics log of what the app did and how long it took. It contains no server addresses, logins or channel names, and it leaves your computer only if you attach it to an issue or an email.
 - a cache of images, at most 64 MB, and other files the app's browser engine keeps for itself
 
-Two items are stored outside this folder: the key that encrypts your password, in your system's keychain, and a downloaded update, in a `mrstreamer-updater` folder in your system's cache folder.
+Two items are stored outside this folder: the key that encrypts your password or playlist link, in your system's keychain, and a downloaded update, in a `mrstreamer-updater` folder in your system's cache folder.
 
 ## Data sent from your computer
 
@@ -49,9 +49,13 @@ An address starting with `https://` is encrypted, and Mr. Streamer never falls b
 
 Over http, your username and password are sent as plain text, and anyone on your network or between you and your provider can read them. Settings > Subscription marks such a login "not encrypted". If your provider offers an https address, we recommend using it.
 
+### A playlist
+
+When you add a playlist link, Mr. Streamer downloads the playlist from that address when you connect, each time the app starts, when you open Settings > Subscription, and when it refreshes the channel list. To play a channel, it connects to the address the playlist lists for that channel, often on another server, and follows that server's redirects, often to further servers. If the playlist names a programme guide, the app downloads it from the server named. Each of these servers receives your IP address and the app version, or the browser identification and referring address the playlist names for that channel. The servers that play a channel can see what you watch, and when. A playlist link without a login sends no username or password. A channel listed with an `http://` address plays unencrypted.
+
 ### Images
 
-Channel logos, posters and backdrops load from the servers your provider specifies. Film images, episode stills and cast photos load from TMDB. These servers receive your IP address, the image requested, your system language, and a browser identification that includes Mr. Streamer, its version and your operating system. They do not receive your login.
+Channel logos, posters and backdrops load from the servers your provider or playlist specifies. Film images, episode stills and cast photos load from TMDB. These servers receive your IP address, the image requested, your system language, and a browser identification that includes Mr. Streamer, its version and your operating system. They do not receive your login.
 
 ### The Movie Database (TMDB)
 
@@ -82,7 +86,7 @@ Our email and hosting providers process these messages and visits to our website
 
 ## Deleting your data
 
-- **Remove subscription**, in Settings > Subscription, deletes your login and the copies of your provider's lists and guide. Tick **Also delete favourites, history and progress** to delete that account's favourites, watched channels and progress in movies and episodes as well. Otherwise they remain, and reappear if you connect the same account again.
+- **Remove subscription**, in Settings > Subscription, deletes your login or playlist link and the copies of your provider's lists and guide. Tick **Also delete favourites, history and progress** to delete that account's favourites, watched channels and progress in movies and episodes as well. Otherwise they remain, and reappear if you connect the same account again.
 - **Deleting the folder** listed above removes everything Mr. Streamer stores there. To also remove the password key, delete "Mr. Streamer Safe Storage" in Keychain Access on macOS, or the matching entry in your Linux keyring. The update folder can be deleted as well: `~/Library/Caches/mrstreamer-updater` on macOS, `%LOCALAPPDATA%\mrstreamer-updater` on Windows, or `~/.cache/mrstreamer-updater` on Linux.
 - **Uninstalling the app does not delete your data**, so a reinstall continues where you left off. The copy from the Microsoft Store is the exception: uninstalling it deletes its folder.
 - To ask us to delete messages or other data we hold about you, email privacy@mrstreamer.app.
@@ -91,7 +95,7 @@ Our email and hosting providers process these messages and visits to our website
 
 The data on your computer stays under your control. We cannot access or delete it, and you can view or delete it at any time as described above.
 
-For personal data we hold, mainly messages you sent us, the GDPR gives you the right to access, correct and erase it, to restrict or object to its use, and to receive a copy. Email privacy@mrstreamer.app and we will respond within one month. For data held by your provider, TMDB or GitHub, contact them directly.
+For personal data we hold, mainly messages you sent us, the GDPR gives you the right to access, correct and erase it, to restrict or object to its use, and to receive a copy. Email privacy@mrstreamer.app and we will respond within one month. For data held by your provider, the servers a playlist names, TMDB or GitHub, contact them directly.
 
 Mr Streamer OSS is based in Belgium. You can lodge a complaint with the Belgian [Data Protection Authority](https://www.dataprotectionauthority.be/citizen/actions/lodge-a-complaint) or with the data protection authority in your country.
 

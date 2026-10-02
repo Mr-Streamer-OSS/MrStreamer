@@ -31,7 +31,7 @@ export function SubscriptionSection() {
   useEffect(() => mutate(), [mutate]);
 
   if (!subscription.data) return null;
-  const { account, username, server, needsPassword } = subscription.data;
+  const { kind, account, username, server, needsPassword } = subscription.data;
   return (
     <>
       <Section title="Account">
@@ -40,9 +40,12 @@ export function SubscriptionSection() {
         </Row>
         <Row label="Expires">{expiry(account.expiresAt)}</Row>
         <Row label="Connections">{connections(account)}</Row>
-        <Row label="Login" note={server.startsWith("http:") ? "not encrypted" : undefined}>
+        <Row
+          label="Login"
+          note={kind === "xtream" && server.startsWith("http:") ? "not encrypted" : undefined}
+        >
           <span className="truncate">
-            {username} @ {hostOf(server)}
+            {username ? `${username} @ ${hostOf(server)}` : hostOf(server)}
           </span>
           <Button
             variant="secondary"
@@ -53,14 +56,17 @@ export function SubscriptionSection() {
           </Button>
         </Row>
       </Section>
-      <Catalogue />
+      <Catalogue liveOnly={kind === "m3u"} />
       <Remove />
     </>
   );
 }
 
-/** What was loaded from the provider, each list refreshed on its own. */
-function Catalogue() {
+/**
+ * What was loaded from the provider, each list refreshed on its own. A playlist (`liveOnly`) has
+ * no movies or series.
+ */
+function Catalogue({ liveOnly }: { liveOnly: boolean }) {
   const client = useQueryClient();
   const channels = useQuery(queries.libraryStatus());
   const guide = useQuery(queries.guideStatus());
@@ -100,16 +106,18 @@ function Catalogue() {
         refreshing={refreshGuide.isPending}
         onRefresh={() => refreshGuide.mutate()}
       />
-      <List
-        label="Movies and series"
-        count={titleCount}
-        fetchedAt={titles.data?.fetchedAt ?? null}
-        failure={
-          refreshTitles.error ? appError(refreshTitles.error) : (titles.data?.failure ?? null)
-        }
-        refreshing={refreshTitles.isPending}
-        onRefresh={() => refreshTitles.mutate()}
-      />
+      {!liveOnly && (
+        <List
+          label="Movies and series"
+          count={titleCount}
+          fetchedAt={titles.data?.fetchedAt ?? null}
+          failure={
+            refreshTitles.error ? appError(refreshTitles.error) : (titles.data?.failure ?? null)
+          }
+          refreshing={refreshTitles.isPending}
+          onRefresh={() => refreshTitles.mutate()}
+        />
+      )}
     </Section>
   );
 }

@@ -14,16 +14,18 @@ import { player } from "../../player/player.ts";
 
 /**
  * First-run login, also used to correct the login of an existing subscription (`existing`).
- * Accepts either server, username and password, or one pasted M3U link that contains them.
+ * Accepts either server, username and password, or one pasted M3U link: an Xtream panel's, which
+ * contains them, or any playlist's.
  *
  * An address without a scheme connects over https. When https doesn't work there, the main
  * process stops before the login goes out (`unencrypted-only`) and the form asks once whether to
  * connect without encryption, which retries the address with http://. An address typed with
- * http:// connects as typed, with a line under it saying the login travels as plain text.
+ * http:// connects as typed, with a line under it saying the login travels as plain text. A
+ * playlist without a login connects as typed, without that line.
  */
 export function ConnectScreen({ existing }: { existing: SubscriptionSummary | null }) {
   const client = useQueryClient();
-  const [mode, setMode] = useState<"login" | "link">("login");
+  const [mode, setMode] = useState<"login" | "link">(existing?.kind === "m3u" ? "link" : "login");
   const [server, setServer] = useState(existing?.server ?? "");
   const [username, setUsername] = useState(existing?.username ?? "");
   const [password, setPassword] = useState("");
@@ -32,9 +34,7 @@ export function ConnectScreen({ existing }: { existing: SubscriptionSummary | nu
   const connect = useMutation({
     mutationFn: (login: LoginInput) => call("subscription.connect", login),
     onSuccess: async (connected) => {
-      const sameAccount =
-        existing?.server === connected.server && existing.username === connected.username;
-      if (!sameAccount) {
+      if (existing?.id !== connected.id) {
         player.reset();
         resetForAccount();
       }
@@ -122,7 +122,7 @@ export function ConnectScreen({ existing }: { existing: SubscriptionSummary | nu
             <Input
               value={link}
               onChange={(e) => changeAddress(setLink, e.target.value)}
-              placeholder="http://line.example.tv/get.php?username=…"
+              placeholder="https://example.com/playlist.m3u"
               autoFocus
             />
           </Field>
@@ -169,11 +169,7 @@ export function ConnectScreen({ existing }: { existing: SubscriptionSummary | nu
           </div>
         )}
         <p className="mt-10 text-xs leading-relaxed text-muted-foreground/80">
-          {isMac
-            ? "Saved on this Mac. The password is encrypted with your macOS Keychain."
-            : isWindows
-              ? "Saved on this PC. The password is encrypted with your Windows account."
-              : "Saved on this computer. The password is encrypted with your keyring."}
+          {savedNote(mode === "link" && !carriesLogin(link) ? "link" : "password")}
         </p>
       </form>
     </div>
@@ -181,6 +177,15 @@ export function ConnectScreen({ existing }: { existing: SubscriptionSummary | nu
 }
 
 const UNENCRYPTED = "Not encrypted. Your login travels as plain text.";
+
+/** Where the login stays, and what keeps its secret: the password, or a playlist's whole link. */
+function savedNote(secret: "password" | "link"): string {
+  return isMac
+    ? `Saved on this Mac. The ${secret} is encrypted with your macOS Keychain.`
+    : isWindows
+      ? `Saved on this PC. The ${secret} is encrypted with your Windows account.`
+      : `Saved on this computer. The ${secret} is encrypted with your keyring.`;
+}
 
 /** An address typed with http://, which the login travels over unencrypted. */
 function plainHttp(address: string): boolean {
