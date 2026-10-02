@@ -24,3 +24,4 @@ Start with the [development runbook](./maintainers/development.md) and the [cont
 - [Development and local builds](./maintainers/development.md)
 - [Releasing](./maintainers/releasing.md)
 - [Signing](./maintainers/signing.md)
+- [Microsoft Store setup](./maintainers/microsoft-store.md)
