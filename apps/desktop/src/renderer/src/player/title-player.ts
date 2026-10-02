@@ -403,9 +403,10 @@ export const titlePlayer = {
     void call("preferences.update", {
       subtitleLanguage: track ? (track.language ?? null) : "off",
     }).catch(() => {});
-    // Turning subtitles off is instant; showing others needs their cues from a new run.
+    // Turning subtitles off is instant, and stays off; showing others needs a new run.
     if (!track) {
-      clearSubtitles(video);
+      if (engine) engine.hideSubtitles();
+      else clearSubtitles(video);
       return;
     }
     save();

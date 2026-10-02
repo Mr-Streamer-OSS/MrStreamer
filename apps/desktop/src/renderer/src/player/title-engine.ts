@@ -54,6 +54,11 @@ export interface TitleEngine {
   position(): number;
   /** Moves within what is already here; false when the caller must start a run from there. */
   seekWithin(position: number): boolean;
+  /**
+   * Takes the subtitles off for the rest of the run: what shows goes, and the run's cues and
+   * packets stop being read. Showing subtitles again takes a new run.
+   */
+  hideSubtitles(): void;
   info(): StreamInfo;
   /** Stops reading, ends the run's connection and frees the element. */
   destroy(): void;
@@ -61,6 +66,9 @@ export interface TitleEngine {
 
 export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine {
   const abort = new AbortController();
+  /** Ends the subtitles with the run, or before it, when the viewer turns them off. */
+  const subtitlesOff = new AbortController();
+  const subtitlesSignal = AbortSignal.any([abort.signal, subtitlesOff.signal]);
   const mediaSource = new MediaSource();
   const objectUrl = URL.createObjectURL(mediaSource);
   const subtitles = subtitleTrack(video);
@@ -284,13 +292,13 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
   /** Streams the run's cues into the element's subtitle track, on the title's clock. */
   async function readCues(url: string, origin: number): Promise<void> {
     try {
-      const response = await fetch(url, { signal: abort.signal });
+      const response = await fetch(url, { signal: subtitlesSignal });
       if (!response.body) return;
       const reader = webvttReader();
       const decoder = new TextDecoder();
       const add = (cues: ReturnType<typeof reader.push>) => {
         // The track is shared with the next run, which may have started already.
-        if (abort.signal.aborted) return;
+        if (subtitlesSignal.aborted) return;
         for (const cue of cues) {
           subtitles.addCue(new VTTCue(cue.start - origin, cue.end - origin, cue.text));
         }
@@ -309,7 +317,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
    */
   async function readPackets(url: string, codec: SubtitleCodec, origin: number): Promise<void> {
     try {
-      const response = await fetch(url, { signal: abort.signal });
+      const response = await fetch(url, { signal: subtitlesSignal });
       if (!response.body) return;
       const decoder = subtitleDecoder(codec, run.page);
       const presenter = subtitlePresenter(video, origin);
@@ -320,7 +328,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
         const lines = pending.split("\n");
         pending = lines.pop() ?? "";
         for (const line of lines) {
-          if (!line || abort.signal.aborted) continue;
+          if (!line || subtitlesSignal.aborted) continue;
           const packet = JSON.parse(line) as { at: number; data: string };
           const data = Uint8Array.from(atob(packet.data), (char) => char.charCodeAt(0));
           const change = decoder.push(data, packet.at);
@@ -365,6 +373,11 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
         }
       }
       return false;
+    },
+    hideSubtitles() {
+      subtitlesOff.abort();
+      clearSubtitles(video);
+      subtitles.mode = "disabled";
     },
     info: () => ({
       width: video.videoWidth || null,
