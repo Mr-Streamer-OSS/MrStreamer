@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 // A film's details play the version they were opened on when the opener named one, as the 4K tab
-// names a film's 4K version, unless the viewer picked a version for the film.
+// names a film's 4K version, even when it is the version the film shows first and another has
+// progress, unless the viewer picked a version for the film.
 import { ipc } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
@@ -8,6 +9,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Title } from "@mrstreamer/contracts/ondemand";
 import { defaultPreferences } from "@mrstreamer/contracts/preferences";
+import type { TitleProgress } from "@mrstreamer/contracts/viewing";
 import { DetailsView } from "../../src/renderer/src/features/titles/DetailsView.tsx";
 
 /** A film in two versions: HD, shown first, and 4K, added earlier. */
@@ -37,7 +39,11 @@ let unmount = () => {};
 afterEach(() => unmount());
 
 /** Opens the details on version `id`, and says which version's details they ask for. */
-async function opened(id: string, preferences = defaultPreferences): Promise<string | undefined> {
+async function opened(
+  id: string,
+  preferences = defaultPreferences,
+  { title = film, asked = false, played = [] as readonly TitleProgress[] } = {},
+): Promise<string | undefined> {
   ipc.reset();
   const listed = ipc.hold("ondemand.titles");
   const progress = ipc.hold("viewing.progress");
@@ -49,17 +55,17 @@ async function opened(id: string, preferences = defaultPreferences): Promise<str
       createElement(
         QueryClientProvider,
         { client },
-        createElement(DetailsView, { target: { kind: "movie", id } }),
+        createElement(DetailsView, { target: { kind: "movie", id, asked } }),
       ),
     ),
   );
   unmount = () => act(() => root.unmount());
-  await act(async () => listed.resolve([film]));
-  await act(async () => progress.resolve([]));
+  await act(async () => listed.resolve([title]));
+  await act(async () => progress.resolve(played));
   // The details are asked for once React Query has passed both answers on.
   await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
-  const asked = ipc.argsOf("ondemand.details").at(-1);
-  return (asked as { id: string } | undefined)?.id;
+  const requested = ipc.argsOf("ondemand.details").at(-1);
+  return (requested as { id: string } | undefined)?.id;
 }
 
 describe("a film's details", () => {
@@ -69,6 +75,25 @@ describe("a film's details", () => {
 
   it("play the version that suits best when opened on it", async () => {
     expect(await opened("hd")).toBe("hd");
+  });
+
+  it("play the 4K version from the 4K tab when it is the one shown first, though HD has progress", async () => {
+    const fourKFirst: Title = { ...film, id: "4k", versions: film.versions.toReversed() };
+    const halfway: TitleProgress = {
+      title: { kind: "movie", id: "hd" },
+      position: 3000,
+      duration: 6000,
+      finished: false,
+      at: 1,
+    };
+
+    expect(
+      await opened("4k", defaultPreferences, { title: fourKFirst, asked: true, played: [halfway] }),
+    ).toBe("4k");
+    // Opened anywhere else, it carries on where the viewer stopped.
+    expect(await opened("4k", defaultPreferences, { title: fourKFirst, played: [halfway] })).toBe(
+      "hd",
+    );
   });
 
   it("play the version the viewer picked for the film, wherever they were opened", async () => {

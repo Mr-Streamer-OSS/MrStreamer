@@ -69,7 +69,9 @@ export function DetailsView({ target }: { target: DetailsTarget }) {
   });
   const preferences = useQuery(queries.preferences());
   const picked = title ? pickedVersion(title, preferences.data) : null;
-  const automatic = title ? automaticVersion(title, progress.data ?? [], target.id) : target.id;
+  const automatic = title
+    ? automaticVersion(title, progress.data ?? [], target.id, target.asked)
+    : target.id;
   const playing = picked ?? automatic;
   const known = !listed.isPending && (!title || !progress.isPending) && !preferences.isPending;
   // Another version's details replace these once they arrive; nothing plays from them meanwhile.

@@ -98,16 +98,18 @@ export function pickedVersion(title: Title, preferences: Preferences | undefined
 }
 
 /**
- * The version that plays unless the viewer picked one: the one the title was opened on, when
- * that is another than the one it shows first, as a 4K tile opens its 4K version; else the one a
- * movie stopped in partway, or a series was watched in last; else the one that suits best.
+ * The version that plays unless the viewer picked one: the one the title was opened on, when the
+ * opener `asked` for it, as a 4K tile opens its 4K version, or when it is another than the one the
+ * title shows first; else the one a movie stopped in partway, or a series was watched in last;
+ * else the one that suits best.
  */
 export function automaticVersion(
   title: Title,
   progress: readonly TitleProgress[],
   opened: string,
+  asked = false,
 ): string {
-  if (opened !== title.id && title.versions.some((version) => version.id === opened)) {
+  if ((asked || opened !== title.id) && title.versions.some((version) => version.id === opened)) {
     return opened;
   }
   const latest = progress.toSorted((a, b) => b.at - a.at)[0];

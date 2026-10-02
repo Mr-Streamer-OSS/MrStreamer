@@ -18,6 +18,8 @@ export type ChannelList =
 export interface DetailsTarget {
   readonly kind: TitleKind;
   readonly id: string;
+  /** The opener asked for this version, as the 4K tab does, even if the title shows it first. */
+  readonly asked?: boolean;
 }
 
 /** The update dialog on screen: the panel under the top bar's Update, or the restart question. */
