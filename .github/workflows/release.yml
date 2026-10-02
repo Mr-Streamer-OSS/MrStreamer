@@ -1,10 +1,13 @@
-# Builds and publishes releases; docs/maintainers/releasing.md describes the process.
+# Plans and runs releases; docs/maintainers/releasing.md describes the process. build-release.yml
+# builds, checks and publishes each release the plan names.
 #
 # - Nightly: checked on every push to main and every 30 minutes, built when main has new commits
 #   and the last nightly is at least six hours old. GitHub starts scheduled runs far less often
 #   than asked, often hours apart, so a merge checks too. Started by hand, it builds main right away.
-# - Stable: by hand. Rebuilds the commit of the tested nightly, or the latest published one, with a
-#   stable version, publishes it as the latest release, then records the version on main.
+# - Stable: by hand, naming the tested nightly. When main has commits no published nightly holds,
+#   the run first publishes a nightly of main and updates the feed, so Nightly users have every
+#   change before Stable users get any. Then it rebuilds the tested nightly's commit with a stable
+#   version, publishes it as the latest release, and records the version on main.
 # - Dry run: labelling a pull request "release dry run" builds, signs and tests its head commit
 #   once, keeps the files as workflow artifacts and publishes nothing.
 # - Microsoft Store package: dry runs and stable releases also build the MSIX and test it installed.
@@ -33,7 +36,7 @@ on:
         type: string
         required: false
       nightly:
-        description: Stable only. The tested nightly to promote, such as 0.0.2-nightly.20260930.30. Empty promotes the latest.
+        description: Required for stable. The tested nightly to promote, such as 0.0.2-nightly.20260930.30.
         type: string
         required: false
   pull_request:
@@ -46,7 +49,9 @@ permissions:
 # run waits for the one ahead of it and is never cancelled, so a requested stable release is never
 # dropped. Sharing the queue keeps a nightly from being planned while a stable release builds: it
 # would preview the same version as the stable release, from newer code, and sort before it. A
-# push or scheduled check decides whether a nightly is due once its turn comes.
+# push or scheduled check decides whether a nightly is due once its turn comes. The nightly a
+# stable run publishes first is a job of that run, not a run of its own, so it never waits in the
+# queue behind the run that needs it.
 concurrency:
   group: >-
     release-${{ github.event_name == 'pull_request' && format('dry-run-{0}', github.event.pull_request.number)
@@ -73,7 +78,11 @@ jobs:
       tag: ${{ steps.plan.outputs.tag }}
       sha: ${{ steps.plan.outputs.sha }}
       previous-tag: ${{ steps.plan.outputs.previous-tag }}
-      dry-run: ${{ github.event_name == 'pull_request' }}
+      # The nightly a stable run publishes first; empty when none is needed.
+      first-version: ${{ steps.plan.outputs.first-version }}
+      first-tag: ${{ steps.plan.outputs.first-tag }}
+      first-sha: ${{ steps.plan.outputs.first-sha }}
+      first-previous-tag: ${{ steps.plan.outputs.first-previous-tag }}
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -102,479 +111,50 @@ jobs:
             pull_request/*)
               node scripts/release-plan.ts nightly --ref "$GITHUB_REF" --sha "$HEAD_SHA" --run "$RUN" --dry-run ;;
             workflow_dispatch/stable)
-              node scripts/release-plan.ts stable --ref "$GITHUB_REF" --version "$VERSION" --nightly "$NIGHTLY" ;;
+              node scripts/release-plan.ts stable --ref "$GITHUB_REF" --sha "$GITHUB_SHA" --run "$RUN" --version "$VERSION" --nightly "$NIGHTLY" ;;
             workflow_dispatch/nightly)
               node scripts/release-plan.ts nightly --ref "$GITHUB_REF" --sha "$GITHUB_SHA" --run "$RUN" ;;
           esac
 
-  checks:
-    name: Checks
+  # A stable run's nightly of main, published and in the feed before the stable release builds.
+  # Planned only for stable runs, never for dry runs.
+  nightly-first:
+    name: Nightly first
     needs: plan
-    if: needs.plan.outputs.skip == 'false'
-    uses: ./.github/workflows/ci.yml
+    if: needs.plan.outputs.first-tag != ''
+    uses: ./.github/workflows/build-release.yml
     with:
-      ref: ${{ needs.plan.outputs.sha }}
-
-  # The JavaScript is the same on every platform: built once, packaged three times.
-  bundle:
-    name: Build JS bundle
-    needs: plan
-    if: needs.plan.outputs.skip == 'false'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.plan.outputs.sha }}
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: npm pkg set version="${{ needs.plan.outputs.version }}"
-        working-directory: apps/desktop
-      - run: pnpm build
-        env:
-          # The app's TMDB key, built into the main bundle; see docs/maintainers/releasing.md.
-          MR_STREAMER_TMDB_KEY: ${{ secrets.TMDB_API_KEY }}
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: js-bundle
-          path: apps/desktop/out/
-          retention-days: 1
-          if-no-files-found: error
-
-  package:
-    name: Package ${{ matrix.target }}
-    needs: [plan, bundle]
-    strategy:
-      # Every platform reports its own result; the release still needs all of them.
-      fail-fast: false
-      matrix:
-        include:
-          - { target: mac-arm64, runner: macos-15, builder: --mac --arm64 }
-          - { target: win-x64, runner: windows-2025, builder: --win --x64 }
-          - { target: linux-x64, runner: ubuntu-24.04, builder: --linux --x64 }
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
-    env:
-      VERSION: ${{ needs.plan.outputs.version }}
-    # The app, its scripts and its tests live in apps/desktop. Action paths stay relative to the
-    # repository root.
-    defaults:
-      run:
-        shell: bash
-        working-directory: apps/desktop
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.plan.outputs.sha }}
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-
-      # The bundled ffmpeg, rebuilt only when build-ffmpeg.sh changes.
-      - id: ffmpeg
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: apps/desktop/vendor/ffmpeg/${{ matrix.target }}
-          key: ffmpeg-${{ matrix.target }}-${{ hashFiles('apps/desktop/scripts/build-ffmpeg.sh') }}
-      - name: Build ffmpeg on Linux
-        # Ubuntu 22.04, so the binary also runs on older systems.
-        if: steps.ffmpeg.outputs.cache-hit != 'true' && runner.os == 'Linux'
-        run: |
-          docker run --rm -v "$PWD":/repo -w /repo ubuntu:22.04 bash -c '
-            apt-get update -qq &&
-            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-              build-essential nasm pkg-config git curl ca-certificates xz-utils >/dev/null &&
-            scripts/build-ffmpeg.sh linux-x64 &&
-            chown -R '"$(id -u):$(id -g)"' vendor'
-      - name: Build ffmpeg on macOS
-        if: steps.ffmpeg.outputs.cache-hit != 'true' && runner.os == 'macOS'
-        run: |
-          brew install --quiet nasm pkg-config
-          scripts/build-ffmpeg.sh mac-arm64
-      - if: steps.ffmpeg.outputs.cache-hit != 'true' && runner.os == 'Windows'
-        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
-        with:
-          msystem: MINGW64
-          update: false
-          install: >-
-            make git curl mingw-w64-x86_64-gcc mingw-w64-x86_64-nasm mingw-w64-x86_64-pkgconf
-      - name: Build ffmpeg on Windows
-        if: steps.ffmpeg.outputs.cache-hit != 'true' && runner.os == 'Windows'
-        shell: msys2 {0}
-        run: scripts/build-ffmpeg.sh win-x64
-
-      - run: npm pkg set version="$VERSION"
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: js-bundle
-          path: apps/desktop/out
-
-      - name: Build for macOS, signed and notarized
-        if: runner.os == 'macOS'
-        env:
-          # Dry runs happen on this repository's own labelled pull requests, so they sign too.
-          CSC_FOR_PULL_REQUEST: "true"
-          CSC_LINK: ${{ secrets.MAC_CERTIFICATE_P12 }}
-          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
-          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        run: |
-          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY_P8 APPLE_API_KEY_ID APPLE_API_ISSUER; do
-            [ -n "${!name}" ] || { echo "::error::The $name secret is missing; see docs/maintainers/signing.md"; exit 1; }
-          done
-          export APPLE_API_KEY="$RUNNER_TEMP/AuthKey.p8"
-          printf '%s\n' "$APPLE_API_KEY_P8" > "$APPLE_API_KEY"
-          pnpm exec electron-builder ${{ matrix.builder }} --publish never
-          node scripts/notarize-dmg.ts dist/*.dmg
-          rm -f "$APPLE_API_KEY"
-
-      - name: Check the macOS signature
-        if: runner.os == 'macOS'
-        env:
-          TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
-        run: |
-          app="dist/mac-arm64/Mr. Streamer.app"
-          codesign --verify --deep --strict --verbose=2 "$app"
-          codesign -dv "$app" 2>&1 | grep -qx "TeamIdentifier=$TEAM_ID"
-          codesign -dv "$app" 2>&1 | grep -q "flags=0x10000(runtime)"
-          spctl --assess --type execute --verbose "$app"
-          spctl --assess --type open --context context:primary-signature --verbose dist/*.dmg
-          xcrun stapler validate "$app"
-          xcrun stapler validate dist/*.dmg
-
-      # Windows installers are unsigned for now. Signing belongs here, as its own step with its
-      # own secrets, without touching the Mac certificate; docs/maintainers/signing.md.
-      - name: Build for Windows
-        if: runner.os == 'Windows'
-        run: pnpm exec electron-builder ${{ matrix.builder }} --publish never
-
-      - name: Build for Linux
-        if: runner.os == 'Linux'
-        run: pnpm exec electron-builder ${{ matrix.builder }} --publish never
-
-      - name: Check the update metadata
-        run: |
-          for file in dist/latest*.yml; do
-            grep -qx "version: $VERSION" "$file" || { echo "::error::$file does not name $VERSION"; exit 1; }
-          done
-
-      - name: Smoke test the installed app on macOS
-        if: runner.os == 'macOS'
-        run: |
-          mount=$(hdiutil attach -nobrowse -readonly dist/*.dmg | tail -1 | cut -f3)
-          ditto "$mount/Mr. Streamer.app" "/Applications/Mr. Streamer.app"
-          hdiutil detach "$mount"
-          node test/e2e/packaged-app.ts "/Applications/Mr. Streamer.app/Contents/MacOS/Mr. Streamer" -- --use-mock-keychain
-
-      - name: Smoke test the installed app on Windows
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $installer = Get-ChildItem dist/*-setup.exe | Select-Object -First 1
-          Start-Process -FilePath $installer.FullName -ArgumentList '/S' -Wait
-          node test/e2e/packaged-app.ts "$env:LOCALAPPDATA\Programs\mrstreamer\Mr. Streamer.exe"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Smoke test the installed app on Linux
-        if: runner.os == 'Linux'
-        run: |
-          # AppImages need FUSE 2, as on a user's Ubuntu.
-          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libfuse2t64 ./dist/*.deb
-          xvfb-run -a node test/e2e/packaged-app.ts "/opt/Mr. Streamer/mrstreamer" -- --no-sandbox
-          xvfb-run -a node test/e2e/packaged-app.ts dist/*.AppImage -- --no-sandbox
-
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: release-${{ matrix.target }}
-          path: |
-            apps/desktop/dist/*.dmg
-            apps/desktop/dist/*.zip
-            apps/desktop/dist/*.exe
-            apps/desktop/dist/*.AppImage
-            apps/desktop/dist/*.deb
-            apps/desktop/dist/*.blockmap
-            apps/desktop/dist/latest*.yml
-          # Dry runs keep their files for testing; a release keeps them on GitHub Releases.
-          retention-days: ${{ needs.plan.outputs.dry-run == 'true' && 14 || 3 }}
-          if-no-files-found: error
-
-  # The Microsoft Store package, an MSIX of the same app, for dry runs and stable releases: only
-  # stable releases go to the Store. It waits for the installers, whose run caches ffmpeg, but
-  # nothing waits for it, so it can't hold up a release. Its file stays a workflow artifact, apart
-  # from the release-* artifacts publish attaches: never on the release or in the update feed, and
-  # never submitted to the Store.
-  msix:
-    name: Package Microsoft Store MSIX
-    needs: [plan, bundle, package]
-    if: needs.plan.outputs.dry-run == 'true' || needs.plan.outputs.channel == 'stable'
-    runs-on: windows-2025
-    timeout-minutes: 45
-    env:
-      VERSION: ${{ needs.plan.outputs.version }}
-      SHA: ${{ needs.plan.outputs.sha }}
-    defaults:
-      run:
-        shell: pwsh
-        working-directory: apps/desktop
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.plan.outputs.sha }}
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: apps/desktop/vendor/ffmpeg/win-x64
-          key: ffmpeg-win-x64-${{ hashFiles('apps/desktop/scripts/build-ffmpeg.sh') }}
-          fail-on-cache-miss: true
-      - run: npm pkg set version="$env:VERSION"
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: js-bundle
-          path: apps/desktop/out
-      - name: Build the MSIX
-        run: pnpm exec electron-builder --win appx --x64 --publish never
-
-      # Partner Center's identity exactly, the Store version for this release, and what the app
-      # needs at run time: ffmpeg, ffprobe and the notices Settings > About reads.
-      - name: Check the package
-        run: |
-          $makeappx = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\makeappx.exe" | Sort-Object FullName | Select-Object -Last 1
-          & $makeappx.FullName unpack /p "dist/Mr-Streamer-$env:VERSION-win-x64.msix" /d "$env:RUNNER_TEMP\msix" /o | Out-Null
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          [xml]$manifest = Get-Content "$env:RUNNER_TEMP\msix\AppxManifest.xml"
-          $version = node --input-type=module -e 'import { packageVersion } from "./scripts/msix-version.ts"; console.log(packageVersion(process.argv[1]))' $env:VERSION
-          $checks = @(
-            @("Identity name", $manifest.Package.Identity.Name, "MrStreamerOSS.Mr.Streamer"),
-            @("Publisher", $manifest.Package.Identity.Publisher, "CN=A132E842-C4C9-40BF-83C4-D304E7952C2D"),
-            @("Publisher display name", $manifest.Package.Properties.PublisherDisplayName, "Mr Streamer OSS"),
-            @("Display name", $manifest.Package.Properties.DisplayName, "Mr. Streamer"),
-            @("Application id", $manifest.Package.Applications.Application.Id, "MrStreamer"),
-            @("Architecture", $manifest.Package.Identity.ProcessorArchitecture, "x64"),
-            @("Version", $manifest.Package.Identity.Version, $version)
-          )
-          foreach ($check in $checks) {
-            if ($check[1] -cne $check[2]) { echo "::error::$($check[0]) is '$($check[1])', not '$($check[2])'."; exit 1 }
-          }
-          foreach ($file in "Mr. Streamer.exe", "resources\app.asar", "resources\ffmpeg\ffmpeg.exe",
-              "resources\ffmpeg\ffprobe.exe", "LICENSES.chromium.html", "LICENSE.electron.txt") {
-            if (-not (Test-Path -LiteralPath "$env:RUNNER_TEMP\msix\app\$file")) { echo "::error::The package has no $file."; exit 1 }
-          }
-          $record = "Mr. Streamer $env:VERSION is package $version, built from $env:SHA."
-          Set-Content "dist/Mr-Streamer-$env:VERSION-win-x64.msix.txt" $record
-          Add-Content $env:GITHUB_STEP_SUMMARY $record
-
-      # Windows installs only signed packages. A certificate made here, with the package's
-      # publisher as its subject and trusted on this runner alone, signs a copy to install; the
-      # artifact stays unsigned for the Store to sign. Installing proves nothing about Store trust;
-      # docs/maintainers/signing.md#microsoft-store-package.
-      - name: Install a test-signed copy
-        run: |
-          [xml]$manifest = Get-Content "$env:RUNNER_TEMP\msix\AppxManifest.xml"
-          $cert = New-SelfSignedCertificate -Type Custom -Subject $manifest.Package.Identity.Publisher `
-            -KeyUsage DigitalSignature -CertStoreLocation Cert:\CurrentUser\My `
-            -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3", "2.5.29.19={text}")
-          Export-Certificate -Cert $cert -FilePath "$env:RUNNER_TEMP\test.cer" | Out-Null
-          Import-Certificate -FilePath "$env:RUNNER_TEMP\test.cer" -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
-          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1
-          Copy-Item "dist/Mr-Streamer-$env:VERSION-win-x64.msix" "$env:RUNNER_TEMP\test.msix"
-          & $signtool.FullName sign /q /fd SHA256 /sha1 $cert.Thumbprint "$env:RUNNER_TEMP\test.msix"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Add-AppxPackage "$env:RUNNER_TEMP\test.msix"
-          # Windows derives the family name from the identity: it must be the one Partner Center gave.
-          $family = (Get-AppxPackage MrStreamerOSS.Mr.Streamer).PackageFamilyName
-          if ($family -cne "MrStreamerOSS.Mr.Streamer_5yzg1erdm3xmr") { echo "::error::Installed as $family."; exit 1 }
-
-      # Started by its path, the app runs with the package's identity, as it does from Start, so
-      # the test also expects it to leave updates to the Store.
-      - name: Smoke test the installed package
-        run: |
-          $package = Get-AppxPackage MrStreamerOSS.Mr.Streamer
-          node test/e2e/packaged-app.ts (Join-Path $package.InstallLocation "app\Mr. Streamer.exe")
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      # Started as a user would, a Store copy keeps its data in a folder of its own inside the
-      # package's, apart from a direct copy's; docs/maintainers/architecture.md#data.
-      - name: Check where the Store copy keeps its data
-        run: |
-          $package = Get-AppxPackage MrStreamerOSS.Mr.Streamer
-          Start-Process -FilePath (Join-Path $package.InstallLocation "app\Mr. Streamer.exe")
-          Start-Sleep 15
-          Get-Process "Mr. Streamer" -ErrorAction SilentlyContinue | Stop-Process -Force
-          $own = "$env:LOCALAPPDATA\Packages\$($package.PackageFamilyName)\LocalCache\Roaming\Mr. Streamer Store"
-          if (-not (Test-Path "$own\Local State")) { echo "::error::Nothing in $own."; exit 1 }
-          if (Test-Path "$env:APPDATA\Mr. Streamer Store") { echo "::error::The Store copy wrote to the real AppData."; exit 1 }
-
-      # The kit's report goes with the package. Its optional "Blocked executables" test fails: it
-      # flags strings such as "cmd" and "reg" inside Electron's and ffmpeg's files. The overall
-      # result has to pass.
-      - name: Windows App Certification Kit
-        run: |
-          $appcert = "${env:ProgramFiles(x86)}\Windows Kits\10\App Certification Kit\appcert.exe"
-          # The kit takes only a full path for its report.
-          $report = Join-Path (Resolve-Path dist) "Mr-Streamer-$env:VERSION-win-x64.wack.xml"
-          & $appcert reset | Out-Null
-          & $appcert test -appxpackagepath "$env:RUNNER_TEMP\test.msix" -reportoutputpath $report
-          [xml]$xml = Get-Content $report
-          foreach ($test in $xml.SelectNodes("//TEST[RESULT != 'PASS']")) {
-            $optional = if ($test.OPTIONAL -eq "TRUE") { " (optional)" } else { "" }
-            echo "$($test.SelectSingleNode('RESULT').InnerText) $($test.NAME)$optional"
-          }
-          $overall = $xml.REPORT.OVERALL_RESULT
-          Add-Content $env:GITHUB_STEP_SUMMARY "Windows App Certification Kit: $overall"
-          if ($overall -ne "PASS") { echo "::error::The certification kit's result is $overall."; exit 1 }
-
-      # Uninstalling removes what the package wrote to AppData along with it.
-      - name: Uninstall
-        run: |
-          $package = Get-AppxPackage MrStreamerOSS.Mr.Streamer
-          Remove-AppxPackage $package.PackageFullName
-          if (Test-Path "$env:LOCALAPPDATA\Packages\$($package.PackageFamilyName)") {
-            echo "::error::Uninstalling left the package's data behind."
-            exit 1
-          }
-
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: success() || failure()
-        with:
-          name: msix
-          path: |
-            apps/desktop/dist/*.msix
-            apps/desktop/dist/*.msix.txt
-            apps/desktop/dist/*.wack.xml
-          # A release's package is the one to submit to the Store by hand, so it's kept longer.
-          retention-days: ${{ needs.plan.outputs.dry-run == 'true' && 14 || 90 }}
-          if-no-files-found: error
-
-  publish:
-    name: Publish GitHub Release
-    needs: [plan, checks, package]
-    if: needs.plan.outputs.dry-run == 'false'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
+      channel: nightly
+      version: ${{ needs.plan.outputs.first-version }}
+      tag: ${{ needs.plan.outputs.first-tag }}
+      sha: ${{ needs.plan.outputs.first-sha }}
+      previous-tag: ${{ needs.plan.outputs.first-previous-tag }}
+      feed-required: true
+    secrets: inherit
     permissions:
       contents: write
-      # The notes list the pull requests behind each commit.
       pull-requests: read
-    env:
-      GH_TOKEN: ${{ github.token }}
-      CHANNEL: ${{ needs.plan.outputs.channel }}
-      VERSION: ${{ needs.plan.outputs.version }}
-      TAG: ${{ needs.plan.outputs.tag }}
-      SHA: ${{ needs.plan.outputs.sha }}
-      PREVIOUS_TAG: ${{ needs.plan.outputs.previous-tag }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.plan.outputs.sha }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: release-*
-          path: release
-          merge-multiple: true
-      - name: Check every platform's files are here
-        run: |
-          for pattern in "Mr-Streamer-$VERSION-mac-arm64.dmg" "Mr-Streamer-$VERSION-mac-arm64.zip" latest-mac.yml \
-            "Mr-Streamer-$VERSION-win-x64-setup.exe" latest.yml \
-            "Mr-Streamer-$VERSION-linux-*.AppImage" "Mr-Streamer-$VERSION-linux-*.deb" latest-linux.yml; do
-            compgen -G "release/$pattern" >/dev/null || { echo "::error::No $pattern among the packaged files."; exit 1; }
-          done
-      # The installers contain FFmpeg and x264 under the GPL; their exact sources ship alongside.
-      - name: Add the FFmpeg and x264 sources
-        run: |
-          eval "$(grep -E '^(FFMPEG_VERSION|FFMPEG_SHA256|X264_COMMIT)=' apps/desktop/scripts/build-ffmpeg.sh)"
-          curl -sSfL -o "release/ffmpeg-$FFMPEG_VERSION.tar.xz" "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz"
-          echo "$FFMPEG_SHA256  release/ffmpeg-$FFMPEG_VERSION.tar.xz" | sha256sum -c -
-          git init -q x264 && git -C x264 fetch -q --depth 1 https://code.videolan.org/videolan/x264.git "$X264_COMMIT"
-          git -C x264 archive --format=tar.gz --prefix="x264-$X264_COMMIT/" -o "../release/x264-$X264_COMMIT.tar.gz" FETCH_HEAD
-      - name: Write checksums and notes
-        run: |
-          (cd release && sha256sum * > SHA256SUMS.txt)
-          {
-            echo "**${CHANNEL^}** · built from \`${SHA::12}\`"
-            echo
-            echo "Download the DMG on Mac, the setup .exe on Windows, and the AppImage or .deb on Linux. SHA256SUMS.txt lists every file's checksum."
-            echo
-            node scripts/release-plan.ts notes --tag "$TAG" --sha "$SHA" --previous-tag "$PREVIOUS_TAG"
-          } > notes.md
-      # A failed or repeated attempt can leave a draft with this tag. Users never saw it.
-      - name: Remove an unfinished attempt
-        run: |
-          gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
-            --jq ".[] | select(.draft and .tag_name == \"$TAG\") | .id" |
-            while read -r id; do gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"; done
-      - name: Check the version is still new
-        run: node scripts/release-plan.ts check --version "$VERSION"
-      # Uploads into a draft, which the app can't see, and publishes once every file is in.
-      - name: Publish
-        run: |
-          nightly=$([ "$CHANNEL" = nightly ] && echo true || echo false)
-          gh release create "$TAG" release/* --draft --prerelease="$nightly" --target "$SHA" \
-            --title "Mr. Streamer $VERSION" --notes-file notes.md
-          if [ "$nightly" = true ]; then
-            gh release edit "$TAG" --draft=false --latest=false
-          else
-            gh release edit "$TAG" --draft=false --latest
-          fi
-
-  # Points the app's update feed at the release. A job that calls a workflow can't take
-  # continue-on-error, so the input sets it on the called job: the release is out by now, and a
-  # failure there, such as before Pages is enabled, shows on that job without failing the run.
-  feed:
-    name: Update feed
-    needs: publish
-    uses: ./.github/workflows/update-feed.yml
-    with:
-      continue-on-error: true
-    permissions:
-      contents: read
       pages: write
       id-token: write
 
-  finalize:
-    name: Record the stable version on main
-    needs: [plan, publish]
-    if: needs.plan.outputs.channel == 'stable'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
+  # The release the run is for: a nightly, a dry run or a stable release. A stable release waits for
+  # the nightly first and builds only once that one is published and in the feed.
+  release:
+    name: Release
+    needs: [plan, nightly-first]
+    if: >-
+      !cancelled() && needs.plan.outputs.skip == 'false'
+      && (needs.nightly-first.result == 'success' || needs.nightly-first.result == 'skipped')
+    uses: ./.github/workflows/build-release.yml
+    with:
+      channel: ${{ needs.plan.outputs.channel }}
+      version: ${{ needs.plan.outputs.version }}
+      tag: ${{ needs.plan.outputs.tag }}
+      sha: ${{ needs.plan.outputs.sha }}
+      previous-tag: ${{ needs.plan.outputs.previous-tag }}
+    secrets: inherit
     permissions:
       contents: write
-    env:
-      VERSION: ${{ needs.plan.outputs.version }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.ref_name }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-      # Main may move while this runs: start again from its newest commit when a push is refused.
-      - name: Commit the version
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          for attempt in 1 2 3; do
-            git fetch -q --depth 1 origin "$GITHUB_REF_NAME" && git reset -q --hard FETCH_HEAD
-            node scripts/release-plan.ts record --version "$VERSION"
-            git diff --quiet && exit 0
-            git commit -qam "chore(release): prepare v$VERSION"
-            git push -q origin "HEAD:$GITHUB_REF_NAME" && exit 0
-            sleep $((attempt * 5))
-          done
-          echo "::error::Main kept moving; run this job again."
-          exit 1
+      pull-requests: read
+      pages: write
+      id-token: write

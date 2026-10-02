@@ -12,6 +12,7 @@ import {
   type NightlyRequest,
   type PullRequest,
   type Repository,
+  type StableRequest,
 } from "../scripts/release-plan.ts";
 import { compareVersions, formatVersion, parseVersion } from "../packages/contracts/src/version.ts";
 import {
@@ -118,6 +119,17 @@ const scheduled = (overrides: Partial<NightlyRequest> = {}): NightlyRequest => (
   recorded: "0.0.0",
   scheduled: true,
   dryRun: false,
+  ...overrides,
+});
+
+/** A stable release of the tested `nightly`, started on main at "head". */
+const promote = (nightly: string, overrides: Partial<StableRequest> = {}): StableRequest => ({
+  ref: MAIN,
+  sha: "head",
+  run: 40,
+  now: NOW,
+  recorded: "0.0.0",
+  nightly,
   ...overrides,
 });
 
@@ -242,34 +254,100 @@ describe("nightly versions", () => {
 describe("stable releases", () => {
   const older = "v0.0.1-nightly.20261001.20";
   const latest = "v0.0.1-nightly.20261002.30";
-  const promotion = (releases: GitHubRelease[] = []) =>
+  // `main` says how main's commit, "head", relates to the latest nightly.
+  const promotion = (releases: GitHubRelease[] = [], main: History = "identical") =>
     repository({
       releases: [published(older, 30), published(latest, 8), ...releases],
       commits: { [older]: "older-commit", [latest]: "nightly-commit", main: "newer-commit" },
-      histories: { "older-commit...main": "ahead", "nightly-commit...main": "ahead" },
+      histories: {
+        "older-commit...main": "ahead",
+        "nightly-commit...main": "ahead",
+        [`${latest}...head`]: main,
+      },
     });
 
-  it("rebuild the commit of the latest nightly while main moves on", async () => {
-    const { repo } = promotion();
-
-    expect(await planStable(repo, { ref: MAIN })).toEqual({
-      channel: "stable",
-      version: "0.0.1",
-      tag: "v0.0.1",
-      sha: "nightly-commit",
-      previousTag: null,
-    });
-  });
-
-  it("promote the tested nightly when given, by version or tag", async () => {
+  it("rebuild the tested nightly's commit, given by version or tag, while main moves on", async () => {
     const { repo } = promotion();
 
     for (const nightly of ["0.0.1-nightly.20261001.20", older]) {
-      expect(await planStable(repo, { ref: MAIN, nightly })).toMatchObject({
+      expect(await planStable(repo, promote(nightly))).toEqual({
+        channel: "stable",
         version: "0.0.1",
+        tag: "v0.0.1",
         sha: "older-commit",
+        previousTag: null,
+        nightlyFirst: null,
       });
     }
+  });
+
+  it("are refused without the tested nightly", async () => {
+    const { repo } = promotion();
+
+    await expect(planStable(repo, promote(""))).rejects.toThrow("Enter the nightly you tested");
+  });
+
+  it("publish a nightly of main first when main has commits the latest nightly lacks", async () => {
+    for (const main of ["ahead", "diverged"] as const) {
+      const { repo } = promotion([], main);
+
+      expect(await planStable(repo, promote(older))).toMatchObject({
+        version: "0.0.1",
+        sha: "older-commit",
+        nightlyFirst: {
+          channel: "nightly",
+          version: "0.0.1-nightly.20261002.40",
+          tag: "v0.0.1-nightly.20261002.40",
+          sha: "head",
+          previousTag: latest,
+        },
+      });
+    }
+  });
+
+  it("go straight to the stable release when the latest nightly has main's commit", async () => {
+    for (const main of ["identical", "behind"] as const) {
+      const { repo } = promotion([], main);
+
+      expect(await planStable(repo, promote(older))).toMatchObject({ nightlyFirst: null });
+    }
+  });
+
+  it("order the tested nightly, the nightly first and the stable release, each new when published", async () => {
+    const stable = published("v0.0.0", 50, false);
+    const { repo } = promotion([stable], "ahead");
+    const plan = await planStable(repo, promote(older));
+    const first = plan.nightlyFirst!;
+    const versions = [older, first.version, plan.version].map((text) => parseVersion(text)!);
+
+    expect(versions.toSorted(compareVersions)).toEqual(versions);
+    // Publishing checks each again once the release before it is out.
+    expect(() => checkUnreleased(repo, first.version)).not.toThrow();
+    const afterFirst = [
+      stable,
+      published(older, 30),
+      published(latest, 8),
+      published(first.tag, 1),
+    ];
+    expect(() =>
+      checkUnreleased(repository({ releases: afterFirst }).repo, plan.version),
+    ).not.toThrow();
+    // The feed names the nightly first, then the stable release on both channels as it does today.
+    const offered = (releases: GitHubRelease[]) => {
+      const feed = buildFeed(REPOSITORY, releases, new Date(NOW).toISOString());
+      return [feed.stable?.version, feed.nightly?.version];
+    };
+    expect(offered(afterFirst)).toEqual(["0.0.0", first.version]);
+    expect(offered([...afterFirst, published(plan.tag, 0, false)])).toEqual(["0.0.1", "0.0.1"]);
+  });
+
+  it("are refused when the nightly first would sort after the stable release", async () => {
+    // main records 0.0.1 though no release has it, so its next nightly previews 0.0.2.
+    const { repo } = promotion([], "ahead");
+
+    await expect(planStable(repo, promote(older, { recorded: "0.0.1" }))).rejects.toThrow(
+      "would sort after v0.0.1",
+    );
   });
 
   it("refuse a given nightly that is a draft, unknown, stable or not on main", async () => {
@@ -282,7 +360,7 @@ describe("stable releases", () => {
       commits: { [latest]: "rewritten" },
       histories: { "rewritten...main": "diverged" },
     });
-    const pinned = (nightly: string) => planStable(repo, { ref: MAIN, nightly });
+    const pinned = (nightly: string) => planStable(repo, promote(nightly));
 
     await expect(pinned("0.0.1-nightly.20261002.31")).rejects.toThrow("not a published nightly");
     await expect(pinned("0.0.1-nightly.20261002.99")).rejects.toThrow(
@@ -295,7 +373,7 @@ describe("stable releases", () => {
   it("keep the nightly's commit when given another version", async () => {
     const { repo } = promotion();
 
-    expect(await planStable(repo, { ref: MAIN, version: "0.1.0" })).toMatchObject({
+    expect(await planStable(repo, promote(latest, { version: "0.1.0" }))).toMatchObject({
       version: "0.1.0",
       sha: "nightly-commit",
     });
@@ -304,30 +382,14 @@ describe("stable releases", () => {
   it("list the changes since the previous stable release", async () => {
     const { repo } = promotion([published("v0.0.0", 100, false), draft("v0.0.9")]);
 
-    expect(await planStable(repo, { ref: MAIN })).toMatchObject({ previousTag: "v0.0.0" });
-  });
-
-  it("are refused without a published nightly", async () => {
-    const { repo } = repository({ releases: [draft("v0.0.1-nightly.20261002.30")] });
-
-    await expect(planStable(repo, { ref: MAIN })).rejects.toThrow("No published nightly");
-  });
-
-  it("are refused when main does not contain the nightly's commit", async () => {
-    const { repo } = repository({
-      releases: [published(latest, 8)],
-      commits: { [latest]: "rewritten" },
-      histories: { "rewritten...main": "diverged" },
-    });
-
-    await expect(planStable(repo, { ref: MAIN })).rejects.toThrow("main does not contain");
+    expect(await planStable(repo, promote(latest))).toMatchObject({ previousTag: "v0.0.0" });
   });
 
   it("are refused for a released version, or one that would sort before the nightly", async () => {
     const { repo } = promotion([published("v0.0.1", 2, false)]);
 
-    await expect(planStable(repo, { ref: MAIN })).rejects.toThrow("v0.0.1 already exists");
-    await expect(planStable(repo, { ref: MAIN, version: "0.0.0" })).rejects.toThrow(
+    await expect(planStable(repo, promote(latest))).rejects.toThrow("v0.0.1 already exists");
+    await expect(planStable(repo, promote(latest, { version: "0.0.0" }))).rejects.toThrow(
       "would sort before v0.0.1-nightly.20261002.30",
     );
   });
@@ -335,7 +397,7 @@ describe("stable releases", () => {
   it("are refused for a nightly from before the newest stable release, whatever the version", async () => {
     const { repo } = promotion([published("v0.0.1", 2, false)]);
 
-    await expect(planStable(repo, { ref: MAIN, nightly: older, version: "0.1.0" })).rejects.toThrow(
+    await expect(planStable(repo, promote(older, { version: "0.1.0" }))).rejects.toThrow(
       `${older} came before v0.0.1`,
     );
   });
@@ -358,17 +420,24 @@ describe("release notes", () => {
     "v0.1.1-nightly.20261002.3": "c5",
     main: "c6",
   };
+  const promoted = "v0.1.1-nightly.20261002.3";
+  const histories: Record<string, History> = {
+    "c4...main": "ahead",
+    "c5...main": "ahead",
+    [`${promoted}...c5`]: "identical",
+    [`${promoted}...c6`]: "ahead",
+  };
 
   it("list every change since the previous stable release up to the promoted nightly, once each", async () => {
     const { repo } = repository({
       releases: [published("v0.1.0", 100, false), ...nightlies],
       commits,
-      histories: { "c5...main": "ahead" },
+      histories,
       history,
       pulls,
     });
 
-    const plan = await planStable(repo, { ref: MAIN });
+    const plan = await planStable(repo, promote(promoted, { sha: "c5" }));
     const notes = await releaseNotes(repo, plan);
 
     expect(listed(notes)).toEqual([12, 13, 14, 15]);
@@ -379,12 +448,12 @@ describe("release notes", () => {
     const { repo } = repository({
       releases: nightlies,
       commits,
-      histories: { "c5...main": "ahead" },
+      histories,
       history,
       pulls,
     });
 
-    const plan = await planStable(repo, { ref: MAIN });
+    const plan = await planStable(repo, promote(promoted, { sha: "c5" }));
     const notes = await releaseNotes(repo, plan);
 
     expect(plan.previousTag).toBeNull();
@@ -405,6 +474,25 @@ describe("release notes", () => {
     if ("skip" in plan) throw new Error(plan.skip);
 
     expect(listed(await releaseNotes(repo, plan))).toEqual([16]);
+  });
+
+  it("list the nightly first's own changes, and leave the stable release's as they were", async () => {
+    const { repo } = repository({
+      releases: [published("v0.1.0", 100, false), ...nightlies],
+      commits,
+      histories,
+      history,
+      pulls,
+    });
+
+    // Nightly .2 was tested; main has c6, which no nightly holds.
+    const plan = await planStable(
+      repo,
+      promote("v0.1.1-nightly.20261001.2", { sha: "c6", recorded: "0.1.0" }),
+    );
+
+    expect(listed(await releaseNotes(repo, plan.nightlyFirst!))).toEqual([16]);
+    expect(listed(await releaseNotes(repo, plan))).toEqual([12, 13, 14]);
   });
 });
 
