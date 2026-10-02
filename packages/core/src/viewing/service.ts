@@ -88,6 +88,8 @@ export class ViewingStore extends Context.Service<
       readonly at: number;
       readonly events: readonly ViewingEvent[];
     }) => Effect.Effect<boolean, Failed>;
+    /** Deletes `account`'s events with everything worked out from them, so nothing can return. */
+    readonly erase: (account: string) => Effect.Effect<void, Failed>;
   }
 >()("mrstreamer/ViewingStore") {}
 
@@ -132,6 +134,11 @@ export class ViewingRecord extends Context.Service<
     removeFromContinue(commandId: string, filter: TitleFilter): Effect.Effect<Viewing, Failed>;
     /** How far the matching titles got; empty without an account. */
     progress(filter: TitleFilter): Effect.Effect<readonly TitleProgress[], Failed>;
+    /**
+     * Deletes everything `account` recorded, connected or not: favourites, watched channels, how
+     * far titles got and what left Continue watching. Other accounts keep theirs.
+     */
+    erase(account: string): Effect.Effect<void, Failed>;
     /** The sequence after each committed change. */
     readonly changes: Stream.Stream<number>;
   }
@@ -240,6 +247,7 @@ function make() {
           const key = yield* account.current;
           return key ? yield* store.titles(key, filter) : [];
         }),
+      erase: (key: string) => store.erase(key),
       changes: Stream.fromPubSub(changes),
     };
   });

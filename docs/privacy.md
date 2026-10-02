@@ -81,7 +81,7 @@ Our email and hosting providers process these messages and visits to our website
 
 ## Deleting your data
 
-- **Remove subscription**, in Settings > Subscription, deletes your login and the copies of your provider's lists and guide. Your favourites, history and progress remain, and reappear if you connect the same account again.
+- **Remove subscription**, in Settings > Subscription, deletes your login and the copies of your provider's lists and guide. Tick **Also delete favourites, history and progress** to delete that account's favourites, watched channels and progress in movies and episodes as well. Otherwise they remain, and reappear if you connect the same account again.
 - **Deleting the folder** listed above removes everything Mr. Streamer stores there. To also remove the password key, delete "Mr. Streamer Safe Storage" in Keychain Access on macOS, or the matching entry in your Linux keyring. The update folder can be deleted as well: `~/Library/Caches/mrstreamer-updater` on macOS, `%LOCALAPPDATA%\mrstreamer-updater` on Windows, or `~/.cache/mrstreamer-updater` on Linux.
 - **Uninstalling the app does not delete your data**, so a reinstall continues where you left off.
 - To ask us to delete messages or other data we hold about you, email privacy@mrstreamer.app.

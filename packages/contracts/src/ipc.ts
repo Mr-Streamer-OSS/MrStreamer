@@ -54,7 +54,11 @@ export type LoginInput = IpcInput<"subscription.connect">;
 export const ipcInputs = {
   "subscription.get": none,
   "subscription.connect": loginInput,
-  "subscription.remove": none,
+  /**
+   * Forgets the login and what was loaded with it. `eraseViewing` also deletes the account's
+   * favourites, watch history and progress, which otherwise stay for when it connects again.
+   */
+  "subscription.remove": () => type({ "eraseViewing?": "boolean" }),
   /** Asks the provider for the account's status now: expiry and connections in use. */
   "subscription.recheck": none,
   "library.status": none,
