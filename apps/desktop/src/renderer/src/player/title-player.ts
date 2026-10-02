@@ -171,6 +171,8 @@ let holding = false;
 let lastSubtitle: SubtitleTrack | null = null;
 /** Takes a second off the countdown to the next episode. */
 let countdownTimer: ReturnType<typeof setInterval> | null = null;
+/** The countdown waits, at the seconds it has left, as while Settings is open over the title. */
+let countdownHeld = false;
 /** This play of the last episode has recorded that its series is finished. */
 let seriesFinished = false;
 
@@ -241,6 +243,11 @@ async function countDown(mine: number): Promise<void> {
   if (mine !== generation || store.getState().phase.kind !== "ended") return;
   if (preferences?.autoplayNext === false) return;
   store.setState({ countdown: COUNTDOWN_S });
+  if (!countdownHeld) tickCountdown();
+}
+
+/** Takes a second off the countdown each second, and plays the next episode at zero. */
+function tickCountdown(): void {
   countdownTimer = setInterval(() => {
     const left = (store.getState().countdown ?? 0) - 1;
     if (left > 0) store.setState({ countdown: left });
@@ -553,6 +560,22 @@ export const titlePlayer = {
   /** Stops the countdown to the next episode, leaving the end on screen. */
   cancelNext(): void {
     stopCountdown();
+  },
+
+  /**
+   * Holds the countdown to the next episode while `held`, as while Settings is open over the
+   * title, so nothing starts behind it. Let go, it carries on from the seconds it had left; one
+   * that started meanwhile, at an episode's end, starts counting then.
+   */
+  holdNext(held: boolean): void {
+    if (held === countdownHeld) return;
+    countdownHeld = held;
+    if (held) {
+      if (countdownTimer) clearInterval(countdownTimer);
+      countdownTimer = null;
+    } else if (store.getState().countdown !== null) {
+      tickCountdown();
+    }
   },
 
   /** Plays another sound track from where the title is, and remembers its language. */

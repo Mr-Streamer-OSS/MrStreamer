@@ -71,6 +71,9 @@ export const useUi = create<UiState>(() => ({
   updateDialog: null,
 }));
 
+// Settings over a title holds the countdown to its next episode, so nothing starts behind it.
+useUi.subscribe((state) => titlePlayer.holdNext(state.settings !== null));
+
 /** Shows a page, closing Watch, details and Settings over it. */
 export function openView(view: View): void {
   useUi.setState({ view, watching: false, channelsOpen: false, settings: null, details: null });
