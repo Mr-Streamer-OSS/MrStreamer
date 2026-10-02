@@ -12,7 +12,12 @@ import * as Layer from "effect/Layer";
 import * as Semaphore from "effect/Semaphore";
 import { readJsonFile, removeFile, writeJsonFile } from "../platform/json-file.ts";
 import type { Secrets } from "../platform/secrets.ts";
-import { parseLogin, xtreamProvider, type XtreamAccount } from "../providers/xtream.ts";
+import {
+  httpsUnavailable,
+  parseLogin,
+  xtreamProvider,
+  type XtreamAccount,
+} from "../providers/xtream.ts";
 
 const StoredSubscription = type({
   version: "1",
@@ -53,7 +58,10 @@ export class Subscriptions extends Context.Service<
   Subscriptions,
   {
     readonly get: Effect.Effect<SubscriptionSummary | null>;
-    /** Checks the login with the provider, then stores it. Replaces any earlier subscription. */
+    /**
+     * Checks the login with the provider, then stores it. Replaces any earlier subscription. An
+     * address without a scheme connects over https or fails with `unencrypted-only`.
+     */
     connect(login: LoginInput): Effect.Effect<SubscriptionSummary, Failed>;
     /**
      * Asks the provider for the latest account status (expiry, connections) and stores it,
@@ -115,11 +123,22 @@ function make(deps: SubscriptionDeps) {
       connect: (login: LoginInput) =>
         Effect.gen(function* () {
           const change = ++changes;
-          const account = yield* Effect.try({ try: () => parseLogin(login), catch: failedWith });
+          const { account, schemeless } = yield* Effect.try({
+            try: () => parseLogin(login),
+            catch: failedWith,
+          });
           const status = yield* Effect.tryPromise({
             try: (signal) => xtreamProvider(account, deps.providerOptions).authenticate(signal),
             catch: failedWith,
-          });
+          }).pipe(
+            // An address typed without a scheme goes to http only once the viewer agrees: the
+            // login would travel unencrypted.
+            Effect.mapError((failed) =>
+              schemeless && httpsUnavailable(failed.error)
+                ? new Failed({ error: { kind: "unencrypted-only", server: account.server } })
+                : failed,
+            ),
+          );
           const sealedPassword = yield* Effect.try({
             try: () => deps.secrets.seal(account.password),
             catch: failedWith,

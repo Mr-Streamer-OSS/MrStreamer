@@ -15,6 +15,11 @@ import { player } from "../../player/player.ts";
 /**
  * First-run login, also used to correct the login of an existing subscription (`existing`).
  * Accepts either server, username and password, or one pasted M3U link that contains them.
+ *
+ * An address without a scheme connects over https. When https doesn't work there, the main
+ * process stops before the login goes out (`unencrypted-only`) and the form asks once whether to
+ * connect without encryption, which retries the address with http://. An address typed with
+ * http:// connects as typed, with a line under it saying the login travels as plain text.
  */
 export function ConnectScreen({ existing }: { existing: SubscriptionSummary | null }) {
   const client = useQueryClient();
@@ -38,16 +43,32 @@ export function ConnectScreen({ existing }: { existing: SubscriptionSummary | nu
     },
   });
 
+  /** What the form sends for `address`: the server with the login, or the link alone. */
+  const login = (address: string): LoginInput =>
+    mode === "link"
+      ? { server: address, username: "", password: "" }
+      : { server: address, username, password };
+
   function submit(event: FormEvent) {
     event.preventDefault();
-    connect.mutate(
-      mode === "link"
-        ? { server: link, username: "", password: "" }
-        : { server, username, password },
-    );
+    connect.mutate(login(mode === "link" ? link : server));
   }
 
-  const error = connect.error ? describeError(appError(connect.error)) : null;
+  /** The viewer agreed to connect the address that has no https, over http. */
+  function connectUnencrypted() {
+    const address = `http://${(mode === "link" ? link : server).trim()}`;
+    (mode === "link" ? setLink : setServer)(address);
+    connect.mutate(login(address));
+  }
+
+  const failure = connect.error ? appError(connect.error) : null;
+  const asking = failure?.kind === "unencrypted-only" ? failure : null;
+  const error = failure && !asking ? describeError(failure) : null;
+  /** Changes an address. A question about the one before doesn't hold for it. */
+  function changeAddress(set: (value: string) => void, value: string) {
+    set(value);
+    if (asking) connect.reset();
+  }
 
   return (
     <div className="relative flex h-full items-center justify-center overflow-y-auto">
@@ -71,11 +92,11 @@ export function ConnectScreen({ existing }: { existing: SubscriptionSummary | nu
 
         {mode === "login" ? (
           <div className="space-y-4">
-            <Field label="Server">
+            <Field label="Server" note={plainHttp(server) ? UNENCRYPTED : null}>
               <Input
                 value={server}
-                onChange={(e) => setServer(e.target.value)}
-                placeholder="http://line.example.tv:8080"
+                onChange={(e) => changeAddress(setServer, e.target.value)}
+                placeholder="line.example.tv:8080"
                 autoFocus={!existing?.needsPassword}
               />
             </Field>
@@ -97,10 +118,10 @@ export function ConnectScreen({ existing }: { existing: SubscriptionSummary | nu
             </Field>
           </div>
         ) : (
-          <Field label="M3U link">
+          <Field label="M3U link" note={plainHttp(link) && carriesLogin(link) ? UNENCRYPTED : null}>
             <Input
               value={link}
-              onChange={(e) => setLink(e.target.value)}
+              onChange={(e) => changeAddress(setLink, e.target.value)}
               placeholder="http://line.example.tv/get.php?username=…"
               autoFocus
             />
@@ -109,46 +130,84 @@ export function ConnectScreen({ existing }: { existing: SubscriptionSummary | nu
 
         {error && <p className="mt-5 text-sm text-destructive">{error}</p>}
 
-        <div className="mt-8 flex items-center gap-3">
-          <Button type="submit" variant="primary" size="lg" disabled={connect.isPending}>
-            {connect.isPending ? "Connecting…" : "Connect"}
-          </Button>
-          <Button
-            variant="ghost"
-            size="lg"
-            onClick={() => setMode(mode === "login" ? "link" : "login")}
-          >
-            {mode === "login" ? <Link2 /> : <KeyRound />}
-            {mode === "login" ? "Use an M3U link" : "Use server and login"}
-          </Button>
-          {existing && !existing.needsPassword && (
+        {asking ? (
+          <div className="mt-8">
+            <p className="text-[0.9375rem]">{describeError(asking)}</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Your username and password would travel unencrypted.
+            </p>
+            <div className="mt-5 flex items-center gap-3">
+              <Button onClick={connectUnencrypted}>Connect without encryption</Button>
+              <Button variant="ghost" onClick={() => connect.reset()}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-8 flex items-center gap-3">
+            <Button type="submit" variant="primary" size="lg" disabled={connect.isPending}>
+              {connect.isPending ? "Connecting…" : "Connect"}
+            </Button>
             <Button
               variant="ghost"
               size="lg"
-              className="ml-auto"
-              onClick={() => useUi.setState({ editingLogin: false })}
+              onClick={() => setMode(mode === "login" ? "link" : "login")}
             >
-              Cancel
+              {mode === "login" ? <Link2 /> : <KeyRound />}
+              {mode === "login" ? "Use an M3U link" : "Use server and login"}
             </Button>
-          )}
-        </div>
+            {existing && !existing.needsPassword && (
+              <Button
+                variant="ghost"
+                size="lg"
+                className="ml-auto"
+                onClick={() => useUi.setState({ editingLogin: false })}
+              >
+                Cancel
+              </Button>
+            )}
+          </div>
+        )}
         <p className="mt-10 text-xs leading-relaxed text-muted-foreground/80">
           {isMac
-            ? "Stays on this Mac. The password is encrypted with your macOS Keychain."
+            ? "Saved on this Mac. The password is encrypted with your macOS Keychain."
             : isWindows
-              ? "Stays on this PC. The password is encrypted with your Windows account."
-              : "Stays on this computer. The password is encrypted with your keyring."}
+              ? "Saved on this PC. The password is encrypted with your Windows account."
+              : "Saved on this computer. The password is encrypted with your keyring."}
         </p>
       </form>
     </div>
   );
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+const UNENCRYPTED = "Not encrypted. Your login travels as plain text.";
+
+/** An address typed with http://, which the login travels over unencrypted. */
+function plainHttp(address: string): boolean {
+  return /^http:\/\//i.test(address.trim());
+}
+
+/** Whether an M3U link names a login, as `get.php?username=…&password=…` does. */
+function carriesLogin(link: string): boolean {
+  const query = URL.parse(link.trim())?.searchParams;
+  return !!query?.get("username") || !!query?.get("password");
+}
+
+function Field({
+  label,
+  note,
+  children,
+}: {
+  label: string;
+  /** A line under the control. */
+  note?: string | null;
+  children: ReactNode;
+}) {
   return (
     <label className="flex flex-col gap-2 text-sm text-muted-foreground">
       {label}
       {children}
+      {note && <span className="text-xs text-foreground/85">{note}</span>}
     </label>
   );
 }

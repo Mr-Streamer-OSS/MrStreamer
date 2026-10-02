@@ -31,6 +31,8 @@ The Windows installer isn't code-signed yet, so SmartScreen shows "Windows prote
 
 ## Channels or login stop working
 
+- **"… has no encrypted connection":** the address you typed doesn't work over https, so Mr. Streamer stopped before sending your login. **Connect without encryption** connects over http instead: your username and password then travel as plain text, so anyone on your network or between you and your provider can read them. If your provider offers an https address, use that. An address you type with `http://` connects over http straight away; the line under the field says so, and Settings > Subscription marks the login "not encrypted".
+- **"The server doesn't offer an encrypted connection at this address":** you typed `https://`, and the server answers only over http. Mr. Streamer never falls back to http on its own. Type the address without `https://` to be asked, or with `http://`.
 - **"The provider rejected this username or password":** check the login with your provider, then choose **Edit** beside Login in Settings > Subscription.
 - **No programme information for a channel:** your provider's guide doesn't cover it. Many providers cover only some channels. When a guide download fails, the last guide stays in use and Mr. Streamer tries again later; the refresh button beside Guide in Settings > Subscription tries now.
 - **"Channels unavailable":** the provider didn't send the channel list. **Try again**, or check your internet connection. When a refresh fails, Mr. Streamer keeps showing the last channel list it received, and Settings > Subscription says why the list may be out of date; the refresh button beside Channels tries again.

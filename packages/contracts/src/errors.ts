@@ -14,6 +14,11 @@ export type AppError =
     }
   /** DNS failure, refused connection, timeout, or a server that is not an Xtream API. */
   | { readonly kind: "unreachable"; readonly server: string; readonly detail: string }
+  /**
+   * An address typed without http:// or https:// didn't work over https, `server`, so connecting
+   * stopped before the login went out unencrypted. The UI asks before trying it with http://.
+   */
+  | { readonly kind: "unencrypted-only"; readonly server: string }
   /** The provider answered with an HTTP status the app does not expect. */
   | { readonly kind: "provider-error"; readonly status: number }
   | { readonly kind: "no-subscription" }
