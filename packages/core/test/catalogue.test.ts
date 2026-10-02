@@ -1,5 +1,6 @@
 import type { ChannelVariant, LiveChannel, Quality } from "@mrstreamer/contracts/library";
 import { describe, expect, it } from "vitest";
+import { isAdultCategory } from "../src/adult.ts";
 import { normalizeCatalogue } from "../src/catalogue/normalize.ts";
 import { liveChannels, qualityOf, streamsToPlay } from "../src/catalogue/variants.ts";
 import type { LiveCatalogue } from "../src/provider.ts";
@@ -409,4 +410,27 @@ describe("which stream plays", () => {
     expect(ids(streamsToPlay(all, { channelVariants: { uhd: "gone" } }))).toHaveLength(3);
     expect(streamsToPlay(all, {}, "gone")).toEqual([]);
   });
+});
+
+describe("categories for adults", () => {
+  it.each([
+    "XXX | FOR ADULTS",
+    "ADULT 18+",
+    "+18",
+    "ADULTOS +18",
+    "FR| ADULTES",
+    "IT| PER ADULTI",
+    "PORNO",
+    "DE| ERWACHSENE",
+    "NL| VOLWASSENEN",
+  ])("reads %s as for adults", (name) => {
+    expect(isAdultCategory(name)).toBe(true);
+  });
+
+  it.each(["US| ADULT SWIM", "ADULTERY DRAMAS", "MATURE", "XXL SPORTS", "UFC 218", "KIDS"])(
+    "reads %s as for everyone",
+    (name) => {
+      expect(isAdultCategory(name)).toBe(false);
+    },
+  );
 });

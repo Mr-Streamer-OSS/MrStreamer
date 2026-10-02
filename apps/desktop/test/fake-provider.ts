@@ -109,6 +109,8 @@ export interface FakeProvider {
    * still answer.
    */
   failTitles(status: number | "login" | null): void;
+  /** Makes the movie and series categories answer an empty list, as a busy panel does, or not. */
+  emptyTitleCategories(empty: boolean): void;
   /** Streams currently holding a connection slot. */
   activeStreams(): number;
   /** Picks the channel list each later request returns, as panel updates would. */
@@ -163,6 +165,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
       .map((episode) => [String(episode.id), episode]),
   );
   let titleFailure: number | "login" | null = null;
+  let titleCategoriesEmpty = false;
   let fileCount = 0;
   let detailCount = 0;
   let select = (all: readonly FakeChannel[]): readonly FakeChannel[] => all;
@@ -231,7 +234,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
       return void response.writeHead(titleFailure).end();
     }
     const categoryRows = (categories: FakeTitles["movieCategories"]) =>
-      categories.map((category) => ({
+      (titleCategoriesEmpty ? [] : categories).map((category) => ({
         category_id: category.id,
         category_name: category.name,
         parent_id: 0,
@@ -253,7 +256,9 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
           // Panels send ratings as strings and "0" for none.
           rating: movie.rating ? String(movie.rating) : "0",
           added: String(movie.added),
-          is_adult: movie.adult ? 1 : 0,
+          // Panels flag some titles for adults, here every other one, and leave the rest to their
+          // category's name.
+          is_adult: movie.adult && movie.id % 8 === 3 ? 1 : 0,
           category_id: movie.categoryId,
           category_ids: [Number(movie.categoryId)],
           container_extension: movie.container,
@@ -480,6 +485,9 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     detailRequests: () => detailCount,
     failTitles(status) {
       titleFailure = status;
+    },
+    emptyTitleCategories(empty) {
+      titleCategoriesEmpty = empty;
     },
     activeStreams: () => slots,
     serveChannels(next) {
