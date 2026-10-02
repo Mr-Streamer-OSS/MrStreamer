@@ -2,8 +2,8 @@
 // behind it: the facts, the actions, the story, the cast with their photos, and a series'
 // episodes. Resume is the main action for anything partly watched, and From the beginning plays
 // at once, without asking. A title with several versions plays the one picked with the arrow
-// beside Play, else the one that suits best; the sheet shows that version, so a series lists its
-// episodes. A series opens on the season being watched, and marks the episode.
+// beside Play, else the one it was opened on, as from the 4K tab, else the one that suits best;
+// the sheet shows that version, so a series lists its episodes. A series opens on the season being watched, and marks the episode.
 import { Dialog } from "@base-ui/react/dialog";
 import { Menu } from "@base-ui/react/menu";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
@@ -64,7 +64,8 @@ export function DetailsView({ target }: { target: DetailsTarget }) {
   });
   const preferences = useQuery(queries.preferences());
   const picked = title ? pickedVersion(title, preferences.data) : null;
-  const playing = picked ?? (title ? automaticVersion(title, progress.data ?? []) : target.id);
+  const playing =
+    picked ?? (title ? automaticVersion(title, progress.data ?? [], target.id) : target.id);
   const known = !listed.isPending && (!title || !progress.isPending) && !preferences.isPending;
   // Another version's details replace these once they arrive; nothing plays from them meanwhile.
   // A new target mounts a new sheet (see App), so these are only ever the same title's.
