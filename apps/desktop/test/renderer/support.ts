@@ -43,10 +43,11 @@ const bridge = {
 
 /**
  * happy-dom has no Media Source Extensions. This stand-in opens and takes no data, so a title's
- * run gets as far as its subtitles, and no further.
+ * run gets as far as its subtitles, and no further. It plays no codec, so live streams keep to
+ * the element's own engine rather than hls.js or mpegts.js.
  */
 class StandInMediaSource extends EventTarget {
-  static isTypeSupported = () => true;
+  static isTypeSupported = () => false;
   readyState = "closed";
   constructor() {
     super();
