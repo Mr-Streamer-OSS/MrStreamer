@@ -8,6 +8,7 @@
 - [Updates and channels](./user/updates.md)
 - [What plays](./user/playback.md)
 - [Troubleshooting](./user/troubleshooting.md)
+- [Privacy policy](./privacy.md)
 
 ---
 
@@ -17,6 +18,7 @@ Start with the [development runbook](./maintainers/development.md) and the [cont
 
 - [Architecture](./maintainers/architecture.md)
 - [Playback evaluation](./maintainers/playback.md)
+- [Privacy audit](./maintainers/privacy-audit.md)
 - [Testing](./maintainers/testing.md)
 
 ### Runbooks
