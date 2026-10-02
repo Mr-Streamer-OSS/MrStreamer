@@ -62,7 +62,7 @@ A Store copy, an installed MSIX, names its folder `Mr. Streamer Store` instead (
 
 Chromium keeps its own cache there too, mostly posters and backdrops; `index.ts` caps it at 64 MB on disk, and artwork is asked for at the width it shows at (`components/TitleArt.tsx`).
 
-The [privacy audit](../maintainers/privacy-audit.md) lists every file, everything that leaves the computer and what uninstalling keeps, and the [privacy policy](../privacy.md) tells users. A change to what the app keeps or sends updates both.
+The [privacy policy](../privacy.md) tells users what the app keeps, what leaves the computer and what uninstalling leaves behind. A change to any of these updates the policy in the same pull request.
 
 ## The login on the wire
 

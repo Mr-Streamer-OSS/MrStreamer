@@ -23,7 +23,6 @@ Start with the [contribution policy](../CONTRIBUTING.md).
 
 - [Releasing](./maintainers/releasing.md)
 - [Signing](./maintainers/signing.md)
-- [Microsoft Store setup](./maintainers/microsoft-store.md)
-- [Privacy audit](./maintainers/privacy-audit.md)
-- [Release readiness](./maintainers/release-readiness.md): licences, content and launch questions
+- [Microsoft Store submissions](./maintainers/microsoft-store.md)
+- [Licences and sources](./maintainers/licences.md)
 - [Planning](./maintainers/README.md)

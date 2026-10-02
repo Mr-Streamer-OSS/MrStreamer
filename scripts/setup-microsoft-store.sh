@@ -255,7 +255,7 @@ wrap_up() {
     fi
   done
   finish
-  note "Record the submission in the setup record of docs/maintainers/microsoft-store.md."
+  note "Record the submission and its certification on its card in the GitHub project."
 }
 
 stage_notifications() {
