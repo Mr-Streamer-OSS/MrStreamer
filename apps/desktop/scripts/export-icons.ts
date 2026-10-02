@@ -1,10 +1,10 @@
-// Renders the app icons from assets/brand/icon.svg.
+// Renders the app icons from assets/brand/icon.svg and mark.svg.
 // build/icon.png: 1024 px macOS icon (the squircle sits on Apple's grid with its margin and shadow).
 // build/icon.icns: the same artwork at every size macOS asks for. Shipping it means electron-builder
 //   never runs its own PNG to ICNS converter.
 // build/icon.ico: Windows icon, cropped to the squircle so it fills the tile like other Windows apps.
-// build/appx: the Microsoft Store package's logos, from the same crop. electron-builder's appx target
-//   packs every file there and indexes the scaled ones.
+// build/appx: the Microsoft Store package's logos, drawn from the bare mark rather than the macOS
+//   squircle. electron-builder's appx target packs every file there and indexes the scaled ones.
 // Usage: pnpm icons:export
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -12,6 +12,7 @@ import sharp from "sharp";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const svg = await readFile(`${root}assets/brand/icon.svg`, "utf8");
+const mark = await readFile(`${root}assets/brand/mark.svg`, "utf8");
 await mkdir(`${root}build`, { recursive: true });
 
 await sharp(Buffer.from(svg), { density: 72 })
@@ -57,54 +58,103 @@ const pngs = await Promise.all(
 );
 await writeFile(`${root}build/icon.ico`, ico(sizes, pngs));
 
-// The Store package's logos at 100, 200 and 400 % scale. The app list and taskbar icon also comes
-// at the pixel sizes Windows asks for, unplated, so Windows 11 draws it without a coloured square.
-// Tiles centre the icon on transparency, over the manifest's black background.
+// The Store package's logos, as Windows asks for them (see docs/maintainers/releasing.md):
+// - the app list icon at every target size, in three forms: plated, for where Windows wants a
+//   tile; unplated, the white mark alone for the dark theme; light-unplated, the black mark alone
+//   for the light theme. With all three Windows draws the mark itself in the taskbar and Start,
+//   instead of shrinking it onto a system plate.
+// - the tiles, StoreLogo and the Windows 10 small and large tiles at every scale: true black with
+//   the white mark large in the middle. The manifest's background is black too.
 await rm(`${root}build/appx`, { recursive: true, force: true });
 await mkdir(`${root}build/appx`);
-type Logo = { name: string; width: number; height: number; icon: number };
-const square = (name: string, size: number, icon = size): Logo => ({
-  name,
-  width: size,
-  height: size,
-  icon,
+
+/** The mark's drawing, without its <svg> element, so it can be placed inside other artwork. */
+const markBody = mark.replace(/^[\s\S]*?<svg[^>]*>/, "").replace(/<\/svg>\s*$/, "");
+/** The mark in `color`, `width` px wide, centred on (x, y). Its hat spans 80 of its 100 units. */
+const placedMark = (color: "#fff" | "#000", width: number, x: number, y: number): string => {
+  const box = width / 0.8;
+  // Only the hat's group ends its fill attribute with ">": the mask's white rect closes with "/>".
+  const body = markBody.replace('fill="#fff">', `fill="${color}">`);
+  if (color !== "#fff" && body === markBody)
+    throw new Error("mark.svg no longer sets the hat's fill.");
+  return `<svg x="${x - box / 2}" y="${y - box / 2}" width="${box}" height="${box}" viewBox="0 0 100 100">${body}</svg>`;
+};
+/** A flat black rounded square with a faint edge, inset 4 %, the white mark at 60 % of it. */
+const plate = (size: number): string => {
+  const inset = Math.max(1, Math.round(size * 0.04));
+  const edge = Math.max(1, size / 64);
+  const side = size - inset * 2 - edge;
+  return (
+    `<rect x="${inset + edge / 2}" y="${inset + edge / 2}" width="${side}" height="${side}" rx="${side * 0.22}" fill="#000" stroke="#fff" stroke-opacity="0.18" stroke-width="${edge}"/>` +
+    placedMark("#fff", (size - inset * 2) * 0.6, size / 2, size / 2)
+  );
+};
+/** True black with the white mark `share` of the height wide, in the middle. */
+const tile =
+  (share: number) =>
+  (width: number, height: number): string =>
+    `<rect width="${width}" height="${height}" fill="#000"/>` +
+    placedMark("#fff", height * share, width / 2, height / 2);
+
+type Logo = {
+  name: string;
+  width: number;
+  height: number;
+  draw: (width: number, height: number) => string;
+};
+const targetSizes = [16, 20, 24, 30, 32, 36, 40, 48, 60, 64, 72, 80, 96, 256];
+const scales = [100, 125, 150, 200, 400];
+/** A logo `base` px (or `base` by `tall`) at `scale` %, named as Windows looks for it. */
+const scaled = (
+  name: string,
+  scale: number,
+  base: number,
+  draw: Logo["draw"],
+  tall = base,
+): Logo => ({
+  name: `${name}.scale-${scale}`,
+  width: Math.round((base * scale) / 100),
+  height: Math.round((tall * scale) / 100),
+  draw,
 });
 const logos: Logo[] = [
-  ...[16, 24, 32, 48, 256].flatMap((size) => [
-    square(`Square44x44Logo.targetsize-${size}`, size),
-    square(`Square44x44Logo.targetsize-${size}_altform-unplated`, size),
-  ]),
-  ...[1, 2, 4].flatMap((times) => [
-    square(`StoreLogo.scale-${times * 100}`, 50 * times),
-    square(`Square44x44Logo.scale-${times * 100}`, 44 * times),
-    square(`Square150x150Logo.scale-${times * 100}`, 150 * times, 75 * times),
+  ...targetSizes.flatMap((size): Logo[] => [
+    { name: `Square44x44Logo.targetsize-${size}`, width: size, height: size, draw: plate },
     {
-      name: `Wide310x150Logo.scale-${times * 100}`,
-      width: 310 * times,
-      height: 150 * times,
-      icon: 75 * times,
+      name: `Square44x44Logo.targetsize-${size}_altform-unplated`,
+      width: size,
+      height: size,
+      draw: () => placedMark("#fff", size * 0.9, size / 2, size / 2),
     },
+    {
+      name: `Square44x44Logo.targetsize-${size}_altform-lightunplated`,
+      width: size,
+      height: size,
+      draw: () => placedMark("#000", size * 0.9, size / 2, size / 2),
+    },
+  ]),
+  ...scales.flatMap((scale) => [
+    scaled("Square44x44Logo", scale, 44, plate),
+    scaled("Square150x150Logo", scale, 150, tile(0.56)),
+    scaled("Wide310x150Logo", scale, 310, tile(0.56), 150),
+    scaled("StoreLogo", scale, 50, tile(0.74)),
+    // electron-builder adds these to the manifest as the small and large tiles when they exist.
+    scaled("SmallTile", scale, 71, tile(0.66)),
+    scaled("LargeTile", scale, 310, tile(0.5)),
   ]),
 ];
 await Promise.all(
-  logos.map(async ({ name, width, height, icon }) => {
-    const art = await sharp(Buffer.from(windowsSvg), { density: 72 * (icon / 840) * 4 })
-      .resize(icon, icon)
+  logos.map(({ name, width, height, draw }) =>
+    sharp(
+      Buffer.from(
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${draw(width, height)}</svg>`,
+      ),
+      { density: 72 * 4 },
+    )
+      .resize(width, height)
       .png()
-      .toBuffer();
-    const left = Math.floor((width - icon) / 2);
-    const top = Math.floor((height - icon) / 2);
-    await sharp(art)
-      .extend({
-        left,
-        right: width - icon - left,
-        top,
-        bottom: height - icon - top,
-        background: { r: 0, g: 0, b: 0, alpha: 0 },
-      })
-      .png()
-      .toFile(`${root}build/appx/${name}.png`);
-  }),
+      .toFile(`${root}build/appx/${name}.png`),
+  ),
 );
 console.log("Wrote build/icon.png, build/icon.icns, build/icon.ico and build/appx");
 
