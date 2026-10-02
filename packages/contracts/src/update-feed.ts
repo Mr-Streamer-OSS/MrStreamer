@@ -24,8 +24,9 @@ export interface UpdateFeed {
   /** The highest stable release. */
   readonly stable: FeedRelease | null;
   /**
-   * The highest release of all. Versions 0.0.3 and earlier offer it to Nightly users even when
-   * it's a stable release; later versions offer Nightly users nightlies only, and skip it then.
+   * The highest nightly. Versions 0.0.3 and earlier offer Nightly users the higher of this and
+   * `stable`; later versions offer them nightlies only. Feeds deployed before 0.0.4 may name a
+   * stable release here, which later versions skip.
    */
   readonly nightly: FeedRelease | null;
 }
@@ -66,8 +67,8 @@ export interface GitHubRelease {
 /**
  * The feed for a repository's releases. A release counts only when it is published, its version
  * and pre-release flag name the same channel, and it carries every platform's update metadata: a
- * release missing one is incomplete. Stable takes the highest stable version, Nightly the highest
- * of all, by version order and never by date.
+ * release missing one is incomplete. Each channel takes its highest version, by version order and
+ * never by date.
  *
  * `repository` is the repository's page, such as https://github.com/owner/repo.
  */
@@ -98,13 +99,16 @@ export function buildFeed(
     schema: 1,
     generated,
     stable: listed.find(({ version }) => !version.nightly)?.entry ?? null,
-    nightly: listed[0]?.entry ?? null,
+    nightly: listed.find(({ version }) => version.nightly)?.entry ?? null,
   };
 }
 
 /**
  * The feed to publish: `next`, except that neither channel moves to a lower version than the
- * `current` feed names, so a late or stale publication never takes users back. `current` is null
+ * `current` feed names, so a late or stale publication never takes users back. Each channel is
+ * compared with its own releases: a stable release that a feed deployed before 0.0.4 names as
+ * nightly gives way to the highest nightly. That takes no one back: versions 0.0.3 and earlier
+ * still find it as `stable`, and later ones never offered it on Nightly. `current` is null
  * before the first publication. `allowRegress` publishes `next` as it is, to withdraw a release
  * that was deleted.
  */
@@ -117,7 +121,7 @@ export function mergeFeeds(
   return {
     ...next,
     stable: higher(current.stable, next.stable),
-    nightly: higher(current.nightly, next.nightly),
+    nightly: higher(isNightly(current.nightly) ? current.nightly : null, next.nightly),
   };
 }
 
@@ -132,6 +136,10 @@ export function readFeed(json: unknown): UpdateFeed {
     stable: readRelease(json["stable"], "stable"),
     nightly: readRelease(json["nightly"], "nightly"),
   };
+}
+
+function isNightly(entry: FeedRelease | null): boolean {
+  return Boolean(entry && parseVersion(entry.version)?.nightly);
 }
 
 /** The entry with the higher version; `next` when both name the same one. */

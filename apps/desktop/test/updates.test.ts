@@ -736,7 +736,7 @@ describe("finding releases", () => {
   });
 
   it("offers a Nightly user nothing from a feed whose nightly is a stable release", async () => {
-    // The feed names the highest release of all as nightly, for versions up to 0.0.3.
+    // Feeds deployed before 0.0.4 named the highest release of all as nightly.
     const { fetchImpl } = sources({
       feed: () =>
         json({
