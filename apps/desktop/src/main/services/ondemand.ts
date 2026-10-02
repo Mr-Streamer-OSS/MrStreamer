@@ -146,6 +146,19 @@ export class OnDemand extends Context.Service<
   static readonly layer = (deps: OnDemandDeps) => Layer.effect(OnDemand, make(deps));
 }
 
+/**
+ * What opening a title downloaded: the provider's details, as of the refresh of the lists that
+ * `lists` counts, and TMDB's, with the title as the lists showed it then, for when they no longer
+ * list it. `about` is null when TMDB doesn't have the title, and undefined when it didn't answer or
+ * there was no key: opening the title again asks again.
+ */
+interface Downloaded {
+  readonly raw: ProviderDetails;
+  readonly lists: number;
+  readonly about: TitleAbout | null | undefined;
+  readonly title: Title;
+}
+
 function make(deps: OnDemandDeps) {
   return Effect.gen(function* () {
     const subscriptions = yield* Subscriptions;
@@ -197,14 +210,12 @@ function make(deps: OnDemandDeps) {
     /** Counts restarts of the worker. */
     let generation = 0;
     /**
-     * What opening a title downloaded, by subscription, language, kind and id, oldest first: the
-     * provider's details and TMDB's, with the title as the lists showed it then, for when they no
-     * longer list it.
+     * Rises with each refresh of the lists. Details downloaded before ask the provider again, as
+     * it may list new episodes.
      */
-    const details = new Map<
-      string,
-      { raw: ProviderDetails; about: TitleAbout | null; title: Title }
-    >();
+    let listsVersion = 0;
+    /** What opening a title downloaded, by subscription, language, kind and id, oldest first. */
+    const details = new Map<string, Downloaded>();
     /**
      * What TMDB said about the seasons opened, by TMDB id, season and language, oldest first;
      * null where TMDB doesn't have the season.
@@ -244,6 +255,7 @@ function make(deps: OnDemandDeps) {
         Effect.tap((worked) =>
           Effect.gen(function* () {
             failure = null;
+            listsVersion++;
             yield* PubSub.publish(updates, statusOf(worked, source.key));
           }),
         ),
@@ -291,7 +303,10 @@ function make(deps: OnDemandDeps) {
         const [listed] = yield* loaded((_, language) =>
           call("byIds", { key: source.key, language, kind, ids: [id] }),
         );
-        const downloaded = details.get(cacheKey) ?? (yield* download(source, kind, id, listed));
+        const kept = details.get(cacheKey);
+        const downloaded = kept
+          ? yield* renewed(source, kind, id, kept)
+          : yield* download(source, kind, id, listed);
         details.delete(cacheKey);
         // Kept again only for the subscription it was asked for.
         if ((yield* subscriptions.source)?.key === source.key) {
@@ -307,43 +322,78 @@ function make(deps: OnDemandDeps) {
         };
         return {
           raw,
-          about,
+          about: about ?? null,
           shown:
             kind === "movie"
-              ? movieDetails(version, raw, about)
-              : seriesDetails(version, raw, about),
+              ? movieDetails(version, raw, about ?? null)
+              : seriesDetails(version, raw, about ?? null),
         };
+      });
+
+    /** The provider's details of a movie or series. */
+    const providerDetails = (source: Source, kind: TitleKind, id: string) =>
+      Effect.tryPromise({
+        try: (signal) =>
+          kind === "movie"
+            ? source.provider.movieDetails(id, signal)
+            : source.provider.seriesDetails(id, signal),
+        catch: failedWith,
+      }).pipe(diagnosed("details"));
+
+    /**
+     * TMDB's overview, artwork and credits of a title; without them, the provider's stand. Null
+     * when TMDB doesn't have it, undefined when it didn't answer in time or there is no key.
+     */
+    const aboutOf = (kind: TitleKind, title: Title) =>
+      Effect.gen(function* () {
+        if (!title.tmdbId) return null;
+        if (!tmdbKey) return undefined;
+        const { tmdbId } = title;
+        const client = tmdb({ key: tmdbKey, ...(deps.tmdbApi ? { api: deps.tmdbApi } : {}) });
+        const viewer = yield* language;
+        return yield* Effect.tryPromise((signal) =>
+          client
+            .about(
+              kind === "movie" ? "movie" : "tv",
+              tmdbId,
+              viewer,
+              AbortSignal.any([signal, AbortSignal.timeout(ABOUT_TIMEOUT_MS)]),
+            )
+            .catch((cause: unknown) => {
+              if (cause instanceof TmdbError && cause.failure.kind === "missing") return null;
+              throw cause;
+            }),
+        ).pipe(Effect.orElseSucceed(() => undefined));
       });
 
     /** Asks the provider and TMDB about a title the lists show, both at once. */
     const download = (source: Source, kind: TitleKind, id: string, title: Title | undefined) =>
       Effect.gen(function* () {
         if (!title) return yield* new Failed({ error: { kind: "title-not-found", titleId: id } });
-        const viewer = yield* language;
+        const [raw, about] = yield* Effect.all(
+          [providerDetails(source, kind, id), aboutOf(kind, title)],
+          { concurrency: 2 },
+        );
+        return { raw, lists: listsVersion, about, title };
+      });
+
+    /**
+     * Details kept from an earlier open, with what went stale asked again: the provider's after
+     * the lists were refreshed, keeping the old ones if it fails, and TMDB's when it didn't answer.
+     */
+    const renewed = (source: Source, kind: TitleKind, id: string, kept: Downloaded) =>
+      Effect.gen(function* () {
+        const lists = listsVersion;
         const [raw, about] = yield* Effect.all(
           [
-            Effect.tryPromise({
-              try: (signal) =>
-                kind === "movie"
-                  ? source.provider.movieDetails(id, signal)
-                  : source.provider.seriesDetails(id, signal),
-              catch: failedWith,
-            }).pipe(diagnosed("details")),
-            // TMDB's overview, artwork and credits; without them, the provider's stand.
-            Effect.tryPromise((signal) =>
-              tmdbKey && title.tmdbId
-                ? tmdb({ key: tmdbKey, ...(deps.tmdbApi ? { api: deps.tmdbApi } : {}) }).about(
-                    kind === "movie" ? "movie" : "tv",
-                    title.tmdbId,
-                    viewer,
-                    AbortSignal.any([signal, AbortSignal.timeout(ABOUT_TIMEOUT_MS)]),
-                  )
-                : Promise.resolve(null),
-            ).pipe(Effect.orElseSucceed(() => null)),
+            kept.lists === lists
+              ? Effect.succeed(kept.raw)
+              : providerDetails(source, kind, id).pipe(Effect.orElseSucceed(() => null)),
+            kept.about === undefined ? aboutOf(kind, kept.title) : Effect.succeed(kept.about),
           ],
           { concurrency: 2 },
         );
-        return { raw, about, title };
+        return raw ? { raw, lists, about, title: kept.title } : { ...kept, about };
       });
 
     /**

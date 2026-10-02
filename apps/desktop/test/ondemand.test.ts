@@ -95,6 +95,28 @@ describe("movies and series", { timeout: 20_000 }, () => {
     expect((await onDemand.search("adult film")).movies).toEqual([]);
   });
 
+  it("shows the episodes the provider added once the lists are refreshed", async () => {
+    const { onDemand, provider } = await onDemandApp();
+    const episodes = async () => {
+      const details = await onDemand.details("series", "80000");
+      return details.kind === "series" ? details.seasons.flatMap((season) => season.episodes) : [];
+    };
+    const before = await episodes();
+
+    const series = provider.titles.series.find((each) => each.id === 80_000);
+    const season = series?.seasons.at(-1);
+    if (!series || !season?.[0]) throw new Error("The fake provider has no test series.");
+    // The fake provider lists what its titles hold when asked.
+    (season as unknown as unknown[]).push({ ...season[0], id: 81_012 });
+    expect(await episodes()).toHaveLength(before.length);
+    await onDemand.refresh();
+
+    expect((await episodes()).map((episode) => episode.id)).toEqual([
+      ...before.map((episode) => episode.id),
+      "81012",
+    ]);
+  });
+
   it("searches movies and series by any words of their names", async () => {
     const { onDemand } = await onDemandApp();
 
