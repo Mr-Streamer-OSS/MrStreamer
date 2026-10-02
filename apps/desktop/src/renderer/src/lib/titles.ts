@@ -1,6 +1,6 @@
 // Movies and episodes as the views talk about them: how long, how far, what's next, which version
 // plays, and playing one. The player itself is in ../player/title-player.ts.
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { isCancelledError, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Episode, SeriesDetails, Title, TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { Preferences } from "@mrstreamer/contracts/preferences";
 import type { TitleProgress } from "@mrstreamer/contracts/viewing";
@@ -236,11 +236,32 @@ export function useContinueWatching(limit = Infinity): {
   return { entries: [...entries.values()].slice(0, limit), loading, error: viewing.error };
 }
 
+/** Rises with every resume, so only the latest acts once its details arrive. */
+let resuming = 0;
+
+/**
+ * Whether the viewer is where a resume started: the same account, page and overlays. A resume
+ * that waited for a series' details gives way to anything done since, a new account above all.
+ */
+function stillThere(from: ReturnType<typeof useUi.getState>): boolean {
+  const now = useUi.getState();
+  return (
+    now.account === from.account &&
+    now.view === from.view &&
+    now.watching === from.watching &&
+    now.playingTitle === from.playingTitle &&
+    now.details === from.details &&
+    now.settings === from.settings &&
+    now.searchOpen === from.searchOpen
+  );
+}
+
 /**
  * Plays a Continue watching entry: a movie at once, where it stopped; an episode, or the one after
  * a finished one, once the series' details arrive, since only they list the episodes. A series
  * with nothing after the finished episode opens its details instead. Both play the version picked
- * for the title, when there is one.
+ * for the title, when there is one. A series that answers after the viewer moved on, or after the
+ * account changed, does nothing.
  */
 export function useResume(): (entry: ContinueEntry) => void {
   const client = useQueryClient();
@@ -255,16 +276,28 @@ export function useResume(): (entry: ContinueEntry) => void {
       return;
     }
     const seriesId = picked ?? ref.seriesId;
+    const mine = ++resuming;
+    const from = useUi.getState();
+    const wanted = () => mine === resuming && stillThere(from);
     const open = () => openDetails({ kind: "series", id: seriesId });
-    void client.fetchQuery(queries.details("series", seriesId)).then((found) => {
-      if (found.kind !== "series") return open();
-      const episodes = found.seasons.flatMap((season) => season.episodes);
-      const current =
-        episodes.find((episode) => episode.id === ref.id) ??
-        episodes.find((episode) => episode.season === ref.season && episode.number === ref.episode);
-      const next = progress.finished ? nextEpisode(found, ref) : current;
-      if (!next) return open();
-      playTitle(episodeNow(found, next), progress.finished ? 0 : resumePoint(progress));
-    }, open);
+    void client.fetchQuery(queries.details("series", seriesId)).then(
+      (found) => {
+        if (!wanted()) return;
+        if (found.kind !== "series") return open();
+        const episodes = found.seasons.flatMap((season) => season.episodes);
+        const current =
+          episodes.find((episode) => episode.id === ref.id) ??
+          episodes.find(
+            (episode) => episode.season === ref.season && episode.number === ref.episode,
+          );
+        const next = progress.finished ? nextEpisode(found, ref) : current;
+        if (!next) return open();
+        playTitle(episodeNow(found, next), progress.finished ? 0 : resumePoint(progress));
+      },
+      (error: unknown) => {
+        // Cancelled when the account changed, or the details failed: open them only if still wanted.
+        if (!isCancelledError(error) && wanted()) open();
+      },
+    );
   };
 }

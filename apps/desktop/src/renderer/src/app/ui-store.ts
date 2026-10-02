@@ -24,6 +24,8 @@ export interface DetailsTarget {
 type UpdateDialog = "panel" | "restart";
 
 interface UiState {
+  /** Rises each time the account changes, so work started for the one before gives way. */
+  readonly account: number;
   readonly view: View;
   /** Watch covers the page with a live channel. Closing it returns to the page as it was. */
   readonly watching: boolean;
@@ -47,6 +49,7 @@ interface UiState {
 
 /** Navigation and overlay state for the window. */
 export const useUi = create<UiState>(() => ({
+  account: 0,
   view: "home",
   watching: false,
   playingTitle: false,
@@ -70,7 +73,8 @@ export function openView(view: View): void {
  * before belonged to the account that went.
  */
 export function resetForAccount(): void {
-  useUi.setState({
+  useUi.setState((state) => ({
+    account: state.account + 1,
     view: "home",
     watching: false,
     playingTitle: false,
@@ -78,7 +82,7 @@ export function resetForAccount(): void {
     channelsOpen: false,
     searchOpen: false,
     list: { kind: "all" },
-  });
+  }));
 }
 
 /** Opens Watch over the current page. */
