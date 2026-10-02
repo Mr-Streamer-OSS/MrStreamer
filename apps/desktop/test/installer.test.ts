@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import type { OutgoingHttpHeaders } from "node:http";
 import type { CancellationToken } from "electron-updater";
 import { describe, expect, it } from "vitest";
 import { electronInstaller, type Updater } from "../src/main/platform/installer.ts";
@@ -9,6 +10,7 @@ class FakeUpdater extends EventEmitter implements Updater {
   autoInstallOnAppQuit = true;
   allowDowngrade = false;
   logger: unknown = console;
+  requestHeaders: OutgoingHttpHeaders | null = null;
   readonly metadata = Promise.withResolvers<void>();
   readonly transfer = Promise.withResolvers<void>();
   readonly downloads: CancellationToken[] = [];
