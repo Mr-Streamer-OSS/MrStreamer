@@ -65,7 +65,7 @@ How far you got is saved as you go: every minute, and whenever you pause, skip, 
 
 ## The next episode
 
-When an episode ends, the next one plays after ten seconds. The end screen names it, and says when a new season starts, as in "Finished S1 E3 · Season 2 is next". **Play now**, or N, starts it straight away. **Cancel** keeps the end on screen, with **Next episode** and **Episodes**, which opens the series. Leaving, starting something else or switching subscriptions stops the countdown too. To decide each time, turn off **Next episode** in Settings > General.
+When an episode ends, the next one plays after ten seconds. The end screen names it, and says when a new season starts, as in "Finished S1 E3 · Season 2 is next". **Play now**, or N, starts it straight away. **Cancel** keeps the end on screen, with **Next episode** and **Episodes**, which opens the series. Leaving, starting something else or switching subscriptions stops the countdown too. While Settings is open it waits, and it carries on from where it was when you close Settings. To decide each time, turn off **Next episode** in Settings > General.
 
 The next episode is the one your provider numbers next, across seasons, in the version of the series you're watching and with your sound and subtitle languages. Specials only lead to other specials. If it doesn't start, the screen says why: **Try again** asks your provider once more, and **Episodes** opens the series.
 

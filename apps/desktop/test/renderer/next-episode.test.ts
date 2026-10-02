@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 // At the end of an episode the next one in its series plays after a ten-second countdown, which
-// the viewer can cancel, skip with Play now or N, or turn off in Settings. One next episode
-// opens, only once the countdown ends and the episode before has closed; leaving, another title
-// or a new account plays nothing. A next episode that fails says it didn't start, and the last
+// the viewer can cancel, skip with Play now or N, or turn off in Settings. It waits while Settings
+// is open. One next episode opens, only once the countdown ends and the episode before has closed;
+// leaving, another title or a new account plays nothing. A next episode that fails says it didn't start, and the last
 // episode records that its series is finished.
 import { ipc } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -133,8 +133,15 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-/** Plays `played` from its beginning, as session `sessionId`, to its end. */
-async function playToEnd(played: Episode, sessionId: string): Promise<void> {
+/**
+ * Plays `played` from its beginning, as session `sessionId`, to its end, doing `meanwhile` while
+ * it plays.
+ */
+async function playToEnd(
+  played: Episode,
+  sessionId: string,
+  meanwhile: () => Promise<void> = async () => {},
+): Promise<void> {
   const answer = ipc.hold("playback.openTitle");
   const now = episodeNow(series, played);
   await act(async () => playTitle(now, 0));
@@ -149,6 +156,7 @@ async function playToEnd(played: Episode, sessionId: string): Promise<void> {
     }),
   );
   await act(async () => runs.at(-1)?.start());
+  await meanwhile();
   await act(async () => runs.at(-1)?.end());
 }
 
@@ -242,6 +250,37 @@ describe("the end of an episode", () => {
     expect(opened()).toEqual(["e13"]);
 
     await key("n");
+    expect(opened()).toEqual(["e13", "e21"]);
+  });
+
+  it("waits while Settings is open over it, then carries on from the seconds it had left", async () => {
+    await playToEnd(pilotHouse, "s1");
+    await wait(3000);
+    expect(text()).toContain("Plays in 7");
+
+    await act(async () => useUi.setState({ settings: "general" }));
+    await wait(30_000);
+    expect(text()).toContain("Plays in 7");
+    expect(opened()).toEqual(["e13"]);
+
+    await act(async () => useUi.setState({ settings: null }));
+    await wait(6000);
+    expect(text()).toContain("Plays in 1");
+    expect(opened()).toEqual(["e13"]);
+    await wait(1000);
+    expect(opened()).toEqual(["e13", "e21"]);
+  });
+
+  it("starts counting at an end behind Settings once Settings closes", async () => {
+    await playToEnd(pilotHouse, "s1", () =>
+      act(async () => useUi.setState({ settings: "general" })),
+    );
+    await wait(30_000);
+    expect(text()).toContain("Plays in 10");
+    expect(opened()).toEqual(["e13"]);
+
+    await act(async () => useUi.setState({ settings: null }));
+    await wait(10_000);
     expect(opened()).toEqual(["e13", "e21"]);
   });
 
