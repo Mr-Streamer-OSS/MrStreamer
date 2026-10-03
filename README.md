@@ -2,7 +2,7 @@
 
 <h1 align="center">Mr. Streamer</h1>
 
-<p align="center"><strong>Live TV, movies and series. One place.</strong><br>A desktop player for the IPTV subscription you already have.</p>
+<p align="center"><strong>IPTV without the junk.</strong><br>No ads. No account. No nonsense. Bring your own subscription.</p>
 
 <p align="center">
   <a href="https://apps.microsoft.com/detail/9N45GG76ZP4T?referrer=appbadge">
@@ -15,19 +15,19 @@
 
 <p align="center"><strong><a href="https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest">Download for macOS, Windows or Linux</a></strong></p>
 
-### Every channel, with what's on now and next
+### Every channel. What's on now, what's next.
 
 <img src="docs/assets/readme-live-tv.webp" alt="Live TV: channels with what's on now and next" width="100%">
 
 A programme guide, favourites, and the channels you watched last.
 
-### Each film once, in your language
+### Your films and series, in your language.
 
 <img src="docs/assets/readme-library.webp" alt="A title's details: its story, cast and episodes, with Play and its sound language" width="100%">
 
 Stories, artwork and cast, with resume and the next episode.
 
-### Sound and subtitles, your way
+### Every sound track. Every subtitle.
 
 <img src="docs/assets/readme-watching.webp" alt="A series playing with English subtitles, and the subtitle menu" width="100%">
 
