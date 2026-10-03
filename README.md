@@ -17,19 +17,19 @@
 
 ### Every channel, with what's on now and next
 
-<img src="docs/assets/live-tv.webp" alt="Live TV: channels with what's on now and next" width="100%">
+<img src="docs/assets/readme-live-tv.webp" alt="Live TV: channels with what's on now and next" width="100%">
 
 A programme guide, favourites, and the channels you watched last.
 
 ### Each film once, in your language
 
-<img src="docs/assets/details.webp" alt="A title's details: its story, cast and episodes, with Play and its sound language" width="100%">
+<img src="docs/assets/readme-library.webp" alt="A title's details: its story, cast and episodes, with Play and its sound language" width="100%">
 
 Stories, artwork and cast, with resume and the next episode.
 
 ### Sound and subtitles, your way
 
-<img src="docs/assets/watching.webp" alt="A series playing with English subtitles, and the subtitle menu" width="100%">
+<img src="docs/assets/readme-watching.webp" alt="A series playing with English subtitles, and the subtitle menu" width="100%">
 
 Every track your provider sends, on live channels and on demand.
 
