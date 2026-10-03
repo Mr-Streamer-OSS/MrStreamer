@@ -15,15 +15,21 @@
 
 <p align="center"><strong><a href="https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest">Download for macOS, Windows or Linux</a></strong></p>
 
-<img src="docs/assets/live-tv.webp" alt="Every channel, with what's on now and next: Live TV with its guide" width="100%">
+### Every channel, with what's on now and next
+
+<img src="docs/assets/live-tv.webp" alt="Live TV: channels with what's on now and next" width="100%">
 
 A programme guide, favourites, and the channels you watched last.
 
-<img src="docs/assets/details.webp" alt="Each film once, in your language: a title's details with Play and its sound language" width="100%">
+### Each film once, in your language
+
+<img src="docs/assets/details.webp" alt="A title's details: its story, cast and episodes, with Play and its sound language" width="100%">
 
 Stories, artwork and cast, with resume and the next episode.
 
-<img src="docs/assets/watching.webp" alt="Sound and subtitles, your way: a series playing with the subtitle menu" width="100%">
+### Sound and subtitles, your way
+
+<img src="docs/assets/watching.webp" alt="A series playing with English subtitles, and the subtitle menu" width="100%">
 
 Every track your provider sends, on live channels and on demand.
 
