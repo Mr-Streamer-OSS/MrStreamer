@@ -15,25 +15,19 @@
 
 <p align="center"><strong><a href="https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest">Download for macOS, Windows or Linux</a></strong></p>
 
-### Every channel, with what's on now and next
-
-<img src="docs/assets/live-tv.webp" alt="Live TV: channels with what's on now and next" width="100%">
+<img src="docs/assets/live-tv.webp" alt="Every channel, with what's on now and next: Live TV with its guide" width="100%">
 
 A programme guide, favourites, and the channels you watched last.
 
-### Each film once, in your language
-
-<img src="docs/assets/details.webp" alt="A film's details: its versions, story and cast" width="100%">
+<img src="docs/assets/details.webp" alt="Each film once, in your language: a title's details with Play and its sound language" width="100%">
 
 Stories, artwork and cast, with resume and the next episode.
 
-### Sound and subtitles, your way
-
-<img src="docs/assets/watching.webp" alt="A film playing with English subtitles" width="100%">
+<img src="docs/assets/watching.webp" alt="Sound and subtitles, your way: a series playing with the subtitle menu" width="100%">
 
 Every track your provider sends, on live channels and on demand.
 
-The pictures come from a test provider with made-up titles and artwork.
+The pictures come from a test provider with made-up titles and public-domain footage.
 
 ## What you need
 
