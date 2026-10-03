@@ -2,7 +2,7 @@
 
 <h1 align="center">Mr. Streamer</h1>
 
-<p align="center"><strong>Live TV, movies and series. One place.</strong><br>A desktop player for the IPTV subscription you already have.</p>
+<p align="center"><strong>IPTV without the junk.</strong><br>No ads. No account. No nonsense. Bring your own subscription.</p>
 
 <p align="center">
   <a href="https://apps.microsoft.com/detail/9N45GG76ZP4T?referrer=appbadge">
