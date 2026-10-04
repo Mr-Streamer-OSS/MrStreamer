@@ -18,6 +18,7 @@ Start with the [contribution policy](../CONTRIBUTING.md).
 - [Testing](./contributing/testing.md): the suite, the fake provider, a real provider and measurements
 - [Architecture](./contributing/architecture.md)
 - [Playback evaluation](./contributing/playback-evaluation.md): why playback works the way it does
+- [Marketing artwork](./contributing/marketing-artwork.md): the app captures the website shows, and how to take them
 
 ## Maintaining
 
@@ -25,5 +26,6 @@ Start with the [contribution policy](../CONTRIBUTING.md).
 - [Signing](./maintainers/signing.md)
 - [Microsoft Store submissions](./maintainers/microsoft-store.md)
 - [Licences and sources](./maintainers/licences.md)
+- [The website](../apps/marketing/README.md): running it, publishing it and the one-time setup
 
 Priorities, status and acceptance live in the maintainers' [GitHub project](https://github.com/orgs/Mr-Streamer-OSS/projects/1).

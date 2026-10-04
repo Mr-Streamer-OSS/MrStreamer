@@ -48,13 +48,17 @@ export async function connect(port: number) {
   });
   let nextId = 1;
   const pending = new Map<number, (message: { result?: unknown; error?: unknown }) => void>();
+  const listeners = new Map<string, (params: unknown) => void>();
   socket.addEventListener("message", (event) => {
     const message = JSON.parse(String(event.data)) as {
       id?: number;
+      method?: string;
+      params?: unknown;
       result?: unknown;
       error?: unknown;
     };
     if (message.id !== undefined) pending.get(message.id)?.(message);
+    else if (message.method) listeners.get(message.method)?.(message.params);
   });
   const send = (method: string, params: Record<string, unknown> = {}) =>
     new Promise<{ result?: unknown; error?: unknown }>((resolve) => {
@@ -68,6 +72,10 @@ export async function connect(port: number) {
     });
   return {
     send,
+    /** Calls `listener` with each event of this name, as `Fetch.requestPaused`. */
+    on(method: string, listener: (params: unknown) => void): void {
+      listeners.set(method, listener);
+    },
     async evaluate<T>(expression: string): Promise<T> {
       const reply = await send("Runtime.evaluate", {
         expression,

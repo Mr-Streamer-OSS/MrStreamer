@@ -13,7 +13,7 @@ pnpm test         # Vitest
 pnpm build        # production bundles in apps/desktop/out/
 ```
 
-The repository is a pnpm workspace: the app is `apps/desktop`, shared contracts and rules are in `packages/`; [architecture](architecture.md) shows the layout. The scripts above run from the root. If `pnpm dev` reports that Electron failed to install, as a fresh install from pnpm's store can leave it, run `node node_modules/electron/install.js`.
+The repository is a pnpm workspace: the app is `apps/desktop`, the website is `apps/marketing`, shared contracts and rules are in `packages/`; [architecture](architecture.md) shows the layout. `pnpm dev:marketing`, `pnpm build:marketing` and `pnpm preview:marketing` run the website, which [its README](../../apps/marketing/README.md) describes. The scripts above run from the root. If `pnpm dev` reports that Electron failed to install, as a fresh install from pnpm's store can leave it, run `node node_modules/electron/install.js`.
 
 ## Running the app
 
@@ -25,14 +25,14 @@ Streams the player can't decode go through ffmpeg, and every movie and episode g
 
 Environment variables for testing:
 
-| Variable                    | Effect                                                                                                                                                     |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MR_STREAMER_FFMPEG`        | The ffmpeg to convert streams with, in development and packaged builds; its ffprobe must sit beside it. The tests read it too.                             |
-| `MR_STREAMER_UPDATE_FEED`   | The update feed to read instead of the published one; see [releasing](../maintainers/releasing.md#testing-updates-against-another-feed).                   |
-| `MR_STREAMER_UPDATE_API`    | A GitHub-compatible API for when the feed is missing, instead of `https://api.github.com`.                                                                 |
-| `MR_STREAMER_UPDATE_CHECKS` | `off` stops the automatic update checks; checking from Settings still works. The packaged-app test and the measurements set it.                            |
-| `MR_STREAMER_TMDB_KEY`      | A TMDB key or read access token. At build time it's built into the app; at run time it replaces the built-in one. A key set in Settings still comes first. |
-| `MR_STREAMER_TMDB_API`      | A TMDB-compatible API instead of `https://api.themoviedb.org/3`, such as the tests' fake.                                                                  |
+| Variable                    | Effect                                                                                                                                                           |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MR_STREAMER_FFMPEG`        | The ffmpeg to convert streams with, in development and packaged builds; its ffprobe must sit beside it. The tests and the marketing capture scripts read it too. |
+| `MR_STREAMER_UPDATE_FEED`   | The update feed to read instead of the published one; see [releasing](../maintainers/releasing.md#testing-updates-against-another-feed).                         |
+| `MR_STREAMER_UPDATE_API`    | A GitHub-compatible API for when the feed is missing, instead of `https://api.github.com`.                                                                       |
+| `MR_STREAMER_UPDATE_CHECKS` | `off` stops the automatic update checks; checking from Settings still works. The packaged-app test and the measurements set it.                                  |
+| `MR_STREAMER_TMDB_KEY`      | A TMDB key or read access token. At build time it's built into the app; at run time it replaces the built-in one. A key set in Settings still comes first.       |
+| `MR_STREAMER_TMDB_API`      | A TMDB-compatible API instead of `https://api.themoviedb.org/3`, such as the tests' fake.                                                                        |
 
 ## Installers
 
@@ -67,4 +67,5 @@ Chromium's credits, which hold Node.js's licence too, are 20 MB of HTML from Ele
 - App icons come from `apps/desktop/assets/brand/`; `pnpm --filter mrstreamer icons:export` renders `apps/desktop/build/icon.*` from `icon.svg` and the Store package's logos in `apps/desktop/build/appx` from `mark.svg` ([releasing](../maintainers/releasing.md#microsoft-store-package) lists them).
 - The DMG window background is `apps/desktop/build/dmg-background.png` and its `@2x` twin; `pnpm --filter mrstreamer dmg:background` renders them on a Mac, so the text uses the system font.
 - The README banner, `docs/assets/banner.png`, is 2560 × 800 for sharp screens: the mark and name, in Inter, beside Home, captured from a development build on a Mac in full screen against the fake provider with made-up channels, programmes and titles. The pictures playing in it are public domain: NASA's views of Earth from the space station on the live channel, and the U.S. National Park Service's Grand Canyon footage for the series being watched. Never use a provider's catalogue, real posters or anything not free to use worldwide in it.
+- The website's pictures, `docs/assets/marketing-*.png`, are captures of the whole window at 2560 × 1600, taken on Linux by `apps/desktop/scripts/marketing-capture.ts` against a made-up subscription and the same public-domain footage. [Marketing artwork](marketing-artwork.md) has the recipe and the sources.
 - The README's pictures, `docs/assets/readme-live-tv.webp`, `readme-library.webp` and `readme-watching.webp`, are 2560 × 1440 compositions on true black: the app window straight on with a thin border, and one detail of it enlarged over it. The windows are captures of a development build in the same way: the fake provider with its guide, a TMDB stand-in answering with made-up names, stories and people, and the same public-domain NASA and National Park Service footage as the banner. Only what the app shows goes in them, and the same rule holds: nothing from a real provider, film or person.

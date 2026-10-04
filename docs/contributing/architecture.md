@@ -1,6 +1,6 @@
 # Architecture
 
-An Electron app in a pnpm workspace. The main process owns everything that touches the network, the disk and the system; the renderer shows state and starts actions over a typed IPC contract.
+An Electron app in a pnpm workspace, with its website beside it. The main process owns everything that touches the network, the disk and the system; the renderer shows state and starts actions over a typed IPC contract.
 
 ```
 packages/contracts   @mrstreamer/contracts: IPC schemas, library, guide and movie and series
@@ -30,11 +30,14 @@ apps/desktop         The app, package name mrstreamer
                      controllers, Picture, and the subtitles drawn over it
   src/shared         What main and the renderer share inside the app: window bar sizes
   scripts            Icons, the DMG background, signing, notarization, ffmpeg builds, third-party
-                     notices, the Store package's version, guide and viewing record measurements
+                     notices, the Store package's version, guide and viewing record measurements,
+                     the website's demo subscription and captures
   test               Service suites, the fake provider, codec and title clips, packaged-app test,
                      measurements
+apps/marketing       The website, package name mrstreamer-marketing: one static page built by Vite
+                     from the app captures in docs/assets. Depends on nothing else in the workspace.
 scripts              Release planning, the update feed and CI signing, run from the repository root
-test                 The release planning suite
+test                 The release planning suite, and the website's publishing workflow
 ```
 
 Packages export their source files by path, `@mrstreamer/core/catalogue/normalize`, and the app bundles them; nothing is built separately. Lint rules keep packages from importing Electron, React or the app, contracts from importing core, and every file from import cycles. `scripts/release-plan.ts` imports `packages/contracts/src/version.ts` and `update-feed.ts` by relative path, because release jobs run it before installing packages.
