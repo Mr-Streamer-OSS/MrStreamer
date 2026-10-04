@@ -375,15 +375,27 @@ async function start(): Promise<void> {
   mainWindow.once("ready-to-show", () =>
     diagnostics.record({ op: "start", ms: Math.round(performance.now()), outcome: "ok" }),
   );
+  /** Set by the first quit: the runtime closes once, however often the app is asked to quit. */
+  let closing = false;
   app.on("activate", () => {
-    mainWindow ??= openWindow(closeStreams);
+    // Nothing opens on a runtime that is closing.
+    if (!closing) mainWindow ??= openWindow(closeStreams);
   });
-  app.on("will-quit", () => {
-    // Streams close right away, so no ffmpeg or provider connection outlives the app. The rest
-    // of the runtime, background work and the database, closes as the app exits; holding the
-    // quit for it would get in the way of an update's restart.
+  app.on("will-quit", (event) => {
+    // The quit waits for the runtime to close, which stops background work, closes the database
+    // and writes the diagnostics still queued. An update's restart comes this way too: its
+    // installer has started by then and waits for the app to exit, so the wait takes nothing
+    // from it.
+    event.preventDefault();
+    if (closing) return;
+    closing = true;
+    // Streams close right away, so no ffmpeg or provider connection outlives the app.
     runtime.runSyncExit(playback.closeAll);
-    void runtime.dispose();
+    // Exits instead of quitting again: with nothing left to write, closing can finish before this
+    // handler returns to Electron, which ignores a quit asked for until then. Every window has
+    // closed by now, so exiting skips nothing.
+    const exit = () => app.exit();
+    void runtime.dispose().then(exit, exit);
   });
 
   // Keeps account status, the channel list and the guide current without making the UI wait.
