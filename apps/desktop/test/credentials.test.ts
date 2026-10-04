@@ -1,10 +1,12 @@
 import { readFile } from "node:fs/promises";
+import { Socket } from "node:net";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import { Failed } from "@mrstreamer/core/failure";
 import * as Layer from "effect/Layer";
 import { diagnosticsLogLayer } from "../src/main/platform/diagnostics-log.ts";
+import type { TcpConnect } from "../src/main/providers/xtream.ts";
 import { Playback } from "../src/main/services/playback.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import type { FakeProvider } from "./fake-provider.ts";
@@ -12,8 +14,11 @@ import { fakeProvider, promised, runtimeFor, tempDir, testSecrets, userAgent } f
 
 const LOGIN = { username: "viewer-7", password: "s3cret-pass" };
 
-/** Subscriptions and playback whose provider requests go through `fetchImpl`, with the log on. */
-async function app(fetchImpl: typeof fetch) {
+/**
+ * Subscriptions and playback whose provider requests go through `fetchImpl`, with the log on.
+ * `tcpConnect` replaces the connection that tries an https port.
+ */
+async function app(fetchImpl: typeof fetch, tcpConnect?: TcpConnect) {
   const dataDir = await tempDir();
   const runtime = runtimeFor(
     Playback.layer({ userAgent, ffmpeg: null }).pipe(
@@ -22,6 +27,7 @@ async function app(fetchImpl: typeof fetch) {
           dataDir,
           secrets: testSecrets,
           providerOptions: { userAgent, fetch: fetchImpl },
+          ...(tcpConnect ? { tcpConnect } : {}),
         }),
       ),
       Layer.provideMerge(diagnosticsLogLayer(dataDir)),
@@ -166,6 +172,58 @@ describe("credential protection", () => {
     const connected = await subscriptions.connect({ server: `http://${address}`, ...LOGIN });
     expect(connected).toMatchObject({ server: provider.url });
   });
+
+  it(
+    "asks within seconds when the https port leaves the connection unanswered",
+    { timeout: 15_000 },
+    async () => {
+      // Behind a firewall that drops https, the name resolves and nothing accepts or refuses.
+      const unanswered: TcpConnect = () => {
+        const socket = new Socket();
+        setImmediate(() => socket.emit("lookup", null, "192.0.2.1", 4, "panel.test"));
+        return socket;
+      };
+      // Fetch waits there until the login's time is up.
+      const asked: string[] = [];
+      const waiting: typeof fetch = (input, init) => {
+        asked.push(String(input));
+        return new Promise((_, reject) =>
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason)),
+        );
+      };
+      const { subscriptions } = await app(waiting, unanswered);
+
+      const started = performance.now();
+      const error = await failure(subscriptions.connect({ server: "panel.test", ...LOGIN }));
+      const waited = performance.now() - started;
+
+      expect(error).toEqual({ kind: "unencrypted-only", server: "https://panel.test" });
+      // Time for a lost packet to be sent again, and far less than the 15 seconds a login gets.
+      expect(waited).toBeGreaterThan(2_000);
+      expect(waited).toBeLessThan(8_000);
+      expect(asked.filter((each) => each.startsWith("http:"))).toEqual([]);
+      expect(await subscriptions.get()).toBeNull();
+    },
+  );
+
+  it(
+    "keeps waiting for a slow login once the https port accepted the connection",
+    { timeout: 15_000 },
+    async () => {
+      const provider = await fakeProvider(LOGIN);
+      const address = provider.url.replace("http://", "");
+      // As if the fake provider were behind https, and answered later than a port gets to accept.
+      const slow: typeof fetch = async (input, init) => {
+        await new Promise((resolve) => setTimeout(resolve, 4_000));
+        return fetch(String(input).replace("https:", "http:"), init);
+      };
+      const { subscriptions } = await app(slow);
+
+      const connected = await subscriptions.connect({ server: address, ...LOGIN });
+
+      expect(connected).toMatchObject({ server: `https://${address}` });
+    },
+  );
 
   it("doesn't ask when https isn't what failed", async () => {
     const provider = await fakeProvider(LOGIN);

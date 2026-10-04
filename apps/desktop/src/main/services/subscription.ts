@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { type } from "arktype";
 import type { LoginInput } from "@mrstreamer/contracts/ipc";
-import type { SubscriptionSummary } from "@mrstreamer/contracts/subscription";
+import type { AccountStatus, SubscriptionSummary } from "@mrstreamer/contracts/subscription";
 import { diagnosed } from "@mrstreamer/core/diagnostics";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
 import type { Provider, ProviderOptions } from "@mrstreamer/core/provider";
@@ -15,7 +15,12 @@ import * as Semaphore from "effect/Semaphore";
 import { readJsonFile, removeFile, writeJsonFile } from "../platform/json-file.ts";
 import type { Secrets } from "../platform/secrets.ts";
 import { providerFor, type ProviderAccount } from "../providers/account.ts";
-import { httpsUnavailable, parseLogin } from "../providers/xtream.ts";
+import {
+  connectionIgnored,
+  httpsUnavailable,
+  parseLogin,
+  type TcpConnect,
+} from "../providers/xtream.ts";
 
 const AccountRecord = type({
   state: "'active' | 'expired' | 'banned' | 'disabled' | 'unknown'",
@@ -71,6 +76,8 @@ export interface SubscriptionDeps {
   readonly dataDir: string;
   readonly secrets: Secrets;
   readonly providerOptions: ProviderOptions;
+  /** Opens the connection that tries an address's https port. `net.connect`, except in tests. */
+  readonly tcpConnect?: TcpConnect;
 }
 
 export class Subscriptions extends Context.Service<
@@ -143,6 +150,24 @@ function make(deps: SubscriptionDeps) {
         return summary(next);
       });
 
+    /**
+     * The login check `authenticated` for an https address the viewer typed without a scheme.
+     * When https is what fails there, it fails with `unencrypted-only` instead. A port that leaves
+     * the connection unanswered ends it that way within seconds (`connectionIgnored`). A server
+     * that accepted the connection keeps the whole time a login gets.
+     */
+    const httpsOrAsk = (authenticated: Effect.Effect<AccountStatus, Failed>, server: string) => {
+      const ask = new Failed({ error: { kind: "unencrypted-only", server } });
+      return authenticated.pipe(
+        Effect.mapError((failed) => (httpsUnavailable(failed.error) ? ask : failed)),
+        Effect.raceFirst(
+          Effect.promise((signal) => connectionIgnored(server, signal, deps.tcpConnect)).pipe(
+            Effect.flatMap((ignored) => (ignored ? Effect.fail(ask) : Effect.never)),
+          ),
+        ),
+      );
+    };
+
     return {
       get: Effect.map(load, (subscription) => (subscription ? summary(subscription) : null)),
 
@@ -154,18 +179,15 @@ function make(deps: SubscriptionDeps) {
             catch: failedWith,
           });
           const provider = providerFor(account, deps.providerOptions);
-          const status = yield* Effect.tryPromise({
+          const authenticated = Effect.tryPromise({
             try: (signal) => provider.authenticate(signal),
             catch: failedWith,
-          }).pipe(
-            // An address typed without a scheme goes to http only once the viewer agrees: the
-            // login would travel unencrypted. A playlist without a login keeps the https answer.
-            Effect.mapError((failed) =>
-              account.kind === "xtream" && schemeless && httpsUnavailable(failed.error)
-                ? new Failed({ error: { kind: "unencrypted-only", server: account.server } })
-                : failed,
-            ),
-          );
+          });
+          // An address typed without a scheme goes to http only once the viewer agrees: the
+          // login would travel unencrypted. A playlist without a login keeps the https answer.
+          const status = yield* account.kind === "xtream" && schemeless
+            ? httpsOrAsk(authenticated, account.server)
+            : authenticated;
           // The link of a playlist can hold a token, so it is sealed like a password.
           const sealed = yield* Effect.try({
             try: () =>
