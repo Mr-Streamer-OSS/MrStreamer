@@ -10,6 +10,7 @@ import { mainLayer } from "../src/main/runtime.ts";
 import { Library } from "../src/main/services/library.ts";
 import { Playback } from "../src/main/services/playback.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
+import { Updates } from "../src/main/services/updates.ts";
 import { fakeGuide } from "./fake-provider.ts";
 import { fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 
@@ -73,6 +74,45 @@ describe("diagnostics", () => {
     expect(await entries(dataDir)).toContainEqual(
       expect.objectContaining({ op: "start", ms: 7, outcome: "ok" }),
     );
+  });
+
+  it("closes while an update's install waits for the app to quit, with its line on disk", async () => {
+    const dataDir = await tempDir();
+    const installing = Promise.withResolvers<void>();
+    const runtime = ManagedRuntime.make(
+      mainLayer({
+        ...testConfig(dataDir),
+        updates: {
+          installed: "0.0.1",
+          discover: async () => [
+            {
+              version: { major: 0, minor: 0, patch: 2, nightly: null },
+              feedUrl: "https://example.test/download/v0.0.2",
+              notes: null,
+              page: "https://example.test/releases/v0.0.2",
+            },
+          ],
+          installer: {
+            download: async () => {},
+            // As electron-updater leaves an install the system accepts: the app quits instead.
+            install: () => {
+              installing.resolve();
+              return new Promise<void>(() => {});
+            },
+          },
+        },
+      }),
+    );
+    const updates = await promised(runtime, Updates);
+    await updates.check();
+    await updates.download();
+    const restart = updates.restart().catch(() => {});
+    await installing.promise;
+
+    await runtime.dispose();
+    await restart;
+
+    expect(await entries(dataDir)).toContainEqual(expect.objectContaining({ op: "install" }));
   });
 
   it("keeps the log and the one before it, each at most 512 KB", async () => {
