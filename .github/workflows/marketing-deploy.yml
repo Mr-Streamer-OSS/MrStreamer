@@ -13,8 +13,9 @@
 #   (apps/marketing/scripts/package-vercel.ts) and hands over only .vercel/output.
 # - The publish job checks out nothing: it holds that package and the token, and runs the pinned
 #   Vercel CLI on it.
-# - One publication at a time. A run that waited builds the newest main; one whose build main has
-#   since overtaken leaves publishing to the run that change started.
+# - One publication at a time. A run that waited builds the newest main. Before it publishes, a
+#   run asks git whether main has changed the website since its build, and if so leaves
+#   publishing to the run that change started.
 #
 # The Vercel project has no Git connection and an empty Root Directory: Vercel builds nothing
 # itself, and this workflow is the only thing that publishes.
@@ -23,7 +24,7 @@ name: Marketing deploy
 on:
   push:
     branches: [main]
-    # What the page is built from. MARKETING_INPUTS below names the same files.
+    # What the page is built from. MARKETING_INPUTS below names the same files for git.
     paths:
       - apps/marketing/**
       - docs/assets/**
@@ -39,12 +40,17 @@ permissions:
   contents: read
   actions: read
 
+# Runs from main take turns, and none is cancelled halfway. GitHub keeps one run waiting per
+# group, so a run started by hand from another branch, which builds nothing, gets a group of its
+# own: it can't take the place of a run from main that is waiting to publish.
 concurrency:
-  group: marketing-production
+  group: marketing-production-${{ github.ref }}
   cancel-in-progress: false
 
 env:
-  MARKETING_INPUTS: '^(apps/marketing/|docs/assets/|apps/desktop/assets/brand/mark\.svg$|package\.json$|pnpm-workspace\.yaml$|pnpm-lock\.yaml$|\.github/workflows/marketing(-deploy)?\.yml$)'
+  MARKETING_INPUTS: >-
+    apps/marketing docs/assets apps/desktop/assets/brand/mark.svg package.json pnpm-workspace.yaml
+    pnpm-lock.yaml .github/workflows/marketing.yml .github/workflows/marketing-deploy.yml
 
 jobs:
   build:
@@ -113,16 +119,26 @@ jobs:
             echo "::error::The marketing-production environment lacks ${list%, }."
             exit 1
           fi
+      # git compares the whole of both commits. GitHub's comparison names 300 changed files at
+      # most, so a website change behind a larger one would get past it and the older page would
+      # be published over the newer. The copy of main holds its history and no files, so there is
+      # still nothing from the repository here to run. A comparison that fails publishes nothing.
       - name: Leave it to a newer run when main changed the website since the build
         id: newest
         env:
-          GH_TOKEN: ${{ github.token }}
           BUILT: ${{ needs.build.outputs.commit }}
         run: |
-          changed=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BUILT...main" --paginate --jq '.files[]?.filename')
-          if grep -Eq "$MARKETING_INPUTS" <<<"$changed"; then
+          git clone --quiet --bare --filter=blob:none --single-branch --branch main \
+            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "$RUNNER_TEMP/main.git"
+          read -ra inputs <<<"$MARKETING_INPUTS"
+          changed=0
+          git --git-dir="$RUNNER_TEMP/main.git" diff --quiet --no-renames "$BUILT" main -- "${inputs[@]}" || changed=$?
+          if [ "$changed" -eq 1 ]; then
             echo "::notice::main changed the website after $BUILT was built. The run for that change publishes it."
             echo "superseded=true" >> "$GITHUB_OUTPUT"
+          elif [ "$changed" -ne 0 ]; then
+            echo "::error::Couldn't compare $BUILT with main, so this run publishes nothing."
+            exit 1
           fi
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         if: steps.newest.outputs.superseded != 'true'
@@ -144,4 +160,8 @@ jobs:
           BUILT: ${{ needs.build.outputs.commit }}
         run: |
           url=$(npx --yes vercel@62.2.0 deploy --prebuilt --prod --cwd apps/marketing --token "$VERCEL_TOKEN")
-          echo "Published $BUILT as $url" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### Deployed"
+            echo "$BUILT is a production deployment at $url."
+            echo "Vercel points the project's domains at it, unless the project is rolled back: then they stay on the earlier deployment until Undo Rollback."
+          } >> "$GITHUB_STEP_SUMMARY"

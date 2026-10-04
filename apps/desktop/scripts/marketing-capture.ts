@@ -72,6 +72,8 @@ try {
     deviceScaleFactor: SCALE,
     mobile: false,
   });
+  // Scroll bars stay out of the picture, as on a Mac, where they show only while scrolling.
+  await page.send("Emulation.setScrollbarsHidden", { hidden: true });
   // Images come from the demo; a remote image it doesn't know is refused.
   page.on("Fetch.requestPaused", (params) => {
     const { requestId, request } = params as { requestId: string; request: { url: string } };

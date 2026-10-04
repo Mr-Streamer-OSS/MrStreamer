@@ -43,7 +43,7 @@ pnpm preview:marketing   # the built page, on http://localhost:4173
 2. The build job has no secrets. It builds `main`, checks the package and hands over `.vercel/output` alone.
 3. The publish job holds the Vercel token. It checks out nothing and runs the pinned Vercel CLI on that package: `vercel deploy --prebuilt --prod`.
 
-Runs take turns and none is cancelled halfway. A run that waited builds the newest `main`.
+Runs take turns and none is cancelled halfway. A run that waited builds the newest `main`. Before it publishes, a run asks git whether `main` has changed the website since its build. If it has, the run leaves publishing to the run that change started. If git can't tell, the run fails and publishes nothing.
 
 Publishing is off until you turn it on. Until then a run builds, says publishing is off, and stops. Every pull request also builds the page in `.github/workflows/marketing.yml`, without secrets.
 
@@ -164,7 +164,7 @@ To stop publishing, set the variable to anything but `true`. The page stays as i
 gh variable set MARKETING_DEPLOY_ENABLED --repo Mr-Streamer-OSS/MrStreamer --body false
 ```
 
-To go back one publication, open the project in Vercel and choose Instant Rollback on the production deployment. The Hobby plan goes back to the deployment before the current one. After a rollback Vercel holds the domain on that deployment, and new publications don't go live until you choose Undo Rollback.
+To go back one publication, open the project in Vercel and choose Instant Rollback on the production deployment. The Hobby plan goes back to the deployment before the current one. After a rollback Vercel holds the domain on that deployment. The workflow still runs and its summary names each new deployment, but none of them goes live until you choose Undo Rollback.
 
 To go back further, revert the commit on `main`. The workflow publishes the reverted page.
 

@@ -93,11 +93,11 @@ p {
 /* Bar */
 .bar {
   display: flex;
-  /* On the narrowest screens the links go under the name instead of off the edge. */
+  /* One row on a phone. Narrower than about 340 px, the links go under the name, not off the edge. */
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 0.7em 1em;
+  gap: 0.7em 0.8em;
   padding: 1.1em var(--inset);
   font-size: 0.9em;
   color: var(--soft);
@@ -106,7 +106,7 @@ p {
 .bar nav {
   display: flex;
   align-items: center;
-  gap: 1.3em;
+  gap: 1em;
 }
 
 .bar nav a:not(.button):hover,

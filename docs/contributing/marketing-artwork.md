@@ -68,7 +68,7 @@ It also starts the made-up subscription, on loopback ports of its own:
 5. Stars two channels in Live TV, watches one and captures Live TV.
 6. Watches another channel, goes Home and captures.
 
-Each capture is the page of the window, taken with `Emulation.setDeviceMetricsOverride` at 1280 × 800 and a scale of 2, then `Page.captureScreenshot`. A page capture doesn't include the window's buttons. Home, Live TV and the details are captured in full screen, where the top bar keeps no room for those buttons. The episode is captured in a window, because in full screen the player hides the top bar.
+Each capture is the page of the window, taken with `Emulation.setDeviceMetricsOverride` at 1280 × 800 and a scale of 2, then `Page.captureScreenshot`. `Emulation.setScrollbarsHidden` keeps scroll bars out of it, as on a Mac, where they show only while scrolling. A page capture doesn't include the window's buttons. Home, Live TV and the details are captured in full screen, where the top bar keeps no room for those buttons. The episode is captured in a window, because in full screen the player hides the top bar.
 
 The app's pictures never come from the network. The script answers the image addresses the demo hands out from the page's DevTools session, with the canyon stills and drawn artwork, and refuses any other remote image.
 
