@@ -23,7 +23,7 @@ import {
   type TitleDetails,
   type TitleKind,
 } from "./ondemand.ts";
-import type { OutputStatus, RemoteMedia, RemoteTitle } from "./output.ts";
+import type { OutputStatus, RemoteMedia, RemotePlayingTitle, RemoteTitle } from "./output.ts";
 import {
   CODECS,
   type ChannelTracks,
@@ -168,6 +168,7 @@ export const ipcInputs = {
       .or({ generation: "number.integer", command: "'seek'", position: "number >= 0" })
       .or({ generation: "number.integer", command: "'subtitles'", on: "boolean" }),
   "output.volume": () => type({ "level?": "0 <= number <= 1", "muted?": "boolean" }),
+  "output.playingTitle": none,
   "preferences.get": none,
   "preferences.update": () => Preferences.partial(),
   "viewing.get": none,
@@ -183,11 +184,6 @@ export const ipcInputs = {
       duration: "number > 0",
       /** When this play of the title began: epoch milliseconds. */
       since: "number",
-      /**
-       * For progress a receiver reported: the load it is of. It is saved only while that load is
-       * the receiver's and the account it began under is the connected one.
-       */
-      "generation?": "number.integer",
     }),
   /** Every version played of the movies and series with these ids. */
   "viewing.removeFromContinue": () =>
@@ -287,6 +283,11 @@ export interface IpcOutputs {
   /** Does nothing when `generation` is no longer what the receiver plays. */
   "output.command": null;
   "output.volume": null;
+  /**
+   * The title the receiver plays, with what its file holds and the tracks chosen, for a window
+   * opened while it plays. Null for a channel, or when it plays nothing.
+   */
+  "output.playingTitle": RemotePlayingTitle | null;
   "preferences.get": Preferences;
   "preferences.update": Preferences;
   /** Favourites and recently watched channels of the connected account. */

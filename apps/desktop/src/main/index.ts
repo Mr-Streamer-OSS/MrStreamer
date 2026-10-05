@@ -162,7 +162,7 @@ async function start(): Promise<void> {
       ffmpeg: toolPath("ffmpeg"),
       ffprobe: toolPath("ffprobe"),
       catalogueWorker: (setup) => createCatalogueWorker({ workerData: setup }),
-      receivers: receiverAdapters(),
+      output: { adapters: receiverAdapters() },
       // MR_STREAMER_TMDB_KEY at run time overrides the key built in, for testing.
       tmdbKey: process.env["MR_STREAMER_TMDB_KEY"] || __TMDB_KEY__ || null,
       region: app.getLocaleCountryCode() || "US",
@@ -260,10 +260,11 @@ async function start(): Promise<void> {
       "subscription.connect": (login) =>
         Effect.gen(function* () {
           const previous = yield* subscriptions.get;
+          // What a receiver plays is the account's that is there now: it ends before another
+          // takes its place, with how far it got saved under its own.
+          yield* output.accountChanged;
           const connected = yield* subscriptions.connect(login);
           if (previous?.id !== connected.id) {
-            // What a receiver plays of the account before ends with it.
-            yield* output.accountChanged;
             yield* playback.closeAll;
             yield* forgetAccount;
           }
@@ -400,6 +401,7 @@ async function start(): Promise<void> {
       "output.command": ({ generation, ...command }) =>
         Effect.as(output.command(generation, command), null),
       "output.volume": (volume) => Effect.as(output.setVolume(volume), null),
+      "output.playingTitle": () => output.playingTitle,
       "preferences.get": () => settings.get,
       "preferences.update": (patch) =>
         Effect.gen(function* () {
@@ -415,14 +417,8 @@ async function start(): Promise<void> {
           settings.update({ lastChannelId: channelId }),
           viewing.recordWatch(commandId, channelId),
         ),
-      "viewing.recordProgress": ({ commandId, title, position, duration, since, generation }) =>
-        Effect.gen(function* () {
-          // What a receiver reported counts only for the load and the account it was of.
-          if (generation !== undefined && !(yield* output.savesProgress(generation))) {
-            return yield* viewing.state;
-          }
-          return yield* viewing.recordProgress(commandId, title, position, duration, since);
-        }),
+      "viewing.recordProgress": ({ commandId, title, position, duration, since }) =>
+        viewing.recordProgress(commandId, title, position, duration, since),
       "viewing.removeFromContinue": ({ commandId, ...filter }) =>
         viewing.removeFromContinue(commandId, filter),
       "viewing.finishSeries": ({ commandId, seriesIds }) =>
@@ -449,9 +445,12 @@ async function start(): Promise<void> {
     (sender) => sender === mainWindow?.webContents,
   );
 
-  // A receiver plays from this window's app: without the window nobody controls it, so it ends.
+  // What plays here ends with the window. What a receiver plays goes on: the app is still
+  // there to serve it, and opening the window again shows its controls.
   const closeStreams = () =>
-    void runtime.runFork(Effect.andThen(output.disconnect, playback.closeAll));
+    void runtime.runFork(
+      Effect.flatMap(output.remote, (remote) => (remote ? Effect.void : playback.closeAll)),
+    );
   mainWindow = openWindow(closeStreams);
   // How long the app took to show its window, from the start of the process.
   mainWindow.once("ready-to-show", () =>

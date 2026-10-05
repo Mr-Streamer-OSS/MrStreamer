@@ -15,6 +15,10 @@
 // load is dropped too, so a late answer can't move the clock of what plays now, save progress
 // under another account, or end an episode that is no longer the one playing.
 //
+// How far a title got on a receiver is saved here, from what the receiver confirmed: each minute
+// while it plays, and when it pauses, is skipped in, ends, stops or is lost. The UI saves that for
+// what plays on this computer; a receiver plays on with the window closed, when there is no UI.
+//
 // A receiver plays from an address of this computer, so the app has to stay open: quitting ends
 // what the receiver plays.
 import type {
@@ -25,11 +29,14 @@ import type {
   RemoteCommand,
   RemoteItem,
   RemoteMedia,
+  RemotePlayingTitle,
   RemoteTitle,
 } from "@mrstreamer/contracts/output";
+import { randomUUID } from "node:crypto";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { StreamFailure } from "@mrstreamer/contracts/playback";
 import { Failed } from "@mrstreamer/core/failure";
+import { ViewingRecord } from "@mrstreamer/core/viewing/service";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -56,6 +63,8 @@ import { Subscriptions } from "./subscription.ts";
 const FETCH_MS = 10_000;
 /** Whose pictures a receiver is given to show: TMDB's, which anyone may fetch. */
 const ARTWORK_HOST = "image.tmdb.org";
+/** How often a title's progress is saved while a receiver plays it. */
+const CHECKPOINT_MS = 60_000;
 
 export interface OutputDeps {
   /** The ways this build reaches receivers: Google Cast, AirPlay, both or none. */
@@ -64,6 +73,8 @@ export interface OutputDeps {
   readonly addresses?: () => readonly string[];
   /** How long a receiver gets to ask for what it was sent, in ms, when not the usual. */
   readonly fetchMs?: number;
+  /** How often a playing title's progress is saved, in ms, when not the usual. */
+  readonly checkpointMs?: number;
 }
 
 /** What the receiver may show about what it plays. */
@@ -84,7 +95,19 @@ interface Playing {
   readonly offset: number;
   /** Ends the wait for the receiver's first request. */
   readonly watch: AbortController;
+  /** A title: what its file holds, the tracks chosen, and when this play of it began. */
+  readonly title: OpenedTitle | null;
+  readonly tracks: { readonly audio: number | null; readonly subtitle: number | null };
   media: RemoteMedia;
+}
+
+/** A title opened for the receiver. */
+interface OpenedTitle {
+  readonly info: RemoteTitle;
+  /** Seconds between the start of the title and where a receiver's clock starts. */
+  readonly offset: number;
+  /** When this play of it began, epoch ms: what its progress is saved with. */
+  readonly since: number;
 }
 
 export class Output extends Context.Service<
@@ -141,11 +164,14 @@ export class Output extends Context.Service<
     /** Whether a receiver has playback, or had it until it was lost: nothing previews here then. */
     readonly remote: Effect.Effect<boolean>;
     /**
-     * Whether progress a receiver reported for `generation` may be saved: only while that load
-     * is the receiver's, and the account it began under is the connected one.
+     * The title the receiver plays, with what its file holds and the tracks chosen: what a
+     * window opened meanwhile needs to show its controls. Null for a channel, or nothing.
      */
-    savesProgress(generation: number): Effect.Effect<boolean>;
-    /** Another account connected, or none: ends what the receiver plays of the one before. */
+    readonly playingTitle: Effect.Effect<RemotePlayingTitle | null>;
+    /**
+     * Another account is about to connect, or the one there to go: saves how far the receiver
+     * got with the title of the one before, then ends it.
+     */
     readonly accountChanged: Effect.Effect<void>;
   }
 >()("mrstreamer/Output") {
@@ -156,6 +182,7 @@ function make(deps: OutputDeps) {
   return Effect.gen(function* () {
     const playback = yield* Playback;
     const subscriptions = yield* Subscriptions;
+    const viewing = yield* ViewingRecord;
     const updates = yield* PubSub.unbounded<OutputStatus>();
     /** Changes to what is connected and what plays run one at a time. */
     const one = (yield* Semaphore.make(1)).withPermits(1);
@@ -176,8 +203,8 @@ function make(deps: OutputDeps) {
     let generation = 0;
     /** Which of this computer's addresses the next load is served on, counted round. */
     let addressTurn = 0;
-    /** Titles opened for the receiver and not played yet, by session. */
-    const opened = new Map<string, { readonly title: TitleRef; readonly offset: number }>();
+    /** Titles opened for the receiver, by session. */
+    const opened = new Map<string, OpenedTitle>();
 
     const snapshot = (): OutputStatus => ({
       offers: adapters.map((each) => each.kind),
@@ -200,13 +227,46 @@ function make(deps: OutputDeps) {
     /** Runs what an adapter's or the playback service's callback sets off, outside any call. */
     const later = (effect: Effect.Effect<void>) => void Effect.runFork(effect);
 
-    /** Ends what plays on the receiver, for this service: its session closes, its wait ends. */
+    /** Where the title is now, in seconds into it: the receiver's last word, moved on while it plays. */
+    const positionOf = (now: Playing): number => {
+      const { media } = now;
+      const moved = media.state === "playing" ? (Date.now() - media.at) / 1000 : 0;
+      return Math.min(media.position + Math.max(0, moved), now.title?.info.duration ?? Infinity);
+    };
+
+    /**
+     * Saves how far the receiver got with the title it plays, under the account it began with:
+     * never under another that connected since. A channel has no progress.
+     */
+    const checkpoint = (now: Playing | null) =>
+      Effect.gen(function* () {
+        const title = now?.title;
+        // Nothing confirmed yet says nothing of how far it got.
+        if (!now || !title || now.media.state === "loading") return;
+        const position = positionOf(now);
+        if (position <= 0 || (yield* subscriptions.key) !== now.account) return;
+        yield* viewing
+          .recordProgress(
+            randomUUID(),
+            title.info.title,
+            position,
+            title.info.duration,
+            title.since,
+          )
+          .pipe(Effect.ignore);
+      });
+
+    /**
+     * Ends what plays on the receiver, for this service: how far its title got is saved, its
+     * session closes, its waits end.
+     */
     const drop = (close: boolean) =>
-      Effect.suspend(() => {
+      Effect.gen(function* () {
         const was = playing;
         playing = null;
         was?.watch.abort();
-        return was && close ? playback.close(was.sessionId) : Effect.void;
+        yield* checkpoint(was);
+        if (was && close) yield* playback.close(was.sessionId);
       });
 
     /** What plays now doesn't any more, and why, with the receiver still there. */
@@ -294,6 +354,7 @@ function make(deps: OutputDeps) {
           }),
         );
       }
+      const before = now.media.state;
       now.media = {
         ...now.media,
         state: said.state,
@@ -302,6 +363,10 @@ function make(deps: OutputDeps) {
       };
       output = { ...output, media: now.media };
       publish();
+      // Paused, or played to its end: how far it got is saved then, as for the UI's player.
+      if (said.state !== before && (said.state === "paused" || said.state === "ended")) {
+        later(checkpoint(now));
+      }
     }
 
     for (const adapter of adapters) adapter.listen((event) => hear(adapter, event));
@@ -357,7 +422,8 @@ function make(deps: OutputDeps) {
       connection: Connection,
       sessionId: string,
       item: RemoteItem,
-      offset: number,
+      title: OpenedTitle | null,
+      tracks: Playing["tracks"],
       media: Omit<ReceiverMedia, "generation" | "metadata">,
       shown: Shown,
     ) =>
@@ -366,6 +432,7 @@ function make(deps: OutputDeps) {
         if (!account) return yield* new Failed({ error: { kind: "no-subscription" } });
         const mine = ++generation;
         const watch = new AbortController();
+        const offset = title?.offset ?? 0;
         const now: Playing = {
           generation: mine,
           sessionId,
@@ -373,14 +440,16 @@ function make(deps: OutputDeps) {
           account,
           offset,
           watch,
+          title,
+          tracks,
           media: {
             generation: mine,
             sessionId,
             item,
             state: "loading",
-            position: item.kind === "title" ? media.position + offset : 0,
+            position: title ? media.position + offset : 0,
             at: Date.now(),
-            duration: media.duration,
+            duration: title?.info.duration ?? null,
             subtitles: media.subtitles,
           },
         };
@@ -426,7 +495,18 @@ function make(deps: OutputDeps) {
             ),
           deps.fetchMs ?? FETCH_MS,
         );
-        watch.signal.addEventListener("abort", () => clearTimeout(timer), { once: true });
+        // Only playing moves a title on: a save while paused would make it look watched later.
+        const saving = setInterval(() => {
+          if (playing === now && now.media.state === "playing") later(checkpoint(now));
+        }, deps.checkpointMs ?? CHECKPOINT_MS);
+        watch.signal.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(timer);
+            clearInterval(saving);
+          },
+          { once: true },
+        );
         return now.media;
       });
 
@@ -569,7 +649,8 @@ function make(deps: OutputDeps) {
               connection,
               stream.sessionId,
               { kind: "channel", channelId },
-              0,
+              null,
+              { audio: options.audio ?? null, subtitle: null },
               {
                 url: stream.url,
                 live: true,
@@ -594,15 +675,16 @@ function make(deps: OutputDeps) {
               upstreamUrl,
               yield* target(connection),
             );
-            opened.set(session.sessionId, { title, offset: session.offset });
-            return {
+            const info: RemoteTitle = {
               sessionId: session.sessionId,
               title,
               duration: session.duration,
               audio: session.audio,
               subtitles: session.subtitles,
               shows: ["text"],
-            } satisfies RemoteTitle;
+            };
+            opened.set(session.sessionId, { info, offset: session.offset, since: Date.now() });
+            return info;
           }),
         ),
 
@@ -634,15 +716,15 @@ function make(deps: OutputDeps) {
             return yield* load(
               connection,
               sessionId,
-              { kind: "title", title: title.title },
-              title.offset,
+              { kind: "title", title: title.info.title },
+              title,
+              { audio: options.audio, subtitle: loaded.subtitles ? options.subtitle : null },
               {
                 url: loaded.url,
                 live: false,
                 position: Math.max(0, options.position - title.offset),
                 paused: options.paused === true,
-                // The receiver reads the title's length from its playlist.
-                duration: null,
+                duration: title.info.duration,
                 subtitles: loaded.subtitles,
               },
               options.shown,
@@ -662,6 +744,8 @@ function make(deps: OutputDeps) {
               case "pause":
                 return yield* told(() => connection.pause(mine));
               case "seek":
+                // Where it was before the skip, as the UI's player saves it.
+                yield* checkpoint(now);
                 return yield* told(() =>
                   connection.seek(mine, Math.max(0, command.position - now.offset)),
                 );
@@ -700,11 +784,9 @@ function make(deps: OutputDeps) {
 
       remote: Effect.sync(() => output.kind === "receiver" || output.kind === "lost"),
 
-      savesProgress: (mine: number) =>
-        Effect.map(
-          subscriptions.key,
-          (account) => playing?.generation === mine && playing.account === account,
-        ),
+      playingTitle: Effect.sync(() =>
+        playing?.title ? { title: playing.title.info, ...playing.tracks } : null,
+      ),
 
       accountChanged: one(
         Effect.gen(function* () {

@@ -108,6 +108,13 @@ export interface RemoteTitle {
   readonly shows: readonly SubtitleFormat[];
 }
 
+/** The title a receiver plays: what its file holds, and the tracks it plays with. */
+export interface RemotePlayingTitle {
+  readonly title: RemoteTitle;
+  readonly audio: number | null;
+  readonly subtitle: number | null;
+}
+
 /** What a receiver can be told about what it plays. */
 export type RemoteCommand =
   | { readonly command: "play" | "pause" | "stop" }

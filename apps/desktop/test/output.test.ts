@@ -3,23 +3,16 @@ import { describe, expect, it, vi } from "vitest";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { Codec } from "@mrstreamer/contracts/playback";
 import { Failed } from "@mrstreamer/core/failure";
-import * as Layer from "effect/Layer";
+import { ViewingRecord } from "@mrstreamer/core/viewing/service";
 import { airplayAdapter } from "../src/main/receivers/airplay/adapter.ts";
 import { castAdapter } from "../src/main/receivers/cast/adapter.ts";
+import { mainLayer } from "../src/main/runtime.ts";
 import { Output } from "../src/main/services/output.ts";
 import { Playback } from "../src/main/services/playback.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { startFakeAirplayHelper } from "./fake-airplay-helper.ts";
 import { startFakeCastReceiver } from "./fake-cast-receiver.ts";
-import {
-  collect,
-  fakeProvider,
-  promised,
-  runtimeFor,
-  tempDir,
-  testSecrets,
-  userAgent,
-} from "./support.ts";
+import { collect, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 
 // CI points this at the bundled build, with ffprobe beside it; locally the ones on PATH do.
 const FFMPEG = process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg";
@@ -41,51 +34,47 @@ const eventually = <T>(check: () => T | Promise<T>) =>
  * fake TV that takes Cast and a fake helper for AirPlay. The TV fetches nothing by itself: a test
  * that wants it to play asks for the stream as a TV does, with `fetches`.
  */
-async function casting(options: { fetchMs?: number } = {}) {
+async function casting(options: { fetchMs?: number; checkpointMs?: number } = {}) {
   const provider = await fakeProvider({ maxConnections: 1, slotReleaseMs: 50 });
   const tv = await startFakeCastReceiver();
   const helper = await startFakeAirplayHelper();
-  const accounts = Subscriptions.layer({
-    dataDir: await tempDir(),
-    secrets: testSecrets,
-    providerOptions: { userAgent },
-  });
   const runtime = runtimeFor(
-    Output.layer({
-      adapters: [
-        castAdapter({
-          discovery: tv.discovery,
-          timings: {
-            request: 3000,
-            launch: 3000,
-            load: 3000,
-            close: 200,
-            status: 60_000,
-            reconnect: [20, 20, 20],
-            attempt: 500,
-          },
-        }),
-        airplayAdapter({
-          helper: helper.helper,
-          args: helper.args,
-          timings: { chosen: 300, settle: 150, quit: 500 },
-        }),
-      ],
-      addresses: () => ["127.0.0.1"],
-      fetchMs: options.fetchMs ?? 60_000,
-    }).pipe(
-      Layer.provideMerge(
-        Playback.layer({ userAgent, ffmpeg: FFMPEG, ffprobe: FFPROBE }).pipe(
-          Layer.provideMerge(accounts),
-        ),
-      ),
-    ),
+    mainLayer({
+      ...testConfig(await tempDir()),
+      ffmpeg: FFMPEG,
+      ffprobe: FFPROBE,
+      output: {
+        adapters: [
+          castAdapter({
+            discovery: tv.discovery,
+            timings: {
+              request: 3000,
+              launch: 3000,
+              load: 3000,
+              close: 200,
+              status: 60_000,
+              reconnect: [20, 20, 20],
+              attempt: 500,
+            },
+          }),
+          airplayAdapter({
+            helper: helper.helper,
+            args: helper.args,
+            timings: { chosen: 300, settle: 150, quit: 500 },
+          }),
+        ],
+        addresses: () => ["127.0.0.1"],
+        fetchMs: options.fetchMs ?? 60_000,
+        ...(options.checkpointMs ? { checkpointMs: options.checkpointMs } : {}),
+      },
+    }),
   );
   const subscriptions = await promised(runtime, Subscriptions);
   await subscriptions.connect({ server: provider.url, username: "demo", password: "demo" });
   const source = await subscriptions.source();
   const playback = await promised(runtime, Playback);
   const output = await promised(runtime, Output);
+  const viewing = await promised(runtime, ViewingRecord);
   const changes = await collect(runtime, (await runtime.runPromise(Output)).changes);
 
   const movie = provider.titles.movies.find((each) => each.name.startsWith(MOVIE))!;
@@ -126,7 +115,10 @@ async function casting(options: { fetchMs?: number } = {}) {
     return fetch(new URL(first, video).href);
   };
   const state = async () => (await output.status()).output;
+  /** How far the record says the movie got under the connected account, in seconds; null when it has nothing. */
+  const saved = async () => (await viewing.progress({ movieIds: [title.id] }))[0]?.position ?? null;
   return {
+    saved,
     provider,
     tv,
     helper,
@@ -254,7 +246,6 @@ describe.skipIf(!hasTools)("playback on a receiver", () => {
     await eventually(async () =>
       expect(await state()).toMatchObject({ kind: "lost", failure: { kind: "unreachable" } }),
     );
-    expect(await output.savesProgress(second.media.generation)).toBe(false);
     // What it played is closed with it: the provider's connection is free.
     await eventually(() => expect(provider.activeStreams()).toBe(0));
     expect(await output.remote()).toBe(true);
@@ -303,34 +294,56 @@ describe.skipIf(!hasTools)("playback on a receiver", () => {
     expect(tv.app).toBeNull();
   });
 
-  it("saves a receiver's progress only for the load and the account it began under", async () => {
-    const { tv, output, subscriptions, connect, play, state } = await casting();
+  it("saves how far the receiver got from what it confirms, never from an earlier load", async () => {
+    const { tv, connect, play, state, saved } = await casting({ checkpointMs: 100 });
     await connect();
-    const first = await play(10);
-    expect(await output.savesProgress(first.media.generation)).toBe(true);
+    await play(10);
+    // Loading says nothing of how far it got.
+    expect(await saved()).toBeNull();
 
+    tv.status({ playerState: "PLAYING", currentTime: 30 });
+    // While it plays, now and then.
+    await eventually(async () => expect(await saved()).toBeGreaterThanOrEqual(30));
+    tv.status({ playerState: "PAUSED", currentTime: 61 });
+    await eventually(async () => expect(await saved()).toBeCloseTo(61, 0));
+
+    // Another load of the title, from further back. What the TV still says of the first one,
+    // that it played to the end, moves neither the clock nor what is saved.
     const second = await play(20);
-    expect(await output.savesProgress(first.media.generation)).toBe(false);
-    expect(await output.savesProgress(second.media.generation)).toBe(true);
-    // What the TV still says of the first load moves nothing.
     tv.send({
       type: "MEDIA_STATUS",
       status: [
         { mediaSessionId: 1, playerState: "IDLE", idleReason: "FINISHED", currentTime: 150 },
       ],
     });
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 250));
     expect(await state()).toMatchObject({
       media: { generation: second.media.generation, state: "loading" },
     });
+    expect(await saved()).toBeCloseTo(61, 0);
+  });
 
-    // The account goes: what the receiver plays of it ends, and none of it is saved after.
+  it("saves a receiver's progress under the account it began with, and ends it when another connects", async () => {
+    const { tv, output, subscriptions, connect, play, state, saved } = await casting();
+    const other = await fakeProvider({ maxConnections: 1 });
+    await connect();
+    const { media } = await play(10);
+    tv.status({ playerState: "PLAYING", currentTime: 80 });
+    await eventually(async () => expect(await state()).toMatchObject({ media: { position: 80 } }));
     const stops = tv.requests("STOP").length;
+
+    // As the app does when another login is entered: the receiver's title ends first.
     await output.accountChanged();
-    await subscriptions.remove();
-    expect(await output.savesProgress(second.media.generation)).toBe(false);
+    expect(await saved()).toBeGreaterThanOrEqual(80);
     expect(await state()).toMatchObject({ kind: "receiver", media: null, failure: null });
     expect(tv.requests("STOP").length).toBeGreaterThan(stops);
+    await subscriptions.connect({ server: other.url, username: "demo", password: "demo" });
+
+    // What the TV says after that is of a load that is gone: the new account's record stays empty.
+    tv.status({ playerState: "PAUSED", currentTime: 120 });
+    await output.command(media.generation, { command: "seek", position: 140 });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(await saved()).toBeNull();
   });
 
   it("has the receiver stop when something plays here instead", async () => {

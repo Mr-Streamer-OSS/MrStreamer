@@ -15,10 +15,9 @@ import { diagnosticsLogLayer } from "./platform/diagnostics-log.ts";
 import { guideStoreLayer } from "./platform/guide-store.ts";
 import type { Secrets } from "./platform/secrets.ts";
 import { viewingStoreLayer } from "./platform/viewing-store.ts";
-import type { ReceiverAdapter } from "./receivers/adapter.ts";
 import { Library } from "./services/library.ts";
 import { OnDemand, type OnDemandDeps } from "./services/ondemand.ts";
-import { Output } from "./services/output.ts";
+import { Output, type OutputDeps } from "./services/output.ts";
 import { appNotices, Licences } from "./services/licences.ts";
 import { Playback } from "./services/playback.ts";
 import { Settings } from "./services/preferences.ts";
@@ -42,8 +41,8 @@ export interface MainConfig {
   readonly region: string;
   /** Another TMDB API, for tests. */
   readonly tmdbApi?: string;
-  /** The ways this build reaches receivers on the network: Google Cast, AirPlay, both or none. */
-  readonly receivers?: readonly ReceiverAdapter[];
+  /** How this build reaches receivers on the network; none when absent. */
+  readonly output?: OutputDeps;
 }
 
 export type MainServices =
@@ -136,7 +135,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
       ),
     ),
   );
-  const output = Output.layer({ adapters: config.receivers ?? [] });
+  const output = Output.layer(config.output ?? { adapters: [] }).pipe(Layer.provide(viewing));
   return Layer.mergeAll(guide, viewing, output).pipe(
     Layer.provideMerge(services),
     Layer.provideMerge(diagnosticsLogLayer(dataDir)),
