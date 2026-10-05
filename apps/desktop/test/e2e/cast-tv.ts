@@ -203,8 +203,11 @@ async function choose(page: Page): Promise<void> {
 }
 
 let broke = false;
+/** The app's window, once it is there, for what it showed when a step failed. */
+let opened: Page | null = null;
 try {
   const page = await connect(port);
+  opened = page;
   await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
   await login(page, provider);
 
@@ -382,6 +385,16 @@ try {
   );
 } catch (error) {
   console.error(`FAIL ${String(error)}`);
+  // A wait that ran out doesn't say what happened instead. The window and the TV do.
+  const view = await opened
+    ?.evaluate<string>(
+      `(document.querySelector("[data-view]") ?? document.body).innerText.replaceAll("\\n", " | ").slice(0, 400)`,
+    )
+    .catch(() => null);
+  console.error(`     The window showed: ${view ?? "nothing"}`);
+  console.error(
+    `     The TV held ${tv.media?.playerState ?? "nothing"} after ${tv.requests("LOAD").length} loads, with ${provider.activeStreams()} provider connections open`,
+  );
   broke = true;
 } finally {
   clearInterval(player);
