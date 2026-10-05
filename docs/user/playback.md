@@ -36,13 +36,13 @@ Providers keep movies and episodes as files, mostly MKV and MP4 and a few AVI. M
 | Subtitles stored as pictures (Blu-ray, DVD, DVB)         | Drawn over the picture                                                    |
 | Teletext subtitles and closed captions                   | Shown under the picture, like text subtitles                              |
 
-A movie starts about a second after you choose it. Skipping into what's already loaded is instant; skipping further away starts it again from there, which takes about a second too.
+A movie starts about a second after you choose it. Skipping into what's already loaded is instant; skipping further away starts it again from there, which takes about a second too. With subtitles on, the picture starts as soon as without them, and the subtitles already on screen at that moment follow as soon as Mr. Streamer has read them: "Subtitles loading" shows at the top right meanwhile.
 
 ## Known limits
 
 - Live subtitles show from their next line after you turn them on, and another sound track starts the channel again.
 - Surround sound that needs converting plays as stereo.
-- After you skip in a movie or episode, picture subtitles, teletext and captions already on screen at that moment show again from the next line.
+- After you skip in a movie or episode, the subtitle already on screen at that moment can't always be had: Mr. Streamer reads only a little of the file for it, and only while the picture can spare the connection. That works for MKV files when the subtitle began shortly before, and for MP4 files with text subtitles; a line that began long before, a slow connection, and other kinds of files leave it out. "Subtitles unavailable" then shows for a few seconds, the movie plays on, and the subtitles are back from the next line.
 - Closed captions come from the CEA-608 data most broadcasts carry. A channel or file that sends captions only in the newer CEA-708 form shows none.
 - Converting an HEVC or Xvid picture uses much more of your computer's processor than playing it as it is.
 - A damaged broadcast can take more than ten seconds to start, while Mr. Streamer retries it with the picture re-encoded.

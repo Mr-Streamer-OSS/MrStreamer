@@ -28,17 +28,15 @@ const movie = (id: string): NowPlaying => ({
   originalLanguage: null,
 });
 
-/** Serves each run with subtitles the same cue, "We sail at first light." from 10 to 12 s. */
+/** Serves each run with subtitles the same line, "We sail at first light." from 10 to 12 s. */
 function serveRuns(): void {
   vi.stubGlobal("fetch", async (url: string) => {
-    if (url === "http://127.0.0.1/cues") {
-      return new Response("WEBVTT\n\n00:10.000 --> 00:12.000\nWe sail at first light.\n\n");
+    if (new URL(url).searchParams.get("only") === "subtitles") {
+      const line = { at: 10, until: 12, text: "We sail at first light." };
+      return new Response(`{"ready":true}\n${JSON.stringify(line)}\n`);
     }
     // A run's picture never comes, which these tests don't need.
-    const subtitles = new URL(url).searchParams.has("subtitle");
-    return new Response(new ReadableStream(), {
-      headers: subtitles ? { "x-cues": "http://127.0.0.1/cues", "x-origin": "0" } : {},
-    });
+    return new Response(new ReadableStream());
   });
 }
 

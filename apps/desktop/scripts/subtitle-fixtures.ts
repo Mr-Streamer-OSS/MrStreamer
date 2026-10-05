@@ -8,9 +8,23 @@
 // PATH, as Ubuntu's and Homebrew's builds have. The clips:
 //
 // - title-h264-picture-subs.mkv: the MP4 title clip's picture and sound, with PGS subtitles in
-//   English and forced DVD subtitles in Dutch, as pictures.
+//   English and forced DVD subtitles in Dutch, as pictures, and SubRip subtitles in French. One
+//   subtitle of each starts between two keyframes and lasts beyond the second, which a run from
+//   a position has to bring back.
 // - h264-subtitles.mpegts: four seconds of a channel with English and Dutch sound, Dutch DVB
 //   subtitles, a Dutch teletext subtitle page, 888, and closed captions in the picture.
+// - title-long-subs.mkv: two and a half minutes of picture with PGS, DVD and SubRip subtitles
+//   that last long or build on earlier ones, which a run from a position has to bring back: a
+//   PGS picture drawn again at 23 s from what was sent at 11 s, a subtitle of each kind on screen
+//   from 121 to 139 s, and a second line of text over it. ffmpeg writes an index entry for each
+//   subtitle packet. title-long-subs-uncued.mkv has one taken out. title-long-subs-doubled.mkv
+//   has one twice, in place of another, with the counts mkvmerge writes: they agree with the
+//   index, which still leaves a packet out.
+// - recording-long-subtitles.mpegts: forty seconds of a recording whose subtitles depend on what
+//   came long before: captions that swap two screens, a teletext page that gains a row, and DVB
+//   subtitles shown again without being sent again.
+// - title-caption-track.mov: forty seconds with closed captions in a track of their own, which
+//   load a caption out of sight long before they show it.
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,19 +38,34 @@ interface Line {
   readonly text: string;
   readonly from: number;
   readonly to: number;
+  /**
+   * PGS: shows the picture of the line before again, without sending it again, as a display set
+   * in the same epoch can.
+   */
+  readonly again?: boolean;
 }
 
 function writeTitle(): void {
   const english = join(work, "english.sup");
   const dutch = join(work, "dutch.sup");
+  const french = join(work, "french.srt");
+  // The picture has a keyframe every two seconds: the subtitles from 5 to 7 s start between two.
   writeFileSync(
     english,
     pgs(640, 360, [
       { text: "FIRST PICTURE LINE", from: 2, to: 4 },
+      { text: "FIVE SECONDS", from: 5, to: 7 },
       { text: "EIGHT SECONDS", from: 8, to: 10 },
     ]),
   );
-  writeFileSync(dutch, pgs(640, 360, [{ text: "ACHT", from: 8, to: 10 }]));
+  writeFileSync(
+    dutch,
+    pgs(640, 360, [
+      { text: "VIJF", from: 5, to: 7 },
+      { text: "ACHT", from: 8, to: 10 },
+    ]),
+  );
+  writeFileSync(french, "1\n00:00:05,000 --> 00:00:07,000\nCinq secondes\n");
   ffmpeg(
     // PGS doesn't say how long a picture shows; the DVD subtitles made from it do.
     ...[
@@ -47,14 +76,272 @@ function writeTitle(): void {
       "-fix_sub_duration",
       "-i",
       dutch,
+      "-i",
+      french,
     ],
-    ...["-map", "0:v", "-map", "0:a", "-map", "1", "-map", "2"],
-    ...["-c:v", "copy", "-c:a", "copy", "-c:s:0", "copy", "-c:s:1", "dvdsub"],
+    ...["-map", "0:v", "-map", "0:a", "-map", "1", "-map", "2", "-map", "3"],
+    ...["-c:v", "copy", "-c:a", "copy", "-c:s:0", "copy", "-c:s:1", "dvdsub", "-c:s:2", "srt"],
     ...["-metadata:s:s:0", "language=eng", "-metadata:s:s:1", "language=nld"],
-    ...["-disposition:s:0", "0", "-disposition:s:1", "forced"],
+    ...["-metadata:s:s:2", "language=fra"],
+    ...["-disposition:s:0", "0", "-disposition:s:1", "forced", "-disposition:s:2", "0"],
     // Each input keeps its own times; by default ffmpeg starts the subtitles at zero.
     ...["-copyts", "-fflags", "+bitexact", join(fixtures, "title-h264-picture-subs.mkv")],
   );
+}
+
+/** Subtitles that depend on what came long before, for runs that start in the middle. */
+function writeLongTitle(): void {
+  const picture = join(work, "long.mkv");
+  // Five pictures a second, a keyframe every two seconds and silence keep the file small. FLAC
+  // starts at zero, where AAC would start before it and move every time in the file.
+  ffmpeg(
+    ...["-f", "lavfi", "-i", "smptebars=size=128x72:rate=5"],
+    ...["-f", "lavfi", "-i", "anullsrc=sample_rate=8000:channel_layout=mono", "-t", "150"],
+    ...["-c:v", "libx264", "-preset", "medium", "-crf", "32", "-pix_fmt", "yuv420p"],
+    ...["-g", "10", "-bf", "0", "-c:a", "flac", "-fflags", "+bitexact", picture],
+  );
+  const english = join(work, "long-english.sup");
+  const dutch = join(work, "long-dutch.sup");
+  const french = join(work, "long-french.srt");
+  writeFileSync(
+    english,
+    pgs(640, 360, [
+      { text: "ELEVEN", from: 11, to: 13 },
+      { text: "ELEVEN", from: 23, to: 29, again: true },
+      { text: "SIXTY", from: 60, to: 62 },
+      { text: "LONG LINE", from: 121, to: 139 },
+    ]),
+  );
+  writeFileSync(
+    dutch,
+    pgs(640, 360, [
+      { text: "ELF", from: 11, to: 13 },
+      { text: "ZESTIG", from: 60, to: 62 },
+      { text: "LANGE REGEL", from: 121, to: 139 },
+    ]),
+  );
+  writeFileSync(
+    french,
+    [
+      "1\n00:01:00,000 --> 00:01:02,000\nSoixante\n",
+      "2\n00:02:01,000 --> 00:02:19,000\nLongue ligne\n",
+      "3\n00:02:10,000 --> 00:02:13,000\nEn meme temps\n",
+      "4\n00:02:21,000 --> 00:02:23,000\nApres\n",
+    ].join("\n"),
+  );
+  const plain = join(fixtures, "title-long-subs.mkv");
+  ffmpeg(
+    ...["-i", picture, "-i", english, "-fix_sub_duration", "-i", dutch, "-i", french],
+    ...["-map", "0:v", "-map", "0:a", "-map", "1", "-map", "2", "-map", "3"],
+    ...["-c:v", "copy", "-c:a", "copy", "-c:s:0", "copy", "-c:s:1", "dvdsub", "-c:s:2", "srt"],
+    ...["-metadata:s:s:0", "language=eng", "-metadata:s:s:1", "language=nld"],
+    ...["-metadata:s:s:2", "language=fra"],
+    ...["-disposition:s:0", "0", "-disposition:s:1", "0", "-disposition:s:2", "0"],
+    // ffmpeg writes a subtitle as soon as it has waited ten seconds for the picture to catch
+    // up, far ahead of its time. Waiting as long as it takes puts each where its time falls, as
+    // a file from a disc or a muxer has them.
+    ...["-max_interleave_delta", "0", "-copyts", "-fflags", "+bitexact", plain],
+  );
+  // The PGS track is the file's third: the end of its picture at 29 s leaves the index.
+  writeFileSync(
+    join(fixtures, "title-long-subs-uncued.mkv"),
+    withoutIndexEntry(readFileSync(plain), 3, 29),
+  );
+  // What mkvmerge writes about each track, and who wrote it: the application that wrote the file,
+  // which ffmpeg calls "Lavf" here.
+  const counts = [2, 3, 4].flatMap((stream) => {
+    const sizes = execFileSync(
+      "ffprobe",
+      [
+        ...["-v", "error", "-select_streams", String(stream), "-show_entries", "packet=size"],
+        ...["-of", "csv=p=0", plain],
+      ],
+      { encoding: "utf8" },
+    )
+      .split("\n")
+      .filter(Boolean)
+      .map(Number);
+    return [
+      ...[`-metadata:s:${stream}`, `NUMBER_OF_FRAMES=${sizes.length}`],
+      ...[`-metadata:s:${stream}`, `NUMBER_OF_BYTES=${sizes.reduce((sum, size) => sum + size, 0)}`],
+      ...[`-metadata:s:${stream}`, "_STATISTICS_WRITING_APP=Lavf"],
+    ];
+  });
+  const counted = join(work, "long-counted.mkv");
+  ffmpeg(
+    ...["-i", plain, "-map", "0", "-c", "copy", ...counts, "-max_interleave_delta", "0"],
+    ...["-copyts", "-fflags", "+bitexact", counted],
+  );
+  // As many entries as the track has packets, as the counts say, and one packet left out all the
+  // same: the entry for the PGS picture at 23 s stands where the one for its end at 29 s was.
+  writeFileSync(
+    join(fixtures, "title-long-subs-doubled.mkv"),
+    withIndexEntryTwice(readFileSync(counted), 3, 23, 29),
+  );
+}
+
+/**
+ * The Matroska file without the index entry of track `track` at `seconds`: an empty element
+ * takes its place, so nothing else in the file moves.
+ */
+function withoutIndexEntry(file: Buffer, track: number, seconds: number): Buffer {
+  const point = indexEntry(file, track, seconds);
+  const out = Buffer.from(file);
+  // A Void element: its id, its size in one byte, then nothing that means anything.
+  out.fill(0, point.at, point.end);
+  out[point.at] = 0xec;
+  out[point.at + 1] = 0x80 | (point.end - point.at - 2);
+  return out;
+}
+
+/**
+ * The Matroska file with the index entry of track `track` at `seconds` a second time, in place
+ * of the one at `over`: the index lists as many packets as before, and nothing else moves.
+ */
+function withIndexEntryTwice(file: Buffer, track: number, seconds: number, over: number): Buffer {
+  const twice = indexEntry(file, track, seconds);
+  const gone = indexEntry(file, track, over);
+  if (twice.end - twice.at !== gone.end - gone.at) {
+    throw new Error("The two index entries differ in size");
+  }
+  const out = Buffer.from(file);
+  file.copy(out, gone.at, twice.at, twice.end);
+  return out;
+}
+
+/** Where a Matroska file's index entry of track `track` at `seconds` starts and ends. */
+function indexEntry(file: Buffer, track: number, seconds: number): { at: number; end: number } {
+  /** An element's id, where its data starts and ends, for the short ones an index holds. */
+  const element = (at: number) => {
+    const idLength = Math.clz32(file[at]!) - 23;
+    const sizeLength = Math.clz32(file[at + idLength]!) - 23;
+    let size = file[at + idLength]! & (0xff >> sizeLength);
+    for (let index = 1; index < sizeLength; index++)
+      size = size * 256 + file[at + idLength + index]!;
+    const start = at + idLength + sizeLength;
+    return { id: file.readUIntBE(at, idLength), start, end: start + size };
+  };
+  const children = (parent: { start: number; end: number }) => {
+    const found = [];
+    for (let at = parent.start; at < parent.end;) {
+      const child = element(at);
+      found.push({ ...child, at });
+      at = child.end;
+    }
+    return found;
+  };
+  const value = (each: { start: number; end: number }) =>
+    file.readUIntBE(each.start, each.end - each.start);
+  const cues = file.lastIndexOf(Buffer.from([0x1c, 0x53, 0xbb, 0x6b]));
+  for (const point of children(element(cues))) {
+    const parts = children(point);
+    const time = parts.find((part) => part.id === 0xb3);
+    const positions = parts.filter((part) => part.id === 0xb7);
+    const tracks = positions.map((part) => children(part).find((each) => each.id === 0xf7));
+    if (!time || value(time) !== seconds * 1000 || tracks.length !== 1) continue;
+    if (!tracks[0] || value(tracks[0]) !== track) continue;
+    return point;
+  }
+  throw new Error(`No index entry for track ${track} at ${seconds} s`);
+}
+
+/** A recording whose captions, teletext page and DVB subtitles depend on what came before. */
+function writeLongRecording(): void {
+  const raw = join(work, "long-picture.h264");
+  // Ten pictures a second, one caption pair in each, and a keyframe every two seconds.
+  ffmpeg(
+    ...["-f", "lavfi", "-i", "smptebars=size=128x72:rate=10", "-t", "40"],
+    ...["-c:v", "libx264", "-preset", "medium", "-crf", "32", "-pix_fmt", "yuv420p", "-g", "20"],
+    ...["-bf", "0", "-x264-params", "aud=1", "-f", "h264", raw],
+  );
+  const captioned = join(work, "long-captioned.h264");
+  writeFileSync(captioned, withCaptions(readFileSync(raw), swappedCaptionPairs(10, 40)));
+  const dvb = join(work, "long-dvb.sup");
+  writeFileSync(
+    dvb,
+    pgs(720, 576, [
+      { text: "ONDERTITEL", from: 11, to: 13 },
+      { text: "ONDERTITEL", from: 23, to: 29 },
+      { text: "LATER", from: 33, to: 35 },
+    ]),
+  );
+  // PGS doesn't say how long a picture shows, and ffmpeg times DVB subtitles made straight from
+  // it wrongly; DVD subtitles made from it carry their length, and DVB ones made from those their
+  // times.
+  const timed = join(work, "long-dvd.mkv");
+  ffmpeg("-fix_sub_duration", "-i", dvb, "-c:s", "dvdsub", "-copyts", timed);
+  const base = join(work, "long-base.mpegts");
+  ffmpeg(
+    ...["-framerate", "10", "-i", captioned, "-i", timed, "-map", "0:v", "-map", "1", "-t", "40"],
+    ...["-c:v", "copy", "-c:s", "dvbsub", "-metadata:s:s:0", "language=dut"],
+    ...["-copyts", "-fflags", "+bitexact", "-f", "mpegts", base],
+  );
+  // ffmpeg sends every DVB picture whole and starts afresh with each. A broadcast sends regions,
+  // colours and objects once and then only says what the page shows: the ends at 13 and 29 s
+  // become such updates, and the picture at 23 s one that shows the regions sent at 11 s.
+  const reused = dvbUpdates(readFileSync(base), [13, 23, 29]);
+  writeFileSync(
+    join(fixtures, "recording-long-subtitles.mpegts"),
+    withTeletext(reused, [
+      { at: 11, erase: true, rows: [{ row: 20, text: "EERSTE RIJ" }] },
+      // Not erased: the row from 11 s stays, and this one joins it.
+      { at: 23, erase: false, rows: [{ row: 22, text: "TWEEDE RIJ" }] },
+      { at: 29, erase: true, rows: [] },
+    ]),
+  );
+}
+
+/**
+ * Captions in a track of their own, as a MOV from an editing suite carries them. FIRST is loaded
+ * into the hidden memory at 10 s and SECOND after it at 29 s, and the end-of-caption command at
+ * 30 s shows both. Only a decoder that read the track from 10 s on has FIRST to show.
+ */
+function writeCaptionTrack(): void {
+  const picture = join(work, "captions-picture.mp4");
+  ffmpeg(
+    ...["-f", "lavfi", "-i", "smptebars=size=128x72:rate=5", "-t", "40"],
+    ...["-c:v", "libx264", "-preset", "medium", "-crf", "32", "-pix_fmt", "yuv420p"],
+    ...["-g", "10", "-bf", "0", "-fflags", "+bitexact", picture],
+  );
+  const twice = (pair: readonly [number, number]) => [pair, pair];
+  const letters = (text: string) =>
+    Array.from({ length: Math.ceil(text.length / 2) }, (_, index): readonly [number, number] => [
+      text.charCodeAt(index * 2),
+      text.charCodeAt(index * 2 + 1) || 0,
+    ]);
+  /** Resume caption loading, then row 15: what follows goes into the hidden memory. */
+  const load = (text: string) => [...twice([0x14, 0x20]), ...twice([0x14, 0x70]), ...letters(text)];
+  const captions = join(work, "captions.scc");
+  writeFileSync(
+    captions,
+    scc([
+      [10, load("FIRST ")],
+      // A line with nothing to say, as a track sends between captions.
+      [23, [[0, 0]]],
+      [29, letters("SECOND")],
+      [30, twice([0x14, 0x2f])],
+      [31, twice([0x14, 0x2c])],
+      [33, load("THIRD")],
+      [35, twice([0x14, 0x2f])],
+      [37, twice([0x14, 0x2c])],
+      // ffmpeg leaves the file's last line out.
+      [39, [[0, 0]]],
+    ]),
+  );
+  ffmpeg(
+    ...["-i", picture, "-i", captions, "-map", "0:v", "-map", "1", "-c", "copy"],
+    ...["-fflags", "+bitexact", "-f", "mov", join(fixtures, "title-caption-track.mov")],
+  );
+}
+
+/** A Scenarist caption file: the CEA-608 pairs sent at each second, for channel 1. */
+function scc(sent: readonly (readonly [number, readonly (readonly [number, number])[]])[]): string {
+  const hex = (value: number) => oddParity(value).toString(16).padStart(2, "0");
+  const lines = sent.map(([at, pairs]) => {
+    const time = [0, Math.floor(at / 60), at % 60, 0].map((part) => String(part).padStart(2, "0"));
+    return `${time.join(":")}\t${pairs.map(([a, b]) => hex(a) + hex(b)).join(" ")}`;
+  });
+  return `Scenarist_SCC V1.0\n\n${lines.join("\n\n")}\n`;
 }
 
 function writeChannel(): void {
@@ -83,7 +370,10 @@ function writeChannel(): void {
   );
   writeFileSync(
     join(fixtures, "h264-subtitles.mpegts"),
-    withTeletext(readFileSync(base), [{ text: "TELETEKST 888", from: 1, to: 3 }]),
+    withTeletext(readFileSync(base), [
+      { at: 1, erase: true, rows: [{ row: 22, text: "TELETEKST 888" }] },
+      { at: 3, erase: true, rows: [] },
+    ]),
   );
 }
 
@@ -175,13 +465,13 @@ function pgs(canvasWidth: number, canvasHeight: number, lines: readonly Line[]):
     const x = Math.round((canvasWidth - picture.width) / 2);
     const y = canvasHeight - picture.height - Math.round(canvasHeight / 12);
     const window = [0, ...u16(x), ...u16(y), ...u16(picture.width), ...u16(picture.height)];
-    // Epoch start: one object in one window.
+    // One object in one window: at an epoch start, or again in the epoch it was sent in.
     segment(line.from, 0x16, [
       ...u16(canvasWidth),
       ...u16(canvasHeight),
       0x10,
       ...u16(composition++),
-      0x80,
+      line.again ? 0x00 : 0x80,
       0x00,
       0x00,
       1,
@@ -192,18 +482,21 @@ function pgs(canvasWidth: number, canvasHeight: number, lines: readonly Line[]):
       ...u16(y),
     ]);
     segment(line.from, 0x17, [1, ...window]);
-    // Palette: entry 0 stays undefined, which is clear; 1 white and 2 black, as Y, Cr, Cb, alpha.
-    segment(line.from, 0x14, [0, 0, 1, 235, 128, 128, 255, 2, 16, 128, 128, 255]);
-    const rle = pgsRle(picture.pixels, picture.width, picture.height);
-    segment(line.from, 0x15, [
-      ...u16(0),
-      0,
-      0xc0,
-      ...u24(rle.length + 4),
-      ...u16(picture.width),
-      ...u16(picture.height),
-      ...rle,
-    ]);
+    if (!line.again) {
+      // Palette: entry 0 stays undefined, which is clear; 1 white and 2 black, as Y, Cr, Cb,
+      // alpha.
+      segment(line.from, 0x14, [0, 0, 1, 235, 128, 128, 255, 2, 16, 128, 128, 255]);
+      const rle = pgsRle(picture.pixels, picture.width, picture.height);
+      segment(line.from, 0x15, [
+        ...u16(0),
+        0,
+        0xc0,
+        ...u24(rle.length + 4),
+        ...u16(picture.width),
+        ...u16(picture.height),
+        ...rle,
+      ]);
+    }
     segment(line.from, 0x80, []);
     // Cleared: a composition without objects.
     segment(line.to, 0x16, [
@@ -267,6 +560,40 @@ function captionPairs(): (readonly [number, number])[] {
   return frames.map(([a, b]) => [oddParity(a), oddParity(b)] as const);
 }
 
+/**
+ * CEA-608 byte pairs for channel 1, one per frame, for `seconds` at `rate` frames a second: two
+ * pop-on captions that take each other's place. FIRST shows at 11 s. SECOND shows at 23 s, by the
+ * end-of-caption command that swaps the two memories, which puts FIRST in the hidden one; the same
+ * command at 29 s brings FIRST back, and 31 s erases the screen. Only a decoder that read the
+ * stream from 11 s on has FIRST to bring back.
+ */
+function swappedCaptionPairs(rate: number, seconds: number): (readonly [number, number])[] {
+  const frames: (readonly [number, number])[] = Array.from({ length: rate * seconds }, () => [
+    0x80, 0x80,
+  ]);
+  /** Loads `text` into the hidden memory and shows it at `at` seconds. */
+  const load = (at: number, text: string) => {
+    const sequence: (readonly [number, number])[] = [];
+    const twice = (pair: readonly [number, number]) => sequence.push(pair, pair);
+    twice([0x14, 0x20]);
+    twice([0x14, 0x70]);
+    for (let i = 0; i < text.length; i += 2) {
+      sequence.push([text.charCodeAt(i), i + 1 < text.length ? text.charCodeAt(i + 1) : 0]);
+    }
+    twice([0x14, 0x2f]);
+    sequence.forEach((pair, index) => (frames[at * rate - sequence.length + index] = pair));
+  };
+  const twiceAt = (at: number, pair: readonly [number, number]) => {
+    frames[at * rate] = pair;
+    frames[at * rate + 1] = pair;
+  };
+  load(11, "FIRST");
+  load(23, "SECOND");
+  twiceAt(29, [0x14, 0x2f]);
+  twiceAt(31, [0x14, 0x2c]);
+  return frames.map(([a, b]) => [oddParity(a), oddParity(b)] as const);
+}
+
 /** The H.264 stream with a captions SEI after each access unit delimiter, a frame each. */
 function withCaptions(stream: Buffer, pairs: readonly (readonly [number, number])[]): Buffer {
   const out: Buffer[] = [];
@@ -317,13 +644,74 @@ const TELETEXT_PID = 0x0300;
 const MAGAZINE = 8;
 const PAGE = 0x88;
 
-/** The transport stream with a teletext subtitle page, 888, added as a stream of its own. */
-function withTeletext(stream: Buffer, lines: readonly Line[]): Buffer {
+/** What a teletext page is sent as at `at` seconds: its rows, after erasing the page or not. */
+interface TeletextPage {
+  readonly at: number;
+  readonly erase: boolean;
+  readonly rows: readonly { readonly row: number; readonly text: string }[];
+}
+
+/** The transport packets of a stream, a copy of each. */
+function transportPackets(stream: Buffer): Buffer[] {
   const packets: Buffer[] = [];
   for (let offset = 0; offset + 188 <= stream.length; offset += 188) {
     packets.push(Buffer.from(stream.subarray(offset, offset + 188)));
   }
-  const pid = (packet: Buffer) => ((packet[1]! & 0x1f) << 8) | packet[2]!;
+  return packets;
+}
+
+const pidOf = (packet: Buffer) => ((packet[1]! & 0x1f) << 8) | packet[2]!;
+
+/**
+ * The transport stream with its DVB subtitle packets at `times` seconds made page updates in
+ * the normal case, which start nothing afresh: the page state says so, and the regions, colours
+ * and objects such a packet carried are given a type no decoder reads. What the page then shows
+ * is what an earlier packet sent.
+ */
+function dvbUpdates(stream: Buffer, times: readonly number[]): Buffer {
+  const packets = transportPackets(stream);
+  const first = Math.min(...packets.flatMap((packet) => ptsOf(packet) ?? []));
+  /** Each subtitle PES: where each of its bytes sits in the stream's packets. */
+  const open = new Map<number, { pts: number; bytes: [Buffer, number][] }>();
+  const update = (pes: { pts: number; bytes: [Buffer, number][] }) => {
+    const at = (index: number) => pes.bytes[index]![0][pes.bytes[index]![1]]!;
+    const set = (index: number, value: number) => {
+      pes.bytes[index]![0][pes.bytes[index]![1]] = value;
+    };
+    const start = 9 + at(8);
+    // A subtitle PES: private stream 1, a data identifier of 0x20 and a stream id of 0.
+    if (at(3) !== 0xbd || at(start) !== 0x20 || at(start + 1) !== 0x00) return;
+    if (!times.some((time) => Math.abs((pes.pts - first) / 90_000 - time) < 0.1)) return;
+    for (let offset = start + 2; offset + 6 <= pes.bytes.length && at(offset) === 0x0f;) {
+      const type = at(offset + 1);
+      // The page composition's state, two bits: 0 is the normal case.
+      if (type === 0x10) set(offset + 7, at(offset + 7) & ~0x0c);
+      if (type === 0x11 || type === 0x12 || type === 0x13) set(offset + 1, 0x7f);
+      offset += 6 + ((at(offset + 4) << 8) | at(offset + 5));
+    }
+  };
+  for (const packet of packets) {
+    const pid = pidOf(packet);
+    if (pid === 0x1fff || !(packet[3]! & 0x10)) continue;
+    const pts = ptsOf(packet);
+    if (packet[1]! & 0x40) {
+      const before = open.get(pid);
+      if (before) update(before);
+      open.delete(pid);
+      if (pts !== null) open.set(pid, { pts, bytes: [] });
+    }
+    const pes = open.get(pid);
+    const from = 4 + (packet[3]! & 0x20 ? 1 + packet[4]! : 0);
+    for (let index = from; pes && index < 188; index++) pes.bytes.push([packet, index]);
+  }
+  for (const pes of open.values()) update(pes);
+  return Buffer.concat(packets);
+}
+
+/** The transport stream with a teletext subtitle page, 888, added as a stream of its own. */
+function withTeletext(stream: Buffer, sent: readonly TeletextPage[]): Buffer {
+  const packets = transportPackets(stream);
+  const pid = pidOf;
   const pmtPid = (() => {
     const pat = packets.find((packet) => pid(packet) === 0)!;
     const section = pat.subarray(5 + pat[4]!);
@@ -340,17 +728,10 @@ function withTeletext(stream: Buffer, lines: readonly Line[]): Buffer {
   const firstPts = ptsOf(
     packets.find((packet) => pid(packet) === videoPid && ptsOf(packet) !== null)!,
   )!;
-  const pages: { pts: number; packet: Buffer }[] = [];
-  let counter = 0;
-  for (const line of lines) {
-    for (const [at, text] of [
-      [line.from, line.text],
-      [line.to, null],
-    ] as const) {
-      const pts = firstPts + Math.round(at * 90_000);
-      pages.push({ pts, packet: teletextPacket(pts, text, counter++ & 0x0f) });
-    }
-  }
+  const pages = sent.map((page, index) => {
+    const pts = firstPts + Math.round(page.at * 90_000);
+    return { pts, packet: teletextPacket(pts, page, index & 0x0f) };
+  });
   const out: Buffer[] = [];
   for (const packet of packets) {
     const clock = pcrOf(packet);
@@ -411,12 +792,12 @@ function addTeletextStream(packet: Buffer): number {
   return video;
 }
 
-/** One transport packet with a teletext PES: the page header and the line, or only a clear page. */
-function teletextPacket(pts: number, text: string | null, continuity: number): Buffer {
+/** One transport packet with a teletext PES: the page header and up to two of its rows. */
+function teletextPacket(pts: number, page: TeletextPage, continuity: number): Buffer {
   const units: Buffer[] = [];
-  // Erase the page, a subtitle, no header shown: C4, C6 and C7.
-  units.push(teletextUnit(0, header({ erase: true, subtitle: true, suppressHeader: true })));
-  if (text) units.push(teletextUnit(22, row(text)));
+  // A subtitle, no header shown, and the page erased or kept: C6, C7 and C4.
+  units.push(teletextUnit(0, header({ erase: page.erase, subtitle: true, suppressHeader: true })));
+  for (const each of page.rows) units.push(teletextUnit(each.row, row(each.text)));
   while (units.length < 3) units.push(Buffer.from([0xff, 0x2c, ...new Array(44).fill(0xff)]));
   const pesHeader = [
     0,
@@ -545,6 +926,9 @@ function u32(value: number): number[] {
 try {
   writeTitle();
   writeChannel();
+  writeLongTitle();
+  writeLongRecording();
+  writeCaptionTrack();
 } finally {
   rmSync(work, { recursive: true, force: true });
 }

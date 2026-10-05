@@ -5,6 +5,7 @@
 import type { AppError } from "@mrstreamer/contracts/errors";
 import type { IpcMethod } from "@mrstreamer/contracts/ipc";
 import type { StreamFailure } from "@mrstreamer/contracts/playback";
+import type { SubtitlesUnavailable } from "./subtitles/feed.ts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -46,6 +47,27 @@ export type Diagnostic =
       readonly video: "copy" | "convert" | "none";
       readonly audio: "copy" | "convert" | "none";
       readonly outcome: "ok" | StreamFailure["kind"];
+    }
+  /**
+   * The subtitles a movie or episode has on screen at a position, read beside a run from there:
+   * what that took of the provider's file, nothing when they had been read before, and why they
+   * couldn't be had when they couldn't.
+   */
+  | {
+      readonly op: "subtitles";
+      readonly ms: number;
+      readonly bytes: number;
+      readonly requests: number;
+      /** The most bytes of the file kept in memory for it. */
+      readonly kept: number;
+      /**
+       * In the session so far: how long such readings held the provider, the longest playback
+       * waited for it meanwhile, and how many of their requests playback cut short.
+       */
+      readonly heldMs: number;
+      readonly waitedMs: number;
+      readonly revoked: number;
+      readonly outcome: "ok" | SubtitlesUnavailable;
     }
   /**
    * What an update source answered when a check failed: its status and GitHub's rate-limit

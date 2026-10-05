@@ -28,7 +28,7 @@ import { useTitleSession } from "../../player/media-session.ts";
 import { Picture } from "../../player/Picture.tsx";
 import { player, type PlaybackProblem } from "../../player/player.ts";
 import { titlePlayer, useTitlePlayer, type TitlePlayerState } from "../../player/title-player.ts";
-import { Flash } from "../watch/Flash.tsx";
+import { Flash, flashNote } from "../watch/Flash.tsx";
 import { useFullscreen, useWake } from "../watch/layout.ts";
 import { MiniControls, MiniPlayerButton } from "../watch/MiniPlayer.tsx";
 import { nudgeSubtitles, PlaybackMenu, stepSpeed } from "../watch/PlaybackMenu.tsx";
@@ -38,6 +38,8 @@ import { VolumeControl } from "../watch/VolumeControl.tsx";
 /** Controls fade out after this long without input. */
 const IDLE_MS = 3000;
 const SKIP_S = 10;
+/** How long the note that subtitles can't be had stays. */
+const SUBTITLES_UNAVAILABLE_MS = 5000;
 
 /** Leaves the title, saving how far it got, back to its details or the page. */
 function leave(): void {
@@ -66,8 +68,29 @@ export function TitleWatch() {
   const phase = useTitlePlayer((state) => state.phase);
   const next = useTitlePlayer((state) => state.next);
   const continued = useTitlePlayer((state) => state.continued);
+  const subtitleStatus = useTitlePlayer((state) => state.subtitleStatus);
   const [menu, setMenu] = useState<TrackMenu>(null);
   useTitleSession();
+
+  // How the chosen subtitles stand after a skip, where a changed speed shows: loading for as long
+  // as it lasts, and that they can't be had for a few seconds. The picture plays either way.
+  useEffect(() => {
+    flashNote(
+      subtitleStatus === "loading"
+        ? "Subtitles loading"
+        : subtitleStatus === "unavailable"
+          ? "Subtitles unavailable"
+          : null,
+    );
+    const timer =
+      subtitleStatus === "unavailable"
+        ? setTimeout(() => flashNote(null), SUBTITLES_UNAVAILABLE_MS)
+        : undefined;
+    return () => {
+      clearTimeout(timer);
+      flashNote(null);
+    };
+  }, [subtitleStatus]);
 
   // Nothing open any more, as after a live channel took over: back to the page.
   useEffect(() => {
@@ -370,6 +393,7 @@ function Tracks({ menu, onMenu }: { menu: TrackMenu; onMenu: (menu: TrackMenu) =
   const subtitles = useTitlePlayer((state) => state.subtitles);
   const audioId = useTitlePlayer((state) => state.audioId);
   const subtitle = useTitlePlayer((state) => state.subtitle);
+  const subtitleStatus = useTitlePlayer((state) => state.subtitleStatus);
   const speed = useTitlePlayer((state) => state.speed);
   return (
     <>
@@ -378,6 +402,13 @@ function Tracks({ menu, onMenu }: { menu: TrackMenu; onMenu: (menu: TrackMenu) =
         audioId={audioId}
         subtitles={subtitles}
         subtitle={subtitle}
+        subtitleNote={
+          subtitleStatus === "loading"
+            ? "Loading"
+            : subtitleStatus === "unavailable"
+              ? "Unavailable"
+              : null
+        }
         open={menu}
         onOpenChange={onMenu}
         onAudio={(id) => titlePlayer.setAudio(id)}

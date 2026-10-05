@@ -33,7 +33,7 @@ import { titleDecoders } from "./decoders.ts";
 import type { EngineError } from "./engine.ts";
 import { onLiveStart, player, rememberSubtitles, type PlaybackProblem } from "./player.ts";
 import { clearSubtitles, setSubtitleDelay } from "./subtitles.ts";
-import { titleEngine, type TitleEngine } from "./title-engine.ts";
+import { titleEngine, type SubtitleStatus, type TitleEngine } from "./title-engine.ts";
 
 /** How often progress is saved while a title plays. */
 const CHECKPOINT_MS = 60_000;
@@ -111,6 +111,11 @@ export interface TitlePlayerState {
   readonly audioId: number | null;
   /** The subtitle track on screen, or null for none. */
   readonly subtitle: SubtitleTrack | null;
+  /**
+   * How the chosen track stands after a skip or a start: still loading what was on screen there,
+   * or without it. Null once it shows as the file has it.
+   */
+  readonly subtitleStatus: SubtitleStatus;
   readonly speed: Speed;
   /**
    * For an episode, the one after it in its series: null after the last episode, undefined for
@@ -135,6 +140,7 @@ const idle: TitlePlayerState = {
   subtitles: [],
   audioId: null,
   subtitle: null,
+  subtitleStatus: null,
   speed: 1,
   next: undefined,
   countdown: null,
@@ -313,6 +319,7 @@ async function run(start: number, attempt = 0, paused = false): Promise<void> {
         ? { kind: "starting" }
         : { kind: "reconnecting", attempt, of: RECONNECT_DELAYS_MS.length },
     position: start,
+    subtitleStatus: subtitle ? "loading" : null,
   });
   const started = titleEngine(video, {
     url: session.url,
@@ -325,6 +332,9 @@ async function run(start: number, attempt = 0, paused = false): Promise<void> {
     paused,
   });
   engine = started;
+  started.onSubtitles((subtitleStatus) => {
+    if (mine === generation) store.setState({ subtitleStatus });
+  });
   // Starting a run loads the element afresh, which sets its rate to the default one.
   playAt(store.getState().speed);
   try {
@@ -600,6 +610,7 @@ export const titlePlayer = {
     rememberSubtitles(track);
     // Turning subtitles off is instant, and stays off; showing others needs a new run.
     if (!track) {
+      store.setState({ subtitleStatus: null });
       if (engine) engine.hideSubtitles();
       else clearSubtitles(video);
       return;

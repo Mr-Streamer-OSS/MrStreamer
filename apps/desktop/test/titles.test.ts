@@ -1,15 +1,18 @@
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { Codec } from "@mrstreamer/contracts/playback";
 import * as Layer from "effect/Layer";
-import { Playback } from "../src/main/services/playback.ts";
+import { Playback, type PlaybackDeps } from "../src/main/services/playback.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { subtitleDecoder, type SubtitleCodec } from "@mrstreamer/core/subtitles/decoder";
+import { readFeedLine, type SubtitlesUnavailable } from "@mrstreamer/core/subtitles/feed";
 import type { SubtitleChange } from "@mrstreamer/core/subtitles/screen";
 import { readMp4Start } from "../src/renderer/src/player/mp4.ts";
-import { webvttReader } from "../src/renderer/src/player/webvtt.ts";
-import { fixture } from "./fake-provider.ts";
+import { fixture, type FakeProviderOptions } from "./fake-provider.ts";
 import { fakeProvider, promised, runtimeFor, tempDir, testSecrets, userAgent } from "./support.ts";
 
 /** What Chromium on Linux decodes: no HEVC, no AC-3 or E-AC-3. */
@@ -22,10 +25,10 @@ const hasTools =
   spawnSync(FFMPEG, ["-version"]).status === 0 && spawnSync(FFPROBE, ["-version"]).status === 0;
 
 /** Title playback on a connected fake provider that allows one connection. */
-async function titles() {
-  const provider = await fakeProvider({ maxConnections: 1, slotReleaseMs: 50 });
+async function titles(deps: Partial<PlaybackDeps> = {}, options: FakeProviderOptions = {}) {
+  const provider = await fakeProvider({ maxConnections: 1, slotReleaseMs: 50, ...options });
   const runtime = runtimeFor(
-    Playback.layer({ userAgent, ffmpeg: FFMPEG, ffprobe: FFPROBE }).pipe(
+    Playback.layer({ userAgent, ffmpeg: FFMPEG, ffprobe: FFPROBE, ...deps }).pipe(
       Layer.provideMerge(
         Subscriptions.layer({
           dataDir: await tempDir(),
@@ -60,21 +63,79 @@ async function play(url: string) {
   return { response, body, streams: streamsOf(body) };
 }
 
-/** The subtitle packets of a run, decoded as the player decodes them, on the file's clock. */
-async function decodedPackets(
-  response: Response,
-  page: number | null,
-): Promise<{ codec: string | null; changes: SubtitleChange[] }> {
-  const codec = response.headers.get("x-packets-codec");
-  const lines = (await (await fetch(response.headers.get("x-packets") ?? "")).text())
-    .split("\n")
-    .filter(Boolean);
-  const decoder = subtitleDecoder(codec as SubtitleCodec, page);
-  const changes = lines.flatMap((line) => {
-    const { at, data } = JSON.parse(line) as { at: number; data: string };
-    return decoder.push(Buffer.from(data, "base64"), at) ?? [];
-  });
-  return { codec, changes };
+/** A line of text and when it shows, in title seconds. */
+type Line = readonly [from: number, until: number, text: string];
+
+/**
+ * A track's subtitles as the player reads them: opens the feed for a track from `start`, with
+ * the teletext page or caption channel when the track has several, and waits until it says what
+ * it has for the position. The player asks for the picture meanwhile; these tests mostly ask for
+ * it after. Packets go through the decoder for their codec, as in the player.
+ */
+async function subtitles(url: string, start: number, track: number, page: number | null = null) {
+  const query = new URLSearchParams({ only: "subtitles", start: String(start) });
+  query.set("subtitle", String(track));
+  if (page !== null) query.set("page", String(page));
+  const leaving = new AbortController();
+  const response = await fetch(`${url}?${query}`, { signal: leaving.signal });
+  const codec = response.headers.get("x-codec");
+  const decoderFor = () => (codec ? subtitleDecoder(codec as SubtitleCodec, page) : null);
+  let decoder = decoderFor();
+  const changes: SubtitleChange[] = [];
+  const lines: Line[] = [];
+  /** The title seconds from which the track shows again after it had nothing for a position. */
+  const again: number[] = [];
+  const {
+    promise: settled,
+    resolve,
+    reject,
+  } = Promise.withResolvers<{
+    changes: readonly SubtitleChange[];
+    lines: readonly Line[];
+    /** Why the feed has nothing for the position, when it hasn't. */
+    unavailable: SubtitlesUnavailable | null;
+  }>();
+  const read = async () => {
+    const text = new TextDecoder();
+    let pending = "";
+    for await (const chunk of response.body ?? []) {
+      pending += text.decode(chunk, { stream: true });
+      const parts = pending.split("\n");
+      pending = parts.pop() ?? "";
+      for (const part of parts) {
+        const line = readFeedLine(part);
+        if (!line) continue;
+        if ("unavailable" in line) {
+          decoder = decoderFor();
+          resolve({ changes: [], lines: [], unavailable: line.unavailable });
+        } else if ("ready" in line) {
+          if (line.at === undefined) {
+            resolve({ changes: [...changes], lines: [...lines], unavailable: null });
+          } else again.push(line.at);
+        } else if ("text" in line) lines.push([line.at, line.until, line.text]);
+        else {
+          const change = decoder?.push(Buffer.from(line.data, "base64"), line.at);
+          if (change) changes.push(change);
+        }
+      }
+    }
+  };
+  read().then(
+    () => reject(new Error("The feed ended before it said what it has.")),
+    (error: unknown) => reject(error),
+  );
+  return {
+    codec,
+    /** What the feed sent before it was ready: what the track holds before `start`. */
+    before: await settled,
+    /** Every change so far, those the run sent after the feed was ready included. */
+    changes,
+    lines,
+    again,
+    /** Plays the run the feed belongs to, to its end. */
+    run: (more = "") => play(`${url}?start=${start}&subtitle=${track}${more}`),
+    leave: () => leaving.abort(),
+  };
 }
 
 /** Each change as its time and what it shows: text, or how many pictures. */
@@ -83,6 +144,21 @@ function shown(changes: readonly SubtitleChange[]): [number, string | number][] 
     Math.round(change.at * 100) / 100,
     change.screen.kind === "text" ? change.screen.lines.join(" ") : change.screen.pictures.length,
   ]);
+}
+
+/**
+ * What the changes leave on screen `at` seconds into the title, as the player shows them: the
+ * last one before then, unless it has ended. Text, or how many pictures; null for nothing.
+ */
+function screenAt(changes: readonly SubtitleChange[], at: number): string | number | null {
+  const last = changes.findLast((change) => change.at <= at);
+  if (!last || (last.until !== null && last.until <= at)) return null;
+  return shown([last])[0]?.[1] || null;
+}
+
+/** The lines of text on screen `at` seconds into the title. */
+function linesAt(lines: readonly Line[], at: number): string[] {
+  return lines.filter(([from, until]) => from <= at && at < until).map(([, , text]) => text);
 }
 
 function streamsOf(body: Buffer): { codec_type: string; codec_name: string; channels?: number }[] {
@@ -101,6 +177,68 @@ function streamsOf(body: Buffer): { codec_type: string; codec_name: string; chan
     { input: body, encoding: "utf8" },
   );
   return probe.stdout ? ((JSON.parse(probe.stdout) as { streams?: [] }).streams ?? []) : [];
+}
+
+/** Where a clip's first packet of `stream` at or after `seconds` starts, in bytes. */
+function packetPosition(name: string, stream: number, seconds: number): number {
+  const probe = spawnSync(
+    FFPROBE,
+    [
+      ...["-v", "error", "-select_streams", String(stream)],
+      ...["-show_entries", "packet=pts_time,pos", "-of", "csv=p=0", "-i", "pipe:0"],
+    ],
+    { input: fixture(name), encoding: "utf8" },
+  );
+  const packets = probe.stdout.split("\n").map((line) => line.split(",").map(Number));
+  return packets.find(([time = Number.NaN]) => time >= seconds)?.[1] ?? Number.NaN;
+}
+
+/**
+ * The picture and sound of an MP4 clip `times` over as one file, its index first: as large as a
+ * real file, where a clip fits in the proxy's memory whole.
+ */
+async function repeated(name: string, times: number): Promise<Buffer> {
+  const made = join(await tempDir(), name);
+  const done = spawnSync(
+    FFMPEG,
+    [
+      ...["-v", "error", "-stream_loop", String(times - 1)],
+      ...["-i", fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url))],
+      ...["-map", "0:v", "-map", "0:a", "-c", "copy", "-movflags", "+faststart", made],
+    ],
+    { encoding: "utf8" },
+  );
+  if (done.status !== 0) throw new Error(`ffmpeg could not repeat ${name}: ${done.stderr}`);
+  return readFileSync(made);
+}
+
+/**
+ * How many pictures of a run decode. An MP4's index says where each one lies, so every packet
+ * comes even when the bytes there are another part of the file; only decoding tells.
+ */
+function picturesOf(body: Buffer): { readonly decoded: number; readonly errors: string } {
+  const probe = spawnSync(
+    FFPROBE,
+    [
+      ...["-v", "error", "-select_streams", "v:0", "-count_frames"],
+      ...["-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", "-i", "pipe:0"],
+    ],
+    { input: body, encoding: "utf8" },
+  );
+  return { decoded: Number(probe.stdout), errors: probe.stderr };
+}
+
+/** How many pictures a run sent. */
+function framesOf(body: Buffer): number {
+  const probe = spawnSync(
+    FFPROBE,
+    [
+      ...["-v", "error", "-select_streams", "v:0", "-count_packets"],
+      ...["-show_entries", "stream=nb_read_packets", "-of", "csv=p=0", "-i", "pipe:0"],
+    ],
+    { input: body, encoding: "utf8" },
+  );
+  return Number(probe.stdout);
 }
 
 // Each run starts ffmpeg, which takes a moment under a busy suite.
@@ -156,6 +294,7 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
       [
         { id: 2, page: null, format: "picture", label: "English", forced: false },
         { id: 3, page: null, format: "picture", label: "Nederlands · Forced", forced: true },
+        { id: 4, page: null, format: "text", label: "Français", forced: false },
       ],
     ],
     [
@@ -179,24 +318,33 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
     const { open, dispose } = await titles();
     const session = await open("TEST | Picture subtitles");
 
-    const pgs = await play(`${session.url}?start=0&subtitle=2`);
-    expect(pgs.response.headers.get("x-cues")).toBe("");
-    // Shown from 2 to 4 s and from 8 to 10 s, on the file's clock, which starts at 0.021 s.
-    const english = await decodedPackets(pgs.response, null);
-    expect(english.codec).toBe("pgs");
-    expect(shown(english.changes)).toEqual([
-      [2.02, 1],
-      [4.02, 0],
-      [8.02, 1],
-      [10.02, 0],
-    ]);
-    const dvd = await play(`${session.url}?start=0&subtitle=3`);
-    const dutch = await decodedPackets(dvd.response, null);
-    expect(dutch.codec).toBe("dvb");
-    expect(shown(dutch.changes)).toEqual([
-      [8.02, 1],
-      [10.01, 0],
-    ]);
+    const pgs = await subtitles(session.url, 0, 2);
+    expect(pgs.codec).toBe("pgs");
+    // From the start of the file the run brings every subtitle itself.
+    expect(pgs.before.changes).toEqual([]);
+    await pgs.run();
+    // Shown from 2 to 4 s, 5 to 7 s and 8 to 10 s; the subtitles' times are 0.021 s on.
+    await vi.waitFor(() =>
+      expect(shown(pgs.changes)).toEqual([
+        [2.02, 1],
+        [4.02, 0],
+        [5.02, 1],
+        [7.02, 0],
+        [8.02, 1],
+        [10.02, 0],
+      ]),
+    );
+    const dvd = await subtitles(session.url, 0, 3);
+    expect(dvd.codec).toBe("dvb");
+    await dvd.run();
+    await vi.waitFor(() =>
+      expect(shown(dvd.changes)).toEqual([
+        [5.02, 1],
+        [7.01, 0],
+        [8.02, 1],
+        [10.01, 0],
+      ]),
+    );
     await dispose();
   });
 
@@ -204,58 +352,593 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
     const { open, dispose } = await titles();
     const session = await open("TEST | Broadcast recording");
 
-    const teletext = await decodedPackets(
-      (await play(`${session.url}?start=0&subtitle=4`)).response,
-      888,
-    );
+    const teletext = await subtitles(session.url, 0, 4, 888);
     expect(teletext.codec).toBe("teletext");
-    expect(shown(teletext.changes)).toEqual([
-      [2.4, "TELETEKST 888"],
-      [4.4, ""],
-    ]);
-    const captions = await decodedPackets(
-      (await play(`${session.url}?start=0&subtitle=0`)).response,
-      1,
+    await teletext.run();
+    await vi.waitFor(() =>
+      expect(shown(teletext.changes)).toEqual([
+        [1.02, "TELETEKST 888"],
+        [3.02, ""],
+      ]),
     );
+    const captions = await subtitles(session.url, 0, 0, 1);
     expect(captions.codec).toBe("captions");
-    expect(shown(captions.changes)).toEqual([
-      [2.32, "HELLO CAPTIONS"],
-      [4.4, ""],
-    ]);
-    const dvb = await decodedPackets((await play(`${session.url}?start=0&subtitle=3`)).response, 1);
-    expect(shown(dvb.changes)[0]).toEqual([1.9, 1]);
+    await captions.run();
+    await vi.waitFor(() =>
+      expect(shown(captions.changes)).toEqual([
+        [0.94, "HELLO CAPTIONS"],
+        [3.02, ""],
+      ]),
+    );
+    const dvb = await subtitles(session.url, 0, 3);
+    await dvb.run();
+    await vi.waitFor(() => expect(shown(dvb.changes)[0]).toEqual([0.52, 1]));
     await dispose();
   });
 
-  it("plays from a position: the picture from the keyframe before it, cues on the file's clock", async () => {
+  it("plays from a position: the picture from the keyframe before it", async () => {
     const { open, dispose } = await titles();
     const session = await open("TEST | Two sound tracks");
 
-    const run = await play(`${session.url}?start=12&audio=1&subtitle=3`);
+    const run = await play(`${session.url}?start=12&audio=1`);
 
     // Keyframes every 5 seconds: a start at 12 shows the picture from 10, counted from its first
     // frame's decoding time, a few frames earlier.
     expect(Number(run.response.headers.get("x-start"))).toBeGreaterThan(9.8);
     expect(Number(run.response.headers.get("x-start"))).toBeLessThanOrEqual(10);
-    // Sound that starts a moment before the picture puts the file's clock just below zero.
-    expect(Number(run.response.headers.get("x-origin"))).toBeCloseTo(0, 1);
     expect(run.body.subarray(4, 8).toString()).toBe("ftyp");
     // E-AC-3 becomes AAC here, because the player decodes no E-AC-3; H.264 stays as it is.
     expect(run.streams.map((stream) => stream.codec_name)).toEqual(["h264", "aac"]);
-    const cues = await (await fetch(run.response.headers.get("x-cues") ?? "")).text();
-    expect(cues).toContain("00:12.000 --> 00:14.000\nTwelve seconds");
-    expect(cues).not.toContain("First line");
-    // What the player reads from these: the codecs Media Source Extensions needs, and the cues.
+    // What the player reads from these: the codecs Media Source Extensions needs.
     const start = readMp4Start(run.body);
     expect(start.codecs).toMatch(/^avc1\.64[0-9a-f]{4},mp4a\.40\.2$/);
     expect(start.firstFragment).not.toBeNull();
-    const reader = webvttReader();
-    const parsed = [
-      ...reader.push(cues.slice(0, 40)),
-      ...reader.push(cues.slice(40)),
-      ...reader.end(),
-    ];
-    expect(parsed[0]).toEqual({ start: 12, end: 14, text: "Twelve seconds" });
+    await dispose();
+  });
+
+  it("sends text subtitles as lines on the title's clock, with the run that reads them", async () => {
+    const { open, dispose } = await titles();
+    const session = await open("TEST | Two sound tracks");
+
+    const text = await subtitles(session.url, 17.5, 3);
+    expect(text.codec).toBe("");
+    // To the tenth of a second: the file's sound starts 0.021 s before its picture, and
+    // ffprobe's versions differ on which of the two starts the title.
+    const tenths = ([from, until, line]: Line) => [from.toFixed(1), until.toFixed(1), line];
+    expect(text.before.lines.map(tenths)).toEqual([["17.0", "19.0", "Seventeen"]]);
+    const run = await text.run("&audio=1");
+
+    // With subtitles on, the picture starts at the keyframe before the position all the same.
+    expect(Number(run.response.headers.get("x-start"))).toBeGreaterThan(14.8);
+    expect(Number(run.response.headers.get("x-start"))).toBeLessThanOrEqual(15);
+    // The run sends nothing that began before its position again.
+    expect(text.lines).toEqual(text.before.lines);
+    await dispose();
+  });
+
+  // What a file holds of a subtitle sits where it begins, before the keyframe a run starts from.
+  it.each([
+    ["a PGS picture", "TEST | Picture subtitles", 2, null, 6.5, 1, 7.02],
+    ["a DVD picture", "TEST | Picture subtitles", 3, null, 6.5, 1, 7.01],
+  ] as const)(
+    "shows %s already on screen at the position, until it goes",
+    async (_, name, track, page, position, showing, gone) => {
+      const { open, provider, dispose } = await titles();
+      const session = await open(name);
+
+      const feed = await subtitles(session.url, position, track, page);
+
+      // On screen when the feed is ready, before the run is asked for.
+      expect(screenAt(feed.before.changes, position)).toBe(showing);
+      await feed.run();
+      await vi.waitFor(() => expect(shown(feed.changes).at(-1)?.[0]).toBeGreaterThanOrEqual(gone));
+      expect(screenAt(feed.changes, gone - 0.05)).toBe(showing);
+      expect(screenAt(feed.changes, gone + 0.01)).toBeNull();
+      expect(provider.mostFilesAtOnce()).toBe(1);
+      await dispose();
+    },
+  );
+
+  // A recording keeps its subtitles among its pictures, with no index to find them by.
+  it.each([
+    ["DVB subtitles", 3, null],
+    ["teletext page", 4, 888],
+    ["captions", 0, 1],
+  ] as const)(
+    "plays a recording from a position and says its %s can't be had there",
+    async (_, track, page) => {
+      const { open, playback, provider, dispose } = await titles();
+      const session = await open("TEST | Broadcast recording");
+
+      const feed = await subtitles(session.url, 2.5, track, page);
+      const run = await feed.run();
+
+      expect(feed.before.unavailable).toBe("unreadable");
+      // Nothing of what the track held before the position shows, and the picture plays.
+      expect(screenAt(feed.changes, 2.6)).toBeNull();
+      expect(run.response.status).toBe(200);
+      expect(framesOf(run.body)).toBeGreaterThan(0);
+      expect(await playback.failure(session.sessionId)).toBeNull();
+      expect(provider.mostFilesAtOnce()).toBe(1);
+      await dispose();
+    },
+  );
+
+  it("shows nothing at a position between two subtitles", async () => {
+    const { open, dispose } = await titles();
+    const session = await open("TEST | Picture subtitles");
+
+    const feed = await subtitles(session.url, 7.5, 2);
+
+    expect(screenAt(feed.before.changes, 7.5)).toBeNull();
+    await feed.run();
+    await vi.waitFor(() => expect(screenAt(feed.changes, 8.1)).toBe(1));
+    await dispose();
+  });
+
+  // From here on, what shows at a position depends on what the file holds long before it.
+  it("shows a PGS picture that has been on screen for a quarter of a minute", async () => {
+    const { open, dispose } = await titles();
+    const session = await open("TEST | Long subtitles");
+
+    // On screen from 121 to 139 s.
+    const feed = await subtitles(session.url, 137, 2);
+
+    expect(screenAt(feed.before.changes, 137)).toBe(1);
+    const run = await feed.run();
+    await vi.waitFor(() => expect(shown(feed.changes).at(-1)).toEqual([139, 0]));
+    // The picture itself starts at the keyframe before the position, as without subtitles.
+    expect(Number(run.response.headers.get("x-start"))).toBeCloseTo(136, 1);
+    await dispose();
+  });
+
+  it("draws a PGS picture again from the object and colours sent long before", async () => {
+    const { open, dispose } = await titles();
+    const session = await open("TEST | Long subtitles");
+
+    // Sent at 11 s and cleared at 13; shown again at 23 s by a display set that sends nothing.
+    const feed = await subtitles(session.url, 27, 2);
+
+    expect(shown(feed.before.changes)).toEqual([
+      [11, 1],
+      [13, 0],
+      [23, 1],
+    ]);
+    expect(screenAt(feed.before.changes, 27)).toBe(1);
+    await feed.run();
+    await vi.waitFor(() => expect(screenAt(feed.changes, 29)).toBeNull());
+    await dispose();
+  });
+
+  it("keeps what later packets build on when a run starts before them", async () => {
+    const { open, dispose } = await titles();
+    const session = await open("TEST | Long subtitles");
+
+    // The run reads the display set at 23 s itself; what it draws was sent at 11 s.
+    const feed = await subtitles(session.url, 21, 2);
+
+    expect(screenAt(feed.before.changes, 21)).toBeNull();
+    await feed.run();
+    // Each change once, in order: what the feed brought, then what the run read.
+    await vi.waitFor(() =>
+      expect(shown(feed.changes)).toEqual([
+        [11, 1],
+        [13, 0],
+        [23, 1],
+        [29, 0],
+        [60, 1],
+        [62, 0],
+        [121, 1],
+        [139, 0],
+      ]),
+    );
+    await dispose();
+  });
+
+  it("shows nothing once a picture has ended, though the file's index leaves its end out", async () => {
+    const { open, dispose } = await titles();
+    // Its index lists the picture at 23 s and not the end of it at 29 s.
+    const session = await open("TEST | Index with a gap");
+
+    const feed = await subtitles(session.url, 29.5, 2);
+
+    expect(shown(feed.before.changes).at(-1)).toEqual([29, 0]);
+    expect(screenAt(feed.before.changes, 29.5)).toBeNull();
+    await dispose();
+  });
+
+  it("shows nothing once a picture has ended, though the index lists as many packets as the file counts", async () => {
+    const { open, provider, dispose } = await titles();
+    // Its index lists the picture at 23 s twice, the second time where its end at 29 s was, and
+    // the file's own count of the track's packets agrees with it.
+    const session = await open("TEST | Index doubled");
+    // The provider keeps the end waiting: a scan that stops at the picture never reads it.
+    const movie = provider.titles.movies.find((each) => each.name.startsWith("TEST | Index doub"));
+    const end = packetPosition("title-long-subs-doubled.mkv", 2, 29);
+    provider.stallMovieFile(movie?.id ?? 0, end, 600);
+
+    const feed = await subtitles(session.url, 29.5, 2);
+
+    expect(shown(feed.before.changes)).toEqual([
+      [11, 1],
+      [13, 0],
+      [23, 1],
+      [29, 0],
+    ]);
+    expect(screenAt(feed.before.changes, 29.5)).toBeNull();
+    await dispose();
+  });
+
+  it("shows the lines of text on screen at a position, however long ago they began", async () => {
+    const { open, dispose } = await titles();
+    const session = await open("TEST | Long subtitles");
+
+    // One line from 121 to 139 s, another over it from 130 to 133 s.
+    const long = await subtitles(session.url, 137, 4);
+    expect(linesAt(long.before.lines, 137)).toEqual(["Longue ligne"]);
+    await long.run();
+    await vi.waitFor(() => expect(linesAt(long.lines, 142)).toEqual(["Apres"]));
+    expect(long.lines.map(([, , text]) => text)).toEqual(["Longue ligne", "Apres"]);
+
+    const both = await subtitles(session.url, 131, 4);
+    expect(linesAt(both.before.lines, 131)).toEqual(["Longue ligne", "En meme temps"]);
+    const none = await subtitles(session.url, 100, 4);
+    expect(none.before.lines).toEqual([]);
+    await dispose();
+  });
+
+  it("sends each line once, though the file was read for it and the run reads it too", async () => {
+    const { open, dispose } = await titles();
+    const session = await open("TEST | Long subtitles");
+    // The line that starts at 130 s is read for the position, a second and a half before it,
+    // and by the run from there.
+    const feed = await subtitles(session.url, 128.5, 4);
+    await feed.run();
+    await vi.waitFor(() => expect(linesAt(feed.lines, 142)).toEqual(["Apres"]));
+
+    expect(feed.lines.map(([, , text]) => text)).toEqual([
+      "Longue ligne",
+      "En meme temps",
+      "Apres",
+    ]);
+    await dispose();
+  });
+
+  it("ends a DVD picture at its own end, which comes with the picture", async () => {
+    const { open, dispose } = await titles();
+    const session = await open("TEST | Long subtitles");
+
+    // On screen from 121 to 139 s; the page ffmpeg makes of it would stay until 151 s.
+    const during = await subtitles(session.url, 137, 3);
+    expect(shown(during.before.changes)).toEqual([
+      [121, 1],
+      [139, 0],
+    ]);
+    expect(screenAt(during.before.changes, 137)).toBe(1);
+    const after = await subtitles(session.url, 140, 3);
+    expect(screenAt(after.before.changes, 140)).toBeNull();
+    await dispose();
+  });
+
+  it("shows a recording's subtitles again from where they start afresh after a skip", async () => {
+    const { open, playback, dispose } = await titles();
+    const session = await open("TEST | Long recording");
+
+    // Regions, colours and objects come at 11 s; the page at 23 s only says to show them, which
+    // a run from 27 s can't. The page at 33 s brings its own.
+    const feed = await subtitles(session.url, 27, 1);
+    await feed.run();
+
+    expect(feed.before.unavailable).toBe("unreadable");
+    await vi.waitFor(() => expect(shown(feed.changes).at(-1)).toEqual([34.99, 0]));
+    expect(feed.again).toEqual([33]);
+    expect(shown(feed.changes)).toEqual([
+      [33, 1],
+      [34.99, 0],
+    ]);
+    expect(await playback.failure(session.sessionId)).toBeNull();
+    await dispose();
+  });
+
+  it("sends a caption track's own packets, for the player's decoder to read from the start", async () => {
+    const { open, provider, dispose } = await titles();
+    const session = await open("TEST | Caption track");
+    expect(session.subtitles).toEqual([
+      expect.objectContaining({ id: 1, page: null, format: "captions" }),
+    ]);
+
+    // FIRST goes into the hidden memory at 10 s and SECOND after it at 29 s; the command at 30 s
+    // shows both, which ffmpeg's own caption decoder would lose at a skip.
+    const feed = await subtitles(session.url, 0, 1);
+    expect(feed.codec).toBe("captions");
+    await feed.run();
+
+    await vi.waitFor(() =>
+      expect(shown(feed.changes)).toEqual([
+        [30, "FIRST SECOND"],
+        [31, ""],
+        [35, "THIRD"],
+        [37, ""],
+      ]),
+    );
+    expect(provider.mostFilesAtOnce()).toBe(1);
+    await dispose();
+  });
+
+  it("reads the file for a position once: the same or an earlier one costs nothing more", async () => {
+    const { open, provider, dispose } = await titles();
+    const session = await open("TEST | Long subtitles");
+    const first = await subtitles(session.url, 137, 4);
+    await first.run();
+
+    const sent = provider.fileBytes();
+    const again = await subtitles(session.url, 137, 4);
+    const earlier = await subtitles(session.url, 61, 4);
+
+    expect(linesAt(again.before.lines, 137)).toEqual(["Longue ligne"]);
+    expect(linesAt(earlier.before.lines, 61)).toEqual(["Soixante"]);
+    expect(provider.fileBytes()).toBe(sent);
+    expect(provider.mostFilesAtOnce()).toBe(1);
+    await dispose();
+  });
+
+  it("forgets what it read of a file once the provider puts another in its place", async () => {
+    const { open, provider, dispose } = await titles();
+    const session = await open("TEST | Long subtitles");
+    const first = await subtitles(session.url, 6.5, 2);
+    // The long movie shows nothing at 6.5 s.
+    expect(screenAt(first.before.changes, 6.5)).toBeNull();
+    await first.run();
+
+    // Another file behind the same address, of another size: its PGS picture shows from 5 to 7 s.
+    const movie = provider.titles.movies.find((each) => each.name.startsWith("TEST | Long sub"));
+    provider.replaceMovieFile(movie?.id ?? 0, "title-h264-picture-subs.mkv");
+    // The first read of it tells the proxy; what it knew was the other file's.
+    await play(`${session.url}?start=0`);
+    const second = await subtitles(session.url, 6.5, 2);
+
+    expect(screenAt(second.before.changes, 6.5)).toBe(1);
+    await dispose();
+  });
+
+  it("says a file was replaced when its first answer shows it, and reads the new one next", async () => {
+    const { open, provider, playback, dispose } = await titles();
+    const session = await open("TEST | Long subtitles");
+    // The same file but for one line of text, as a provider's corrected copy: only its ETag
+    // tells the two apart.
+    const corrected = Buffer.from(fixture("title-long-subs.mkv"));
+    corrected.write("Ligne longue", corrected.indexOf("Longue ligne"));
+    const movie = provider.titles.movies.find((each) => each.name.startsWith("TEST | Long sub"));
+    provider.replaceMovieFile(movie?.id ?? 0, corrected);
+
+    // The first read of the file, for its index, tells the proxy: nothing it knew holds.
+    const told = await subtitles(session.url, 137, 4);
+    const feed = await subtitles(session.url, 137, 4);
+
+    expect(told.before.unavailable).toBe("changed");
+    expect(linesAt(feed.before.lines, 137)).toEqual(["Ligne longue"]);
+    expect(await playback.failure(session.sessionId)).toBeNull();
+    expect(provider.mostFilesAtOnce()).toBe(1);
+    await feed.run();
+    await vi.waitFor(() => expect(linesAt(feed.lines, 142)).toEqual(["Apres"]));
+    await dispose();
+  });
+
+  it("never takes a replaced file's subtitles for the new one's when two servers take turns", async () => {
+    // A provider that frees its connection at once, so the two servers answer strictly in turn.
+    const { open, provider, playback, dispose } = await titles(
+      {},
+      { fileHosts: 2, slotReleaseMs: 0 },
+    );
+    const session = await open("TEST | Long subtitles");
+    const first = await subtitles(session.url, 137, 4);
+    expect(linesAt(first.before.lines, 137)).toEqual(["Longue ligne"]);
+    first.leave();
+
+    // Each server has its own ETag for the file, and both get the corrected copy.
+    const corrected = Buffer.from(fixture("title-long-subs.mkv"));
+    corrected.write("Ligne longue", corrected.indexOf("Longue ligne"));
+    const movie = provider.titles.movies.find((each) => each.name.startsWith("TEST | Long sub"));
+    provider.replaceMovieFile(movie?.id ?? 0, corrected);
+    // One server's answer to the picture shows the new file.
+    await play(`${session.url}?start=0`);
+    const second = await subtitles(session.url, 137, 4);
+
+    expect(linesAt(second.before.lines, 137)).toEqual(["Ligne longue"]);
+    expect(await playback.failure(session.sessionId)).toBeNull();
+    expect(provider.mostFilesAtOnce()).toBe(1);
+    await dispose();
+  });
+
+  it("takes every file a provider puts in place of one of the same size for another", async () => {
+    // Each copy is read some ten times, which a provider that frees its connection at once
+    // keeps short.
+    const { open, provider, playback, dispose } = await titles({}, { slotReleaseMs: 0 });
+    const session = await open("TEST | Long subtitles");
+    const movie = provider.titles.movies.find((each) => each.name.startsWith("TEST | Long sub"));
+    const first = await subtitles(session.url, 137, 4);
+    expect(linesAt(first.before.lines, 137)).toEqual(["Longue ligne"]);
+
+    // Five corrected copies, one after the other: each the same file but for one line of text,
+    // which only its ETag tells from the copy before.
+    for (const line of [1, 2, 3, 4, 5].map((copy) => `Copie num. ${copy}`)) {
+      const corrected = Buffer.from(fixture("title-long-subs.mkv"));
+      corrected.write(line, corrected.indexOf("Longue ligne"));
+      provider.replaceMovieFile(movie?.id ?? 0, corrected);
+      // The first read of it tells the proxy; what it knew was the other file's.
+      await play(`${session.url}?start=0`);
+
+      const feed = await subtitles(session.url, 137, 4);
+      expect(linesAt(feed.before.lines, 137)).toEqual([line]);
+    }
+    expect(await playback.failure(session.sessionId)).toBeNull();
+    expect(provider.mostFilesAtOnce()).toBe(1);
+    await dispose();
+  });
+
+  it("plays on without subtitles from before a position when the file is another with every answer", async () => {
+    const { open, provider, playback, dispose } = await titles();
+    const session = await open("TEST | Long subtitles");
+    const movie = provider.titles.movies.find((each) => each.name.startsWith("TEST | Long sub"));
+    provider.unsettleMovieFile(movie?.id ?? 0, true);
+    const asked = provider.fileRequests();
+
+    // Nothing read of one file holds for the next: the feed says so, and the picture plays.
+    const feed = await subtitles(session.url, 137, 4);
+    const run = await feed.run();
+
+    expect(feed.before.unavailable).toBe("changed");
+    expect(run.response.status).toBe(200);
+    expect(framesOf(run.body)).toBeGreaterThan(0);
+    expect(await playback.failure(session.sessionId)).toBeNull();
+    // It asks once for the subtitles, not for as long as the provider goes on.
+    expect(provider.fileRequests() - asked).toBeLessThan(20);
+    expect(provider.mostFilesAtOnce()).toBe(1);
+    // Once the file stays the same one, its subtitles come.
+    provider.unsettleMovieFile(movie?.id ?? 0, false);
+    await play(`${session.url}?start=0`);
+    const settled = await subtitles(session.url, 137, 4);
+    expect(linesAt(settled.before.lines, 137)).toEqual(["Longue ligne"]);
+    await dispose();
+  });
+
+  it("opens and plays an MP4 with its index at the end though its ETag is another with every answer", async () => {
+    const { open, provider, playback, dispose } = await titles();
+    const movie = provider.titles.movies.find((each) => each.name.startsWith("TEST | Index at"));
+    provider.unsettleMovieFile(movie?.id ?? 0, true);
+
+    const session = await open("TEST | Index at the end");
+    const run = await play(`${session.url}?start=5`);
+
+    expect(run.response.status).toBe(200);
+    expect(Number(run.response.headers.get("x-start"))).toBeLessThanOrEqual(5);
+    expect(framesOf(run.body)).toBeGreaterThan(0);
+    expect(await playback.failure(session.sessionId)).toBeNull();
+    expect(provider.mostFilesAtOnce()).toBe(1);
+    await dispose();
+  });
+
+  it("plays, and reads a track's past anew each time, when answers carry only the time they were sent", async () => {
+    const { open, provider, playback, dispose } = await titles({}, { fileDates: true });
+    const session = await open("TEST | Long subtitles");
+
+    const feed = await subtitles(session.url, 137, 4);
+    const run = await feed.run();
+
+    expect(linesAt(feed.before.lines, 137)).toEqual(["Longue ligne"]);
+    expect(framesOf(run.body)).toBeGreaterThan(0);
+    expect(await playback.failure(session.sessionId)).toBeNull();
+    // Nothing says the file is still the same one, so nothing read of it is used again.
+    const asked = provider.fileRequests();
+    const again = await subtitles(session.url, 137, 4);
+    expect(linesAt(again.before.lines, 137)).toEqual(["Longue ligne"]);
+    expect(provider.fileRequests()).toBeGreaterThan(asked);
+    await dispose();
+  });
+
+  it("says the subtitles before a position can't be had when they are more than it keeps", async () => {
+    // Room for one line of text, where the lines before 137 s take three.
+    const { open, playback, dispose } = await titles({ recovery: { history: 16 } });
+    const session = await open("TEST | Long subtitles");
+
+    const feed = await subtitles(session.url, 137, 4);
+    const run = await feed.run();
+
+    expect(feed.before.unavailable).toBe("limit");
+    // The picture plays, and the lines the run reads from there on still come.
+    expect(framesOf(run.body)).toBeGreaterThan(0);
+    await vi.waitFor(() => expect(linesAt(feed.lines, 142)).toEqual(["Apres"]));
+    expect(feed.again).toEqual([141]);
+    expect(await playback.failure(session.sessionId)).toBeNull();
+    await dispose();
+  });
+
+  it("starts the picture while the subtitles before its position are slow to come", async () => {
+    const { open, provider, playback, dispose } = await titles();
+    const session = await open("TEST | Long subtitles");
+    provider.slowFileParts(700);
+
+    // Asked together, as the player does: the run plays to its end before the feed is ready.
+    let played = false;
+    const waiting = subtitles(session.url, 137, 2).then((feed) => ({ feed, after: played }));
+    const run = await play(`${session.url}?start=137&subtitle=2`);
+    played = true;
+    const { feed, after } = await waiting;
+
+    expect(run.response.status).toBe(200);
+    expect(framesOf(run.body)).toBeGreaterThan(0);
+    expect(after).toBe(true);
+    // Then what was on screen at the position, and its end, which the run read meanwhile.
+    expect(screenAt(feed.before.changes, 137)).toBe(1);
+    await vi.waitFor(() => expect(shown(feed.changes).at(-1)).toEqual([139, 0]));
+    expect(await playback.failure(session.sessionId)).toBeNull();
+    expect(provider.mostFilesAtOnce()).toBe(1);
+    await dispose();
+  });
+
+  it("plays a whole file from a provider that knows no byte ranges", async () => {
+    const { open, provider, dispose } = await titles({}, { wholeFiles: true });
+    const session = await open("TEST | Long subtitles");
+    const size = fixture("title-long-subs.mkv").length;
+    const before = { requests: provider.fileRequests(), bytes: provider.fileBytes() };
+
+    const feed = await subtitles(session.url, 0, 2);
+    const run = await feed.run();
+
+    expect(run.response.status).toBe(200);
+    // Every picture of its 150 seconds, at five a second.
+    expect(framesOf(run.body)).toBe(750);
+    await vi.waitFor(() => expect(shown(feed.changes).at(-1)).toEqual([139, 0]));
+    // The provider's one answer at a time, as ffmpeg asks for it: once or twice, by its version,
+    // each a redirect and the file. The subtitles ask for nothing more.
+    expect(provider.fileRequests() - before.requests).toBeLessThanOrEqual(4);
+    expect(provider.fileBytes() - before.bytes).toBeLessThanOrEqual(2 * size);
+    expect(provider.mostFilesAtOnce()).toBe(1);
+    await dispose();
+  });
+
+  it("plays a large file whole from a provider that knows no byte ranges", async () => {
+    // 10 MB of film, which ffprobe leaves in the middle of: the provider answers the run's
+    // request with all of it again.
+    const { open, provider, dispose } = await titles({}, { wholeFiles: true });
+    const film = await repeated("title-h264-aac.mp4", 70);
+    const movie = provider.titles.movies.find((each) => each.name.startsWith("TEST | Index at"));
+    provider.replaceMovieFile(movie?.id ?? 0, film);
+    const session = await open("TEST | Index at the end");
+    // ffprobe left in the middle of the file, and the provider has stopped sending it.
+    await vi.waitFor(() => expect(provider.activeStreams()).toBe(0));
+    const before = { requests: provider.fileRequests(), bytes: provider.fileBytes() };
+    expect(before.bytes).toBeLessThan(film.length);
+
+    const run = await play(`${session.url}?start=0`);
+
+    expect(run.response.status).toBe(200);
+    expect(run.streams.map((stream) => stream.codec_name)).toEqual(["h264", "aac"]);
+    // Every picture of its 300, seventy times, and each the file's own.
+    expect(picturesOf(run.body)).toEqual({ decoded: 21_000, errors: "" });
+    // Asked for once, redirect and file, and sent once: no request after the provider's answer.
+    expect(provider.fileRequests() - before.requests).toBe(2);
+    expect(provider.fileBytes() - before.bytes).toBe(film.length);
+    expect(provider.mostFilesAtOnce()).toBe(1);
+    await dispose();
+  });
+
+  it("starts a converted picture exactly where asked, with the subtitle on screen there", async () => {
+    const { open, dispose } = await titles();
+    // No H.264 here, so the picture converts.
+    const session = await open("TEST | Long subtitles", ["aac"]);
+
+    const feed = await subtitles(session.url, 137, 2);
+    expect(screenAt(feed.before.changes, 137)).toBe(1);
+    const run = await feed.run();
+
+    expect(Number(run.response.headers.get("x-start"))).toBeCloseTo(137, 2);
+    // The file ends at 150 s: thirteen seconds of picture at 5 frames a second, without the
+    // sixteen the subtitle had been on screen before them.
+    const frames = framesOf(run.body);
+    expect(frames).toBeGreaterThan(60);
+    expect(frames).toBeLessThan(70);
+    await vi.waitFor(() => expect(shown(feed.changes).at(-1)).toEqual([139, 0]));
     await dispose();
   });
 
@@ -272,7 +955,7 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
     await dispose();
   });
 
-  it("plays the chosen sound track, and no cues without subtitles", async () => {
+  it("plays the chosen sound track", async () => {
     const { open, dispose } = await titles();
     const session = await open("TEST | Two sound tracks");
 
@@ -283,7 +966,6 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
       codec_name: "aac",
       channels: 2,
     });
-    expect(run.response.headers.get("x-cues")).toBe("");
     await dispose();
   });
 
@@ -295,6 +977,21 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
 
     expect(session.subtitles.map((track) => track.label)).toEqual(["English"]);
     expect(run.streams.map((stream) => stream.codec_name)).toEqual(["h264", "aac"]);
+    await dispose();
+  });
+
+  it("leaves an MP4's text subtitles to the run, which starts them at their own line", async () => {
+    const { open, dispose } = await titles();
+    const session = await open("TEST | Index at the end");
+
+    const feed = await subtitles(session.url, 5, 2);
+    // An MP4 lists each track's own samples: nothing to read before the run.
+    expect(feed.before.lines).toEqual([]);
+    const run = await feed.run();
+
+    expect(Number(run.response.headers.get("x-start"))).toBeGreaterThan(3.8);
+    expect(Number(run.response.headers.get("x-start"))).toBeLessThanOrEqual(4);
+    await vi.waitFor(() => expect(feed.lines).toContainEqual([2, 4, "First line"]));
     await dispose();
   });
 
@@ -319,18 +1016,25 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
     await dispose();
   });
 
-  it("holds one provider connection while seeking, and none once closed", async () => {
+  it("holds one provider connection while skipping, and none once closed", async () => {
     const { provider, open, playback, dispose } = await titles();
-    const session = await open("TEST | Two sound tracks");
+    const session = await open("TEST | Long subtitles");
 
-    const controller = new AbortController();
-    const first = await fetch(`${session.url}?start=0`, { signal: controller.signal });
+    const leaving = new AbortController();
+    const first = await fetch(`${session.url}?start=0&subtitle=2`, { signal: leaving.signal });
     expect(first.status).toBe(200);
-    // A seek: the player asks again from another position, and the first run ends.
-    const second = await play(`${session.url}?start=15`);
+    // A skip: the player asks for the subtitles before another position, which are read from
+    // the file, and for the run from there.
+    const feed = await subtitles(session.url, 137, 2);
+    const second = await feed.run();
     expect(second.response.status).toBe(200);
-    expect(provider.activeStreams()).toBeLessThanOrEqual(1);
-    controller.abort();
+    // And a skip while the file is still being read for the one before.
+    const dropped = subtitles(session.url, 61, 3).catch(() => null);
+    const last = await subtitles(session.url, 27, 2);
+    expect(screenAt(last.before.changes, 27)).toBe(1);
+    await dropped;
+    expect(provider.mostFilesAtOnce()).toBe(1);
+    leaving.abort();
 
     await playback.close(session.sessionId);
     await vi.waitFor(() => expect(provider.activeStreams()).toBe(0));

@@ -15,8 +15,11 @@ import {
   type SubtitleScreen,
 } from "@mrstreamer/core/subtitles/screen";
 
-/** How long a cue whose end isn't known yet lasts until the next change closes it. */
-const OPEN_END_S = 60 * 60;
+/**
+ * The end of a cue whose end isn't known yet: later than any title lasts, so the cue stays until
+ * the next change ends it, however long that takes. Chromium takes no infinite time.
+ */
+const NO_END_YET = Number.MAX_VALUE;
 /** Cues this far behind the position are let go, pictures with their pixels. */
 const KEEP_BEHIND_S = 30;
 /** How far G and H move text subtitles, and how far they go at most either way. */
@@ -78,7 +81,7 @@ function pictureTrack(video: HTMLVideoElement): TextTrack {
 }
 
 /** The screens picture cues show. Their bitmaps are made when they show and closed after. */
-const pictures = new WeakMap<VTTCue, SubtitleScreen>();
+const pictures = new WeakMap<TextTrackCue, SubtitleScreen>();
 
 interface Drawable {
   readonly width: number;
@@ -88,7 +91,7 @@ interface Drawable {
 
 let drawn: Drawable | null = null;
 /** Whatever was asked to show last, so a slow bitmap can't replace a newer screen. */
-let showing: VTTCue | null = null;
+let showing: TextTrackCue | null = null;
 
 /** Removes every cue from both tracks and clears the canvas. */
 export function clearSubtitles(video: HTMLVideoElement): void {
@@ -152,28 +155,61 @@ export function setSubtitleLook(look: SubtitleLook): void {
 }
 
 /**
- * Shows decoded subtitles on `video`: each change from its time on, until the next one or the
- * time it ends, whichever comes first. `offset` moves times onto the element's clock.
+ * Shows decoded subtitles on `video`, whose times are on the element's clock: each change from
+ * its time on, until the next one or the time it ends, whichever comes first, and for as long as
+ * it takes when neither comes.
  */
-export function subtitlePresenter(video: HTMLVideoElement, offset = 0) {
+export function subtitlePresenter(video: HTMLVideoElement) {
   const text = subtitleTrack(video);
   const timing = pictureTrack(video);
   text.mode = "showing";
-  /** The last cue, open until the next change sets its end. */
-  let open: VTTCue | null = null;
+  /** The last cue, which the next change ends when that comes before the end it has. */
+  let last: VTTCue | null = null;
+
+  /** Draws a picture cue's screen, unless another was asked for before its bitmaps were made. */
+  async function draw(cue: TextTrackCue, screen: SubtitleScreen): Promise<void> {
+    showing = cue;
+    const ready = await drawable(screen);
+    if (showing !== cue) {
+      for (const image of ready?.images ?? []) image.bitmap.close();
+      return;
+    }
+    release();
+    drawn = ready;
+    paint(video);
+  }
 
   return {
+    /**
+     * Draws the picture due at the element's position, without waiting for Chromium to say it is:
+     * that comes a moment after the position moves. Resolves once it is on the canvas.
+     */
+    async drawNow(): Promise<void> {
+      const due = [...(timing.cues ?? [])].findLast(
+        (cue) => cue.startTime <= video.currentTime && video.currentTime < cue.endTime,
+      );
+      const screen = due && pictures.get(due);
+      if (due && screen) await draw(due, screen);
+    },
+
     show(change: SubtitleChange): void {
-      const at = change.at - offset;
-      if (open) {
-        const times = textTimes.get(open);
+      const { at } = change;
+      if (last) {
+        const times = textTimes.get(last);
         if (times) {
-          times.end = Math.max(times.start, at);
-          open.endTime = times.end + settings.getState().delay;
+          times.end = Math.min(times.end, Math.max(times.start, at));
+          last.endTime = times.end + settings.getState().delay;
         } else {
-          open.endTime = Math.max(open.startTime, at);
+          last.endTime = Math.min(last.endTime, Math.max(last.startTime, at));
+          // A run brings the changes from before its position too. A picture that ends behind
+          // the position gets no exit from Chromium, so it goes here.
+          if (showing === last && last.endTime <= video.currentTime) {
+            showing = null;
+            release();
+            paint(video);
+          }
         }
-        open = null;
+        last = null;
       }
       // Cues shown long ago go, so a long film or a channel left on all day doesn't keep every one.
       for (const track of [text, timing]) {
@@ -182,25 +218,18 @@ export function subtitlePresenter(video: HTMLVideoElement, offset = 0) {
         }
       }
       if (isBlank(change.screen)) return;
-      const end = change.until === null ? at + OPEN_END_S : change.until - offset;
+      const end = change.until ?? NO_END_YET;
       if (change.screen.kind === "text") {
-        const cue = addTextCue(video, at, end, change.screen.lines.join("\n"));
-        open = change.until === null ? cue : null;
+        last = addTextCue(video, at, end, change.screen.lines.join("\n"));
         return;
       }
       const cue = new VTTCue(at, end, "");
       pictures.set(cue, change.screen);
       cue.onenter = () => {
-        showing = cue;
-        void drawable(change.screen).then((ready) => {
-          if (showing !== cue) {
-            for (const image of ready?.images ?? []) image.bitmap.close();
-            return;
-          }
-          release();
-          drawn = ready;
-          paint(video);
-        });
+        // Chromium says so a moment after the cue turns active. By then a cue from before the
+        // position may have got its end, behind the position.
+        if (cue.endTime <= video.currentTime) return;
+        void draw(cue, change.screen);
       };
       cue.onexit = () => {
         if ((timing.activeCues?.length ?? 0) > 0) return;
@@ -209,7 +238,7 @@ export function subtitlePresenter(video: HTMLVideoElement, offset = 0) {
         paint(video);
       };
       timing.addCue(cue);
-      open = change.until === null ? cue : null;
+      last = cue;
     },
   };
 }

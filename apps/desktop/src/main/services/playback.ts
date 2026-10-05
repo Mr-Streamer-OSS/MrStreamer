@@ -16,6 +16,15 @@
 // Movies and episodes (see ../playback/title.ts): the proxy serves the provider's file to ffprobe
 // and ffmpeg over loopback, answering byte ranges, one upstream request at a time. Each request
 // from the player runs ffmpeg from a position with the chosen tracks, and replaces the run before.
+// With subtitles on, the player also asks for their feed, and the picture doesn't wait for it:
+// what the track holds before the position, as far back as the subtitles on screen there depend
+// on, then what the run reads. The proxy keeps what each run reads of a track
+// (see ../playback/subtitle-history.ts) and reads the rest from the file itself, only the track's
+// packets (see ../playback/matroska.ts), when playback spares the provider and no more than a
+// bounded amount (see ../playback/upstream.ts). What can't be had that way leaves the subtitles
+// unavailable for the position, never the picture. All it keeps is of one file: when an answer
+// shows the provider put another behind the address, it starts afresh
+// (see ../playback/source-identity.ts).
 //
 // Each session is a scope within the service's. Closing it, by stopping, switching or quitting,
 // aborts its upstream requests, which ends their ffmpeg processes; the proxy closes with the
@@ -56,17 +65,44 @@ import {
   startsPlaylist,
 } from "../playback/hls.ts";
 import { createAudioChoice } from "../playback/program-table.ts";
-import { captionsInPicture } from "@mrstreamer/core/subtitles/captions";
+import { captionsInPicture, captionsInTrack } from "@mrstreamer/core/subtitles/captions";
+import { freshStart } from "@mrstreamer/core/subtitles/decoder";
+import { dvbClears } from "@mrstreamer/core/subtitles/dvb";
+import type { SubtitleFeedLine, SubtitlesUnavailable } from "@mrstreamer/core/subtitles/feed";
 import { pgsSegments } from "@mrstreamer/core/subtitles/pgs";
 import { pesReader, type PesPacket } from "@mrstreamer/core/subtitles/transport";
+import { webvttReader, type Cue } from "@mrstreamer/core/subtitles/webvtt";
+import { fileWindows, type FileWindows } from "../playback/file-windows.ts";
+import { blocks, readLayout, selected, type Layout, type ReadFile } from "../playback/matroska.ts";
+import { sourceIdentity, type Held, type SourceIdentity } from "../playback/source-identity.ts";
+import {
+  nextScan,
+  replayFor,
+  subtitleHistory,
+  type Need,
+  type SubtitleEntry,
+  type SubtitleHistory,
+  type TrackIndex,
+} from "../playback/subtitle-history.ts";
 import {
   firstPacketTime,
   PROBE_ARGUMENTS,
   readProbe,
+  selectedPlan,
+  subtitleOutput,
   titlePlan,
+  type SubtitleOutput,
   type TitleProbe,
   type TitleRun,
 } from "../playback/title.ts";
+import {
+  rateMeter,
+  UPSTREAM_LIMITS,
+  upstreamSlot,
+  type Progress,
+  type UpstreamLimits,
+  type UpstreamSlot,
+} from "../playback/upstream.ts";
 import { Subscriptions } from "./subscription.ts";
 
 /** How long the provider gets to start answering before the stream counts as failed. */
@@ -90,6 +126,67 @@ const PROBE_TIMEOUT_MS = 30_000;
 const RUN_START_TIMEOUT_MS = 30_000;
 /** Probes kept for files opened again, such as when resuming. */
 const PROBES_KEPT = 32;
+/**
+ * How far a subtitle packet may sit in a file from the picture of its own time, in seconds. A
+ * file stores its packets in the order of their times, near enough: a reading counts as whole
+ * from this long after its first picture to this long before its last, and a run brings the
+ * subtitles itself from this long after its position. Matroska and MP4 files keep to a few
+ * hundredths of a second. A transport stream sends each picture ahead of its time, by as much as
+ * its encoder's buffer, and subtitles when they are due, so those come that much after the
+ * pictures of their time.
+ */
+const INTERLEAVE_S = { ordered: 1, broadcast: 2.5 } as const;
+/**
+ * The readings one position may take. Each reaches further back, the thirteenth from the start of
+ * the file at the latest, so more than these means what they read doesn't stay read.
+ */
+const SCANS_LIMIT = 16;
+/** What reading a subtitle track's past may take, for one position. */
+interface RecoveryLimits {
+  /** Bytes of the provider's file, and requests for them. */
+  readonly bytes: number;
+  readonly requests: number;
+  /** Milliseconds, waiting for turns at the provider included. */
+  readonly ms: number;
+  /** Bytes of the file kept in memory, of the track's packets taken from one stretch, and of the track's subtitles. */
+  readonly kept: number;
+  readonly selected: number;
+  readonly history: number;
+  /**
+   * How much of the file one request asks for: what arrives in about `WINDOW_S`, so it is soon
+   * over when playback wants the provider back, within these bounds.
+   */
+  readonly windowLeast: number;
+  readonly windowMost: number;
+}
+
+const RECOVERY_LIMITS: RecoveryLimits = {
+  bytes: 8 * 1024 * 1024,
+  requests: 256,
+  ms: 30_000,
+  kept: 8 * 1024 * 1024,
+  selected: 4 * 1024 * 1024,
+  history: 4 * 1024 * 1024,
+  windowLeast: 16 * 1024,
+  windowMost: 256 * 1024,
+};
+/** See `RecoveryLimits.windowLeast`; and the window before anything was measured. */
+const WINDOW_S = 0.05;
+const WINDOW_FIRST = 64 * 1024;
+/** The same for playback's requests meanwhile: about a second's worth. */
+const PART_BYTES = { least: 512 * 1024, most: 4 * 1024 * 1024, first: 1024 * 1024 } as const;
+/**
+ * How long ffmpeg may leave what it was sent before playback counts as resting: it reads in
+ * bursts, a few milliseconds apart, while the player wants more, and not at all once the player
+ * has enough buffered or is paused.
+ */
+const REST_MS = 300;
+/** How long the proxy waits for what an ffmpeg that has ended sent it over loopback. */
+const REPORT_WAIT_MS = 2000;
+/** How much of what a run reads of its subtitle track is kept for a feed that becomes ready. */
+const LIVE_BYTES = 2 * 1024 * 1024;
+/** How much of a feed may wait for a player that doesn't read it. */
+const FEED_WAITING_BYTES = 2 * 1024 * 1024;
 /** How long a channel's stream that failed goes after its others when Auto tries them again. */
 const FAILED_STREAM_MS = 2 * 60_000;
 
@@ -143,24 +240,137 @@ interface TitleSessionState extends SessionBase {
   readonly kind: "title";
   readonly title: TitleRef;
   readonly upstreamUrl: string;
+  /** What the file holds, as ffprobe read it when the title opened. */
   probe: TitleProbe | null;
+  /** Which of the files behind the address ffprobe read; see `SourceIdentity.generation`. */
+  probed: number;
   /** The upstream request serving ffprobe or ffmpeg. A new one replaces it. */
   source: AbortController | null;
-  /** What each run of ffmpeg reports back: its subtitle cues and where its picture starts. */
-  readonly runs: Map<string, RunReports>;
+  /** Whose turn it is at the provider: one request at a time, playback first. */
+  readonly slot: UpstreamSlot;
+  /** How fast the file arrives. */
+  readonly meter: ReturnType<typeof rateMeter>;
+  /** What the provider's answers say of the file, and whether it is still the same one. */
+  readonly identity: SourceIdentity;
+  /** What the session keeps of that file for its subtitles. Another file gets a new one. */
+  kept: FileKept;
+  /** The run whose picture hasn't reached the player yet, and the one that hasn't ended. */
+  starting: AbortController | null;
+  running: AbortController | null;
+  /** How many feeds are reading the file for what came before their position. */
+  recovering: number;
+  /** How many of ffmpeg's requests for the file are being taken, rather than left waiting. */
+  reading: number;
+  /** What the player last said of its buffer. */
+  progress: Progress | null;
+  /** Where each ffmpeg's reports go, by the id in their address. */
+  readonly reports: Map<string, Reports>;
+  /** The player's subtitle feed, which gets what the run reads of its track. */
+  feed: Feed | null;
+  /** What the run has read of its subtitle track. */
+  live: Live | null;
 }
 
 type Session = LiveSession | TitleSessionState;
 
-/** What an ffmpeg run sends the proxy besides the picture. */
-interface RunReports {
-  readonly cues: TextRelay;
+/**
+ * What a session knows and keeps of the provider's file, for as long as it stays the same file.
+ * When the provider puts another behind the address the session starts a new one, so whoever
+ * still holds this one can tell that what it read was of a file that is gone.
+ */
+interface FileKept {
+  /** The parts of the file read for a subtitle track's past. */
+  readonly windows: FileWindows;
+  /** What has been read of the subtitle track the player shows, by its id. */
+  readonly histories: Map<number, SubtitleHistory>;
+  /** What the file's descriptions say, once read; Matroska only. */
+  layout: Layout | null;
+  /** How many of the provider's servers had answered for the file when this was last read for. */
+  servers: number;
+}
+
+/** What an ffmpeg sends the proxy besides the picture. */
+interface Reports {
+  /** Takes the subtitles as they arrive. */
+  readonly subtitles?: (request: IncomingMessage) => void;
+  /** A run's first video packet, which says where its picture starts. */
+  readonly start?: TextRelay;
+}
+
+/** What a run has read of its subtitle track, for the feeds that join it. */
+interface Live {
+  readonly track: number;
   /**
-   * Subtitle packets the player decodes itself, a JSON line each: `{"at":12.3,"data":"<base64>"}`,
-   * `at` in seconds on the file's clock.
+   * The run brings every entry of the track after this time on the file's clock: a little after
+   * its position. A feed for an earlier position isn't this run's.
    */
-  readonly packets: TextRelay;
-  readonly start: TextRelay;
+  readonly since: number;
+  /** Every entry after this time is in `entries`: `since`, until the oldest had to go. */
+  from: number;
+  entries: SubtitleEntry[];
+  bytes: number;
+}
+
+/** One reading of a subtitle track's past: when it is over, and what it took of the provider. */
+interface Attempt {
+  /** The player left, the session closed, or the reading ran out of time. */
+  readonly signal: AbortSignal;
+  readonly spent: Spent;
+  /**
+   * The stretch being stepped through is more of the file than the reading has left to take, so
+   * each request asks for the least: a block's header and what little follows it.
+   */
+  narrow: boolean;
+}
+
+interface Spent {
+  bytes: number;
+  requests: number;
+}
+
+/** A subtitle track's past couldn't be had for a position; `kind` says why. */
+class Unavailable extends Error {
+  readonly kind: SubtitlesUnavailable;
+  constructor(kind: SubtitlesUnavailable) {
+    super(kind);
+    this.kind = kind;
+  }
+}
+
+/** The subtitles the player is reading: one track, from one position on. */
+interface Feed {
+  readonly track: number;
+  /**
+   * What the run reads of the track after this time on the file's clock goes to the player. Up
+   * to it, the history did. Infinity until the feed has that.
+   */
+  after: number;
+  /** Sends an entry on, its times counted from `origin`, where the title starts on the file's clock. */
+  send(entry: SubtitleEntry, origin: number): void;
+  /** Ends the feed: the player asked for another. */
+  close(): void;
+  /** The provider put another file behind the address: what the feed sent is of one that is gone. */
+  changed(): void;
+}
+
+/** What the player asked a feed for. */
+interface FeedRequest {
+  readonly track: number;
+  /** The teletext page or caption channel, for a track that holds several. */
+  readonly page: number | null;
+  /** The decoder the player was told for the track's packets; none for text. */
+  readonly codec: string;
+  /** Seconds into the title. */
+  readonly start: number;
+}
+
+/** What a track holds before a position that the player needs to start there. */
+interface Before {
+  readonly entries: readonly SubtitleEntry[];
+  /** Up to this time on the file's clock; the run brings what comes after. */
+  readonly upTo: number;
+  /** The file's clock at the start of the title. */
+  readonly origin: number;
 }
 
 export interface PlaybackDeps {
@@ -169,6 +379,10 @@ export interface PlaybackDeps {
   readonly ffmpeg: string | null;
   /** The ffprobe that reads what movie files hold, or null when this build has none. */
   readonly ffprobe?: string | null;
+  /** What reading a subtitle track's past may take, when not the usual amounts. */
+  readonly recovery?: Partial<RecoveryLimits>;
+  /** When that reading gets the provider, when not as usual. */
+  readonly upstream?: Partial<UpstreamLimits>;
 }
 
 export class Playback extends Context.Service<
@@ -245,16 +459,20 @@ function make(deps: PlaybackDeps) {
     yield* Effect.addFinalizer(() => closeAll);
 
     const base = `http://127.0.0.1:${port}`;
-    /** Probes by file, so reopening a title doesn't read its file again. Oldest first. */
-    const probes = new Map<string, TitleProbe>();
     /**
-     * How each run's subtitle packets arrive: PGS as stored, or in a transport stream, where a
-     * picture's SEI units carry captions.
+     * Probes by address, so reopening a title doesn't read its file again, until an answer shows
+     * the provider put another file there. Oldest first.
      */
-    const reportedPackets = new WeakMap<
-      TextRelay,
-      { readonly container: "mpegts" | "sup"; readonly captions: "h264" | "hevc" | null }
-    >();
+    const probes = new Map<string, TitleProbe>();
+    const limits: RecoveryLimits = { ...RECOVERY_LIMITS, ...deps.recovery };
+
+    /** What a session keeps of a file it has read nothing of yet. */
+    const fileKept = (): FileKept => ({
+      windows: fileWindows(limits.kept),
+      histories: new Map(),
+      layout: null,
+      servers: 0,
+    });
 
     async function serve(request: IncomingMessage, response: ServerResponse): Promise<void> {
       response.setHeader("Access-Control-Allow-Origin", "*");
@@ -265,10 +483,9 @@ function make(deps: PlaybackDeps) {
       }
       const url = new URL(request.url ?? "/", base);
       // /stream/<token>.ts, /stream/<token>.m3u8 and its /stream/<token>/<address id>,
-      // /source/<token>, /title/<token>.mp4, /report/<token>/<run>/<what>, /cues/<token>/<run>,
-      // /packets/<token>/<run>
+      // /source/<token>, /title/<token>.mp4, /report/<token>/<ffmpeg>/<what>
       const route =
-        /^\/(stream|source|title|report|cues|packets)\/([\w-]+)(?:\.\w+)?(?:\/([\w-]+))?(?:\/(cues|packets|start))?$/.exec(
+        /^\/(stream|source|title|report)\/([\w-]+)(?:\.\w+)?(?:\/([\w-]+))?(?:\/(subtitles|start))?$/.exec(
           url.pathname,
         );
       const session = route && [...sessions.values()].find((each) => each.token === route[2]);
@@ -288,19 +505,25 @@ function make(deps: PlaybackDeps) {
         case "source":
           return serveSource(session, request, response);
         case "title":
+          if (url.searchParams.get("only") === "subtitles") {
+            return serveSubtitles(session, url, response);
+          }
+          if (url.searchParams.get("only") === "progress") {
+            // How much the player has buffered, which says whether playback can spare the provider.
+            session.progress = {
+              buffered: Math.max(0, Number(url.searchParams.get("buffered")) || 0),
+              paused: url.searchParams.get("paused") === "1",
+              at: performance.now(),
+            };
+            session.slot.look();
+            response.writeHead(204).end();
+            return;
+          }
           // A new run starts clean: what went wrong before was dealt with, or happens again.
           session.failure = null;
           return serveTitle(session, url, response);
         case "report":
           return receiveReport(session, route[3] ?? "", route[4] ?? "", request, response);
-        case "cues":
-          return sendRelay(session.runs.get(route[3] ?? "")?.cues, "text/vtt", response);
-        case "packets":
-          return sendRelay(
-            session.runs.get(route[3] ?? "")?.packets,
-            "application/x-ndjson",
-            response,
-          );
         default:
           response.writeHead(410).end();
       }
@@ -613,17 +836,7 @@ function make(deps: PlaybackDeps) {
       response.writeHead(answer.status, passed);
       for (const part of opened.parts) response.write(part);
       for (let next = await opened.reader.read(); !next.done; next = await opened.reader.read()) {
-        if (!response.write(next.value)) {
-          await new Promise<void>((resume) => {
-            const resumed = () => {
-              response.off("drain", resumed);
-              response.off("close", resumed);
-              resume();
-            };
-            response.on("drain", resumed);
-            response.on("close", resumed);
-          });
-        }
+        if (!response.write(next.value)) await drained(response);
       }
       response.end();
     }
@@ -686,8 +899,42 @@ function make(deps: PlaybackDeps) {
     }
 
     /**
+     * Notes what an upstream answer says of the session's file. Once it is another file than the
+     * session knew, nothing kept of the old one stays: not its parts, its subtitles or its index,
+     * nor what ffprobe read of it for the next time the title opens, and a feed that gave the
+     * player the old file's subtitles says they are gone. Playback goes on with what the provider
+     * sends, as it always did. Null when the answer doesn't say what it holds.
+     */
+    function observe(session: TitleSessionState, answer: Response, ranged: boolean): Held | null {
+      const held = session.identity.observe(answer, ranged);
+      if (held?.other) {
+        session.kept = fileKept();
+        probes.delete(session.upstreamUrl);
+        session.feed?.changed();
+      }
+      return held;
+    }
+
+    /** How much of the file one of playback's requests asks for while recovery takes turns: about a second's worth. */
+    function partBytes(session: TitleSessionState): number {
+      const rate = session.meter.rate;
+      return rate === null
+        ? PART_BYTES.first
+        : Math.max(PART_BYTES.least, Math.min(PART_BYTES.most, Math.round(rate)));
+    }
+
+    /**
      * The provider's file for ffprobe and ffmpeg, the byte range they ask for. One upstream
-     * request at a time: a new one, such as a seek, ends the one before.
+     * request at a time: a new one, such as a seek, ends the one before. ffmpeg asks for the file
+     * from a position to its end, and the provider is asked the same, so the answer passes
+     * through as it comes.
+     *
+     * While a subtitle track's past is being read (see `subtitlesBefore`), that reading needs
+     * turns at the provider. A provider that answers ranges is then asked for the file a part at
+     * a time: ffmpeg's answer stays the one it was promised, the same length from the same
+     * position, and each part has to be exactly the bytes that follow, of a file of the same
+     * size, or the answer ends there and ffmpeg asks again. A provider that knows no ranges keeps
+     * its one answer, and the reading does without.
      */
     async function serveSource(
       session: TitleSessionState,
@@ -699,60 +946,234 @@ function make(deps: PlaybackDeps) {
       session.source = mine;
       response.on("close", () => mine.abort());
       const signal = AbortSignal.any([session.closed.signal, mine.signal]);
-      const headers: Record<string, string> = request.headers.range
-        ? { Range: request.headers.range }
-        : {};
-      const found = await connect(
-        session,
-        session.upstreamUrl,
-        headers,
-        signal,
-        FILE_RETRY_DELAYS_MS,
-      );
-      if (signal.aborted) {
-        if (found.ok) void found.response.body?.cancel().catch(() => {});
-        response.destroy();
-        return;
-      }
-      if (!found.ok) {
-        // A range past the end is ffmpeg looking around, not the provider refusing.
-        if (!("status" in found.failure) || found.failure.status !== 416) {
-          session.failure = found.failure;
+      const { identity, slot } = session;
+      // ffmpeg asks for a file from a position to its end. Any other range passes as it is.
+      const asked = request.headers.range;
+      const open = asked === undefined ? "0" : /^bytes=(\d+)-$/.exec(asked)?.[1];
+      /** The next byte ffmpeg gets; null when the answer isn't known to hold the bytes asked for. */
+      let position = open === undefined ? null : Number(open);
+      /** The size of the file ffmpeg's answer was promised from; null before its headers went. */
+      let total: number | null = null;
+      let answered = false;
+      /** Asked in parts and answered otherwise: the rest passes through as it comes. */
+      let plain = false;
+
+      /** ffmpeg hasn't taken what it was sent for a while: playback can spare the provider. */
+      let resting = false;
+      const rest = (on: boolean) => {
+        if (resting === on) return;
+        resting = on;
+        session.reading += on ? -1 : 1;
+        if (on) slot.look();
+      };
+      /**
+       * Waits until ffmpeg takes more: true. With `spare`, false instead once it has left what
+       * it was sent for long enough and recovery wants the provider.
+       */
+      const taken = (spare: boolean) =>
+        new Promise<boolean>((resolve) => {
+          const settle = (went: boolean) => {
+            clearTimeout(timer);
+            stop();
+            response.off("drain", resumed);
+            response.off("close", resumed);
+            rest(false);
+            resolve(went);
+          };
+          const resumed = () => settle(true);
+          const look = () => {
+            if (resting && spare && slot.wanted(false)) settle(false);
+          };
+          const timer = setTimeout(() => {
+            rest(true);
+            look();
+          }, REST_MS);
+          const stop = slot.onWanting(look);
+          response.on("drain", resumed);
+          response.on("close", resumed);
+        });
+
+      session.reading++;
+      try {
+        for (let fresh = true; ; fresh = false) {
+          const size: number | null = answered ? total : identity.size;
+          // In parts while a subtitle track's past is being read, so that reading gets turns. A
+          // run that is starting reads as it always did; recovery has no turns then anyway.
+          const end =
+            !plain &&
+            position !== null &&
+            size !== null &&
+            position < size &&
+            identity.ranges === true &&
+            session.recovering > 0 &&
+            session.starting === null
+              ? Math.min(size, position + partBytes(session))
+              : null;
+          const range =
+            position === null
+              ? asked
+              : end !== null
+                ? `bytes=${position}-${end - 1}`
+                : asked !== undefined || position > 0
+                  ? `bytes=${position}-`
+                  : undefined;
+          const lease = await slot.play(signal, fresh);
+          if (!lease) {
+            response.destroy();
+            return;
+          }
+          let body: ReadableStreamDefaultReader<Uint8Array> | null = null;
+          /** How this request ended: its body did, or it was ended to give recovery a turn. */
+          let outcome: "ended" | "spared" | null = null;
+          try {
+            const found = await connect(
+              session,
+              session.upstreamUrl,
+              range === undefined ? {} : { Range: range },
+              signal,
+              FILE_RETRY_DELAYS_MS,
+            );
+            if (signal.aborted) {
+              if (found.ok) void found.response.body?.cancel().catch(() => {});
+              response.destroy();
+              return;
+            }
+            if (!found.ok) {
+              // A range past the end is ffmpeg looking around, not the provider refusing.
+              if (!("status" in found.failure) || found.failure.status !== 416) {
+                session.failure = found.failure;
+              }
+              if ("status" in found.failure && !answered) {
+                response.writeHead(found.failure.status).end();
+              } else response.destroy();
+              return;
+            }
+            const upstream = found.response;
+            const held = observe(session, upstream, range !== undefined);
+            const follows =
+              held !== null &&
+              upstream.status === 206 &&
+              held.start === position &&
+              !held.other &&
+              !held.stale;
+            if (answered && (!follows || held.size !== total)) {
+              // Not the bytes that follow what ffmpeg has: it asks again, and gets what there is.
+              void upstream.body?.cancel().catch(() => {});
+              response.destroy();
+              return;
+            }
+            if (!answered && end !== null && (!follows || held.size !== size)) {
+              // A part was asked of a file that isn't the one known: as the provider answers.
+              void upstream.body?.cancel().catch(() => {});
+              plain = true;
+              continue;
+            }
+            // The provider answers again, so ffmpeg has the range it asked for again: a break
+            // before this no longer cuts the run short.
+            session.failure = null;
+            if (!answered) {
+              answered = true;
+              const forwarded: Record<string, string> = { "Accept-Ranges": "bytes" };
+              const type = upstream.headers.get("content-type");
+              if (type) forwarded["content-type"] = type;
+              if (end !== null && position !== null && size !== null) {
+                // What the provider answers when asked for the file from here to its end.
+                total = size;
+                forwarded["content-length"] = String(size - position);
+                if (asked !== undefined) {
+                  forwarded["content-range"] = `bytes ${position}-${size - 1}/${size}`;
+                }
+                response.writeHead(asked === undefined ? 200 : 206, forwarded);
+              } else {
+                for (const name of ["content-length", "content-range"]) {
+                  const value = upstream.headers.get(name);
+                  if (value) forwarded[name] = value;
+                }
+                response.writeHead(upstream.status, forwarded);
+                total = held?.size ?? null;
+                // An answer that starts elsewhere than asked, as from a provider that knows no
+                // ranges, passes through as it is.
+                if (held?.start !== position) position = null;
+              }
+            }
+            if (!upstream.body) {
+              response.end();
+              return;
+            }
+            body = upstream.body.getReader();
+            /** Whether the request can be ended early and the file asked for again from there. */
+            const resumable = position !== null && total !== null && identity.ranges === true;
+            const began = performance.now();
+            let got = 0;
+            for (;;) {
+              const { done, value } = await body.read();
+              if (done) {
+                outcome = "ended";
+                break;
+              }
+              got += value.length;
+              if (position !== null) position += value.length;
+              const more = response.write(value);
+              // A part is read to its end at once, and ffmpeg takes it from memory.
+              if (end !== null) continue;
+              // ffmpeg takes the file as it comes, or has all it takes for now: either way
+              // recovery may get the provider, when playback can spare it.
+              const went = more || (await taken(resumable));
+              if (signal.aborted) return;
+              if (!went || (resumable && slot.wanted(true))) {
+                outcome = "spared";
+                break;
+              }
+            }
+            if (end !== null) session.meter.add(got, performance.now() - began);
+          } catch {
+            // The provider broke off; ffmpeg may still end its run as if the file had.
+            if (!signal.aborted) {
+              session.failure ??= { kind: "network", detail: "The provider's file broke off." };
+            }
+            response.destroy();
+            return;
+          } finally {
+            if (outcome !== "ended") {
+              await body?.cancel().catch(() => {});
+              await gone();
+            }
+            lease.release();
+          }
+          if (signal.aborted) return;
+          if (
+            outcome === "ended" &&
+            (end === null || position === null || position >= (total ?? 0))
+          ) {
+            response.end();
+            return;
+          }
+          // More of the file once ffmpeg has taken what it was sent.
+          if (response.writableNeedDrain) await taken(false);
+          if (signal.aborted) return;
         }
-        if ("status" in found.failure) response.writeHead(found.failure.status).end();
-        else response.destroy();
-        return;
+      } finally {
+        if (!resting) session.reading--;
+        slot.look();
       }
-      const upstream = found.response;
-      // The provider answers again, so ffmpeg has the range it asked for again: a break before
-      // this no longer cuts the run short.
-      session.failure = null;
-      const forwarded: Record<string, string> = { "Accept-Ranges": "bytes" };
-      for (const name of ["content-type", "content-length", "content-range"]) {
-        const value = upstream.headers.get(name);
-        if (value) forwarded[name] = value;
-      }
-      response.writeHead(upstream.status, forwarded);
-      if (!upstream.body) {
-        response.end();
-        return;
-      }
-      const body = Readable.from(upstream.body);
-      body.on("error", () => {
-        // The provider broke off; ffmpeg may still end its run as if the file had.
-        if (!signal.aborted) {
-          session.failure ??= { kind: "network", detail: "The provider's file broke off." };
-        }
-        response.destroy();
-      });
-      signal.addEventListener("abort", () => body.destroy(), { once: true });
-      body.pipe(response);
+    }
+
+    /** What `kept` holds of a subtitle track. One track's at a time: the one the player shows. */
+    function historyOf(kept: FileKept, track: number): SubtitleHistory {
+      const known = kept.histories.get(track);
+      if (known) return known;
+      kept.histories.clear();
+      const history = subtitleHistory(limits.history);
+      kept.histories.set(track, history);
+      return history;
     }
 
     /**
-     * Plays a movie or episode from `start` with the chosen tracks, as fragmented MP4. Headers
-     * tell the player where the picture starts (`x-start`, title seconds), where the file's clock
-     * begins (`x-origin`, which subtitle times count from) and where the cues stream (`x-cues`).
+     * Plays a movie or episode from `start` with the chosen tracks, as fragmented MP4. A header
+     * tells the player where the picture starts (`x-start`, title seconds). The picture doesn't
+     * wait for subtitles: what the run reads of its subtitle track is kept, and goes to the
+     * player's feed once that has what came before (see `serveSubtitles`). Until the picture has
+     * reached the player, nothing but the run reads the provider's file.
      */
     async function serveTitle(
       session: TitleSessionState,
@@ -765,13 +1186,13 @@ function make(deps: PlaybackDeps) {
       session.active = active;
       response.on("close", () => active.abort());
       const signal = AbortSignal.any([session.closed.signal, active.signal]);
-      const probe = session.probe;
       const run: TitleRun = {
         start: Math.max(0, Number(url.searchParams.get("start")) || 0),
         audio: optionalNumber(url.searchParams.get("audio")),
         subtitle: optionalNumber(url.searchParams.get("subtitle")),
         convertSound: url.searchParams.get("sound") === "convert",
       };
+      const probe = session.probe;
       if (!probe || !deps.ffmpeg) {
         session.failure = {
           kind: "unsupported",
@@ -780,31 +1201,27 @@ function make(deps: PlaybackDeps) {
         response.writeHead(415).end();
         return;
       }
-      const runId = randomBytes(9).toString("base64url");
-      const reports: RunReports = {
-        cues: textRelay(),
-        packets: textRelay(),
-        start: textRelay(),
+      session.starting = active;
+      session.running = active;
+      // What the player said of its buffer was of the run before.
+      session.progress = null;
+      // ffmpeg asks for the file in a moment: recovery's request is over by then.
+      session.slot.clear();
+      /** The run's picture reached the player, or never will: recovery may read again. */
+      const settled = () => {
+        if (session.starting !== active) return;
+        session.starting = null;
+        session.slot.look();
       };
-      // The run before is over; its cues may still be read until now, as a short run can end
-      // before the player asks for them.
-      session.runs.clear();
-      session.runs.set(runId, reports);
-      const reportUrl = (what: string) => `${base}/report/${session.token}/${runId}/${what}`;
+      // The run reads the file as the session knows it now, and keeps what it reads with it.
+      const kept = session.kept;
+      const generation = session.identity.generation;
+      const id = randomBytes(9).toString("base64url");
+      const reportUrl = (what: string) => `${base}/report/${session.token}/${id}/${what}`;
       const plan = titlePlan(probe, run, session.decoders, {
         source: `${base}/source/${session.token}`,
-        cues: reportUrl("cues"),
-        packets: reportUrl("packets"),
+        subtitles: reportUrl("subtitles"),
         start: reportUrl("start"),
-      });
-      reportedPackets.set(reports.packets, {
-        container: plan.packets ?? "mpegts",
-        captions:
-          plan.subtitle && "packets" in plan.subtitle && plan.subtitle.packets === "captions"
-            ? probe.video?.name === "hevc"
-              ? "hevc"
-              : "h264"
-            : null,
       });
       const report = (outcome: "ok" | StreamFailure["kind"]) =>
         diagnostics.record({
@@ -820,7 +1237,13 @@ function make(deps: PlaybackDeps) {
       child.stderr.on("data", (chunk: Buffer) => {
         errors = (errors + chunk.toString()).slice(-2000);
       });
-      const stop = () => child.kill("SIGKILL");
+      const stop = () => {
+        child.kill("SIGKILL");
+        // A player that holds back reading leaves the picture waiting in the pipe, and nobody
+        // reads it now: the pipe closes with the run.
+        child.stdout.destroy();
+        settled();
+      };
       signal.addEventListener("abort", stop, { once: true });
       // Held until the picture's start is known; ffmpeg pauses when too much waits.
       const held: Buffer[] = [];
@@ -836,8 +1259,64 @@ function make(deps: PlaybackDeps) {
         outputEnded = true;
       });
       const exited = new Promise<number | null>((resolve) => child.on("close", resolve));
+      // The process is gone before its last output has been read, which a paused player may
+      // leave waiting.
+      const ended = new Promise<number | null>((resolve) => {
+        child.on("exit", resolve);
+        child.on("error", () => resolve(null));
+      });
       child.on("error", (cause) => {
         errors = String(cause);
+      });
+
+      const start = textRelay();
+      const reading =
+        plan.subtitle && run.subtitle !== null ? historyOf(kept, run.subtitle).reading() : null;
+      /** What the run reads of its track, for a feed that becomes ready while it runs. */
+      const since = readsItsOwn(probe, run.subtitle, run.start)
+        ? Number.NEGATIVE_INFINITY
+        : probe.origin + run.start + interleave(probe);
+      const live: Live | null =
+        run.subtitle === null
+          ? null
+          : { track: run.subtitle, since, from: since, entries: [], bytes: 0 };
+      session.live = live;
+      const subtitles =
+        plan.subtitle && reading && live
+          ? subtitleSink(plan.subtitle, (entry) => {
+              // What it reads now is of another file than it started in.
+              if (session.identity.generation !== generation) return;
+              reading.add(entry);
+              // A run stops when the viewer skips or leaves, at any moment: what it has read
+              // counts up to a little before the last subtitle that arrived.
+              reading.reach(entry.from - interleave(probe));
+              live.entries.push(entry);
+              live.bytes += sizeOf(entry);
+              // The oldest go first, and what is left is whole only from after them.
+              while (live.bytes > LIVE_BYTES && live.entries.length > 1) {
+                const gone = live.entries.shift()!;
+                live.bytes -= sizeOf(gone);
+                live.from = Math.max(live.from, gone.from);
+              }
+              const feed = session.feed;
+              if (
+                session.live === live &&
+                feed?.track === live.track &&
+                live.since <= feed.after &&
+                entry.from > feed.after
+              ) {
+                feed.send(entry, probe.origin);
+              }
+            })
+          : null;
+      session.reports.set(id, { start, ...(subtitles ? { subtitles: subtitles.receive } : {}) });
+      void ended.then(async (code) => {
+        const whole = (await subtitles?.whole()) === true;
+        // ffmpeg exits cleanly after its input broke off too; the source knows better.
+        reading?.end(whole && code === 0 && !signal.aborted && !session.failure);
+        session.reports.delete(id);
+        if (session.running === active) session.running = null;
+        settled();
       });
 
       // Converted video starts exactly at `start`; copied video at the keyframe before it,
@@ -853,14 +1332,14 @@ function make(deps: PlaybackDeps) {
                 unsubscribe();
                 resolve(time);
               };
-              const unsubscribe = reports.start.subscribe(
+              const unsubscribe = start.subscribe(
                 () => {
-                  const time = firstPacketTime(reports.start.text());
+                  const time = firstPacketTime(start.text());
                   if (time !== null) settle(time);
                 },
-                () => settle(firstPacketTime(reports.start.text())),
+                () => settle(firstPacketTime(start.text())),
               );
-              void exited.then(() => settle(firstPacketTime(reports.start.text())));
+              void exited.then(() => settle(firstPacketTime(start.text())));
             })
           : probe.origin + run.start;
       if (signal.aborted) {
@@ -879,19 +1358,19 @@ function make(deps: PlaybackDeps) {
         response.writeHead("status" in failure ? failure.status : 415).end();
         return;
       }
+      // From the start of the file the run reads every subtitle; from a position, those from a
+      // little after where ffmpeg reads on from. That is the keyframe its picture starts at, or
+      // the position itself when that keyframe comes after it, as in a transport stream.
+      reading?.begin(
+        run.start === 0
+          ? Number.NEGATIVE_INFINITY
+          : Math.min(pictureStart, probe.origin + run.start) + interleave(probe),
+      );
 
       response.writeHead(200, {
         "Content-Type": "video/mp4",
-        "Access-Control-Expose-Headers": "x-start, x-origin, x-cues, x-packets, x-packets-codec",
+        "Access-Control-Expose-Headers": "x-start",
         "x-start": String(Math.max(0, pictureStart - probe.origin)),
-        "x-origin": String(probe.origin),
-        "x-cues":
-          plan.subtitle && "cues" in plan.subtitle ? `${base}/cues/${session.token}/${runId}` : "",
-        "x-packets":
-          plan.subtitle && "packets" in plan.subtitle
-            ? `${base}/packets/${session.token}/${runId}`
-            : "",
-        "x-packets-codec": plan.subtitle && "packets" in plan.subtitle ? plan.subtitle.packets : "",
       });
       child.stdout.pause();
       child.stdout.off("data", hold);
@@ -900,6 +1379,7 @@ function make(deps: PlaybackDeps) {
       // with ffmpeg below: a run that broke off must not end like the title.
       if (!outputEnded) child.stdout.pipe(response, { end: false });
       report("ok");
+      settled();
       void exited.then((code) => {
         signal.removeEventListener("abort", stop);
         // ffmpeg exits cleanly after its input broke off too; the source knows better.
@@ -918,86 +1398,536 @@ function make(deps: PlaybackDeps) {
     }
 
     /**
-     * What ffmpeg sends back about a run: its subtitle cues, its subtitle packets, or where its
-     * picture starts.
+     * A subtitle track from `start` on, for the player: a JSON line each, with times in title
+     * seconds (see `@mrstreamer/core/subtitles/feed`). The picture doesn't wait for it. First
+     * what the track holds before the position, as far back as what is on screen there depends
+     * on, then `ready`, then what the run from there reads, for as long as the player listens.
+     * Until `ready` the player shows nothing of the track and says it is preparing.
+     *
+     * Finding the first part takes reading the file, which only gets the provider when playback
+     * spares it, and only so much of it (see `subtitlesBefore`). When it can't be found, the feed
+     * says `unavailable` and playback goes on: the session's failure is the picture's alone.
+     * The track is `ready` again from the first thing the run reads of it that stands on its
+     * own. `x-codec` names the decoder for packets; text has none.
      */
+    function serveSubtitles(session: TitleSessionState, url: URL, response: ServerResponse): void {
+      const started = performance.now();
+      // One feed at a time: the one before would read the file for a position nobody waits for.
+      session.feed?.close();
+      const left = new AbortController();
+      response.on("close", () => left.abort());
+      const track = optionalNumber(url.searchParams.get("subtitle"));
+      const probe = session.probe;
+      const output = probe && track !== null ? subtitleOutput(probe, track) : null;
+      if (track === null || !probe || !output) {
+        response.writeHead(410).end();
+        return;
+      }
+      const codec = codecOf(output);
+      const page = optionalNumber(url.searchParams.get("page"));
+      response.writeHead(200, {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+        "Access-Control-Expose-Headers": "x-codec",
+        "x-codec": codec,
+      });
+      response.flushHeaders();
+
+      const write = (line: SubtitleFeedLine) => {
+        // A player that doesn't read its feed gets no more of it than this waiting.
+        if (response.writableLength > FEED_WAITING_BYTES) return feed.close();
+        response.write(`${JSON.stringify(line)}\n`);
+      };
+      const starts = output.kind === "packets" ? freshStart(output.codec, page) : null;
+      /** Why the feed has nothing to show for its position, once it hasn't. */
+      let unavailable: SubtitlesUnavailable | null = null;
+      const send: Feed["send"] = (entry, origin) => {
+        if (unavailable !== null) {
+          // After a position it has nothing for, a track shows from the first thing that stands
+          // on its own: a packet that starts it afresh, or, for lines of text and for packets
+          // that never start afresh, the next one, as a run alone shows them.
+          if (starts && "data" in entry && !starts(entry.data)) return;
+          unavailable = null;
+          write({ ready: true, at: entry.at - origin });
+        }
+        write(
+          "data" in entry
+            ? { at: entry.at - origin, data: Buffer.from(entry.data).toString("base64") }
+            : { at: entry.at - origin, until: entry.until - origin, text: entry.text },
+        );
+      };
+      /**
+       * Hands the feed what a run from its position has read of the track after `after`, and
+       * whatever such a run reads from now on. A run that no longer holds everything from there
+       * on leaves a gap, and the feed has only what comes after it.
+       */
+      const join = (after: number, origin: number) => {
+        const live = session.live;
+        const mine = live?.track === track && live.since <= after ? live : null;
+        feed.after = mine ? Math.max(after, mine.from) : after;
+        for (const entry of mine?.entries ?? []) if (entry.from > feed.after) send(entry, origin);
+      };
+      const feed: Feed = {
+        track,
+        after: Number.POSITIVE_INFINITY,
+        send,
+        close: () => {
+          left.abort();
+          response.destroy();
+        },
+        changed: () => {
+          // What the player has of the track is of a file that is gone, and so is the run's.
+          left.abort();
+          feed.after = Number.POSITIVE_INFINITY;
+          unavailable = "changed";
+          write({ unavailable: "changed" });
+        },
+      };
+      session.feed = feed;
+      // The feed ends with the session, though the player hasn't left it.
+      const end = () => response.destroy();
+      session.closed.signal.addEventListener("abort", end, { once: true });
+      response.on("close", () => {
+        session.closed.signal.removeEventListener("abort", end);
+        if (session.feed === feed) session.feed = null;
+      });
+
+      const spent: Spent = { bytes: 0, requests: 0 };
+      const record = (outcome: "ok" | SubtitlesUnavailable) =>
+        diagnostics.record({
+          op: "subtitles",
+          ms: Math.round(performance.now() - started),
+          bytes: spent.bytes,
+          requests: spent.requests,
+          kept: session.kept.windows.most,
+          heldMs: Math.round(session.slot.counts.recoveryMs),
+          waitedMs: Math.round(session.slot.counts.longestWaitMs),
+          revoked: session.slot.counts.revoked,
+          outcome,
+        });
+      const attempt: Attempt = {
+        signal: AbortSignal.any([
+          session.closed.signal,
+          left.signal,
+          AbortSignal.timeout(limits.ms),
+        ]),
+        spent,
+        narrow: false,
+      };
+      const wanted: FeedRequest = {
+        track,
+        page,
+        codec,
+        start: Math.max(0, Number(url.searchParams.get("start")) || 0),
+      };
+      session.recovering++;
+      void subtitlesBefore(session, probe, wanted, attempt)
+        .then(
+          (before) => {
+            if (left.signal.aborted || session.closed.signal.aborted) return;
+            const live = session.live;
+            if (live?.track === track && live.since <= before.upTo && live.from > before.upTo) {
+              // The run kept less than came between the position and now.
+              unavailable = "limit";
+              record(unavailable);
+              write({ unavailable });
+              join(before.upTo, before.origin);
+              return;
+            }
+            for (const entry of before.entries) send(entry, before.origin);
+            join(before.upTo, before.origin);
+            write({ ready: true });
+            record("ok");
+          },
+          (cause: unknown) => {
+            if (left.signal.aborted || session.closed.signal.aborted) return;
+            unavailable =
+              cause instanceof Unavailable
+                ? cause.kind
+                : attempt.signal.aborted
+                  ? "limit"
+                  : "unreadable";
+            record(unavailable);
+            write({ unavailable });
+            // What the run reads from here on still comes: see `send`.
+            join(probe.origin + wanted.start + interleave(probe), probe.origin);
+          },
+        )
+        .finally(() => {
+          session.recovering--;
+        });
+    }
+
+    /**
+     * What a decoder needs of a subtitle track before a run from `wanted.start`: the entries the
+     * history holds from the last fresh start, or the start of the file, up to where the run
+     * brings its own. Whatever of them the history doesn't hold yet is read from the file, as
+     * little of it as will do (see `select`), within what one reading may take of the provider.
+     * Throws `Unavailable` when they can't be had, as when the provider puts another file in its
+     * place meanwhile: the feed says so, and the next one reads that file.
+     */
+    async function subtitlesBefore(
+      session: TitleSessionState,
+      probe: TitleProbe,
+      wanted: FeedRequest,
+      attempt: Attempt,
+    ): Promise<Before> {
+      const { origin } = probe;
+      const track = probe.subtitles.find((each) => each.id === wanted.track);
+      const output = subtitleOutput(probe, wanted.track);
+      if (!track || !output) throw new Unavailable("unreadable");
+      if (readsItsOwn(probe, wanted.track, wanted.start)) {
+        return { entries: [], upTo: Number.NEGATIVE_INFINITY, origin };
+      }
+      // Captions sit in the picture, and other files aren't stepped through here.
+      if (probe.container !== "matroska" || track.codec === null) {
+        throw new Unavailable("unreadable");
+      }
+      if (session.identity.ranges === false) throw new Unavailable("unreadable");
+      const at = origin + wanted.start;
+      const starts = output.kind === "packets" ? freshStart(output.codec, wanted.page) : null;
+      const need: Need = {
+        at,
+        upTo: at + interleave(probe),
+        text: output.kind === "cues",
+        fresh: starts && ((entry) => "data" in entry && starts(entry.data)),
+      };
+      // What is kept is used again only for a file the provider's answers vouch for: every one
+      // marked, and none from a server that hadn't answered when it was kept. A file known by
+      // its size alone, or to a server heard for the first time, is read anew.
+      const { identity } = session;
+      if (!identity.steady || session.kept.servers !== identity.servers) session.kept = fileKept();
+      try {
+        return await subtitlesBeforeIn(session, session.kept, probe, track, need, attempt);
+      } finally {
+        session.kept.servers = identity.servers;
+      }
+    }
+
+    /** `subtitlesBefore` of the file as `kept` holds it; throws once that is another file. */
+    async function subtitlesBeforeIn(
+      session: TitleSessionState,
+      kept: FileKept,
+      probe: TitleProbe,
+      track: TitleProbe["subtitles"][number],
+      need: Need,
+      attempt: Attempt,
+    ): Promise<Before> {
+      const still = () => {
+        attempt.signal.throwIfAborted();
+        if (session.kept !== kept) throw new Unavailable("changed");
+      };
+      const history = historyOf(kept, track.id);
+      const ready = replayFor(history, need);
+      if (ready) return { entries: ready, upTo: need.upTo, origin: probe.origin };
+      const read = fileReader(session, kept, attempt);
+      kept.layout ??= await readLayout(read);
+      still();
+      const layout = kept.layout;
+      // ffmpeg numbers its streams by the tracks it reads, in the file's order.
+      const entry = layout?.tracks[track.id];
+      if (!layout || !entry?.subtitles) throw new Unavailable("unreadable");
+      // After another file took the place of the one ffprobe read, the track has to be the same
+      // kind still before its number means anything.
+      if (session.identity.generation !== session.probed) {
+        const codec = await codecOfTrack(selected(layout, entry.entry, []), attempt.signal);
+        if (codec !== track.codec) throw new Unavailable("changed");
+      }
+      const listed = layout.cues.flatMap((cue) => (cue.track === entry.number ? [cue.time] : []));
+      const index: TrackIndex | null = listed.length === 0 ? null : { times: listed };
+      /** The file has been stepped through from its start to the position. */
+      let whole = false;
+      for (let tries = 0; ; tries++) {
+        const entries = replayFor(history, need);
+        if (entries) return { entries, upTo: need.upTo, origin: probe.origin };
+        if (whole || tries >= SCANS_LIMIT) throw new Unavailable("limit");
+        const stretch = nextScan(history, need, index, tries);
+        await select(
+          session,
+          probe,
+          layout,
+          { ...entry, id: track.id, history },
+          stretch,
+          read,
+          attempt,
+        );
+        still();
+        whole = stretch.from === null;
+      }
+    }
+
+    /**
+     * Reads the session's file for a subtitle track's past: from memory, else from the provider,
+     * a window at a time, when playback spares it a turn. A window is about what arrives in a
+     * twentieth of a second, so a request is soon over when playback wants the provider back, and
+     * what the steps through the file ask for next is mostly in it already. Each request counts
+     * against what the attempt may take. Null when a part can't be had.
+     */
+    function fileReader(session: TitleSessionState, kept: FileKept, attempt: Attempt): ReadFile {
+      return async (start, length) => {
+        const size = session.identity.size;
+        const known = kept.windows.read(start, length, size);
+        if (known) return known;
+        if (size !== null && start >= size) return Buffer.alloc(0);
+        const rate = session.meter.rate;
+        const window = attempt.narrow
+          ? limits.windowLeast
+          : Math.max(
+              limits.windowLeast,
+              Math.min(
+                limits.windowMost,
+                rate === null ? WINDOW_FIRST : Math.round(rate * WINDOW_S),
+              ),
+            );
+        const end = Math.min(size ?? Number.POSITIVE_INFINITY, start + Math.max(window, length));
+        const parts: Uint8Array[] = [];
+        for (let position = start; position < end;) {
+          const { spent } = attempt;
+          if (spent.requests >= limits.requests || spent.bytes + end - position > limits.bytes) {
+            throw new Unavailable("limit");
+          }
+          const lease = await session.slot.recover(attempt.signal);
+          if (!lease) attempt.signal.throwIfAborted();
+          if (!lease) return null;
+          const signal = AbortSignal.any([attempt.signal, lease.revoked]);
+          let body: ReadableStreamDefaultReader<Uint8Array> | null = null;
+          spent.requests++;
+          const began = performance.now();
+          let got = 0;
+          try {
+            const found = await connect(
+              session,
+              session.upstreamUrl,
+              { Range: `bytes=${position}-${end - 1}` },
+              signal,
+              FILE_RETRY_DELAYS_MS,
+            );
+            if (!found.ok) {
+              // A turn that was taken away comes again; anything else is the provider's answer.
+              if (lease.revoked.aborted && !attempt.signal.aborted) continue;
+              attempt.signal.throwIfAborted();
+              throw new Unavailable("network");
+            }
+            const held = observe(session, found.response, true);
+            if (session.kept !== kept || held?.stale) {
+              void found.response.body?.cancel().catch(() => {});
+              throw new Unavailable("changed");
+            }
+            if (found.response.status !== 206 || held?.start !== position || !found.response.body) {
+              void found.response.body?.cancel().catch(() => {});
+              throw new Unavailable("unreadable");
+            }
+            body = found.response.body.getReader();
+            for (;;) {
+              const { done, value } = await body.read();
+              if (done) break;
+              parts.push(value);
+              got += value.length;
+              position += value.length;
+              spent.bytes += value.length;
+            }
+            session.meter.add(got, performance.now() - began);
+            if (got === 0) break;
+          } catch (cause) {
+            if (cause instanceof Unavailable) throw cause;
+            // Taken away in the middle: what arrived counts, and the rest is asked for again.
+            if (lease.revoked.aborted && !attempt.signal.aborted) continue;
+            attempt.signal.throwIfAborted();
+            throw new Unavailable("network");
+          } finally {
+            if (lease.revoked.aborted) {
+              await body?.cancel().catch(() => {});
+              await gone();
+            }
+            lease.release();
+          }
+        }
+        const data = Buffer.concat(parts);
+        kept.windows.keep(start, data);
+        return data.subarray(0, length);
+      };
+    }
+
+    /**
+     * Reads a subtitle track from `stretch.from` to `stretch.to` on the file's clock, from the
+     * start of the file when `from` is null, into the track's history. It steps through the
+     * file's blocks from the cluster its index lists last before the stretch, takes the track's
+     * packets, and has ffmpeg read them from a file of their own, as a run sends them. A packet
+     * may sit a little off its own time, so the steps start and end that much wider. Throws
+     * `Unavailable` when it couldn't, or when the file became another meanwhile.
+     */
+    async function select(
+      session: TitleSessionState,
+      probe: TitleProbe,
+      layout: Layout,
+      track: {
+        readonly id: number;
+        readonly number: number;
+        readonly entry: Uint8Array;
+        readonly history: SubtitleHistory;
+      },
+      stretch: { readonly from: number | null; readonly to: number },
+      read: ReadFile,
+      attempt: Attempt,
+    ): Promise<void> {
+      const apart = interleave(probe);
+      const from = stretch.from === null ? null : stretch.from - apart;
+      // The index says where to start; without an entry before the stretch, the file's start does.
+      const cue = from === null ? undefined : layout.cues.findLast((each) => each.time <= from);
+      const packets: { readonly clusterTime: number; readonly element: Uint8Array }[] = [];
+      let bytes = 0;
+      /** The times of the first block stepped over, and the latest of another track's. */
+      let first: number | null = null;
+      let reached = Number.NEGATIVE_INFINITY;
+      let toEnd = true;
+      const start = cue ?? { cluster: layout.firstCluster };
+      // Where the index says the stretch ends, which says how much of the file it is. Read whole
+      // that is soonest over; when it is more than the reading has left, only around each block's
+      // header.
+      const after = layout.cues.find((each) => each.time >= stretch.to + apart)?.cluster;
+      const span = (after ?? session.identity.size ?? Number.POSITIVE_INFINITY) - start.cluster;
+      attempt.narrow = attempt.spent.bytes + span > limits.bytes;
+      try {
+        for await (const step of blocks(read, layout, track.number, start)) {
+          first ??= step.time;
+          if (step.packet) {
+            packets.push(step);
+            bytes += step.element.length;
+            if (bytes > limits.selected) throw new Unavailable("limit");
+            continue;
+          }
+          reached = Math.max(reached, step.time);
+          if (step.time >= stretch.to + apart) {
+            toEnd = false;
+            break;
+          }
+        }
+      } catch (cause) {
+        if (cause instanceof Unavailable) throw cause;
+        attempt.signal.throwIfAborted();
+        throw new Unavailable("unreadable");
+      }
+      if (cue !== undefined && first === null) throw new Unavailable("unreadable");
+      const entries = await converted(session, probe, layout, track, packets, attempt.signal);
+      const reading = track.history.reading(stretch.to);
+      // Whole from a little after the first block: a packet before it may sit ahead of that.
+      reading.begin(cue === undefined || first === null ? Number.NEGATIVE_INFINITY : first + apart);
+      for (const entry of entries) reading.add(entry);
+      if (!toEnd) reading.reach(reached - apart);
+      reading.end(toEnd);
+    }
+
+    /**
+     * The subtitles in `packets`, a track's packets as the file stores them: ffmpeg reads them
+     * from a file of their own on its input and sends them as a run does, so they come the same
+     * whatever the track's coding. Nothing of the provider's is read for it.
+     */
+    async function converted(
+      session: TitleSessionState,
+      probe: TitleProbe,
+      layout: Layout,
+      track: { readonly id: number; readonly entry: Uint8Array },
+      packets: readonly { readonly clusterTime: number; readonly element: Uint8Array }[],
+      signal: AbortSignal,
+    ): Promise<readonly SubtitleEntry[]> {
+      if (packets.length === 0) return [];
+      const id = randomBytes(9).toString("base64url");
+      const plan = selectedPlan(probe, track.id, `${base}/report/${session.token}/${id}/subtitles`);
+      if (!deps.ffmpeg || !plan) throw new Unavailable("unreadable");
+      const entries: SubtitleEntry[] = [];
+      const subtitles = subtitleSink(plan.subtitle, (entry) => entries.push(entry));
+      const { promise: arrived, resolve: arrive } = Promise.withResolvers<void>();
+      session.reports.set(id, {
+        subtitles: (request) => {
+          subtitles.receive(request);
+          arrive();
+        },
+      });
+      const child = spawn(deps.ffmpeg, plan.args, { stdio: ["pipe", "ignore", "ignore"] });
+      const stop = () => child.kill("SIGKILL");
+      signal.addEventListener("abort", stop, { once: true });
+      const exited = new Promise<number | null>((resolve) => {
+        child.on("close", resolve);
+        child.on("error", () => resolve(null));
+      });
+      // ffmpeg may be gone before it has taken its input.
+      child.stdin.on("error", () => {});
+      child.stdin.end(selected(layout, track.entry, packets));
+      const code = await exited;
+      // ffmpeg can be gone before the proxy has heard what it sent: that arrives in a moment.
+      if (code === 0) {
+        await Promise.race([
+          arrived,
+          new Promise((resolve) => setTimeout(resolve, REPORT_WAIT_MS)),
+        ]);
+      }
+      const whole = await subtitles.whole();
+      signal.removeEventListener("abort", stop);
+      session.reports.delete(id);
+      signal.throwIfAborted();
+      if (code !== 0 || !whole) throw new Unavailable("unreadable");
+      return entries;
+    }
+
+    /**
+     * ffmpeg's name for the coding of the one track in `file`, a Matroska file as `selected`
+     * writes them, or null when ffprobe can't say.
+     */
+    async function codecOfTrack(file: Buffer, signal: AbortSignal): Promise<string | null> {
+      const ffprobe = deps.ffprobe;
+      if (!ffprobe) return null;
+      const output = await new Promise<string | null>((resolve) => {
+        const child = execFile(
+          ffprobe,
+          ["-v", "error", "-print_format", "json", "-show_streams", "-i", "pipe:0"],
+          { timeout: PROBE_TIMEOUT_MS, signal },
+          (error, stdout) => resolve(error ? null : stdout),
+        );
+        child.stdin?.on("error", () => {});
+        child.stdin?.end(file);
+      });
+      try {
+        const probe = output === null ? null : readProbe(JSON.parse(output));
+        return probe?.subtitles[0]?.codec ?? null;
+      } catch {
+        return null;
+      }
+    }
+
+    /** What ffmpeg sends back: a run's or a selection's subtitles, or where a picture starts. */
     function receiveReport(
       session: TitleSessionState,
-      runId: string,
+      id: string,
       what: string,
       request: IncomingMessage,
       response: ServerResponse,
     ): void {
-      const reports = session.runs.get(runId);
-      const relay =
-        what === "cues"
-          ? reports?.cues
-          : what === "packets"
-            ? reports?.packets
-            : what === "start"
-              ? reports?.start
-              : undefined;
-      if (!relay) {
-        response.writeHead(410).end();
-        return;
-      }
-      const finish = () => {
-        relay.end();
-        response.writeHead(204).end();
-      };
-      request.on("error", () => relay.end());
-      if (what !== "packets") {
+      const reports = session.reports.get(id);
+      const received = () => response.writeHead(204).end();
+      if (what === "start" && reports?.start) {
+        const relay = reports.start;
         request.setEncoding("utf8");
         request.on("data", (text: string) => relay.write(text));
-        request.on("end", finish);
-        return;
-      }
-      // Packets arrive as a transport stream, or as PGS as it is stored, and go on as lines.
-      const send = (at: number, data: Uint8Array) => {
-        if (data.length > 0) {
-          relay.write(`${JSON.stringify({ at, data: Buffer.from(data).toString("base64") })}\n`);
-        }
-      };
-      const kind = reportedPackets.get(relay);
-      if (kind?.container === "sup") {
-        const segments = pgsSegments();
-        request.on("data", (chunk: Buffer) => {
-          for (const { at, set } of segments.push(chunk)) send(at, set);
+        request.on("error", () => relay.end());
+        request.on("end", () => {
+          relay.end();
+          received();
         });
-        request.on("end", finish);
         return;
       }
-      const reader = pesReader();
-      const captions = kind?.captions ?? null;
-      const forward = (packets: readonly PesPacket[]) => {
-        for (const packet of packets) {
-          if (packet.pts === null) continue;
-          const data = captions ? captionsInPicture(packet.payload, captions) : packet.payload;
-          send(packet.pts / 90_000, data);
-        }
-      };
-      request.on("data", (chunk: Buffer) => forward(reader.push(chunk)));
-      request.on("end", () => {
-        forward(reader.end());
-        finish();
-      });
-    }
-
-    /** A run's subtitle cues or packets, as ffmpeg sends them. */
-    function sendRelay(relay: TextRelay | undefined, type: string, response: ServerResponse): void {
-      if (!relay) {
+      const take = what === "subtitles" ? reports?.subtitles : undefined;
+      if (!take) {
         response.writeHead(410).end();
         return;
       }
-      response.writeHead(200, { "Content-Type": `${type}; charset=utf-8` });
-      const unsubscribe = relay.subscribe(
-        (text) => response.write(text),
-        () => response.end(),
-      );
-      response.on("close", unsubscribe);
+      take(request);
+      request.on("end", received);
     }
 
-    /** Reads what a title's file holds with ffprobe, through the session's source. */
+    /**
+     * Reads what the session's file holds with ffprobe, through the session's source, unless it
+     * is known from when the title was open before. What was read is known for the next time
+     * only when the file stayed the same one meanwhile.
+     */
     async function probeTitle(session: TitleSessionState): Promise<TitleProbe> {
       const known = probes.get(session.upstreamUrl);
       if (known) return known;
@@ -1010,16 +1940,19 @@ function make(deps: PlaybackDeps) {
           },
         });
       }
+      const generation = session.identity.generation;
       const output = await new Promise<string | null>((resolve) => {
         const child = execFile(
           ffprobe,
           [...PROBE_ARGUMENTS, `${base}/source/${session.token}`],
           { timeout: PROBE_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 },
-          (error, stdout) => resolve(error ? null : stdout),
+          (error, stdout) => {
+            session.closed.signal.removeEventListener("abort", stop);
+            resolve(error ? null : stdout);
+          },
         );
-        session.closed.signal.addEventListener("abort", () => child.kill("SIGKILL"), {
-          once: true,
-        });
+        const stop = () => void child.kill("SIGKILL");
+        session.closed.signal.addEventListener("abort", stop, { once: true });
       });
       let json: unknown = null;
       try {
@@ -1039,8 +1972,10 @@ function make(deps: PlaybackDeps) {
           },
         });
       }
-      probes.set(session.upstreamUrl, probe);
-      if (probes.size > PROBES_KEPT) probes.delete(probes.keys().next().value ?? "");
+      if (session.identity.generation === generation) {
+        probes.set(session.upstreamUrl, probe);
+        if (probes.size > PROBES_KEPT) probes.delete(probes.keys().next().value ?? "");
+      }
       return probe;
     }
 
@@ -1086,7 +2021,18 @@ function make(deps: PlaybackDeps) {
         const delay = retryDelays[attempt];
         if (failure.kind !== "refused" || delay === undefined || signal.aborted)
           return { ok: false, failure };
-        await new Promise((resolve) => setTimeout(resolve, delay));
+        // The wait ends with whoever asked: a turn at the provider that was taken away is given
+        // back at once.
+        await new Promise<void>((resolve) => {
+          const done = () => {
+            clearTimeout(timer);
+            signal.removeEventListener("abort", done);
+            resolve();
+          };
+          const timer = setTimeout(done, delay);
+          signal.addEventListener("abort", done, { once: true });
+        });
+        if (signal.aborted) return { ok: false, failure };
       }
     }
 
@@ -1199,8 +2145,28 @@ function make(deps: PlaybackDeps) {
               active: null,
               failure: null,
               probe: null,
+              probed: 0,
               source: null,
-              runs: new Map(),
+              slot: upstreamSlot(
+                {
+                  starting: () => session.starting !== null,
+                  attached: () => session.running !== null,
+                  reading: () => session.reading > 0,
+                  progress: () => session.progress,
+                },
+                { ...UPSTREAM_LIMITS, ...deps.upstream },
+              ),
+              meter: rateMeter(),
+              identity: sourceIdentity(),
+              kept: fileKept(),
+              starting: null,
+              running: null,
+              recovering: 0,
+              reading: 0,
+              progress: null,
+              reports: new Map(),
+              feed: null,
+              live: null,
             };
             sessions.set(id, session);
             const probe = yield* Effect.tryPromise({
@@ -1208,6 +2174,7 @@ function make(deps: PlaybackDeps) {
               catch: (cause) => (cause instanceof Failed ? cause : failedWith(cause)),
             }).pipe(Effect.tapError(() => Scope.close(sessionScope, Exit.void)));
             session.probe = probe;
+            session.probed = session.identity.generation;
             return {
               sessionId: id,
               title,
@@ -1244,6 +2211,130 @@ function make(deps: PlaybackDeps) {
         }),
     };
   });
+}
+
+/** What the player is told of how a subtitle track comes: the decoder for packets, none for text. */
+function codecOf(output: SubtitleOutput): string {
+  return output.kind === "packets" ? output.codec : "";
+}
+
+/**
+ * Whether a run from `start` reads everything subtitle track `id` has on screen there itself:
+ * from the start of the file it reads every subtitle, and in an MP4's text track ffmpeg starts at
+ * the track's own line before the position.
+ */
+function readsItsOwn(probe: TitleProbe, id: number | null, start: number): boolean {
+  const track = probe.subtitles.find((each) => each.id === id);
+  return start === 0 || (probe.container === "mp4" && track?.format === "text");
+}
+
+/** How many bytes an entry holds. */
+function sizeOf(entry: SubtitleEntry): number {
+  return "data" in entry ? entry.data.length : entry.text.length;
+}
+
+/** How far a subtitle packet of `probe`'s file may sit from the picture of its time, in seconds. */
+function interleave(probe: TitleProbe): number {
+  return probe.container === "other" ? INTERLEAVE_S.broadcast : INTERLEAVE_S.ordered;
+}
+
+/**
+ * Resolves once a request that was cut short has left this machine. Its connection closes at the
+ * end of the turn it was cut in; a request made in that same turn on a connection kept from
+ * before would reach the provider first, and meet the one before still open.
+ */
+function gone(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+/** Resolves once a response takes more, or its reader has left. */
+function drained(response: ServerResponse): Promise<void> {
+  return new Promise((resume) => {
+    const resumed = () => {
+      response.off("drain", resumed);
+      response.off("close", resumed);
+      resume();
+    };
+    response.on("drain", resumed);
+    response.on("close", resumed);
+  });
+}
+
+/**
+ * Reads the subtitles one ffmpeg sends, as `output` says they come, and hands each to `entry` in
+ * the order ffmpeg read them, with their times on the file's clock.
+ */
+function subtitleSink(output: SubtitleOutput, entry: (entry: SubtitleEntry) => void) {
+  let receiving: Promise<boolean> | null = null;
+
+  function read(request: IncomingMessage): void {
+    if (output.kind === "cues") {
+      const reader = webvttReader();
+      const add = (cues: readonly Cue[]) => {
+        for (const cue of cues) {
+          entry({ from: cue.start, at: cue.start, until: cue.end, text: cue.text });
+        }
+      };
+      request.setEncoding("utf8");
+      request.on("data", (text: string) => add(reader.push(text)));
+      request.on("end", () => add(reader.end()));
+      return;
+    }
+    if (output.container === "sup") {
+      const segments = pgsSegments();
+      request.on("data", (chunk: Buffer) => {
+        for (const { at, set } of segments.push(chunk)) entry({ from: at, at, data: set });
+      });
+      return;
+    }
+    const reader = pesReader();
+    /** The last picture of a converted DVD track: the empty page after it is its end. */
+    let picture: number | null = null;
+    const forward = (packets: readonly PesPacket[]) => {
+      for (const packet of packets) {
+        if (packet.pts === null) continue;
+        const at = packet.pts / 90_000;
+        const data =
+          output.captions === null
+            ? packet.payload
+            : output.captions === "track"
+              ? captionsInTrack(packet.payload)
+              : captionsInPicture(packet.payload, output.captions);
+        // Most pictures carry no caption, only padding, which a decoder passes over.
+        if (
+          !data.some((byte, index) => (output.captions ? index % 3 > 0 && (byte & 0x7f) > 0 : true))
+        ) {
+          continue;
+        }
+        const ends = output.paired && picture !== null && dvbClears(data);
+        entry({ from: ends && picture !== null ? picture : at, at, data });
+        if (!ends) picture = at;
+      }
+    };
+    request.on("data", (chunk: Buffer) => forward(reader.push(chunk)));
+    // The last packet is whole only when ffmpeg ended the stream itself.
+    request.on("end", () => forward(reader.end()));
+  }
+
+  return {
+    /** Takes the request ffmpeg sends them in. */
+    receive(request: IncomingMessage): void {
+      receiving = new Promise((resolve) => {
+        let whole = false;
+        request.on("error", () => {});
+        request.on("end", () => {
+          whole = true;
+        });
+        request.on("close", () => resolve(whole));
+        read(request);
+      });
+    },
+    /**
+     * Resolves once everything ffmpeg sent has been read: true when it ended the stream itself,
+     * having written all it read of the file, false when it was cut off or never sent any.
+     */
+    whole: (): Promise<boolean> => receiving ?? Promise.resolve(false),
+  };
 }
 
 function optionalNumber(value: string | null): number | null {
@@ -1312,12 +2403,16 @@ function textRelay(): TextRelay {
   };
 }
 
-/** Starts the proxy on a free loopback port. */
+/**
+ * Starts the proxy on a free loopback port. A request may take as long as it likes to arrive:
+ * ffmpeg's reports are requests that last as long as its run, and Node would end one after five
+ * minutes.
+ */
 function listen(
   handle: (request: IncomingMessage, response: ServerResponse) => void,
 ): Promise<{ server: Server; port: number }> {
   return new Promise((resolve, reject) => {
-    const http = createServer(handle);
+    const http = createServer({ requestTimeout: 0 }, handle);
     http.once("error", reject);
     http.listen(0, "127.0.0.1", () => {
       const address = http.address();

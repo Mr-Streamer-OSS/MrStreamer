@@ -15,7 +15,7 @@
 // per language.
 import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import type { Writable } from "node:stream";
+import { Readable, type Writable } from "node:stream";
 
 export interface FakeChannel {
   readonly streamId: number;
@@ -60,6 +60,21 @@ export interface FakeProviderOptions {
   readonly guideIdOf?: (channel: FakeChannel) => string | null;
   /** About how many movies and series to list, besides the test titles. */
   readonly titles?: number;
+  /**
+   * Answers every request for a movie's or episode's file with the whole file, whatever range it
+   * asks for, as a provider that knows no byte ranges does.
+   */
+  readonly wholeFiles?: boolean;
+  /**
+   * How many file servers take turns behind a title's address, each with its own ETag for the
+   * same file, as a provider's load balancer spreads requests; one when absent.
+   */
+  readonly fileHosts?: number;
+  /**
+   * Marks each answer for a file with the time it was sent as Last-Modified, and no ETag, as
+   * servers do that stamp their answers rather than their files.
+   */
+  readonly fileDates?: boolean;
   /**
    * Adds channels for adults: "AFTER HOURS", flagged in an ordinary category, with guide id
    * "afterhours.adult", and "LATE SHOW" and "NIGHT CLUB" in a category named "XXX | ADULTS".
@@ -122,6 +137,31 @@ export interface FakeProvider {
   readonly titles: FakeTitles;
   /** How many requests for movie and episode files reached the provider, redirects included. */
   fileRequests(): number;
+  /** How many bytes of movie and episode files the provider has sent. */
+  fileBytes(): number;
+  /** The most movie and episode files the provider was sending at the same moment. */
+  mostFilesAtOnce(): number;
+  /**
+   * Puts another file behind a movie's address, as a provider that replaces one does: a clip by
+   * its name in test/fixtures, or its bytes. Its ETag changes with it.
+   */
+  replaceMovieFile(movieId: number, file: string | Buffer): void;
+  /**
+   * Has a movie's file count as another with every answer, its ETag changing each time and its
+   * bytes not, as a provider's whose file never stays the same one; or stops that.
+   */
+  unsettleMovieFile(movieId: number, unsettled: boolean): void;
+  /**
+   * Makes a movie's file stall: each time the provider reaches byte `at` of it, it waits `ms`
+   * before sending on, as a slow provider keeps a reader waiting in the middle of a file.
+   */
+  stallMovieFile(movieId: number, at: number, ms: number): void;
+  /**
+   * Makes the provider wait `ms` before it answers a request for a part of a file that names
+   * where it ends, which is how the subtitles before a position are read and never how ffmpeg
+   * reads a run.
+   */
+  slowFileParts(ms: number): void;
   /** How many requests for a movie's or series' details reached the provider. */
   detailRequests(): number;
   /**
@@ -191,6 +231,16 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
   let titleFailure: number | "login" | null = null;
   let titleCategoriesEmpty = false;
   let fileCount = 0;
+  /** The bytes put behind a title's address in place of its clip, and how many times. */
+  const replaced = new Map<FakeTitle, { readonly bytes: Buffer; readonly times: number }>();
+  /** The titles whose file is put in its own place again with every answer. */
+  const unsettled = new Set<FakeTitle>();
+  const stalls = new Map<FakeTitle, Stall>();
+  let partsWait = 0;
+  let fileTurn = 0;
+  let fileBytesSent = 0;
+  let filesOpen = 0;
+  let mostFilesOpen = 0;
   let detailCount = 0;
   let select = (all: readonly FakeChannel[]): readonly FakeChannel[] => all;
   let catalogueFailure: number | null = null;
@@ -212,11 +262,12 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     if (live) return stream(live[1] ?? "", live[2] ?? "", live[3] ?? "", request, response);
     const title = /^\/(movie|series)\/([^/]+)\/([^/]+)\/(\d+)\.(\w+)$/.exec(url.pathname);
     if (title) return redirectFile(title, response);
-    const file = /^\/files\/(movie|series)\/(\d+)$/.exec(url.pathname);
+    const file = /^\/files\/(\d+)\/(movie|series)\/(\d+)$/.exec(url.pathname);
     if (file)
       return serveFile(
-        file[1] === "movie" ? movieFiles : episodeFiles,
-        file[2] ?? "",
+        file[2] === "movie" ? movieFiles : episodeFiles,
+        file[3] ?? "",
+        file[1] ?? "",
         request,
         response,
       );
@@ -462,13 +513,20 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     ) {
       return void response.writeHead(401).end();
     }
-    response.writeHead(302, { Location: `${origin}/files/${folder}/${id}` }).end();
+    const host = fileTurn++ % (options.fileHosts ?? 1);
+    response.writeHead(302, { Location: `${origin}/files/${host}/${folder}/${id}` }).end();
+  }
+
+  /** Puts `bytes` behind a title's address as another file than was there. */
+  function replace(title: FakeTitle, bytes: Buffer): void {
+    replaced.set(title, { bytes, times: (replaced.get(title)?.times ?? 0) + 1 });
   }
 
   /** A title's file, whole or the byte range asked for. An open file holds a connection slot. */
   function serveFile(
     files: ReadonlyMap<string, FakeTitle>,
     id: string,
+    host: string,
     request: IncomingMessage,
     response: ServerResponse,
   ): void {
@@ -476,27 +534,46 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     const title = files.get(id);
     if (!title?.fixture) return void response.writeHead(404).end();
     if (slots >= maxConnections) return void response.writeHead(403).end();
-    const bytes = fixture(title.fixture);
-    const range = /^bytes=(\d+)-(\d*)$/.exec(request.headers.range ?? "");
+    if (unsettled.has(title)) replace(title, replaced.get(title)?.bytes ?? fixture(title.fixture));
+    const other = replaced.get(title);
+    const bytes = other?.bytes ?? fixture(title.fixture);
+    const range = options.wholeFiles
+      ? null
+      : /^bytes=(\d+)-(\d*)$/.exec(request.headers.range ?? "");
     const start = range ? Number(range[1]) : 0;
     const end = range?.[2] ? Math.min(Number(range[2]), bytes.length - 1) : bytes.length - 1;
     if (start >= bytes.length) {
       return void response.writeHead(416, { "Content-Range": `bytes */${bytes.length}` }).end();
     }
     slots++;
+    filesOpen++;
+    mostFilesOpen = Math.max(mostFilesOpen, filesOpen);
     let released = false;
     request.on("close", () => {
       if (released) return;
       released = true;
+      filesOpen--;
       setTimeout(() => slots--, slotReleaseMs);
     });
-    response.writeHead(range ? 206 : 200, {
-      "Content-Type": title.container === "mkv" ? "video/x-matroska" : "video/mp4",
-      "Accept-Ranges": "bytes",
-      "Content-Length": end - start + 1,
-      ...(range ? { "Content-Range": `bytes ${start}-${end}/${bytes.length}` } : {}),
-    });
-    response.end(bytes.subarray(start, end + 1));
+    const answer = () => {
+      if (response.destroyed) return;
+      response.writeHead(range ? 206 : 200, {
+        "Content-Type": title.container === "mkv" ? "video/x-matroska" : "video/mp4",
+        ...(options.wholeFiles ? {} : { "Accept-Ranges": "bytes" }),
+        ...(options.fileDates
+          ? { "Last-Modified": new Date().toUTCString() }
+          : { ETag: `"${host}-${id}-${other?.times ?? 0}"` }),
+        "Content-Length": end - start + 1,
+        ...(range ? { "Content-Range": `bytes ${start}-${end}/${bytes.length}` } : {}),
+      });
+      // In pieces, counted as they leave: a reader that stops early took only so many.
+      const pieces = Readable.from(sent(bytes.subarray(start, end + 1), start, stalls.get(title)));
+      pieces.on("data", (piece: Buffer) => (fileBytesSent += piece.length));
+      response.on("close", () => pieces.destroy());
+      pieces.pipe(response);
+    };
+    if (range?.[2] && partsWait > 0) setTimeout(answer, partsWait);
+    else answer();
   }
 
   await new Promise<void>((resolve, reject) => {
@@ -512,6 +589,25 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     catalogue,
     titles,
     fileRequests: () => fileCount,
+    fileBytes: () => fileBytesSent,
+    mostFilesAtOnce: () => mostFilesOpen,
+    replaceMovieFile(movieId, file) {
+      const movie = movieFiles.get(String(movieId));
+      if (movie) replace(movie, typeof file === "string" ? fixture(file) : file);
+    },
+    unsettleMovieFile(movieId, on) {
+      const movie = movieFiles.get(String(movieId));
+      if (!movie) return;
+      if (on) unsettled.add(movie);
+      else unsettled.delete(movie);
+    },
+    stallMovieFile(movieId, at, ms) {
+      const movie = movieFiles.get(String(movieId));
+      if (movie) stalls.set(movie, { at, ms });
+    },
+    slowFileParts(ms) {
+      partsWait = ms;
+    },
     detailRequests: () => detailCount,
     failTitles(status) {
       titleFailure = status;
@@ -702,6 +798,30 @@ function buildCatalogue(size: number, adultChannels: boolean): FakeCatalogue {
   return { categories, channels };
 }
 
+/** Where the provider waits in a file, and for how long. */
+interface Stall {
+  readonly at: number;
+  readonly ms: number;
+}
+
+/** `bytes`, which begin at byte `start` of their file, in pieces, waiting at `stall` on the way. */
+async function* sent(bytes: Buffer, start: number, stall: Stall | undefined) {
+  const before = stall ? stall.at - start : 0;
+  if (!stall || before <= 0 || before >= bytes.length) return yield* chunked(bytes, 16 * 1024);
+  yield* chunked(bytes.subarray(0, before), 16 * 1024);
+  await new Promise((resolve) => setTimeout(resolve, stall.ms));
+  yield* chunked(bytes.subarray(before), 16 * 1024);
+}
+
+/** `bytes` in pieces of at most `size`. */
+function chunked(bytes: Buffer, size: number): Buffer[] {
+  const pieces: Buffer[] = [];
+  for (let offset = 0; offset < bytes.length; offset += size) {
+    pieces.push(bytes.subarray(offset, offset + size));
+  }
+  return pieces;
+}
+
 /** Stream ids of the channel in three qualities, after every other channel's. */
 export const QUALITY_STREAM_IDS = 100_000;
 
@@ -736,6 +856,24 @@ const TEST_MOVIES: readonly {
     fixture: "title-h264-aac.mp4",
     versionOf: 0,
   },
+  // Subtitles that last long or build on earlier ones; see scripts/subtitle-fixtures.ts.
+  { name: "TEST | Long subtitles (MULTI)", container: "mkv", fixture: "title-long-subs.mkv" },
+  {
+    name: "TEST | Index with a gap (MULTI)",
+    container: "mkv",
+    fixture: "title-long-subs-uncued.mkv",
+  },
+  {
+    name: "TEST | Index doubled (MULTI)",
+    container: "mkv",
+    fixture: "title-long-subs-doubled.mkv",
+  },
+  {
+    name: "TEST | Long recording (NL)",
+    container: "ts",
+    fixture: "recording-long-subtitles.mpegts",
+  },
+  { name: "TEST | Caption track (EN)", container: "mov", fixture: "title-caption-track.mov" },
 ];
 
 /** Builds roughly `size` movies and series. The same size always gives the same titles. */
