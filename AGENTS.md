@@ -3,7 +3,7 @@
 Desktop IPTV player, docs indexed in `docs/README.md`. The [GitHub project](https://github.com/orgs/Mr-Streamer-OSS/projects/1) is the planning authority.
 
 - Read its README and your card through `gh api graphql`. `gh project item-list` drains the shared rate limit.
-- When Wout asks you to implement something specific, first search the project for a matching card and use it. If none matches, create a draft card for that work, with the project README's next release and Status Planned, before implementing.
+- When Wout asks you to implement something specific, first search the project for a matching card and use it. If none matches, scope the request first, then create a draft card with its scope and acceptance, the project README's next release and Status Planned before implementing.
 - Without a specific request, take the lowest-Order card that has a Release version and isn't Blocked, Done or archived. Leave Order and the owner's pins as set. [Project order](docs/maintainers/project-order.md) covers changing the automation.
 - A card with no content beyond its title gets a small `$grilling` session on scope and acceptance first. Once Wout confirms, rename the card to the agreed outcome and write that scope and acceptance on it before planning, release assignment or development.
 - Keep Status current: Backlog, Planned, Development, Implemented (checks or merge pending), Tested (ready to merge), Done (merged or accepted). Blocked is separate.
