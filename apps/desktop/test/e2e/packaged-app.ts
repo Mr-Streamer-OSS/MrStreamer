@@ -6,9 +6,9 @@
 // Movies, which the bundled ffprobe reads and ffmpeg repackages, skips ahead and leaves it. Then
 // it shows a movie's PGS subtitles and its DVD subtitles, which the bundled ffmpeg sends beside the
 // picture, as stored and as DVB, for the app to draw, and starts it again inside a subtitle and
-// between two. Then it shows the movie's French subtitles, which are text, and skips past them.
-// Last, it opens Chromium's and Node.js's notices, which come from the credits page the installer
-// must keep.
+// between two. Then it shows the movie's French subtitles, which are text, with a class on the
+// line that the app's own styles know, and skips past them. Last, it opens Chromium's and
+// Node.js's notices, which come from the credits page the installer must keep.
 //
 //   node test/e2e/packaged-app.ts <app executable> [-- extra app arguments]
 //
@@ -17,13 +17,14 @@
 // to the provider, and the movie plays with sound, skips 10 seconds and lets go of its connection
 // when left, both subtitle tracks draw over the picture while they are due, a subtitle that began
 // before the position a run starts from shows once it has loaded and one that ended before it
-// doesn't, the text subtitle shows its line in place of the pictures and no longer after a skip
-// past it, and both notices have text. The app runs with a throwaway profile and remote debugging
-// on a random port; on macOS pass --use-mock-keychain so the test never touches a real keychain.
+// doesn't, the text subtitle shows its line in place of the pictures, whatever its class, and no
+// longer after a skip past it, and both notices have text. The app runs with a throwaway profile
+// and remote debugging on a random port; on macOS pass --use-mock-keychain so the test never
+// touches a real keychain.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startFakeProvider } from "../fake-provider.ts";
+import { fixture, startFakeProvider } from "../fake-provider.ts";
 import { connect, delay, key, launch, login, waitFor, type Page } from "./app.ts";
 
 const [executable, ...rest] = process.argv.slice(2).filter((arg) => arg !== "--");
@@ -204,6 +205,12 @@ async function playMovie(page: Page): Promise<{ ok: boolean; detail: string }> {
  * subtitle of those seconds, reads the line on screen, and skips past its end.
  */
 async function pictureSubtitles(page: Page): Promise<{ ok: boolean; detail: string }> {
+  // The French line gets a WebVTT class that the app's own styles hide things with, which must
+  // not hide the line. It is as long as the line it replaces, so nothing else in the file moves.
+  const clip = Buffer.from(fixture("title-h264-picture-subs.mkv"));
+  clip.write("<c.hidden>Oui", clip.indexOf("Cinq secondes"));
+  const movie = provider.titles.movies.find((each) => each.name.includes("Picture subtitles"));
+  provider.replaceMovieFile(movie?.id ?? 0, clip);
   await key(page, "Escape", 27);
   await delay(500);
   const poster = `[...document.querySelectorAll("button[title]")].find((b) => b.title.includes("Picture subtitles"))`;
@@ -278,8 +285,9 @@ async function pictureSubtitles(page: Page): Promise<{ ok: boolean; detail: stri
   const inside = await startAt(6.5, "English");
   const after = await startAt(7.5, "Nederlands · Forced");
   // Text shows as lines over the picture, where the pictures of the track before have gone.
+  // What the viewer can read of it: text a style hides isn't part of that.
   const text = () =>
-    page.evaluate<string>(`document.querySelector("[data-subtitle-text]")?.textContent ?? ""`);
+    page.evaluate<string>(`document.querySelector("[data-subtitle-text]")?.innerText ?? ""`);
   const pictures = await startAt(6.5, "Français");
   const french = await text();
   // A skip within what's loaded, still paused: the line ended at 7 s.
@@ -300,7 +308,7 @@ async function pictureSubtitles(page: Page): Promise<{ ok: boolean; detail: stri
       dutch > 0 &&
       inside > 0 &&
       after === 0 &&
-      french === "Cinq secondes" &&
+      french === "Oui" &&
       pictures === 0 &&
       skipped === "",
     detail: `${english} pixels of PGS at 2.5 s, ${dutch} of DVD subtitles at 8.5 s, ${inside} of PGS in a run from 6.5 s, ${after} of DVD subtitles in a run from 7.5 s, "${french}" as text in a run from 6.5 s with ${pictures} pixels of pictures, "${skipped}" after a skip to 7.5 s`,

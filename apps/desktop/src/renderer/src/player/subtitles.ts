@@ -141,7 +141,11 @@ function showText(video: HTMLVideoElement): void {
     const text = document.createElement("span");
     // The cue's own parser builds the nodes: text and the few tags WebVTT knows, never markup
     // a file could slip in.
-    text.append(cue.getCueAsHTML());
+    const parsed = cue.getCueAsHTML();
+    // A tag's classes come along, and here they would be the app's own: `<c.hidden>` would
+    // take its text off the screen. Chromium styles none when it draws a cue itself.
+    for (const element of parsed.querySelectorAll("[class]")) element.removeAttribute("class");
+    text.append(parsed);
     box.append(text);
     const empty = rows.find((row) => row.cue === null);
     if (empty) {
