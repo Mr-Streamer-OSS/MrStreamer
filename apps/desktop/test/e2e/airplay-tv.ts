@@ -337,10 +337,19 @@ try {
     (response) => !response.ok,
     () => true,
   );
+  // Nothing of the app may outlive it with the provider's connection, as an ffmpeg left running
+  // would. The provider counts a stream for 300 ms after its connection closed, and the app may
+  // hold that connection until it quits, so the count at the exit says only how long ago it
+  // closed. It is read once the provider let go, or two seconds on, when whatever still holds
+  // the connection has outlived the app.
+  const open = provider.activeStreams();
+  await waitFor(async () => provider.activeStreams() === 0, 2000).catch(() => {});
   check(
     app.exitCode === 0 && gone && helper.running().length === 0 && provider.activeStreams() === 0,
     "Quitting with the window closed ends the TV's playback and the app",
-    took === null ? "still running after 10 s" : `${took} ms, exit code ${app.exitCode}`,
+    took === null
+      ? "still running after 10 s"
+      : `${took} ms, exit code ${app.exitCode}, ${open} open at the exit, ${provider.activeStreams()} after`,
   );
   check(
     served.refused === 0,

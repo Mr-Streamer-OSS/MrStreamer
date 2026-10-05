@@ -5,11 +5,14 @@
 // computer, the receivers found, and what is going on. Where only the system knows them, as with
 // AirPlay on macOS, it opens the system's list at the button, which the app can't draw or read.
 // O opens either. Choosing changes nothing by itself: what plays goes on here until the receiver
-// answers, and This computer cancels.
+// answers, and This computer cancels. The system's list belongs to the view it was asked from,
+// and goes when that view closes (see `outputs.pick`).
 import { Airplay, Cast, Monitor } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { OutputFailure, Receiver } from "@mrstreamer/contracts/output";
+import { miniPlayer } from "../../app/mini-player.ts";
 import { isMac } from "../../app/platform.ts";
+import { useUi } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { Tooltip } from "../../components/ui/tooltip.tsx";
 import { outputs, receiverName, useOutput, where } from "../../player/output.ts";
@@ -32,15 +35,22 @@ export function playHere(): void {
 }
 
 /**
- * O: opens the chooser. Where the app lists receivers itself, `showList` opens that list; where
- * only the system knows them, its list opens at the output button.
+ * O: opens the chooser, over the full window's controls. The mini player has none, so the window
+ * goes back first, and the chooser opens once it has, full screen again where it was. An O the
+ * viewer overtook opens nothing: with the mini player asked for again, or the view closed, no
+ * controls are left to open over. `view` ends with the view that took the O, so one that opened
+ * in its place meanwhile, or under another account, gets no chooser it never asked for. Where the
+ * app lists receivers itself, `showList` opens that list; where only the system knows them, its
+ * list opens at the output button.
  */
-export function openChooser(showList: () => void): void {
+export async function openChooser(showList: () => void, view: AbortSignal): Promise<void> {
+  const { account } = useUi.getState();
+  if (!(await miniPlayer.leave())) return;
+  if (view.aborted || account !== useUi.getState().account) return;
   const { offers } = outputs.status();
   if (offers.length === 0) return;
   if (offers.includes("cast")) return showList();
-  const box = document.querySelector("[data-output]")?.getBoundingClientRect();
-  outputs.pick(box && { x: box.x, y: box.y, width: box.width, height: box.height });
+  outputs.pick();
 }
 
 /** Seconds since `since`, counted once a second; null while there is nothing to count. */
@@ -73,14 +83,6 @@ export function OutputButton({
 }) {
   const offers = useOutput((state) => state.status.offers);
   const output = useOutput((state) => state.status.output);
-  const holder = useRef<HTMLSpanElement>(null);
-  /** Where the system's list opens: at the button. */
-  const anchor = () => {
-    const box = holder.current?.getBoundingClientRect();
-    return box
-      ? { x: box.x, y: box.y, width: box.width, height: box.height }
-      : { x: 0, y: 0, width: 0, height: 0 };
-  };
   // The app's own list looks for receivers while it shows.
   useEffect(() => {
     outputs.list(open);
@@ -93,17 +95,16 @@ export function OutputButton({
   const label = active ? `Playing ${where(output.receiver)}` : listed ? "Play on a TV" : "AirPlay";
   if (!listed) {
     // The system's list is the only chooser: a press opens it, and ends a connect under way.
+    // It opens at this element (see `outputs.pick`).
     return (
-      <span ref={holder} data-output="">
+      <span data-output="">
         <Tooltip label={label}>
           <Button
             variant={active ? "primary" : "media"}
             size="icon"
             aria-label={label}
             aria-pressed={active}
-            onClick={() =>
-              output.kind === "connecting" ? void outputs.local() : outputs.choose(anchor())
-            }
+            onClick={() => (output.kind === "connecting" ? void outputs.local() : outputs.choose())}
           >
             <ReceiverIcon kind={kind} />
           </Button>
@@ -112,7 +113,7 @@ export function OutputButton({
     );
   }
   return (
-    <span ref={holder} data-output="">
+    <span data-output="">
       <Menu
         label={label}
         on={active}
@@ -124,7 +125,7 @@ export function OutputButton({
           onDone={() => onOpenChange(false)}
           onSystemList={() => {
             onOpenChange(false);
-            outputs.pick(anchor());
+            outputs.pick();
           }}
         />
       </Menu>

@@ -131,12 +131,20 @@ export const ipcInputs = {
   "output.connect": () => type({ receiverId: "string > 0" }),
   /**
    * Opens the system's own list of receivers at `anchor`, a place in the window in CSS pixels,
-   * and answers once the viewer picked one or closed it.
+   * and answers once the viewer picked one or closed it. `request` is the page's own name for
+   * this list, made up for each, which `output.closePicker` takes it down by.
    */
   "output.pick": () =>
     type({
       anchor: type({ x: "number", y: "number", width: "number >= 0", height: "number >= 0" }),
+      request: "string > 0",
     }),
+  /**
+   * Takes down the system's list asked for as `request`, open or still to open, as when the view
+   * it was asked from closes. Only that list goes: one asked for since stays, and so does what
+   * plays, here or on a receiver.
+   */
+  "output.closePicker": () => type({ request: "string > 0" }),
   /** Back to this computer: ends what the receiver plays and lets go of it. */
   "output.disconnect": none,
   "output.playChannel": () =>
@@ -272,6 +280,8 @@ export interface IpcOutputs {
   "output.connect": OutputStatus;
   /** Resolves with a receiver connected, or with nothing changed when the viewer picked none. */
   "output.pick": OutputStatus;
+  /** Resolves at once. The list's own `output.pick` answers with the status, and nothing failed. */
+  "output.closePicker": null;
   /** Resolves once the receiver is let go of. */
   "output.disconnect": null;
   /** Plays a channel on the receiver in place of what it had, and closes any stream open here. */

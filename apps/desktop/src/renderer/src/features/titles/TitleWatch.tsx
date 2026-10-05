@@ -79,6 +79,7 @@ export function TitleWatch() {
   const [awake, wake] = useWake(IDLE_MS);
   const [fullscreen, toggleFullscreen] = useFullscreen();
   const mini = useMiniPlayer((state) => state.on);
+  const account = useUi((state) => state.account);
   const countdown = useTitlePlayer((state) => state.countdown);
   const now = useTitlePlayer((state) => state.now);
   const phase = useTitlePlayer((state) => state.phase);
@@ -130,6 +131,10 @@ export function TitleWatch() {
   const latest = useRef({ menu, toggleFullscreen, wake });
   latest.current = { menu, toggleFullscreen, wake };
   useEffect(() => {
+    // Ends with this view, or with the account it shows, and with it an O that still waits for
+    // the window and the system's list asked for from here.
+    const view = new AbortController();
+    outputs.viewShown(view.signal);
     function onKey(event: KeyboardEvent) {
       const ui = useUi.getState();
       if (event.defaultPrevented || isTyping(event) || hasModifier(event) || event.isComposing)
@@ -167,9 +172,7 @@ export function TitleWatch() {
           break;
         case "o":
         case "O":
-          // The chooser opens over the full window's controls.
-          if (miniPlayer.on()) void miniPlayer.leave();
-          openChooser(() => setMenu("output"));
+          void openChooser(() => setMenu("output"), view.signal);
           break;
         case "m":
           if (!player.toggleMute()) flash("TV remote sets volume");
@@ -208,8 +211,11 @@ export function TitleWatch() {
     }
     // Before tooltips and popovers see the key, which would otherwise keep Escape to themselves.
     window.addEventListener("keydown", onKey, { capture: true });
-    return () => window.removeEventListener("keydown", onKey, { capture: true });
-  }, []);
+    return () => {
+      view.abort();
+      window.removeEventListener("keydown", onKey, { capture: true });
+    };
+  }, [account]);
 
   if (!now) return null;
   const controlsVisible = awake || phase.kind !== "playing" || menu !== null || remote;

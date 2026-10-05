@@ -10,8 +10,9 @@ import {
   safeStorage,
   session,
   shell,
+  type Rectangle,
 } from "electron";
-import type { IpcEvent, IpcEvents } from "@mrstreamer/contracts/ipc";
+import type { IpcEvent, IpcEvents, IpcInput } from "@mrstreamer/contracts/ipc";
 import { streamsToPlay } from "@mrstreamer/core/catalogue/variants";
 import { Diagnostics } from "@mrstreamer/core/diagnostics";
 import { Failed } from "@mrstreamer/core/failure";
@@ -27,7 +28,7 @@ import { miniPlayer, miniPlayerAvailable } from "./mini-player.ts";
 import { electronInstaller } from "./platform/installer.ts";
 import { removeUnfinishedWrites } from "./platform/json-file.ts";
 import { keychainSecrets } from "./platform/secrets.ts";
-import type { ReceiverAdapter } from "./receivers/adapter.ts";
+import type { ReceiverAdapter, ScreenRect } from "./receivers/adapter.ts";
 import { airplayAdapter } from "./receivers/airplay/adapter.ts";
 import { castAdapter } from "./receivers/cast/adapter.ts";
 // electron-vite builds the worker as its own file and hands back a function that starts it; the
@@ -91,6 +92,25 @@ let mainWindow: BrowserWindow | null = null;
  * back, and it closes for good once the receiver lets go (see `start`).
  */
 let away = false;
+/**
+ * The window the system's list of receivers opens from, and where its page was on screen when the
+ * list was asked for, from then until the viewer is done at that list. The list hangs from a
+ * place in that page, so it goes once the page is elsewhere or out of sight, and doesn't open
+ * when that happens first (see `start`).
+ */
+let listedFrom: { readonly window: BrowserWindow; readonly page: Rectangle } | null = null;
+/** How long to wait for a window on its way into full screen to say it arrived. */
+const FULL_SCREEN_MS = 2000;
+/**
+ * How long the system's list waits after the window arrived in full screen. As macOS finishes
+ * the change of Space it gives the window's app the front once more, and takes it from the helper
+ * when that has just opened the list, which then closes by itself. On one Mac that happened to
+ * lists opened up to 63 ms after `enter-full-screen` and to none from 65 ms on. The system names
+ * no event for it, so this is that time with room to spare.
+ */
+const FULL_SCREEN_SETTLE_MS = 250;
+/** When the window arrived in full screen, by `performance.now()`; null once it has left it. */
+let filledAt: number | null = null;
 /** The smallest the window gets, except as the mini player. */
 const MIN_SIZE = { minWidth: 960, minHeight: 600 } as const;
 /** Each window's mini player, which remembers where the window was. */
@@ -123,11 +143,101 @@ function bringBack(window: BrowserWindow): void {
   window.webContents.setBackgroundThrottling(true);
 }
 
+/** Whether the viewer can see `window` as a window: not closed, hidden or minimised. */
+function onScreen(window: BrowserWindow): boolean {
+  return (
+    !window.isDestroyed() &&
+    window.isVisible() &&
+    !window.isMinimized() &&
+    !(isMac && app.isHidden())
+  );
+}
+
+/**
+ * Resolves once `window` has settled in full screen, for one on its way there or just arrived,
+ * and at once for any other. A list opened before that loses the front to the window's app, and
+ * closes by itself (see `FULL_SCREEN_SETTLE_MS`). The way out of full screen takes no list down.
+ *
+ * The wait also ends when `signal` gives it up or the window closes. However it ends, it leaves
+ * no timer and no listener behind.
+ */
+function settledInFullScreen(window: BrowserWindow, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve();
+    let timer: NodeJS.Timeout | undefined;
+    const done = () => {
+      clearTimeout(timer);
+      window.off("enter-full-screen", arrived).off("closed", done);
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    /** The window is there, or never said so in time: what is left of its time to settle. */
+    const arrived = () => {
+      clearTimeout(timer);
+      const left = filledAt === null ? 0 : filledAt + FULL_SCREEN_SETTLE_MS - performance.now();
+      if (left > 0) timer = setTimeout(done, left);
+      else done();
+    };
+    window.once("closed", done);
+    signal.addEventListener("abort", done, { once: true });
+    // On its way: the window says it is full screen from the start, and tells when it arrived.
+    if (filledAt === null && window.isFullScreen()) {
+      window.once("enter-full-screen", arrived);
+      timer = setTimeout(arrived, FULL_SCREEN_MS);
+    } else arrived();
+  });
+}
+
+/** Whether the window's page is at the same place and of the same size as it was. */
+function samePage(now: Rectangle, was: Rectangle): boolean {
+  return now.x === was.x && now.y === was.y && now.width === was.width && now.height === was.height;
+}
+
+/**
+ * Where the system's list of receivers opens from: `anchor`, a place in the window's page in CSS
+ * pixels, as a place on screen in points, with where the page is there and whether the window
+ * has the keyboard, as the one the viewer is at does. Null while the window is out of sight, when
+ * no list can hang from it.
+ *
+ * The page's zoom turns its pixels into points. A place outside the page, as one measured before
+ * the window changed, gives way to the middle of the page.
+ */
+function listPlace(
+  window: BrowserWindow,
+  anchor: IpcInput<"output.pick">["anchor"],
+): { readonly place: ScreenRect; readonly page: Rectangle; readonly front: boolean } | null {
+  if (!onScreen(window)) return null;
+  const page = window.getContentBounds();
+  const zoom = window.webContents.getZoomFactor();
+  const place = {
+    x: page.x + anchor.x * zoom,
+    y: page.y + anchor.y * zoom,
+    width: anchor.width * zoom,
+    height: anchor.height * zoom,
+  };
+  const inside = (at: number, from: number, length: number) => at >= from && at <= from + length;
+  const inPage =
+    inside(place.x + place.width / 2, page.x, page.width) &&
+    inside(place.y + place.height / 2, page.y, page.height);
+  return {
+    page,
+    front: window.isFocused(),
+    place: inPage
+      ? place
+      : { x: page.x + page.width / 2, y: page.y + page.height / 2, width: 0, height: 0 },
+  };
+}
+
 /**
  * Opens the app's window. `keeps` says, when the viewer closes it, whether it only goes out of
- * sight; `closeStreams` runs once it is gone.
+ * sight; `closeStreams` runs once it is gone. `changed` runs whenever it moves, changes size or
+ * goes out of sight, and once it is gone.
  */
-function openWindow(closeStreams: () => void, keeps: () => boolean): BrowserWindow {
+function openWindow(
+  closeStreams: () => void,
+  keeps: () => boolean,
+  changed: (window: BrowserWindow) => void,
+): BrowserWindow {
   const window = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -156,8 +266,14 @@ function openWindow(closeStreams: () => void, keeps: () => boolean): BrowserWind
   window.once("ready-to-show", () => window.show());
   // Full screen hides the traffic lights and the Windows controls; the top bar takes their room.
   const fullScreen = () => emit(window.webContents, "window.fullScreen", window.isFullScreen());
-  window.on("enter-full-screen", fullScreen);
-  window.on("leave-full-screen", fullScreen);
+  window.on("enter-full-screen", () => {
+    filledAt = performance.now();
+    fullScreen();
+  });
+  window.on("leave-full-screen", () => {
+    filledAt = null;
+    fullScreen();
+  });
   window.webContents.on("did-finish-load", fullScreen);
   window.on("close", (event) => {
     if (!keeps()) return;
@@ -170,10 +286,20 @@ function openWindow(closeStreams: () => void, keeps: () => boolean): BrowserWind
     if (mainWindow === window) {
       mainWindow = null;
       away = false;
+      filledAt = null;
     }
     // Nothing can be watching once the window is gone, so release the provider connection.
     closeStreams();
   });
+  const moved = () => changed(window);
+  window
+    .on("move", moved)
+    .on("resize", moved)
+    .on("hide", moved)
+    .on("minimize", moved)
+    .on("enter-full-screen", moved)
+    .on("leave-full-screen", moved)
+    .on("closed", moved);
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//.test(url)) void shell.openExternal(url);
     return { action: "deny" };
@@ -424,11 +550,41 @@ async function start(): Promise<void> {
       "output.status": () => output.status,
       "output.scan": ({ on }) => Effect.as(output.scan(on), null),
       "output.connect": ({ receiverId }) => output.connect(receiverId),
-      "output.pick": ({ anchor }) => {
-        // The window's place on screen, which the system's list opens from.
-        const window = mainWindow?.getContentBounds() ?? { x: 0, y: 0 };
-        return output.pick({ ...anchor, x: window.x + anchor.x, y: window.y + anchor.y });
-      },
+      "output.pick": ({ anchor, request }) =>
+        Effect.suspend(() => {
+          const window = mainWindow;
+          const asked = window && listPlace(window, anchor);
+          // No window on screen for the list to open from: nothing changes.
+          if (!window || !asked) return output.status;
+          // The list is this window's from here on, also while it waits for the window to
+          // settle: `followList` ends it with the window, the output service with what the
+          // viewer chooses next, and the page with the view it asked from, by its name.
+          const mine = { window, page: asked.page };
+          listedFrom = mine;
+          return output
+            .pick(async (signal) => {
+              await settledInFullScreen(window, signal);
+              // The window closed or went elsewhere meanwhile, or another took its place, which
+              // leaves the place asked for behind: no list opens.
+              const from = mainWindow === window ? listPlace(window, anchor) : null;
+              if (!from || !samePage(from.page, asked.page)) return null;
+              // Nor when the viewer went to another app while the window settled: the list
+              // would open over that app, and its helper would take the keyboard from it. A
+              // window that had no keyboard when asked isn't held to this: leaving the mini
+              // player takes it away for a moment, and an O can arrive in that. Once the helper
+              // is asked for the list, it follows where the viewer goes itself (see
+              // native/airplay/Picker.swift), and takes the keyboard from this window to do so.
+              return asked.front && !from.front ? null : from.place;
+            }, request)
+            .pipe(
+              Effect.ensuring(
+                Effect.sync(() => {
+                  if (listedFrom === mine) listedFrom = null;
+                }),
+              ),
+            );
+        }),
+      "output.closePicker": ({ request }) => Effect.as(output.closePicker(request), null),
       "output.disconnect": () => Effect.as(output.disconnect, null),
       "output.playChannel": ({ channelId, variant, audio, audioLanguage, name }) =>
         Effect.gen(function* () {
@@ -532,6 +688,23 @@ async function start(): Promise<void> {
       ),
     );
   /**
+   * Takes the system's list down, or keeps one that still waits for its window from opening.
+   * Only the list goes. A receiver that plays goes on, and what plays here does too.
+   */
+  const closeList = () => {
+    listedFrom = null;
+    void runtime.runFork(output.closePicker());
+  };
+  /**
+   * Ends the system's list once the window it opens from is elsewhere, another size or out of
+   * sight: the button it hangs from is no longer there.
+   */
+  const followList = (window: BrowserWindow) => {
+    if (listedFrom?.window !== window) return;
+    if (onScreen(window) && samePage(window.getContentBounds(), listedFrom.page)) return;
+    closeList();
+  };
+  /**
    * The app is quitting, or restarting into an update: its window closes for good, whatever
    * plays. Both say so before they close the window. An update's restart closes it before
    * `before-quit`, and would wait forever for a window that only went out of sight.
@@ -539,6 +712,8 @@ async function start(): Promise<void> {
   let leaving = false;
   const leave = () => {
     leaving = true;
+    // No list opens from a window on its way out.
+    closeList();
   };
   app.on("before-quit", leave);
   autoUpdater.on("before-quit-for-update", leave);
@@ -546,7 +721,7 @@ async function start(): Promise<void> {
   // played still to pick up, closing the window keeps it out of sight. Other systems quit with
   // their window, which ends the receiver's playback.
   const keeps = () => isMac && !leaving && runtime.runSync(output.remote);
-  mainWindow = openWindow(closeStreams, keeps);
+  mainWindow = openWindow(closeStreams, keeps, followList);
   // How long the app took to show its window, from the start of the process.
   mainWindow.once("ready-to-show", () =>
     diagnostics.record({ op: "start", ms: Math.round(performance.now()), outcome: "ok" }),
@@ -556,7 +731,7 @@ async function start(): Promise<void> {
   app.on("activate", () => {
     // Nothing opens on a runtime that is closing.
     if (closing) return;
-    if (!mainWindow) mainWindow = openWindow(closeStreams, keeps);
+    if (!mainWindow) mainWindow = openWindow(closeStreams, keeps, followList);
     else if (away) bringBack(mainWindow);
   });
   app.on("will-quit", (event) => {
