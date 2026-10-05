@@ -1,11 +1,14 @@
-# Agent notes
+# Mr. Streamer
 
-[docs/README.md](docs/README.md) indexes the user, contributor and maintainer docs.
+Desktop IPTV player, docs indexed in `docs/README.md`. The [GitHub project](https://github.com/orgs/Mr-Streamer-OSS/projects/1) is the planning authority.
 
-- Planning lives in the [GitHub project](https://github.com/orgs/Mr-Streamer-OSS/projects/1): draft cards hold priority, status, acceptance, decisions and evidence, and its README holds the rules (`gh project view 1 --owner Mr-Streamer-OSS --format json --jq .readme`). Record results on the card you work from; bugs go in repository Issues. `gh project item-list` spends much of the GraphQL rate limit every agent shares, so read and edit single cards through `gh api graphql`.
-- PostPlan pages, plans and options alike, go on the card they decided. Repository docs, code and templates link only repository files and public pages.
-- Before handing work back: `pnpm knip`, `pnpm lint`, `pnpm fmt:check`, `pnpm typecheck` and `pnpm test`, the same checks CI runs. Conversion and title tests need `ffmpeg` and `ffprobe` on PATH.
-- Check live TV changes in the real app against iptv-org's public playlist, as [testing](docs/contributing/testing.md#a-real-provider) describes; the suite, measurements, movies and series stay on the fake provider and fake TMDB.
-- Provider logins and stream URLs, which contain them, stay in the gitignored `.local/`: never in commits, logs, fixtures or published evidence.
-- User-facing text follows the approved direction: true black, white primary text, minimal copy.
-- Outside contributions are limited to small bug fixes; [CONTRIBUTING.md](CONTRIBUTING.md) is the policy.
+- Read its README and your card through `gh api graphql`. `gh project item-list` drains the shared rate limit.
+- Without a card, take the lowest-Order card that has a Release version and isn't Blocked, Done or archived. Leave Order and the owner's pins as set. [Project order](docs/maintainers/project-order.md) covers changing the automation.
+- Keep Status current: Backlog, Planned, Development, Implemented (checks or merge pending), Tested (ready to merge), Done (merged or accepted). Blocked is separate.
+- Keep a feature's plan, decisions, PR, validation evidence and acceptance on one draft card. PostPlan links go only there. Repository Issues are bugs only.
+- `Release <version>` cards hold installed checks and the announcement. Publishing stable needs Wout's approval.
+- Before handing back, pass `pnpm knip`, `lint`, `fmt:check`, `typecheck` and `test`, which needs `ffmpeg` and `ffprobe`.
+- Smoke live TV changes in the real app per [testing](docs/contributing/testing.md). The rest uses the fake provider and TMDB.
+- Provider logins and stream URLs stay in gitignored `.local/`, never in commits, logs, fixtures or evidence.
+- UI is true black, white text, minimal copy.
+- Outside contributions are small bug fixes, per `CONTRIBUTING.md`.
