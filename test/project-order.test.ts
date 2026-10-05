@@ -36,11 +36,12 @@ const FIELDS: readonly Field[] = [
   { id: ORDER, name: "Order", dataType: "NUMBER" },
 ];
 
-/** A card that is Planned for 0.0.7, has no number and isn't blocked, unless told otherwise. */
+/** A draft that is Planned for 0.0.7, has no number and isn't blocked, unless told otherwise. */
 function card(id: string, values: Partial<Omit<Card, "id">> = {}): Card {
   return {
     id,
     archived: false,
+    draft: true,
     title: id,
     status: "Planned",
     release: "0.0.7",
@@ -59,6 +60,17 @@ function releaseCard(version: string, values: Partial<Omit<Card, "id">> = {}): C
     ...values,
   });
 }
+
+/** What a draft made on the board holds: no Status, no release. */
+const NEW = { status: null, release: null } as const;
+
+/** The project's fields when its Status lacks one stage. */
+const withoutStage = (stage: string): readonly Field[] =>
+  FIELDS.map((field) =>
+    field.name === "Status"
+      ? { ...field, options: (field.options ?? []).filter((option) => option.name !== stage) }
+      : field,
+  );
 
 /** 0.0.7 and 0.0.8 are out, so tests of the order see no new release card and no number for one. */
 const RELEASED = [
@@ -131,6 +143,7 @@ function project(cards: readonly Card[], pageSize = 100) {
       held.set(id, {
         id,
         archived: false,
+        draft: true,
         title: draft.title,
         status: null,
         release: null,
@@ -253,6 +266,7 @@ describe("the order cards are worked in", () => {
 describe("a project that can't be ordered", () => {
   it.each([
     ["no Status", card("odd", { status: null })],
+    ["no Status on an issue or pull request", card("odd", { draft: false, ...NEW })],
     ["a Status the rules don't know", card("odd", { status: "Review" })],
     ["a release on a Backlog card", card("odd", { status: "Backlog" })],
     ["no release on a Planned card", card("odd", { release: null })],
@@ -280,10 +294,8 @@ describe("a project that can't be ordered", () => {
       FIELDS.map((field) => (field.name === "Order" ? { ...field, dataType: "TEXT" } : field)),
     ],
     ["has no Blocked field", FIELDS.filter((field) => field.name !== "Blocked")],
-    [
-      "has no Planned among its stages",
-      FIELDS.map((field) => (field.name === "Status" ? { ...field, options: [] } : field)),
-    ],
+    ["has no Backlog among its stages", withoutStage("Backlog")],
+    ["has no Planned among its stages", withoutStage("Planned")],
   ])("is left alone when it %s", async (_, fields) => {
     const board = project([...RELEASED, card("first", { order: 5 })]);
     board.fields = fields;
@@ -395,6 +407,97 @@ describe("writing the order", () => {
   });
 });
 
+describe("a new draft", () => {
+  /** A project in order but for one draft made on the board, holding what a test gives it. */
+  const drafted = (values: Partial<Omit<Card, "id">> = {}) => [
+    ...RELEASED,
+    card("planned", { order: 1 }),
+    card("idea", { status: "Backlog", release: "Unscheduled", order: 2 }),
+    card("new", { ...NEW, ...values }),
+  ];
+
+  it("is proposed for the Backlog by a preview, with its place in the order, and not written", async () => {
+    const board = project(drafted());
+    const outcome = await maintainProject(board, {}, { apply: false });
+    expect(outcome.backlog).toEqual(["new"]);
+    expect(outcome.order).toEqual(["planned", "idea", "new"]);
+    expect(outcome.changes).toEqual([{ card: "new", from: null, to: 3 }]);
+    expect(board.writes).toEqual([]);
+  });
+
+  it("goes to the Backlog and gets a number, and the next run writes nothing", async () => {
+    const board = project(drafted());
+    const outcome = await maintainProject(board, {}, { apply: true });
+    expect(outcome).toMatchObject({ backlog: ["new"], written: true });
+    expect(board.held.get("new")).toMatchObject({ status: "Backlog", order: 3 });
+    const made = board.writes.length;
+    const again = await maintainProject(board, {}, { apply: true });
+    expect(again).toMatchObject({ backlog: [], changes: [], written: false });
+    expect(board.writes).toHaveLength(made);
+  });
+
+  it("keeps the Unscheduled and Blocked it was made with, and is the only card given a Status", async () => {
+    const board = project(drafted({ release: "Unscheduled", blocked: "Blocked" }));
+    await maintainProject(board, {}, { apply: true });
+    expect(board.held.get("new")).toMatchObject({
+      status: "Backlog",
+      release: "Unscheduled",
+      blocked: "Blocked",
+    });
+    expect(board.writes.filter((write) => "field" in write && write.field === STATUS)).toEqual([
+      { field: STATUS, card: "new", value: { singleSelectOptionId: "backlog-option" } },
+    ]);
+  });
+
+  it("stays as it is when archived", async () => {
+    const board = project(drafted({ archived: true }));
+    const outcome = await maintainProject(board, {}, { apply: true });
+    expect(outcome.backlog).toEqual([]);
+    expect(board.writes).toEqual([]);
+  });
+
+  it("stops the run when it names a version, which takes a Status chosen by hand", async () => {
+    const board = project(drafted({ release: "0.0.9" }));
+    await expect(maintainProject(board, {}, { apply: true })).rejects.toThrow("new has no Status.");
+    expect(board.writes).toEqual([]);
+  });
+
+  it("stays without a Status while another card can't be placed", async () => {
+    const board = project([...drafted(), card("odd", { status: "Review" })]);
+    await expect(maintainProject(board, {}, { apply: true })).rejects.toThrow(
+      /^1 card can't be placed/,
+    );
+    expect(board.writes).toEqual([]);
+  });
+
+  it("gets its number from the next run when one stops right after putting it in the Backlog", async () => {
+    const board = project(drafted());
+    board.beforeWrite = (count) => {
+      if (count === 1) throw new Error("GitHub is unreachable.");
+    };
+    await expect(maintainProject(board, {}, { apply: true })).rejects.toThrow("unreachable");
+    board.beforeWrite = () => {};
+    await maintainProject(board, {}, { apply: true });
+    expect(board.held.get("new")).toMatchObject({ status: "Backlog", order: 3 });
+  });
+
+  it("is told apart from a release card a run left half-made, which still ends up Planned", async () => {
+    const board = project([
+      ...drafted(),
+      card("feature", { release: "0.0.10", order: 3 }),
+      card("half-made", { ...NEW, title: "Release 0.0.10" }),
+    ]);
+    const outcome = await maintainProject(board, {}, { apply: true });
+    expect(outcome.backlog).toEqual(["new"]);
+    expect(board.drafts).toEqual([]);
+    expect(board.held.get("half-made")).toMatchObject({
+      status: "Planned",
+      release: "0.0.10",
+      blocked: "Blocked",
+    });
+  });
+});
+
 describe("a release's own card", () => {
   /** Work is planned for 0.0.10, which has no card. */
   const unreleased = () => [...RELEASED, card("feature", { release: "0.0.10", order: 1 })];
@@ -421,6 +524,7 @@ describe("a release's own card", () => {
     expect(board.held.get("draft-1")).toEqual({
       id: "draft-1",
       archived: false,
+      draft: true,
       title: "Release 0.0.10",
       status: "Planned",
       release: "0.0.10",

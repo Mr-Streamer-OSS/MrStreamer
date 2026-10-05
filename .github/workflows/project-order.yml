@@ -1,6 +1,7 @@
-# Keeps the maintainers' GitHub project in working order: gives every release with unfinished work
-# its own card, and numbers the Order field so open-work views list cards in the order to work on
-# them. scripts/project-order.ts holds the rules, and docs/maintainers/project-order.md the setup.
+# Keeps the maintainers' GitHub project in working order: puts a new draft in the Backlog, gives
+# every release with unfinished work its own card, and numbers the Order field so open-work views
+# list cards in the order to work on them. scripts/project-order.ts holds the rules, and
+# docs/maintainers/project-order.md the setup.
 #
 # - Every hour, and by hand. A run started by hand reports what it would change and writes
 #   nothing, unless "apply" is ticked.
@@ -23,7 +24,7 @@ on:
   workflow_dispatch:
     inputs:
       apply:
-        description: Add release cards and write the Order values. Unticked, the run reports what it would change.
+        description: Put new drafts in the Backlog, add release cards and write the Order values. Unticked, the run reports what it would change.
         type: boolean
         default: false
 

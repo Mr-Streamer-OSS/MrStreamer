@@ -1,13 +1,14 @@
 # Project order
 
-> For maintainers. How the [GitHub project](https://github.com/orgs/Mr-Streamer-OSS/projects/1) gets its release cards and its Order numbers.
+> For maintainers. How the [GitHub project](https://github.com/orgs/Mr-Streamer-OSS/projects/1) gets its Backlog, its release cards and its Order numbers.
 
-`.github/workflows/project-order.yml` runs `scripts/project-order.ts` every hour. Each run does two things:
+`.github/workflows/project-order.yml` runs `scripts/project-order.ts` every hour. Each run does three things:
 
+- It puts a [new draft](#new-drafts), one without a Status or a release, in the Backlog.
 - It gives every release with unfinished work its own card, `Release 0.0.7`.
 - It numbers the unfinished cards 1, 2, 3 and so on in the Order field, in the order to work on them, and clears the number of Done cards.
 
-It writes Order, and the empty fields of a release card. It never changes a Status, Release, Blocked, owner or text that a card already has, and it builds, publishes and submits nothing. It is off until someone [sets it up](#setup).
+It writes Order, Backlog on a new draft, and the empty fields of a release card. It never changes a Status, Release, Blocked, owner or text that it read on a card, though it can overwrite an [edit made during a run](#edits-during-a-run). It builds, publishes and submits nothing. It is off until someone [sets it up](#setup).
 
 ## The order
 
@@ -27,6 +28,16 @@ Type a number between the two cards it should sit between, such as 4.5 to go bet
 
 A number moves a card within its group only. Its release, Blocked and stage decide the rest, so a card that should move further needs one of those changed.
 
+## New drafts
+
+A draft made on the board starts without a Status. The next run puts it in the Backlog and numbers it there, so a new idea needs only its title.
+
+- A draft counts while its Release is empty or `Unscheduled`. Its Release, Blocked, owner and text stay as they are.
+- A draft that names a version stops the run until someone chooses its Status, Planned or later.
+- So does an issue or pull request without a Status. The run chooses a Status for drafts alone.
+- A draft titled exactly `Release 0.0.10` is a [release card](#release-cards), and is set up as one.
+- Archived drafts keep whatever they hold.
+
 ## Release cards
 
 A release's own card is titled exactly `Release 0.0.7`. It holds the release checklist, the acceptance, the notes and the announcement.
@@ -41,11 +52,11 @@ When an unfinished card is planned for a version that has no such card, the next
 
 ## What a card needs
 
-| Field   | Unfinished cards                                                                             |
-| ------- | -------------------------------------------------------------------------------------------- |
-| Status  | Backlog, Planned, Development, Implemented or Tested                                         |
-| Release | A version such as `0.0.7` from Planned to Tested. `Unscheduled` or empty in the Backlog only |
-| Blocked | `Blocked` or empty                                                                           |
+| Field   | Unfinished cards                                                                                    |
+| ------- | --------------------------------------------------------------------------------------------------- |
+| Status  | Backlog, Planned, Development, Implemented or Tested. Only a [new draft](#new-drafts) may have none |
+| Release | A version such as `0.0.7` from Planned to Tested. `Unscheduled` or empty in the Backlog only        |
+| Blocked | `Blocked` or empty                                                                                  |
 
 A card that doesn't fit stops the run before it writes anything, so the order never forms around a card it can't place. Done and archived cards can hold anything.
 
@@ -66,7 +77,7 @@ The project belongs to the organization, which a workflow's own token can't reac
    gh secret set PROJECT_AUTOMATION_TOKEN --repo Mr-Streamer-OSS/MrStreamer
    ```
 
-3. Preview. Under Actions, run **Project order** on `main` with "apply" unticked. The run's page lists the release cards it would add and every number it would change.
+3. Preview. Under Actions, run **Project order** on `main` with "apply" unticked. The run's page lists the drafts it would put in the Backlog, the release cards it would add and every number it would change.
 4. Turn it on:
 
    ```sh
@@ -94,11 +105,19 @@ Runs take turns and never overlap. Nothing is applied from an old preview. Apply
 | GitHub refused the request             | Usually an expired token or one without access to the project. Create a new one and store it                                                                          |
 | A card can't be placed                 | Fix that card's [fields](#what-a-card-needs)                                                                                                                          |
 | A card can't be read                   | GitHub hides that card's title from the token, so release cards can't be told apart. Give the token access to the card's repository, or take the card off the project |
-| A release card didn't show as set up   | Nothing. GitHub hadn't listed the new card yet, and the next run looks again                                                                                          |
-| The project has no field, or no option | The script expects Status with Planned, Release, Blocked with Blocked, and Order. Restore it or change the script                                                     |
+| A card didn't show as set up           | Nothing. GitHub hadn't shown a new Status or a new release card yet, and the next run looks again                                                                     |
+| The project has no field, or no option | The script expects Status with Backlog and Planned, Release, Blocked with Blocked, and Order. Restore it or change the script                                         |
 | The project changed while it was read  | Nothing. A card was added or removed mid-read, and the next run reads again                                                                                           |
 | The project was edited while written   | Nothing. The next run orders it again                                                                                                                                 |
 
-A run that stops halfway leaves part of its changes written. That part is safe. Numbers are written in an order that keeps every card sorting as planned after each single write, and a half-added release card is finished by the next run.
+A run that stops halfway leaves part of its changes written. That part is safe. Numbers are written in an order that keeps every card sorting as planned after each single write. The next run numbers a draft that reached the Backlog, and finishes a half-added release card.
 
-One limit is worth knowing. GitHub can't write a number only where it is still the one that was read. An Order typed during the few seconds a run writes that same card's number is overwritten. The board shows it at once, so type it again.
+## Edits during a run
+
+GitHub can't write a value only where it is still the one that was read. A run plans from what it read and writes a moment later, so it overwrites an edit made in between to a field it writes:
+
+- An Order typed during the few seconds a run writes the numbers.
+- A Status chosen for a new draft between the run's read and its Backlog write. The Backlog write comes first, straight after the read, so that gap is about a second for the first new draft, and a request longer for each further one. The card says Backlog afterwards. If it was given a version as well, the run then fails and names the card, because a Backlog card can't hold a version.
+- A Status, Blocked or Release filled in on a release card the run is setting up.
+
+The board shows the overwritten value at once, so set it again.
