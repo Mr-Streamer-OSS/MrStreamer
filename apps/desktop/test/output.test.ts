@@ -578,6 +578,110 @@ describe.skipIf(!hasTools)("playback through the system's list of receivers", ()
     await expect(fetch(loaded().media.contentId)).rejects.toThrow();
   });
 
+  it("takes only the list down with its window, and keeps what the receiver plays", async () => {
+    const { helper, output, play, fetches, state, changes } = await casting();
+    const picking = output.pick(ANCHOR);
+    await helper.took("showPicker");
+    helper.choose();
+    await picking;
+    const { media } = await play(25);
+    const load = await helper.took("load");
+    expect((await fetches(load.url)).status).toBe(200);
+    helper.status("playing", 26, 150);
+    await eventually(async () =>
+      expect(await state()).toMatchObject({ media: { state: "playing" } }),
+    );
+    const before = changes.length;
+    const hidden = () => helper.commands.filter((command) => command.cmd === "hidePicker").length;
+
+    const again = output.pick(ANCHOR);
+    await helper.took("showPicker");
+    const lists = hidden();
+    // The window the list opened from moved, or went out of sight.
+    await output.closePicker();
+
+    expect((await again).output).toMatchObject({
+      kind: "receiver",
+      media: { generation: media.generation, sessionId: media.sessionId, state: "playing" },
+      failure: null,
+    });
+    await eventually(() => expect(hidden()).toBe(lists + 1));
+    // It never stopped being the receiver's, in the process that holds its one load.
+    const kinds = changes.slice(before).map((each) => each.output.kind);
+    expect(kinds).not.toContain("connecting");
+    expect(kinds).not.toContain("local");
+    const sent = helper.commands.map((command) => command.cmd);
+    expect(sent.filter((cmd) => cmd === "load")).toHaveLength(1);
+    expect(sent.filter((cmd) => cmd === "stop" || cmd === "unload" || cmd === "quit")).toEqual([]);
+    expect(helper.running()).toEqual(helper.pids);
+    // The address it plays from still answers, and it takes what it is told.
+    expect((await fetches(load.url)).status).toBe(200);
+    await output.command(media.generation, { command: "pause" });
+    expect(await helper.took("pause")).toMatchObject({ generation: media.generation });
+  });
+
+  it("takes the list down with its window and plays on here when no receiver was picked", async () => {
+    const { helper, playback, output, provider, channel, state } = await casting();
+    const local = await playback.open(channel, LOCAL);
+    const watching = new AbortController();
+    void fetch(local.url, { signal: watching.signal }).catch(() => {});
+    await eventually(() => expect(provider.activeStreams()).toBe(1));
+
+    const picking = output.pick(ANCHOR);
+    await helper.took("showPicker");
+    await eventually(async () =>
+      expect(await state()).toEqual({ kind: "connecting", protocol: "airplay", receiver: null }),
+    );
+    await output.closePicker();
+
+    // As when the viewer closes it without picking: nothing failed, and nothing changed.
+    expect((await picking).output).toEqual({ kind: "local" });
+    await helper.took("hidePicker");
+    await helper.took("unload");
+    expect(helper.commands.filter((command) => command.cmd === "load")).toHaveLength(0);
+    expect(provider.activeStreams()).toBe(1);
+    expect(provider.streamRequests()).toBe(1);
+    watching.abort();
+  });
+
+  it("opens the list asked for right after one was taken down", async () => {
+    const { helper, output, state } = await casting();
+    const first = output.pick(ANCHOR);
+    await helper.took("showPicker");
+
+    // The window moved, and the viewer pressed the button again before the first wait ended.
+    const closing = output.closePicker();
+    const second = output.pick({ ...ANCHOR, x: 400 });
+    await closing;
+    await first;
+
+    // The first one's end took nothing from the second, whose list is up and waited at.
+    expect(await helper.took("showPicker")).toMatchObject({ anchor: { x: 400 } });
+    expect(await state()).toEqual({ kind: "connecting", protocol: "airplay", receiver: null });
+    helper.choose();
+    expect((await second).output).toMatchObject({
+      kind: "receiver",
+      receiver: { kind: "airplay" },
+    });
+  });
+
+  it("leaves a connect to a TV the app listed alone when there is no list to take down", async () => {
+    const { tv, output, state } = await casting();
+    await output.closePicker();
+    expect(await state()).toEqual({ kind: "local" });
+
+    await output.scan(true);
+    await eventually(async () => expect((await output.status()).receivers).toHaveLength(1));
+    tv.answers.launch = "ignore";
+    const connecting = output.connect(tv.receiver.id);
+    await eventually(() => expect(tv.requests("LAUNCH")).toHaveLength(1));
+    await output.closePicker();
+    expect(await state()).toMatchObject({ kind: "connecting", protocol: "cast" });
+
+    await output.disconnect();
+    expect((await connecting).output).toEqual({ kind: "local" });
+  });
+
   it("gives up the list when the viewer goes back to this computer meanwhile", async () => {
     const { helper, output, state } = await casting();
     const picking = output.pick(ANCHOR);

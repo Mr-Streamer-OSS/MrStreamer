@@ -74,6 +74,11 @@ const CHECKPOINT_MS = 60_000;
  * this computer, that takes nothing back: a receiver picked in the list before still counts.
  */
 const REOPENED = "reopened";
+/**
+ * Why it ends when the list was taken down from here, with the window it opened from. That is as
+ * if the viewer closed it without picking.
+ */
+const CLOSED = "closed";
 
 export interface OutputDeps {
   /** The ways this build reaches receivers: Google Cast, AirPlay, both or none. */
@@ -134,6 +139,12 @@ export class Output extends Context.Service<
      * already: it plays on while the list is open, from the same address, and takes commands.
      */
     pick(anchor: ScreenRect): Effect.Effect<OutputStatus, Failed>;
+    /**
+     * Takes the system's list down while the viewer is at it, as when the window it opened from
+     * moves or goes out of sight. Nothing else changes: a receiver that plays goes on, and one
+     * the viewer picked in the list just before still counts.
+     */
+    readonly closePicker: Effect.Effect<void>;
     /** Back to this computer: ends what the receiver plays, closes its session, lets go of it. */
     readonly disconnect: Effect.Effect<void>;
     /**
@@ -209,6 +220,8 @@ function make(deps: OutputDeps) {
       null;
     /** A connect under way, which going back to this computer ends. */
     let connecting: AbortController | null = null;
+    /** The wait at the system's list, from when the list is asked for. */
+    let listing: AbortController | null = null;
     let playing: Playing | null = null;
     let generation = 0;
     /** Which of this computer's addresses the next load is served on, counted round. */
@@ -600,10 +613,14 @@ function make(deps: OutputDeps) {
     const pickWith = (adapter: ReceiverAdapter, anchor: ScreenRect) =>
       Effect.gen(function* () {
         const mine = new AbortController();
+        // One list at a time, from when it is asked for: the wait at the one before ends, and
+        // nothing failed.
+        listing?.abort(REOPENED);
+        listing = mine;
         yield* one(
           Effect.sync(() => {
-            // One list at a time: the wait at the one before ends, and nothing failed.
-            connecting?.abort(REOPENED);
+            // Given up before its turn came: no list opens.
+            if (mine.signal.aborted) return;
             connecting = mine;
             if (connected) return;
             output = { kind: "connecting", protocol: adapter.kind, receiver: null };
@@ -617,12 +634,16 @@ function make(deps: OutputDeps) {
         );
         return yield* one(
           Effect.gen(function* () {
-            if (connecting === mine) connecting = null;
+            // Whether this is still the connect under way: none began since.
+            const current = connecting === mine;
+            if (current) connecting = null;
+            if (listing === mine) listing = null;
             const picked = waited._tag === "Success" ? waited.success : null;
             // Given up from here meanwhile, which fails nothing. `left` when the viewer went
             // elsewhere: back to this computer, or to a receiver the app lists.
             const given = mine.signal.aborted;
-            const left = given && mine.signal.reason !== REOPENED;
+            const reason: unknown = mine.signal.reason;
+            const left = given && reason !== REOPENED && reason !== CLOSED;
             if (picked && picked !== connected?.connection) {
               if (left) {
                 // Nobody takes what was picked after all.
@@ -636,8 +657,14 @@ function make(deps: OutputDeps) {
                 }
                 take(picked, adapter);
               }
-            } else if (!picked && !given && output.kind === "connecting") {
-              // The list closed on nothing, and no receiver was there before it opened.
+            } else if (
+              !picked &&
+              current &&
+              (!given || reason === CLOSED) &&
+              output.kind === "connecting"
+            ) {
+              // The list closed on nothing, by the viewer or from here, and no receiver was
+              // there before it opened.
               output = { kind: "local" };
               publish();
             }
@@ -691,6 +718,8 @@ function make(deps: OutputDeps) {
           }
           return pickWith(adapter, anchor);
         }),
+
+      closePicker: Effect.sync(() => listing?.abort(CLOSED)),
 
       // A connect that waits ends first, for its receiver or for the viewer at the system's
       // list: the one for a receiver holds the turn this takes.

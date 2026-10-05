@@ -10,8 +10,9 @@ import {
   safeStorage,
   session,
   shell,
+  type Rectangle,
 } from "electron";
-import type { IpcEvent, IpcEvents } from "@mrstreamer/contracts/ipc";
+import type { IpcEvent, IpcEvents, IpcInput } from "@mrstreamer/contracts/ipc";
 import { streamsToPlay } from "@mrstreamer/core/catalogue/variants";
 import { Diagnostics } from "@mrstreamer/core/diagnostics";
 import { Failed } from "@mrstreamer/core/failure";
@@ -27,7 +28,7 @@ import { miniPlayer, miniPlayerAvailable } from "./mini-player.ts";
 import { electronInstaller } from "./platform/installer.ts";
 import { removeUnfinishedWrites } from "./platform/json-file.ts";
 import { keychainSecrets } from "./platform/secrets.ts";
-import type { ReceiverAdapter } from "./receivers/adapter.ts";
+import type { ReceiverAdapter, ScreenRect } from "./receivers/adapter.ts";
 import { airplayAdapter } from "./receivers/airplay/adapter.ts";
 import { castAdapter } from "./receivers/cast/adapter.ts";
 // electron-vite builds the worker as its own file and hands back a function that starts it; the
@@ -91,6 +92,12 @@ let mainWindow: BrowserWindow | null = null;
  * back, and it closes for good once the receiver lets go (see `start`).
  */
 let away = false;
+/**
+ * The window the system's list of receivers opened from, and where its page was on screen then,
+ * while the viewer is at that list. The list hangs from a place in that page, so it goes once the
+ * page is elsewhere or out of sight (see `start`).
+ */
+let listedFrom: { readonly window: BrowserWindow; readonly page: Rectangle } | null = null;
 /** The smallest the window gets, except as the mini player. */
 const MIN_SIZE = { minWidth: 960, minHeight: 600 } as const;
 /** Each window's mini player, which remembers where the window was. */
@@ -123,11 +130,59 @@ function bringBack(window: BrowserWindow): void {
   window.webContents.setBackgroundThrottling(true);
 }
 
+/** Whether the viewer can see `window` as a window: not closed, hidden or minimised. */
+function onScreen(window: BrowserWindow): boolean {
+  return (
+    !window.isDestroyed() &&
+    window.isVisible() &&
+    !window.isMinimized() &&
+    !(isMac && app.isHidden())
+  );
+}
+
+/**
+ * Where the system's list of receivers opens from: `anchor`, a place in the window's page in CSS
+ * pixels, as a place on screen in points, with where the page is there. Null while the window is
+ * out of sight, when no list can hang from it.
+ *
+ * The page's zoom turns its pixels into points. A place outside the page, as one measured before
+ * the window changed, gives way to the middle of the page.
+ */
+function listPlace(
+  window: BrowserWindow,
+  anchor: IpcInput<"output.pick">["anchor"],
+): { readonly place: ScreenRect; readonly page: Rectangle } | null {
+  if (!onScreen(window)) return null;
+  const page = window.getContentBounds();
+  const zoom = window.webContents.getZoomFactor();
+  const place = {
+    x: page.x + anchor.x * zoom,
+    y: page.y + anchor.y * zoom,
+    width: anchor.width * zoom,
+    height: anchor.height * zoom,
+  };
+  const inside = (at: number, from: number, length: number) => at >= from && at <= from + length;
+  const inPage =
+    inside(place.x + place.width / 2, page.x, page.width) &&
+    inside(place.y + place.height / 2, page.y, page.height);
+  return {
+    page,
+    place: inPage
+      ? place
+      : { x: page.x + page.width / 2, y: page.y + page.height / 2, width: 0, height: 0 },
+  };
+}
+
 /**
  * Opens the app's window. `keeps` says, when the viewer closes it, whether it only goes out of
- * sight; `closeStreams` runs once it is gone.
+ * sight; `closeStreams` runs once it is gone. `changed` runs whenever it moves, changes size or
+ * goes out of sight, and once it is gone.
  */
-function openWindow(closeStreams: () => void, keeps: () => boolean): BrowserWindow {
+function openWindow(
+  closeStreams: () => void,
+  keeps: () => boolean,
+  changed: (window: BrowserWindow) => void,
+): BrowserWindow {
   const window = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -174,6 +229,15 @@ function openWindow(closeStreams: () => void, keeps: () => boolean): BrowserWind
     // Nothing can be watching once the window is gone, so release the provider connection.
     closeStreams();
   });
+  const moved = () => changed(window);
+  window
+    .on("move", moved)
+    .on("resize", moved)
+    .on("hide", moved)
+    .on("minimize", moved)
+    .on("enter-full-screen", moved)
+    .on("leave-full-screen", moved)
+    .on("closed", moved);
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//.test(url)) void shell.openExternal(url);
     return { action: "deny" };
@@ -425,9 +489,18 @@ async function start(): Promise<void> {
       "output.scan": ({ on }) => Effect.as(output.scan(on), null),
       "output.connect": ({ receiverId }) => output.connect(receiverId),
       "output.pick": ({ anchor }) => {
-        // The window's place on screen, which the system's list opens from.
-        const window = mainWindow?.getContentBounds() ?? { x: 0, y: 0 };
-        return output.pick({ ...anchor, x: window.x + anchor.x, y: window.y + anchor.y });
+        const from = mainWindow && listPlace(mainWindow, anchor);
+        // No window on screen for the list to open from: nothing changes.
+        if (!mainWindow || !from) return output.status;
+        const mine = { window: mainWindow, page: from.page };
+        listedFrom = mine;
+        return output.pick(from.place).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (listedFrom === mine) listedFrom = null;
+            }),
+          ),
+        );
       },
       "output.disconnect": () => Effect.as(output.disconnect, null),
       "output.playChannel": ({ channelId, variant, audio, audioLanguage, name }) =>
@@ -532,6 +605,26 @@ async function start(): Promise<void> {
       ),
     );
   /**
+   * Takes the system's list down once the window it opened from is elsewhere, another size or
+   * out of sight: the button it hangs from is no longer there. Only the list goes. A receiver
+   * that plays goes on, and what plays here does too.
+   */
+  const followList = (window: BrowserWindow) => {
+    if (listedFrom?.window !== window) return;
+    const { page } = listedFrom;
+    const now = onScreen(window) ? window.getContentBounds() : null;
+    if (
+      now?.x === page.x &&
+      now.y === page.y &&
+      now.width === page.width &&
+      now.height === page.height
+    ) {
+      return;
+    }
+    listedFrom = null;
+    void runtime.runFork(output.closePicker);
+  };
+  /**
    * The app is quitting, or restarting into an update: its window closes for good, whatever
    * plays. Both say so before they close the window. An update's restart closes it before
    * `before-quit`, and would wait forever for a window that only went out of sight.
@@ -546,7 +639,7 @@ async function start(): Promise<void> {
   // played still to pick up, closing the window keeps it out of sight. Other systems quit with
   // their window, which ends the receiver's playback.
   const keeps = () => isMac && !leaving && runtime.runSync(output.remote);
-  mainWindow = openWindow(closeStreams, keeps);
+  mainWindow = openWindow(closeStreams, keeps, followList);
   // How long the app took to show its window, from the start of the process.
   mainWindow.once("ready-to-show", () =>
     diagnostics.record({ op: "start", ms: Math.round(performance.now()), outcome: "ok" }),
@@ -556,7 +649,7 @@ async function start(): Promise<void> {
   app.on("activate", () => {
     // Nothing opens on a runtime that is closing.
     if (closing) return;
-    if (!mainWindow) mainWindow = openWindow(closeStreams, keeps);
+    if (!mainWindow) mainWindow = openWindow(closeStreams, keeps, followList);
     else if (away) bringBack(mainWindow);
   });
   app.on("will-quit", (event) => {

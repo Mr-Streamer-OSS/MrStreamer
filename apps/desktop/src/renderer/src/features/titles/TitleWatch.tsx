@@ -167,9 +167,7 @@ export function TitleWatch() {
           break;
         case "o":
         case "O":
-          // The chooser opens over the full window's controls.
-          if (miniPlayer.on()) void miniPlayer.leave();
-          openChooser(() => setMenu("output"));
+          void openChooser(() => setMenu("output"));
           break;
         case "m":
           if (!player.toggleMute()) flash("TV remote sets volume");

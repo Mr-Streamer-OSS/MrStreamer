@@ -15,14 +15,6 @@ import type {
 import { appError } from "../lib/errors.ts";
 import { call, listen } from "../lib/ipc.ts";
 
-/** A place in the window, in CSS pixels, for the system's list of receivers to open from. */
-export interface Anchor {
-  readonly x: number;
-  readonly y: number;
-  readonly width: number;
-  readonly height: number;
-}
-
 interface OutputState {
   readonly status: OutputStatus;
   /** When the connect under way began, as `Date.now()`; null while none is. */
@@ -64,8 +56,18 @@ export function useOutput<T>(selector: (state: OutputState) => T): T {
 }
 
 const listeners = new Set<(now: OutputStatus, before: OutputStatus) => void>();
-/** Where the system's list last opened from, for opening it again after a lost connection. */
-let anchor: Anchor = { x: 0, y: 0, width: 0, height: 0 };
+
+/**
+ * Where the system's list of receivers opens from, a place in the window in CSS pixels: the
+ * output button where the view shows one, else the middle of the window. Measured for each list
+ * and never remembered, since the window and its layout may have changed since the last one.
+ */
+function listAnchor() {
+  const box = document.querySelector("[data-output]")?.getBoundingClientRect();
+  return box
+    ? { x: box.x, y: box.y, width: box.width, height: box.height }
+    : { x: window.innerWidth / 2, y: window.innerHeight / 2, width: 0, height: 0 };
+}
 
 /** The receiver `output` has playback on, or had it on until its connection broke. */
 function receiverOf(output: Output): Receiver | null {
@@ -151,13 +153,12 @@ export const outputs = {
   },
   /**
    * Opens the chooser: the app's own list where it finds receivers itself, and the system's
-   * list at `from`, a place in the window, where only that knows them.
+   * list where only that knows them.
    */
-  choose(from: Anchor): void {
-    anchor = from;
+  choose(): void {
     const { offers } = store.getState().status;
     if (offers.length === 0) return;
-    if (offers.every((kind) => kind === "airplay")) void outputs.pick();
+    if (offers.every((kind) => kind === "airplay")) outputs.pick();
     else outputs.list(true);
   },
   /** Shows or hides the app's own list, which looks for receivers while it shows. */
@@ -174,11 +175,10 @@ export const outputs = {
       refused(receiver ?? { id: receiverId, kind: "cast", name: null }),
     );
   },
-  /** Opens the system's list at `from`, or where the chooser last opened. */
-  pick(from: Anchor = anchor): void {
-    anchor = from;
+  /** Opens the system's list at the output button, as the view shows it now. */
+  pick(): void {
     store.setState({ refused: null });
-    void call("output.pick", { anchor }).catch(
+    void call("output.pick", { anchor: listAnchor() }).catch(
       refused({ id: "airplay", kind: "airplay", name: null }),
     );
   },

@@ -166,6 +166,51 @@ describe("AirPlay adapter", () => {
     await helper.took("unload");
   });
 
+  it("gives up a list opened on a receiver that plays, and keeps the receiver", async () => {
+    const { helper, adapter, connection, caughtUp, news } = await connected();
+    await connection.load(media(1), never());
+    helper.status("playing", 12, 180);
+    await helper.took("hidePicker");
+
+    const waiting = new AbortController();
+    const again = adapter.connect(PICKER, waiting.signal);
+    await helper.took("showPicker");
+    waiting.abort();
+
+    await expect(again).rejects.toBeInstanceOf(ReceiverFailed);
+    await helper.took("hidePicker");
+    await caughtUp();
+    // The helper keeps the load it holds, in the process it was given it.
+    const sent = helper.commands.map((command) => command.cmd);
+    expect(sent.filter((cmd) => cmd === "stop" || cmd === "unload" || cmd === "quit")).toEqual([]);
+    expect(helper.running()).toEqual(helper.pids);
+    expect(news().map((event) => event.type)).not.toContain("released");
+    expect(news().map((event) => event.type)).not.toContain("lost");
+    await connection.pause(1);
+    expect(await helper.took("pause")).toMatchObject({ generation: 1 });
+  });
+
+  it("waits at a list while the one before it still closes", async () => {
+    const { helper, adapter, caughtUp } = await setup();
+    const waiting = new AbortController();
+    const first = adapter.connect(PICKER, waiting.signal);
+    const earlier = await helper.took("showPicker");
+    waiting.abort();
+    await expect(first).rejects.toBeInstanceOf(ReceiverFailed);
+
+    let settled = false;
+    const second = adapter.connect(PICKER, never()).finally(() => (settled = true));
+    const later = await helper.took("showPicker");
+    expect(later.request).not.toBe(earlier.request);
+    // The helper says the first list closed only now, after the second was asked for.
+    helper.emit({ type: "picker", request: earlier.request, state: "closed" });
+    await caughtUp();
+    expect(settled).toBe(false);
+
+    helper.choose();
+    expect(await second).toMatchObject({ receiver: { kind: "airplay" } });
+  });
+
   it("passes what the service asks to the helper, with the load's generation", async () => {
     const { helper, connection } = await connected();
 
