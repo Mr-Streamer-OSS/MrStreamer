@@ -8,6 +8,8 @@
 // them again when it moves to a variant with another group. Here a rendition's id is worked out
 // from what the playlist declares about it, so the viewer's choice stays the same track through
 // such a move, and when the channel opens again, in whatever order that stream lists them.
+// Captions the viewer chose are listed from the start of such a stream, though its picture tells
+// of them only at their first line.
 //
 // Subtitles show only when the viewer's choice says so. hls.js would turn on the ones a stream
 // marks as its default, so whatever it selects by itself is put back to what was asked for. Its
@@ -46,7 +48,8 @@ export interface EngineTracks {
   setAudio(id: number): void;
   /**
    * Chooses the subtitles whose lines `onLine` hears, or none. Lines read before that are yet to
-   * end come at once: hls.js reads ahead of the picture, and each line only once.
+   * end come at once: hls.js reads ahead of the picture, and each line only once. Captions are
+   * listed from then on, whether or not the picture told of them yet.
    */
   setSubtitle(track: SubtitleTrack | null): void;
   /** Hears each line of the chosen subtitles, timed on the element's clock. */
@@ -179,10 +182,11 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
     if (data.id !== wantedIndex()) assert();
   });
   // Captions the picture turned out to carry: hls.js says so at the first line of each channel.
+  // One listed only for the viewer's choice gets what the playlist declares about it here.
   hls.on(Hls.Events.NON_NATIVE_TEXT_TRACKS_FOUND, (_event, data) => {
     for (const track of data.tracks) {
       const channel = captionChannel(track._id);
-      if (channel !== null && !captions.has(channel)) {
+      if (channel !== null && !captions.get(channel)) {
         captions.set(channel, track.closedCaptions ?? null);
       }
     }
@@ -231,6 +235,12 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
     },
     setSubtitle(track) {
       wanted = track;
+      // Captions chosen before this stream's picture told of them, as when the channel opens
+      // again with them: listed all the same, or the player would take the choice for gone.
+      if (track?.id === CAPTIONS_ID && track.page !== null && !captions.has(track.page)) {
+        captions.set(track.page, null);
+        tell();
+      }
       assert();
       if (!track || released) return;
       for (const line of lines.get(keyOf(track))?.values() ?? []) {

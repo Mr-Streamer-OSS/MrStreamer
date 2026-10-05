@@ -11,7 +11,8 @@
 // - Picking subtitles without a line in them stops saying Loading once hls.js has read them.
 //   Picking others shows that rendition's lines at their seconds; C turns them off, and on again
 //   with the lines hls.js had read before.
-// - A channel whose picture carries closed captions offers them under CC and shows them.
+// - A channel whose picture carries closed captions offers them under CC and shows them. After
+//   Stop and the same channel again they are still chosen, and show as the new stream brings them.
 // - Back on the first channel, the sound and subtitles in the languages picked come on by
 //   themselves; a stream with nothing to choose shows neither button.
 // - After the keychain loses the link, the app asks for the link again, naming only its host, and
@@ -346,16 +347,50 @@ async function showsCaptions(page: Page): Promise<{ ok: boolean; detail: string 
   const shown = await playing(page);
   await holdAt(page, 3.5);
   const after = await playing(page);
+  // Stop, then the same channel: a new stream, whose picture tells of its captions only at their
+  // first line. The lines of the stream before are marked, to tell them from the ones it brings.
+  const marked = await markedLines(page, true);
+  const stop = `document.querySelector('[data-view="watch"] [aria-label="Stop"]')`;
+  await click(page, stop);
+  await waitFor(() => page.evaluate<boolean>(`!${stop}`), 10_000);
+  await play(page, PLAYLIST_CHANNELS.captions.name);
+  await waitFor(async () => (await playing(page)).cc !== "absent", 15_000).catch(() => {});
+  const reopened = await playing(page);
+  const kept = reopened.cc === "absent" ? [] : await choices(page, "Subtitles");
+  await holdAt(page, 2);
+  await waitFor(async () => (await playing(page)).lines.length > 0, 10_000).catch(() => {});
+  const again = await playing(page);
+  const old = await markedLines(page, false);
+  const said = (lines: readonly string[]) => lines.join(" ").replace(/\s+/g, " ").trim();
   const ok =
     listed.join() === "*Off,Captions" &&
     !before.soundButton &&
     shown.cc === "on" &&
-    shown.lines.join(" ").replace(/\s+/g, " ").trim() === "HELLO CAPTIONS" &&
-    after.lines.length === 0;
+    said(shown.lines) === "HELLO CAPTIONS" &&
+    after.lines.length === 0 &&
+    marked > 0 &&
+    reopened.cc === "on" &&
+    kept.join() === "Off,*Captions" &&
+    said(again.lines) === "HELLO CAPTIONS" &&
+    old === 0;
   return {
     ok,
-    detail: `CC [${listed}], at 2 s "${shown.lines.join(" | ")}", at 3.5 s ${after.lines.length} lines, Sound ${before.soundButton ? "shown" : "hidden"}`,
+    detail: `CC [${listed}], at 2 s "${shown.lines.join(" | ")}", at 3.5 s ${after.lines.length} lines, Sound ${before.soundButton ? "shown" : "hidden"}; after Stop and the same channel CC ${reopened.cc} [${kept}], at 2 s "${again.lines.join(" | ")}", ${old} of ${marked} earlier lines left`,
   };
+}
+
+/**
+ * How many lines on the element's subtitle track bear a mark, after marking all of them when
+ * `mark` says so. A line read from a later stream bears none.
+ */
+function markedLines(page: Page, mark: boolean): Promise<number> {
+  return page.evaluate<number>(`(() => {
+    const video = document.querySelector("video");
+    const track = [...video.textTracks].find((each) => each.kind === "subtitles");
+    const lines = [...(track?.cues ?? [])];
+    if (${mark}) for (const line of lines) line.id = "before-stop";
+    return lines.filter((line) => line.id === "before-stop").length;
+  })()`);
 }
 
 async function carriesOver(page: Page): Promise<{ ok: boolean; detail: string }> {

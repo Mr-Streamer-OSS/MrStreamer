@@ -3,10 +3,11 @@
 // same Sound and CC as any channel, with the viewer's remembered languages. Sound switches where
 // the stream plays. Subtitles and captions come on only by the viewer's choice, never because the
 // stream marks them as its default, and a choice stays the same track when the stream moves to
-// another group of renditions, or the channel opens again with them in another order. CC says the
-// chosen subtitles are loading until the stream's player has read them where it plays, whether or
-// not anything is said there. hls.js itself runs in the real app (see test/e2e); here a stand-in
-// plays the stream's part.
+// another group of renditions, or the channel opens again with them in another order. Chosen
+// captions stay chosen through that too, though a stream's picture tells of them only at their
+// first line. CC says the chosen subtitles are loading until the stream's player has read them
+// where it plays, whether or not anything is said there. hls.js itself runs in the real app (see
+// test/e2e); here a stand-in plays the stream's part.
 import { ipc } from "./support.ts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
@@ -425,6 +426,68 @@ describe("an HLS channel's tracks", () => {
     expect(soundPlaying()).toBe("Español (Latinoamérica)");
     expect(player.state().subtitle).toMatchObject({ label: "Deutsch (Schweiz)" });
     expect(second.subtitlesLoaded).toEqual(["Deutsch (Schweiz)"]);
+  });
+
+  it("opens the channel again with the captions chosen from its picture, before any line of them", async () => {
+    const first = await playing("a");
+    // The playlist declares no captions: the picture tells of them at their first line.
+    first.captionLines(1, 1, 3, ["HELLO"]);
+    await wait();
+    player.setSubtitle(subtitles("Captions"));
+
+    const second = await reopened("a");
+    second.variant({ audio: SOUND, subtitles: SUBTITLES });
+    await wait();
+
+    // The new stream's picture has yet to tell of them, and the line of the one before is gone.
+    expect(listed().subtitles).toEqual(["English", "Deutsch", "Captions"]);
+    expect(player.state().subtitle).toMatchObject({ label: "Captions", format: "captions" });
+    expect(second.subtitleTrack).toBe(-1);
+    expect(onScreen()).toEqual([]);
+
+    second.captionLines(1, 1, 3, ["STILL HERE"]);
+    await wait();
+
+    expect(listed().subtitles).toEqual(["English", "Deutsch", "Captions"]);
+    expect(player.state().subtitle).toMatchObject({ label: "Captions" });
+    expect(onScreen()).toEqual(["STILL HERE"]);
+  });
+
+  it("opens the channel again with the captions still off for a viewer who turned them off", async () => {
+    const first = await playing("a");
+    first.captionLines(1, 1, 3, ["HELLO"]);
+    await wait();
+    player.setSubtitle(subtitles("Captions"));
+    player.toggleSubtitles();
+    // What turning them off saved.
+    ipc.prefer({ subtitleLanguage: "off" });
+
+    const second = await reopened("a");
+    second.variant({ audio: SOUND, subtitles: SUBTITLES });
+    second.captionLines(1, 1, 3, ["NOT ASKED FOR"]);
+    await wait();
+
+    expect(player.state().subtitle).toBeNull();
+    expect(onScreen()).toEqual([]);
+  });
+
+  it("lists no captions on the next channel until its own picture carries them", async () => {
+    const first = await playing("a");
+    first.captionLines(1, 1, 3, ["HELLO"]);
+    await wait();
+    player.setSubtitle(subtitles("Captions"));
+
+    const second = await playing("b");
+
+    expect(listed().subtitles).toEqual(["English", "Deutsch"]);
+    expect(player.state().subtitle).toBeNull();
+
+    second.captionLines(1, 1, 3, ["ANOTHER CHANNEL'S"]);
+    await wait();
+
+    expect(listed().subtitles).toEqual(["English", "Deutsch", "Captions"]);
+    expect(player.state().subtitle).toBeNull();
+    expect(onScreen()).toEqual([]);
   });
 
   it("lets go of the stream and its lines when stopped", async () => {
