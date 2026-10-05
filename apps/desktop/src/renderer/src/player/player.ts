@@ -10,6 +10,11 @@
 // Another sound track opens the stream again with it; subtitles are decoded here from the
 // stream's private data, timed on the element's clock, and shown over the picture.
 //
+// An HLS stream's tracks come from its engine instead, which reads them from the stream's
+// playlists and says so again whenever they change: its sound switches where it plays, and the
+// lines of its subtitles and captions go on the element's subtitle track as they are read. The
+// same choices and the same remembered languages apply to both.
+//
 // The video element outlives every view: Home's backdrop, the guide's preview and Watch each show
 // it in turn (see Picture.tsx), so moving between them never reopens the stream. Only Watch plays
 // sound unless the viewer unmutes elsewhere; `audible` is that choice, `muted` the viewer's own.
@@ -30,6 +35,7 @@ import type {
 } from "@mrstreamer/contracts/playback";
 import { channelSubtitle } from "@mrstreamer/core/ondemand/tracks";
 import { subtitleDecoder, type SubtitleDecoder } from "@mrstreamer/core/subtitles/decoder";
+import type { Cue } from "@mrstreamer/core/subtitles/webvtt";
 import { appError } from "../lib/errors.ts";
 import { call } from "../lib/ipc.ts";
 import { decoders } from "./decoders.ts";
@@ -42,8 +48,11 @@ import {
   type EngineName,
   type StreamInfo,
 } from "./engine.ts";
+import type { SoundChoice } from "./hls-tracks.ts";
 import {
+  addTextCue,
   clearSubtitles,
+  forgetShownSubtitles,
   setSubtitleDelay,
   setSubtitleLook,
   subtitlePresenter,
@@ -94,10 +103,16 @@ export interface PlayerState {
   readonly stopped: boolean;
   /** The channel's sound and subtitle tracks, once its stream started. */
   readonly tracks: ChannelTracks | null;
-  /** The sound track chosen, by PID; null plays the channel's own choice. */
+  /** The sound track chosen, by id; null plays the channel's own choice. */
   readonly audioId: number | null;
   /** The subtitles on screen, or null for none. */
   readonly subtitle: SubtitleTrack | null;
+  /**
+   * The chosen subtitles of an HLS stream are still loading: its engine hasn't read them where
+   * the stream plays. Whether they say anything there doesn't matter, and subtitles that can't be
+   * had stay loading.
+   */
+  readonly subtitleLoading: boolean;
   /** Which of the channel's streams plays, once it started, and those that failed first. */
   readonly stream: LivePlaying | null;
   /**
@@ -118,6 +133,7 @@ const store = createStore<PlayerState>(() => ({
   tracks: null,
   audioId: null,
   subtitle: null,
+  subtitleLoading: false,
   stream: null,
   fellBack: null,
 }));
@@ -175,6 +191,8 @@ function release(): void {
   clearSubtitles(video);
   void call("playback.close", { sessionId: current.sessionId }).catch(() => {});
   current = null;
+  // Nothing loads the chosen subtitles any more.
+  if (store.getState().subtitleLoading) store.setState({ subtitleLoading: false });
 }
 
 /**
@@ -203,16 +221,20 @@ async function start(
   });
 
   let session: StreamSession;
+  let sound: SoundChoice;
   try {
-    const { audioId } = store.getState();
     const preferred = (await call("preferences.get").catch(() => null))?.audioLanguage;
+    sound = {
+      audio: store.getState().audioId,
+      // The sound in the viewer's language, when the channel has it; the original is its own.
+      audioLanguage: preferred && preferred !== ORIGINAL_SOUND ? preferred : null,
+    };
     session = await call("playback.open", {
       channelId: channel.id,
       decoders: [...decoders],
       repair,
-      ...(audioId !== null ? { audio: audioId } : {}),
-      // The sound in the viewer's language, when the channel has it; the original is its own.
-      ...(preferred && preferred !== ORIGINAL_SOUND ? { audioLanguage: preferred } : {}),
+      ...(sound.audio !== null ? { audio: sound.audio } : {}),
+      ...(sound.audioLanguage !== null ? { audioLanguage: sound.audioLanguage } : {}),
     });
   } catch (cause) {
     if (mine === selection)
@@ -227,10 +249,13 @@ async function start(
     return;
   }
 
-  let engine = createEngine(session.format, video, session.url);
+  let engine = createEngine(session.format, video, session.url, sound);
   current = { sessionId: session.sessionId, engine };
-  restartSubtitles();
   engine.onPrivateData(showSubtitles);
+  engine.tracks?.onChange((tracks) => engineTracks(mine, tracks));
+  engine.tracks?.onLine((line) => showLine(mine, line));
+  engine.tracks?.onSubtitleLoaded(() => subtitlesLoaded(mine));
+  restartSubtitles();
   let failure = await startFailure(engine);
   // Some "live" channels are raw audio (AAC radio) rather than MPEG-TS. Chromium plays those itself.
   if (failure?.kind === "wrong-container" && mine === selection) {
@@ -247,8 +272,11 @@ async function start(
 
   store.setState({ phase: { kind: "playing", engine: engine.name } });
   void loadStream(mine, session.sessionId);
-  void loadTracks(mine, session.sessionId);
-  setTimeout(() => void loadTracks(mine, session.sessionId), TRACKS_AGAIN_MS);
+  // An engine that reads the stream's tracks tells them itself; the main process reads the rest.
+  if (!engine.tracks) {
+    void loadTracks(mine, session.sessionId);
+    setTimeout(() => void loadTracks(mine, session.sessionId), TRACKS_AGAIN_MS);
+  }
   void call("viewing.recordWatch", { commandId: crypto.randomUUID(), channelId: channel.id }).catch(
     () => {},
   );
@@ -339,7 +367,13 @@ function tune(channel: LiveChannel): void {
   if (tuned?.id === channel.id) return;
   if (tuned) store.setState({ previous: tuned });
   tuned = channel;
-  store.setState({ tracks: null, audioId: null, subtitle: null, fellBack: null });
+  store.setState({
+    tracks: null,
+    audioId: null,
+    subtitle: null,
+    subtitleLoading: false,
+    fellBack: null,
+  });
   lastSubtitle = null;
   shown = null;
   clearSubtitles(video);
@@ -356,23 +390,74 @@ async function loadStream(mine: number, sessionId: string): Promise<void> {
   store.setState(fellBack ? { stream, fellBack } : { stream });
 }
 
-/**
- * Reads the stream's tracks from the main process. The first time on a channel, subtitles in the
- * viewer's language may come on by themselves (see channelSubtitle).
- */
+/** Reads the stream's tracks from the main process. */
 async function loadTracks(mine: number, sessionId: string): Promise<void> {
   const tracks = await call("playback.tracks", { sessionId }).catch(() => null);
-  if (mine !== selection || !tracks) return;
-  store.setState({ tracks });
-  if (store.getState().subtitle || lastSubtitle) return;
-  const wanted = (await call("preferences.get").catch(() => null))?.subtitleLanguage ?? null;
-  const match = channelSubtitle(tracks, wanted);
-  if (match && mine === selection) choose(match);
+  if (mine === selection && tracks) await applyTracks(mine, tracks);
 }
 
-/** A decoder and presenter for the chosen subtitles, from scratch. */
+/**
+ * Takes the stream's tracks as its engine tells them, now and whenever they change. What the
+ * viewer chose holds only while the stream still has it: subtitles it no longer lists go, and a
+ * sound track gives way to the one that plays, as after the stream moved to renditions without it.
+ */
+function engineTracks(mine: number, tracks: ChannelTracks): void {
+  if (mine !== selection) return;
+  const { audioId, subtitle } = store.getState();
+  const listed = (track: SubtitleTrack) =>
+    tracks.subtitles.some((each) => each.id === track.id && each.page === track.page);
+  if (lastSubtitle && !listed(lastSubtitle)) lastSubtitle = null;
+  if (subtitle && !listed(subtitle)) choose(null);
+  if (audioId !== null && tracks.playing !== null && tracks.playing !== audioId) {
+    store.setState({ audioId: null });
+  }
+  void applyTracks(mine, tracks);
+}
+
+/**
+ * Shows the stream's tracks. Until the viewer chose subtitles on this channel, those in the
+ * viewer's language may come on by themselves (see channelSubtitle): the language remembered, or
+ * none when the viewer turned subtitles off, whatever the stream marks as its default.
+ */
+async function applyTracks(mine: number, tracks: ChannelTracks): Promise<void> {
+  store.setState({ tracks });
+  const chosen = () => store.getState().subtitle !== null || lastSubtitle !== null;
+  if (chosen()) return;
+  const wanted = (await call("preferences.get").catch(() => null))?.subtitleLanguage ?? null;
+  // The viewer may have chosen meanwhile, and the stream may list other tracks by now.
+  const latest = store.getState().tracks;
+  if (mine !== selection || chosen() || !latest) return;
+  const match = channelSubtitle(latest, wanted);
+  if (match) choose(match);
+}
+
+/** Puts a line of an HLS stream's subtitles on the element's track, at the viewer's timing. */
+function showLine(mine: number, line: Cue): void {
+  if (mine !== selection || !store.getState().subtitle) return;
+  forgetShownSubtitles(video);
+  addTextCue(video, line.start, line.end, line.text);
+}
+
+/** The engine of an HLS stream has read the chosen subtitles where the stream plays. */
+function subtitlesLoaded(mine: number): void {
+  if (mine !== selection || !store.getState().subtitleLoading) return;
+  store.setState({ subtitleLoading: false });
+}
+
+/**
+ * Starts the chosen subtitles from scratch: read by the engine of a stream that carries them in
+ * its playlists, else decoded here from the stream's private data. The engine's are loading until
+ * it says otherwise, which it may do at once.
+ */
 function restartSubtitles(): void {
   const { subtitle } = store.getState();
+  const own = current?.engine.tracks ?? null;
+  store.setState({ subtitleLoading: own !== null && subtitle !== null });
+  if (own) {
+    shown = null;
+    own.setSubtitle(subtitle);
+    return;
+  }
   shown = subtitle
     ? {
         pid: subtitle.id,
@@ -559,8 +644,8 @@ export const player = {
   },
 
   /**
-   * Plays another sound track of the channel. The stream opens again with it, so the picture
-   * starts over; the language is remembered.
+   * Plays another sound track of the channel, and remembers its language. An HLS stream switches
+   * where it plays. Any other opens again with the track, so its picture starts over.
    */
   setAudio(id: number): void {
     const { channel, tracks } = store.getState();
@@ -570,7 +655,9 @@ export const player = {
     if (track.language) {
       void call("preferences.update", { audioLanguage: track.language }).catch(() => {});
     }
-    void start(channel, 0);
+    const own = current?.engine.tracks;
+    if (own) own.setAudio(id);
+    else void start(channel, 0);
   },
 
   /** Shows a subtitle track, or none, and remembers the choice. */

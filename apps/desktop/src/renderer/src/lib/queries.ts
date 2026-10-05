@@ -31,7 +31,10 @@ export const queries = {
       queryFn: () => call("viewing.get"),
       staleTime: Infinity,
     }),
-  /** How many channels the guide covers, and since when. Read again on `guide.updated`. */
+  /**
+   * How many channels the guide covers and since when, or that the subscription has none. Read
+   * again on `guide.updated`.
+   */
   guideStatus: () =>
     queryOptions({ queryKey: ["guide", "status"], queryFn: () => call("guide.status") }),
   libraryStatus: () =>

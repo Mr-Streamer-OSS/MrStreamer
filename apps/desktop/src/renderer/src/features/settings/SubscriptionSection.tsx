@@ -1,7 +1,7 @@
 // Settings > Subscription, for the one account: how the provider says it stands, asked again
 // when the tab opens, the login, and what was loaded from it, each list with its own refresh, so
 // one that failed can be fetched again alone. The server shows, with a note when the login travels
-// over plain http; the password never does.
+// over plain http; the password never does, nor a playlist's link beyond its host.
 import { Checkbox } from "@base-ui/react/checkbox";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, RotateCw } from "lucide-react";
@@ -11,6 +11,7 @@ import type { SubscriptionSummary } from "@mrstreamer/contracts/subscription";
 import { resetForAccount, useUi } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { appError, describeError, formatDate } from "../../lib/errors.ts";
+import { hostOf } from "../../lib/format.ts";
 import { call } from "../../lib/ipc.ts";
 import { queries } from "../../lib/queries.ts";
 import { player } from "../../player/player.ts";
@@ -31,11 +32,18 @@ export function SubscriptionSection() {
   useEffect(() => mutate(), [mutate]);
 
   if (!subscription.data) return null;
-  const { kind, account, username, server, needsPassword } = subscription.data;
+  const { kind, account, username, server, needsSecret } = subscription.data;
   return (
     <>
       <Section title="Account">
-        <Row label="Status" note={needsPassword ? "needs your password again" : undefined}>
+        <Row
+          label="Status"
+          note={
+            needsSecret
+              ? `needs your ${kind === "m3u" ? "playlist link" : "password"} again`
+              : undefined
+          }
+        >
           {stateName(account.state)}
         </Row>
         <Row label="Expires">{expiry(account.expiresAt)}</Row>
@@ -64,7 +72,8 @@ export function SubscriptionSection() {
 
 /**
  * What was loaded from the provider, each list refreshed on its own. A playlist (`liveOnly`) has
- * no movies or series.
+ * no movies or series, and a guide only when its first line names one: without, the row says so,
+ * and its refresh reads that line again.
  */
 function Catalogue({ liveOnly }: { liveOnly: boolean }) {
   const client = useQueryClient();
@@ -102,6 +111,7 @@ function Catalogue({ liveOnly }: { liveOnly: boolean }) {
         count={guide.data?.channels ?? 0}
         unit="channels"
         fetchedAt={guide.data?.fetchedAt ?? null}
+        without={guide.data?.availability === "none" ? "none in this playlist" : null}
         failure={refreshGuide.error ? appError(refreshGuide.error) : null}
         refreshing={refreshGuide.isPending}
         onRefresh={() => refreshGuide.mutate()}
@@ -128,6 +138,7 @@ function List({
   count,
   unit,
   fetchedAt,
+  without = null,
   failure,
   refreshing,
   onRefresh,
@@ -137,22 +148,26 @@ function List({
   /** What `count` counts, when not the list itself. */
   unit?: string;
   fetchedAt: number | null;
+  /** What to say, in place of a count and a time, for a list the subscription doesn't have. */
+  without?: string | null;
   failure: AppError | null;
   refreshing: boolean;
   onRefresh: () => void;
 }) {
+  const loaded = without === null && fetchedAt !== null;
   return (
     <>
       <Row
         label={label}
         note={
-          fetchedAt === null
+          without ??
+          (fetchedAt === null
             ? "not loaded yet"
-            : [count.toLocaleString(), unit].filter(Boolean).join(" ")
+            : [count.toLocaleString(), unit].filter(Boolean).join(" "))
         }
       >
         <span className="text-muted-foreground">
-          {refreshing ? "refreshing…" : fetchedAt === null ? "" : relativeTime(fetchedAt)}
+          {refreshing ? "refreshing…" : loaded ? relativeTime(fetchedAt) : ""}
         </span>
         <Button
           variant="ghost"
@@ -253,15 +268,6 @@ function connections(account: SubscriptionSummary["account"]): string {
   const { maxConnections: max, activeConnections: active } = account;
   if (max === null) return active === null ? "Not reported" : `${active} in use`;
   return `${active ?? 0} of ${max} in use`;
-}
-
-/** The server's host, without its scheme: "tv.example.net:8080". */
-function hostOf(server: string): string {
-  try {
-    return new URL(server).host;
-  } catch {
-    return server;
-  }
 }
 
 function relativeTime(epochMs: number): string {

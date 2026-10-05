@@ -190,10 +190,10 @@ describe("subscriptions", () => {
       },
     });
 
-    expect(await locked.get()).toMatchObject({ username: "demo", needsPassword: true });
+    expect(await locked.get()).toMatchObject({ username: "demo", needsSecret: true });
     expect(await locked.source()).toBeNull();
-    expect(await locked.recheck()).toMatchObject({ needsPassword: true });
-    expect(await locked.connect(login)).toMatchObject({ needsPassword: false });
+    expect(await locked.recheck()).toMatchObject({ needsSecret: true });
+    expect(await locked.connect(login)).toMatchObject({ needsSecret: false });
   });
 
   it("forgets the subscription when removed", async () => {

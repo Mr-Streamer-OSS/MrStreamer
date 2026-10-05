@@ -18,7 +18,7 @@ const subscription: SubscriptionSummary = {
   server: "https://line.example.tv",
   username: "demo",
   account: { state: "active", expiresAt: null, maxConnections: 1, activeConnections: 0 },
-  needsPassword: false,
+  needsSecret: false,
 };
 
 async function section(): Promise<HTMLElement> {

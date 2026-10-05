@@ -177,6 +177,18 @@ function release(): void {
 }
 
 /**
+ * Lets go of the cues shown long ago, pictures with their pixels, so a channel left on all day
+ * doesn't keep every one.
+ */
+export function forgetShownSubtitles(video: HTMLVideoElement): void {
+  for (const track of [subtitleTrack(video), pictureTrack(video)]) {
+    for (const old of [...(track.cues ?? [])]) {
+      if (old.endTime < video.currentTime - KEEP_BEHIND_S) track.removeCue(old);
+    }
+  }
+}
+
+/**
  * Puts a text cue on `video`'s subtitle track: from `start` to `end` on the file's clock. One due
  * already shows at once.
  */
@@ -284,12 +296,8 @@ export function subtitlePresenter(video: HTMLVideoElement) {
         }
         last = null;
       }
-      // Cues shown long ago go, so a long film or a channel left on all day doesn't keep every one.
-      for (const track of [text, timing]) {
-        for (const old of [...(track.cues ?? [])]) {
-          if (old.endTime < video.currentTime - KEEP_BEHIND_S) track.removeCue(old);
-        }
-      }
+      // Cues shown long ago go, so a long film doesn't keep every one either.
+      forgetShownSubtitles(video);
       if (isBlank(change.screen)) return;
       const end = change.until ?? NO_END_YET;
       if (change.screen.kind === "text") {

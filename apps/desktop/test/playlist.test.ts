@@ -3,34 +3,42 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { AppFailure } from "@mrstreamer/contracts/errors";
 import { Failed } from "@mrstreamer/core/failure";
 import { Guide } from "@mrstreamer/core/guide/service";
+import { ViewingRecord } from "@mrstreamer/core/viewing/service";
+import type { Secrets } from "../src/main/platform/secrets.ts";
 import { mainLayer } from "../src/main/runtime.ts";
 import { Library } from "../src/main/services/library.ts";
 import { OnDemand } from "../src/main/services/ondemand.ts";
 import { Playback } from "../src/main/services/playback.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
+import { PLAYLIST_CHANNELS, startFakePlaylist } from "./fake-playlist.ts";
 import { fixture } from "./fake-provider.ts";
-import { promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+import { promised, runtimeFor, tempDir, testConfig, testSecrets } from "./support.ts";
 
 const CLIP = fixture("h264-aac.mpegts");
 const PLAYER = "Player/1.0 (X11, Linux)";
 const servers: Server[] = [];
+const hosts: { close(): Promise<void> }[] = [];
 
 afterEach(async () => {
   for (const server of servers.splice(0)) {
     server.closeAllConnections();
     await new Promise((closed) => server.close(closed));
   }
+  for (const host of hosts.splice(0)) await host.close();
 });
 
 /**
  * A host for made-up playlists, as a public collection publishes them: `/list.m3u` with an HLS
  * channel that asks for its own User-Agent and Referer, an MPEG-TS channel, and entries no player
- * here plays; `/other.m3u`; a packed guide its header names; and `/panel`, a web page. HLS
- * playlists arrive a few bytes at a time and one segment compressed, as some servers send them.
- * `asked` lists every request with the headers it came with.
+ * here plays; `/other.m3u`, whose first line names no guide; a packed guide `/list.m3u` names;
+ * and `/panel`, a web page. HLS playlists arrive a few bytes at a time and one segment compressed,
+ * as some servers send them. `asked` lists every request with the headers it came with. `serve`
+ * puts something else at a path: a body, an HTTP status that fails it, or "hold", which takes
+ * the request and never answers.
  */
 async function playlistHost() {
   const asked: { path: string; userAgent?: string; referer?: string }[] = [];
@@ -43,6 +51,8 @@ async function playlistHost() {
     });
     const body = routes.get(pathname);
     if (body === undefined) return response.writeHead(404).end();
+    if (body === "hold") return;
+    if (typeof body === "number") return response.writeHead(body).end();
     if (pathname.endsWith("segment-1.ts")) {
       const packed = gzipSync(body);
       return response
@@ -63,7 +73,7 @@ async function playlistHost() {
   servers.push(server);
   await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const routes = new Map<string, string | Buffer>([
+  const routes = new Map<string, string | Buffer | number>([
     [
       "/list.m3u",
       [
@@ -99,8 +109,21 @@ async function playlistHost() {
     ["/guide.xml.gz", gzipSync(guideAround(Date.now()))],
     ["/panel", "<!doctype html><title>Panel</title>"],
   ]);
-  return { origin, asked };
+  return {
+    origin,
+    asked,
+    serve: (path: string, body: string | Buffer | number) => void routes.set(path, body),
+    /** How often `path` was asked for. */
+    requests: (path: string) => asked.filter((request) => request.path === path).length,
+  };
 }
+
+/** `/other.m3u` with a first line that names the host's guide, and a channel the guide covers. */
+const namingGuide = (origin: string) =>
+  `#EXTM3U x-tvg-url="${origin}/guide.xml.gz"\n#EXTINF:-1 tvg-id="Alpha.test@HD",Alpha\n${origin}/beta.ts\n`;
+/** The same channel under a first line that names none. */
+const namingNone = (origin: string) =>
+  `#EXTM3U\n#EXTINF:-1 tvg-id="Alpha.test@HD",Alpha\n${origin}/beta.ts\n`;
 
 /** Alpha's programme on now and the one after, in XMLTV. */
 function guideAround(now: number): string {
@@ -112,17 +135,28 @@ function guideAround(now: number): string {
   return `<?xml version="1.0"?><tv>${programme(now - hour / 2, now + hour / 2, "Morning News")}${programme(now + hour / 2, now + hour, "Weather")}</tv>`;
 }
 
-/** The app's services on `dataDir`; another call is the app started again. */
-async function app(dataDir: string) {
-  const runtime = runtimeFor(mainLayer(testConfig(dataDir)));
+/**
+ * The app's services on `dataDir`; another call is the app started again, with `secrets` as the
+ * keychain it finds then.
+ */
+async function app(dataDir: string, secrets: Secrets = testSecrets) {
+  const runtime = runtimeFor(mainLayer({ ...testConfig(dataDir), secrets }));
   return {
     subscriptions: await promised(runtime, Subscriptions),
     library: await promised(runtime, Library),
     onDemand: await promised(runtime, OnDemand),
     playback: await promised(runtime, Playback),
     guide: await promised(runtime, Guide),
+    viewing: await promised(runtime, ViewingRecord),
   };
 }
+
+/** Why `promise` failed, as the window is told. */
+const failureOf = (promise: Promise<unknown>) =>
+  promise.then(
+    () => null,
+    (cause: unknown) => (cause instanceof Failed ? cause.error : cause),
+  );
 
 const linkOnly = (server: string) => ({ server, username: "", password: "" });
 
@@ -161,11 +195,7 @@ describe("playlist subscriptions", () => {
   it("refuse a page that isn't a playlist, and a server address without a login", async () => {
     const host = await playlistHost();
     const { subscriptions } = await app(await tempDir());
-    const failure = (server: string) =>
-      subscriptions.connect(linkOnly(server)).then(
-        () => null,
-        (cause: unknown) => (cause instanceof Failed ? cause.error : cause),
-      );
+    const failure = (server: string) => failureOf(subscriptions.connect(linkOnly(server)));
 
     expect(await failure(`${host.origin}/panel`)).toMatchObject({ kind: "incomplete-login" });
     const asked = host.asked.length;
@@ -199,6 +229,37 @@ describe("playlist subscriptions", () => {
     // A closed session's addresses lead nowhere.
     await playback.close(session.sessionId);
     expect((await fetch(segments[0] ?? "")).status).toBe(410);
+  });
+
+  it("play an HLS stream's sound and subtitle renditions through the proxy too", async () => {
+    const host = await startFakePlaylist();
+    hosts.push(host);
+    const { subscriptions, playback } = await app(await tempDir());
+    await subscriptions.connect(linkOnly(host.link));
+
+    const session = await playback.open(PLAYLIST_CHANNELS.tracks.id, ["h264", "aac"]);
+    const master = await (await fetch(session.url)).text();
+    /** Where the player finds the rendition named `name`: an address of the proxy. */
+    const rendition = (name: string) =>
+      new RegExp(`NAME="${name}".*URI="([^"]+)"`).exec(master)?.[1] ?? "";
+    const [segment] = addresses(await (await fetch(rendition("spa"))).text());
+    const [lines] = addresses(await (await fetch(rendition("Deutsch"))).text());
+
+    // The player is told what the stream declares, and of no address of the host's.
+    expect(master).toContain('TYPE=SUBTITLES,GROUP-ID="subtitles",NAME="English",LANGUAGE="en"');
+    expect(master).not.toContain(host.origin);
+    expect(Buffer.from(await (await fetch(segment ?? "")).arrayBuffer())).toEqual(
+      fixture("hls/sound-es-0.mpegts"),
+    );
+    expect(await (await fetch(lines ?? "")).text()).toContain("Deutsche Zeile 1");
+    // Only what the player asked for was fetched: no rendition it didn't choose.
+    expect(host.requests().filter((path) => path.startsWith("/tracks/"))).toEqual([
+      "/tracks/master.m3u8",
+      "/tracks/sound-es.m3u8",
+      "/tracks/subtitles-de.m3u8",
+      "/tracks/sound-es-0.mpegts",
+      "/tracks/subtitles-de.vtt",
+    ]);
   });
 
   it("play a channel after a restart, reading the playlist again for its address", async () => {
@@ -236,5 +297,152 @@ describe("playlist subscriptions", () => {
       next: { title: "Weather" },
     });
     expect(listings["Beta.test"]).toBeUndefined();
+    expect(await guide.status()).toMatchObject({ channels: 1, availability: "available" });
+  });
+
+  it("say a playlist names no guide, without failing, and ask again only when told to", async () => {
+    const host = await playlistHost();
+    const { subscriptions, library, guide } = await app(await tempDir());
+    await subscriptions.connect(linkOnly(`${host.origin}/other.m3u`));
+    await library.channels({});
+    // Not read for a guide yet: nothing says it has none.
+    expect(await guide.status()).toEqual({ channels: 0, fetchedAt: null, availability: "unknown" });
+
+    await guide.refreshIfStale();
+
+    const none = { channels: 0, fetchedAt: null, availability: "none" };
+    expect(await guide.status()).toEqual(none);
+    const read = host.requests("/other.m3u");
+    // The checks the app makes on its own leave the playlist alone from then on.
+    await guide.refreshIfStale();
+    await guide.refreshIfStale();
+    expect(host.requests("/other.m3u")).toBe(read);
+    // Refresh in Settings reads its first line again, and still succeeds.
+    await guide.refresh();
+    expect(host.requests("/other.m3u")).toBe(read + 1);
+    expect(await guide.status()).toEqual(none);
+    expect(host.requests("/guide.xml.gz")).toBe(0);
+  });
+
+  it("find a guide the playlist names later, and drop it when the playlist names none any more", async () => {
+    const host = await playlistHost();
+    const dataDir = await tempDir();
+    const { subscriptions, library, guide } = await app(dataDir);
+    await subscriptions.connect(linkOnly(`${host.origin}/other.m3u`));
+    host.serve("/other.m3u", namingNone(host.origin));
+    await library.refresh();
+    await guide.refresh();
+    expect(await guide.listings(["Alpha.test@HD"])).toEqual({});
+
+    host.serve("/other.m3u", namingGuide(host.origin));
+    await guide.refresh();
+
+    expect((await guide.listings(["Alpha.test@HD"]))["Alpha.test@HD"]).toMatchObject({
+      now: { title: "Morning News" },
+    });
+    expect(await guide.status()).toMatchObject({ channels: 1, availability: "available" });
+
+    host.serve("/other.m3u", namingNone(host.origin));
+    await guide.refresh();
+
+    expect(await guide.listings(["Alpha.test@HD"])).toEqual({});
+    expect(await guide.status()).toEqual({ channels: 0, fetchedAt: null, availability: "none" });
+    // Nothing of the dropped guide is left for the next start to read.
+    const restarted = await app(dataDir);
+    await restarted.library.channels({});
+    expect(await restarted.guide.listings(["Alpha.test@HD"])).toEqual({});
+    expect(await restarted.guide.status()).toMatchObject({ availability: "unknown" });
+  });
+
+  it("keep the last guide when the playlist or the guide it names can't be had", async () => {
+    const host = await playlistHost();
+    const dataDir = await tempDir();
+    const { subscriptions, library, guide } = await app(dataDir);
+    await subscriptions.connect(linkOnly(`${host.origin}/list.m3u`));
+    await library.channels({});
+    await guide.refresh();
+    const playlist = await (await fetch(`${host.origin}/list.m3u`)).text();
+    const nowOn = async (services: { guide: typeof guide }) =>
+      (await services.guide.listings(["Alpha.test@HD"]))["Alpha.test@HD"]?.now?.title;
+
+    host.serve("/guide.xml.gz", 502);
+    expect(await failureOf(guide.refresh())).toEqual({ kind: "provider-error", status: 502 });
+    host.serve("/guide.xml.gz", "<tv></tv>");
+    expect(await failureOf(guide.refresh())).toMatchObject({ kind: "unexpected" });
+    host.serve("/list.m3u", 503);
+    expect(await failureOf(guide.refresh())).toEqual({ kind: "provider-error", status: 503 });
+    // A page in the playlist's place says nothing about its guide either.
+    host.serve("/list.m3u", "<!doctype html><title>Moved</title>");
+    expect(await failureOf(guide.refresh())).toMatchObject({
+      kind: "unreachable",
+      server: host.origin,
+    });
+
+    expect(await nowOn({ guide })).toBe("Morning News");
+    expect(await guide.status()).toMatchObject({ channels: 1, availability: "available" });
+    // The guide on disk is still the last complete one.
+    host.serve("/list.m3u", playlist);
+    const guideRequests = host.requests("/guide.xml.gz");
+    const restarted = await app(dataDir);
+    await restarted.library.channels({});
+    await restarted.guide.refreshIfStale();
+    expect(await nowOn(restarted)).toBe("Morning News");
+    expect(host.requests("/guide.xml.gz")).toBe(guideRequests);
+  });
+
+  it("keep what was known when the subscription goes while the playlist is being read", async () => {
+    const host = await playlistHost();
+    const { subscriptions, library, guide } = await app(await tempDir());
+    await subscriptions.connect(linkOnly(`${host.origin}/other.m3u`));
+    await library.channels({});
+    host.serve("/other.m3u", "hold");
+    const read = host.requests("/other.m3u");
+    const refresh = guide.refresh().then(
+      () => "finished",
+      () => "stopped",
+    );
+    await vi.waitFor(() => expect(host.requests("/other.m3u")).toBe(read + 1));
+
+    await guide.clear();
+
+    expect(await refresh).toBe("stopped");
+    expect(await guide.status()).toMatchObject({ availability: "unknown" });
+  });
+
+  it("ask for the link again when the keychain no longer opens it, and keep the account", async () => {
+    const host = await playlistHost();
+    const dataDir = await tempDir();
+    const link = `${host.origin}/list.m3u?token=t0k3n`;
+    const before = await app(dataDir);
+    const connected = await before.subscriptions.connect(linkOnly(link));
+    await before.library.channels({});
+    await before.viewing.setFavourite("first", "Beta.test", true);
+
+    // What a new app signature or a reset keychain looks like to the app.
+    const locked = await app(dataDir, {
+      seal: testSecrets.seal,
+      open: () => {
+        throw new AppFailure({ kind: "keychain-refused" });
+      },
+    });
+    const asking = await locked.subscriptions.get();
+
+    // Only the host is left to say which link: none of the link itself reaches the window.
+    expect(asking).toEqual({ ...connected, needsSecret: true });
+    expect(asking).toMatchObject({ kind: "m3u", server: host.origin, username: "" });
+    expect(JSON.stringify(asking)).not.toMatch(/t0k3n|list\.m3u/);
+    expect(await locked.subscriptions.source()).toBeNull();
+    expect((await locked.viewing.state()).favourites).toEqual([]);
+
+    // The same link is the same account: its favourites and channels are as they were.
+    const read = host.requests("/list.m3u");
+    expect(await locked.subscriptions.connect(linkOnly(link))).toEqual(connected);
+    expect((await locked.viewing.state()).favourites).toEqual(["Beta.test"]);
+    expect(await locked.library.channels({})).toHaveLength(2);
+    // Checking the link read its first line; the channels came from the copy on disk.
+    expect(host.requests("/list.m3u")).toBe(read + 1);
+    // Another link is another account, as on the Connect screen.
+    const other = await locked.subscriptions.connect(linkOnly(`${host.origin}/other.m3u`));
+    expect(other.id).not.toBe(connected.id);
   });
 });

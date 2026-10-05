@@ -110,6 +110,16 @@ export interface LiveStream {
   readonly headers?: Readonly<Record<string, string>>;
 }
 
+/** What a subscription answers when asked for its programme guide. */
+export type LiveGuide =
+  /** An XMLTV document, as it downloads. */
+  | { readonly kind: "document"; readonly body: ReadableStream<Uint8Array> }
+  /**
+   * The subscription has no guide: a playlist whose first line names none. An answer, not a
+   * failure, which a guide that can't be reached or read is.
+   */
+  | { readonly kind: "none" };
+
 /**
  * One connected subscription. Adapters translate a provider's API into the catalogue model and
  * throw `AppFailure` with a specific error when the provider refuses or cannot be reached.
@@ -127,8 +137,11 @@ export interface Provider {
    * sending the login unencrypted after an https address.
    */
   request(url: string, init?: RequestInit): Promise<Response>;
-  /** The provider's programme guide, an XMLTV document, as it downloads. */
-  liveGuide(signal?: AbortSignal): Promise<ReadableStream<Uint8Array>>;
+  /**
+   * The provider's programme guide, or that it has none. A playlist reads its first line again
+   * for it, so a guide its publisher added, moved or dropped since is found.
+   */
+  liveGuide(signal?: AbortSignal): Promise<LiveGuide>;
   onDemandCatalogue(signal?: AbortSignal): Promise<OnDemandCatalogue>;
   movieDetails(id: string, signal?: AbortSignal): Promise<ProviderDetails>;
   seriesDetails(id: string, signal?: AbortSignal): Promise<ProviderDetails>;

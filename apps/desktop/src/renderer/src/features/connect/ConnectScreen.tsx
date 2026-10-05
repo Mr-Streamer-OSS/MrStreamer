@@ -9,11 +9,14 @@ import { Logo } from "../../components/Logo.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { Input } from "../../components/ui/input.tsx";
 import { appError, describeError } from "../../lib/errors.ts";
+import { hostOf } from "../../lib/format.ts";
 import { call } from "../../lib/ipc.ts";
 import { player } from "../../player/player.ts";
 
 /**
- * First-run login, also used to correct the login of an existing subscription (`existing`).
+ * First-run login, also used to correct the login of an existing subscription (`existing`), or to
+ * enter again what its keychain no longer gives back: the password, with the rest filled in, or
+ * a playlist's link. Of that link the screen can name only the host, so its field starts empty.
  * Accepts either server, username and password, or one pasted M3U link: an Xtream panel's, which
  * contains them, or any playlist's.
  *
@@ -30,6 +33,15 @@ export function ConnectScreen({ existing }: { existing: SubscriptionSummary | nu
   const [username, setUsername] = useState(existing?.username ?? "");
   const [password, setPassword] = useState("");
   const [link, setLink] = useState("");
+  /**
+   * What the keychain no longer gives back, to ask for again: the password, or a playlist's link,
+   * with the host it came from.
+   */
+  const lost = !existing?.needsSecret
+    ? null
+    : existing.kind === "m3u"
+      ? ({ secret: "link", host: hostOf(existing.server) } as const)
+      : ({ secret: "password" } as const);
 
   const connect = useMutation({
     mutationFn: (login: LoginInput) => call("subscription.connect", login),
@@ -76,18 +88,22 @@ export function ConnectScreen({ existing }: { existing: SubscriptionSummary | nu
       <form className="flex w-[26rem] flex-col py-12" onSubmit={submit}>
         <Logo className="mb-7 size-14" />
         <h1 className="mb-2 text-4xl font-semibold tracking-tight">
-          {existing?.needsPassword
-            ? "Enter your password again"
-            : existing
-              ? "Update your login"
-              : "Connect your subscription"}
+          {lost?.secret === "link"
+            ? "Enter your playlist link again"
+            : lost
+              ? "Enter your password again"
+              : existing
+                ? "Update your login"
+                : "Connect your subscription"}
         </h1>
         <p className="mb-9 text-[0.9375rem] text-muted-foreground">
-          {existing?.needsPassword
-            ? "Your keychain no longer gives Mr. Streamer the saved password."
-            : mode === "login"
-              ? "Your provider's server address and login."
-              : "The M3U link from your provider."}
+          {lost?.secret === "link"
+            ? `Your keychain no longer gives Mr. Streamer the saved link from ${lost.host}.`
+            : lost
+              ? "Your keychain no longer gives Mr. Streamer the saved password."
+              : mode === "login"
+                ? "Your provider's server address and login."
+                : "The M3U link from your provider."}
         </p>
 
         {mode === "login" ? (
@@ -97,7 +113,7 @@ export function ConnectScreen({ existing }: { existing: SubscriptionSummary | nu
                 value={server}
                 onChange={(e) => changeAddress(setServer, e.target.value)}
                 placeholder="line.example.tv:8080"
-                autoFocus={!existing?.needsPassword}
+                autoFocus={lost?.secret !== "password"}
               />
             </Field>
             <Field label="Username">
@@ -113,7 +129,7 @@ export function ConnectScreen({ existing }: { existing: SubscriptionSummary | nu
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
-                autoFocus={existing?.needsPassword}
+                autoFocus={lost?.secret === "password"}
               />
             </Field>
           </div>
@@ -156,7 +172,7 @@ export function ConnectScreen({ existing }: { existing: SubscriptionSummary | nu
               {mode === "login" ? <Link2 /> : <KeyRound />}
               {mode === "login" ? "Use an M3U link" : "Use server and login"}
             </Button>
-            {existing && !existing.needsPassword && (
+            {existing && !lost && (
               <Button
                 variant="ghost"
                 size="lg"

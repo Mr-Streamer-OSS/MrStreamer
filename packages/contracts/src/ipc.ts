@@ -72,7 +72,10 @@ export const ipcInputs = {
   "guide.schedule": () => type({ channelId: "string" }),
   "guide.search": () => type({ query: "string" }),
   "guide.status": none,
-  /** Downloads the guide now, and answers with its status. */
+  /**
+   * Asks the subscription for its guide now and downloads it. Answers with the status, also when
+   * the subscription has no guide, which is no failure.
+   */
   "guide.refresh": none,
   "ondemand.status": none,
   "ondemand.refresh": none,
@@ -269,7 +272,7 @@ export type IpcArgs<M extends IpcMethod> =
 export interface IpcEvents {
   /** A catalogue refresh finished, or failed and kept the previous channels. */
   "library.updated": CatalogueStatus;
-  /** A new programme guide is loaded. */
+  /** A new programme guide is loaded, or the one loaded was dropped. */
   "guide.updated": null;
   /** The movie and series lists were fetched again, or the fetch failed and kept them. */
   "ondemand.updated": OnDemandStatus;

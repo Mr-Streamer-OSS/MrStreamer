@@ -95,11 +95,11 @@ export class Subscriptions extends Context.Service<
      */
     readonly recheck: Effect.Effect<SubscriptionSummary | null, Failed>;
     readonly remove: Effect.Effect<void>;
-    /** The provider behind the subscription, or null without one or its password. */
+    /** The provider behind the subscription, or null without one or its password or link. */
     readonly source: Effect.Effect<Source | null>;
     /**
-     * The subscription's `Source.key`, also while its password can't be read: what its viewing
-     * record is kept under. Null without a subscription.
+     * The subscription's `Source.key`, also while its password or link can't be read: what its
+     * viewing record is kept under. Null without a subscription.
      */
     readonly key: Effect.Effect<string | null>;
   }
@@ -272,7 +272,7 @@ function summary({ stored, provider }: Connected): SubscriptionSummary {
     server: stored.server,
     username: stored.kind === "xtream" ? stored.username : "",
     account: stored.account,
-    needsPassword: provider === null,
+    needsSecret: provider === null,
   };
 }
 

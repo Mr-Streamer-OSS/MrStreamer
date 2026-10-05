@@ -4,7 +4,12 @@ import { collections } from "../src/ondemand/collections.ts";
 import { movieDetails, nextEpisode, seriesDetails } from "../src/ondemand/details.ts";
 import { suitability, versionLabels } from "../src/ondemand/languages.ts";
 import { episodeName, titleName } from "../src/ondemand/names.ts";
-import { channelSubtitle } from "../src/ondemand/tracks.ts";
+import {
+  channelSubtitle,
+  renditionAudio,
+  renditionSubtitles,
+  type RenditionFacts,
+} from "../src/ondemand/tracks.ts";
 import { continueWatching, isFinished, type TitleRow } from "../src/viewing/titles.ts";
 
 describe("title names", () => {
@@ -252,6 +257,73 @@ describe("subtitles a channel starts with", () => {
     };
 
     expect(channelSubtitle(tracks, "nl")?.forced).toBe(false);
+  });
+});
+
+describe("an HLS stream's tracks", () => {
+  const rendition = (id: number, facts: Partial<RenditionFacts> = {}): RenditionFacts => ({
+    id,
+    name: null,
+    language: null,
+    default: false,
+    forced: false,
+    accessible: false,
+    ...facts,
+  });
+
+  it("names sound by the stream's own names, by language where a name is only a code, else by its place", () => {
+    const tracks = renditionAudio([
+      rendition(4, { name: "Director's commentary", language: "en" }),
+      rendition(5, { name: "eng", language: "ENG", default: true }),
+      rendition(6, { name: "DE" }),
+      rendition(7, { name: "  ", language: "fra", accessible: true }),
+      rendition(8),
+      // A word of three letters that names no language stays the stream's name for it.
+      rendition(9, { name: "HQ", language: "en" }),
+    ]);
+
+    expect(tracks).toEqual([
+      { id: 4, language: "en", label: "Director's commentary", default: false },
+      { id: 5, language: "en", label: "English", default: true },
+      { id: 6, language: "de", label: "Deutsch", default: false },
+      { id: 7, language: "fr", label: "Français · Audio description", default: false },
+      { id: 8, language: null, label: "Track 5", default: false },
+      { id: 9, language: "en", label: "HQ", default: false },
+    ]);
+  });
+
+  it("tells subtitles from captions of the same name, and numbers those that still read the same", () => {
+    const text = { page: null, format: "text" as const };
+    const captions = (channel: number) => ({ page: channel, format: "captions" as const });
+    const tracks = renditionSubtitles([
+      { ...rendition(0, { name: "English", language: "en" }), ...text },
+      { ...rendition(1, { name: "nld", forced: true }), ...text },
+      { ...rendition(2, { language: "nl", accessible: true }), ...text },
+      { ...rendition(3), ...text },
+      { ...rendition(-1, { name: "English", language: "en" }), ...captions(1) },
+      { ...rendition(-1), ...captions(2) },
+      { ...rendition(-1), ...captions(3) },
+    ]);
+
+    expect(tracks.map((track) => [track.label, track.id, track.page, track.format])).toEqual([
+      ["English · Text", 0, null, "text"],
+      ["Nederlands · Forced", 1, null, "text"],
+      ["Nederlands · SDH", 2, null, "text"],
+      ["Track 4", 3, null, "text"],
+      ["English · Captions", -1, 1, "captions"],
+      ["Captions · 1", -1, 2, "captions"],
+      ["Captions · 2", -1, 3, "captions"],
+    ]);
+    expect(tracks.map((track) => track.language)).toEqual([
+      "en",
+      "nl",
+      "nl",
+      null,
+      "en",
+      null,
+      null,
+    ]);
+    expect(tracks[1]?.forced).toBe(true);
   });
 });
 

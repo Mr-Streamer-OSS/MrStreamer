@@ -278,7 +278,7 @@ export function xtreamProvider(account: XtreamAccount, options: ProviderOptions)
       if (!response.ok || !response.body) {
         throw new AppFailure({ kind: "provider-error", status: response.status });
       }
-      return response.body;
+      return { kind: "document", body: response.body };
     },
 
     async onDemandCatalogue(signal): Promise<OnDemandCatalogue> {
