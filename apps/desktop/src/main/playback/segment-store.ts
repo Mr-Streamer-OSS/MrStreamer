@@ -8,7 +8,10 @@ export interface SegmentLimits {
   /** Segments kept after the newest one the receiver asked for, and before it. */
   readonly ahead: number;
   readonly behind: number;
-  /** Bytes kept at most, and the most one segment may hold. */
+  /**
+   * Bytes from which no new segment is taken, and the most one segment may hold. One taken just
+   * below the first still comes whole, so the store holds less than the two together.
+   */
   readonly bytes: number;
   readonly segment: number;
   /** Requests that may wait for a segment at once. */
