@@ -3,7 +3,7 @@
   "compilerOptions": {
     // The page's script runs in a browser, the build scripts in Node.
     "lib": ["ES2024", "DOM", "DOM.Iterable"],
-    "types": ["node"]
+    "types": ["node", "vite/client"]
   },
   "include": ["src", "scripts"]
 }

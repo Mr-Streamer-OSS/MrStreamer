@@ -5,8 +5,8 @@ One static page for `https://mrstreamer.app`, built with Vite from plain HTML, C
 | File                        | Holds                                                                       |
 | --------------------------- | --------------------------------------------------------------------------- |
 | `index.html`                | The page and everything it says                                             |
-| `src/styles.css`            | The layout, and the motion's keyframes                                      |
-| `src/main.ts`               | What moves when the reader scrolls                                          |
+| `src/styles.css`            | The layout                                                                  |
+| `src/main.ts`               | Website page-view analytics                                                 |
 | `scripts/prepare-assets.ts` | Cuts the page's pictures, icons and social picture into `public/generated/` |
 | `scripts/package-vercel.ts` | Packs the built page for Vercel in `.vercel/output/` and checks the package |
 | `public/`                   | `robots.txt` and `sitemap.xml`                                              |
@@ -31,9 +31,13 @@ pnpm preview:marketing   # the built page, on http://localhost:4173
 ## Change it
 
 - Keep the words true and few. Every claim on the page comes from the README or the docs. The app's limits are in [what plays](../../docs/user/playback.md).
-- True black, white text, no decoration, nothing that moves by itself. The hero rises in once, section text rises in once as it scrolls into view, and the hero's window tips upright as the page scrolls. With reduced motion, or without JavaScript, everything is in place from the start.
+- True black, white text, minimal copy and no page animations. Screenshots describe the app; download buttons name the platforms.
 - New pictures come from new captures. Follow the [artwork recipe](../../docs/contributing/marketing-artwork.md). A phone shows a part of each window, set in `prepare-assets.ts`, with its size repeated in `index.html`.
 - The privacy policy stays in `docs/privacy.md`. The app and the Store listing link to `https://mrstreamer.app/privacy`, which this site redirects there.
+
+## Website analytics
+
+The production build loads Vercel Web Analytics for page views. Local development does not load it. Enable Web Analytics in the Vercel project's Analytics tab before deploying; the project currently has it enabled. The desktop app has no analytics. The [privacy policy](../../docs/privacy.md#the-website) describes website data collection.
 
 ## How it gets published
 

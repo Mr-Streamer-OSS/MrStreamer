@@ -12,5 +12,8 @@
   "devDependencies": {
     "sharp": "0.35.4",
     "vite": "7.3.6"
+  },
+  "dependencies": {
+    "@vercel/analytics": "2.0.1"
   }
 }

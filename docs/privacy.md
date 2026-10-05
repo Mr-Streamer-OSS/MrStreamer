@@ -1,6 +1,6 @@
 # Privacy policy
 
-Last updated 2 October 2026. The current version is at <https://mrstreamer.app/privacy>.
+Last updated 5 October 2026. The current version is at <https://mrstreamer.app/privacy>.
 
 Mr. Streamer is a free, open-source desktop player for the IPTV subscription you already have. This policy explains what it stores on your computer, what it sends and to whom, and what we receive.
 
@@ -75,9 +75,15 @@ As with any app, your network operator and DNS provider can see which servers Mr
 
 Mr. Streamer shows no advertising, does not track you, and does not sell data.
 
+## The website
+
+The website at mrstreamer.app is hosted by Vercel and uses Vercel Web Analytics to count visits and page views. Vercel processes the page URL, referrer, approximate location, device and browser information. We see aggregate traffic statistics. It uses no analytics cookies; its visitor identifier is discarded after 24 hours. See [Vercel's Web Analytics privacy information](https://vercel.com/docs/analytics/privacy-policy).
+
+Website analytics do not receive your IPTV login or viewing history from the desktop app. The desktop app has no analytics or telemetry.
+
 ## Data we receive
 
-We receive only what you choose to send us:
+Apart from the website statistics above, we receive what you choose to send us:
 
 - email to privacy@mrstreamer.app, hello@mrstreamer.app or security@mrstreamer.app
 - issues and comments on [GitHub](https://github.com/Mr-Streamer-OSS/MrStreamer/issues). These are public, so please leave out your server address, username and password.
