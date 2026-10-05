@@ -336,8 +336,6 @@ interface TitleReceiver {
   plan: SegmentPlan;
   /** Where the plan's starts come from, for the diagnostics. */
   readonly index: "cues" | "samples" | "none";
-  /** The size of the file the plan was made of, when the provider said: another size is another file. */
-  readonly size: number | null;
   /** What the receiver was last sent: the tracks chosen, under a token of their own. */
   load: TitleLoad | null;
 }
@@ -419,7 +417,10 @@ interface TitleSessionState extends SessionBase {
   readonly upstreamUrl: string;
   /** What the file holds, as ffprobe read it when the title opened. */
   probe: TitleProbe | null;
-  /** Which of the files behind the address ffprobe read; see `SourceIdentity.generation`. */
+  /**
+   * Which of the files behind the address ffprobe read; see `SourceIdentity.generation`. A
+   * receiver's playlist is of that file, and its load ends once an answer is of another.
+   */
   probed: number;
   /** The upstream request serving ffprobe or ffmpeg. A new one replaces it. */
   source: AbortController | null;
@@ -583,6 +584,11 @@ export class Playback extends Context.Service<
      * streams to try in turn, the channel's id alone when absent. `decoders` lists what the UI's
      * player decodes; the proxy converts the rest. `repair` re-encodes the picture too, for a
      * broadcast the player failed to decode: ffmpeg conceals damage that stops the player.
+     *
+     * `preview` says nobody chose to watch it, as a page's muted preview. It closes nothing a
+     * receiver plays: the open fails while a receiver's session is open, and that is looked at
+     * when the open takes its turn, so a receiver that began after it was asked for keeps its
+     * stream too.
      */
     open(
       channelId: string,
@@ -592,6 +598,7 @@ export class Playback extends Context.Service<
         readonly repair?: boolean;
         readonly audio?: number | null;
         readonly audioLanguage?: string | null;
+        readonly preview?: boolean;
       },
     ): Effect.Effect<StreamSession, Failed>;
     /**
@@ -1159,17 +1166,12 @@ function make(deps: PlaybackDeps) {
         session.feed?.changed();
       }
       // A receiver holds a playlist of the file as it was read when the title opened: its length,
-      // its tracks and where its segments start. A file of another size is another file, of
-      // which none of that holds, so what the receiver was sent ends there rather than go on as a
-      // mixture of the two. Opening the title again reads the new file.
+      // its tracks and where its segments start. Of another file none of that holds, whether the
+      // answers tell it by its size or, at the same size, by the mark of the server that sent
+      // it. What the receiver was sent ends there rather than go on as a mixture of the two, and
+      // so does a load made of the session after that. Opening the title again reads the new file.
       const receiver = session.receiver;
-      if (
-        receiver?.load &&
-        receiver.size !== null &&
-        held &&
-        held.size !== null &&
-        held.size !== receiver.size
-      ) {
+      if (receiver?.load && session.identity.generation !== session.probed) {
         const failure: StreamFailure = {
           kind: "network",
           detail: "The provider put another file behind this title while it played.",
@@ -3310,10 +3312,18 @@ function make(deps: PlaybackDeps) {
           readonly repair?: boolean;
           readonly audio?: number | null;
           readonly audioLanguage?: string | null;
+          readonly preview?: boolean;
         } = {},
       ) =>
         openOne(
           Effect.gen(function* () {
+            // Looked at in the open's own turn, before anything closes: no receiver's open can
+            // come between this and the session it would close.
+            if (options.preview && [...sessions.values()].some((each) => each.lan !== null)) {
+              return yield* new Failed({
+                error: { kind: "unexpected", detail: "A receiver has playback." },
+              });
+            }
             const session = yield* liveSession(channelId, decoders, options, null);
             const extension = session.format === "mpegts" ? "ts" : "m3u8";
             return {
@@ -3389,7 +3399,7 @@ function make(deps: PlaybackDeps) {
                 },
               });
             }
-            session.receiver = { ...planned, size: session.identity.size, load: null };
+            session.receiver = { ...planned, load: null };
             return {
               sessionId: session.id,
               title,

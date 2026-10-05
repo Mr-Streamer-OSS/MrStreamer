@@ -104,11 +104,14 @@ async function casting(options: { fetchMs?: number; checkpointMs?: number } = {}
   /** The LOAD the TV was sent last. */
   const loaded = () =>
     tv.requests("LOAD").at(-1) as { media: { contentId: string } } & Record<string, unknown>;
-  /** Asks for the stream the TV was sent as a TV does: its playlists and its first segment. */
-  const fetches = async () => {
-    const main = await (await fetch(loaded().media.contentId)).text();
+  /**
+   * Asks for a stream as a receiver does, its playlists and its first segment: the one the TV was
+   * sent last, or the one at `address`.
+   */
+  const fetches = async (address = loaded().media.contentId) => {
+    const main = await (await fetch(address)).text();
     const stream = main.split("\n").find((line) => line && !line.startsWith("#"))!;
-    const video = new URL(stream, loaded().media.contentId).href;
+    const video = new URL(stream, address).href;
     const first = (await (await fetch(video)).text())
       .split("\n")
       .find((line) => /^[^#]/.test(line))!;
@@ -363,11 +366,20 @@ describe.skipIf(!hasTools)("playback on a receiver", () => {
     expect(await saved()).toBeNull();
   });
 
-  it("has the receiver stop when something plays here instead", async () => {
-    const { tv, playback, connect, play, state, channel } = await casting();
+  it("has the receiver stop when something plays here instead, but not for a page's preview", async () => {
+    const { tv, playback, connect, play, fetches, state, channel } = await casting();
     await connect();
-    await play(0);
+    const { media } = await play(0);
     const stops = tv.requests("STOP").length;
+
+    // Nobody chose to watch a preview: it is refused, and the receiver keeps its stream.
+    expect(await failure(playback.open(channel, LOCAL, { preview: true }))).toEqual({
+      kind: "unexpected",
+      detail: "A receiver has playback.",
+    });
+    expect(await state()).toMatchObject({ media: { generation: media.generation } });
+    expect((await fetches()).status).toBe(200);
+    expect(tv.requests("STOP")).toHaveLength(stops);
 
     await playback.open(channel, LOCAL);
     await eventually(async () =>
@@ -461,6 +473,109 @@ describe.skipIf(!hasTools)("playback through the system's list of receivers", ()
     helper.external(false);
     await eventually(async () => expect(await state()).toEqual({ kind: "local" }));
     await eventually(() => expect(provider.activeStreams()).toBe(0));
+  });
+
+  it("keeps what a receiver plays while its list is open again, and when it closes with nothing picked", async () => {
+    const { helper, output, play, fetches, state, changes, provider } = await casting();
+    const picking = output.pick(ANCHOR);
+    await helper.took("showPicker");
+    helper.choose();
+    await picking;
+    const { media } = await play(25);
+    const load = await helper.took("load");
+    expect((await fetches(load.url)).status).toBe(200);
+    helper.status("playing", 26, 150);
+    await eventually(async () =>
+      expect(await state()).toMatchObject({ media: { state: "playing" } }),
+    );
+    const before = changes.length;
+
+    const again = output.pick(ANCHOR);
+    await helper.took("showPicker");
+    // With the list open the receiver takes what it is told.
+    await output.command(media.generation, { command: "pause" });
+    expect(await helper.took("pause")).toMatchObject({ generation: media.generation });
+    helper.dismiss();
+
+    expect((await again).output).toMatchObject({
+      kind: "receiver",
+      media: { generation: media.generation, sessionId: media.sessionId, state: "playing" },
+      failure: null,
+    });
+    // It never stopped being the receiver's: nothing else was said meanwhile.
+    expect(changes.slice(before).map((each) => each.output.kind)).not.toContain("connecting");
+    expect(changes.slice(before).map((each) => each.output.kind)).not.toContain("local");
+    // The helper holds the one load it was given, in the process it was given it.
+    const sent = helper.commands.map((command) => command.cmd);
+    expect(sent.filter((cmd) => cmd === "load")).toHaveLength(1);
+    expect(sent.filter((cmd) => cmd === "stop" || cmd === "unload" || cmd === "quit")).toEqual([]);
+    expect(helper.running()).toEqual(helper.pids);
+    // And the address it plays from still answers.
+    expect((await fetches(load.url)).status).toBe(200);
+    expect(provider.mostFilesAtOnce()).toBe(1);
+  });
+
+  it("follows what the viewer picks in a list opened on a receiver that plays", async () => {
+    const { helper, output, play, state } = await casting();
+    const picking = output.pick(ANCHOR);
+    await helper.took("showPicker");
+    helper.choose();
+    await picking;
+    await play(25);
+    const load = await helper.took("load");
+
+    const again = output.pick(ANCHOR);
+    await helper.took("showPicker");
+    // This computer, in the system's list: the receiver lets go, and its stream closes.
+    helper.external(false);
+    await eventually(async () => expect(await state()).toEqual({ kind: "local" }));
+    await expect(fetch(load.url)).rejects.toThrow();
+
+    // Then another receiver, in the same list: connected, with nothing sent to it yet.
+    helper.choose();
+    expect((await again).output).toMatchObject({
+      kind: "receiver",
+      receiver: { kind: "airplay" },
+      media: null,
+      failure: null,
+    });
+    const second = await play(40);
+    expect(await helper.took("load")).toMatchObject({
+      generation: second.media.generation,
+      position: 40,
+    });
+  });
+
+  it("leaves a TV the app listed playing until the viewer picks in the system's list", async () => {
+    const { tv, helper, output, connect, play, loaded, fetches, state } = await casting();
+    await connect();
+    const { media } = await play(30);
+    expect((await fetches()).status).toBe(200);
+    const stops = tv.requests("STOP").length;
+
+    const closing = output.pick(ANCHOR);
+    await helper.took("showPicker");
+    expect(await state()).toMatchObject({ receiver: { kind: "cast" }, media: {} });
+    helper.dismiss();
+    expect((await closing).output).toMatchObject({
+      kind: "receiver",
+      receiver: { kind: "cast" },
+      media: { generation: media.generation },
+    });
+    expect(tv.requests("STOP")).toHaveLength(stops);
+    expect((await fetches()).status).toBe(200);
+
+    // Picked there, the other receiver takes the TV's place, which is let go of with its stream.
+    const picking = output.pick(ANCHOR);
+    await helper.took("showPicker");
+    helper.choose();
+    expect((await picking).output).toMatchObject({
+      kind: "receiver",
+      receiver: { kind: "airplay" },
+      media: null,
+    });
+    expect(tv.app).toBeNull();
+    await expect(fetch(loaded().media.contentId)).rejects.toThrow();
   });
 
   it("gives up the list when the viewer goes back to this computer meanwhile", async () => {

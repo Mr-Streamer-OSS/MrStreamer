@@ -474,6 +474,36 @@ describe.skipIf(!hasTools)("a movie for a receiver", () => {
     expect(provider.mostFilesAtOnce()).toBe(1);
   });
 
+  it("ends it too when the other file is as long to the byte, and reads that one when opened again", async () => {
+    const { provider, playback, load, open, movie, failed } = await receiver();
+    const { video, loaded } = await load(MATROSKA, "title-receiver.mkv");
+    expect((await segment(video.segments[0]!.url)).status).toBe(200);
+
+    // The same file but for one line of its subtitles, which its server marks as another.
+    const other = fixture("title-receiver.mkv");
+    other.write("Three to SIX", other.indexOf("Three to six"));
+    provider.replaceMovieFile(movie(MATROSKA).id, other);
+    expect((await fetch(video.segments[5]!.url)).status).toBeGreaterThanOrEqual(400);
+    expect((await fetch(loaded.url)).status).toBe(410);
+    expect((await fetch(video.segments[0]!.url)).status).toBe(410);
+    // Whoever opened it heard once, however often the receiver asked after that.
+    expect(failed).toEqual([expect.objectContaining({ kind: "network" })]);
+
+    const again = await open(MATROSKA);
+    const english = again.subtitles.find((track) => track.language === "en");
+    const reloaded = await playback.loadReceiverTitle(again.sessionId, {
+      audio: null,
+      subtitle: english!.id,
+    });
+    const main = await playlist(reloaded!.url);
+    const fresh = await playlist(main.stream!);
+    for (const index of [0, 1]) await segment(fresh.segments[index]!.url);
+    const lines = await cues((await playlist(main.subtitles!)).segments[0]!.url);
+    expect(lines.lines).toEqual([[3, 6, "Three to SIX"]]);
+    expect(failed).toHaveLength(1);
+    expect(provider.mostFilesAtOnce()).toBe(1);
+  });
+
   it("gives up a segment the provider doesn't send in time, and makes it when asked again", async () => {
     const { provider, playback, load, movie, failed } = await receiver({
       receiver: { segmentMs: 1500 },
@@ -624,6 +654,28 @@ describe.skipIf(!hasTools)("a movie for a receiver", () => {
     await expect(fetch(video.segments[1]!.url)).rejects.toThrow();
     expect(await playback.receiverRequests(opened.sessionId)).toBeNull();
     reading.abort();
+  });
+
+  it("refuses a page's preview while a receiver has the session, one asked for before it opened too", async () => {
+    const { provider, playback, load, closed } = await receiver();
+    const channel = String(
+      provider.catalogue.channels.find((each) => !each.offline && !each.fixture)!.streamId,
+    );
+    const refused = { error: { kind: "unexpected", detail: "A receiver has playback." } };
+
+    // Asked for while the receiver's title is still being read: its turn comes after.
+    const opening = load(MATROSKA, "title-receiver.mkv");
+    await expect(playback.open(channel, RECEIVER, { preview: true })).rejects.toMatchObject(
+      refused,
+    );
+    const { video } = await opening;
+    await expect(playback.open(channel, RECEIVER, { preview: true })).rejects.toMatchObject(
+      refused,
+    );
+
+    // The receiver's session never closed: it still gets what it asks for.
+    expect(closed).toEqual([]);
+    expect((await segment(video.segments[0]!.url)).status).toBe(200);
   });
 });
 

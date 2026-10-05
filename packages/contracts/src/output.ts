@@ -37,7 +37,12 @@ export type RemoteItem =
   | { readonly kind: "channel"; readonly channelId: string }
   | { readonly kind: "title"; readonly title: TitleRef };
 
-/** `loading` until the receiver shows a picture; `ended` only when it played to the end. */
+/**
+ * `loading` from when the media was sent until the receiver says its player is past starting:
+ * playing or held paused over Cast, ready to play over AirPlay, where it may be `buffering` before
+ * anything plays. That is the receiver's word for how its player stands, not proof that a picture
+ * shows. `ended` only when it played to the end.
+ */
 export type RemoteState = "loading" | "buffering" | "playing" | "paused" | "ended";
 
 /** What the receiver plays now, as it last confirmed. */

@@ -10,6 +10,10 @@
 // on a connected receiver closes what was open here, through the playback service, so the
 // provider sees one connection throughout. Going back closes the receiver's session first.
 //
+// One receiver at a time. Connecting to one the app lists lets go of the one before, with what it
+// played. The system's own list decides nothing until the viewer picks in it: a receiver that
+// plays goes on while the list is open, and stays when it closes with nothing else picked.
+//
 // Every load has a generation, counted here, and the account it began under. A command names its
 // generation and is dropped once another load took its place. What a receiver says of an earlier
 // load is dropped too, so a late answer can't move the clock of what plays now, save progress
@@ -65,6 +69,11 @@ const FETCH_MS = 10_000;
 const ARTWORK_HOST = "image.tmdb.org";
 /** How often a title's progress is saved while a receiver plays it. */
 const CHECKPOINT_MS = 60_000;
+/**
+ * Why a wait at the system's list ends when the list only opened again. Unlike going back to
+ * this computer, that takes nothing back: a receiver picked in the list before still counts.
+ */
+const REOPENED = "reopened";
 
 export interface OutputDeps {
   /** The ways this build reaches receivers: Google Cast, AirPlay, both or none. */
@@ -121,7 +130,8 @@ export class Output extends Context.Service<
     connect(receiverId: string): Effect.Effect<OutputStatus, Failed>;
     /**
      * Opens the system's own list of receivers at `anchor`, a place on screen, and connects to
-     * the one the viewer picks. Nothing changes when they pick none.
+     * the one the viewer picks. Nothing changes when they pick none, or the one that plays
+     * already: it plays on while the list is open, from the same address, and takes commands.
      */
     pick(anchor: ScreenRect): Effect.Effect<OutputStatus, Failed>;
     /** Back to this computer: ends what the receiver plays, closes its session, lets go of it. */
@@ -301,12 +311,15 @@ function make(deps: OutputDeps) {
         case "media-failed":
           if (connected?.adapter !== adapter || playing?.generation !== event.generation) return;
           return later(mediaFailed(event.failure, false));
-        case "released":
-          if (connected?.adapter !== adapter) return;
+        case "released": {
+          const was = connected;
+          if (was?.adapter !== adapter) return;
           // Let go of from the receiver's side: back to this computer, nothing failed.
           return later(
             one(
               Effect.gen(function* () {
+                // Another receiver took its place before this got its turn: the news is old.
+                if (connected !== was) return;
                 yield* drop(true);
                 connected = null;
                 output = { kind: "local" };
@@ -314,12 +327,15 @@ function make(deps: OutputDeps) {
               }),
             ),
           );
+        }
         case "lost": {
-          if (connected?.adapter !== adapter || output.kind !== "receiver") return;
+          const was = connected;
+          if (was?.adapter !== adapter || output.kind !== "receiver") return;
           const { receiver } = output;
           return later(
             one(
               Effect.gen(function* () {
+                if (connected !== was) return;
                 yield* drop(true);
                 connected = null;
                 output = { kind: "lost", receiver, failure: event.failure };
@@ -517,12 +533,22 @@ function make(deps: OutputDeps) {
         : Effect.fail(failed({ kind: "unreachable" })),
     );
 
-    /** Connects through `adapter`; null when the viewer picked nothing in the system's list. */
-    const connectTo = (
-      adapter: ReceiverAdapter,
-      request: Parameters<ReceiverAdapter["connect"]>[0],
-      known: Receiver | null,
-    ) =>
+    /** `connection` is the receiver from now on, with nothing sent to it yet. */
+    const take = (connection: Connection, adapter: ReceiverAdapter) => {
+      connected = { connection, adapter };
+      addressTurn = 0;
+      output = {
+        kind: "receiver",
+        receiver: connection.receiver,
+        volume: null,
+        media: null,
+        failure: null,
+      };
+      publish();
+    };
+
+    /** Connects to `known`, a receiver `adapter` listed, in place of the one before. */
+    const connectTo = (adapter: ReceiverAdapter, known: Receiver) =>
       one(
         Effect.gen(function* () {
           // One receiver at a time: the one before goes first, with what it played.
@@ -532,7 +558,10 @@ function make(deps: OutputDeps) {
           output = { kind: "connecting", protocol: adapter.kind, receiver: known };
           publish();
           const connection = yield* told((signal) =>
-            adapter.connect(request, AbortSignal.any([signal, mine.signal])),
+            adapter.connect(
+              { kind: "receiver", id: known.id },
+              AbortSignal.any([signal, mine.signal]),
+            ),
           ).pipe(
             Effect.ensuring(
               Effect.sync(() => {
@@ -556,19 +585,67 @@ function make(deps: OutputDeps) {
             publish();
             return snapshot();
           }
-          connected = { connection, adapter };
-          addressTurn = 0;
-          output = {
-            kind: "receiver",
-            receiver: connection.receiver,
-            volume: null,
-            media: null,
-            failure: null,
-          };
-          publish();
+          take(connection, adapter);
           return snapshot();
         }),
       );
+
+    /**
+     * Opens the system's list through `adapter` at `anchor` and connects to what the viewer picks
+     * there. The list by itself changes nothing, so the turn isn't held while it is open: a
+     * receiver that plays goes on playing and takes what it is told meanwhile. It stays, with
+     * what it plays, when the list closes with nothing picked or with the same receiver. Only
+     * another receiver takes its place, once that one answered.
+     */
+    const pickWith = (adapter: ReceiverAdapter, anchor: ScreenRect) =>
+      Effect.gen(function* () {
+        const mine = new AbortController();
+        yield* one(
+          Effect.sync(() => {
+            // One list at a time: the wait at the one before ends, and nothing failed.
+            connecting?.abort(REOPENED);
+            connecting = mine;
+            if (connected) return;
+            output = { kind: "connecting", protocol: adapter.kind, receiver: null };
+            publish();
+          }),
+        );
+        const waited = yield* Effect.result(
+          told((signal) =>
+            adapter.connect({ kind: "picker", anchor }, AbortSignal.any([signal, mine.signal])),
+          ),
+        );
+        return yield* one(
+          Effect.gen(function* () {
+            if (connecting === mine) connecting = null;
+            const picked = waited._tag === "Success" ? waited.success : null;
+            // Given up from here meanwhile, which fails nothing. `left` when the viewer went
+            // elsewhere: back to this computer, or to a receiver the app lists.
+            const given = mine.signal.aborted;
+            const left = given && mine.signal.reason !== REOPENED;
+            if (picked && picked !== connected?.connection) {
+              if (left) {
+                // Nobody takes what was picked after all.
+                yield* Effect.promise(() => picked.disconnect().catch(() => {}));
+              } else {
+                // Another receiver than the one before, which goes first with what it played.
+                if (connected) {
+                  output = { kind: "connecting", protocol: adapter.kind, receiver: null };
+                  publish();
+                  yield* release;
+                }
+                take(picked, adapter);
+              }
+            } else if (!picked && !given && output.kind === "connecting") {
+              // The list closed on nothing, and no receiver was there before it opened.
+              output = { kind: "local" };
+              publish();
+            }
+            if (waited._tag === "Failure" && !given) return yield* waited.failure;
+            return snapshot();
+          }),
+        );
+      });
 
     /** Ends what the receiver plays and lets go of it, the session first. */
     const release = Effect.gen(function* () {
@@ -598,7 +675,7 @@ function make(deps: OutputDeps) {
           );
           const known = [...found.values()].flat().find((each) => each.id === receiverId);
           if (!adapter || !known) return Effect.fail(failed({ kind: "unreachable" }));
-          return connectTo(adapter, { kind: "receiver", id: receiverId }, known);
+          return connectTo(adapter, known);
         }),
 
       pick: (anchor: ScreenRect) =>
@@ -612,11 +689,11 @@ function make(deps: OutputDeps) {
               }),
             );
           }
-          return connectTo(adapter, { kind: "picker", anchor }, null);
+          return pickWith(adapter, anchor);
         }),
 
-      // A connect that waits, for the receiver or for the viewer in the system's list, ends
-      // first: it holds the turn this takes.
+      // A connect that waits ends first, for its receiver or for the viewer at the system's
+      // list: the one for a receiver holds the turn this takes.
       disconnect: Effect.andThen(
         Effect.sync(() => connecting?.abort()),
         one(
