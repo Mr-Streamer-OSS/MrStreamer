@@ -55,6 +55,8 @@ const RELEASE_OWNER = "MDQ6VXNlcjcxNDk4NDUy";
 const RELEASE_BODY = `## Release checklist
 
 - [ ] Check the exact published nightly in the installed app on every supported desktop build, against this release's changes.
+- [ ] Check what this release's changes store, send and leave behind after an uninstall, and that the privacy policy still describes it.
+- [ ] Check the licence and source obligations of third-party code this release adds or updates, and verify the packaged notices and the release's attached sources.
 - [ ] Get Wout's approval to promote that exact tested build.
 - [ ] Write cumulative release notes from the previous stable release.
 - [ ] Publish the stable GitHub release and verify the package and download links.
