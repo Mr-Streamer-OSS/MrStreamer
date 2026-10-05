@@ -70,9 +70,12 @@ function Shell({ liveOnly }: { liveOnly: boolean }) {
   const covered = watching || playingTitle;
   useReceiverBar();
   const client = useQueryClient();
-  // A receiver that plays as the window opens gets its controls back.
+  // A receiver that plays as the window opens gets its controls back, unless the pages have gone
+  // by the time the lists say what it plays.
   useEffect(() => {
-    void showReceiverPlayback(client).catch(() => {});
+    const leaving = new AbortController();
+    void showReceiverPlayback(client, leaving.signal).catch(() => {});
+    return () => leaving.abort();
   }, [client]);
   // Watch and a playing title play sound, at the viewer's volume; the page underneath goes back to
   // a muted preview. One place decides, so a channel picked over a playing title, which opens Watch

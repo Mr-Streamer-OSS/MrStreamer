@@ -332,7 +332,7 @@ The output button sits between the volume and the mini player (`features/watch/O
 
 A channel follows the receiver's word too: one it holds paused or buffering, as after Pause on the TV's remote, reads so in Watch, in the bar and in the system's controls, and the system's Play has the receiver play on with the stream it holds (`output.command`) instead of opening the channel again.
 
-`player/media-session.ts` plays a silent loop in step with the receiver, because Chromium offers the system only a window that makes sound: the media keys and the system's controls then work the receiver. The app holds a power save blocker while a receiver plays, so the computer doesn't sleep under it. A page that starts while a receiver plays, as after a reload, asks `output.status` and `output.playingTitle` and takes up what plays (`app/receiver-playback.ts`).
+`player/media-session.ts` plays a silent loop in step with the receiver, because Chromium offers the system only a window that makes sound: the media keys and the system's controls then work the receiver. The app holds a power save blocker while a receiver plays, so the computer doesn't sleep under it. A page that starts while a receiver plays, as after a reload, asks `output.status` and `output.playingTitle` and takes up what plays (`app/receiver-playback.ts`). The lists say what it is, so it takes up only what the receiver still plays once they answered, the same receiver, session and load, as the status says it by then, and nothing once the pages made way for the login form, the account changed or the viewer played something else.
 
 ### The window's lifetime
 
