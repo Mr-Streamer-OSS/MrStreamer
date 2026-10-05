@@ -1,0 +1,36 @@
+# Builds the website, apps/marketing, on every pull request and push to main: the pictures from
+# the captures, the page, and the package Vercel takes, which checks itself. It installs only what
+# the website declares, as publishing does. No secrets, so pull requests from forks run it too.
+#
+# Publishing is marketing-deploy.yml's. The release's checks (ci.yml) leave the website out: a
+# page that doesn't build never holds back an app release.
+name: Marketing
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# A new push to a pull request replaces its running build.
+concurrency:
+  group: marketing-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter mrstreamer-marketing...
+      - name: Build
+        run: pnpm --filter mrstreamer-marketing build

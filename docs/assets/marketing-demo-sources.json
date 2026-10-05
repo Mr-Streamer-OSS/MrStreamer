@@ -1,0 +1,288 @@
+{
+  "accessed": "2026-10-04",
+  "sources": {
+    "earth": {
+      "title": "4K Earth Views Extended Cut for Earth Day 2021",
+      "author": "NASA Johnson Space Center",
+      "credit": "NASA",
+      "page": "https://images.nasa.gov/details/jsc2021m000138_4K_Earth_Views_Extended_Cut_for_Earth_Day_%202021_210422-4KMP4",
+      "listing": "https://images-api.nasa.gov/asset/jsc2021m000138_4K_Earth_Views_Extended_Cut_for_Earth_Day_%202021_210422-4KMP4",
+      "url": "https://images-assets.nasa.gov/video/jsc2021m000138_4K_Earth_Views_Extended_Cut_for_Earth_Day_%202021_210422-4KMP4/jsc2021m000138_4K_Earth_Views_Extended_Cut_for_Earth_Day_%202021_210422-4KMP4~large.mp4",
+      "terms": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+      "file": "nasa-earth-views-large.mp4",
+      "bytes": 2040459091,
+      "sha256": "935e06af45042466475bbf910b04c2eb2dc27362b1fe070ca2171cff448c8bf8",
+      "from": "00:09:00",
+      "to": "00:11:00"
+    },
+    "canyon": {
+      "title": "Grand Canyon South Rim summer time-lapse",
+      "author": "U.S. National Park Service, Grand Canyon National Park",
+      "credit": "U.S. National Park Service",
+      "page": "https://www.nps.gov/grca/learn/photosmultimedia/b-roll_hd01.htm",
+      "url": "https://www.nps.gov/nps-audiovideo/audiovideo/49968ade-360e-4946-bfee-facd5086245d1080p.mp4",
+      "terms": "https://www.nps.gov/grca/learn/photosmultimedia/b-roll_hd_index.htm",
+      "file": "nps-grca-south-rim-summer.mp4",
+      "bytes": 33836539,
+      "sha256": "71c418f8b24aa6f34c1c42c9c7b1539d41202bdbfb58454766fb338d7031f4fc",
+      "from": "00:00:10",
+      "to": "00:00:40"
+    }
+  },
+  "provider": {
+    "channels": 60
+  },
+  "categories": [
+    {
+      "id": "1",
+      "name": "UK | ENTERTAINMENT"
+    },
+    {
+      "id": "2",
+      "name": "UK | DOCUMENTARY"
+    },
+    {
+      "id": "3",
+      "name": "NL | DOCUMENTARY"
+    },
+    {
+      "id": "4",
+      "name": "NL | KIDS"
+    },
+    {
+      "id": "5",
+      "name": "BE | SPORTS"
+    },
+    {
+      "id": "6",
+      "name": "BE | MUSIC"
+    }
+  ],
+  "channels": [
+    {
+      "streamId": 2014,
+      "number": 1,
+      "name": "UK | ESTUARY MAX HD",
+      "categoryId": "2",
+      "logo": null,
+      "programmes": ["Weather Watch", "Morning Tide", "Field Notes"]
+    },
+    {
+      "streamId": 2016,
+      "number": 2,
+      "name": "UK | RIVERBEND",
+      "categoryId": "1",
+      "logo": null,
+      "programmes": ["The Garden Show", "Morning Tide", "Small Kitchens"]
+    },
+    {
+      "streamId": 2018,
+      "number": 3,
+      "name": "NL | MERIDIAN HD",
+      "categoryId": "3",
+      "logo": null,
+      "programmes": ["Studio Sessions", "Field Notes", "Weather Watch"]
+    },
+    {
+      "streamId": 2020,
+      "number": 4,
+      "name": "NL | WILDMOOR MAX",
+      "categoryId": "4",
+      "logo": "#2f9e44",
+      "programmes": ["Small Kitchens", "Kids Club", "The Garden Show"]
+    },
+    {
+      "streamId": 2022,
+      "number": 5,
+      "name": "BE | FERNLIGHT HD",
+      "categoryId": "5",
+      "logo": "#1fa67a",
+      "programmes": ["Rally Hour", "The Long Table", "Saturday Workshop"]
+    },
+    {
+      "streamId": 2024,
+      "number": 6,
+      "name": "UK | SKYREACH 24",
+      "categoryId": "1",
+      "logo": "#7aa82e",
+      "programmes": ["Saturday Workshop", "The Long Table", "Rally Hour"]
+    },
+    {
+      "streamId": 2026,
+      "number": 7,
+      "name": "BE | BEACON PLUS",
+      "categoryId": "6",
+      "logo": "#2f7f9e",
+      "programmes": ["Night Sessions", "Field Notes", "Morning Tide"]
+    },
+    {
+      "streamId": 2028,
+      "number": 8,
+      "name": "UK | COASTWAY MAX HD",
+      "categoryId": "2",
+      "logo": "#3b7df0",
+      "programmes": ["Tide Tables", "Weather Watch", "Kids Club"]
+    }
+  ],
+  "favourites": ["Riverbend", "Fernlight"],
+  "home": "Meridian",
+  "guide": "Estuary Max",
+  "seriesCategory": {
+    "id": "601",
+    "name": "EN | SERIES"
+  },
+  "featured": {
+    "providerId": 80000,
+    "tmdbId": 90000,
+    "name": "Canyon Hours",
+    "genre": 99,
+    "rating": 7.5,
+    "overview": "A year in one canyon, from the rim to the river.",
+    "creator": "Leon Okafor",
+    "runtime": 44,
+    "cast": [
+      {
+        "name": "Noor Halden",
+        "character": "Captain Wren",
+        "colour": "#5b3fa8"
+      },
+      {
+        "name": "Rafael Stone",
+        "character": "Lia Moreau",
+        "colour": "#3f8a3a"
+      },
+      {
+        "name": "Tessa Morrow",
+        "character": "Inspector Sato",
+        "colour": "#a8493f"
+      },
+      {
+        "name": "Theo Marsh",
+        "character": "The Keeper",
+        "colour": "#2f8a55"
+      },
+      {
+        "name": "Mara Voss",
+        "character": "Margot",
+        "colour": "#a8623f"
+      },
+      {
+        "name": "Felix Arden",
+        "character": "Sam Ellery",
+        "colour": "#2f8a70"
+      }
+    ],
+    "episodes": [
+      {
+        "providerId": 81000,
+        "season": 1,
+        "number": 1,
+        "name": "First Light",
+        "overview": "The river keeps carving, a little every day.",
+        "airDate": "2025-02-03",
+        "rating": 7.6,
+        "guest": "Mara Voss",
+        "still": 26
+      },
+      {
+        "providerId": 81010,
+        "season": 2,
+        "number": 1,
+        "name": "The Rim",
+        "overview": "Snow closes the north road, and the canyon keeps its own hours.",
+        "airDate": "2026-02-02",
+        "rating": 7.9,
+        "guest": "Theo Marsh",
+        "still": 39
+      }
+    ],
+    "backdrop": 18,
+    "poster": 34,
+    "subtitles": {
+      "eng": [
+        {
+          "from": 2,
+          "to": 7,
+          "text": "Morning comes late to the canyon floor."
+        },
+        {
+          "from": 12,
+          "to": 18,
+          "text": "By evening,\nthe colours change again."
+        },
+        {
+          "from": 22,
+          "to": 27,
+          "text": "The river keeps carving, a little every day."
+        }
+      ],
+      "nld": [
+        {
+          "from": 2,
+          "to": 7,
+          "text": "De ochtend komt laat op de bodem van de canyon."
+        },
+        {
+          "from": 12,
+          "to": 18,
+          "text": "Tegen de avond\nveranderen de kleuren opnieuw."
+        },
+        {
+          "from": 22,
+          "to": 27,
+          "text": "De rivier slijt verder, elke dag een beetje."
+        }
+      ]
+    }
+  },
+  "shelf": [
+    {
+      "providerId": 80001,
+      "tmdbId": 90001,
+      "name": "Kestrel Bay",
+      "genre": 18,
+      "rating": 7.1,
+      "colours": ["#0e1b33", "#b85a3a"]
+    },
+    {
+      "providerId": 80002,
+      "tmdbId": 90002,
+      "name": "The Lamplighters' Almanac",
+      "genre": 9648,
+      "rating": 7.8,
+      "colours": ["#1a427f", "#050d1f"]
+    },
+    {
+      "providerId": 80003,
+      "tmdbId": 90003,
+      "name": "Harbour Nine",
+      "genre": 80,
+      "rating": 6.9,
+      "colours": ["#24361f", "#0b1626"]
+    },
+    {
+      "providerId": 80004,
+      "tmdbId": 90004,
+      "name": "Tin Roof Weather",
+      "genre": 35,
+      "rating": 7.3,
+      "colours": ["#f2b872", "#84544e"]
+    },
+    {
+      "providerId": 80005,
+      "tmdbId": 90005,
+      "name": "Paper Orchard",
+      "genre": 10751,
+      "rating": 8,
+      "colours": ["#e4c9b4", "#5a3d2b"]
+    },
+    {
+      "providerId": 80006,
+      "tmdbId": 90006,
+      "name": "Slow Train to Elsewhere",
+      "genre": 99,
+      "rating": 7.4,
+      "colours": ["#31506b", "#3f2220"]
+    }
+  ]
+}

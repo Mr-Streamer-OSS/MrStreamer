@@ -3,6 +3,9 @@ out/
 dist/
 # Built by scripts/build-ffmpeg.sh.
 vendor/
+# Built by apps/marketing: the page's pictures, and the package Vercel takes.
+apps/marketing/public/generated/
+apps/marketing/.vercel/
 .DS_Store
 *.log
 # Private local configuration (subscription details, test access). Never commit.

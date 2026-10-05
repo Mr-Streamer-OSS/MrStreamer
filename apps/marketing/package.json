@@ -1,0 +1,16 @@
+{
+  "name": "mrstreamer-marketing",
+  "private": true,
+  "type": "module",
+  "description": "The website at mrstreamer.app: one static page, built from the app captures in docs/assets.",
+  "license": "GPL-3.0-only",
+  "scripts": {
+    "dev": "node scripts/prepare-assets.ts && vite",
+    "build": "node scripts/prepare-assets.ts && vite build && node scripts/package-vercel.ts",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "sharp": "0.35.4",
+    "vite": "7.3.6"
+  }
+}
