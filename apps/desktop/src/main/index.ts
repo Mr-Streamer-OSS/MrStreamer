@@ -165,11 +165,14 @@ function openWindow(closeStreams: () => void, keeps: () => boolean): BrowserWind
     putAway(window);
   });
   window.on("closed", () => {
+    // Forgotten first: ending its streams can tell of a change at once, and nothing may be sent
+    // to a window that is gone.
+    if (mainWindow === window) {
+      mainWindow = null;
+      away = false;
+    }
     // Nothing can be watching once the window is gone, so release the provider connection.
     closeStreams();
-    if (mainWindow !== window) return;
-    mainWindow = null;
-    away = false;
   });
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//.test(url)) void shell.openExternal(url);
