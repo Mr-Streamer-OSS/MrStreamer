@@ -86,8 +86,9 @@ export interface ChannelTracks {
 
 export interface AudioTrack {
   /**
-   * The track's number in a file, its PID in a channel, or the number an HLS stream's rendition
-   * keeps while it plays; pass it back to choose it.
+   * The track's number in a file, its PID in a channel, or for an HLS stream's rendition a number
+   * worked out from what the playlist declares about it, the same whenever the channel lists it;
+   * pass it back to choose it.
    */
   readonly id: number;
   /** ISO 639 language code as the file names it, or null. */
@@ -108,8 +109,9 @@ export type SubtitleFormat = "text" | "picture" | "teletext" | "captions";
 export interface SubtitleTrack {
   /**
    * The track's number in a file, or its PID in a channel. Captions inside the picture use the
-   * picture's. An HLS stream's renditions keep a number of their own while it plays, and its
-   * caption channels share one no rendition has.
+   * picture's. An HLS stream's rendition has a number worked out from what the playlist declares
+   * about it, the same whenever the channel lists it, and its caption channels share one no
+   * rendition has.
    */
   readonly id: number;
   /**

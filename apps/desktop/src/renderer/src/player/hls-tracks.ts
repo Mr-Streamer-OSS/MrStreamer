@@ -5,8 +5,9 @@
 // as DVB subtitles or teletext inside its segments, aren't read.
 //
 // hls.js numbers renditions by their place in the group the playing variant uses, and numbers
-// them again when it moves to a variant with another group. Here a rendition keeps one id for as
-// long as the stream plays, so the viewer's choice stays the same track.
+// them again when it moves to a variant with another group. Here a rendition's id is worked out
+// from what the playlist declares about it, so the viewer's choice stays the same track through
+// such a move, and when the channel opens again, in whatever order that stream lists them.
 //
 // Subtitles show only when the viewer's choice says so. hls.js would turn on the ones a stream
 // marks as its default, so whatever it selects by itself is put back to what was asked for. Its
@@ -64,8 +65,6 @@ export interface EngineTracks {
  * it from telling anything more, for when the stream goes.
  */
 export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice) {
-  const audioIds = renditionIds();
-  const subtitleIds = renditionIds();
   /** Caption channels (1 to 4) with what the playlist declares about each, or null for nothing. */
   const captions = new Map<number, MediaPlaylist | null>();
   /** The lines read and yet to end, by track, each once. */
@@ -84,8 +83,8 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
 
   /** The tracks as the viewer chooses them, in hls.js's order, captions last. */
   function listed(): ChannelTracks {
-    const ids = audioIds(hls.audioTracks);
-    const subtitles = subtitleIds(hls.subtitleTracks);
+    const ids = renditionIds(hls.audioTracks);
+    const subtitles = renditionIds(hls.subtitleTracks);
     return {
       audio: renditionAudio(hls.audioTracks.map((track, at) => facts(track, ids[at] ?? at))),
       subtitles: renditionSubtitles([
@@ -118,7 +117,7 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
 
   /** Where the wanted subtitles are in hls.js's list now, or -1 for none or captions. */
   const wantedIndex = () =>
-    wanted?.format === "text" ? subtitleIds(hls.subtitleTracks).indexOf(wanted.id) : -1;
+    wanted?.format === "text" ? renditionIds(hls.subtitleTracks).indexOf(wanted.id) : -1;
 
   /** Has hls.js load the wanted subtitles, and no others. */
   function assert(): void {
@@ -206,7 +205,7 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
       return;
     }
     const at = data.subtitleTrack ? hls.subtitleTracks.indexOf(data.subtitleTrack) : -1;
-    const id = subtitleIds(hls.subtitleTracks)[at];
+    const id = renditionIds(hls.subtitleTracks)[at];
     if (id === undefined) return;
     for (const cue of cues) read(keyOf({ id, page: null }), cue);
   });
@@ -215,7 +214,7 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
   // before the viewer chose other subtitles is told with the rendition it belongs to.
   hls.on(Hls.Events.SUBTITLE_FRAG_PROCESSED, (_event, data) => {
     if (released || !data.success) return;
-    const id = subtitleIds(hls.subtitleTracks)[data.frag.level];
+    const id = renditionIds(hls.subtitleTracks)[data.frag.level];
     if (id === undefined) return;
     const { start, duration } = data.part ?? data.frag;
     readUntil.set(id, Math.max(readUntil.get(id) ?? 0, start + duration));
@@ -227,7 +226,7 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
       changeListener = listener;
     },
     setAudio(id) {
-      const index = audioIds(hls.audioTracks).indexOf(id);
+      const index = renditionIds(hls.audioTracks).indexOf(id);
       if (!released && index !== -1) hls.audioTrack = index;
     },
     setSubtitle(track) {
@@ -263,24 +262,31 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
 
 /**
  * Numbers renditions by what they are: the name, language and marks that hls.js itself matches
- * a rendition by when it looks one up in another group. Asked again with another group's list, it
- * gives each rendition the number its counterpart had; two that read the same keep their order.
+ * a rendition by when it looks one up in another group. A rendition's number is worked out from
+ * those alone, so its counterpart has the same one in another group, and in another stream of the
+ * channel, in whatever order either lists them; two that read the same are told apart by their
+ * order.
  */
-function renditionIds(): (renditions: readonly MediaPlaylist[]) => number[] {
-  const known = new Map<string, number>();
-  return (renditions) => {
-    const seen = new Map<string, number>();
-    return renditions.map((rendition) => {
-      const { name, lang = "", assocLang = "", characteristics = "", forced } = rendition;
-      const identity = JSON.stringify([name, lang, assocLang, characteristics, forced]);
-      const nth = seen.get(identity) ?? 0;
-      seen.set(identity, nth + 1);
-      const key = `${identity}#${nth}`;
-      const id = known.get(key) ?? known.size;
-      known.set(key, id);
-      return id;
-    });
-  };
+function renditionIds(renditions: readonly MediaPlaylist[]): number[] {
+  const seen = new Map<string, number>();
+  return renditions.map((rendition) => {
+    const { name, lang = "", assocLang = "", characteristics = "", forced } = rendition;
+    const identity = JSON.stringify([name, lang, assocLang, characteristics, forced]);
+    const nth = seen.get(identity) ?? 0;
+    seen.set(identity, nth + 1);
+    return hashed(`${identity}#${nth}`);
+  });
+}
+
+/**
+ * A stable unsigned 32-bit rendition id using FNV-1a, separate from `CAPTIONS_ID`.
+ */
+function hashed(text: string): number {
+  let hash = 0x811c9dc5;
+  for (let at = 0; at < text.length; at++) {
+    hash = Math.imul(hash ^ text.charCodeAt(at), 0x01000193);
+  }
+  return hash >>> 0;
 }
 
 /** What the playlist declares about a rendition, or about a caption channel if anything. */

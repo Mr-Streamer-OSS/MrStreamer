@@ -107,7 +107,7 @@ export const ipcInputs = {
       "variant?": "string",
       decoders: decoders(),
       "repair?": "boolean",
-      /** The sound track to play, by PID; the channel's first otherwise. */
+      /** The chosen sound track id. MPEG-TS uses its PID; HLS selection happens in the engine. */
       "audio?": "number.integer >= 0",
       /** Without `audio`, the sound in this language when the channel has it: "nl". */
       "audioLanguage?": "string",

@@ -3,9 +3,10 @@
 // same Sound and CC as any channel, with the viewer's remembered languages. Sound switches where
 // the stream plays. Subtitles and captions come on only by the viewer's choice, never because the
 // stream marks them as its default, and a choice stays the same track when the stream moves to
-// another group of renditions. CC says the chosen subtitles are loading until the stream's player
-// has read them where it plays, whether or not anything is said there. hls.js itself runs in the
-// real app (see test/e2e); here a stand-in plays the stream's part.
+// another group of renditions, or the channel opens again with them in another order. CC says the
+// chosen subtitles are loading until the stream's player has read them where it plays, whether or
+// not anything is said there. hls.js itself runs in the real app (see test/e2e); here a stand-in
+// plays the stream's part.
 import { ipc } from "./support.ts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
@@ -58,6 +59,21 @@ async function playing(id: string) {
   stream.variant({ audio: SOUND, subtitles: SUBTITLES });
   await wait();
   return stream;
+}
+
+/** Opens `id` again, as after the connection was lost, and gives the stream opened for that. */
+async function reopened(id: string) {
+  const answer = ipc.hold("playback.open");
+  player.retry();
+  await wait();
+  answer.resolve({
+    sessionId: `${id}2`,
+    channelId: id,
+    url: `http://127.0.0.1/${id}2`,
+    format: "hls",
+  });
+  await wait();
+  return streams.latest();
 }
 
 /** The tracks Sound and CC list, by label. */
@@ -354,32 +370,61 @@ describe("an HLS channel's tracks", () => {
     expect(onScreen()).toEqual([]);
   });
 
-  it("opens the channel again with the tracks the viewer chose on it", async () => {
+  it("opens the channel again with the tracks the viewer chose on it, wherever it lists them", async () => {
     const first = await playing("a");
     player.setAudio(sound("Español")?.id ?? -1);
-    player.setSubtitle(subtitles("English"));
-    first.subtitleLines([{ start: 10, end: 12, text: "We sail at first light." }]);
+    player.setSubtitle(subtitles("Deutsch"));
+    first.subtitleLines([{ start: 10, end: 12, text: "Wir segeln im Morgengrauen." }]);
 
-    // As after the connection was lost.
-    const answer = ipc.hold("playback.open");
-    player.retry();
-    await wait();
-    answer.resolve({ sessionId: "a2", channelId: "a", url: "http://127.0.0.1/a2", format: "hls" });
-    await wait();
-    const second = streams.latest();
-    second.variant({ audio: SOUND, subtitles: SUBTITLES });
+    // Another stream of the channel, as its other qualities are, lists them the other way round.
+    const second = await reopened("a");
+    second.variant({ audio: SOUND.toReversed(), subtitles: SUBTITLES.toReversed() });
     await wait();
 
     expect(second).not.toBe(first);
     expect(first.destroyed).toBe(true);
-    expect(second.audioTrack).toBe(1);
+    expect(second.audioTrack).toBe(0);
     expect(soundPlaying()).toBe("Español");
     expect(second.subtitleTrack).toBe(0);
-    expect(player.state().subtitle).toMatchObject({ label: "English" });
+    expect(player.state().subtitle).toMatchObject({ label: "Deutsch" });
+    // English, the stream's default and where Deutsch was listed before, is never loaded.
+    expect(second.subtitlesLoaded).not.toContain("English");
     // The new stream's clock starts again, so the lines of the one before are gone, and it has
     // yet to read the subtitles.
     expect(onScreen()).toEqual([]);
     expect(loading()).toBe(true);
+
+    second.subtitleLines([{ start: 1, end: 2, text: "Noch da." }]);
+
+    expect(onScreen()).toEqual(["Noch da."]);
+  });
+
+  it("opens the channel again in the viewer's languages when it lists the chosen tracks no more", async () => {
+    await playing("a");
+    player.setAudio(sound("Español")?.id ?? -1);
+    player.setSubtitle(subtitles("Deutsch"));
+    // What choosing them saved.
+    ipc.prefer({ audioLanguage: "es", subtitleLanguage: "de" });
+
+    const second = await reopened("a");
+    second.variant({
+      audio: [
+        { name: "English", lang: "en", default: true },
+        { name: "Italiano", lang: "it" },
+        { name: "Español (Latinoamérica)", lang: "es" },
+      ],
+      subtitles: [
+        { name: "English", lang: "en", default: true },
+        { name: "Français", lang: "fr" },
+        { name: "Deutsch (Schweiz)", lang: "de" },
+      ],
+    });
+    await wait();
+
+    // Not Italiano and Français, which are where Español and Deutsch were listed before.
+    expect(soundPlaying()).toBe("Español (Latinoamérica)");
+    expect(player.state().subtitle).toMatchObject({ label: "Deutsch (Schweiz)" });
+    expect(second.subtitlesLoaded).toEqual(["Deutsch (Schweiz)"]);
   });
 
   it("lets go of the stream and its lines when stopped", async () => {
