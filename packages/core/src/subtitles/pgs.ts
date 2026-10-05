@@ -141,6 +141,20 @@ export function pgsDecoder() {
 }
 
 /**
+ * Whether a display set starts an epoch, which forgets every object and palette before it: a
+ * decoder that begins there draws what one that read the whole stream draws.
+ */
+export function pgsStartsEpoch(set: Uint8Array): boolean {
+  for (let offset = 0; offset + 3 <= set.length;) {
+    const size = (set[offset + 1]! << 8) | set[offset + 2]!;
+    // A presentation composition: its state is the eighth byte.
+    if (set[offset] === 0x16 && size >= 11) return (set[offset + 3 + 7]! & 0x80) !== 0;
+    offset += 3 + size;
+  }
+  return false;
+}
+
+/**
  * The display sets of a stored PGS stream ("PG", times, type, size, data per segment), each with
  * its time in seconds and its segments without the "PG" header.
  */

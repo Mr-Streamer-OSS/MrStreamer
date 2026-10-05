@@ -41,8 +41,9 @@ export interface StreamSession {
  * `${url}?start=<seconds>&audio=<id>&subtitle=<id>`. Each request starts again from its position
  * and replaces the one before, so seeking and changing tracks never hold two provider
  * connections. The answer is fragmented MP4; its `x-start` header says at which second of the
- * title its first frame sits, and `x-cues` names where the subtitle cues stream, as WebVTT with
- * the title's own times.
+ * title its first frame sits. With `only=subtitles` the same address answers the subtitle
+ * track's feed instead, which the player reads before it asks for the picture: see
+ * `@mrstreamer/core/subtitles/feed`.
  */
 export interface TitleSession {
   readonly sessionId: string;

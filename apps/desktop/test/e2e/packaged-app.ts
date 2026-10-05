@@ -5,17 +5,19 @@
 // back, which must keep the one stream rather than open another. Then it plays a movie from
 // Movies, which the bundled ffprobe reads and ffmpeg repackages, skips ahead and leaves it. Then
 // it shows a movie's PGS subtitles and its DVD subtitles, which the bundled ffmpeg sends beside the
-// picture, as stored and as DVB, for the app to draw. Last, it opens Chromium's and Node.js's
-// notices, which come from the credits page the installer must keep.
+// picture, as stored and as DVB, for the app to draw, and starts it again inside a subtitle and
+// between two. Last, it opens Chromium's and Node.js's notices, which come from the credits page
+// the installer must keep.
 //
 //   node test/e2e/packaged-app.ts <app executable> [-- extra app arguments]
 //
 // Passes when the build names the right updater, both channels show a moving picture with decoded
 // sound, Home and Watch share the stream: muted on Home, with sound in Watch, and no second request
 // to the provider, and the movie plays with sound, skips 10 seconds and lets go of its connection
-// when left, both subtitle tracks draw over the picture while they are due, and both notices have
-// text. The app runs with a throwaway profile and remote debugging on a random port; on macOS pass
-// --use-mock-keychain so the test never touches a real keychain.
+// when left, both subtitle tracks draw over the picture while they are due, a subtitle that began
+// before the position a run starts from shows once it has loaded and one that ended before it
+// doesn't, and both notices have text. The app runs with a throwaway profile and remote debugging on a random
+// port; on macOS pass --use-mock-keychain so the test never touches a real keychain.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -194,7 +196,9 @@ async function playMovie(page: Page): Promise<{ ok: boolean; detail: string }> {
 
 /**
  * Plays the movie with picture subtitles: English PGS from 2 to 4 s, then Dutch DVD subtitles
- * from 8 to 10 s, each chosen under CC. Counts the pixels drawn over the picture.
+ * from 8 to 10 s, each chosen under CC. Then, paused, starts it again inside the PGS subtitle from
+ * 5 to 7 s, which began before the keyframe at 6 s, and after the DVD subtitle of those seconds.
+ * Counts the pixels drawn over the picture.
  */
 async function pictureSubtitles(page: Page): Promise<{ ok: boolean; detail: string }> {
   await key(page, "Escape", 27);
@@ -236,10 +240,44 @@ async function pictureSubtitles(page: Page): Promise<{ ok: boolean; detail: stri
   await waitFor(async () => (await time()) >= 8.5, 30_000);
   await delay(300);
   const dutch = await drawn();
+  // Choosing subtitles starts a run where the title is. Paused, at a position within what's
+  // loaded, only that run puts anything on screen.
+  const startAt = async (position: number, label: string) => {
+    const before = await page.evaluate<string>(`(() => {
+      const video = document.querySelector("video");
+      video.currentTime = ${position};
+      return video.src;
+    })()`);
+    await choose(label);
+    await waitFor(
+      () =>
+        page.evaluate<boolean>(`(() => {
+          const video = document.querySelector("video");
+          return video.src !== ${JSON.stringify(before)} && !video.seeking &&
+            video.readyState >= 2 && Math.abs(video.currentTime - ${position}) < 0.1;
+        })()`),
+      30_000,
+    );
+    // The picture doesn't wait for the subtitles: the view says they are loading until what was
+    // on screen at the position is there.
+    await waitFor(
+      async () =>
+        !(await page.evaluate<boolean>(
+          `document.querySelector('[role="status"]')?.textContent === "Subtitles loading"`,
+        )),
+      15_000,
+    );
+    await delay(300);
+    return drawn();
+  };
+  await key(page, " ", 32);
+  await waitFor(() => page.evaluate<boolean>(`document.querySelector("video").paused`), 10_000);
+  const inside = await startAt(6.5, "English");
+  const after = await startAt(7.5, "Nederlands · Forced");
   await key(page, "Escape", 27);
   return {
-    ok: english > 0 && dutch > 0,
-    detail: `${english} pixels of PGS at 2.5 s, ${dutch} of DVD subtitles at 8.5 s`,
+    ok: english > 0 && dutch > 0 && inside > 0 && after === 0,
+    detail: `${english} pixels of PGS at 2.5 s, ${dutch} of DVD subtitles at 8.5 s, ${inside} of PGS in a run from 6.5 s, ${after} of DVD subtitles in a run from 7.5 s`,
   };
 }
 

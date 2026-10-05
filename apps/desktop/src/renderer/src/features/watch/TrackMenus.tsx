@@ -17,6 +17,7 @@ export function TrackMenus({
   audioId,
   subtitles,
   subtitle,
+  subtitleNote = null,
   open,
   onOpenChange,
   onAudio,
@@ -27,6 +28,8 @@ export function TrackMenus({
   audioId: number | null;
   subtitles: readonly SubtitleTrack[];
   subtitle: SubtitleTrack | null;
+  /** What to say beside the chosen subtitle track, such as that it is still loading. */
+  subtitleNote?: string | null;
   open: TrackMenu;
   onOpenChange: (open: TrackMenu) => void;
   onAudio: (id: number) => void;
@@ -73,18 +76,22 @@ export function TrackMenus({
           >
             Off
           </Choice>
-          {subtitles.map((track) => (
-            <Choice
-              key={`${track.id}:${track.page}`}
-              chosen={track.id === subtitle?.id && track.page === subtitle.page}
-              onChoose={() => {
-                onSubtitle(track);
-                onOpenChange(null);
-              }}
-            >
-              {track.label}
-            </Choice>
-          ))}
+          {subtitles.map((track) => {
+            const chosen = track.id === subtitle?.id && track.page === subtitle.page;
+            return (
+              <Choice
+                key={`${track.id}:${track.page}`}
+                chosen={chosen}
+                note={chosen ? subtitleNote : null}
+                onChoose={() => {
+                  onSubtitle(track);
+                  onOpenChange(null);
+                }}
+              >
+                {track.label}
+              </Choice>
+            );
+          })}
         </Menu>
       )}
     </>
@@ -188,13 +195,15 @@ function moveFocus(event: KeyboardEvent<HTMLDivElement>): void {
   target.focus();
 }
 
-/** One of a menu's choices, marked when chosen. */
+/** One of a menu's choices, marked when chosen, with a word at its end when there is one to say. */
 export function Choice({
   chosen,
+  note = null,
   onChoose,
   children,
 }: {
   chosen: boolean;
+  note?: string | null;
   onChoose: () => void;
   children: ReactNode;
 }) {
@@ -211,6 +220,9 @@ export function Choice({
     >
       <span className={cn("size-1.5 flex-none rounded-full", chosen && "bg-white")} />
       <span className="min-w-0">{children}</span>
+      {note && (
+        <span className="ml-auto flex-none text-[0.8125rem] text-muted-foreground">{note}</span>
+      )}
     </button>
   );
 }

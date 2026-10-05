@@ -247,6 +247,45 @@ export function dvbDecoder(page: number | null) {
   }
 }
 
+/** The page compositions in a PES payload: each one's page, its state and how many regions it shows. */
+function* pageCompositions(
+  payload: Uint8Array,
+): Generator<{ pageId: number; state: number; regions: number }> {
+  if (payload[0] !== 0x20 || payload[1] !== 0x00) return;
+  for (let offset = 2; offset + 6 <= payload.length && payload[offset] === 0x0f;) {
+    const length = (payload[offset + 4]! << 8) | payload[offset + 5]!;
+    if (payload[offset + 1] === 0x10 && length >= 2) {
+      yield {
+        pageId: (payload[offset + 2]! << 8) | payload[offset + 3]!,
+        state: (payload[offset + 7]! >> 2) & 0x03,
+        regions: Math.floor((length - 2) / 6),
+      };
+    }
+    offset += 6 + length;
+  }
+}
+
+/**
+ * Whether a PES payload starts page `page`, or any page when null, afresh: an acquisition point or
+ * a mode change, where the standard has every region, colour table and object sent again so that a
+ * decoder can join there, as one does on a channel. A decoder that begins there draws what one
+ * that read the whole stream draws.
+ */
+export function dvbStartsAfresh(payload: Uint8Array, page: number | null): boolean {
+  for (const composition of pageCompositions(payload)) {
+    if (page === null || composition.pageId === page) {
+      return composition.state === 1 || composition.state === 2;
+    }
+  }
+  return false;
+}
+
+/** Whether a PES payload shows a page without regions: what ffmpeg writes to end a picture. */
+export function dvbClears(payload: Uint8Array): boolean {
+  const [composition] = pageCompositions(payload);
+  return composition?.regions === 0;
+}
+
 function newEpoch(): Epoch {
   return {
     display: { width: 720, height: 576, x: 0, y: 0 },

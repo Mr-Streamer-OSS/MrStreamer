@@ -63,6 +63,21 @@ export function captionsInPicture(payload: Uint8Array, codec: "h264" | "hevc"): 
   return joined;
 }
 
+/**
+ * The caption pairs in one packet of a CEA-608 track as ffmpeg reads it from a file: three bytes
+ * each there too, a marker that names the field, then the pair.
+ */
+export function captionsInTrack(packet: Uint8Array): Uint8Array {
+  const pairs: number[] = [];
+  for (let at = 0; at + 3 <= packet.length; at += 3) {
+    const marker = packet[at]!;
+    // Valid, and CEA-608 for field one or two, as in a picture's user data.
+    if (!(marker & 0x04) || (marker & 0x03) > 1) continue;
+    pairs.push(marker & 0x01, packet[at + 1]!, packet[at + 2]!);
+  }
+  return Uint8Array.from(pairs);
+}
+
 /** NAL units in Annex B data, each from its header byte. */
 function* nalUnits(data: Uint8Array): Generator<Uint8Array> {
   let start = -1;

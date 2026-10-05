@@ -106,6 +106,37 @@ export function teletextDecoder(page: number | null) {
   }
 }
 
+/**
+ * Whether a PES payload holds page `page`'s header with the erase flag, after which the page is
+ * only what follows: a decoder that begins there shows what one that read the whole stream shows.
+ */
+export function teletextErases(payload: Uint8Array, page: number): boolean {
+  if (payload.length < 1 || payload[0]! < 0x10 || payload[0]! > 0x1f) return false;
+  const wanted = pageAddress(page);
+  for (let offset = 1; offset + 2 <= payload.length;) {
+    const id = payload[offset]!;
+    const length = payload[offset + 1]!;
+    if ((id === 0x02 || id === 0x03) && length === 0x2c && offset + 2 + length <= payload.length) {
+      const data = payload.subarray(offset + 4, offset + 46).map(reverse);
+      const address = unham(data[0]!) | (unham(data[1]!) << 4);
+      const [units, tens, erase] = [unham(data[2]!), unham(data[3]!), unham(data[5]!)];
+      if (
+        address >= 0 &&
+        address >> 3 === 0 &&
+        units >= 0 &&
+        tens >= 0 &&
+        erase >= 0 &&
+        (address & 0x07 || 8) * 0x100 + (tens << 4) + units === wanted &&
+        (erase & 0x08) !== 0
+      ) {
+        return true;
+      }
+    }
+    offset += 2 + length;
+  }
+  return false;
+}
+
 /** Page 888 as its address: magazine 8, page 0x88. */
 function pageAddress(page: number): number {
   const magazine = Math.floor(page / 100);

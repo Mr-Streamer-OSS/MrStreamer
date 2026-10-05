@@ -1,10 +1,10 @@
 // One way in for every subtitle format the player draws itself: the data of a packet, with its
 // time, in; what the screen shows from then on, when that changes, out.
 import { captionDecoder } from "./captions.ts";
-import { dvbDecoder } from "./dvb.ts";
-import { pgsDecoder } from "./pgs.ts";
+import { dvbDecoder, dvbStartsAfresh } from "./dvb.ts";
+import { pgsDecoder, pgsStartsEpoch } from "./pgs.ts";
 import type { SubtitleChange } from "./screen.ts";
-import { teletextDecoder } from "./teletext.ts";
+import { teletextDecoder, teletextErases } from "./teletext.ts";
 
 /**
  * How a subtitle packet is coded. `pgs`: a PGS display set. `dvb`: a DVB subtitle PES payload,
@@ -32,5 +32,28 @@ export function subtitleDecoder(codec: SubtitleCodec, page: number | null): Subt
       return teletextDecoder(page);
     case "captions":
       return captionDecoder(page ?? 1);
+  }
+}
+
+/**
+ * A test for the packets that start `codec`'s subtitles afresh, so that a decoder which begins
+ * with one shows the same from then on as one that read everything before: a PGS epoch start, a
+ * DVB acquisition point or mode change, the erased header of the chosen teletext page. Null when
+ * no packet does: captions keep their hidden memory, mode and cursor from the start of the
+ * stream, and a teletext decoder that picks the page itself takes the first one it finds.
+ */
+export function freshStart(
+  codec: SubtitleCodec,
+  page: number | null,
+): ((data: Uint8Array) => boolean) | null {
+  switch (codec) {
+    case "pgs":
+      return pgsStartsEpoch;
+    case "dvb":
+      return (data) => dvbStartsAfresh(data, page);
+    case "teletext":
+      return page === null ? null : (data) => teletextErases(data, page);
+    case "captions":
+      return null;
   }
 }
