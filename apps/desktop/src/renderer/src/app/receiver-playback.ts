@@ -1,5 +1,6 @@
-// Taking up what a receiver already plays when the window opens, as after closing it on macOS:
-// the main process kept it playing, and the window shows its controls again.
+// Taking up what a receiver already plays when the page starts, as after a reload: the main
+// process kept it playing, and the window shows its controls again. A window closed on macOS
+// while a receiver plays keeps its page, so it has nothing to take up.
 import type { QueryClient } from "@tanstack/react-query";
 import { call } from "../lib/ipc.ts";
 import { queries } from "../lib/queries.ts";

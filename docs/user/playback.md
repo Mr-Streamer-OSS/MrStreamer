@@ -46,12 +46,12 @@ Press the TV button beside the volume, or **O**. On Windows, pick a Cast device 
 
 While the TV plays:
 
-- The controls in Mr. Streamer work the TV: pause, skipping, the scrubber, the next episode, channel up and down, and the volume where the TV lets an app set it. They show what the TV last confirmed. After a skip the scrubber stays where you put it, with a ring where the TV still is, until the TV catches up.
+- The controls in Mr. Streamer work the TV: pause, skipping, the scrubber, the next episode, channel up and down, and the volume where the TV lets an app set it. They show what the TV last confirmed, so a pause from the TV's own remote shows too, for a channel as for a movie. After a skip the scrubber stays where you put it, with a ring where the TV still is, until the TV catches up.
 - **Back** and **Escape** leave the player and the TV plays on. A bar at the foot of every page says what plays where, with Stop and **Play here**; clicking what plays opens its controls again.
 - **Stop** ends the stream and keeps the TV, so the next thing you play goes there too. **Disconnect** in the bar then lets the TV go.
 - **Play here** ends playback on the TV and carries on in Mr. Streamer from where the TV was, with the same sound and subtitles.
 - Home and Live TV show no preview, since your subscription's one connection is the TV's.
-- Closing the window on macOS leaves the TV playing, and the Dock icon brings its controls back. Quitting Mr. Streamer ends it.
+- Closing the window on macOS leaves the TV playing. The next episode still starts by itself and the media keys still work the TV, and the Dock icon brings the window back. Quitting Mr. Streamer ends it. On Windows, closing the window quits.
 - How far you got in a movie or episode is saved as it is on your computer.
 
 | What you play                                              | What the TV gets                                    |
@@ -75,7 +75,6 @@ A movie or episode starts later on a TV than on your computer, and so does a ski
 - A damaged broadcast can take more than ten seconds to start, while Mr. Streamer retries it with the picture re-encoded.
 - Interlaced channels that play directly, common in European HD broadcasts, aren't deinterlaced; fast motion can show fine horizontal lines.
 - On a TV, a movie or episode plays at normal speed, subtitle timing can't be shifted, and the mini player is off, since it has no picture to show. Video the TV could play itself, such as HEVC, is still converted on your computer.
-- The keyboard's media keys and your system's media controls work a TV only while Mr. Streamer's window is open.
 - Playing on a TV is new. If yours doesn't show up or doesn't play, please [report it](https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose) with its make and model.
 
 ## When something won't play

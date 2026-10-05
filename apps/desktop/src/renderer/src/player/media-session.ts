@@ -15,8 +15,8 @@
 // paused, as after Pause on the TV's remote, shows as paused, and play has the receiver play on
 // with the stream it has. Chromium offers the system only a window that plays sound itself, and a
 // receiver's playback makes none here, so a silent loop plays in step with the receiver meanwhile
-// (`carry`). With the window closed, as macOS allows while a receiver plays, there is no session
-// and the media keys reach nothing.
+// (`carry`). A window closed on macOS while a receiver plays is only out of sight, so its session
+// and the media keys go on (see the main process's index.ts).
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";

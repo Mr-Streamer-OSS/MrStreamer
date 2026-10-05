@@ -27,7 +27,8 @@ import dns from "dns-packet";
 import { lanAddresses } from "../../src/main/playback/lan.ts";
 import { startFakeCastReceiver } from "../fake-cast-receiver.ts";
 import { fixture, startFakeProvider } from "../fake-provider.ts";
-import { connect, delay, key, launch, login, waitFor, type Page } from "./app.ts";
+import { connect, delay, key, launch, login, press, says, waitFor, type Page } from "./app.ts";
+import { segmentsOf } from "./tv-player.ts";
 
 const [executable, ...rest] = process.argv.slice(2).filter((arg) => arg !== "--");
 if (!executable) throw new Error("Usage: node test/e2e/cast-tv.ts <app executable> [-- args]");
@@ -113,40 +114,28 @@ mdns.on("message", (message, from) => {
  * The TV's player: for the media it holds it reads the playlists, fetches the segment it is at
  * and the next, says it plays once it has them, and moves its position on while it does.
  */
-const fetched = { segments: 0, refused: 0 };
+const fetched = { segments: 0, refused: [] as string[] };
 let segment: Buffer | null = null;
 const have = new Set<string>();
 async function get(url: string): Promise<Buffer | null> {
   const response = await fetch(url, { signal: AbortSignal.timeout(25_000) }).catch(() => null);
-  if (!response?.ok) fetched.refused++;
+  if (!response?.ok) {
+    fetched.refused.push(`${response?.status ?? "no answer"} for ${new URL(url).pathname}`);
+  }
   return response?.ok ? Buffer.from(await response.arrayBuffer()) : null;
 }
 let busy = false;
+/** The script works the TV's own remote, and the TV's player leaves its state alone meanwhile. */
+let remote = false;
 const player = setInterval(() => {
   const media = tv.media;
-  if (!media || busy) return;
+  if (!media || busy || remote) return;
   busy = true;
   void (async () => {
-    const address = String(media.media["contentId"]);
-    const first = (await get(address))?.toString() ?? "";
-    // A title's playlist names its picture's; a channel's lists its segments itself.
-    const named = first.split("\n").find((line) => line && !line.startsWith("#"));
-    const list =
-      first.includes("#EXTINF") || !named ? address : new URL(named.trim(), address).href;
-    const text = list === address ? first : ((await get(list))?.toString() ?? "");
-    let start = 0;
-    let length = 0;
-    const segments: { start: number; length: number; url: string }[] = [];
-    for (const line of text.split("\n")) {
-      const info = /^#EXTINF:([\d.]+)/.exec(line);
-      if (info) length = Number(info[1]);
-      else if (line && !line.startsWith("#")) {
-        segments.push({ start, length, url: new URL(line.trim(), list).href });
-        start += length;
-      }
-    }
+    const segments = await segmentsOf(String(media.media["contentId"]), get);
     const live = media.media["streamType"] === "LIVE";
-    if (!live) media.media = { ...media.media, duration: start };
+    const last = segments.at(-1);
+    if (!live) media.media = { ...media.media, duration: last ? last.start + last.length : 0 };
     const at = media.currentTime;
     const wanted = live
       ? segments.slice(-2)
@@ -188,18 +177,6 @@ const profile = join(work, "profile");
 process.env["MR_STREAMER_CAST"] = "on";
 const app = launch(executable, rest, { port, profile });
 
-const text = (page: Page, selector = "body") =>
-  page.evaluate<string>(`document.querySelector(${JSON.stringify(selector)})?.innerText ?? ""`);
-const says = (page: Page, words: string, selector?: string) => async () =>
-  (await text(page, selector)).includes(words);
-/** Clicks the button whose text starts with `label`, or that has it as its label, once there is one. */
-async function press(page: Page, label: string): Promise<void> {
-  const button = `[...document.querySelectorAll("button")].find((b) =>
-    b.textContent.trim().startsWith(${JSON.stringify(label)}) ||
-    b.getAttribute("aria-label") === ${JSON.stringify(label)})`;
-  await waitFor(() => page.evaluate<boolean>(`!!${button}`), 20_000);
-  await page.evaluate(`${button}.click()`);
-}
 const output = async (page: Page) =>
   (
     await page.evaluate<{
@@ -315,9 +292,14 @@ try {
   await press(page, "Search");
   await delay(500);
   await page.send("Input.insertText", { text: "TEST | H.264 + AAC" });
-  await delay(800);
+  const found = `[...document.querySelectorAll("[data-index]")].some((row) => row.textContent.includes("H.264 + AAC"))`;
+  await waitFor(() => page.evaluate<boolean>(found), 20_000);
   await key(page, "Enter", 13);
-  await waitFor(async () => (await clock(page)) > 1, 30_000);
+  const watching = `!!document.querySelector("[data-view=watch]") && !document.querySelector("video").paused`;
+  await waitFor(
+    async () => (await page.evaluate<boolean>(watching)) && (await clock(page)) > 1,
+    30_000,
+  );
   const title = fetched.segments;
   await choose(page);
   await waitFor(says(page, "Playing on Living Room TV", "[data-view=watch]"), 40_000);
@@ -328,7 +310,46 @@ try {
     `${fetched.segments - title} segments, ${provider.activeStreams()} open`,
   );
 
-  // Quitting ends it.
+  // Pause on the TV's own remote, and a stream that runs dry there, show in the window.
+  const loads = tv.requests("LOAD").length;
+  const plays = tv.requests("PLAY").length;
+  const watch = (words: string) => says(page, `${words} on Living Room TV`, "[data-view=watch]");
+  remote = true;
+  tv.status({ playerState: "PAUSED" });
+  await waitFor(watch("Paused"), 10_000);
+  tv.status({ playerState: "BUFFERING" });
+  await waitFor(watch("Buffering"), 10_000);
+  tv.status({ playerState: "PAUSED" });
+  await waitFor(watch("Paused"), 10_000);
+  check(
+    tv.requests("LOAD").length === loads && provider.activeStreams() === 1,
+    "The window says when the TV holds the channel paused or buffering",
+    `${provider.activeStreams()} open`,
+  );
+  // The system's Play, which a media key sends, has the TV play on with the stream it holds.
+  // It is asked over MPRIS, so only where a session bus runs.
+  if (process.platform === "linux" && process.env["DBUS_SESSION_BUS_ADDRESS"]) {
+    execFileSync("dbus-send", [
+      "--session",
+      "--print-reply",
+      `--dest=org.mpris.MediaPlayer2.chromium.instance${app.pid}`,
+      "/org/mpris/MediaPlayer2",
+      "org.mpris.MediaPlayer2.Player.Play",
+    ]);
+    await waitFor(async () => tv.requests("PLAY").length > plays, 10_000).catch(() => {});
+    check(
+      tv.requests("PLAY").length === plays + 1 && tv.requests("LOAD").length === loads,
+      "The system's Play has the TV play the paused channel on",
+      `${tv.requests("PLAY").length - plays} PLAY, ${tv.requests("LOAD").length - loads} LOAD`,
+    );
+  } else tv.status({ playerState: "PLAYING" });
+  remote = false;
+  await waitFor(watch("Playing"), 10_000);
+
+  // Quitting ends it. The TV's player stops asking first: a request the quit cuts off says
+  // nothing about the app.
+  clearInterval(player);
+  await waitFor(async () => !busy, 30_000);
   page.close();
   app.kill("SIGTERM");
   await waitFor(async () => tv.app === null && provider.activeStreams() === 0, 10_000).catch(
@@ -339,9 +360,9 @@ try {
     "Quitting stops the TV and frees the provider",
   );
   check(
-    fetched.refused === 0,
+    fetched.refused.length === 0,
     "The app answered every request of the TV",
-    `${fetched.refused} refused`,
+    fetched.refused.join(", "),
   );
   check(
     tv.violations.length === 0,

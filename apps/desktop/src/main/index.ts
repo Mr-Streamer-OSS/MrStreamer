@@ -1,7 +1,16 @@
 // Composition root: creates the window and wires the services to IPC.
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { app, BrowserWindow, Menu, powerSaveBlocker, safeStorage, session, shell } from "electron";
+import {
+  app,
+  autoUpdater,
+  BrowserWindow,
+  Menu,
+  powerSaveBlocker,
+  safeStorage,
+  session,
+  shell,
+} from "electron";
 import type { IpcEvent, IpcEvents } from "@mrstreamer/contracts/ipc";
 import { streamsToPlay } from "@mrstreamer/core/catalogue/variants";
 import { Diagnostics } from "@mrstreamer/core/diagnostics";
@@ -76,12 +85,49 @@ app.commandLine.appendSwitch("disk-cache-size", String(DISK_CACHE_BYTES));
 const CATALOGUE_MAX_AGE = "12 hours";
 
 let mainWindow: BrowserWindow | null = null;
+/**
+ * The viewer closed the window while a receiver had playback, and macOS keeps it, out of sight:
+ * its page is what counts down to the next episode and answers the media keys. The Dock brings it
+ * back, and it closes for good once the receiver lets go (see `start`).
+ */
+let away = false;
 /** The smallest the window gets, except as the mini player. */
 const MIN_SIZE = { minWidth: 960, minHeight: 600 } as const;
 /** Each window's mini player, which remembers where the window was. */
 const miniPlayers = new WeakMap<BrowserWindow, ReturnType<typeof miniPlayer>>();
 
-function openWindow(closeStreams: () => void): BrowserWindow {
+/**
+ * Takes the window out of sight in place of closing it, with its page running as if on screen.
+ * Chromium wakes a hidden page's timers once a minute after the first, which would hold the next
+ * episode back by minutes, so the page isn't told it is hidden. A full-screen window leaves full
+ * screen first: macOS shows a black screen in place of one that hides.
+ */
+function putAway(window: BrowserWindow): void {
+  away = true;
+  window.webContents.setBackgroundThrottling(false);
+  if (!window.isFullScreen()) return window.hide();
+  window.once("leave-full-screen", () => {
+    // Not when it was brought back meanwhile.
+    if (away) window.hide();
+  });
+  window.setFullScreen(false);
+}
+
+/** Puts the window on screen and in front, from out of sight or minimised. */
+function bringBack(window: BrowserWindow): void {
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+  if (!away) return;
+  away = false;
+  window.webContents.setBackgroundThrottling(true);
+}
+
+/**
+ * Opens the app's window. `keeps` says, when the viewer closes it, whether it only goes out of
+ * sight; `closeStreams` runs once it is gone.
+ */
+function openWindow(closeStreams: () => void, keeps: () => boolean): BrowserWindow {
   const window = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -113,10 +159,17 @@ function openWindow(closeStreams: () => void): BrowserWindow {
   window.on("enter-full-screen", fullScreen);
   window.on("leave-full-screen", fullScreen);
   window.webContents.on("did-finish-load", fullScreen);
+  window.on("close", (event) => {
+    if (!keeps()) return;
+    event.preventDefault();
+    putAway(window);
+  });
   window.on("closed", () => {
     // Nothing can be watching once the window is gone, so release the provider connection.
     closeStreams();
-    if (mainWindow === window) mainWindow = null;
+    if (mainWindow !== window) return;
+    mainWindow = null;
+    away = false;
   });
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//.test(url)) void shell.openExternal(url);
@@ -235,12 +288,16 @@ async function start(): Promise<void> {
   forward(guide.changes, "guide.updated", () => null);
   forward(viewing.changes, "viewing.changed", (sequence) => ({ sequence }));
   forward(updates.changes, "updates.changed", (status) => status);
-  forward(output.changes, "output.changed", (status) => status);
   // A receiver plays from this computer, so it stays awake while one does. The display may sleep.
   let awake: number | null = null;
   runtime.runFork(
     Stream.runForEach(output.changes, (status) =>
       Effect.sync(() => {
+        // A window out of sight is there for the receiver only. Once the receiver lets go it
+        // closes, as the viewer asked, before its page hears of it: the page would carry on
+        // here, or start a preview, with nobody watching.
+        if (away && status.output.kind === "local") mainWindow?.destroy();
+        if (mainWindow) emit(mainWindow.webContents, "output.changed", status);
         const playing = status.output.kind === "receiver" && status.output.media !== null;
         if (playing && awake === null) awake = powerSaveBlocker.start("prevent-app-suspension");
         if (!playing && awake !== null) {
@@ -459,13 +516,31 @@ async function start(): Promise<void> {
     (sender) => sender === mainWindow?.webContents,
   );
 
-  // What plays here ends with the window. What a receiver plays goes on: the app is still
-  // there to serve it, and opening the window again shows its controls.
+  // What plays here ends with the window, and so does a connect to a receiver still under way:
+  // with no window, nothing plays and nothing connects. With a receiver as the output a window
+  // closes only as the app quits, and the quit ends that playback itself.
   const closeStreams = () =>
     void runtime.runFork(
-      Effect.flatMap(output.remote, (remote) => (remote ? Effect.void : playback.closeAll)),
+      Effect.flatMap(output.remote, (remote) =>
+        remote ? Effect.void : Effect.andThen(output.disconnect, playback.closeAll),
+      ),
     );
-  mainWindow = openWindow(closeStreams);
+  /**
+   * The app is quitting, or restarting into an update: its window closes for good, whatever
+   * plays. Both say so before they close the window. An update's restart closes it before
+   * `before-quit`, and would wait forever for a window that only went out of sight.
+   */
+  let leaving = false;
+  const leave = () => {
+    leaving = true;
+  };
+  app.on("before-quit", leave);
+  autoUpdater.on("before-quit-for-update", leave);
+  // On macOS the app outlives its window. While a receiver has playback, or is gone with what it
+  // played still to pick up, closing the window keeps it out of sight. Other systems quit with
+  // their window, which ends the receiver's playback.
+  const keeps = () => isMac && !leaving && runtime.runSync(output.remote);
+  mainWindow = openWindow(closeStreams, keeps);
   // How long the app took to show its window, from the start of the process.
   mainWindow.once("ready-to-show", () =>
     diagnostics.record({ op: "start", ms: Math.round(performance.now()), outcome: "ok" }),
@@ -474,7 +549,9 @@ async function start(): Promise<void> {
   let closing = false;
   app.on("activate", () => {
     // Nothing opens on a runtime that is closing.
-    if (!closing) mainWindow ??= openWindow(closeStreams);
+    if (closing) return;
+    if (!mainWindow) mainWindow = openWindow(closeStreams, keeps);
+    else if (away) bringBack(mainWindow);
   });
   app.on("will-quit", (event) => {
     // The quit waits for the runtime to close, which stops background work, closes the database
@@ -570,10 +647,7 @@ app.on("window-all-closed", () => {
 // first's. Opening the app again brings the running copy's window forward instead.
 if (app.requestSingleInstanceLock()) {
   app.on("second-instance", () => {
-    if (!mainWindow) return;
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
+    if (mainWindow) bringBack(mainWindow);
   });
   // Quitting hands the profile on at once: an update's AppImage starts its new copy just before
   // this one quits.

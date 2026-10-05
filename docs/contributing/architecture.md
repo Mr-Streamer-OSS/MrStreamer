@@ -307,7 +307,7 @@ A movie or episode is served as HLS with a playlist of the whole title, so the r
 - **The clock** is the title's: the first picture of the file sits at 10 s in every segment's timestamps, whichever run made it.
 - **Sound** the receiver decodes is copied and the rest becomes stereo AAC. Both adapters name H.264 and AAC only until a receiver has shown more.
 - **Text subtitles** go beside the picture as a WebVTT rendition, one track per load, cut at the same starts. A line that began before a skip is read from the file's index as for this computer. Picture subtitles, teletext and captions aren't sent: the picture is never re-encoded to burn them in, and the menus mark them "Here only".
-- **ffmpeg never runs ahead.** It doesn't wait for a POST's answer, so each segment's address carries a user name, which makes ffmpeg send `Expect: 100-continue`, and the proxy answers only when its store has room: three segments ahead of the receiver, one behind, 160 MB at most (`playback/segment-store.ts`). A receiver that stays away lets the run end and the provider's connection go; asking again starts one. A segment not made within 30 s answers 504.
+- **ffmpeg never runs ahead.** It doesn't wait for a POST's answer, so each segment's address carries a user name, which makes ffmpeg send `Expect: 100-continue`, and the proxy answers only when its store has room: at most three segments ahead of the receiver and one behind, and no new one while it holds 160 MiB (`playback/segment-store.ts`). A segment is 96 MiB at most, so the store stays under 256 MiB. A receiver that stays away lets the run end and the provider's connection go; asking again starts one. A segment not made within 30 s answers 504.
 - **A file the provider replaces** mid-session ends the load, as its index no longer describes it.
 
 A channel is cut into 2 s segments by the same muxer from the one upstream stream, kept in memory, the newest four in its playlist. A channel that is HLS already keeps its playlists, with their addresses pointed at this computer as for the local player.
@@ -330,7 +330,21 @@ Electron can't AirPlay a stream, so the app comes with a helper: one Swift execu
 
 The output button sits between the volume and the mini player (`features/watch/Output.tsx`). Where the app lists receivers itself it opens a menu like Sound's, which closes once the receiver answers; where only the system does, it opens the system's list. A connect that reaches no receiver says why for a few seconds while what played here plays on, and one the viewer gives up says nothing. It shows on macOS whether or not a receiver is in reach, since the system's list is also where a missing one is diagnosed. `features/watch/ReceiverBar.tsx` stands at the foot of every page while a receiver is connected, and pages and the details sheet end above it (`--receiver-bar`). No page previews meanwhile: the main process refuses a preview's open while a receiver is connected, since the provider's one connection is the receiver's.
 
-On macOS, closing the window leaves the app and the receiver running. The window opened again asks `output.status` and `output.playingTitle` and takes up what plays (`app/receiver-playback.ts`). The app holds a power save blocker while a receiver plays, so the computer doesn't sleep under it. `player/media-session.ts` plays a silent loop in step with the receiver, because Chromium offers the system only a window that makes sound: the media keys and the system's controls then work the receiver while the window is open.
+A channel follows the receiver's word too: one it holds paused or buffering, as after Pause on the TV's remote, reads so in Watch, in the bar and in the system's controls, and the system's Play has the receiver play on with the stream it holds (`output.command`) instead of opening the channel again.
+
+`player/media-session.ts` plays a silent loop in step with the receiver, because Chromium offers the system only a window that makes sound: the media keys and the system's controls then work the receiver. The app holds a power save blocker while a receiver plays, so the computer doesn't sleep under it. A page that starts while a receiver plays, as after a reload, asks `output.status` and `output.playingTitle` and takes up what plays (`app/receiver-playback.ts`).
+
+### The window's lifetime
+
+On macOS the app outlives its window, and a receiver's playback needs the window's page: the page counts down to the next episode and holds the system's media session. So while a receiver is the output, connected or gone with what it played still to pick up (`output.remote`), closing the window only puts it out of sight (`index.ts`):
+
+- **The page runs on as if on screen.** Chromium wakes a hidden page's timers once a minute after the first, which would hold the next episode back by minutes, so background throttling is off for the window while it is out of sight, and on again once it shows. A full-screen window leaves full screen first, since macOS shows a black screen in place of one that hides.
+- **The Dock brings the same window back.** `activate` shows it; there is never a second one.
+- **The window closes for good once the receiver lets go**, before its page hears of it. Nothing plays here unseen, and no preview takes the provider's connection for a window nobody sees.
+- **With no window, nothing plays and nothing connects.** A window closed while playback is here ends its streams, as before, and gives up a connect still under way.
+- **Quitting closes the window whatever plays.** `before-quit` says so before the windows are asked to close. An update's restart closes the windows before `before-quit`, so Electron's `before-quit-for-update` says so too; without it the restart would wait forever for a window that only went out of sight. The quit then ends the receiver's playback within each adapter's own bound.
+
+Windows and Linux quit with their window, which ends the receiver's playback.
 
 ## Updates
 
