@@ -15,7 +15,8 @@
 # MPEG-PS files read over loopback HTTP and written as fragmented MP4, WebVTT cues, subtitle
 # packets beside them and a framecrc report of the first video packet; the decoders for the
 # codecs these carry; the AAC, x264, WebVTT and DVB subtitle encoders; and the deinterlace and
-# scale filters.
+# scale filters. For receivers on the network it also cuts MPEG-TS into the segments of an HLS
+# stream, sent to the app over loopback HTTP like the reports.
 set -euo pipefail
 
 target=${1:?usage: scripts/build-ffmpeg.sh mac-arm64|linux-x64|win-x64}
@@ -83,8 +84,9 @@ features=(
   --enable-protocol=pipe,file,http,tcp
   # mpegvideo recognises the MPEG-2 picture in an MPEG-PS file; it reads no files itself.
   --enable-demuxer=mpegts,matroska,mov,avi,flv,mpegps,mpegvideo
-  # sup writes PGS subtitles as they are stored, beside the picture.
-  --enable-muxer=mpegts,mp4,webvtt,framecrc,sup
+  # sup writes PGS subtitles as they are stored, beside the picture. segment cuts a stream into
+  # the MPEG-TS files a receiver's HLS player asks for, at the times it is given.
+  --enable-muxer=mpegts,mp4,webvtt,framecrc,sup,segment
   --enable-parser=h264,hevc,mpegvideo,mpeg4video,mpegaudio,aac,aac_latm,ac3,dca,mlp,flac,vorbis
   --enable-parser=opus,dvbsub,dvdsub
   --enable-decoder=h264,hevc,mpeg1video,mpeg2video,mpeg4,msmpeg4v3,h263,flv

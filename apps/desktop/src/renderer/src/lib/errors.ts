@@ -1,4 +1,5 @@
 import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
+import type { OutputFailure } from "@mrstreamer/contracts/output";
 import type { StreamFailure } from "@mrstreamer/contracts/playback";
 import { isMac } from "../app/platform.ts";
 
@@ -37,6 +38,8 @@ export function describeError(error: AppError): string {
       return "The provider no longer lists this title.";
     case "stream":
       return describeStreamFailure(error.failure);
+    case "output":
+      return describeOutputFailure(error.failure);
     case "incomplete-catalogue":
       if (error.list) return `The provider sent no ${error.list}, so the previous list stays.`;
       return error.received === 0
@@ -61,6 +64,24 @@ function describeStreamFailure(failure: StreamFailure): string {
       return `The connection to the provider failed. ${failure.detail}`;
     case "unsupported":
       return `Mr. Streamer can't play this file. ${failure.detail}`;
+  }
+}
+
+/** Why a receiver on the network doesn't play. */
+export function describeOutputFailure(failure: OutputFailure): string {
+  switch (failure.kind) {
+    case "unreachable":
+      return "The receiver didn't answer.";
+    case "not-fetched":
+      return "The receiver couldn't reach this computer. Check that your firewall allows Mr. Streamer on private networks.";
+    case "media":
+      return `The receiver couldn't play this. ${failure.detail}`;
+    case "no-network":
+      return "This computer isn't on a local network.";
+    case "unavailable":
+      return `Mr. Streamer can't reach receivers right now. ${failure.detail}`;
+    case "stream":
+      return describeStreamFailure(failure.failure);
   }
 }
 

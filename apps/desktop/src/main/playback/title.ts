@@ -11,6 +11,7 @@ import { type } from "arktype";
 import type { Codec, SubtitleFormat } from "@mrstreamer/contracts/playback";
 import type { AudioFacts, SubtitleFacts } from "@mrstreamer/core/ondemand/tracks";
 import type { SubtitleCodec } from "@mrstreamer/core/subtitles/decoder";
+import { segmentArguments, type RunCuts } from "./receiver.ts";
 
 export interface TitleProbe {
   /**
@@ -26,6 +27,10 @@ export interface TitleProbe {
     readonly id: number;
     readonly codec: Codec | null;
     readonly name: string;
+    /** When the first picture shows, on the file's clock. */
+    readonly start: number;
+    /** The file stores its pictures out of the order they show in, as with B-frames. */
+    readonly reordered: boolean;
   } | null;
   readonly audio: readonly (AudioFacts & { readonly codec: Codec | null })[];
   /** With ffmpeg's name for each codec, null for captions inside the picture. */
@@ -53,6 +58,8 @@ function defineProbe() {
     "codec_name?": "string",
     "pix_fmt?": "string",
     "channels?": "number",
+    "start_time?": "string",
+    "has_b_frames?": "number",
     "tags?": type({ "language?": "string", "title?": "string" }),
     /** Teletext pages and DVB subtitle pages, as the program table described them, in hex. */
     "extradata?": "string",
@@ -121,7 +128,17 @@ export function readProbe(json: unknown): TitleProbe | null {
     duration: Number.isFinite(duration) && duration > 0 ? duration : null,
     origin: Number.isFinite(origin) ? origin : 0,
     video: video
-      ? { id: video.index, codec: videoCodec(video), name: video.codec_name ?? "unknown" }
+      ? {
+          id: video.index,
+          codec: videoCodec(video),
+          name: video.codec_name ?? "unknown",
+          start: Number.isFinite(Number(video.start_time))
+            ? Number(video.start_time)
+            : Number.isFinite(origin)
+              ? origin
+              : 0,
+          reordered: (video.has_b_frames ?? 0) > 0,
+        }
       : null,
     audio: streams
       .filter((stream) => stream.codec_type === "audio")
@@ -362,6 +379,74 @@ export function titlePlan(
       ...["-method", "PUT", urls.start],
     );
   }
+  return {
+    video: !video ? "none" : copyVideo ? "copy" : "convert",
+    audio: !sound ? "none" : copySound ? "copy" : "convert",
+    subtitle: side?.output ?? null,
+    args,
+  };
+}
+
+/** What a run for a receiver plays: its tracks, and the segments it makes. */
+export interface ReceiverRun {
+  /** A sound track's id; null for the file's first. */
+  readonly audio: number | null;
+  /** A text subtitle track's id, or null for none. */
+  readonly subtitle: number | null;
+  /** Converts the picture, with keyframes where the segments start, even when the receiver decodes it. */
+  readonly convert: boolean;
+  /** Where the run starts and its segments end; see `runCuts` in receiver.ts. */
+  readonly cuts: RunCuts;
+  /** The number of its first segment. */
+  readonly from: number;
+  /** The file's first picture on its clock. */
+  readonly first: number;
+}
+
+/**
+ * The ffmpeg arguments for a run that a receiver plays: the picture and the chosen sound as
+ * MPEG-TS segments, cut where `run.cuts` says and sent one by one to `urls.segments`, which holds
+ * `%d` for a segment's number. `decoders` is what the receiver decodes; the rest converts, the
+ * picture with a keyframe at each cut. Text subtitles go to `urls.subtitles` as WebVTT cues, as
+ * for the app's own player.
+ */
+export function receiverPlan(
+  probe: TitleProbe,
+  run: ReceiverRun,
+  decoders: ReadonlySet<Codec>,
+  urls: { readonly source: string; readonly segments: string; readonly subtitles: string },
+): TitlePlan {
+  const video = probe.video;
+  const sound = probe.audio.find((track) => track.id === run.audio) ?? probe.audio[0] ?? null;
+  const copyVideo = video?.codec != null && decoders.has(video.codec) && !run.convert;
+  const copySound = sound?.codec != null && decoders.has(sound.codec);
+  const track = probe.subtitles.find((each) => each.id === run.subtitle);
+  const side = track?.format === "text" ? subtitleSide(probe, track.id, urls.subtitles) : null;
+
+  const args = [
+    ...["-hide_banner", "-loglevel", "error", "-nostdin"],
+    ...INPUT,
+    ...(run.cuts.seek === null ? [] : ["-ss", run.cuts.seek.toFixed(6)]),
+    ...["-copyts", "-i", urls.source],
+  ];
+  if (video) args.push("-map", `0:${video.id}`);
+  if (sound) args.push("-map", `0:${sound.id}`);
+  if (video && copyVideo) args.push("-c:v", "copy");
+  else if (video) {
+    args.push(
+      ...["-c:v", "libx264", "-preset", "veryfast", "-crf", "21"],
+      // Keyframes only where the segments start, so each is cut where the playlist says.
+      ...["-g", "100000", "-sc_threshold", "0"],
+      ...(run.cuts.keyframes.length > 0
+        ? ["-force_key_frames", run.cuts.keyframes.map((time) => time.toFixed(6)).join(",")]
+        : []),
+      ...["-vf", "yadif=deint=interlaced,scale=w='min(1920,iw)':h=-2", "-pix_fmt", "yuv420p"],
+    );
+  }
+  if (sound && copySound) args.push("-c:a", "copy");
+  else if (sound) args.push("-c:a", "aac", "-b:a", "192k", "-ac", "2");
+  args.push(...segmentArguments(run.cuts, run.from, run.first, urls.segments));
+  if (side) args.push(...side.args);
   return {
     video: !video ? "none" : copyVideo ? "copy" : "convert",
     audio: !sound ? "none" : copySound ? "copy" : "convert",
