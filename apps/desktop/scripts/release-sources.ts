@@ -15,7 +15,7 @@ import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import { type } from "arktype";
@@ -25,11 +25,13 @@ import { linkProblems, releaseSources, type Source } from "./licences.ts";
 const run = promisify(execFile);
 
 /**
- * Puts `source` in `folder` under its name and returns its path. Throws, leaving no file, when a
- * download differs from its SHA-256 or a repository doesn't hold the commit.
+ * Puts `source` in `folder` under its name and returns its full path. Throws, leaving no file,
+ * when a download differs from its SHA-256 or a repository doesn't hold the commit.
  */
 export async function prepare(source: Source, folder: string): Promise<string> {
-  const path = join(folder, source.file);
+  // Resolved here, because git writes the archive from inside its temporary repository, where a
+  // folder relative to this process would name another place.
+  const path = resolve(folder, source.file);
   await mkdir(folder, { recursive: true });
   if ("url" in source) {
     await run("curl", ["-sSfL", "--retry", "4", "--retry-all-errors", "-o", path, source.url]);

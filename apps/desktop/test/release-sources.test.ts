@@ -10,6 +10,25 @@ import { pluginProblems } from "../scripts/installer-plugins.ts";
 import { prepare } from "../scripts/release-sources.ts";
 import { tempDir } from "./support.ts";
 
+/** A repository whose first commit, the pinned one, has a later change after it. */
+async function pinnedRepository(): Promise<{ repository: string; commit: string }> {
+  const repository = await tempDir();
+  const git = (...args: string[]) =>
+    execFileSync(
+      "git",
+      ["-C", repository, "-c", "user.name=Test", "-c", "user.email=test@example.com", ...args],
+      { encoding: "utf8" },
+    ).trim();
+  git("init", "-q");
+  await writeFile(join(repository, "codec.c"), "the pinned source");
+  git("add", ".");
+  git("commit", "-qm", "Pinned");
+  const commit = git("rev-parse", "HEAD");
+  await writeFile(join(repository, "codec.c"), "a later change");
+  git("commit", "-qam", "Later");
+  return { repository, commit };
+}
+
 describe("preparing a release's sources", () => {
   it("keeps a download that matches its pinned SHA-256 and refuses one that doesn't", async () => {
     const upstream = join(await tempDir(), "Codec_1.zip");
@@ -29,20 +48,7 @@ describe("preparing a release's sources", () => {
   });
 
   it("archives a repository at its pinned commit, not at what came after", async () => {
-    const repository = await tempDir();
-    const git = (...args: string[]) =>
-      execFileSync(
-        "git",
-        ["-C", repository, "-c", "user.name=Test", "-c", "user.email=test@example.com", ...args],
-        { encoding: "utf8" },
-      ).trim();
-    git("init", "-q");
-    await writeFile(join(repository, "codec.c"), "the pinned source");
-    git("add", ".");
-    git("commit", "-qm", "Pinned");
-    const commit = git("rev-parse", "HEAD");
-    await writeFile(join(repository, "codec.c"), "a later change");
-    git("commit", "-qam", "Later");
+    const { repository, commit } = await pinnedRepository();
     const folder = await tempDir();
 
     const archive = await prepare(
@@ -58,6 +64,28 @@ describe("preparing a release's sources", () => {
       prepare({ file: "missing.tar.gz", git: repository, commit: "0".repeat(40) }, folder),
     ).rejects.toThrow();
     expect(existsSync(join(folder, "missing.tar.gz"))).toBe(false);
+  });
+
+  it("archives into a folder named relative to where the command runs", async () => {
+    const { repository, commit } = await pinnedRepository();
+    const script = pathToFileURL(join(import.meta.dirname, "../scripts/release-sources.ts")).href;
+    const cwd = await tempDir();
+
+    // Started in `cwd` as a process of its own, since the tests share theirs and can't move it.
+    execFileSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `import { prepare } from ${JSON.stringify(script)};
+         await prepare(JSON.parse(process.argv[1]), "sources");`,
+        JSON.stringify({ file: "codec.tar.gz", git: repository, commit }),
+      ],
+      { cwd },
+    );
+
+    const tar = gunzipSync(await readFile(join(cwd, "sources", "codec.tar.gz"))).toString("latin1");
+    expect(tar).toContain("the pinned source");
   });
 });
 

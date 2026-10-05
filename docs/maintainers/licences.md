@@ -81,7 +81,7 @@ Both are Microsoft's and neither is open source. Chromium's credits page mention
 - Microsoft's [REDIST list](https://learn.microsoft.com/en-us/legal/windows-sdk/redist) names both under `Redist\D3D`, as files a holder of the [Windows SDK licence](https://learn.microsoft.com/en-us/legal/windows-sdk/license) may redistribute. The licence's conditions for such files include: unmodified, only for Windows, with their notices intact, and under terms that protect them at least as much. The list adds that these files go with "Classic Windows applications" and not with "Universal Windows apps".
 - `dxcompiler.dll`, beside them, is another case. Its version resource says "Google Dawn Custom Build": it is built from the open-source DirectX Shader Compiler, whose licence Chromium's credits hold under DirectX-Shader-Compiler.
 - The **Microsoft Direct3D compiler files** notice says whose the two files are, links Microsoft's terms and says what the project hasn't confirmed. Its licence is `LicenseRef-proprietary`, which the build accepts only through the exception written on that one component in `licences.config.json`.
-- The project holds no Microsoft agreement for these files and doesn't know which one Electron's builders redistribute them under. [Open questions](#open-questions) has the rest.
+- The project hasn't confirmed which Microsoft agreement applies to these files, or which one Electron's builders redistribute them under. [Open questions](#open-questions) has the rest.
 
 ## Upgrading Electron or electron-builder
 
