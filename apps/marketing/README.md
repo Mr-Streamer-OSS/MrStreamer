@@ -7,8 +7,8 @@ Three static pages for `https://mrstreamer.app`, built with Vite from plain HTML
 | `index.html`                | The home page and everything it says                                                   |
 | `privacy/index.html`        | The privacy page around the policy. The build puts `docs/privacy.md` in it             |
 | `404.html`                  | The page for an address that has none                                                  |
-| `src/styles.css`            | The layout                                                                             |
-| `src/main.ts`               | Website page-view analytics, on every page                                             |
+| `src/styles.css`            | The layout, and the motion's keyframes                                                 |
+| `src/main.ts`               | Page-view analytics on every page, and what moves on the home page                     |
 | `vite.config.ts`            | Builds the pages, renders the policy, and answers the addresses below on your computer |
 | `scripts/prepare-assets.ts` | Cuts the pictures, icons and social picture into `public/generated/`                   |
 | `scripts/package-vercel.ts` | Packs the built site for Vercel in `.vercel/output/`, with its routes, and checks it   |
@@ -47,7 +47,8 @@ Vercel alone answers `/_vercel/insights/`, for [website analytics](#website-anal
 ## Change it
 
 - Keep the words true and few. Every claim on the page comes from the README or the docs. The app's limits are in [what plays](../../docs/user/playback.md).
-- True black, white text, minimal copy and no page animations. Screenshots describe the app; download buttons name the platforms.
+- True black, white text, minimal copy. Screenshots describe the app, so a feature is its name beside its window, with no paragraph under it.
+- Nothing moves by itself. The hero rises in once, each feature's name and window rise in once as they scroll into view, and the hero's window tips upright as the page scrolls. Each animation ends. Once the page is open, the script works only after a scroll, a resize or a changed preference. With reduced motion nothing moves. Without JavaScript the hero still rises in, and the rest is in place.
 - New pictures come from new captures. Follow the [artwork recipe](../../docs/contributing/marketing-artwork.md). A phone shows a part of each window, set in `prepare-assets.ts`, with its size repeated in `index.html`.
 - The privacy policy has one source, `docs/privacy.md`. The build renders it into `https://mrstreamer.app/privacy`, where the app and the Store listing link. Edit the Markdown, never the page. A merge to `main` that changes it publishes the site again.
 
