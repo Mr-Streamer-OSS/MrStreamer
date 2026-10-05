@@ -5,6 +5,11 @@ import { readFile, writeFile } from "node:fs/promises";
 import { type } from "arktype";
 import { packageVersion } from "@mrstreamer/contracts/package-version";
 
+// build-release.yml's package check reads the version from here, in whichever commit it checked
+// out. Nightlies from before package-version.ts existed export it from this file too, so a stable
+// release of one of them still passes.
+export { packageVersion };
+
 /** Sets the version in the manifest electron-builder wrote, from the app's package.json. */
 export default async function setPackageVersion(manifestPath: string): Promise<void> {
   const app = type({ version: "string" }).assert(

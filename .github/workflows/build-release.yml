@@ -282,6 +282,10 @@ jobs:
       # Partner Center's identity exactly, the Store version for this release, and what the app
       # needs at run time: ffmpeg, ffprobe and the notices Settings > About reads. The record it
       # writes beside the package ties the file to the release and its commit by checksum.
+      #
+      # This workflow is main's, and the checkout is the release's commit, which for a stable
+      # release is a nightly tested earlier. scripts/msix-version.ts exports packageVersion in
+      # every one of them, so the check imports it from there and nowhere newer.
       - name: Check the package
         id: check
         run: |
@@ -289,7 +293,7 @@ jobs:
           & $makeappx.FullName unpack /p "dist/Mr-Streamer-$env:VERSION-win-x64.msix" /d "$env:RUNNER_TEMP\msix" /o | Out-Null
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           [xml]$manifest = Get-Content "$env:RUNNER_TEMP\msix\AppxManifest.xml"
-          $version = node --input-type=module -e 'import { packageVersion } from "../../packages/contracts/src/package-version.ts"; console.log(packageVersion(process.argv[1]))' $env:VERSION
+          $version = node --input-type=module -e 'import { packageVersion } from "./scripts/msix-version.ts"; console.log(packageVersion(process.argv[1]))' $env:VERSION
           $checks = @(
             @("Identity name", $manifest.Package.Identity.Name, "MrStreamerOSS.Mr.Streamer"),
             @("Publisher", $manifest.Package.Identity.Publisher, "CN=A132E842-C4C9-40BF-83C4-D304E7952C2D"),

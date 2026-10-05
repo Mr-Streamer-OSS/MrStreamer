@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
@@ -11,6 +12,10 @@ import { artifactName, STORE_ENVIRONMENT } from "../scripts/store-release.ts";
 // A stable run also sends its package to the Microsoft Store, with the one credential these
 // workflows hold for it. No run can be tried without a real submission, so this also reads which
 // runs reach that job, what it is given, and what runs beside the credential.
+//
+// A stable release builds a commit an earlier nightly tested, under main's workflow, so the Store
+// package's check works out the version with source that can be older than the check. That command
+// runs here for real, on this checkout.
 
 /** The parts of a workflow file this test reads. */
 interface Workflow {
@@ -30,11 +35,13 @@ interface Job {
   readonly permissions?: Record<string, string>;
   readonly environment?: { readonly name: string };
   readonly concurrency?: Record<string, unknown>;
+  readonly defaults?: { readonly run?: { readonly "working-directory"?: string } };
   readonly strategy?: { readonly matrix?: { readonly include?: Record<string, string>[] } };
   readonly steps?: readonly Step[];
 }
 
 interface Step {
+  readonly id?: string;
   readonly if?: string;
   readonly uses?: string;
   readonly run?: string;
@@ -148,6 +155,24 @@ describe("a stable run that publishes a nightly first", () => {
     expect(first.uploaded).toEqual(expect.arrayContaining(first.deployed));
     // Artifacts of earlier attempts stay in the run, so a re-run deploys from new names.
     expect(run(2).deployed.filter((name) => first.uploaded.includes(name))).toEqual([]);
+  });
+});
+
+describe("checking the Store package of a stable release", () => {
+  const job = read("build-release.yml").jobs["msix"];
+  const check = job?.steps?.find((step) => step.id === "check")?.run ?? "";
+  const script = /\bnode --input-type=module -e '([^']+)' \$env:VERSION$/m.exec(check)?.[1] ?? "";
+
+  it("works out the version with the script every tested nightly has", () => {
+    // As the step runs it: in the job's folder, the release version its one argument.
+    const version = execFileSync(process.execPath, ["--input-type=module", "-e", script, "0.0.4"], {
+      cwd: job?.defaults?.run?.["working-directory"],
+      encoding: "utf8",
+    });
+
+    // Nightlies from before packages/contracts/src/package-version.ts have it only in this script.
+    expect(script).toContain('from "./scripts/msix-version.ts"');
+    expect(version.trim()).toBe("1.0.4.0");
   });
 });
 
