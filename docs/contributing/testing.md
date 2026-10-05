@@ -158,7 +158,7 @@ sudo ip netns delete tv
 node test/e2e/airplay-tv.ts node_modules/electron/dist/Electron.app/Contents/MacOS/Electron
 ```
 
-`apps/desktop/test/e2e/airplay-list.ts` runs the same way and checks where the app asks for Apple's list and when it takes it back, which depend on the real window. It checks that:
+`apps/desktop/test/e2e/airplay-list.ts` runs the same way and checks where the app asks for Apple's list and when it takes it back, which depend on the real window. For the viewer who goes to another app it brings Finder to the front with `open`, and the app back through the inspector. It checks that:
 
 - O asks for the list at the output button's place on screen, also with the page zoomed
 - from the mini player the window goes back first, and the list is asked for at the button it then shows and stays up
@@ -166,6 +166,7 @@ node test/e2e/airplay-tv.ts node_modules/electron/dist/Electron.app/Contents/Mac
 - P while an O still waits for the window leaves the mini player and no list, and P again fills the screen
 - a list asked for as the window goes full screen, and given up before the window settled, opens none once it has, from here and with Play here from a TV that plays, and the O after it opens one
 - a list asked for by name as the window goes full screen, and taken back by that name, opens none once the window has settled, while another list's name leaves it to open, and its own then takes it down with the episode playing on here
+- a list asked for as the window goes full screen opens none once the viewer went to another app before the window settled, with the TV playing on, and the O after the viewer is back opens one, which stays up when its window loses the keyboard
 - a window that moves takes its list down, and what plays here plays on
 - a window minimised or closed while the TV plays takes its list down, and the TV plays on from the same helper and the same address
 - a window out of sight opens no list

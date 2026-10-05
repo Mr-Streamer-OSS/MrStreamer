@@ -10,18 +10,22 @@
 // waits for the window. It presses O as the window goes full screen and goes back to this computer
 // before the window settled, from here and from a TV that plays. It asks for a list by name as the
 // window goes full screen, as the page does, and takes it back by that name and by another's, as
-// the page does when a view closes. It has a TV play, and minimises and closes the window under a
-// list opened again. It passes when each list was asked for where the button was on screen at
-// that moment, when a window that moved or went out of sight took its list down and nothing else,
-// when the O that P overtook and the lists given up or taken back before the window settled
-// opened none, when a name took down its own list alone, and when a window out of sight opened
-// none.
+// the page does when a view closes. It has a TV play, and brings Finder to the front in place of
+// the app: while an O still waits for the window to fill the screen, and under a list that is up.
+// It minimises and closes the window under a list opened again. It passes when each list was
+// asked for where the button was on screen at that moment, when a window that moved or went out
+// of sight took its list down and nothing else, when the O that P overtook and the lists given
+// up or taken back before the window settled opened none, when a name took down its own list
+// alone, when the list that waited opened none over Finder while the one that was up stayed, and
+// when a window out of sight opened none.
 //
 // The helper is the suite's stand-in (../fake-airplay-helper.ts), which shows no list: it says
 // where the app asked for one and when the app took it back. See airplay-tv.ts for how the app
 // comes to start it, and for what the script needs of the Mac. The window fills the screen for a
 // few seconds, in a Space of its own that goes with it. Nothing is typed or clicked on the Mac
-// itself: keys and window calls go through the app's own inspectors.
+// itself: keys and window calls go through the app's own inspectors, and `open` brings Finder to
+// the front.
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -255,6 +259,30 @@ const tookBack = (before: number) =>
     () => true,
     () => false,
   );
+/** Whether the window has the keyboard, as the window of the app in front does. */
+const hasKeyboard = () => main.evaluate<boolean>(`${WINDOW}.isFocused()`);
+/**
+ * Brings Finder to the front, as a viewer does who goes to another app, and says whether the
+ * window lost the keyboard to it within a few seconds. The window stays where it is.
+ */
+async function goesElsewhere(): Promise<boolean> {
+  execFileSync("open", ["-a", "Finder"]);
+  const until = Date.now() + 5000;
+  while (await hasKeyboard()) {
+    if (Date.now() > until) return false;
+    await delay(10);
+  }
+  return true;
+}
+/** Brings the app back to the front, and says whether its window has the keyboard again. */
+const comesBack = () =>
+  main
+    .evaluate(`(() => { ${ELECTRON}.app.focus({ steal: true }); ${WINDOW}.focus(); })()`)
+    .then(() => waitFor(hasKeyboard, 5000))
+    .then(
+      () => true,
+      () => false,
+    );
 
 const output = async (page: Page) =>
   (
@@ -534,18 +562,61 @@ try {
   await until("left", () => key(page, "f", 70));
   await delay(1000);
 
-  // The viewer picks the TV in the list, and the list opens on it again as it plays. Minimised,
-  // the window takes the list down and leaves the TV what it plays.
+  // The viewer picks the TV in the list, and it plays.
   await fromItsStart();
   await openList(page);
   helper.choose();
   const tv = await tvPlays();
   await waitFor(says(page, "Playing over AirPlay", "[data-view=title]"), 20_000);
+
+  // The viewer goes to another app while an O still waits for the window to fill the screen. The
+  // window stays where it is, so nothing but the keyboard it lost keeps the list from opening
+  // over that app once the window has settled. It counts only when the window had the keyboard
+  // as O came, and Finder was in front before the window arrived.
+  await comesBack();
+  lists = sent("showPicker");
+  arrived = await startsFilling(page);
+  const had = await hasKeyboard();
+  await key(page, "o", 79);
+  const away = (await goesElsewhere()) && (await fullScreens()).arrived === arrived;
+  const settled = await settles(arrived).then(
+    () => true,
+    () => false,
+  );
+  let lost = await tvLost(page, tv);
+  check(
+    had && away && settled && sent("showPicker") === lists && lost === null,
+    "A list that waits for its window to fill the screen opens none once the viewer went to another app, and the TV plays on",
+    `${sent("showPicker") - lists} lists asked for, the window ${had ? "had" : "had not"} the keyboard when O came, Finder in front ${away ? "before" : "after"} the window arrived${settled ? "" : ", which it never did"}${lost ? `, ${lost}` : ""}`,
+  );
+  const back = await comesBack();
+  if (await main.evaluate<boolean>(`${WINDOW}.isFullScreen()`)) {
+    await until("left", () => key(page, "f", 70));
+  }
+  await delay(1000);
+
+  // Back at the window, the next O is its own. Apple's list takes the keyboard from the window
+  // whenever it opens, so a window that loses it under a list that is up takes nothing down.
+  asked = await openList(page);
+  at = await button(page);
+  hidden = sent("hidePicker");
+  const left = await goesElsewhere();
+  await delay(1000);
+  lost = await tvLost(page, tv);
+  check(
+    back && left && near(asked, at) && sent("hidePicker") === hidden && lost === null,
+    "The O after the viewer is back opens the list at the button, and it stays up with the TV playing on when its window loses the keyboard",
+    `${text(asked)}, ${sent("hidePicker") - hidden} lists taken down, the window ${back ? "had" : "had not"} the keyboard and ${left ? "lost" : "kept"} it${lost ? `, ${lost}` : ""}`,
+  );
+  await comesBack();
+
+  // The list opens on the TV again as it plays. Minimised, the window takes the list down and
+  // leaves the TV what it plays.
   await openList(page);
   hidden = sent("hidePicker");
   await main.evaluate(`${WINDOW}.minimize()`);
   const minimised = await tookBack(hidden);
-  let lost = await tvLost(page, tv);
+  lost = await tvLost(page, tv);
   check(
     minimised && lost === null,
     "A minimised window takes its list down, and the TV plays on",

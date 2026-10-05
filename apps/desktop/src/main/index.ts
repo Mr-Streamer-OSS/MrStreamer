@@ -195,8 +195,9 @@ function samePage(now: Rectangle, was: Rectangle): boolean {
 
 /**
  * Where the system's list of receivers opens from: `anchor`, a place in the window's page in CSS
- * pixels, as a place on screen in points, with where the page is there. Null while the window is
- * out of sight, when no list can hang from it.
+ * pixels, as a place on screen in points, with where the page is there and whether the window
+ * has the keyboard, as the one the viewer is at does. Null while the window is out of sight, when
+ * no list can hang from it.
  *
  * The page's zoom turns its pixels into points. A place outside the page, as one measured before
  * the window changed, gives way to the middle of the page.
@@ -204,7 +205,7 @@ function samePage(now: Rectangle, was: Rectangle): boolean {
 function listPlace(
   window: BrowserWindow,
   anchor: IpcInput<"output.pick">["anchor"],
-): { readonly place: ScreenRect; readonly page: Rectangle } | null {
+): { readonly place: ScreenRect; readonly page: Rectangle; readonly front: boolean } | null {
   if (!onScreen(window)) return null;
   const page = window.getContentBounds();
   const zoom = window.webContents.getZoomFactor();
@@ -220,6 +221,7 @@ function listPlace(
     inside(place.y + place.height / 2, page.y, page.height);
   return {
     page,
+    front: window.isFocused(),
     place: inPage
       ? place
       : { x: page.x + page.width / 2, y: page.y + page.height / 2, width: 0, height: 0 },
@@ -565,7 +567,14 @@ async function start(): Promise<void> {
               // The window closed or went elsewhere meanwhile, or another took its place, which
               // leaves the place asked for behind: no list opens.
               const from = mainWindow === window ? listPlace(window, anchor) : null;
-              return from && samePage(from.page, asked.page) ? from.place : null;
+              if (!from || !samePage(from.page, asked.page)) return null;
+              // Nor when the viewer went to another app while the window settled: the list
+              // would open over that app, and its helper would take the keyboard from it. A
+              // window that had no keyboard when asked isn't held to this: leaving the mini
+              // player takes it away for a moment, and an O can arrive in that. Once the helper
+              // is asked for the list, it follows where the viewer goes itself (see
+              // native/airplay/Picker.swift), and takes the keyboard from this window to do so.
+              return asked.front && !from.front ? null : from.place;
             }, request)
             .pipe(
               Effect.ensuring(

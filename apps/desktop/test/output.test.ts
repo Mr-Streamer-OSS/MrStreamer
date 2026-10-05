@@ -770,11 +770,13 @@ describe.skipIf(!hasTools)("playback through the system's list of receivers", ()
   );
 
   it.each([
-    { how: "went back to this computer", next: "disconnect" },
-    { how: "moved the window", next: "closePicker" },
+    { how: "the viewer went back to this computer", next: "disconnect", arrives: ANCHOR },
+    { how: "the viewer moved the window", next: "closePicker", arrives: ANCHOR },
+    // As when the viewer went to another app meanwhile, which only the window knows.
+    { how: "its window had no place left for it", next: "status", arrives: null },
   ] as const)(
-    "starts nothing when the viewer $how before a list asked for from here had its place",
-    async ({ next }) => {
+    "starts nothing once $how while a list asked for from here waited for its place",
+    async ({ next, arrives }) => {
       const { helper, playback, output, provider, channel, changes } = await casting();
       const local = await playback.open(channel, LOCAL);
       const watching = new AbortController();
@@ -784,9 +786,9 @@ describe.skipIf(!hasTools)("playback through the system's list of receivers", ()
       const window = onItsWay();
       const waiting = output.pick(window.place);
       await output[next]();
-      // The wait for the place hears of it at once.
-      expect(window.calledOff()).toBe(true);
-      window.arrive(ANCHOR);
+      // Given up from here, the wait for the place hears of it at once.
+      expect(window.calledOff()).toBe(arrives !== null);
+      window.arrive(arrives);
 
       expect((await waiting).output).toEqual({ kind: "local" });
       // No helper ever started, no connect was said to be under way, and what plays here does.
