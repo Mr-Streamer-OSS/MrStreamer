@@ -818,6 +818,69 @@ describe.skipIf(!hasTools)("playback through the system's list of receivers", ()
     });
   });
 
+  it("takes the list its asker names down, waiting or open, and leaves the receiver what it plays", async () => {
+    const { helper, output, play, fetches, state } = await casting();
+    const picking = output.pick(at(ANCHOR));
+    await helper.took("showPicker");
+    helper.choose();
+    await picking;
+    const { media } = await play(25);
+    const load = await helper.took("load");
+    helper.status("playing", 26, 150);
+    await eventually(async () =>
+      expect(await state()).toMatchObject({ media: { state: "playing" } }),
+    );
+    const sent = (cmd: string) => helper.commands.filter((command) => command.cmd === cmd).length;
+    const plays = { kind: "receiver", media: { generation: media.generation, state: "playing" } };
+
+    // The view it was asked from closes while the list still waits for its place.
+    const window = onItsWay();
+    const waiting = output.pick(window.place, "waiting");
+    await output.closePicker("waiting");
+    expect(window.calledOff()).toBe(true);
+    window.arrive(ANCHOR);
+    expect((await waiting).output).toMatchObject(plays);
+    expect(sent("showPicker")).toBe(1);
+
+    // And while the viewer is at the list.
+    const open = output.pick(at(ANCHOR), "open");
+    await helper.took("showPicker");
+    const hidden = sent("hidePicker");
+    await output.closePicker("open");
+    expect((await open).output).toMatchObject(plays);
+    await eventually(() => expect(sent("hidePicker")).toBe(hidden + 1));
+
+    // The receiver has its one load still, in the one helper, from an address that answers.
+    expect(sent("load")).toBe(1);
+    expect(sent("stop") + sent("unload") + sent("quit")).toBe(0);
+    expect(helper.pids).toHaveLength(1);
+    expect((await fetches(load.url)).status).toBe(200);
+  });
+
+  it("leaves a list alone when the one before it is taken down by its name", async () => {
+    const { helper, output, state } = await casting();
+    const window = onItsWay();
+    const first = output.pick(window.place, "first");
+    const second = output.pick(at({ ...ANCHOR, x: 400 }), "second");
+    expect(await helper.took("showPicker")).toMatchObject({ anchor: { x: 400 } });
+
+    // The first one's view closes late, with the second list up already. So does a view whose
+    // list is long gone.
+    await output.closePicker("first");
+    await output.closePicker("gone");
+    window.arrive(ANCHOR);
+    await first;
+
+    // The second is up and waited at, as if nothing was said.
+    expect(helper.commands.filter((command) => command.cmd === "hidePicker")).toHaveLength(0);
+    expect(await state()).toEqual({ kind: "connecting", protocol: "airplay", receiver: null });
+    helper.choose();
+    expect((await second).output).toMatchObject({
+      kind: "receiver",
+      receiver: { kind: "airplay" },
+    });
+  });
+
   it("gives a list that still waited for its place up for a TV the viewer picks in the app's list", async () => {
     const { helper, output, connect } = await casting();
     const window = onItsWay();

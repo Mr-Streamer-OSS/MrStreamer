@@ -5,9 +5,13 @@
 // asks for none, and neither does one whose view closed or whose account went, whatever is open
 // in its place by then. Where no view shows the button, the list opens in the middle of the
 // window, never where it opened before.
+//
+// A list asked for is its view's from then on. Each goes by a name of its own, and when the view
+// closes or its account goes, the page takes back the lists of that view that are still asked
+// for, by their names, and tells the main process nothing else.
 import { fullScreen, ipc } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, createElement, type FunctionComponent } from "react";
+import { act, createElement, StrictMode, type FunctionComponent } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
@@ -92,8 +96,12 @@ let app: Awaited<ReturnType<typeof loaded>>;
 let container: HTMLDivElement;
 let unmount = () => {};
 
+/** The lists the page asked the system for so far: where each opens, and the name it goes by. */
+const lists = () => ipc.argsOf("output.pick");
 /** The places the system's list was asked to open at so far. */
-const asked = () => ipc.argsOf("output.pick");
+const asked = () => lists().map(({ anchor }) => ({ anchor }));
+/** The names of the lists the page took back so far. */
+const takenBack = () => ipc.argsOf("output.closePicker").map(({ request }) => request);
 
 /** Shows `view` as the window does once `open` asked for it. */
 async function show(view: FunctionComponent, open: () => void): Promise<void> {
@@ -132,6 +140,20 @@ const key = (name: string) =>
     window.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true }));
     await settle();
   });
+
+/** How a view asks for the system's list. */
+const ways = {
+  O: () => key("o"),
+  "its button": () =>
+    act(async () => container.querySelector<HTMLElement>('[aria-label="AirPlay"]')?.click()),
+};
+
+/** The view closes, as when the viewer leaves it. */
+async function close(view: keyof typeof views): Promise<void> {
+  await unmount();
+  unmount = () => {};
+  await act(async () => views[view].leave());
+}
 
 /** What `event` leads to, once the page has taken it in. */
 const after = (event: () => void) =>
@@ -396,5 +418,141 @@ describe("the system's list of receivers", () => {
     expect(asked()[1]).toEqual({
       anchor: { x: window.innerWidth / 2, y: window.innerHeight / 2, width: 0, height: 0 },
     });
+  });
+});
+
+describe("the system's list and the view it was asked from", () => {
+  it.each(
+    (["Watch", "a title"] as const).flatMap((view) =>
+      (["O", "its button"] as const).map((way) => ({ view, way })),
+    ),
+  )(
+    "goes with its view, and nothing else does: $view, asked for by $way",
+    async ({ view, way }) => {
+      await views[view].show();
+      await ways[way]();
+      const [list] = lists();
+      expect(list).toMatchObject({ anchor: BUTTON });
+      // Asked for, and its view on screen: it stays.
+      expect(takenBack()).toEqual([]);
+
+      await close(view);
+      expect(takenBack()).toEqual([list?.request]);
+      // Only the list: nobody went back to this computer, and a receiver was told nothing.
+      expect(ipc.methods()).not.toContain("output.disconnect");
+      expect(ipc.methods()).not.toContain("output.command");
+    },
+  );
+
+  it("goes with its view when Try again asked for it, as after a TV's connection broke", async () => {
+    await watching();
+    await act(async () =>
+      ipc.emit(
+        "output.changed",
+        status({ kind: "lost", receiver: airplay, failure: { kind: "unreachable" } }),
+      ),
+    );
+    app.outputs.reconnect();
+    const [list] = lists();
+    expect(list).toMatchObject({ anchor: BUTTON });
+
+    await close("Watch");
+    expect(takenBack()).toEqual([list?.request]);
+  });
+
+  it("is nothing to take back once the viewer was done at it", async () => {
+    await watching();
+    const done = ipc.hold("output.pick");
+    await key("o");
+    await after(() => done.resolve(status({ kind: "local" })));
+
+    await close("Watch");
+    expect(takenBack()).toEqual([]);
+  });
+
+  it("goes by a name of its own, so only the one still asked for is taken back", async () => {
+    await watching();
+    const first = ipc.hold("output.pick");
+    await key("o");
+    await key("o");
+    const [older, newer] = lists().map(({ request }) => request);
+    expect(older).not.toBe(newer);
+    // The main process answers the first as the second takes its place.
+    await after(() => first.resolve(status({ kind: "local" })));
+
+    await close("Watch");
+    expect(takenBack()).toEqual([newer]);
+  });
+
+  it.each(["Watch", "a title"] as const)(
+    "leaves alone the list of a view opened in its place: %s",
+    async (view) => {
+      await views[view].show();
+      const first = ipc.hold("output.pick");
+      await key("o");
+      await close(view);
+      await views[view].show();
+      await key("o");
+      const [older, newer] = lists().map(({ request }) => request);
+      // The view that closed took its own list back, before and after the next one was asked for.
+      expect(takenBack()).toEqual([older]);
+
+      // The first list's answer comes late, and takes nothing from the view that is there now.
+      await after(() => first.resolve(status({ kind: "local" })));
+      expect(takenBack()).toEqual([older]);
+      await close(view);
+      expect(takenBack()).toEqual([older, newer]);
+    },
+  );
+
+  it("is the view's that is still on screen, once one that opened over it has closed", async () => {
+    // Two views at once, as each says it is on screen.
+    const under = new AbortController();
+    const over = new AbortController();
+    app.outputs.viewShown(under.signal);
+    app.outputs.viewShown(over.signal);
+    over.abort();
+    app.outputs.pick();
+    expect(takenBack()).toEqual([]);
+
+    under.abort();
+    expect(takenBack()).toEqual(lists().map(({ request }) => request));
+  });
+
+  it("goes with its account, with Watch open again by then, and the next one is the view's again", async () => {
+    await watching();
+    await key("o");
+    const [older] = lists().map(({ request }) => request);
+    // Another account, and Watch again before the page drew anything: the view never left it.
+    await act(async () => {
+      app.resetForAccount();
+      app.openWatch();
+    });
+    expect(takenBack()).toEqual([older]);
+
+    await key("o");
+    const newer = lists().at(-1)?.request;
+    expect(takenBack()).toEqual([older]);
+    await close("Watch");
+    expect(takenBack()).toEqual([older, newer]);
+  });
+
+  it("is its view's all the same where React sets the view up twice, as in development", async () => {
+    await show(
+      () => createElement(StrictMode, null, createElement(app.WatchScreen)),
+      () => {
+        app.openWatch();
+        app.player.play(channel);
+      },
+    );
+    // The first setup ended with nothing asked for, and took nothing back.
+    expect(takenBack()).toEqual([]);
+    await key("o");
+    // One view, one O, one list.
+    expect(asked()).toEqual([{ anchor: BUTTON }]);
+    expect(takenBack()).toEqual([]);
+
+    await close("Watch");
+    expect(takenBack()).toEqual(lists().map(({ request }) => request));
   });
 });

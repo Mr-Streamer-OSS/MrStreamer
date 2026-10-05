@@ -5,7 +5,8 @@
 // computer, the receivers found, and what is going on. Where only the system knows them, as with
 // AirPlay on macOS, it opens the system's list at the button, which the app can't draw or read.
 // O opens either. Choosing changes nothing by itself: what plays goes on here until the receiver
-// answers, and This computer cancels.
+// answers, and This computer cancels. The system's list belongs to the view it was asked from,
+// and goes when that view closes (see `outputs.pick`).
 import { Airplay, Cast, Monitor } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { OutputFailure, Receiver } from "@mrstreamer/contracts/output";

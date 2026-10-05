@@ -23,7 +23,7 @@ import { useCategoryMap, useToggleFavourite } from "../../lib/queries.ts";
 import { cn } from "../../lib/utils.ts";
 import { WINDOW_BAR } from "../../../../shared/window-bar.ts";
 import { useLiveSession } from "../../player/media-session.ts";
-import { useOutput } from "../../player/output.ts";
+import { outputs, useOutput } from "../../player/output.ts";
 import { Picture } from "../../player/Picture.tsx";
 import { player, usePlayer } from "../../player/player.ts";
 import { useOpenGroups } from "../live/ListPicker.tsx";
@@ -55,6 +55,7 @@ export function WatchScreen() {
   const [awake, wake] = useWake(IDLE_MS);
   const [fullscreen, toggleFullscreen] = useFullscreen();
   const mini = useMiniPlayer((state) => state.on);
+  const account = useUi((state) => state.account);
   const list = useUi((state) => state.list);
   const channelsOpen = useUi((state) => state.channelsOpen);
   const channels = useListChannels(list).channels ?? NO_CHANNELS;
@@ -151,8 +152,10 @@ export function WatchScreen() {
     menu,
   };
   useEffect(() => {
-    // Ends with this view, and with it an O that still waits for the window.
+    // Ends with this view, or with the account it shows, and with it an O that still waits for
+    // the window and the system's list asked for from here.
     const view = new AbortController();
+    outputs.viewShown(view.signal);
     function onKey(event: KeyboardEvent) {
       const ui = useUi.getState();
       if (event.defaultPrevented || isTyping(event) || hasModifier(event) || event.isComposing)
@@ -284,7 +287,7 @@ export function WatchScreen() {
       view.abort();
       window.removeEventListener("keydown", onKey, { capture: true });
     };
-  }, []);
+  }, [account]);
 
   if (!channel) return null;
   const controlsVisible = awake || phase.kind !== "playing" || menu !== null || remote;

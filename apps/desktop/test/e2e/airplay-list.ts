@@ -8,11 +8,14 @@
 // the output button, where it moves the window under the list, then with the page zoomed, from
 // the mini player, and from a mini player that was full screen. It presses P while an O still
 // waits for the window. It presses O as the window goes full screen and goes back to this computer
-// before the window settled, from here and from a TV that plays. It has a TV play, and minimises
-// and closes the window under a list opened again. It passes when each list was asked for where
-// the button was on screen at that moment, when a window that moved or went out of sight took its
-// list down and nothing else, when the O that P overtook and the lists given up before the window
-// settled opened none, and when a window out of sight opened none.
+// before the window settled, from here and from a TV that plays. It asks for a list by name as the
+// window goes full screen, as the page does, and takes it back by that name and by another's, as
+// the page does when a view closes. It has a TV play, and minimises and closes the window under a
+// list opened again. It passes when each list was asked for where the button was on screen at
+// that moment, when a window that moved or went out of sight took its list down and nothing else,
+// when the O that P overtook and the lists given up or taken back before the window settled
+// opened none, when a name took down its own list alone, and when a window out of sight opened
+// none.
 //
 // The helper is the suite's stand-in (../fake-airplay-helper.ts), which shows no list: it says
 // where the app asked for one and when the app took it back. See airplay-tv.ts for how the app
@@ -198,17 +201,44 @@ async function openList(page: Page): Promise<Box> {
   return asked.anchor;
 }
 /**
- * Presses F, and O once the window says it is on its way into full screen, from where the app
- * holds a list back until the window has settled there. Gives how often the window had arrived
- * in full screen before.
+ * Presses F and waits until the window says it is on its way into full screen, from where the
+ * app holds a list back until the window has settled there. Gives how often the window had
+ * arrived in full screen before.
  */
-async function listWhileFilling(page: Page): Promise<number> {
+async function startsFilling(page: Page): Promise<number> {
   const { arrived } = await fullScreens();
   await key(page, "f", 70);
   while (!(await main.evaluate<boolean>(`${WINDOW}.isFullScreen()`))) await delay(5);
+  return arrived;
+}
+/** Presses F, and O once the window is on its way into full screen. */
+async function listWhileFilling(page: Page): Promise<number> {
+  const arrived = await startsFilling(page);
   await key(page, "o", 79);
   return arrived;
 }
+/** What the main process answered a call from the page with. */
+interface Answer {
+  readonly ok: boolean;
+  readonly value?: { readonly output: { readonly kind: string } };
+}
+/**
+ * Asks for a list as the page does, under a name the script knows. The answer comes once the
+ * viewer is done at the list or it was given up, and is waited for later: a call that fails
+ * meanwhile fails there.
+ */
+function pickAs(page: Page, request: string): Promise<Answer> {
+  const answer = page.evaluate<Answer>(
+    `window.mrStreamer.invoke("output.pick", { anchor: { x: 10, y: 10, width: 10, height: 10 }, request: ${JSON.stringify(request)} })`,
+  );
+  answer.catch(() => {});
+  return answer;
+}
+/** Takes the list of that name back, as the page does when the view it was asked from closes. */
+const takeBack = (page: Page, request: string) =>
+  page.evaluate(
+    `window.mrStreamer.invoke("output.closePicker", { request: ${JSON.stringify(request)} })`,
+  );
 /**
  * Whether the window is still on its way into full screen for the first time since `arrived`,
  * and then waits until it has been there for a second, well past the time it takes to settle.
@@ -426,6 +456,59 @@ try {
   await until("left", () => key(page, "f", 70));
   await delay(1000);
 
+  // A view that closes takes back the list it asked for, by the name it gave it. The window
+  // stands still, so nothing but that word keeps the list from opening once the window has
+  // settled, and the episode plays on here.
+  await fromItsStart();
+  lists = sent("showPicker");
+  arrived = await startsFilling(page);
+  let named = pickAs(page, "closed");
+  await takeBack(page, "closed");
+  let answer = await within("the list taken back answers", 10_000, named);
+  waited = await settles(arrived);
+  let here = await clock(page);
+  await waitFor(async () => (await clock(page)) > here, 20_000).catch(() => {});
+  check(
+    waited &&
+      answer.ok &&
+      sent("showPicker") === lists &&
+      (await output(page))?.kind === "local" &&
+      (await clock(page)) > here,
+    "A list taken back by its name while its window still fills the screen opens none once it has, and the episode plays on here",
+    `${sent("showPicker") - lists} lists asked for, output ${(await output(page))?.kind}, taken back ${waited ? "before" : "after"} the window arrived`,
+  );
+  await until("left", () => key(page, "f", 70));
+  await delay(1000);
+
+  // Another list's name takes nothing from this one, however late it comes: the list opens once
+  // the window has settled. Its own name then takes it down, open, and nothing else.
+  await fromItsStart();
+  lists = sent("showPicker");
+  hidden = sent("hidePicker");
+  arrived = await startsFilling(page);
+  named = pickAs(page, "open");
+  await takeBack(page, "closed");
+  waited = await settles(arrived);
+  const opened = sent("showPicker") - lists;
+  await takeBack(page, "open");
+  const taken = await tookBack(hidden);
+  answer = await within("the list taken down answers", 10_000, named);
+  await waitFor(async () => (await output(page))?.kind === "local", 5000).catch(() => {});
+  here = await clock(page);
+  await waitFor(async () => (await clock(page)) > here, 20_000).catch(() => {});
+  check(
+    waited &&
+      opened === 1 &&
+      taken &&
+      answer.ok &&
+      (await output(page))?.kind === "local" &&
+      (await clock(page)) > here,
+    "Another list's name leaves a list to open once its window has settled, and its own takes it down with the episode playing on here",
+    `${opened} lists asked for, ${taken ? "taken down" : "left up"}, output ${(await output(page))?.kind}, the other name ${waited ? "before" : "after"} the window arrived`,
+  );
+  await until("left", () => key(page, "f", 70));
+  await delay(1000);
+
   // The same from a TV that plays, where Play here is that last word: the episode comes back
   // here, and no list opens over it.
   await fromItsStart();
@@ -438,7 +521,7 @@ try {
   await press(page, "Play here");
   waited = await settles(arrived);
   await waitFor(async () => (await output(page))?.kind === "local", 10_000).catch(() => {});
-  const here = await clock(page);
+  here = await clock(page);
   await waitFor(async () => (await clock(page)) > here, 20_000).catch(() => {});
   check(
     waited &&
@@ -488,9 +571,7 @@ try {
 
   // Out of sight, the window has no place for a list: one asked for now opens nowhere.
   lists = sent("showPicker");
-  const answer = await page.evaluate<{ ok: boolean; value?: { output: { kind: string } } }>(
-    `window.mrStreamer.invoke("output.pick", { anchor: { x: 10, y: 10, width: 10, height: 10 } })`,
-  );
+  answer = await pickAs(page, "out of sight");
   await delay(500);
   check(
     answer.ok && answer.value?.output.kind === "receiver" && sent("showPicker") === lists,

@@ -58,6 +58,13 @@ export function useOutput<T>(selector: (state: OutputState) => T): T {
 const listeners = new Set<(now: OutputStatus, before: OutputStatus) => void>();
 
 /**
+ * The views on screen that show an output button, Watch and a playing title, each as the signal
+ * that ends with it, in the order they opened. The system's list belongs to the one opened last
+ * when it is asked for.
+ */
+const views = new Set<AbortSignal>();
+
+/**
  * Where the system's list of receivers opens from, a place in the window in CSS pixels: the
  * output button where the view shows one, else the middle of the window. Measured for each list
  * and never remembered, since the window and its layout may have changed since the last one.
@@ -175,12 +182,31 @@ export const outputs = {
       refused(receiver ?? { id: receiverId, kind: "cast", name: null }),
     );
   },
-  /** Opens the system's list at the output button, as the view shows it now. */
+  /**
+   * Says a view that shows an output button is on screen until `view` ends. The system's list
+   * asked for meanwhile is that view's, whatever asked for it there.
+   */
+  viewShown(view: AbortSignal): void {
+    views.add(view);
+    view.addEventListener("abort", () => views.delete(view), { once: true });
+  },
+  /**
+   * Opens the system's list at the output button, as the view shows it now. The list is that
+   * view's and goes with it, open or still to open, while what plays stays as it is. On a page,
+   * where no view shows the button, the list is the window's alone.
+   */
   pick(): void {
     store.setState({ refused: null });
-    void call("output.pick", { anchor: listAnchor() }).catch(
-      refused({ id: "airplay", kind: "airplay", name: null }),
-    );
+    const view = [...views].at(-1);
+    // A name of its own for each list, so the main process takes down this one and none asked
+    // for since.
+    const request = crypto.randomUUID();
+    const close = () => void call("output.closePicker", { request }).catch(() => {});
+    view?.addEventListener("abort", close, { once: true });
+    void call("output.pick", { anchor: listAnchor(), request })
+      .catch(refused({ id: "airplay", kind: "airplay", name: null }))
+      // Answered: the viewer is done at this list, and nothing of it is left to take down.
+      .finally(() => view?.removeEventListener("abort", close));
   },
   /** Connects again to the receiver whose connection broke. */
   reconnect(): void {

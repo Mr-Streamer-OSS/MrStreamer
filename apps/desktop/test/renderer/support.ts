@@ -12,6 +12,7 @@ import {
   type BridgeApi,
   type IpcEvent,
   type IpcEvents,
+  type IpcInput,
   type IpcMethod,
   type IpcOutput,
 } from "@mrstreamer/contracts/ipc";
@@ -23,9 +24,9 @@ const calls: { readonly method: IpcMethod; readonly args: unknown }[] = [];
 let preferences = defaultPreferences;
 
 export const ipc = {
-  /** The arguments of each call to `method` so far. */
-  argsOf: (method: IpcMethod): unknown[] =>
-    calls.filter((each) => each.method === method).map((each) => each.args),
+  /** The arguments of each call to `method` so far, which its contract allowed. */
+  argsOf: <M extends IpcMethod>(method: M): IpcInput<M>[] =>
+    calls.filter((each) => each.method === method).map((each) => each.args as IpcInput<M>),
   /** The methods called so far, in order. */
   methods: (): IpcMethod[] => calls.map((each) => each.method),
   /** Holds the next call to `method` until the test answers it. */

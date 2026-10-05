@@ -548,15 +548,15 @@ async function start(): Promise<void> {
       "output.status": () => output.status,
       "output.scan": ({ on }) => Effect.as(output.scan(on), null),
       "output.connect": ({ receiverId }) => output.connect(receiverId),
-      "output.pick": ({ anchor }) =>
+      "output.pick": ({ anchor, request }) =>
         Effect.suspend(() => {
           const window = mainWindow;
           const asked = window && listPlace(window, anchor);
           // No window on screen for the list to open from: nothing changes.
           if (!window || !asked) return output.status;
           // The list is this window's from here on, also while it waits for the window to
-          // settle: `followList` ends it with the window, and the output service with what the
-          // viewer chooses next.
+          // settle: `followList` ends it with the window, the output service with what the
+          // viewer chooses next, and the page with the view it asked from, by its name.
           const mine = { window, page: asked.page };
           listedFrom = mine;
           return output
@@ -566,7 +566,7 @@ async function start(): Promise<void> {
               // leaves the place asked for behind: no list opens.
               const from = mainWindow === window ? listPlace(window, anchor) : null;
               return from && samePage(from.page, asked.page) ? from.place : null;
-            })
+            }, request)
             .pipe(
               Effect.ensuring(
                 Effect.sync(() => {
@@ -575,6 +575,7 @@ async function start(): Promise<void> {
               ),
             );
         }),
+      "output.closePicker": ({ request }) => Effect.as(output.closePicker(request), null),
       "output.disconnect": () => Effect.as(output.disconnect, null),
       "output.playChannel": ({ channelId, variant, audio, audioLanguage, name }) =>
         Effect.gen(function* () {
@@ -683,7 +684,7 @@ async function start(): Promise<void> {
    */
   const closeList = () => {
     listedFrom = null;
-    void runtime.runFork(output.closePicker);
+    void runtime.runFork(output.closePicker());
   };
   /**
    * Ends the system's list once the window it opens from is elsewhere, another size or out of
