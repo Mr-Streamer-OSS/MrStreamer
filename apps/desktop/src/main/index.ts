@@ -93,9 +93,10 @@ let mainWindow: BrowserWindow | null = null;
  */
 let away = false;
 /**
- * The window the system's list of receivers opened from, and where its page was on screen then,
- * while the viewer is at that list. The list hangs from a place in that page, so it goes once the
- * page is elsewhere or out of sight (see `start`).
+ * The window the system's list of receivers opens from, and where its page was on screen when the
+ * list was asked for, from then until the viewer is done at that list. The list hangs from a
+ * place in that page, so it goes once the page is elsewhere or out of sight, and doesn't open
+ * when that happens first (see `start`).
  */
 let listedFrom: { readonly window: BrowserWindow; readonly page: Rectangle } | null = null;
 /** How long to wait for a window on its way into full screen to say it arrived. */
@@ -156,20 +157,35 @@ function onScreen(window: BrowserWindow): boolean {
  * Resolves once `window` has settled in full screen, for one on its way there or just arrived,
  * and at once for any other. A list opened before that loses the front to the window's app, and
  * closes by itself (see `FULL_SCREEN_SETTLE_MS`). The way out of full screen takes no list down.
+ *
+ * The wait also ends when `signal` gives it up or the window closes. However it ends, it leaves
+ * no timer and no listener behind.
  */
-async function settledInFullScreen(window: BrowserWindow): Promise<void> {
-  // On its way: the window says it is full screen from the start, and tells when it arrived.
-  if (filledAt === null && window.isFullScreen()) {
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, FULL_SCREEN_MS);
-      window.once("enter-full-screen", () => {
-        clearTimeout(timer);
-        resolve();
-      });
-    });
-  }
-  const settle = filledAt === null ? 0 : filledAt + FULL_SCREEN_SETTLE_MS - performance.now();
-  if (settle > 0) await new Promise((resolve) => setTimeout(resolve, settle));
+function settledInFullScreen(window: BrowserWindow, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve();
+    let timer: NodeJS.Timeout | undefined;
+    const done = () => {
+      clearTimeout(timer);
+      window.off("enter-full-screen", arrived).off("closed", done);
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    /** The window is there, or never said so in time: what is left of its time to settle. */
+    const arrived = () => {
+      clearTimeout(timer);
+      const left = filledAt === null ? 0 : filledAt + FULL_SCREEN_SETTLE_MS - performance.now();
+      if (left > 0) timer = setTimeout(done, left);
+      else done();
+    };
+    window.once("closed", done);
+    signal.addEventListener("abort", done, { once: true });
+    // On its way: the window says it is full screen from the start, and tells when it arrived.
+    if (filledAt === null && window.isFullScreen()) {
+      window.once("enter-full-screen", arrived);
+      timer = setTimeout(arrived, FULL_SCREEN_MS);
+    } else arrived();
+  });
 }
 
 /** Whether the window's page is at the same place and of the same size as it was. */
@@ -533,25 +549,31 @@ async function start(): Promise<void> {
       "output.scan": ({ on }) => Effect.as(output.scan(on), null),
       "output.connect": ({ receiverId }) => output.connect(receiverId),
       "output.pick": ({ anchor }) =>
-        Effect.gen(function* () {
+        Effect.suspend(() => {
           const window = mainWindow;
           const asked = window && listPlace(window, anchor);
-          if (window && asked) yield* Effect.promise(() => settledInFullScreen(window));
-          const from = mainWindow && listPlace(mainWindow, anchor);
-          // No window on screen for the list to open from, or one that went elsewhere while the
-          // list waited, which leaves the place asked for behind: nothing changes.
-          if (!mainWindow || !asked || !from || !samePage(from.page, asked.page)) {
-            return yield* output.status;
-          }
-          const mine = { window: mainWindow, page: from.page };
+          // No window on screen for the list to open from: nothing changes.
+          if (!window || !asked) return output.status;
+          // The list is this window's from here on, also while it waits for the window to
+          // settle: `followList` ends it with the window, and the output service with what the
+          // viewer chooses next.
+          const mine = { window, page: asked.page };
           listedFrom = mine;
-          return yield* output.pick(from.place).pipe(
-            Effect.ensuring(
-              Effect.sync(() => {
-                if (listedFrom === mine) listedFrom = null;
-              }),
-            ),
-          );
+          return output
+            .pick(async (signal) => {
+              await settledInFullScreen(window, signal);
+              // The window closed or went elsewhere meanwhile, or another took its place, which
+              // leaves the place asked for behind: no list opens.
+              const from = mainWindow === window ? listPlace(window, anchor) : null;
+              return from && samePage(from.page, asked.page) ? from.place : null;
+            })
+            .pipe(
+              Effect.ensuring(
+                Effect.sync(() => {
+                  if (listedFrom === mine) listedFrom = null;
+                }),
+              ),
+            );
         }),
       "output.disconnect": () => Effect.as(output.disconnect, null),
       "output.playChannel": ({ channelId, variant, audio, audioLanguage, name }) =>
@@ -656,15 +678,21 @@ async function start(): Promise<void> {
       ),
     );
   /**
-   * Takes the system's list down once the window it opened from is elsewhere, another size or
-   * out of sight: the button it hangs from is no longer there. Only the list goes. A receiver
-   * that plays goes on, and what plays here does too.
+   * Takes the system's list down, or keeps one that still waits for its window from opening.
+   * Only the list goes. A receiver that plays goes on, and what plays here does too.
+   */
+  const closeList = () => {
+    listedFrom = null;
+    void runtime.runFork(output.closePicker);
+  };
+  /**
+   * Ends the system's list once the window it opens from is elsewhere, another size or out of
+   * sight: the button it hangs from is no longer there.
    */
   const followList = (window: BrowserWindow) => {
     if (listedFrom?.window !== window) return;
     if (onScreen(window) && samePage(window.getContentBounds(), listedFrom.page)) return;
-    listedFrom = null;
-    void runtime.runFork(output.closePicker);
+    closeList();
   };
   /**
    * The app is quitting, or restarting into an update: its window closes for good, whatever
@@ -674,6 +702,8 @@ async function start(): Promise<void> {
   let leaving = false;
   const leave = () => {
     leaving = true;
+    // No list opens from a window on its way out.
+    closeList();
   };
   app.on("before-quit", leave);
   autoUpdater.on("before-quit-for-update", leave);

@@ -12,7 +12,10 @@
 //
 // One receiver at a time. Connecting to one the app lists lets go of the one before, with what it
 // played. The system's own list decides nothing until the viewer picks in it: a receiver that
-// plays goes on while the list is open, and stays when it closes with nothing else picked.
+// plays goes on while the list is open, and stays when it closes with nothing else picked. A list
+// counts from when it is asked for, also while it still waits for the place it opens at: going
+// back to this computer, another receiver, another account or another list ends it there, and
+// none opens.
 //
 // Every load has a generation, counted here, and the account it began under. A command names its
 // generation and is dropped once another load took its place. What a receiver says of an earlier
@@ -75,8 +78,8 @@ const CHECKPOINT_MS = 60_000;
  */
 const REOPENED = "reopened";
 /**
- * Why it ends when the list was taken down from here, with the window it opened from. That is as
- * if the viewer closed it without picking.
+ * Why it ends when the list was taken down from here, with the window it opened from or the
+ * account it was asked under. That is as if the viewer closed it without picking.
  */
 const CLOSED = "closed";
 
@@ -90,6 +93,12 @@ export interface OutputDeps {
   /** How often a playing title's progress is saved, in ms, when not the usual. */
   readonly checkpointMs?: number;
 }
+
+/**
+ * Where the system's list opens, once that is known: a place on screen, or null when there is
+ * none left. `signal` ends the wait for it.
+ */
+export type ListPlace = (signal: AbortSignal) => Promise<ScreenRect | null>;
 
 /** What the receiver may show about what it plays. */
 export interface Shown {
@@ -134,15 +143,20 @@ export class Output extends Context.Service<
     /** Connects to a receiver the status lists. What plays here goes on. */
     connect(receiverId: string): Effect.Effect<OutputStatus, Failed>;
     /**
-     * Opens the system's own list of receivers at `anchor`, a place on screen, and connects to
-     * the one the viewer picks. Nothing changes when they pick none, or the one that plays
+     * Opens the system's own list of receivers at the place on screen `place` gives, and connects
+     * to the one the viewer picks. Nothing changes when they pick none, or the one that plays
      * already: it plays on while the list is open, from the same address, and takes commands.
+     *
+     * `place` may take its time, as for a window that is still moving, and gives null once there
+     * is nowhere left to open at. No list opens then, nor when the viewer went back to this
+     * computer, chose another receiver, changed account or asked for another list meanwhile:
+     * `place` hears of that through its signal, and the status comes back as it is.
      */
-    pick(anchor: ScreenRect): Effect.Effect<OutputStatus, Failed>;
+    pick(place: ListPlace): Effect.Effect<OutputStatus, Failed>;
     /**
-     * Takes the system's list down while the viewer is at it, as when the window it opened from
-     * moves or goes out of sight. Nothing else changes: a receiver that plays goes on, and one
-     * the viewer picked in the list just before still counts.
+     * Takes the system's list down while the viewer is at it or it still waits for its place, as
+     * when the window it opens from moves or goes out of sight. Nothing else changes: a receiver
+     * that plays goes on, and one the viewer picked in the list just before still counts.
      */
     readonly closePicker: Effect.Effect<void>;
     /** Back to this computer: ends what the receiver plays, closes its session, lets go of it. */
@@ -220,7 +234,11 @@ function make(deps: OutputDeps) {
       null;
     /** A connect under way, which going back to this computer ends. */
     let connecting: AbortController | null = null;
-    /** The wait at the system's list, from when the list is asked for. */
+    /**
+     * The system's list, from when it is asked for until the wait at it ends. Going back to this
+     * computer, another receiver, another account or another list ends it as each is asked,
+     * before that takes its turn.
+     */
     let listing: AbortController | null = null;
     let playing: Playing | null = null;
     let generation = 0;
@@ -604,33 +622,40 @@ function make(deps: OutputDeps) {
       );
 
     /**
-     * Opens the system's list through `adapter` at `anchor` and connects to what the viewer picks
-     * there. The list by itself changes nothing, so the turn isn't held while it is open: a
-     * receiver that plays goes on playing and takes what it is told meanwhile. It stays, with
-     * what it plays, when the list closes with nothing picked or with the same receiver. Only
-     * another receiver takes its place, once that one answered.
+     * Opens the system's list through `adapter` at the place `place` gives and connects to what
+     * the viewer picks there. The list by itself changes nothing, so the turn isn't held while it
+     * waits for its place or is open: a receiver that plays goes on playing and takes what it is
+     * told meanwhile. It stays, with what it plays, when the list closes with nothing picked or
+     * with the same receiver. Only another receiver takes its place, once that one answered.
      */
-    const pickWith = (adapter: ReceiverAdapter, anchor: ScreenRect) =>
+    const pickWith = (adapter: ReceiverAdapter, place: ListPlace) =>
       Effect.gen(function* () {
         const mine = new AbortController();
         // One list at a time, from when it is asked for: the wait at the one before ends, and
         // nothing failed.
         listing?.abort(REOPENED);
         listing = mine;
-        yield* one(
-          Effect.sync(() => {
-            // Given up before its turn came: no list opens.
-            if (mine.signal.aborted) return;
-            connecting = mine;
-            if (connected) return;
-            output = { kind: "connecting", protocol: adapter.kind, receiver: null };
-            publish();
-          }),
-        );
+        /** Until the call it is for ends, or this list is given up. */
+        const until = (signal: AbortSignal) => AbortSignal.any([signal, mine.signal]);
         const waited = yield* Effect.result(
-          told((signal) =>
-            adapter.connect({ kind: "picker", anchor }, AbortSignal.any([signal, mine.signal])),
-          ),
+          Effect.gen(function* () {
+            const anchor = yield* told((signal) => place(until(signal)));
+            // Nowhere left to open at: no list opens.
+            if (!anchor) return null;
+            yield* one(
+              Effect.sync(() => {
+                // Given up before its turn came: no list opens.
+                if (mine.signal.aborted) return;
+                connecting = mine;
+                if (connected) return;
+                output = { kind: "connecting", protocol: adapter.kind, receiver: null };
+                publish();
+              }),
+            );
+            return yield* told((signal) =>
+              adapter.connect({ kind: "picker", anchor }, until(signal)),
+            );
+          }),
         );
         return yield* one(
           Effect.gen(function* () {
@@ -702,10 +727,12 @@ function make(deps: OutputDeps) {
           );
           const known = [...found.values()].flat().find((each) => each.id === receiverId);
           if (!adapter || !known) return Effect.fail(failed({ kind: "unreachable" }));
+          // The system's list gives way as this is asked, also one that still waits for its place.
+          listing?.abort();
           return connectTo(adapter, known);
         }),
 
-      pick: (anchor: ScreenRect) =>
+      pick: (place: ListPlace) =>
         Effect.suspend(() => {
           const adapter = adapters.find((each) => each.kind === "airplay");
           if (!adapter) {
@@ -716,15 +743,19 @@ function make(deps: OutputDeps) {
               }),
             );
           }
-          return pickWith(adapter, anchor);
+          return pickWith(adapter, place);
         }),
 
       closePicker: Effect.sync(() => listing?.abort(CLOSED)),
 
       // A connect that waits ends first, for its receiver or for the viewer at the system's
-      // list: the one for a receiver holds the turn this takes.
+      // list: the one for a receiver holds the turn this takes. So does a list that has yet to
+      // open, which then never does.
       disconnect: Effect.andThen(
-        Effect.sync(() => connecting?.abort()),
+        Effect.sync(() => {
+          connecting?.abort();
+          listing?.abort();
+        }),
         one(
           Effect.gen(function* () {
             if (output.kind !== "local") {
@@ -899,17 +930,24 @@ function make(deps: OutputDeps) {
         playing?.title ? { title: playing.title.info, ...playing.tracks } : null,
       ),
 
-      accountChanged: one(
-        Effect.gen(function* () {
-          const was = playing;
-          opened.clear();
-          yield* drop(true);
-          if (was && connected) {
-            yield* Effect.promise(() => connected!.connection.stop(was.generation).catch(() => {}));
-          }
-          if (output.kind === "receiver") output = { ...output, media: null, failure: null };
-          publish();
-        }),
+      // A list asked for under the account before goes with it, as one the viewer closed: the
+      // receiver stays.
+      accountChanged: Effect.andThen(
+        Effect.sync(() => listing?.abort(CLOSED)),
+        one(
+          Effect.gen(function* () {
+            const was = playing;
+            opened.clear();
+            yield* drop(true);
+            if (was && connected) {
+              yield* Effect.promise(() =>
+                connected!.connection.stop(was.generation).catch(() => {}),
+              );
+            }
+            if (output.kind === "receiver") output = { ...output, media: null, failure: null };
+            publish();
+          }),
+        ),
       ),
     };
   });

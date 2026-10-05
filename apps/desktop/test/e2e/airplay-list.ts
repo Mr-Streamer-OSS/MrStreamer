@@ -7,10 +7,12 @@
 // From `apps/desktop`, after `pnpm build`. It plays an episode here and opens the list with O: at
 // the output button, where it moves the window under the list, then with the page zoomed, from
 // the mini player, and from a mini player that was full screen. It presses P while an O still
-// waits for the window. It has a TV play, and minimises and closes the window under a list opened
-// again. It passes when each list was asked for where the button was on screen at that moment,
-// when a window that moved or went out of sight took its list down and nothing else, when the O
-// that P overtook opened none, and when a window out of sight opened none.
+// waits for the window. It presses O as the window goes full screen and goes back to this computer
+// before the window settled, from here and from a TV that plays. It has a TV play, and minimises
+// and closes the window under a list opened again. It passes when each list was asked for where
+// the button was on screen at that moment, when a window that moved or went out of sight took its
+// list down and nothing else, when the O that P overtook and the lists given up before the window
+// settled opened none, and when a window out of sight opened none.
 //
 // The helper is the suite's stand-in (../fake-airplay-helper.ts), which shows no list: it says
 // where the app asked for one and when the app took it back. See airplay-tv.ts for how the app
@@ -194,6 +196,28 @@ async function openList(page: Page): Promise<Box> {
   const asked = helper.commands.findLast((command) => command.cmd === "showPicker");
   if (asked?.cmd !== "showPicker") throw new Error("The app asked for no list.");
   return asked.anchor;
+}
+/**
+ * Presses F, and O once the window says it is on its way into full screen, from where the app
+ * holds a list back until the window has settled there. Gives how often the window had arrived
+ * in full screen before.
+ */
+async function listWhileFilling(page: Page): Promise<number> {
+  const { arrived } = await fullScreens();
+  await key(page, "f", 70);
+  while (!(await main.evaluate<boolean>(`${WINDOW}.isFullScreen()`))) await delay(5);
+  await key(page, "o", 79);
+  return arrived;
+}
+/**
+ * Whether the window is still on its way into full screen for the first time since `arrived`,
+ * and then waits until it has been there for a second, well past the time it takes to settle.
+ */
+async function settles(arrived: number): Promise<boolean> {
+  const onItsWay = (await fullScreens()).arrived === arrived;
+  await waitFor(async () => (await fullScreens()).arrived > arrived, 10_000);
+  await delay(1000);
+  return onItsWay;
 }
 /** Whether the app took a list back since `before` of them, within a few seconds. */
 const tookBack = (before: number) =>
@@ -381,6 +405,50 @@ try {
     `${sent("showPicker") - lists} lists asked for, the mini player at ${text(small)}`,
   );
   if (filled) await until("left", () => key(page, "f", 70));
+  await delay(1000);
+
+  // O as the window goes full screen waits until the window has settled there. Going back to
+  // this computer before that is the viewer's last word, and no list opens after it.
+  await fromItsStart();
+  lists = sent("showPicker");
+  let arrived = await listWhileFilling(page);
+  await page.evaluate(`window.mrStreamer.invoke("output.disconnect")`);
+  let waited = await settles(arrived);
+  check(
+    waited && sent("showPicker") === lists && (await output(page))?.kind === "local",
+    "A list given up while its window still fills the screen opens none once it has",
+    `${sent("showPicker") - lists} lists asked for, given up ${waited ? "before" : "after"} the window arrived`,
+  );
+  // The next O is its own.
+  asked = await openList(page);
+  at = await button(page);
+  check(near(asked, at), "The O after it opens the list at the button", `${text(asked)}`);
+  await until("left", () => key(page, "f", 70));
+  await delay(1000);
+
+  // The same from a TV that plays, where Play here is that last word: the episode comes back
+  // here, and no list opens over it.
+  await fromItsStart();
+  await openList(page);
+  helper.choose();
+  await tvPlays();
+  await waitFor(says(page, "Playing over AirPlay", "[data-view=title]"), 20_000);
+  lists = sent("showPicker");
+  arrived = await listWhileFilling(page);
+  await press(page, "Play here");
+  waited = await settles(arrived);
+  await waitFor(async () => (await output(page))?.kind === "local", 10_000).catch(() => {});
+  const here = await clock(page);
+  await waitFor(async () => (await clock(page)) > here, 20_000).catch(() => {});
+  check(
+    waited &&
+      sent("showPicker") === lists &&
+      (await output(page))?.kind === "local" &&
+      (await clock(page)) > here,
+    "Play here while a list waits for its window to fill the screen opens none, and the episode plays on here",
+    `${sent("showPicker") - lists} lists asked for, output ${(await output(page))?.kind}, Play here ${waited ? "before" : "after"} the window arrived`,
+  );
+  await until("left", () => key(page, "f", 70));
   await delay(1000);
 
   // The viewer picks the TV in the list, and the list opens on it again as it plays. Minimised,

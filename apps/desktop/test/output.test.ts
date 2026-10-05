@@ -5,6 +5,7 @@ import type { Codec } from "@mrstreamer/contracts/playback";
 import { Failed } from "@mrstreamer/core/failure";
 import { ViewingRecord } from "@mrstreamer/core/viewing/service";
 import { airplayAdapter } from "../src/main/receivers/airplay/adapter.ts";
+import type { ScreenRect } from "../src/main/receivers/adapter.ts";
 import { castAdapter } from "../src/main/receivers/cast/adapter.ts";
 import { mainLayer } from "../src/main/runtime.ts";
 import { Output } from "../src/main/services/output.ts";
@@ -24,6 +25,24 @@ const LOCAL: readonly Codec[] = ["h264", "aac", "mp3", "opus"];
 const MOVIE = "TEST | Long subtitles";
 const SHOWN = { name: "A movie" };
 const ANCHOR = { x: 900, y: 40, width: 36, height: 36 };
+/** Where the system's list opens, known at once, as from a window that stands still. */
+const at = (anchor: ScreenRect) => () => Promise.resolve(anchor);
+/**
+ * A place the list has to wait for, as from a window still on its way, until the test gives it
+ * with `arrive`. `calledOff` says whether the service gave the wait up meanwhile.
+ */
+function onItsWay() {
+  const found = Promise.withResolvers<ScreenRect | null>();
+  let wait: AbortSignal | null = null;
+  return {
+    place: (signal: AbortSignal) => {
+      wait = signal;
+      return found.promise;
+    },
+    arrive: found.resolve,
+    calledOff: () => wait?.aborted ?? false,
+  };
+}
 
 /** What is waited for arrives in milliseconds; a busy machine gets the time it needs. */
 const eventually = <T>(check: () => T | Promise<T>) =>
@@ -435,7 +454,7 @@ describe.skipIf(!hasTools)("playback through the system's list of receivers", ()
     void fetch(local.url, { signal: watching.signal }).catch(() => {});
     await eventually(() => expect(provider.activeStreams()).toBe(1));
 
-    const picking = output.pick(ANCHOR);
+    const picking = output.pick(at(ANCHOR));
     expect(await helper.took("showPicker")).toMatchObject({ anchor: ANCHOR });
     await eventually(async () =>
       expect(await state()).toEqual({ kind: "connecting", protocol: "airplay", receiver: null }),
@@ -451,7 +470,7 @@ describe.skipIf(!hasTools)("playback through the system's list of receivers", ()
 
   it("plays on the receiver the viewer picks, and comes back when it lets go", async () => {
     const { helper, output, play, state, provider } = await casting();
-    const picking = output.pick(ANCHOR);
+    const picking = output.pick(at(ANCHOR));
     await helper.took("showPicker");
     helper.choose();
     // The system keeps the receiver's name to itself.
@@ -477,7 +496,7 @@ describe.skipIf(!hasTools)("playback through the system's list of receivers", ()
 
   it("keeps what a receiver plays while its list is open again, and when it closes with nothing picked", async () => {
     const { helper, output, play, fetches, state, changes, provider } = await casting();
-    const picking = output.pick(ANCHOR);
+    const picking = output.pick(at(ANCHOR));
     await helper.took("showPicker");
     helper.choose();
     await picking;
@@ -490,7 +509,7 @@ describe.skipIf(!hasTools)("playback through the system's list of receivers", ()
     );
     const before = changes.length;
 
-    const again = output.pick(ANCHOR);
+    const again = output.pick(at(ANCHOR));
     await helper.took("showPicker");
     // With the list open the receiver takes what it is told.
     await output.command(media.generation, { command: "pause" });
@@ -517,14 +536,14 @@ describe.skipIf(!hasTools)("playback through the system's list of receivers", ()
 
   it("follows what the viewer picks in a list opened on a receiver that plays", async () => {
     const { helper, output, play, state } = await casting();
-    const picking = output.pick(ANCHOR);
+    const picking = output.pick(at(ANCHOR));
     await helper.took("showPicker");
     helper.choose();
     await picking;
     await play(25);
     const load = await helper.took("load");
 
-    const again = output.pick(ANCHOR);
+    const again = output.pick(at(ANCHOR));
     await helper.took("showPicker");
     // This computer, in the system's list: the receiver lets go, and its stream closes.
     helper.external(false);
@@ -553,7 +572,7 @@ describe.skipIf(!hasTools)("playback through the system's list of receivers", ()
     expect((await fetches()).status).toBe(200);
     const stops = tv.requests("STOP").length;
 
-    const closing = output.pick(ANCHOR);
+    const closing = output.pick(at(ANCHOR));
     await helper.took("showPicker");
     expect(await state()).toMatchObject({ receiver: { kind: "cast" }, media: {} });
     helper.dismiss();
@@ -566,7 +585,7 @@ describe.skipIf(!hasTools)("playback through the system's list of receivers", ()
     expect((await fetches()).status).toBe(200);
 
     // Picked there, the other receiver takes the TV's place, which is let go of with its stream.
-    const picking = output.pick(ANCHOR);
+    const picking = output.pick(at(ANCHOR));
     await helper.took("showPicker");
     helper.choose();
     expect((await picking).output).toMatchObject({
@@ -580,7 +599,7 @@ describe.skipIf(!hasTools)("playback through the system's list of receivers", ()
 
   it("takes only the list down with its window, and keeps what the receiver plays", async () => {
     const { helper, output, play, fetches, state, changes } = await casting();
-    const picking = output.pick(ANCHOR);
+    const picking = output.pick(at(ANCHOR));
     await helper.took("showPicker");
     helper.choose();
     await picking;
@@ -594,7 +613,7 @@ describe.skipIf(!hasTools)("playback through the system's list of receivers", ()
     const before = changes.length;
     const hidden = () => helper.commands.filter((command) => command.cmd === "hidePicker").length;
 
-    const again = output.pick(ANCHOR);
+    const again = output.pick(at(ANCHOR));
     await helper.took("showPicker");
     const lists = hidden();
     // The window the list opened from moved, or went out of sight.
@@ -627,7 +646,7 @@ describe.skipIf(!hasTools)("playback through the system's list of receivers", ()
     void fetch(local.url, { signal: watching.signal }).catch(() => {});
     await eventually(() => expect(provider.activeStreams()).toBe(1));
 
-    const picking = output.pick(ANCHOR);
+    const picking = output.pick(at(ANCHOR));
     await helper.took("showPicker");
     await eventually(async () =>
       expect(await state()).toEqual({ kind: "connecting", protocol: "airplay", receiver: null }),
@@ -646,12 +665,12 @@ describe.skipIf(!hasTools)("playback through the system's list of receivers", ()
 
   it("opens the list asked for right after one was taken down", async () => {
     const { helper, output, state } = await casting();
-    const first = output.pick(ANCHOR);
+    const first = output.pick(at(ANCHOR));
     await helper.took("showPicker");
 
     // The window moved, and the viewer pressed the button again before the first wait ended.
     const closing = output.closePicker();
-    const second = output.pick({ ...ANCHOR, x: 400 });
+    const second = output.pick(at({ ...ANCHOR, x: 400 }));
     await closing;
     await first;
 
@@ -684,7 +703,7 @@ describe.skipIf(!hasTools)("playback through the system's list of receivers", ()
 
   it("gives up the list when the viewer goes back to this computer meanwhile", async () => {
     const { helper, output, state } = await casting();
-    const picking = output.pick(ANCHOR);
+    const picking = output.pick(at(ANCHOR));
     await helper.took("showPicker");
 
     // Given up by the viewer: the list closes, and nothing failed.
@@ -692,5 +711,124 @@ describe.skipIf(!hasTools)("playback through the system's list of receivers", ()
     expect((await picking).output).toEqual({ kind: "local" });
     await helper.took("hidePicker");
     expect(await state()).toEqual({ kind: "local" });
+  });
+
+  it.each([
+    {
+      how: "the viewer went back to this computer",
+      next: "disconnect",
+      arrives: ANCHOR,
+      leaves: { kind: "local" },
+    },
+    {
+      how: "the account changed",
+      next: "accountChanged",
+      arrives: ANCHOR,
+      leaves: { kind: "receiver", media: null },
+    },
+    {
+      how: "its window moved",
+      next: "closePicker",
+      arrives: ANCHOR,
+      leaves: { kind: "receiver", media: { state: "playing" } },
+    },
+    {
+      how: "its window had no place left for it",
+      next: "status",
+      arrives: null,
+      leaves: { kind: "receiver", media: { state: "playing" } },
+    },
+  ] as const)(
+    "opens no list on a receiver that plays once $how while the list waited for its place",
+    async ({ next, arrives, leaves }) => {
+      const { helper, output, play, state } = await casting();
+      const picking = output.pick(at(ANCHOR));
+      await helper.took("showPicker");
+      helper.choose();
+      await picking;
+      await play(25);
+      await helper.took("load");
+      helper.status("playing", 26, 150);
+      await eventually(async () =>
+        expect(await state()).toMatchObject({ media: { state: "playing" } }),
+      );
+
+      const window = onItsWay();
+      const waiting = output.pick(window.place);
+      await output[next]();
+      expect(await state()).toMatchObject(leaves);
+      // The place comes late, to a list nobody waits for any more.
+      window.arrive(arrives);
+
+      // Nothing failed, and nothing changed again.
+      expect((await waiting).output).toMatchObject(leaves);
+      expect(await state()).toMatchObject(leaves);
+      // The one list from before, in the one helper: none opened, and none started for it.
+      expect(helper.commands.filter((command) => command.cmd === "showPicker")).toHaveLength(1);
+      expect(helper.pids).toHaveLength(1);
+    },
+  );
+
+  it.each([
+    { how: "went back to this computer", next: "disconnect" },
+    { how: "moved the window", next: "closePicker" },
+  ] as const)(
+    "starts nothing when the viewer $how before a list asked for from here had its place",
+    async ({ next }) => {
+      const { helper, playback, output, provider, channel, changes } = await casting();
+      const local = await playback.open(channel, LOCAL);
+      const watching = new AbortController();
+      void fetch(local.url, { signal: watching.signal }).catch(() => {});
+      await eventually(() => expect(provider.activeStreams()).toBe(1));
+
+      const window = onItsWay();
+      const waiting = output.pick(window.place);
+      await output[next]();
+      // The wait for the place hears of it at once.
+      expect(window.calledOff()).toBe(true);
+      window.arrive(ANCHOR);
+
+      expect((await waiting).output).toEqual({ kind: "local" });
+      // No helper ever started, no connect was said to be under way, and what plays here does.
+      expect(helper.pids).toEqual([]);
+      expect(changes.map((each) => each.output.kind)).not.toContain("connecting");
+      expect(provider.activeStreams()).toBe(1);
+      expect(provider.streamRequests()).toBe(1);
+      watching.abort();
+    },
+  );
+
+  it("opens only the list asked for last when the one before still waited for its place", async () => {
+    const { helper, output } = await casting();
+    const window = onItsWay();
+    const first = output.pick(window.place);
+    const second = output.pick(at({ ...ANCHOR, x: 400 }));
+    expect(await helper.took("showPicker")).toMatchObject({ anchor: { x: 400 } });
+    expect(window.calledOff()).toBe(true);
+
+    // The first one's place comes late, and its end takes nothing from the second.
+    window.arrive(ANCHOR);
+    await first;
+    expect(helper.commands.filter((command) => command.cmd === "showPicker")).toHaveLength(1);
+    expect(helper.commands.filter((command) => command.cmd === "hidePicker")).toHaveLength(0);
+    helper.choose();
+    expect((await second).output).toMatchObject({
+      kind: "receiver",
+      receiver: { kind: "airplay" },
+    });
+  });
+
+  it("gives a list that still waited for its place up for a TV the viewer picks in the app's list", async () => {
+    const { helper, output, connect } = await casting();
+    const window = onItsWay();
+    const waiting = output.pick(window.place);
+    expect((await connect()).output).toMatchObject({
+      kind: "receiver",
+      receiver: { kind: "cast" },
+    });
+    window.arrive(ANCHOR);
+
+    expect((await waiting).output).toMatchObject({ kind: "receiver", receiver: { kind: "cast" } });
+    expect(helper.commands.filter((command) => command.cmd === "showPicker")).toHaveLength(0);
   });
 });
