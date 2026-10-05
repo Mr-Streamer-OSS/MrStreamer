@@ -294,6 +294,23 @@ describe.skipIf(!hasTools)("playback on a receiver", () => {
     expect(tv.app).toBeNull();
   });
 
+  it("says why a connect reached no receiver, and nothing when the viewer gave it up", async () => {
+    const { tv, output, connect, state } = await casting();
+    tv.answers.launch = "refuse";
+    expect(await failure(connect())).toMatchObject({
+      kind: "output",
+      failure: { kind: "unavailable" },
+    });
+    expect(await state()).toEqual({ kind: "local" });
+
+    // The TV says nothing to the next one, and the viewer goes back to this computer.
+    tv.answers.launch = "ignore";
+    const connecting = output.connect(tv.receiver.id);
+    await eventually(() => expect(tv.requests("LAUNCH")).toHaveLength(2));
+    await output.disconnect();
+    expect((await connecting).output).toEqual({ kind: "local" });
+  });
+
   it("saves how far the receiver got from what it confirms, never from an earlier load", async () => {
     const { tv, connect, play, state, saved } = await casting({ checkpointMs: 100 });
     await connect();
@@ -448,11 +465,13 @@ describe.skipIf(!hasTools)("playback through the system's list of receivers", ()
 
   it("gives up the list when the viewer goes back to this computer meanwhile", async () => {
     const { helper, output, state } = await casting();
-    const picking = failure(output.pick(ANCHOR));
+    const picking = output.pick(ANCHOR);
     await helper.took("showPicker");
 
+    // Given up by the viewer: the list closes, and nothing failed.
     await output.disconnect();
-    expect(await picking).toMatchObject({ kind: "output", failure: { kind: "unreachable" } });
+    expect((await picking).output).toEqual({ kind: "local" });
+    await helper.took("hidePicker");
     expect(await state()).toEqual({ kind: "local" });
   });
 });

@@ -17,6 +17,8 @@ import { player } from "../../player/player.ts";
 import { titlePlayer } from "../../player/title-player.ts";
 import { Choice, Menu, MenuNote } from "./TrackMenus.tsx";
 
+/** How long the note that a connect reached no receiver stays. */
+const REFUSED_MS = 8000;
 /** How long a receiver that stopped answering stays in the list, marked as gone. */
 const GONE_MS = 2000;
 /** After this long without a receiver, the list says none was found. */
@@ -134,8 +136,15 @@ export function OutputButton({
 function Receivers({ onDone, onSystemList }: { onDone: () => void; onSystemList: () => void }) {
   const status = useOutput((state) => state.status);
   const connectingSince = useOutput((state) => state.connectingSince);
+  const refused = useOutput((state) => state.refused);
   const { output } = status;
   const connecting = useElapsed(connectingSince);
+  // The list has done its work once the receiver answers.
+  const was = useRef(output.kind);
+  useEffect(() => {
+    if (was.current === "connecting" && output.kind === "receiver") onDone();
+    was.current = output.kind;
+  }, [output.kind, onDone]);
   // Counted from when the list opened.
   const opened = useRef(Date.now()).current;
   const looking = useElapsed(opened) ?? 0;
@@ -168,7 +177,13 @@ function Receivers({ onDone, onSystemList }: { onDone: () => void; onSystemList:
         <Choice
           key={receiver.id}
           chosen={current?.id === receiver.id}
-          note={target?.id === receiver.id ? `Connecting · ${connecting ?? 0} s` : null}
+          note={
+            target?.id === receiver.id
+              ? `Connecting · ${connecting ?? 0} s`
+              : refused?.receiver.id === receiver.id
+                ? "Didn't connect"
+                : null
+          }
           onChoose={() => {
             if (current?.id === receiver.id && output.kind === "receiver") return onDone();
             outputs.connect(receiver.id);
@@ -224,25 +239,38 @@ function useGone(receivers: readonly Receiver[]): readonly Receiver[] {
 }
 
 /**
- * While a connect waits for the viewer in the system's list: how long it has, and where a code
- * the TV may show goes. It stands where a pressed key's word shows. The system owns the prompt,
- * so the app can't tell whether one was asked for.
+ * What a connect has to say, where a pressed key's word shows. While it waits for the viewer in
+ * the system's list: how long it has, and where a code the TV may show goes; the system owns that
+ * prompt, so the app can't tell whether one was asked for. And for a few seconds after a connect
+ * that reached no receiver: why, while what played here plays on.
  */
 export function ConnectingNote() {
   const output = useOutput((state) => state.status.output);
   const since = useOutput((state) => state.connectingSince);
+  const refused = useOutput((state) => state.refused);
   const seconds = useElapsed(since);
-  if (output.kind !== "connecting" || output.protocol !== "airplay") return null;
+  const [, expire] = useState(0);
+  useEffect(() => {
+    if (!refused) return;
+    const timer = setTimeout(() => expire((count) => count + 1), REFUSED_MS);
+    return () => clearTimeout(timer);
+  }, [refused]);
+  const waiting = output.kind === "connecting" && output.protocol === "airplay";
+  const failed =
+    !waiting && output.kind === "local" && refused && Date.now() - refused.at < REFUSED_MS
+      ? receiverProblem(refused.failure, false, refused.receiver, null)
+      : null;
+  if (!waiting && !failed) return null;
   return (
     <div
       role="status"
       className="pointer-events-none fixed top-12 right-12 z-40 max-w-[22rem] rounded-3xl bg-black/80 px-6 py-4 ring-1 ring-white/10"
     >
       <div className="text-xl font-semibold tracking-tight tabular-nums">
-        Connecting over AirPlay · {seconds ?? 0} s
+        {failed ? failed.title : `Connecting over AirPlay · ${seconds ?? 0} s`}
       </div>
       <div className="mt-1 text-[0.8125rem] leading-snug text-muted-foreground">
-        If your TV shows a code, enter it in the AirPlay window.
+        {failed ? failed.body : "If your TV shows a code, enter it in the AirPlay window."}
       </div>
     </div>
   );
@@ -284,7 +312,7 @@ export function PlayHere({
 export function receiverProblem(
   failure: OutputFailure,
   lost: boolean,
-  receiver: Receiver | null,
+  receiver: Pick<Receiver, "kind" | "name"> | null,
   stopped: string | null,
 ): { readonly title: string; readonly body: string; readonly retry: boolean } {
   const name = receiverName(receiver);

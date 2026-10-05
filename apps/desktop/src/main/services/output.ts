@@ -539,6 +539,11 @@ function make(deps: OutputDeps) {
                 if (connecting === mine) connecting = null;
               }),
             ),
+            // Given up by the viewer, with This computer or another receiver: nothing failed.
+            Effect.catchIf(
+              () => mine.signal.aborted,
+              () => Effect.succeed(null),
+            ),
             Effect.tapError(() =>
               Effect.sync(() => {
                 output = { kind: "local" };

@@ -122,7 +122,27 @@ No suite needs a TV. `apps/desktop/test/fake-cast-receiver.ts` is a Cast device 
 
 `title-receiver.mkv` and `title-receiver.mp4` come from `apps/desktop/scripts/receiver-fixtures.ts`: 64 s with keyframes at uneven distances, some half a second apart, B-frames, two sound tracks and English SubRip subtitles, one of which lasts across a keyframe. The MKV's clock starts at 7.5 s; the MP4 keeps its index at the end and shows its first picture a frame after zero. `test/matroska-index.ts` rewrites an MKV's index to leave keyframes out or name one that isn't there.
 
-The real helper is checked on a Mac: `scripts/build-airplay-helper.sh mac-arm64`, then run it with nothing to read, and it says `hello` and exits. What no suite covers is a receiver itself: discovery on a real network, the Windows firewall, what a TV's player accepts and how it behaves over hours. That is tested by hand on a nightly, and the [project](https://github.com/orgs/Mr-Streamer-OSS/projects/1) card holds the result.
+`apps/desktop/test/e2e/cast-tv.ts` runs the whole Cast path through a built app's window, by hand: the app finds the fake device by mDNS on this computer's own local network address, connects, and the device fetches what it is sent as a TV's player would. It plays a movie here, tries a TV that refuses, moves the movie to the TV, pauses and skips it there, leaves the player, brings it back with Play here, moves a channel over and quits. It needs a private address on an interface that isn't a tunnel, `openssl` and `ffprobe`. From `apps/desktop`, after `pnpm build`:
+
+```sh
+xvfb-run -a node test/e2e/cast-tv.ts node_modules/electron/dist/electron -- . --no-sandbox
+```
+
+A Linux machine without such a network can make one that touches nothing else, in a network namespace:
+
+```sh
+sudo ip netns add tv
+sudo ip netns exec tv ip link set lo up
+sudo ip netns exec tv ip link add eth0 type dummy
+sudo ip netns exec tv ip addr add 192.168.77.1/24 dev eth0
+sudo ip netns exec tv ip link set eth0 multicast on up
+sudo ip netns exec tv ip route add 224.0.0.0/4 dev eth0
+sudo ip netns exec tv sudo -u "$USER" env PATH="$PATH" HOME="$HOME" \
+  xvfb-run -a node test/e2e/cast-tv.ts node_modules/electron/dist/electron -- . --no-sandbox
+sudo ip netns delete tv
+```
+
+The real helper is checked on a Mac: `scripts/build-airplay-helper.sh mac-arm64`, then run it with nothing to read, and it says `hello` and exits. What nothing here covers is a receiver itself: discovery on a real network, the Windows firewall, what a TV's player accepts and how it behaves over hours. That is tested by hand on a nightly, and the [project](https://github.com/orgs/Mr-Streamer-OSS/projects/1) card holds the result.
 
 ## Packaged app
 

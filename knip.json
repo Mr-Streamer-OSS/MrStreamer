@@ -12,5 +12,5 @@
     },
     "packages/*": {}
   },
-  "ignoreBinaries": ["ffmpeg", "ffprobe", "fc-match", "electron-builder", "script"]
+  "ignoreBinaries": ["ffmpeg", "ffprobe", "fc-match", "electron-builder", "script", "openssl"]
 }

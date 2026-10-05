@@ -5,7 +5,13 @@
 // The two player controllers follow it: with a receiver connected, what they are asked to play
 // goes there and their state is the receiver's. Nothing here plays or stops anything by itself.
 import { createStore, useStore } from "zustand";
-import type { OutputStatus, Receiver, RemoteMedia } from "@mrstreamer/contracts/output";
+import type {
+  OutputFailure,
+  OutputStatus,
+  Receiver,
+  RemoteMedia,
+} from "@mrstreamer/contracts/output";
+import { appError } from "../lib/errors.ts";
 import { call, listen } from "../lib/ipc.ts";
 
 /** A place in the window, in CSS pixels, for the system's list of receivers to open from. */
@@ -22,6 +28,12 @@ interface OutputState {
   readonly connectingSince: number | null;
   /** The app's own list of receivers shows. */
   readonly choosing: boolean;
+  /** Why the last connect reached no receiver, and when; null once another began. */
+  readonly refused: {
+    readonly receiver: Pick<Receiver, "id" | "kind" | "name">;
+    readonly failure: OutputFailure;
+    readonly at: number;
+  } | null;
 }
 
 const LOCAL: OutputStatus = {
@@ -36,6 +48,7 @@ const store = createStore<OutputState>(() => ({
   status: LOCAL,
   connectingSince: null,
   choosing: false,
+  refused: null,
 }));
 
 /** Reads where playback goes in a component. */
@@ -61,6 +74,15 @@ listen("output.changed", take);
 void call("output.status")
   .then(take)
   .catch(() => {});
+
+/** Keeps why a connect to `receiver` reached nothing, for the views to say. */
+function refused(receiver: Pick<Receiver, "id" | "kind" | "name">) {
+  return (cause: unknown) => {
+    const error = appError(cause);
+    if (error.kind !== "output") return;
+    store.setState({ refused: { receiver, failure: error.failure, at: Date.now() } });
+  };
+}
 
 /** "Living Room TV", or "AirPlay" for a receiver the system doesn't name. */
 export function receiverName(receiver: Pick<Receiver, "kind" | "name"> | null): string {
@@ -131,12 +153,19 @@ export const outputs = {
   },
   /** Connects to a receiver the list shows. What plays here goes on until it answers. */
   connect(receiverId: string): void {
-    void call("output.connect", { receiverId }).catch(() => {});
+    const receiver = store.getState().status.receivers.find((each) => each.id === receiverId);
+    store.setState({ refused: null });
+    void call("output.connect", { receiverId }).catch(
+      refused(receiver ?? { id: receiverId, kind: "cast", name: null }),
+    );
   },
   /** Opens the system's list at `from`, or where the chooser last opened. */
   pick(from: Anchor = anchor): void {
     anchor = from;
-    void call("output.pick", { anchor }).catch(() => {});
+    store.setState({ refused: null });
+    void call("output.pick", { anchor }).catch(
+      refused({ id: "airplay", kind: "airplay", name: null }),
+    );
   },
   /** Connects again to the receiver whose connection broke. */
   reconnect(): void {
