@@ -376,7 +376,9 @@ async function start(): Promise<void> {
       "ondemand.collection": (query) => onDemand.collection(query),
       "playback.open": ({ channelId, variant, decoders, repair, audio, audioLanguage, preview }) =>
         Effect.gen(function* () {
-          // A page's preview never takes the provider's connection from a receiver.
+          // A page's preview never takes the provider's connection from a receiver. Refused
+          // here while one is the output, also one that is gone with nothing open; the playback
+          // service looks again when the open takes its turn, for one that began meanwhile.
           if (preview && (yield* output.remote)) {
             return yield* new Failed({
               error: { kind: "unexpected", detail: "A receiver has playback." },
@@ -395,6 +397,7 @@ async function start(): Promise<void> {
             repair: repair ?? false,
             audio: audio ?? null,
             audioLanguage: audioLanguage ?? null,
+            preview: preview ?? false,
           });
         }),
       "playback.openTitle": ({ title, decoders }) =>
