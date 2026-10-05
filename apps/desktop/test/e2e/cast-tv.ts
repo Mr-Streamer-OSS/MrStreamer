@@ -25,7 +25,7 @@ import { join } from "node:path";
 import { connect as tlsConnect, createServer as tlsServer } from "node:tls";
 import dns from "dns-packet";
 import { lanAddresses } from "../../src/main/playback/lan.ts";
-import { startFakeCastReceiver } from "../fake-cast-receiver.ts";
+import { startFakeCastReceiver, type FakeMedia } from "../fake-cast-receiver.ts";
 import { fixture, startFakeProvider } from "../fake-provider.ts";
 import { connect, delay, key, launch, login, press, says, waitFor, type Page } from "./app.ts";
 import { segmentsOf } from "./tv-player.ts";
@@ -117,12 +117,37 @@ mdns.on("message", (message, from) => {
 const fetched = { segments: 0, refused: [] as string[] };
 let segment: Buffer | null = null;
 const have = new Set<string>();
-async function get(url: string): Promise<Buffer | null> {
+/** Fetches for the TV. A request that isn't answered goes on `failed`, for the player to judge. */
+async function get(url: string, failed: string[]): Promise<Buffer | null> {
   const response = await fetch(url, { signal: AbortSignal.timeout(25_000) }).catch(() => null);
   if (!response?.ok) {
-    fetched.refused.push(`${response?.status ?? "no answer"} for ${new URL(url).pathname}`);
+    failed.push(`${response?.status ?? "no answer"} for ${new URL(url).pathname}`);
   }
   return response?.ok ? Buffer.from(await response.arrayBuffer()) : null;
+}
+/** One round of the TV's player on the media it holds. */
+async function round(media: FakeMedia, ask: (url: string) => Promise<Buffer | null>) {
+  const segments = await segmentsOf(String(media.media["contentId"]), ask);
+  const live = media.media["streamType"] === "LIVE";
+  const last = segments.at(-1);
+  if (!live) media.media = { ...media.media, duration: last ? last.start + last.length : 0 };
+  const at = media.currentTime;
+  const wanted = live
+    ? segments.slice(-2)
+    : segments.filter((each) => each.start + each.length > at && each.start < at + 6).slice(0, 2);
+  for (const each of wanted) {
+    if (have.has(each.url)) continue;
+    const bytes = await ask(each.url);
+    if (!bytes) continue;
+    have.add(each.url);
+    fetched.segments++;
+    segment = bytes;
+  }
+  if (tv.media !== media || wanted.length === 0 || !wanted.every((each) => have.has(each.url))) {
+    return;
+  }
+  if (media.playerState === "BUFFERING") tv.status({ playerState: "PLAYING" });
+  else if (media.playerState === "PLAYING" && !live) media.currentTime += 0.5;
 }
 let busy = false;
 /** The script works the TV's own remote, and the TV's player leaves its state alone meanwhile. */
@@ -132,27 +157,13 @@ const player = setInterval(() => {
   if (!media || busy || remote) return;
   busy = true;
   void (async () => {
-    const segments = await segmentsOf(String(media.media["contentId"]), get);
-    const live = media.media["streamType"] === "LIVE";
-    const last = segments.at(-1);
-    if (!live) media.media = { ...media.media, duration: last ? last.start + last.length : 0 };
-    const at = media.currentTime;
-    const wanted = live
-      ? segments.slice(-2)
-      : segments.filter((each) => each.start + each.length > at && each.start < at + 6).slice(0, 2);
-    for (const each of wanted) {
-      if (have.has(each.url)) continue;
-      const bytes = await get(each.url);
-      if (!bytes) continue;
-      have.add(each.url);
-      fetched.segments++;
-      segment = bytes;
-    }
-    if (tv.media !== media || wanted.length === 0 || !wanted.every((each) => have.has(each.url))) {
-      return;
-    }
-    if (media.playerState === "BUFFERING") tv.status({ playerState: "PLAYING" });
-    else if (media.playerState === "PLAYING" && !live) media.currentTime += 0.5;
+    const failed: string[] = [];
+    await round(media, (url) => get(url, failed));
+    if (failed.length === 0) return;
+    // The app cuts a request off as it ends a stream, on Play here or a stop, before the TV
+    // hears of it. Only one for a stream the TV still holds a moment later was refused.
+    await delay(1500);
+    if (tv.media === media) fetched.refused.push(...failed);
   })().finally(() => (busy = false));
 }, 500);
 
