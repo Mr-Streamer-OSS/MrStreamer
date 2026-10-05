@@ -90,9 +90,12 @@ The release is out either way. The run's error names the case.
 
 1. Download the artifact `msix-<version>` from the stable release's run. Its `.msix.json` names the package version, the commit and the SHA-256.
 2. In Partner Center, start a new submission of Mr. Streamer. It copies the previous one's settings.
-3. Under Packages, upload the `.msix`.
-4. Check the [settings below](#settings-every-submission-keeps), update "What's new" in the listing, and submit for certification. Certification can take up to three business days.
-5. The listing publishes it as soon as it passes.
+3. Under Packages, upload the artifact's `.msix` unchanged. A rebuild from `pnpm dist:msix` is a different file, one the release run never checked.
+4. Wait for the row to show the package version from `.msix.json`, such as `1.0.6.0` for 0.0.6. If it stays on "Analyzing package", reload the page first. A reload has cleared such a row before. Upload again only when the reloaded page doesn't list the package.
+5. Save, then look at Packages again. It should list the new version alone. Partner Center removed the lower version by itself when 1.0.6.0 was saved. Microsoft [describes](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/upload-app-packages#removing-redundant-packages) a warning with an option to remove redundant packages instead, so use that option if a lower version is still listed.
+6. Check the [settings below](#settings-every-submission-keeps) and update "What's new" in the listing.
+7. Submit for certification, which can take up to three business days. Nothing holds the submission after that. The listing publishes it to everyone as soon as it passes, so submitting is the decision to publish, and that decision is Wout's.
+8. Partner Center sends a notice when the submission is published. Check that the public listing shows a new "Last updated date". Record the submission, its package version and when it was submitted and published on the release's card in the GitHub project.
 
 While a submission made by hand is in progress, the automation refuses to start another. **status** follows it by the package's version.
 
@@ -143,9 +146,9 @@ From then on a stable release says that submissions are off and sends nothing. T
 
 A submission copies the one before it, by hand or through the API, so these stay as they are unless someone changes them in Partner Center.
 
-**Pricing and availability.** Every market. Public audience. Free, with no trial or sale, and the organizational licensing defaults.
+**Pricing and availability.** Every market. Under Visibility, "Public audience" and "Make this product available and discoverable in the Store". Free, with no trial or sale, and the organizational licensing defaults.
 
-**Properties.** Category Entertainment. "Yes, my product uses personal information", with `https://mrstreamer.app/privacy`. Website `https://mrstreamer.app`, support `hello@mrstreamer.app`. Untick "designed to run in an immersive (not 2D) view on Windows Mixed Reality" for PC and HoloLens: ticked, it declares a headset app and Partner Center then demands headset hardware. Windows backups to OneDrive off, since the data stays on the PC and a password sealed with the Windows account couldn't be opened elsewhere. No accessibility claim until someone tests it. No system requirements.
+**Properties.** Category Entertainment. "Yes, my product uses personal information", with `https://mrstreamer.app/privacy`. Website `https://mrstreamer.app`, support `hello@mrstreamer.app`. Untick "designed to run in an immersive (not 2D) view on Windows Mixed Reality" for PC and HoloLens: ticked, it declares a headset app and Partner Center then demands headset hardware. Windows backups to OneDrive off, since the data stays on the PC and a password sealed with the Windows account couldn't be opened elsewhere. No accessibility claim until someone tests it. Under System requirements, Keyboard and Mouse ticked as Minimum hardware. The listing shows them as required. Microsoft's [system requirements](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/system-requirements) page says the Store may warn on a device without them. That device can still install the app but can't rate or review it.
 
 **Age rating.** The IARC questionnaire for "All Other App Types", answered honestly. Online Content is Yes, because the app plays whatever the user's provider sends, which gives 18+ everywhere (ESRB Adults Only). Store policy 11.11.2 asks for an accurate rating.
 
@@ -153,11 +156,12 @@ A submission copies the one before it, by hand or through the API, so these stay
 
 - The description opens with what the app needs, as policy 10.2.4 asks: it supplies no channels, playlists or subscriptions, and the user connects their own provider.
 - Screenshots and artwork come from the fake provider with made-up titles, as for the README ([development](../contributing/development.md#artwork)), and stay at a PEGI 12 level (policy 11.1) whatever the app's rating.
+- The trailer stays selected to play at the top of the listing.
 - Search terms name the formats it reads, never providers or channels.
-- Copyright "Copyright © 2026 Wout Stiens", as in the app and the package.
+- Copyright "Copyright (c) 2026 Mr Streamer OSS", which the public listing shows with ©. Keep that listing text for updates. The app and the package carry "Copyright © 2026 Wout Stiens" from `apps/desktop/electron-builder.yml`.
 - **Additional license terms** carry the GPL-3.0 source offer ([licences](licences.md#microsoft-store)).
 
-**Submission options.** No publishing hold: the submission is published as soon as it passes certification. The `runFullTrust` capability needs a justification: Mr. Streamer is an Electron app, which runs as a full-trust Win32 process like every Electron app packaged as MSIX. It starts its bundled ffmpeg and ffprobe as child processes and serves playback through a local proxy on 127.0.0.1. It installs no drivers or services, doesn't start with Windows and writes only to its own data folder.
+**Submission options.** Publishing hold options: "Publish this submission as soon as it passes certification (or per dates you selected in the Schedule section)", which is Partner Center's default and the mode the API calls `Immediate`. Never "Don't publish this submission until I select Publish now", which keeps a certified update unpublished until someone selects **Publish now** and stops the automation before it creates anything. The `runFullTrust` capability needs a justification: Mr. Streamer is an Electron app, which runs as a full-trust Win32 process like every Electron app packaged as MSIX. It starts its bundled ffmpeg and ffprobe as child processes and serves playback through a local proxy on 127.0.0.1. It installs no drivers or services, doesn't start with Windows and writes only to its own data folder.
 
 **Notes for certification**, under Supplemental info > Additional Testing Information. The Description field won't save a link and the Credentials table refuses one too, so the notes say how to find the reviewers' playlist: open the public repository Mr-Streamer-OSS/certification-playlist on GitHub, open `reviewer.m3u`, choose Raw and copy the address. Then connect with **Use an M3U link** and no login. The notes also say that the demo is live TV only, without a guide, that Movies and Series need a provider that offers them, that titles and channels for adults stay hidden until Settings > General > For adults, and that the app asks before sending a login over http. Never give Microsoft a real subscription.
 
