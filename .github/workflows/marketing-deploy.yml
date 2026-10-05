@@ -151,7 +151,11 @@ jobs:
         with:
           node-version: 24
       # The project and account come from VERCEL_PROJECT_ID and VERCEL_ORG_ID. --prebuilt uploads
-      # the package as it is, and Vercel runs no build. Only this step and the check hold the token.
+      # the package as it is, and Vercel runs nothing from the repository. --archive=tgz sends it
+      # as one file, which Vercel unpacks in its build step: the step that adds the Web Analytics
+      # routes under /_vercel/insights/. A package of static files sent without it skips that
+      # step, and the pages' analytics script answers 404. Only this step and the check hold the
+      # token.
       - name: Publish
         if: steps.newest.outputs.superseded != 'true'
         env:
@@ -160,7 +164,7 @@ jobs:
           VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
           BUILT: ${{ needs.build.outputs.commit }}
         run: |
-          url=$(npx --yes vercel@62.2.0 deploy --prebuilt --prod --cwd apps/marketing --token "$VERCEL_TOKEN")
+          url=$(npx --yes vercel@62.2.0 deploy --prebuilt --archive=tgz --prod --cwd apps/marketing --token "$VERCEL_TOKEN")
           {
             echo "### Deployed"
             echo "$BUILT is a production deployment at $url."

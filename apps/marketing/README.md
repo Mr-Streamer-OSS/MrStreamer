@@ -42,6 +42,8 @@ Both local servers and Vercel answer the same addresses, with or without a query
 
 `vite.config.ts` answers them for `pnpm dev:marketing` and `pnpm preview:marketing`. `scripts/package-vercel.ts` writes them as routes in `.vercel/output/config.json` for Vercel. An address added to one goes in the other too.
 
+Vercel alone answers `/_vercel/insights/`, for [website analytics](#website-analytics).
+
 ## Change it
 
 - Keep the words true and few. Every claim on the page comes from the README or the docs. The app's limits are in [what plays](../../docs/user/playback.md).
@@ -53,13 +55,23 @@ Both local servers and Vercel answer the same addresses, with or without a query
 
 The production build loads Vercel Web Analytics for page views. Local development does not load it. Enable Web Analytics in the Vercel project's Analytics tab before deploying; the project currently has it enabled. The desktop app has no analytics. The [privacy policy](../../docs/privacy.md#the-website) describes website data collection.
 
+The pages load the script from `/_vercel/insights/script.js` and send page views to `/_vercel/insights/view`. Vercel adds both to a deployment in its build step. A prebuilt package of static files skips that step unless it arrives as an archive, so every deployment here uses `--archive=tgz`. Without the flag the site looks the same, the script answers 404 and nothing is counted.
+
+To check a deployment, ask for the script. It answers JavaScript, and the 404 page when the routes are missing:
+
+```sh
+curl -sI https://mrstreamer.app/_vercel/insights/script.js | grep -i content-type   # application/javascript
+```
+
+`pnpm preview:marketing` answers that address with the 404 page, as it is not Vercel.
+
 ## How it gets published
 
 `.github/workflows/marketing-deploy.yml` publishes the page from GitHub Actions. Vercel only serves it.
 
 1. A push to `main` that changes what the page is built from starts a run. You can also start one by hand from `main`.
 2. The build job has no secrets. It builds `main`, checks the package and hands over `.vercel/output` alone.
-3. The publish job holds the Vercel token. It checks out nothing and runs the pinned Vercel CLI on that package: `vercel deploy --prebuilt --prod`.
+3. The publish job holds the Vercel token. It checks out nothing and runs the pinned Vercel CLI on that package: `vercel deploy --prebuilt --archive=tgz --prod`.
 
 Runs take turns and none is cancelled halfway. A run that waited builds the newest `main`. Before it publishes, a run asks git whether `main` has changed the website since its build. If it has, the run leaves publishing to the run that change started. If git can't tell, the run fails and publishes nothing.
 
@@ -126,7 +138,7 @@ From an up-to-date `main`, build the same package the workflow builds and publis
 ```sh
 pnpm install
 pnpm build:marketing
-npx --yes vercel@62.2.0 deploy --prebuilt --prod --cwd apps/marketing
+npx --yes vercel@62.2.0 deploy --prebuilt --archive=tgz --prod --cwd apps/marketing
 ```
 
 A project's first deployment is its production deployment. No domain is attached yet, so it is live only at the project's `vercel.app` address. Check there:
@@ -135,6 +147,7 @@ A project's first deployment is its production deployment. No domain is attached
 - `/privacy` and `/privacy/` both show the whole policy.
 - An address with no page, such as `/nothing/here`, shows Page not found.
 - `/robots.txt`, `/sitemap.xml` and `/generated/social.png` answer.
+- `/_vercel/insights/script.js` shows JavaScript, not Page not found.
 
 ### 6. Move the domain
 
@@ -150,11 +163,12 @@ Today `mrstreamer.app` sits behind Cloudflare, which redirects `/` to the reposi
 Then check:
 
 ```sh
-curl -sI https://mrstreamer.app/ | head -1                         # 200
-curl -sI "https://www.mrstreamer.app/x?y=1" | grep -i location     # https://mrstreamer.app/x?y=1
-curl -sI https://mrstreamer.app/privacy | head -1                  # 200
-curl -sI https://mrstreamer.app/privacy/ | head -1                 # 200
-curl -sI "https://mrstreamer.app/nothing/here?y=1" | head -1       # 404
+curl -sI https://mrstreamer.app/ | head -1                             # 200
+curl -sI "https://www.mrstreamer.app/x?y=1" | grep -i location         # https://mrstreamer.app/x?y=1
+curl -sI https://mrstreamer.app/privacy | head -1                      # 200
+curl -sI https://mrstreamer.app/privacy/ | head -1                     # 200
+curl -sI "https://mrstreamer.app/nothing/here?y=1" | head -1           # 404
+curl -sI https://mrstreamer.app/_vercel/insights/script.js | head -1   # 200
 ```
 
 Send a message to `hello@mrstreamer.app` and see it arrive. Open Settings > About in the app and follow its Website and Privacy links.
