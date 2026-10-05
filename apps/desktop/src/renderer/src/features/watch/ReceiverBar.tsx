@@ -15,7 +15,7 @@ import { queries } from "../../lib/queries.ts";
 import { clock } from "../../lib/titles.ts";
 import { useLiveSession, useTitleSession } from "../../player/media-session.ts";
 import { outputs, receiverName, useOutput, where } from "../../player/output.ts";
-import { player, usePlayer } from "../../player/player.ts";
+import { player, receiverState, usePlayer } from "../../player/player.ts";
 import { titlePlayer, useTitlePlayer, type NowPlaying } from "../../player/title-player.ts";
 import { adjacentChannel, useListChannels } from "../live/lists.ts";
 import { PlayHere, playHere, receiverProblem } from "./Output.tsx";
@@ -175,7 +175,10 @@ function TitleOn({ now, receiver }: { now: NowPlaying; receiver: Receiver }) {
   );
 }
 
-/** A channel on the receiver: what's on, channel up and down, Stop and Play here. */
+/**
+ * A channel on the receiver: what's on, what the receiver said of it unless it plays, channel up
+ * and down, Stop and Play here.
+ */
 function ChannelOn({ channel, receiver }: { channel: LiveChannel; receiver: Receiver }) {
   const phase = usePlayer((state) => state.phase);
   const list = useUi((state) => state.list);
@@ -183,16 +186,21 @@ function ChannelOn({ channel, receiver }: { channel: LiveChannel; receiver: Rece
   const programme = useQuery(queries.listings([channel.id])).data?.[channel.id]?.now?.title ?? null;
   // The system's media controls stay with the channel while Watch is closed.
   useLiveSession(channel);
+  const said = receiverState(phase);
   const state =
     phase.kind === "failed"
       ? phase.problem.kind === "receiver"
         ? receiverProblem(phase.problem.failure, phase.problem.lost, receiver, null).title
         : "Didn't play"
-      : phase.kind === "tuning"
+      : phase.kind === "tuning" || said === "loading"
         ? "Loading"
         : phase.kind === "reconnecting"
           ? "Reconnecting"
-          : null;
+          : said === "paused"
+            ? "Paused"
+            : said === "buffering"
+              ? "Buffering"
+              : null;
   const step = (direction: number) => {
     const target = adjacentChannel(channels ?? [], channel.id, direction);
     if (target) player.zap(target);

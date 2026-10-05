@@ -4,7 +4,9 @@
 // receiver catches up, and leaving the view leaves it playing. Play here brings it back from where
 // the receiver was. The next episode counts down only once the receiver played to the end. A
 // channel moves there when a receiver connects, Stop keeps the receiver, and no page previews
-// meanwhile. The bar at the foot of the pages says what plays where.
+// meanwhile. Watch says what the receiver last confirmed of a channel, paused and buffering too,
+// as the TV's own remote can pause what the app can't. The bar at the foot of the pages says what
+// plays where.
 import { ipc } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement, type FunctionComponent } from "react";
@@ -24,6 +26,7 @@ import type {
 import { useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { TitleWatch } from "../../src/renderer/src/features/titles/TitleWatch.tsx";
 import { ReceiverBar } from "../../src/renderer/src/features/watch/ReceiverBar.tsx";
+import { WatchScreen } from "../../src/renderer/src/features/watch/WatchScreen.tsx";
 import { movieNow, playTitle } from "../../src/renderer/src/lib/titles.ts";
 import { player } from "../../src/renderer/src/player/player.ts";
 import type { TitleRun } from "../../src/renderer/src/player/title-engine.ts";
@@ -398,7 +401,7 @@ describe("a channel with a receiver connected", () => {
     await playing();
 
     expect(ipc.argsOf("output.playChannel")).toMatchObject([{ channelId: "a", name: "a" }]);
-    expect(player.state().phase).toEqual({ kind: "playing", engine: "receiver" });
+    expect(player.state().phase).toEqual({ kind: "playing", engine: "receiver", state: "playing" });
 
     player.preview(channel("b"));
     await wait(0);
@@ -436,6 +439,108 @@ describe("a channel with a receiver connected", () => {
 
     expect(ipc.methods()).not.toContain("playback.open");
     expect(player.state()).toMatchObject({ phase: { kind: "idle" }, stopped: true });
+  });
+
+  it("says paused and buffering as the receiver confirms them, on the one stream", async () => {
+    await playing();
+    await show(WatchScreen);
+    expect(text()).toContain("Playing on Living Room TV");
+
+    // Paused with the TV's own remote: nothing here asked for it.
+    await emit(connected(said(1, item, "paused")));
+    expect(text()).toContain("Paused on Living Room TV");
+    expect(text()).not.toContain("Playing on");
+
+    await emit(connected(said(1, item, "buffering")));
+    expect(text()).toContain("Buffering on Living Room TV");
+
+    await emit(connected(said(1, item, "playing")));
+    expect(text()).toContain("Playing on Living Room TV");
+    expect(text()).toContain("Play here");
+
+    // It was the same channel throughout: watched once, sent once, told nothing.
+    expect(ipc.argsOf("viewing.recordWatch")).toHaveLength(1);
+    expect(ipc.argsOf("output.playChannel")).toHaveLength(1);
+    expect(commands()).toEqual([]);
+  });
+
+  it("is paused there, not loading for ever, when that is the receiver's first word", async () => {
+    const loaded = ipc.hold("output.playChannel");
+    player.play(channel("a"));
+    await wait(0);
+    await act(async () => loaded.resolve(said(1, item, "loading")));
+    await show(WatchScreen);
+    expect(text()).toContain("Loading on Living Room TV");
+    expect(text()).toContain("Tuning a");
+
+    await emit(connected(said(1, item, "paused")));
+    expect(text()).toContain("Paused on Living Room TV");
+    expect(text()).not.toContain("Tuning a");
+    expect(ipc.argsOf("viewing.recordWatch")).toMatchObject([{ channelId: "a" }]);
+
+    await emit(connected(said(1, item, "playing")));
+    expect(text()).toContain("Playing on Living Room TV");
+    expect(ipc.argsOf("viewing.recordWatch")).toHaveLength(1);
+  });
+
+  it("says it in the bar at the foot of the pages too", async () => {
+    await playing();
+    await show(ReceiverBar);
+    expect(text()).not.toContain("Paused");
+
+    await emit(connected(said(1, item, "paused")));
+    expect(text()).toContain("a · Paused");
+
+    await emit(connected(said(1, item, "buffering")));
+    expect(text()).toContain("a · Buffering");
+  });
+
+  it("hears nothing of the channel that played before", async () => {
+    await playing();
+    const loaded = ipc.hold("output.playChannel");
+    player.play(channel("b"));
+    await wait(0);
+
+    // A late word on the channel before, while the next one loads and once it plays.
+    await emit(connected(said(1, item, "paused")));
+    expect(player.state()).toMatchObject({ channel: { id: "b" }, phase: { kind: "tuning" } });
+
+    const next: RemoteItem = { kind: "channel", channelId: "b" };
+    await act(async () => loaded.resolve(said(2, next, "loading")));
+    await emit(connected(said(2, next, "playing")));
+    await emit(connected(said(1, item, "paused")));
+
+    expect(player.state().phase).toEqual({ kind: "playing", engine: "receiver", state: "playing" });
+    expect(ipc.argsOf("viewing.recordWatch")).toMatchObject([
+      { channelId: "a" },
+      { channelId: "b" },
+    ]);
+  });
+});
+
+describe("a channel that plays here", () => {
+  it("plays as it always did, with no receiver's word on it", async () => {
+    await emit(HERE);
+    const opened = ipc.hold("playback.open");
+    player.play(channel("a"));
+    await wait(0);
+    await act(async () =>
+      opened.resolve({
+        sessionId: "here",
+        channelId: "a",
+        url: "http://127.0.0.1/stream/here",
+        format: "hls",
+      }),
+    );
+    // The picture moves; the player notices within a second.
+    player.element.currentTime += 1;
+    await wait(1100);
+    await show(WatchScreen);
+
+    expect(player.state().phase).toEqual({ kind: "playing", engine: "native" });
+    expect(text()).not.toContain("Playing");
+    expect(ipc.argsOf("viewing.recordWatch")).toMatchObject([{ channelId: "a" }]);
+    expect(ipc.methods()).not.toContain("output.playChannel");
   });
 });
 

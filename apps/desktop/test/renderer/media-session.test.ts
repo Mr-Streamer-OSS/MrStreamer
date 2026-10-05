@@ -3,7 +3,8 @@
 // a headphone's double tap can't change channel. A view closing after the next one opened, as a
 // movie does when a channel is picked over it, leaves the next one's controls in place. What a
 // receiver on the network plays is paused and played by what the receiver last said, since
-// nothing plays in the window then.
+// nothing plays in the window then: a channel paused with the TV's remote shows as paused, and
+// play has the receiver play on with the stream it has.
 import { ipc } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
@@ -33,6 +34,7 @@ Object.assign(globalThis, {
 });
 const { useLiveSession, useTitleSession } =
   await import("../../src/renderer/src/player/media-session.ts");
+const { player } = await import("../../src/renderer/src/player/player.ts");
 const { titlePlayer } = await import("../../src/renderer/src/player/title-player.ts");
 
 const channel = (title: string): LiveChannel => ({
@@ -143,6 +145,109 @@ describe("the system's media controls", () => {
     ]);
 
     titlePlayer.close();
+    await act(() => root.unmount());
+  });
+
+  it("show a channel the receiver holds paused, and play has it play on there", async () => {
+    ipc.reset();
+    const tv = { id: "tv", kind: "cast", name: "Living Room TV" } as const;
+    const arena = channel("Arena 1");
+    const media = (state: RemoteMedia["state"]): RemoteMedia => ({
+      generation: 4,
+      sessionId: "r4",
+      item: { kind: "channel", channelId: arena.id },
+      state,
+      position: 0,
+      at: Date.now(),
+      duration: null,
+      subtitles: false,
+    });
+    const said = (state: RemoteMedia["state"] | null) =>
+      act(async () =>
+        ipc.emit("output.changed", {
+          offers: ["cast"],
+          airplayRoutes: null,
+          scanning: false,
+          receivers: [tv],
+          output: {
+            kind: "receiver",
+            receiver: tv,
+            volume: null,
+            failure: null,
+            media: state && media(state),
+          },
+        }),
+      );
+    await said(null);
+    const loaded = ipc.hold("output.playChannel");
+    const root = createRoot(document.createElement("div"));
+    await act(async () => {
+      root.render(
+        createElement(
+          QueryClientProvider,
+          { client: new QueryClient() },
+          createElement(Watch, { channel: arena }),
+        ),
+      );
+      player.play(arena);
+    });
+    await act(async () => loaded.resolve(media("loading")));
+    await said("playing");
+    expect(session.playbackState).toBe("playing");
+    const commands = () => ipc.argsOf("output.command");
+
+    // Paused with the TV's own remote.
+    await said("paused");
+    expect(session.playbackState).toBe("paused");
+    handlers.get("play")?.({ action: "play" });
+    expect(commands()).toEqual([{ generation: 4, command: "play" }]);
+    // The receiver plays on with the stream it has: nothing opens again, there or here.
+    expect(ipc.argsOf("output.playChannel")).toHaveLength(1);
+    expect(ipc.methods()).not.toContain("playback.open");
+
+    // Buffering is on its way to playing, and play has nothing to add to either.
+    await said("buffering");
+    expect(session.playbackState).toBe("playing");
+    await said("playing");
+    expect(session.playbackState).toBe("playing");
+    handlers.get("play")?.({ action: "play" });
+    expect(commands()).toHaveLength(1);
+
+    player.reset();
+    await act(() => root.unmount());
+  });
+
+  it("leave a channel that opens here alone when play is pressed", async () => {
+    ipc.reset();
+    await act(async () =>
+      ipc.emit("output.changed", {
+        offers: [],
+        airplayRoutes: null,
+        scanning: false,
+        receivers: [],
+        output: { kind: "local" },
+      }),
+    );
+    const arena = channel("Arena 1");
+    const root = createRoot(document.createElement("div"));
+    await act(async () => {
+      root.render(
+        createElement(
+          QueryClientProvider,
+          { client: new QueryClient() },
+          createElement(Watch, { channel: arena }),
+        ),
+      );
+      player.play(arena);
+    });
+    expect(session.playbackState).toBe("playing");
+
+    handlers.get("play")?.({ action: "play" });
+
+    expect(ipc.argsOf("playback.open")).toHaveLength(1);
+    expect(ipc.methods()).not.toContain("output.command");
+
+    player.reset();
     await act(() => root.unmount());
   });
 });

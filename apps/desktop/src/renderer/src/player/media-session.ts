@@ -11,16 +11,18 @@
 // anything, so the muted previews leave the system alone.
 //
 // What a receiver on the network plays answers the same buttons, from what it last confirmed, in
-// its player's view and from the bar at the foot of the pages. Chromium offers the system only a
-// window that plays sound itself, and a receiver's playback makes none here, so a silent loop
-// plays in step with the receiver meanwhile (`carry`). With the window closed, as macOS allows
-// while a receiver plays, there is no session and the media keys reach nothing.
+// its player's view and from the bar at the foot of the pages. A channel the receiver itself holds
+// paused, as after Pause on the TV's remote, shows as paused, and play has the receiver play on
+// with the stream it has. Chromium offers the system only a window that plays sound itself, and a
+// receiver's playback makes none here, so a silent loop plays in step with the receiver meanwhile
+// (`carry`). With the window closed, as macOS allows while a receiver plays, there is no session
+// and the media keys reach nothing.
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { queries } from "../lib/queries.ts";
 import { useOutput } from "./output.ts";
-import { player, usePlayer } from "./player.ts";
+import { player, receiverState, usePlayer } from "./player.ts";
 import { titlePlayer, useTitlePlayer } from "./title-player.ts";
 
 /** How far the system's back and forward buttons skip when they don't say. */
@@ -249,11 +251,15 @@ function useCarried(remote: boolean, playing: boolean): void {
 
 /**
  * The channel in Watch in the system's controls: the programme on now, the channel and its logo.
- * Play starts a stopped channel, pause and stop stop it.
+ * Play starts a stopped channel, or has a receiver play on with one it holds paused; pause and
+ * stop stop it.
  */
 export function useLiveSession(channel: LiveChannel | null): void {
   const phase = usePlayer((state) => state.phase.kind);
   const live = phase !== "idle" && phase !== "failed";
+  // Only a receiver holds a channel that is on paused: the system shows what it said.
+  const held = usePlayer((state) => receiverState(state.phase) === "paused");
+  const playing = live && !held;
   const listings = useQuery(queries.listings(channel ? [channel.id] : []));
   const programme = (channel && listings.data?.[channel.id]?.now?.title) ?? null;
   const view = useView();
@@ -272,6 +278,8 @@ export function useLiveSession(channel: LiveChannel | null): void {
         play: () => {
           const { phase: now } = player.state();
           if (now.kind === "idle" || now.kind === "failed") player.play(channel);
+          // One a receiver holds paused plays on there. Any other is on its way already.
+          else player.resume();
         },
         pause: stop,
         stop,
@@ -281,9 +289,9 @@ export function useLiveSession(channel: LiveChannel | null): void {
     session?.setPositionState();
   }, [view, channel, programme]);
 
-  useEffect(() => showState(view, live ? "playing" : "paused"), [view, live]);
+  useEffect(() => showState(view, playing ? "playing" : "paused"), [view, playing]);
   // On a receiver the channel makes no sound here. `stopped` tells its Stop from a preview's end.
   const remote = useOutput((state) => state.status.output.kind === "receiver");
   const stopped = usePlayer((state) => state.stopped);
-  useCarried(remote && channel !== null && (live || stopped), live);
+  useCarried(remote && channel !== null && (live || stopped), playing);
 }

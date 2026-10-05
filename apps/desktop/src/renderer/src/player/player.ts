@@ -22,10 +22,16 @@
 // With a receiver on the network connected (see output.ts), a channel the viewer chooses plays
 // there: the main process opens it for the receiver, and the state here is what the receiver
 // confirmed. Nothing previews meanwhile, as a preview would take the provider's connection from
-// the receiver. A channel has no pause and no subtitles there.
+// the receiver. A channel has no pause and no subtitles there; one the receiver itself holds
+// paused or buffering, as after Pause on the TV's remote, says so here.
 import { createStore, useStore } from "zustand";
 import type { AppError } from "@mrstreamer/contracts/errors";
-import type { OutputFailure, OutputStatus, RemoteMedia } from "@mrstreamer/contracts/output";
+import type {
+  OutputFailure,
+  OutputStatus,
+  RemoteMedia,
+  RemoteState,
+} from "@mrstreamer/contracts/output";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import {
   DEFAULT_SUBTITLE_LOOK,
@@ -95,11 +101,18 @@ export type PlaybackProblem =
    */
   | { readonly kind: "receiver"; readonly failure: OutputFailure; readonly lost: boolean };
 
+/** What a receiver says of a channel it started. A channel has no end. */
+type ReceiverState = Exclude<RemoteState, "ended">;
+
 type PlayerPhase =
   | { readonly kind: "idle" }
   | { readonly kind: "tuning"; readonly since: number }
-  /** `engine` is "receiver" when a receiver on the network plays it. */
-  | { readonly kind: "playing"; readonly engine: EngineName | "receiver" }
+  | { readonly kind: "playing"; readonly engine: EngineName }
+  /**
+   * A receiver on the network started it. `state` is its last word on it: it plays, is paused
+   * there, as from the TV's remote, or waits for more of the stream.
+   */
+  | { readonly kind: "playing"; readonly engine: "receiver"; readonly state: ReceiverState }
   | { readonly kind: "reconnecting"; readonly attempt: number; readonly of: number }
   | { readonly kind: "failed"; readonly problem: PlaybackProblem };
 
@@ -154,6 +167,14 @@ const store = createStore<PlayerState>(() => ({
 /** Reads player state in a component. */
 export function usePlayer<T>(selector: (state: PlayerState) => T): T {
   return useStore(store, selector);
+}
+
+/**
+ * What the receiver last said of the channel it started, for the views to say. Null while the
+ * channel plays here, and until the receiver starts it.
+ */
+export function receiverState(phase: PlayerState["phase"]): ReceiverState | null {
+  return phase.kind === "playing" && phase.engine === "receiver" ? phase.state : null;
 }
 
 const video = document.createElement("video");
@@ -361,12 +382,21 @@ async function startOnReceiver(channel: LiveChannel, attempt: number): Promise<v
   }
 }
 
-/** Takes the receiver's word on the channel it plays. */
+/**
+ * Takes the receiver's word on the channel it plays. Its first word past loading starts the
+ * channel, also when that holds it paused; what it says from then on only changes the state.
+ */
 function followReceiver(media: RemoteMedia): void {
   const { channel, phase } = store.getState();
-  if (!channel || media.state !== "playing" || phase.kind === "playing") return;
+  // A channel has no end: the main process says its stream stopped instead.
+  if (!channel || media.state === "ended") return;
+  const started = phase.kind === "playing";
+  if (!started && media.state === "loading") return;
+  if (receiverState(phase) !== media.state) {
+    store.setState({ phase: { kind: "playing", engine: "receiver", state: media.state } });
+  }
+  if (started) return;
   const mine = selection;
-  store.setState({ phase: { kind: "playing", engine: "receiver" } });
   void loadStream(mine, media.sessionId);
   void loadTracks(mine, media.sessionId);
   void call("viewing.recordWatch", { commandId: crypto.randomUUID(), channelId: channel.id }).catch(
@@ -822,6 +852,15 @@ export const player = {
   playHere(): void {
     returning = true;
     void outputs.local();
+  },
+
+  /**
+   * Plays on a channel the receiver holds paused, as after Pause on the TV's remote. The receiver
+   * keeps the stream it has, so nothing opens again.
+   */
+  resume(): void {
+    if (onReceiver?.load == null || receiverState(store.getState().phase) !== "paused") return;
+    void call("output.command", { generation: onReceiver.load, command: "play" }).catch(() => {});
   },
 
   /** Whether the selected channel is the receiver's. */

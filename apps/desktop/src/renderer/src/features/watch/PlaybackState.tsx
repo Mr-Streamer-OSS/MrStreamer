@@ -1,7 +1,8 @@
 // What the picture area says when there is no picture: idle, tuning, reconnecting or failed. A
 // quality chosen for the channel that fails says so, and offers another instead of playing it.
 // While a receiver on the network plays the channel there is never a picture here: the same place
-// says what the receiver does and where, and always offers Play here.
+// says what the receiver last confirmed of it and where, paused and buffering included, and always
+// offers Play here.
 import { useQuery } from "@tanstack/react-query";
 import { Play, RotateCw, SkipForward } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -13,7 +14,7 @@ import { describeError } from "../../lib/errors.ts";
 import { outputs, useOutput, where } from "../../player/output.ts";
 import { qualityName } from "../../lib/quality.ts";
 import { queries, useChooseQuality } from "../../lib/queries.ts";
-import { player, usePlayer, type PlaybackProblem } from "../../player/player.ts";
+import { player, receiverState, usePlayer, type PlaybackProblem } from "../../player/player.ts";
 import { PlayHere, ReceiverLine, receiverProblem } from "./Output.tsx";
 import { useChannelQuality } from "./quality.ts";
 
@@ -90,11 +91,21 @@ export function PlaybackState({
         />
       );
     }
+    // The receiver's own word once it started the channel: its remote pauses what the app can't.
+    const said = receiverState(phase);
     return (
       <Block
         line={
           <ReceiverLine receiver={receiver}>
-            {phase.kind === "playing" ? "Playing" : phase.kind === "tuning" ? "Loading" : "Stopped"}{" "}
+            {phase.kind === "idle"
+              ? "Stopped"
+              : phase.kind === "tuning" || said === "loading"
+                ? "Loading"
+                : said === "paused"
+                  ? "Paused"
+                  : said === "buffering"
+                    ? "Buffering"
+                    : "Playing"}{" "}
             {on}
           </ReceiverLine>
         }
