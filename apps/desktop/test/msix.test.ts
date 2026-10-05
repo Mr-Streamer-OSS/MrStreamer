@@ -1,16 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { compareVersions, parseVersion } from "@mrstreamer/contracts/version";
-import { packageVersion } from "../scripts/msix-version.ts";
-
-/** Orders four-part package versions the way Windows and the Store do: part by part. */
-function comparePackages(a: string, b: string): number {
-  const [left, right] = [a, b].map((version) => version.split(".").map(Number));
-  for (let part = 0; part < 4; part++) {
-    const difference = (left?.[part] ?? 0) - (right?.[part] ?? 0);
-    if (difference !== 0) return difference;
-  }
-  return 0;
-}
+import { comparePackageVersions, packageVersion } from "@mrstreamer/contracts/package-version";
 
 describe("Microsoft Store package versions", () => {
   it("numbers a stable release one major version up, with the Store's last part 0", () => {
@@ -42,7 +32,7 @@ describe("Microsoft Store package versions", () => {
       compareVersions(parseVersion(a)!, parseVersion(b)!),
     );
     const byPackage = [...releases].sort((a, b) =>
-      comparePackages(packageVersion(a), packageVersion(b)),
+      comparePackageVersions(packageVersion(a), packageVersion(b)),
     );
 
     expect(byRelease).toEqual(releases);

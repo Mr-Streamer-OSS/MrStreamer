@@ -11,8 +11,9 @@
 # - Dry run: labelling a pull request "release dry run" builds, signs and tests its head commit
 #   once, keeps the files as workflow artifacts and publishes nothing.
 # - Microsoft Store package: dry runs and stable releases also build the MSIX and test it installed.
-#   It stays a workflow artifact, outside the release and the update feed. Nothing waits for it and
-#   nothing submits it. Nightlies never build it.
+#   It stays a workflow artifact, outside the release and the update feed, and publishing doesn't
+#   wait for it. Nightlies never build it. Once a stable release is published, microsoft-store.yml
+#   sends its package to the Store, when the owner has turned that on.
 # - After publishing, update-feed.yml points the app's update feed at the new release.
 #
 # Every job checks out the commit the plan resolved, so main moving during a run changes nothing.
@@ -136,6 +137,8 @@ jobs:
       pull-requests: read
       pages: write
       id-token: write
+      # The Store job reads the run's own package and the environment's branch rule.
+      actions: read
 
   # The release the run is for: a nightly, a dry run or a stable release. A stable release waits for
   # the nightly first and builds only once that one is published and in the feed.
@@ -158,3 +161,5 @@ jobs:
       pull-requests: read
       pages: write
       id-token: write
+      # The Store job reads the run's own package and the environment's branch rule.
+      actions: read
