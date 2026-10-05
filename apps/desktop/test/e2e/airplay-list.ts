@@ -5,17 +5,18 @@
 //   node test/e2e/airplay-list.ts node_modules/electron/dist/Electron.app/Contents/MacOS/Electron
 //
 // From `apps/desktop`, after `pnpm build`. It plays an episode here and opens the list with O: at
-// the output button, where it moves the window under the list, then with the page zoomed, and
-// from the mini player. It has a TV play, and minimises and closes the window under a list opened
+// the output button, where it moves the window under the list, then with the page zoomed, from
+// the mini player, and from a mini player that was full screen. It presses P while an O still
+// waits for the window. It has a TV play, and minimises and closes the window under a list opened
 // again. It passes when each list was asked for where the button was on screen at that moment,
-// when a window that moved or went out of sight took its list down and nothing else, and when a
-// window out of sight opened none.
+// when a window that moved or went out of sight took its list down and nothing else, when the O
+// that P overtook opened none, and when a window out of sight opened none.
 //
 // The helper is the suite's stand-in (../fake-airplay-helper.ts), which shows no list: it says
 // where the app asked for one and when the app took it back. See airplay-tv.ts for how the app
-// comes to start it, and for what the script needs of the Mac. The window never goes full screen,
-// and nothing is typed or clicked on the Mac itself: keys and window calls go through the app's
-// own inspectors.
+// comes to start it, and for what the script needs of the Mac. The window fills the screen for a
+// few seconds, in a Space of its own that goes with it. Nothing is typed or clicked on the Mac
+// itself: keys and window calls go through the app's own inspectors.
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -130,6 +131,28 @@ const ELECTRON = `process.getBuiltinModule("node:module").createRequire(process.
 const WINDOW = `${ELECTRON}.BrowserWindow.getAllWindows()[0]`;
 /** Where the window's page is on screen, in points. */
 const content = () => main.evaluate<Box>(`${WINDOW}.getContentBounds()`);
+/**
+ * How often the window arrived in full screen and how often it was back out of it, by its own
+ * events. macOS takes over half a second for each, and the window says it is full screen from
+ * the start of the way there.
+ */
+const fullScreens = () =>
+  main.evaluate<{ readonly arrived: number; readonly left: number }>(`(() => {
+    const window = ${WINDOW};
+    globalThis.fullScreens ??= (() => {
+      const count = { arrived: 0, left: 0 };
+      window.on("enter-full-screen", () => count.arrived++);
+      window.on("leave-full-screen", () => count.left++);
+      return count;
+    })();
+    return { ...globalThis.fullScreens };
+  })()`);
+/** Does `act`, and waits until the window has then arrived in full screen, or is back out of it. */
+async function until(what: "arrived" | "left", act: () => Promise<unknown>): Promise<void> {
+  const before = (await fullScreens())[what];
+  await act();
+  await waitFor(async () => (await fullScreens())[what] > before, 10_000);
+}
 /**
  * Where the output button is on screen now, in points. The page's own pixels count `zoom` points
  * each: what the page draws a pixel with, over what the display draws a point with.
@@ -302,8 +325,68 @@ try {
   await delay(2000);
   check(sent("hidePicker") === hidden, "The list stays up once the window is back");
 
-  // The viewer picks the TV in that list, and the list opens on it again as it plays. Minimised,
+  // From a mini player that was full screen, the window fills the screen again first. The page
+  // has full screen at once, and the window changes size on its way there: a list asked for
+  // before it arrived would hang from where the button was, and go with the next change.
+  const shrinks = async () => {
+    await key(page, "p", 80);
+    await waitFor(async () => (await content()).width <= mini.width + 1, 10_000);
+    await delay(1000);
+  };
+  // The episode lasts twelve seconds, and its end takes the place of the controls the output
+  // button is in.
+  const fromItsStart = async () => {
+    await key(page, "ArrowLeft", 37);
+    await waitFor(async () => {
+      const at = await clock(page);
+      return at > 0.2 && at < 3;
+    }, 20_000);
+  };
+  await fromItsStart();
+  await until("arrived", () => key(page, "f", 70));
+  await shrinks();
+  hidden = sent("hidePicker");
+  await until("arrived", async () => (asked = await openList(page)));
+  at = await button(page);
+  check(
+    near(asked, at) && (await content()).width > mini.width,
+    "From a mini player that was full screen, it is asked for at the button of the window full screen again",
+    `${text(asked)}, the button at ${text(at)}, the page at ${text(await content())}`,
+  );
+  await delay(2000);
+  check(sent("hidePicker") === hidden, "The list stays up once the window fills the screen");
+
+  // P while an O still waits for the window: the viewer took the full window away again, so no
+  // list opens over the mini player, and the next way back is to full screen as before. P comes
+  // before the window is back at its size, or just after, when it has begun to fill the screen:
+  // either way the window has shrunk again well within three seconds.
+  await shrinks();
+  let lists = sent("showPicker");
+  await key(page, "o", 79);
+  await key(page, "p", 80);
+  await delay(3000);
+  const small = await content();
+  const overtaken =
+    sent("showPicker") === lists &&
+    small.width <= mini.width + 1 &&
+    (await page.evaluate<boolean>(`!!document.querySelector("[data-mini]")`)) &&
+    !(await main.evaluate<boolean>(`${WINDOW}.isFullScreen()`));
+  const filled = await until("arrived", () => key(page, "p", 80)).then(
+    () => true,
+    () => false,
+  );
+  check(
+    overtaken && filled,
+    "P while O waits for the window leaves the mini player and no list, and P again fills the screen",
+    `${sent("showPicker") - lists} lists asked for, the mini player at ${text(small)}`,
+  );
+  if (filled) await until("left", () => key(page, "f", 70));
+  await delay(1000);
+
+  // The viewer picks the TV in the list, and the list opens on it again as it plays. Minimised,
   // the window takes the list down and leaves the TV what it plays.
+  await fromItsStart();
+  await openList(page);
   helper.choose();
   const tv = await tvPlays();
   await waitFor(says(page, "Playing over AirPlay", "[data-view=title]"), 20_000);
@@ -336,7 +419,7 @@ try {
   );
 
   // Out of sight, the window has no place for a list: one asked for now opens nowhere.
-  const lists = sent("showPicker");
+  lists = sent("showPicker");
   const answer = await page.evaluate<{ ok: boolean; value?: { output: { kind: string } } }>(
     `window.mrStreamer.invoke("output.pick", { anchor: { x: 10, y: 10, width: 10, height: 10 } })`,
   );

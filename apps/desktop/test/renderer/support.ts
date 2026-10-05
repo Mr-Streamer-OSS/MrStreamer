@@ -3,8 +3,8 @@
 // with the defaults and what the test says the viewer saved, and anything else never answers.
 // Like the main process, it refuses a call whose input the contract doesn't allow, so a view
 // can't pass here with a call that fails there. Tests send its events themselves. Import it
-// first, before the renderer's modules: it also stands in for Media Source Extensions, which
-// happy-dom lacks, and for a text track's hidden mode, which it refuses.
+// first, before the renderer's modules: it also stands in for Media Source Extensions and full
+// screen, which happy-dom lacks, and for a text track's hidden mode, which it refuses.
 import { type } from "arktype";
 import type { AppError, Result } from "@mrstreamer/contracts/errors";
 import {
@@ -102,6 +102,57 @@ Object.assign(globalThis, { MediaSource: StandInMediaSource });
 const objectUrl = URL.createObjectURL.bind(URL);
 URL.createObjectURL = (object) =>
   object instanceof StandInMediaSource ? "blob:stand-in" : objectUrl(object);
+
+const fullScreenAnswers = { request: [] as Promise<void>[], exit: [] as Promise<void>[] };
+
+/**
+ * happy-dom has no full screen. This is the page's side of it, as a browser has it: the page's
+ * requests and exits are granted at once, unless a test holds one. Whether the window itself
+ * fills the screen is the main process's word, `window.fullScreen`, which a test sends.
+ */
+export const fullScreen = {
+  /** Whether the page fills the screen, as `document.fullscreenElement` says. */
+  on: false,
+  /** How often the page asked for full screen. */
+  requests: 0,
+  /** Holds the page's next request for full screen, or its next exit, until the test answers. */
+  hold(what: "request" | "exit") {
+    const answer = Promise.withResolvers<void>();
+    fullScreenAnswers[what].push(answer.promise);
+    return {
+      grant: () => answer.resolve(),
+      refuse: () => answer.reject(new TypeError("Refused.")),
+    };
+  },
+  /** The page as it starts: not full screen, with nothing asked and nothing held. */
+  reset(): void {
+    fullScreen.on = false;
+    fullScreen.requests = 0;
+    fullScreenAnswers.request.length = 0;
+    fullScreenAnswers.exit.length = 0;
+  },
+};
+Object.defineProperties(document, {
+  fullscreenElement: {
+    configurable: true,
+    get: () => (fullScreen.on ? document.documentElement : null),
+  },
+  exitFullscreen: {
+    configurable: true,
+    value: async () => {
+      await fullScreenAnswers.exit.shift();
+      fullScreen.on = false;
+    },
+  },
+});
+Object.defineProperty(document.documentElement, "requestFullscreen", {
+  configurable: true,
+  value: async () => {
+    fullScreen.requests += 1;
+    await fullScreenAnswers.request.shift();
+    fullScreen.on = true;
+  },
+});
 
 /**
  * happy-dom refuses a text track's "hidden" mode, in which a browser times the cues and draws

@@ -34,12 +34,13 @@ export function playHere(): void {
 
 /**
  * O: opens the chooser, over the full window's controls. The mini player has none, so the window
- * goes back first, and the chooser opens once it has. Where the app lists receivers itself,
- * `showList` opens that list; where only the system knows them, its list opens at the output
- * button.
+ * goes back first, and the chooser opens once it has, full screen again where it was. An O the
+ * viewer overtook opens nothing: with the mini player asked for again, or the view closed, no
+ * controls are left to open over. Where the app lists receivers itself, `showList` opens that
+ * list; where only the system knows them, its list opens at the output button.
  */
 export async function openChooser(showList: () => void): Promise<void> {
-  await miniPlayer.leave();
+  if (!(await miniPlayer.leave())) return;
   const { offers } = outputs.status();
   if (offers.length === 0) return;
   if (offers.includes("cast")) return showList();
