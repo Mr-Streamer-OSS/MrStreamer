@@ -1,20 +1,9 @@
-/*
- * mrstreamer.app: true black, white text, the system's font. Sizes are in em of the body's font
- * size, which follows the window's width, so the page keeps its proportions:
- * - Up to 1120 px wide everything stacks, and each picture runs off the right edge.
- * - From 1120 px the hero's window sits whole and the feature windows run off alternate edges.
- * - From 1600 px the page stops growing and stays centred.
- * Nothing moves by itself: the hero rises in once, section text rises in once as it scrolls into
- * view (src/main.ts), and the hero's window tips upright as the page scrolls. Without JavaScript,
- * or with reduced motion, everything is in place from the start.
- */
+/* A centred hero and app window, followed by three screenshots. No page animations. */
 :root {
   color-scheme: dark;
   --soft: #b4b4b4;
   --dim: #8b8b8b;
   --line: #262626;
-  --rule: #222;
-  /* How far the pictures and text stand in from the window's edge while stacked. */
   --inset: 1.2em;
 }
 
@@ -68,8 +57,8 @@ picture {
 }
 
 h1,
-h2,
-p {
+p,
+figure {
   margin: 0;
 }
 
@@ -79,7 +68,6 @@ p {
   left: 0.6em;
   z-index: 2;
   padding: 0.6em 1em;
-  border-radius: 9em;
   background: #fff;
   color: #000;
   font-weight: 600;
@@ -90,10 +78,8 @@ p {
   transform: none;
 }
 
-/* Bar */
 .bar {
   display: flex;
-  /* One row on a phone. Narrower than about 340 px, the links go under the name, not off the edge. */
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
@@ -110,8 +96,8 @@ p {
 }
 
 .bar nav a:not(.button):hover,
-footer a:hover,
-.text p a:hover {
+.lead a:hover,
+footer a:hover {
   color: #fff;
 }
 
@@ -142,7 +128,6 @@ footer a:hover,
   font-size: 0.9em;
   font-weight: 600;
   white-space: nowrap;
-  transition: background-color 0.15s;
 }
 
 .button:hover {
@@ -158,10 +143,38 @@ footer a:hover,
   background: #dcdcdc;
 }
 
+.hero {
+  padding: 2em var(--inset) 0;
+  text-align: center;
+}
+
+h1 {
+  max-width: 14em;
+  margin-inline: auto;
+  font-size: 2.5em;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: -0.045em;
+  text-wrap: balance;
+}
+
+.lead {
+  margin: 0.9em 0 1.3em;
+  color: var(--soft);
+  font-size: 1.05em;
+  line-height: 1.4;
+}
+
+.lead a {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  justify-content: center;
   gap: 0.7em;
 }
 
@@ -170,44 +183,18 @@ footer a:hover,
   font-size: 0.95em;
 }
 
-/* Hero */
-.hero {
-  padding: 2em var(--inset) 0;
-  text-align: center;
-}
-
-h1 {
-  font-size: 2.9em;
-  font-weight: 650;
-  line-height: 1;
-  letter-spacing: -0.045em;
-  text-wrap: balance;
-}
-
-.lead {
-  margin: 0.8em 0 1.3em;
-  color: var(--soft);
-  font-size: 1.05em;
-  line-height: 1.4;
-  text-wrap: balance;
-}
-
-.hero .actions {
-  justify-content: center;
-}
-
 .systems {
-  margin-top: 1.2em;
+  max-width: 48em;
+  margin: 1.1em auto 0;
   color: var(--dim);
   font-size: 0.85em;
 }
 
-/* The app's windows: a thin frame, rounded where the window's own corners show. */
 .frame {
   overflow: hidden;
   border: 1px solid var(--line);
   border-right: 0;
-  border-radius: 1em 0 0 1em;
+  border-radius: 0.7em 0 0 0.7em;
   background: #000;
 }
 
@@ -217,91 +204,20 @@ h1 {
 }
 
 .window,
-.shot {
+.screens {
+  width: calc(100% - var(--inset));
+  max-width: 68em;
   margin: 2.2em 0 0 var(--inset);
 }
 
-/* Sections */
-.feature,
-.split {
-  margin-top: 3.5em;
+.screens {
+  display: grid;
+  gap: 1.6em;
 }
 
-.text,
-.rows,
-.terminal {
-  margin-inline: var(--inset);
-}
-
-h2 {
-  font-size: 1.8em;
-  font-weight: 650;
-  line-height: 1.05;
-  letter-spacing: -0.03em;
-  text-wrap: balance;
-}
-
-.text p {
-  margin-top: 0.8em;
-  color: var(--soft);
-  font-size: 1.05em;
-  line-height: 1.4;
-}
-
-.text p a {
-  text-decoration: underline;
-  text-underline-offset: 0.2em;
-  white-space: nowrap;
-}
-
-.text .actions {
-  margin-top: 1.4em;
-}
-
-.split > :last-child {
-  margin-top: 1.6em;
-}
-
-.rows {
-  /* The table's own margins give way to the width. */
-  width: calc(100% - 2 * var(--inset));
-  border-collapse: collapse;
-  font-size: 0.95em;
-  line-height: 1.4;
-  text-align: left;
-}
-
-.rows th,
-.rows td {
-  padding: 0.8em 1em 0.8em 0;
-  border-top: 1px solid var(--rule);
-  vertical-align: top;
-}
-
-.rows th {
-  font-weight: 400;
-  white-space: nowrap;
-}
-
-.rows td {
-  color: var(--soft);
-}
-
-.rows tr:last-child > * {
-  border-bottom: 1px solid var(--rule);
-}
-
-.terminal {
-  padding: 1em 0;
-  border-block: 1px solid var(--rule);
-  color: #d0d0d0;
-  font:
-    0.9em/1.9 ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    monospace;
-  white-space: pre-wrap;
-  word-break: break-all;
+figcaption {
+  margin-top: 0.7em;
+  font-weight: 600;
 }
 
 footer {
@@ -324,22 +240,25 @@ footer p {
   flex-basis: 100%;
 }
 
-/* A narrow phone: the buttons take the width, one above the other. */
-@media (max-width: 30em) {
-  .hero .actions .button,
-  #download .actions .button {
-    flex: 1 1 100%;
-  }
-}
-
-/* Between a phone and the full layout the whole window shows, running off the right edge. */
 @media (min-width: 43.75em) {
+  .window,
+  .screens {
+    width: calc(100% - 2 * var(--inset));
+    margin-inline: auto;
+  }
+
   .frame {
-    width: 125%;
+    border-right: 1px solid var(--line);
+    border-radius: 0.7em;
+  }
+
+  .screens {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1.4em;
+    margin-top: 1.4em;
   }
 }
 
-/* The full layout. */
 @media (min-width: 70em) {
   body {
     font-size: clamp(0.875rem, 1.25vw, 1.25rem);
@@ -355,175 +274,202 @@ footer p {
   }
 
   .hero {
-    padding: 5em 2em 3.5em;
+    padding: 3.2em 2em 0;
   }
 
   h1 {
-    font-size: 6em;
+    font-size: 3.7em;
   }
 
   .lead {
-    margin: 1.1em 0 1.8em;
-    font-size: 1.25em;
+    font-size: 1.1em;
   }
 
   .window {
-    width: 68em;
-    margin: 0 auto;
-    transform-origin: 50% 0;
-  }
-
-  .window .frame {
-    width: auto;
-    border: 1px solid var(--line);
-    border-radius: 1em;
-  }
-
-  .feature,
-  .split {
-    display: grid;
-    margin-top: 8em;
-  }
-
-  .feature {
-    grid-template-columns: 25em 1fr;
-    gap: 4em;
-    align-items: center;
-    padding-left: 5em;
-  }
-
-  .feature.reverse {
-    grid-template-columns: 1fr 25em;
-    padding: 0 5em 0 0;
-  }
-
-  .reverse .text {
-    order: 2;
-  }
-
-  .text,
-  .rows,
-  .terminal {
-    margin-inline: 0;
-  }
-
-  h2 {
-    font-size: 2.6em;
-  }
-
-  /* A window runs off the page's edge and fades out at the bottom. */
-  .shot {
-    position: relative;
-    height: 30em;
-    margin: 0;
-    overflow: hidden;
-  }
-
-  .shot::after {
-    content: "";
-    position: absolute;
-    inset: auto 0 0;
-    height: 5em;
-    background: linear-gradient(transparent, #000);
-    pointer-events: none;
-  }
-
-  .shot .frame {
-    width: 54em;
-  }
-
-  /* The player's controls are along its foot, so this window shows to the bottom. */
-  .shot.whole {
-    height: auto;
-  }
-
-  .shot.whole::after {
-    content: none;
-  }
-
-  .reverse .shot .frame {
-    width: 50em;
-    margin-left: -4em;
-    border: 1px solid var(--line);
-    border-left: 0;
-    border-radius: 0 1em 1em 0;
-  }
-
-  .split {
-    grid-template-columns: 1fr 1.15fr;
-    gap: 5em;
-    align-items: start;
-    padding: 0 5em;
-  }
-
-  .split > :last-child {
-    margin-top: 0;
-  }
-
-  .rows {
-    width: 100%;
+    margin-top: 3em;
   }
 
   footer {
-    margin-top: 6em;
+    margin-top: 5em;
     padding: 2.5em;
   }
 }
 
-/* Wider than the page: the windows fade out where the page ends instead of stopping short. */
-@media (min-width: 100.0625em) {
-  .shot {
-    mask-image: linear-gradient(to right, #000 calc(100% - 6em), transparent);
+/* The privacy page, one reading column, and the page for a missing address, centred. */
+.subpage .page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100svh;
+}
+
+.subpage main {
+  flex: 1;
+}
+
+.subpage footer a[aria-current="page"] {
+  color: #fff;
+}
+
+.policy {
+  max-width: 43.4em;
+  margin-inline: auto;
+  padding: 2.2em var(--inset) 0;
+  line-height: 1.65;
+  overflow-wrap: break-word;
+}
+
+.policy h1,
+.not-found h1 {
+  line-height: 1.05;
+  letter-spacing: -0.04em;
+}
+
+.policy h1 {
+  max-width: none;
+  margin: 0 0 0.7em;
+  font-size: 2.1em;
+}
+
+.policy h2 {
+  margin: 2.4em 0 0.6em;
+  font-size: 1.4em;
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.policy h3 {
+  margin: 1.9em 0 0.4em;
+  font-size: 1.05em;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.policy p,
+.policy ul {
+  margin: 0 0 1em;
+}
+
+.policy ul {
+  padding-left: 1.2em;
+}
+
+.policy li {
+  margin-bottom: 0.5em;
+}
+
+.policy a {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+}
+
+.policy strong {
+  font-weight: 650;
+}
+
+.policy code {
+  font:
+    0.86em/1.5 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+  overflow-wrap: anywhere;
+}
+
+.policy table {
+  width: 100%;
+  margin-bottom: 1.2em;
+  border-collapse: collapse;
+}
+
+.policy th {
+  padding: 0 1.2em 0.5em 0;
+  border-bottom: 1px solid var(--line);
+  font-weight: 650;
+  text-align: left;
+}
+
+.policy td {
+  padding: 0.6em 1.2em 0.6em 0;
+  border-bottom: 1px solid #1c1c1c;
+  vertical-align: top;
+}
+
+.policy td:first-child {
+  width: 11em;
+}
+
+.policy td:last-child,
+.policy th:last-child {
+  padding-right: 0;
+}
+
+.not-found {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.1em;
+  padding: 3em var(--inset) 1em;
+  text-align: center;
+}
+
+.not-found h1 {
+  font-size: 2.5em;
+}
+
+.not-found p {
+  color: var(--soft);
+  line-height: 1.5;
+}
+
+.not-found .button {
+  margin-top: 0.5em;
+  padding: 0.8em 1.4em;
+  font-size: 0.95em;
+}
+
+@media (max-width: 43.74em) {
+  .policy table,
+  .policy tbody,
+  .policy tr,
+  .policy td {
+    display: block;
+    width: auto;
   }
 
-  .reverse .shot {
-    mask-image: linear-gradient(to left, #000 calc(100% - 6em), transparent);
+  .policy thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .policy td:first-child {
+    width: auto;
+    padding: 0.7em 0 0;
+    border: 0;
+    font-weight: 650;
+  }
+
+  .policy td:last-child {
+    padding: 0.1em 0 0.7em;
   }
 }
 
-/*
- * Motion, only for those who haven't asked for less. The hero's keyframes run without JavaScript.
- * main.ts adds `revealed` as a section scrolls into view and sets --tilt from the scroll position:
- * 0 tips the window back 20 degrees, 1 stands it upright, which is also where it stays without
- * the script.
- */
-@keyframes rise {
-  from {
-    opacity: 0;
-    transform: translateY(1.2em);
-  }
-}
-
-@keyframes appear {
-  from {
-    opacity: 0;
-  }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .rise,
-  .revealed {
-    animation: rise 0.7s ease-out both;
+@media (min-width: 70em) {
+  .policy {
+    padding-top: 3.5em;
   }
 
-  .hero .lead {
-    animation-delay: 0.1s;
+  .policy h1 {
+    font-size: 2.8em;
   }
 
-  .hero div.rise {
-    animation-delay: 0.2s;
-  }
-
-  /* Out of sight for a moment, so the script has set the tilt before the window shows. */
-  .window {
-    animation: appear 0.7s ease-out 0.3s both;
-  }
-}
-
-@media (min-width: 70em) and (prefers-reduced-motion: no-preference) {
-  .window {
-    transform: perspective(90em) rotateX(calc((1 - var(--tilt, 1)) * 20deg))
-      scale(calc(0.88 + var(--tilt, 1) * 0.12));
-    will-change: transform;
+  .not-found h1 {
+    font-size: 3.4em;
   }
 }

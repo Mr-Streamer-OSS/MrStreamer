@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Mr. Streamer: IPTV without the junk</title>
+    <title>Mr. Streamer: a desktop player for your IPTV subscription</title>
     <meta
       name="description"
-      content="A free, open-source desktop player for the IPTV subscription you already have. No ads, no account. For macOS, Windows and Linux."
+      content="A free, open-source IPTV player for macOS, Windows and Linux. No channels included."
     />
     <link rel="canonical" href="https://mrstreamer.app/" />
     <meta name="theme-color" content="#000000" />
@@ -17,10 +17,10 @@
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Mr. Streamer" />
     <meta property="og:url" content="https://mrstreamer.app/" />
-    <meta property="og:title" content="Mr. Streamer: IPTV without the junk" />
+    <meta property="og:title" content="Mr. Streamer: a desktop player for your IPTV subscription" />
     <meta
       property="og:description"
-      content="A free, open-source desktop player for the IPTV subscription you already have. No ads, no account."
+      content="A free, open-source IPTV player for macOS, Windows and Linux. No channels included."
     />
     <meta property="og:image" content="https://mrstreamer.app/generated/social.png" />
     <meta property="og:image:width" content="1200" />
@@ -50,26 +50,28 @@
 
       <main id="main">
         <section class="hero">
-          <h1 class="rise">IPTV without the junk.</h1>
-          <p class="lead rise">No ads. No account. No nonsense. Bring your own subscription.</p>
-          <div class="rise">
-            <div class="actions">
-              <a
-                class="button primary"
-                href="https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest"
-                >Download</a
-              >
-              <a
-                class="button"
-                href="https://apps.microsoft.com/detail/9N45GG76ZP4T?referrer=appbadge"
-                >Get it from Microsoft</a
-              >
-            </div>
-            <p class="systems">macOS, Windows and Linux. Free and open source.</p>
+          <h1>A desktop player for your IPTV subscription.</h1>
+          <p class="lead">
+            <a href="https://github.com/Mr-Streamer-OSS/MrStreamer">Don't like it? Fork it.</a>
+          </p>
+          <div class="actions">
+            <a class="button" href="https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest"
+              >macOS</a
+            >
+            <a
+              class="button"
+              href="https://apps.microsoft.com/detail/9N45GG76ZP4T?referrer=appbadge"
+              >Windows</a
+            >
+            <a class="button" href="https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest"
+              >Linux</a
+            >
           </div>
+          <p class="systems">
+            No channels included. macOS 13 or later on Apple silicon, Windows 11, 64-bit Linux.
+          </p>
         </section>
-
-        <div class="window" data-tilt>
+        <div class="window">
           <picture class="frame">
             <source
               media="(max-width: 43.74em)"
@@ -86,7 +88,7 @@
                 /generated/home-1920.webp 1920w,
                 /generated/home-2560.webp 2560w
               "
-              sizes="(min-width: 100em) 1360px, (min-width: 70em) 85vw, 120vw"
+              sizes="(min-width: 100em) 1360px, 95vw"
               width="2560"
               height="1600"
               alt="Home in Mr. Streamer: the channel watched last plays beside what is on now, above a series to continue and two favourite channels"
@@ -94,13 +96,8 @@
             />
           </picture>
         </div>
-
-        <section class="feature">
-          <div class="text" data-reveal>
-            <h2>Live TV</h2>
-            <p>A programme guide, favourites and the channels you watched last.</p>
-          </div>
-          <div class="shot">
+        <section class="screens" aria-label="App screens">
+          <figure>
             <picture class="frame">
               <source
                 media="(max-width: 43.74em)"
@@ -120,7 +117,7 @@
                   /generated/live-tv-1920.webp 1920w,
                   /generated/live-tv-2560.webp 2560w
                 "
-                sizes="(min-width: 100em) 1080px, (min-width: 70em) 68vw, 120vw"
+                sizes="(min-width: 100em) 435px, (min-width: 43.75em) 29vw, 95vw"
                 width="2560"
                 height="1600"
                 alt="Live TV: eight channels, each with the programme on now, how long it has left and what follows"
@@ -128,15 +125,9 @@
                 decoding="async"
               />
             </picture>
-          </div>
-        </section>
-
-        <section class="feature reverse">
-          <div class="text" data-reveal>
-            <h2>Movies and series</h2>
-            <p>Stories, artwork and cast, with resume and the next episode.</p>
-          </div>
-          <div class="shot">
+            <figcaption>Live TV</figcaption>
+          </figure>
+          <figure>
             <picture class="frame">
               <source
                 media="(max-width: 43.74em)"
@@ -156,7 +147,7 @@
                   /generated/library-1920.webp 1920w,
                   /generated/library-2560.webp 2560w
                 "
-                sizes="(min-width: 100em) 1000px, (min-width: 70em) 63vw, 120vw"
+                sizes="(min-width: 100em) 435px, (min-width: 43.75em) 29vw, 95vw"
                 width="2560"
                 height="1600"
                 alt="A series' details: its story, cast and seasons, with Play and the sound it plays in"
@@ -164,15 +155,9 @@
                 decoding="async"
               />
             </picture>
-          </div>
-        </section>
-
-        <section class="feature">
-          <div class="text" data-reveal>
-            <h2>Sound and subtitles</h2>
-            <p>Pick the sound and subtitle tracks your provider sends.</p>
-          </div>
-          <div class="shot whole">
+            <figcaption>Series</figcaption>
+          </figure>
+          <figure>
             <picture class="frame">
               <source
                 media="(max-width: 43.74em)"
@@ -192,7 +177,7 @@
                   /generated/watching-1920.webp 1920w,
                   /generated/watching-2560.webp 2560w
                 "
-                sizes="(min-width: 100em) 1080px, (min-width: 70em) 68vw, 120vw"
+                sizes="(min-width: 100em) 435px, (min-width: 43.75em) 29vw, 95vw"
                 width="2560"
                 height="1600"
                 alt="An episode playing with English subtitles, and the subtitle menu offering Off, English and Nederlands"
@@ -200,86 +185,8 @@
                 decoding="async"
               />
             </picture>
-          </div>
-        </section>
-
-        <section class="split">
-          <div class="text" data-reveal>
-            <h2>Bring your own subscription</h2>
-            <p>
-              An IPTV subscription with Xtream Codes access, or an M3U link. Mr. Streamer supplies
-              no channels.
-            </p>
-            <p>
-              The app has no account, ads, analytics or telemetry. Your login and what you watched
-              stay on your computer.
-              <a href="/privacy">Privacy policy</a>
-            </p>
-          </div>
-          <table class="rows" data-reveal>
-            <tr>
-              <th scope="row">Xtream Codes</th>
-              <td>
-                A server address, username and password, or an M3U link that contains them. Live TV,
-                movies and series.
-              </td>
-            </tr>
-            <tr>
-              <th scope="row">M3U playlist</th>
-              <td>A playlist link without a login. Live TV only.</td>
-            </tr>
-          </table>
-        </section>
-
-        <section class="split">
-          <div class="text" data-reveal>
-            <h2>Free and open source</h2>
-            <p>GPL-3.0. Read it, build it, change it.</p>
-            <div class="actions">
-              <a class="button" href="https://github.com/Mr-Streamer-OSS/MrStreamer">Source</a>
-            </div>
-          </div>
-          <pre class="terminal" data-reveal>
-$ git clone https://github.com/Mr-Streamer-OSS/MrStreamer.git
-$ cd MrStreamer
-$ pnpm install
-$ pnpm dev</pre>
-        </section>
-
-        <section class="split" id="download">
-          <div class="text" data-reveal>
-            <h2>Download Mr. Streamer</h2>
-            <p>A desktop player for your IPTV subscription.</p>
-            <div class="actions">
-              <a
-                class="button primary"
-                href="https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest"
-                >Download</a
-              >
-              <a
-                class="button"
-                href="https://apps.microsoft.com/detail/9N45GG76ZP4T?referrer=appbadge"
-                >Get it from Microsoft</a
-              >
-            </div>
-          </div>
-          <table class="rows" data-reveal>
-            <tr>
-              <th scope="row">macOS</th>
-              <td>13 or later, Apple silicon</td>
-              <td>DMG</td>
-            </tr>
-            <tr>
-              <th scope="row">Windows</th>
-              <td>11, 64-bit</td>
-              <td>Microsoft Store or setup file</td>
-            </tr>
-            <tr>
-              <th scope="row">Linux</th>
-              <td>64-bit</td>
-              <td>deb or AppImage</td>
-            </tr>
-          </table>
+            <figcaption>Player</figcaption>
+          </figure>
         </section>
       </main>
 

@@ -2,7 +2,7 @@
   "name": "mrstreamer-marketing",
   "private": true,
   "type": "module",
-  "description": "The website at mrstreamer.app: one static page, built from the app captures in docs/assets.",
+  "description": "The website at mrstreamer.app: static pages, built from the app captures and privacy policy in docs.",
   "license": "GPL-3.0-only",
   "scripts": {
     "dev": "node scripts/prepare-assets.ts && vite",
@@ -10,7 +10,11 @@
     "preview": "vite preview"
   },
   "devDependencies": {
+    "marked": "18.0.14",
     "sharp": "0.35.4",
     "vite": "7.3.6"
+  },
+  "dependencies": {
+    "@vercel/analytics": "2.0.1"
   }
 }
