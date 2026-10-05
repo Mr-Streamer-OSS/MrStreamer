@@ -2,7 +2,8 @@
 // quality chosen for the channel that fails says so, and offers another instead of playing it.
 // While a receiver on the network plays the channel there is never a picture here: the same place
 // says what the receiver last confirmed of it and where, paused and buffering included, and always
-// offers Play here.
+// offers Play here. A channel that failed there keeps saying so under that receiver's name while
+// it is reached again, or another in its place.
 import { useQuery } from "@tanstack/react-query";
 import { Play, RotateCw, SkipForward } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -38,8 +39,15 @@ export function PlaybackState({
   const chooseQuality = useChooseQuality();
   const playlist = useQuery(queries.subscription()).data?.kind === "m3u";
   const output = useOutput((state) => state.status.output);
-  if (output.kind === "receiver" || output.kind === "lost") {
-    const { receiver } = output;
+  const connectingFrom = useOutput((state) => state.connectingFrom);
+  // The connect under way names the receiver it reaches, which need not be the one that failed.
+  const receiver =
+    output.kind === "receiver" || output.kind === "lost"
+      ? output.receiver
+      : phase.kind === "failed" && phase.problem.kind === "receiver"
+        ? connectingFrom
+        : null;
+  if (receiver) {
     const on = where(receiver);
     if (phase.kind === "failed") {
       const { problem } = phase;
@@ -55,7 +63,8 @@ export function PlaybackState({
           actions={
             <>
               {failed
-                ? failed.retry && (
+                ? failed.retry &&
+                  output.kind !== "connecting" && (
                     <Button
                       variant="primary"
                       onClick={() =>
@@ -279,7 +288,7 @@ function problemMessage(
         actions: retry,
       };
     case "receiver": {
-      const failed = receiverProblem(problem.failure, problem.lost, outputs.receiver(), null);
+      const failed = receiverProblem(problem.failure, problem.lost, outputs.failedOn(), null);
       return { title: failed.title, body: failed.body };
     }
     case "app":

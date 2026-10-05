@@ -583,14 +583,17 @@ describe("an episode on a receiver", () => {
 describe("a channel with a receiver connected", () => {
   const item: RemoteItem = { kind: "channel", channelId: "a" };
 
-  /** Plays channel `a`, which the receiver takes as load 1 and says it plays. */
-  async function playing(): Promise<void> {
+  /** Plays channel `a`, which `receiver` takes as load 1 and says it plays. */
+  async function playing(receiver = tv): Promise<void> {
     const loaded = ipc.hold("output.playChannel");
     player.play(channel("a"));
     await wait(0);
     await act(async () => loaded.resolve(said(1, item, "loading")));
-    await emit(connected(said(1, item, "playing")));
+    await emit(connected(said(1, item, "playing"), null, receiver));
   }
+
+  const lost = (receiver: Receiver) =>
+    status({ kind: "lost", receiver, failure: { kind: "unreachable" } });
 
   it("plays there, and no page previews another meanwhile", async () => {
     await playing();
@@ -725,6 +728,56 @@ describe("a channel with a receiver connected", () => {
     await wait(60_000);
     expect(ipc.argsOf("output.playChannel")).toHaveLength(5);
     expect(ipc.argsOf("viewing.recordWatch")).toEqual([]);
+  });
+
+  it("keeps the lost TV's name while Try again reaches it, and loads there once it answers", async () => {
+    await playing();
+    await show(WatchScreen);
+    await emit(lost(tv));
+    expect(text()).toContain("Living Room TV connection lost");
+
+    await press("Try again");
+    expect(ipc.argsOf("output.connect")).toEqual([{ receiverId: "tv" }]);
+    await emit(reaching(tv));
+    // Still that TV's, with the way back and no second try while this one is under way.
+    expect(text()).toContain("Living Room TV connection lost");
+    expect(text()).not.toContain("AirPlay");
+    expect(text()).toContain("Play here");
+    expect(text()).not.toContain("Try again");
+
+    await emit(connected());
+    await wait(0);
+    expect(text()).toContain("Loading on Living Room TV");
+    expect(ipc.argsOf("output.playChannel")).toHaveLength(2);
+  });
+
+  it("says the connection lost of the TV that lost it, whatever is reached in its place", async () => {
+    await playing();
+    await show(WatchScreen);
+    await emit(lost(tv));
+
+    await emit(reaching(bedroom));
+    expect(text()).toContain("Living Room TV connection lost");
+    expect(text()).not.toContain("Bedroom TV connection lost");
+
+    // The system's list, where no receiver is known until the viewer picks one.
+    await emit(status({ kind: "connecting", protocol: "airplay", receiver: null }));
+    expect(text()).toContain("Living Room TV connection lost");
+    expect(text()).not.toContain("AirPlay connection lost");
+  });
+
+  it("says AirPlay for a receiver the system doesn't name, lost and picked again", async () => {
+    const airplay: Receiver = { id: "airplay", kind: "airplay", name: null };
+    await playing(airplay);
+    await show(WatchScreen);
+    await emit(lost(airplay));
+    expect(text()).toContain("AirPlay connection lost");
+
+    await press("Try again");
+    expect(ipc.methods()).toContain("output.pick");
+    await emit(status({ kind: "connecting", protocol: "airplay", receiver: null }));
+    expect(text()).toContain("AirPlay connection lost");
+    expect(text()).toContain("Play here");
   });
 
   it("says it in the bar at the foot of the pages too", async () => {

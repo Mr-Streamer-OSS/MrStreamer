@@ -6,6 +6,7 @@
 // goes there and their state is the receiver's. Nothing here plays or stops anything by itself.
 import { createStore, useStore } from "zustand";
 import type {
+  Output,
   OutputFailure,
   OutputStatus,
   Receiver,
@@ -26,6 +27,11 @@ interface OutputState {
   readonly status: OutputStatus;
   /** When the connect under way began, as `Date.now()`; null while none is. */
   readonly connectingSince: number | null;
+  /**
+   * The receiver that had playback, or lost it, when the connect under way began; null while none
+   * is, and for one that began from this computer.
+   */
+  readonly connectingFrom: Receiver | null;
   /** The app's own list of receivers shows. */
   readonly choosing: boolean;
   /** Why the last connect reached no receiver, and when; null once another began. */
@@ -47,6 +53,7 @@ const LOCAL: OutputStatus = {
 const store = createStore<OutputState>(() => ({
   status: LOCAL,
   connectingSince: null,
+  connectingFrom: null,
   choosing: false,
   refused: null,
 }));
@@ -60,12 +67,18 @@ const listeners = new Set<(now: OutputStatus, before: OutputStatus) => void>();
 /** Where the system's list last opened from, for opening it again after a lost connection. */
 let anchor: Anchor = { x: 0, y: 0, width: 0, height: 0 };
 
+/** The receiver `output` has playback on, or had it on until its connection broke. */
+function receiverOf(output: Output): Receiver | null {
+  return output.kind === "receiver" || output.kind === "lost" ? output.receiver : null;
+}
+
 function take(status: OutputStatus): void {
   const before = store.getState().status;
   const connecting = status.output.kind === "connecting";
   store.setState((state) => ({
     status,
     connectingSince: connecting ? (state.connectingSince ?? Date.now()) : null,
+    connectingFrom: connecting ? (state.connectingFrom ?? receiverOf(before.output)) : null,
   }));
   for (const listener of listeners) listener(status, before);
 }
@@ -118,10 +131,12 @@ export function positionOf(media: RemoteMedia, now = Date.now()): number {
 export const outputs = {
   status: (): OutputStatus => store.getState().status,
   /** The receiver that has playback, or had it until its connection broke; null when it plays here. */
-  receiver(): Receiver | null {
-    const { output } = store.getState().status;
-    return output.kind === "receiver" || output.kind === "lost" ? output.receiver : null;
-  },
+  receiver: (): Receiver | null => receiverOf(store.getState().status.output),
+  /**
+   * The receiver a failure there is said of: the one that has playback or lost it, and that one
+   * still while it is reached again, or another in its place. Null when none had playback.
+   */
+  failedOn: (): Receiver | null => outputs.receiver() ?? store.getState().connectingFrom,
   /** Whether a receiver takes what is played now. */
   remote: (): boolean => store.getState().status.output.kind === "receiver",
   /** What the receiver plays, as it last confirmed; null when it plays nothing. */
