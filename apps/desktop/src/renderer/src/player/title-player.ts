@@ -13,8 +13,15 @@
 // An episode knows the next one in its series. At its end that one plays after a countdown,
 // unless the viewer turned it off or cancels; Next plays it at once. Watching into the credits of
 // the last episode records that the series is finished.
+//
+// With a receiver on the network connected (see output.ts), a title plays there instead: it is
+// opened and loaded through the main process, the controls here command the receiver, and the
+// position, the length and whether it plays are what the receiver last confirmed. The main process
+// saves how far it got. Connecting a receiver while a title plays here moves it there at its
+// position, with its tracks; going back to this computer brings it back the same way.
 import { createStore, useStore } from "zustand";
 import type { Episode, SeriesDetails, TitleRef } from "@mrstreamer/contracts/ondemand";
+import type { OutputStatus, RemoteMedia } from "@mrstreamer/contracts/output";
 import type {
   AudioTrack,
   StreamFailure,
@@ -33,6 +40,7 @@ import { titleDecoders } from "./decoders.ts";
 import type { EngineError } from "./engine.ts";
 import { onLiveStart, player, rememberSubtitles, type PlaybackProblem } from "./player.ts";
 import { clearSubtitles, setSubtitleDelay } from "./subtitles.ts";
+import { outputs, positionOf } from "./output.ts";
 import { titleEngine, type SubtitleStatus, type TitleEngine } from "./title-engine.ts";
 
 /** How often progress is saved while a title plays. */
@@ -129,6 +137,16 @@ export interface TitlePlayerState {
    * means it didn't start.
    */
   readonly continued: boolean;
+  /**
+   * On a receiver, the kinds of subtitles it shows; null while the title plays here, which shows
+   * them all.
+   */
+  readonly shows: readonly SubtitleFormat[] | null;
+  /**
+   * On a receiver, while it catches up with a skip: where it last said it was. `position` is
+   * where the viewer skipped to meanwhile.
+   */
+  readonly confirmed: number | null;
 }
 
 const idle: TitlePlayerState = {
@@ -145,6 +163,8 @@ const idle: TitlePlayerState = {
   next: undefined,
   countdown: null,
   continued: false,
+  shows: null,
+  confirmed: null,
 };
 
 const store = createStore<TitlePlayerState>(() => idle);
@@ -181,6 +201,19 @@ let countdownTimer: ReturnType<typeof setInterval> | null = null;
 let countdownHeld = false;
 /** This play of the last episode has recorded that its series is finished. */
 let seriesFinished = false;
+/**
+ * The open title is the receiver's: its session there, the load that plays (null while none
+ * does), and the subtitle track that load carries.
+ */
+let receiver: { sessionId: string | null; load: number | null; subtitle: number | null } | null =
+  null;
+/** What the receiver last confirmed of the load, which the position moves on from while it plays. */
+let confirmedMedia: RemoteMedia | null = null;
+let ticking: ReturnType<typeof setInterval> | null = null;
+/** The viewer asked for this computer, so the title goes on playing here rather than held. */
+let returning = false;
+/** The title's view is on screen: only then is it brought back when a receiver lets go. */
+let shown = false;
 
 video.addEventListener("timeupdate", () => {
   if (engine) store.setState({ position: engine.position() });
@@ -213,6 +246,8 @@ onLiveStart(() => {
  * progress, so every version played leaves Continue watching, this one included.
  */
 function save(): void {
+  // What a receiver plays, the main process saves, from what the receiver confirmed.
+  if (receiver) return;
   const { now, position, duration, next } = store.getState();
   if (!now || !duration || position <= 0) return;
   const saved = call("viewing.recordProgress", {
@@ -427,6 +462,309 @@ function asEngineError(error: unknown): EngineError {
     : { kind: "media", detail: String(error) };
 }
 
+/** Stops moving the position on between two words of the receiver. */
+function stopTicking(): void {
+  if (ticking) clearInterval(ticking);
+  ticking = null;
+}
+
+/** What didn't open or load on the receiver, as the view says it. */
+function receiverProblem(cause: unknown): PlaybackProblem {
+  const error = appError(cause);
+  if (error.kind === "output") {
+    return error.failure.kind === "stream"
+      ? problemOf(error.failure.failure, { kind: "network", detail: "" })
+      : { kind: "receiver", failure: error.failure, lost: false };
+  }
+  return error.kind === "stream"
+    ? problemOf(error.failure, { kind: "network", detail: "" })
+    : { kind: "app", error };
+}
+
+/**
+ * Opens the title for the connected receiver and plays it there from `from` seconds, held on its
+ * first picture when `paused`. `keep` are the tracks it had here; without them they are chosen
+ * as for this computer, among the subtitles a receiver shows.
+ */
+async function openOnReceiver(
+  mine: number,
+  now: NowPlaying,
+  from: number,
+  keep: { readonly audioId: number | null; readonly subtitle: SubtitleTrack | null } | null,
+  paused = false,
+): Promise<void> {
+  receiver = { sessionId: null, load: null, subtitle: null };
+  confirmedMedia = null;
+  try {
+    const [opened, preferences] = await Promise.all([
+      call("output.openTitle", { title: now.title }),
+      call("preferences.get").catch((): Preferences | null => null),
+    ]);
+    if (mine !== generation || !receiver) return;
+    receiver.sessionId = opened.sessionId;
+    const sound =
+      preferences?.audioLanguage ?? preferences?.titleLanguage ?? DEFAULT_TITLE_LANGUAGE;
+    const chosen = keep
+      ? { audio: keep.audioId, subtitle: keep.subtitle }
+      : chooseTracks(
+          opened.audio,
+          opened.subtitles,
+          {
+            audioLanguage: sound === ORIGINAL_SOUND ? now.originalLanguage : sound,
+            subtitleLanguage: preferences?.subtitleLanguage ?? null,
+          },
+          new Set(opened.shows),
+        );
+    store.setState({
+      duration: opened.duration,
+      audio: opened.audio,
+      subtitles: opened.subtitles,
+      audioId: opened.audio.some((track) => track.id === chosen.audio) ? chosen.audio : null,
+      // A kind the receiver doesn't show stays listed, and isn't the one on screen.
+      subtitle:
+        chosen.subtitle && opened.shows.includes(chosen.subtitle.format) ? chosen.subtitle : null,
+      shows: opened.shows,
+    });
+  } catch (cause) {
+    if (mine !== generation) return;
+    store.setState({ phase: { kind: "failed", problem: receiverProblem(cause) } });
+    return;
+  }
+  await loadOnReceiver(from, paused);
+}
+
+/** Has the receiver play the open title from `start` seconds with the chosen tracks. */
+async function loadOnReceiver(start: number, paused = false): Promise<void> {
+  const { now, audioId, subtitle } = store.getState();
+  if (!receiver?.sessionId || !now) return;
+  const mine = ++generation;
+  stopCountdown();
+  stopTicking();
+  released = null;
+  receiver.load = null;
+  confirmedMedia = null;
+  store.setState({ phase: { kind: "starting" }, position: start, confirmed: null });
+  try {
+    const media = await call("output.playTitle", {
+      sessionId: receiver.sessionId,
+      position: start,
+      audio: audioId,
+      subtitle: subtitle?.id ?? null,
+      paused,
+      name: now.name,
+      detail: now.detail,
+      artworkUrl: now.artworkUrl,
+    });
+    if (mine !== generation || !receiver) {
+      // Stopped or closed meanwhile: the receiver is told so. One a later load replaced has gone.
+      void call("output.command", { generation: media.generation, command: "stop" }).catch(
+        () => {},
+      );
+      return;
+    }
+    receiver.load = media.generation;
+    receiver.subtitle = subtitle?.id ?? null;
+    // What the receiver said of it before this answer arrived.
+    const said = outputs.media();
+    if (said?.generation === media.generation) follow(said);
+  } catch (cause) {
+    if (mine !== generation) return;
+    store.setState({ phase: { kind: "failed", problem: receiverProblem(cause) } });
+  }
+}
+
+/** Takes the receiver's word on the load that plays: its state, its position and its length. */
+function follow(media: RemoteMedia): void {
+  const before = store.getState();
+  confirmedMedia = media;
+  const at = positionOf(media);
+  // A skip the receiver hasn't caught up with keeps the position where the viewer put it.
+  const skipping =
+    before.confirmed !== null && media.state !== "ended" && Math.abs(at - before.position) > 3;
+  const next = { duration: media.duration ?? before.duration };
+  switch (media.state) {
+    case "loading":
+    case "buffering":
+      store.setState({
+        ...next,
+        phase: { kind: "starting" },
+        ...(skipping ? { confirmed: at } : { position: at, confirmed: null }),
+      });
+      break;
+    case "playing":
+    case "paused":
+      store.setState({
+        ...next,
+        phase: { kind: media.state },
+        continued: false,
+        ...(skipping ? { confirmed: at } : { position: at, confirmed: null }),
+      });
+      break;
+    case "ended": {
+      if (before.phase.kind === "ended") break;
+      const length = media.duration ?? before.duration;
+      store.setState({
+        ...next,
+        phase: { kind: "ended" },
+        position: length ?? at,
+        confirmed: null,
+      });
+      // The main process saved how far it got. That its series is finished is said from here.
+      const { now, next: after } = store.getState();
+      if (after === null && now?.series && !seriesFinished) {
+        seriesFinished = true;
+        const seriesIds = now.series.title.versions.map((version) => version.id);
+        void call("viewing.finishSeries", { commandId: crypto.randomUUID(), seriesIds }).catch(
+          () => {},
+        );
+      }
+      void countDown(generation);
+      break;
+    }
+  }
+  stopTicking();
+  if (media.state === "playing") {
+    ticking = setInterval(() => {
+      if (!confirmedMedia || store.getState().confirmed !== null) return;
+      store.setState({ position: positionOf(confirmedMedia) });
+    }, 500);
+  }
+}
+
+/** Tells the receiver about the load that plays; nothing when none does. */
+function command(
+  request:
+    | { readonly command: "play" | "pause" | "stop" }
+    | { readonly command: "seek"; readonly position: number }
+    | { readonly command: "subtitles"; readonly on: boolean },
+): void {
+  if (receiver?.load == null) return;
+  void call("output.command", { generation: receiver.load, ...request }).catch(() => {});
+}
+
+/**
+ * Moves the title that plays here to the receiver that just connected, at its position and with
+ * its tracks: this computer's run and session end first.
+ */
+function moveToReceiver(): void {
+  const { now, position, audioId, subtitle } = store.getState();
+  if (!now || receiver) return;
+  const paused = pausedByViewer();
+  save();
+  const mine = ++generation;
+  stopCountdown();
+  stopEngine();
+  if (releaseTimer) clearTimeout(releaseTimer);
+  releaseTimer = null;
+  const at = released ?? position;
+  released = null;
+  if (session) void call("playback.close", { sessionId: session.id }).catch(() => {});
+  session = null;
+  clearSubtitles(video);
+  playAt(1);
+  store.setState({ phase: { kind: "opening" }, subtitleStatus: null, speed: 1 });
+  void openOnReceiver(mine, now, at, { audioId, subtitle }, paused);
+}
+
+/**
+ * Brings the title back from the receiver, which let go of it or was let go of, to play here
+ * from where it was with its tracks. It goes on playing when the viewer asked for this computer,
+ * and is held when the receiver let go by itself, or closes then when its view isn't on screen.
+ */
+async function moveHere(): Promise<void> {
+  const { now, position, phase } = store.getState();
+  if (!now || !receiver) return;
+  const asked = returning;
+  const held = !asked || phase.kind === "paused" || phase.kind === "ended";
+  returning = false;
+  receiver = null;
+  confirmedMedia = null;
+  stopTicking();
+  stopCountdown();
+  // Nothing plays here unseen: a title the receiver let go of while the viewer browses closes.
+  if (!shown && !asked) return titlePlayer.close();
+  const mine = ++generation;
+  openedAt = Date.now();
+  convertSound = false;
+  store.setState({ phase: { kind: "opening" }, shows: null, confirmed: null });
+  try {
+    const opened = await call("playback.openTitle", {
+      title: now.title,
+      decoders: [...titleDecoders],
+    });
+    if (mine !== generation) {
+      void call("playback.close", { sessionId: opened.sessionId }).catch(() => {});
+      return;
+    }
+    session = { id: opened.sessionId, url: opened.url };
+    store.setState({ duration: opened.duration, audio: opened.audio, subtitles: opened.subtitles });
+  } catch (cause) {
+    if (mine !== generation) return;
+    const error = appError(cause);
+    store.setState({
+      phase: {
+        kind: "failed",
+        problem:
+          error.kind === "stream"
+            ? problemOf(error.failure, { kind: "network", detail: "" })
+            : { kind: "app", error },
+      },
+    });
+    return;
+  }
+  await run(position, 0, held);
+}
+
+/** Follows where playback goes: to a receiver that connected, back from one, and its word meanwhile. */
+function outputChanged(status: OutputStatus, before: OutputStatus): void {
+  const { output } = status;
+  if (!store.getState().now) return;
+  if (output.kind === "receiver" && before.output.kind !== "receiver") return moveToReceiver();
+  if (!receiver) return;
+  if (output.kind === "local") return void moveHere();
+  if (output.kind === "lost") {
+    stopTicking();
+    stopCountdown();
+    generation++;
+    receiver.load = null;
+    store.setState({
+      phase: {
+        kind: "failed",
+        problem: { kind: "receiver", failure: output.failure, lost: true },
+      },
+      confirmed: null,
+    });
+    return;
+  }
+  if (output.kind !== "receiver" || receiver.load === null) return;
+  if (output.media?.generation === receiver.load) return follow(output.media);
+  if (output.media) return;
+  // The receiver holds the load no more: it failed there, or was stopped there.
+  const position = confirmedMedia ? positionOf(confirmedMedia) : store.getState().position;
+  receiver.load = null;
+  stopTicking();
+  stopCountdown();
+  if (output.failure) {
+    const { failure } = output;
+    store.setState({
+      position,
+      confirmed: null,
+      phase: {
+        kind: "failed",
+        problem:
+          failure.kind === "stream"
+            ? problemOf(failure.failure, { kind: "network", detail: "" })
+            : { kind: "receiver", failure, lost: false },
+      },
+    });
+  } else if (store.getState().phase.kind !== "ended") {
+    released = position;
+    store.setState({ position, confirmed: null, phase: { kind: "paused" } });
+  }
+}
+
+outputs.subscribe(outputChanged);
+
 export const titlePlayer = {
   /**
    * Opens a title and plays it from `from` seconds: the resume position, or 0 to start at the
@@ -441,7 +779,7 @@ export const titlePlayer = {
     titlePlayer.close();
     // Subtitle timing belongs to a file; a new title starts on time.
     setSubtitleDelay(video, 0);
-    player.suspend();
+    player.makeWay();
     const mine = ++generation;
     openedAt = Date.now();
     convertSound = false;
@@ -457,6 +795,7 @@ export const titlePlayer = {
         now.series && now.title.kind === "episode" ? nextEpisode(now.series, now.title) : undefined,
       continued,
     });
+    if (outputs.remote()) return openOnReceiver(mine, now, from, null);
     try {
       // The languages chosen last, fresh: a choice in the title before counts.
       const [opened, preferences] = await Promise.all([
@@ -508,9 +847,20 @@ export const titlePlayer = {
   /** Moves to `position`: at once within what is buffered, otherwise with a new run. */
   seek(position: number): void {
     const { duration, phase } = store.getState();
-    if (!session || phase.kind === "opening") return;
+    if ((!session && !receiver?.sessionId) || phase.kind === "opening") return;
     const target = Math.max(0, Math.min(position, (duration ?? Infinity) - 1));
     stopCountdown();
+    if (receiver) {
+      // A receiver that played to the end, or was stopped, holds nothing to skip in.
+      if (phase.kind === "ended" || phase.kind === "failed" || receiver.load === null) {
+        return void loadOnReceiver(target, phase.kind === "paused");
+      }
+      store.setState((state) => ({
+        position: target,
+        confirmed: state.confirmed ?? state.position,
+      }));
+      return command({ command: "seek", position: target });
+    }
     save();
     if (engine?.seekWithin(target)) {
       store.setState({ position: target });
@@ -531,7 +881,14 @@ export const titlePlayer = {
   },
 
   togglePause(): void {
-    const { phase } = store.getState();
+    const { phase, position } = store.getState();
+    if (receiver) {
+      if (phase.kind === "ended") titlePlayer.seek(0);
+      else if (phase.kind === "failed") titlePlayer.retry();
+      else if (receiver.load === null) void loadOnReceiver(released ?? position);
+      else command({ command: phase.kind === "paused" ? "play" : "pause" });
+      return;
+    }
     if (phase.kind === "ended") {
       titlePlayer.seek(0);
     } else if (!engine && released !== null) {
@@ -550,8 +907,18 @@ export const titlePlayer = {
    * open failed and left no session.
    */
   retry(): void {
-    const { now, phase, position, continued } = store.getState();
+    const { now, phase, position, continued, audioId, subtitle } = store.getState();
     if (!now || phase.kind !== "failed") return;
+    if (receiver) {
+      // A receiver that is gone has to be connected to again, which moves the title back to it.
+      if (phase.problem.kind === "receiver" && phase.problem.lost) {
+        receiver = null;
+        return outputs.reconnect();
+      }
+      // Opened afresh: what failed may have closed its session.
+      store.setState({ phase: { kind: "opening" } });
+      return void openOnReceiver(++generation, now, position, { audioId, subtitle });
+    }
     if (session) void run(position);
     else void titlePlayer.open(now, position, continued);
   },
@@ -592,18 +959,33 @@ export const titlePlayer = {
   setAudio(id: number): void {
     const { audio, position } = store.getState();
     const track = audio.find((each) => each.id === id);
-    if (!track || !session) return;
+    if (!track || (!session && !receiver)) return;
     store.setState({ audioId: id });
     if (track.language) {
       void call("preferences.update", { audioLanguage: track.language }).catch(() => {});
     }
+    // Another sound track is another load on a receiver, from where it is.
+    if (receiver) return void loadOnReceiver(position, pausedByViewer());
     save();
     void run(position, 0, pausedByViewer());
   },
 
   /** Shows another subtitle track, or none, and remembers the choice. */
   setSubtitle(track: SubtitleTrack | null): void {
-    const { position } = store.getState();
+    const { position, shows } = store.getState();
+    if (receiver) {
+      // Only the kinds a receiver shows: the others are listed, and play here only.
+      if (track && !shows?.includes(track.format)) return;
+      store.setState({ subtitle: track });
+      if (track) lastSubtitle = track;
+      rememberSubtitles(track);
+      // The load carries one track: showing or hiding it is a word, another track a new load.
+      if (!track) command({ command: "subtitles", on: false });
+      else if (receiver.load !== null && receiver.subtitle === track.id) {
+        command({ command: "subtitles", on: true });
+      } else void loadOnReceiver(position, pausedByViewer());
+      return;
+    }
     if ((track && !SHOWN_SUBTITLES.has(track.format)) || !session) return;
     store.setState({ subtitle: track });
     if (track) lastSubtitle = track;
@@ -621,18 +1003,21 @@ export const titlePlayer = {
 
   /** C: subtitles off, or back on: the ones chosen last in this title, else the first. */
   toggleSubtitles(): void {
-    const { subtitle, subtitles } = store.getState();
+    const { subtitle, subtitles, shows } = store.getState();
     if (subtitle) {
       lastSubtitle = subtitle;
       return titlePlayer.setSubtitle(null);
     }
-    const next = lastSubtitle ?? subtitles[0] ?? null;
+    // On a receiver, the first of the kinds it shows.
+    const next =
+      lastSubtitle ?? subtitles.find((track) => !shows || shows.includes(track.format)) ?? null;
     if (next) titlePlayer.setSubtitle(next);
   },
 
   /** Plays at `speed` from now on, keeping the pitch. */
   setSpeed(speed: Speed): void {
-    if (!store.getState().now) return;
+    // A receiver plays at its own speed.
+    if (!store.getState().now || receiver) return;
     store.setState({ speed });
     playAt(speed);
   },
@@ -650,10 +1035,90 @@ export const titlePlayer = {
     return store.getState();
   },
 
-  /** Saves how far the title got, then closes it and its provider connection. */
+  /**
+   * Brings the title that plays on a receiver back to this computer, where it goes on from where
+   * it was: the receiver is let go of first.
+   */
+  playHere(): void {
+    if (!receiver) return;
+    returning = true;
+    void outputs.local();
+  },
+
+  /**
+   * Stops the title a receiver plays and closes it here; the receiver stays connected. How far it
+   * got, the main process saves.
+   */
+  stop(): void {
+    if (!receiver) return;
+    command({ command: "stop" });
+    titlePlayer.close();
+  },
+
+  /** Whether the title's view is on screen, which says what happens when a receiver lets go. */
+  setShown(visible: boolean): void {
+    shown = visible;
+  },
+
+  /** Whether the open title plays on a receiver. */
+  onReceiver: (): boolean => receiver !== null,
+
+  /**
+   * Takes up a title a receiver already plays, as when the window opens while it does: what it
+   * is, what its file holds and the tracks it plays with. The receiver's word follows.
+   */
+  adopt(
+    now: NowPlaying,
+    playing: {
+      readonly sessionId: string;
+      readonly duration: number;
+      readonly audio: readonly AudioTrack[];
+      readonly subtitles: readonly SubtitleTrack[];
+      readonly shows: readonly SubtitleFormat[];
+      readonly audioId: number | null;
+      readonly subtitleId: number | null;
+    },
+    media: RemoteMedia,
+  ): void {
+    if (store.getState().now) return;
+    generation++;
+    receiver = {
+      sessionId: playing.sessionId,
+      load: media.generation,
+      subtitle: playing.subtitleId,
+    };
+    store.setState({
+      ...idle,
+      now,
+      duration: playing.duration,
+      audio: playing.audio,
+      subtitles: playing.subtitles,
+      audioId: playing.audioId,
+      subtitle: playing.subtitles.find((track) => track.id === playing.subtitleId) ?? null,
+      shows: playing.shows,
+      next:
+        now.series && now.title.kind === "episode" ? nextEpisode(now.series, now.title) : undefined,
+    });
+    follow(media);
+  },
+
+  /**
+   * Saves how far the title got, then closes it and its provider connection. One that plays on a
+   * receiver is only let go of here: the receiver plays on, or what is played next takes its place.
+   */
   close(): void {
     const { now, phase } = store.getState();
     if (!now) return;
+    if (receiver) {
+      generation++;
+      stopCountdown();
+      stopTicking();
+      receiver = null;
+      confirmedMedia = null;
+      released = null;
+      store.setState(idle);
+      return;
+    }
     save();
     generation++;
     stopCountdown();

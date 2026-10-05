@@ -17,6 +17,7 @@ import { Progress } from "../../components/Progress.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { Tooltip } from "../../components/ui/tooltip.tsx";
 import { MiniPlayerButton } from "./MiniPlayer.tsx";
+import { OutputButton } from "./Output.tsx";
 import { PlaybackMenu } from "./PlaybackMenu.tsx";
 import { QualityMenu } from "./QualityMenu.tsx";
 import { TrackMenus, type TrackMenu } from "./TrackMenus.tsx";
@@ -31,6 +32,7 @@ import {
 } from "../../lib/queries.ts";
 import { cn } from "../../lib/utils.ts";
 import type { StreamInfo } from "../../player/engine.ts";
+import { useOutput } from "../../player/output.ts";
 import { player, usePlayer } from "../../player/player.ts";
 import { useChannelQuality } from "./quality.ts";
 import { VolumeControl } from "./VolumeControl.tsx";
@@ -134,6 +136,8 @@ function Controls({
   const chooseQuality = useChooseQuality();
   const favourite = useFavouriteIds().has(channel.id);
   const toggleFavourite = useToggleFavourite();
+  // A receiver shows none of a channel's subtitles, and takes none of their settings.
+  const remote = useOutput((state) => state.status.output.kind !== "local") && player.onReceiver();
   return (
     <div className="ml-auto flex flex-none items-center gap-3">
       <div className="flex items-center gap-1.5">
@@ -198,8 +202,10 @@ function Controls({
           audio={tracks.audio}
           audioId={audioId ?? tracks.playing}
           subtitles={tracks.subtitles}
-          subtitle={subtitle}
+          subtitle={remote ? null : subtitle}
           subtitleNote={subtitleLoading ? "Loading" : null}
+          shows={remote ? [] : null}
+          hereOnly="Live subtitles play on this computer only."
           open={menu}
           onOpenChange={onMenu}
           onAudio={(id) => player.setAudio(id)}
@@ -210,6 +216,7 @@ function Controls({
         <PlaybackMenu
           subtitles={tracks.subtitles}
           subtitle={subtitle}
+          hereOnly={remote}
           open={menu === "playback"}
           onOpenChange={(next) => onMenu(next ? "playback" : null)}
         />
@@ -227,6 +234,10 @@ function Controls({
         />
       )}
       <VolumeControl />
+      <OutputButton
+        open={menu === "output"}
+        onOpenChange={(open) => onMenu(open ? "output" : null)}
+      />
       <MiniPlayerButton />
       <Tooltip label={fullscreen ? "Exit full screen" : "Full screen"}>
         <Button variant="media" size="icon" aria-label="Full screen" onClick={onToggleFullscreen}>

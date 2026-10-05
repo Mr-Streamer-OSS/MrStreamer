@@ -1,7 +1,7 @@
 // Composition root: creates the window and wires the services to IPC.
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { app, BrowserWindow, Menu, safeStorage, session, shell } from "electron";
+import { app, BrowserWindow, Menu, powerSaveBlocker, safeStorage, session, shell } from "electron";
 import type { IpcEvent, IpcEvents } from "@mrstreamer/contracts/ipc";
 import { streamsToPlay } from "@mrstreamer/core/catalogue/variants";
 import { Diagnostics } from "@mrstreamer/core/diagnostics";
@@ -236,6 +236,20 @@ async function start(): Promise<void> {
   forward(viewing.changes, "viewing.changed", (sequence) => ({ sequence }));
   forward(updates.changes, "updates.changed", (status) => status);
   forward(output.changes, "output.changed", (status) => status);
+  // A receiver plays from this computer, so it stays awake while one does. The display may sleep.
+  let awake: number | null = null;
+  runtime.runFork(
+    Stream.runForEach(output.changes, (status) =>
+      Effect.sync(() => {
+        const playing = status.output.kind === "receiver" && status.output.media !== null;
+        if (playing && awake === null) awake = powerSaveBlocker.start("prevent-app-suspension");
+        if (!playing && awake !== null) {
+          powerSaveBlocker.stop(awake);
+          awake = null;
+        }
+      }),
+    ),
+  );
 
   /** Downloads the guide when it is due. A failure keeps the guide in use until the next check. */
   const refreshGuide = guide.refreshIfStale.pipe(warned("[guide] refresh failed"));

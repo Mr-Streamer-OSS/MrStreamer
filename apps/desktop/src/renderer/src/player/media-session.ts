@@ -9,6 +9,11 @@
 // offer the system, so Watch in the app starts it again. Artwork must be http or https, or a data
 // URL; Chromium refuses the app's own file:// pictures. Only Watch and a playing title present
 // anything, so the muted previews leave the system alone.
+//
+// What a receiver on the network plays answers the same buttons, from what it last confirmed.
+// Chromium shows the system a session only while the window itself plays sound, which it doesn't
+// then, so the system's controls and the media keys reach the app only where the system still
+// offers it.
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
@@ -103,8 +108,13 @@ export function useTitleSession(): void {
     // An episode's detail reads "S1 E3 · Its name".
     const [label, ...name] = now.detail?.split(" · ") ?? [];
     const episode = now.title.kind === "episode";
+    // On a receiver the element here plays nothing: whether it plays is the receiver's word.
+    const paused = () =>
+      titlePlayer.onReceiver()
+        ? titlePlayer.state().phase.kind !== "playing"
+        : player.element.paused;
     const pause = () => {
-      if (!player.element.paused) titlePlayer.togglePause();
+      if (!paused()) titlePlayer.togglePause();
     };
     present(
       view,
@@ -116,7 +126,7 @@ export function useTitleSession(): void {
       },
       {
         play: () => {
-          if (player.element.paused) titlePlayer.togglePause();
+          if (paused()) titlePlayer.togglePause();
         },
         pause,
         stop: pause,
@@ -152,6 +162,19 @@ export function useTitleSession(): void {
       for (const event of events) video.removeEventListener(event, update);
     };
   }, [view, duration]);
+
+  // On a receiver: where it said it was, whenever its state changes or a skip is on its way.
+  const remote = useTitlePlayer((state) => state.shows !== null);
+  const skipping = useTitlePlayer((state) => state.confirmed !== null);
+  useEffect(() => {
+    if (!remote || !duration || !session || owner !== view) return;
+    const { position } = titlePlayer.state();
+    session.setPositionState({
+      duration,
+      position: Math.min(Math.max(0, position), duration),
+      playbackRate: 1,
+    });
+  }, [view, remote, duration, phase, skipping]);
 }
 
 /**

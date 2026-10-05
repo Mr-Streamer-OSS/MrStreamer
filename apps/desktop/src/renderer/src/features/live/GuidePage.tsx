@@ -18,6 +18,7 @@ import { useNow } from "../../lib/clock.ts";
 import { progressOf, timeLeft } from "../../lib/format.ts";
 import { useKeyboardMode } from "../../lib/input-mode.ts";
 import { queries, useCategoryMap, useFavouriteIds, useToggleFavourite } from "../../lib/queries.ts";
+import { usePreviewWaits } from "../../player/output.ts";
 import { Picture } from "../../player/Picture.tsx";
 import { player, usePlayer } from "../../player/player.ts";
 import { numberEntry, NumberEntry } from "../watch/NumberEntry.tsx";
@@ -236,10 +237,14 @@ export function GuidePage({ active }: { active: boolean }) {
   );
 }
 
-/** The stream that plays, muted, with what it shows and a way back to it. */
+/**
+ * The stream that plays, muted, with what it shows and a way back to it. While a receiver on the
+ * network is connected, the channel stands still and a line says why.
+ */
 function NowStrip({ active }: { active: boolean }) {
   const channel = usePlayer((state) => state.channel);
   const audible = usePlayer((state) => state.audible && !state.muted);
+  const waits = usePreviewWaits();
   const listing = useQuery({
     ...queries.listings(channel ? [channel.id] : []),
   }).data?.[channel?.id ?? ""];
@@ -253,7 +258,7 @@ function NowStrip({ active }: { active: boolean }) {
           <ChannelLogo channel={channel} className="h-12 w-20" />
         </div>
         <Picture
-          active={active}
+          active={active && !waits}
           fit="cover"
           className="absolute inset-0"
           onClick={() => watchChannel(channel)}
@@ -272,14 +277,18 @@ function NowStrip({ active }: { active: boolean }) {
             <Play className="fill-current" />
             Watch
           </Button>
-          <Button
-            variant="secondary"
-            size="icon"
-            aria-label={audible ? "Mute" : "Unmute"}
-            onClick={() => player.toggleMute()}
-          >
-            {audible ? <Volume2 /> : <VolumeX />}
-          </Button>
+          {waits ? (
+            <span className="ml-1 text-sm text-muted-foreground">{waits}</span>
+          ) : (
+            <Button
+              variant="secondary"
+              size="icon"
+              aria-label={audible ? "Mute" : "Unmute"}
+              onClick={() => player.toggleMute()}
+            >
+              {audible ? <Volume2 /> : <VolumeX />}
+            </Button>
+          )}
         </div>
       </div>
     </section>

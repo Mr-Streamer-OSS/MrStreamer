@@ -8,6 +8,8 @@ import { miniPlayer, useMiniPlayer } from "../../app/mini-player.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { Tooltip } from "../../components/ui/tooltip.tsx";
 import { cn } from "../../lib/utils.ts";
+import { outputs, useOutput } from "../../player/output.ts";
+import { flash } from "./Flash.tsx";
 
 export function MiniControls({
   visible,
@@ -59,17 +61,27 @@ export function MiniControls({
   );
 }
 
-/** The button beside full screen that shrinks the window; none where windows can't stay on top. */
+/** What the mini player says while a receiver plays: it is a small picture, and there is none. */
+export const MINI_NEEDS_PICTURE = "Mini player needs the picture here";
+
+/**
+ * The button beside full screen that shrinks the window; none where windows can't stay on top.
+ * While a receiver on the network plays it stays, dimmed, and says why it does nothing.
+ */
 export function MiniPlayerButton() {
   const available = useMiniPlayer((state) => state.available);
+  const remote = useOutput((state) => state.status.output.kind !== "local");
   if (!available) return null;
+  const elsewhere = remote && outputs.receiver() !== null;
   return (
-    <Tooltip label="Mini player">
+    <Tooltip label={elsewhere ? MINI_NEEDS_PICTURE : "Mini player"}>
       <Button
         variant="media"
         size="icon"
         aria-label="Mini player"
-        onClick={() => void miniPlayer.enter()}
+        aria-disabled={elsewhere}
+        className={cn(elsewhere && "opacity-45")}
+        onClick={() => (elsewhere ? flash(MINI_NEEDS_PICTURE) : void miniPlayer.enter())}
       >
         <PictureInPicture2 />
       </Button>

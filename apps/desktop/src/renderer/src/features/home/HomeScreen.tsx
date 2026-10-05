@@ -21,6 +21,7 @@ import { categoryOf, channelLine, clockTime, progressOf, timeLeft } from "../../
 import { queries, useCategoryMap, useLastChannel } from "../../lib/queries.ts";
 import { useContinueWatching, useRemoveFromContinue, useResume } from "../../lib/titles.ts";
 import { useFit } from "../../lib/use-fit.ts";
+import { usePreviewWaits } from "../../player/output.ts";
 import { Picture } from "../../player/Picture.tsx";
 import { player, usePlayer } from "../../player/player.ts";
 import { WINDOW_BAR } from "../../../../shared/window-bar.ts";
@@ -248,6 +249,8 @@ function Hero({
 }) {
   const now = useNow();
   const audible = usePlayer((state) => state.audible && !state.muted);
+  // A receiver on the network is connected, so the backdrop stands still and says why.
+  const waits = usePreviewWaits();
   const hue = channel ? hueOf(channel.title) : 220;
   const current = listing?.now ?? null;
   return (
@@ -267,12 +270,17 @@ function Hero({
         />
       )}
       <Picture
-        active={live}
+        active={live && !waits}
         fit="cover"
         className="absolute inset-y-0 right-0 aspect-video h-full max-w-full"
       />
       <div className="absolute inset-0 bg-gradient-to-r from-black via-black/60 to-transparent" />
       <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black to-transparent" />
+      {channel && waits && (
+        <p className="absolute top-[56%] right-[12%] w-[22%] text-center text-sm text-muted-foreground">
+          {waits}
+        </p>
+      )}
       {channel && (
         <div className="relative max-w-[46rem]">
           <h1 className="text-6xl font-semibold tracking-tight text-balance">
@@ -293,7 +301,7 @@ function Hero({
             <Button variant="secondary" size="lg" onClick={() => browse({ kind: "all" })}>
               All channels
             </Button>
-            {live && streaming && (
+            {live && streaming && !waits && (
               <Button
                 variant="secondary"
                 size="icon-lg"
