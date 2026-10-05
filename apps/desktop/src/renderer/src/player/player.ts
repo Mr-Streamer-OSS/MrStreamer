@@ -281,6 +281,8 @@ async function start(
       repair,
       ...(sound.audio !== null ? { audio: sound.audio } : {}),
       ...(sound.audioLanguage !== null ? { audioLanguage: sound.audioLanguage } : {}),
+      // Said so the main process refuses it when a receiver took playback since this began.
+      ...(preview ? { preview } : {}),
     });
   } catch (cause) {
     if (mine === selection)

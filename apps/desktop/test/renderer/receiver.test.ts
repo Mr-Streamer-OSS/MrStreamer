@@ -14,6 +14,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { Episode, SeriesDetails, Title, TitleRef } from "@mrstreamer/contracts/ondemand";
+import { defaultPreferences } from "@mrstreamer/contracts/preferences";
 import type {
   Output,
   OutputFailure,
@@ -541,6 +542,36 @@ describe("a channel that plays here", () => {
     expect(text()).not.toContain("Playing");
     expect(ipc.argsOf("viewing.recordWatch")).toMatchObject([{ channelId: "a" }]);
     expect(ipc.methods()).not.toContain("output.playChannel");
+  });
+});
+
+describe("a preview", () => {
+  it("says it is one, so a receiver that connects as it opens keeps the connection", async () => {
+    await emit(HERE);
+    // The receiver connects while the preview is still about to open.
+    const preferences = ipc.hold("preferences.get");
+    const opened = ipc.hold("playback.open");
+    player.preview(channel("a"));
+    await emit(connected());
+    await act(async () => preferences.resolve(defaultPreferences));
+
+    expect(ipc.argsOf("playback.open")).toMatchObject([{ channelId: "a", preview: true }]);
+
+    // The main process refuses it then, and nothing is said of that.
+    await act(async () =>
+      opened.reject({ kind: "unexpected", detail: "A receiver has playback." }),
+    );
+    expect(player.state().phase).toEqual({ kind: "idle" });
+    expect(ipc.methods()).not.toContain("output.playChannel");
+  });
+
+  it("is not what a channel the viewer chose is", async () => {
+    await emit(HERE);
+    player.play(channel("a"));
+    await wait(0);
+
+    expect(ipc.argsOf("playback.open")).toMatchObject([{ channelId: "a" }]);
+    expect(ipc.argsOf("playback.open")[0]).not.toHaveProperty("preview");
   });
 });
 
