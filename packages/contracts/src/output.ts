@@ -3,7 +3,7 @@
 // sent and asks for changes. A receiver plays from an address this computer serves on the local
 // network, so it never sees a provider address.
 import type { TitleRef } from "./ondemand.ts";
-import type { StreamFailure } from "./playback.ts";
+import type { AudioTrack, StreamFailure, SubtitleFormat, SubtitleTrack } from "./playback.ts";
 
 /** The ways the app sends playback to a receiver. */
 export const RECEIVER_KINDS = ["cast", "airplay"] as const;
@@ -93,3 +93,25 @@ export interface OutputStatus {
   readonly receivers: readonly Receiver[];
   readonly output: Output;
 }
+
+/** A movie or episode opened for a receiver: what its file holds, before anything is sent. */
+export interface RemoteTitle {
+  readonly sessionId: string;
+  readonly title: TitleRef;
+  /** Seconds. */
+  readonly duration: number;
+  /** Sound tracks in the file's order. */
+  readonly audio: readonly AudioTrack[];
+  /** Subtitle tracks in the file's order, whatever their format. */
+  readonly subtitles: readonly SubtitleTrack[];
+  /** The kinds of subtitles a receiver shows. The others only this computer's player draws. */
+  readonly shows: readonly SubtitleFormat[];
+}
+
+/** What a receiver can be told about what it plays. */
+export type RemoteCommand =
+  | { readonly command: "play" | "pause" | "stop" }
+  /** Moves to `position` seconds into the title. */
+  | { readonly command: "seek"; readonly position: number }
+  /** Shows or hides the stream's text subtitles. */
+  | { readonly command: "subtitles"; readonly on: boolean };

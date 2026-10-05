@@ -23,6 +23,7 @@ import {
   type TitleDetails,
   type TitleKind,
 } from "./ondemand.ts";
+import type { OutputStatus, RemoteMedia, RemoteTitle } from "./output.ts";
 import {
   CODECS,
   type ChannelTracks,
@@ -111,6 +112,11 @@ export const ipcInputs = {
       "audio?": "number.integer >= 0",
       /** Without `audio`, the sound in this language when the channel has it: "nl". */
       "audioLanguage?": "string",
+      /**
+       * Nobody chose to watch this: a page's muted preview. Refused while a receiver has
+       * playback, whose connection to the provider it would take.
+       */
+      "preview?": "boolean",
     }),
   "playback.openTitle": () => type({ title: TitleRef, decoders: decoders() }),
   "playback.close": () => type({ sessionId: "string" }),
@@ -118,6 +124,50 @@ export const ipcInputs = {
   "playback.failure": () => type({ sessionId: "string" }),
   "playback.tracks": () => type({ sessionId: "string" }),
   "playback.playing": () => type({ sessionId: "string" }),
+  "output.status": none,
+  /** Looks for receivers while `on`, as while the list of them shows. Plays and changes nothing. */
+  "output.scan": () => type({ on: "boolean" }),
+  /** Connects to a receiver from the status's list. What plays here goes on meanwhile. */
+  "output.connect": () => type({ receiverId: "string > 0" }),
+  /**
+   * Opens the system's own list of receivers at `anchor`, a place in the window in CSS pixels,
+   * and answers once the viewer picked one or closed it.
+   */
+  "output.pick": () =>
+    type({
+      anchor: type({ x: "number", y: "number", width: "number >= 0", height: "number >= 0" }),
+    }),
+  /** Back to this computer: ends what the receiver plays and lets go of it. */
+  "output.disconnect": none,
+  "output.playChannel": () =>
+    type({
+      channelId: "string",
+      "variant?": "string",
+      "audio?": "number.integer >= 0",
+      "audioLanguage?": "string",
+      /** What the receiver may show about it: the channel's name. */
+      name: "string",
+    }),
+  "output.openTitle": () => type({ title: TitleRef }),
+  "output.playTitle": () =>
+    type({
+      sessionId: "string",
+      /** Seconds into the title to start at. */
+      position: "number >= 0",
+      audio: "number.integer >= 0 | null",
+      subtitle: "number.integer >= 0 | null",
+      /** Start held on the first picture. */
+      "paused?": "boolean",
+      /** What the receiver may show about it: "Escape from New York", "S2 E3 · Its name", a poster. */
+      name: "string",
+      "detail?": "string | null",
+      "artworkUrl?": "string | null",
+    }),
+  "output.command": () =>
+    type({ generation: "number.integer", command: "'play' | 'pause' | 'stop'" })
+      .or({ generation: "number.integer", command: "'seek'", position: "number >= 0" })
+      .or({ generation: "number.integer", command: "'subtitles'", on: "boolean" }),
+  "output.volume": () => type({ "level?": "0 <= number <= 1", "muted?": "boolean" }),
   "preferences.get": none,
   "preferences.update": () => Preferences.partial(),
   "viewing.get": none,
@@ -133,6 +183,11 @@ export const ipcInputs = {
       duration: "number > 0",
       /** When this play of the title began: epoch milliseconds. */
       since: "number",
+      /**
+       * For progress a receiver reported: the load it is of. It is saved only while that load is
+       * the receiver's and the account it began under is the connected one.
+       */
+      "generation?": "number.integer",
     }),
   /** Every version played of the movies and series with these ids. */
   "viewing.removeFromContinue": () =>
@@ -214,6 +269,24 @@ export interface IpcOutputs {
   "playback.tracks": ChannelTracks | null;
   /** Which of a channel's streams its session plays, and those that failed first. */
   "playback.playing": LivePlaying | null;
+  /** Where playback goes, and the receivers found. */
+  "output.status": OutputStatus;
+  "output.scan": null;
+  /** Resolves once the receiver takes media, or failed. */
+  "output.connect": OutputStatus;
+  /** Resolves with a receiver connected, or with nothing changed when the viewer picked none. */
+  "output.pick": OutputStatus;
+  /** Resolves once the receiver is let go of. */
+  "output.disconnect": null;
+  /** Plays a channel on the receiver in place of what it had, and closes any stream open here. */
+  "output.playChannel": RemoteMedia;
+  /** Opens a movie or episode for the receiver, and closes any stream open here. Nothing plays yet. */
+  "output.openTitle": RemoteTitle;
+  /** Plays an opened title on the receiver from a position with these tracks. */
+  "output.playTitle": RemoteMedia;
+  /** Does nothing when `generation` is no longer what the receiver plays. */
+  "output.command": null;
+  "output.volume": null;
   "preferences.get": Preferences;
   "preferences.update": Preferences;
   /** Favourites and recently watched channels of the connected account. */
@@ -282,6 +355,8 @@ export interface IpcEvents {
   "viewing.changed": { readonly sequence: number };
   /** The update moved on, for example a download's progress. */
   "updates.changed": UpdateStatus;
+  /** Where playback goes changed, or what the receiver plays did, or the receivers found. */
+  "output.changed": OutputStatus;
   /**
    * Whether the window fills the screen, where the system hides its window controls. Sent when
    * that changes, and once the page loads.

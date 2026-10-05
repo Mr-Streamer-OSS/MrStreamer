@@ -18,6 +18,9 @@ import { miniPlayer, miniPlayerAvailable } from "./mini-player.ts";
 import { electronInstaller } from "./platform/installer.ts";
 import { removeUnfinishedWrites } from "./platform/json-file.ts";
 import { keychainSecrets } from "./platform/secrets.ts";
+import type { ReceiverAdapter } from "./receivers/adapter.ts";
+import { airplayAdapter } from "./receivers/airplay/adapter.ts";
+import { castAdapter } from "./receivers/cast/adapter.ts";
 // electron-vite builds the worker as its own file and hands back a function that starts it; the
 // lint plugin reads the source file, which has no default export.
 // oxlint-disable-next-line import/default
@@ -25,6 +28,7 @@ import createCatalogueWorker from "./ondemand/catalogue-worker.ts?nodeWorker";
 import { mainLayer } from "./runtime.ts";
 import { Library } from "./services/library.ts";
 import { OnDemand } from "./services/ondemand.ts";
+import { Output } from "./services/output.ts";
 import { Licences } from "./services/licences.ts";
 import { Playback } from "./services/playback.ts";
 import { Settings } from "./services/preferences.ts";
@@ -158,6 +162,7 @@ async function start(): Promise<void> {
       ffmpeg: toolPath("ffmpeg"),
       ffprobe: toolPath("ffprobe"),
       catalogueWorker: (setup) => createCatalogueWorker({ workerData: setup }),
+      receivers: receiverAdapters(),
       // MR_STREAMER_TMDB_KEY at run time overrides the key built in, for testing.
       tmdbKey: process.env["MR_STREAMER_TMDB_KEY"] || __TMDB_KEY__ || null,
       region: app.getLocaleCountryCode() || "US",
@@ -189,6 +194,7 @@ async function start(): Promise<void> {
     library,
     onDemand,
     playback,
+    output,
     updates,
     guide,
     viewing,
@@ -201,6 +207,7 @@ async function start(): Promise<void> {
       library: Library,
       onDemand: OnDemand,
       playback: Playback,
+      output: Output,
       updates: Updates,
       guide: Guide,
       viewing: ViewingRecord,
@@ -228,6 +235,7 @@ async function start(): Promise<void> {
   forward(guide.changes, "guide.updated", () => null);
   forward(viewing.changes, "viewing.changed", (sequence) => ({ sequence }));
   forward(updates.changes, "updates.changed", (status) => status);
+  forward(output.changes, "output.changed", (status) => status);
 
   /** Downloads the guide when it is due. A failure keeps the guide in use until the next check. */
   const refreshGuide = guide.refreshIfStale.pipe(warned("[guide] refresh failed"));
@@ -254,6 +262,8 @@ async function start(): Promise<void> {
           const previous = yield* subscriptions.get;
           const connected = yield* subscriptions.connect(login);
           if (previous?.id !== connected.id) {
+            // What a receiver plays of the account before ends with it.
+            yield* output.accountChanged;
             yield* playback.closeAll;
             yield* forgetAccount;
           }
@@ -262,6 +272,7 @@ async function start(): Promise<void> {
         }),
       "subscription.remove": ({ eraseViewing }) =>
         Effect.gen(function* () {
+          yield* output.accountChanged;
           yield* playback.closeAll;
           // First, so a record that can't be erased leaves the subscription to try again.
           const key = yield* subscriptions.key;
@@ -291,8 +302,14 @@ async function start(): Promise<void> {
       "ondemand.rows": ({ kind, tab, like }) => onDemand.rows(kind, tab, like),
       "ondemand.tiles": ({ kind, of }) => onDemand.tiles(kind, of),
       "ondemand.collection": (query) => onDemand.collection(query),
-      "playback.open": ({ channelId, variant, decoders, repair, audio, audioLanguage }) =>
+      "playback.open": ({ channelId, variant, decoders, repair, audio, audioLanguage, preview }) =>
         Effect.gen(function* () {
+          // A page's preview never takes the provider's connection from a receiver.
+          if (preview && (yield* output.remote)) {
+            return yield* new Failed({
+              error: { kind: "unexpected", detail: "A receiver has playback." },
+            });
+          }
           yield* nextTurn;
           const channel = yield* library.channel(channelId);
           const variants = streamsToPlay(channel, yield* settings.get, variant).map(({ id }) => id);
@@ -326,6 +343,63 @@ async function start(): Promise<void> {
       "playback.failure": ({ sessionId }) => playback.failure(sessionId),
       "playback.tracks": ({ sessionId }) => playback.tracks(sessionId),
       "playback.playing": ({ sessionId }) => playback.playing(sessionId),
+      "output.status": () => output.status,
+      "output.scan": ({ on }) => Effect.as(output.scan(on), null),
+      "output.connect": ({ receiverId }) => output.connect(receiverId),
+      "output.pick": ({ anchor }) => {
+        // The window's place on screen, which the system's list opens from.
+        const window = mainWindow?.getContentBounds() ?? { x: 0, y: 0 };
+        return output.pick({ ...anchor, x: window.x + anchor.x, y: window.y + anchor.y });
+      },
+      "output.disconnect": () => Effect.as(output.disconnect, null),
+      "output.playChannel": ({ channelId, variant, audio, audioLanguage, name }) =>
+        Effect.gen(function* () {
+          yield* nextTurn;
+          const channel = yield* library.channel(channelId);
+          const variants = streamsToPlay(channel, yield* settings.get, variant).map(({ id }) => id);
+          if (variants.length === 0) {
+            return yield* new Failed({
+              error: { kind: "channel-not-found", channelId: variant ?? channelId },
+            });
+          }
+          return yield* output.playChannel(channel.id, {
+            variants,
+            audio: audio ?? null,
+            audioLanguage: audioLanguage ?? null,
+            shown: { name },
+          });
+        }),
+      "output.openTitle": ({ title }) =>
+        Effect.gen(function* () {
+          const turn = yield* nextTurn;
+          const file = yield* onDemand.file(title);
+          if (turn !== playbackTurn) {
+            return yield* new Failed({
+              error: { kind: "unexpected", detail: "Something else played in the meantime." },
+            });
+          }
+          return yield* output.openTitle(title, file.url);
+        }),
+      "output.playTitle": ({
+        sessionId,
+        position,
+        audio,
+        subtitle,
+        paused,
+        name,
+        detail,
+        artworkUrl,
+      }) =>
+        output.playTitle(sessionId, {
+          position,
+          audio,
+          subtitle,
+          paused,
+          shown: { name, detail, artworkUrl },
+        }),
+      "output.command": ({ generation, ...command }) =>
+        Effect.as(output.command(generation, command), null),
+      "output.volume": (volume) => Effect.as(output.setVolume(volume), null),
       "preferences.get": () => settings.get,
       "preferences.update": (patch) =>
         Effect.gen(function* () {
@@ -341,8 +415,14 @@ async function start(): Promise<void> {
           settings.update({ lastChannelId: channelId }),
           viewing.recordWatch(commandId, channelId),
         ),
-      "viewing.recordProgress": ({ commandId, title, position, duration, since }) =>
-        viewing.recordProgress(commandId, title, position, duration, since),
+      "viewing.recordProgress": ({ commandId, title, position, duration, since, generation }) =>
+        Effect.gen(function* () {
+          // What a receiver reported counts only for the load and the account it was of.
+          if (generation !== undefined && !(yield* output.savesProgress(generation))) {
+            return yield* viewing.state;
+          }
+          return yield* viewing.recordProgress(commandId, title, position, duration, since);
+        }),
       "viewing.removeFromContinue": ({ commandId, ...filter }) =>
         viewing.removeFromContinue(commandId, filter),
       "viewing.finishSeries": ({ commandId, seriesIds }) =>
@@ -369,7 +449,9 @@ async function start(): Promise<void> {
     (sender) => sender === mainWindow?.webContents,
   );
 
-  const closeStreams = () => void runtime.runFork(playback.closeAll);
+  // A receiver plays from this window's app: without the window nobody controls it, so it ends.
+  const closeStreams = () =>
+    void runtime.runFork(Effect.andThen(output.disconnect, playback.closeAll));
   mainWindow = openWindow(closeStreams);
   // How long the app took to show its window, from the start of the process.
   mainWindow.once("ready-to-show", () =>
@@ -428,6 +510,34 @@ function toolPath(tool: "ffmpeg" | "ffprobe"): string | null {
   if (!app.isPackaged) return tool;
   const bundled = join(process.resourcesPath, "ffmpeg", executable);
   return existsSync(bundled) ? bundled : null;
+}
+
+/**
+ * The ways this build reaches receivers on the network. AirPlay on macOS, through the helper the
+ * app comes with (see scripts/build-airplay-helper.sh), where it is there. Google Cast on Windows;
+ * on other systems only when MR_STREAMER_CAST=on asks for it, since nobody has tried it there.
+ * MR_STREAMER_CASTING_LAB=1 prints what the AirPlay helper says, which is the record of what a
+ * receiver did.
+ */
+function receiverAdapters(): ReceiverAdapter[] {
+  const adapters: ReceiverAdapter[] = [];
+  if (isMac) {
+    const helper = app.isPackaged
+      ? join(process.resourcesPath, "airplay", "MrStreamerAirPlay")
+      : join(app.getAppPath(), "vendor", "airplay", "mac-arm64", "MrStreamerAirPlay");
+    if (existsSync(helper)) {
+      adapters.push(
+        airplayAdapter({
+          helper,
+          ...(process.env["MR_STREAMER_CASTING_LAB"] === "1"
+            ? { log: (line) => console.error(`[airplay] ${line}`) }
+            : {}),
+        }),
+      );
+    }
+  }
+  if (isWindows || process.env["MR_STREAMER_CAST"] === "on") adapters.push(castAdapter());
+  return adapters;
 }
 
 /** Logs a failure as a warning instead of failing. */
