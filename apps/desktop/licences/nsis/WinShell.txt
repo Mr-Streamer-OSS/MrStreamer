@@ -1,0 +1,7 @@
+WinShell plug-in for NSIS, version 20121005
+Written by Anders
+
+Mr. Streamer's Windows setup program carries WinShell.dll, unmodified, and so does the uninstaller it leaves in the app's folder. It ties the app's shortcut to the app in the taskbar and Start, and removes that again on uninstall. It is a separate file that NSIS unpacks and loads when either runs. The Microsoft Store package and the Mac and Linux builds don't contain it.
+
+Its author publishes it on the NSIS wiki as "Freeware", as a binary, with no licence text and no source:
+https://nsis.sourceforge.io/WinShell_plug-in

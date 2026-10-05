@@ -1,0 +1,8 @@
+NSIS, the Nullsoft Scriptable Install System, in the Windows setup program
+Copyright (C) 1999-2018 Contributors
+
+electron-builder makes Mr. Streamer's Windows setup program, Mr-Streamer-{app}-win-x64-setup.exe, with its nsis-{NSIS_BUNDLE} build of NSIS. The setup program is NSIS's own code with the app packed inside, and it carries NSIS's System and nsExec plug-ins. It leaves an uninstaller in the app's folder, made of the same code and the same two plug-ins. The Microsoft Store package and the Mac and Linux builds contain none of it.
+
+NSIS is under the zlib/libpng licence, in its COPYING file, which follows. The setup program uses NSIS's zlib compression, not the bzip2 and LZMA modules that file also covers.
+
+The setup program carries four more plug-ins, from other authors. Each has its own notice in this list, under "NSIS plug-in".

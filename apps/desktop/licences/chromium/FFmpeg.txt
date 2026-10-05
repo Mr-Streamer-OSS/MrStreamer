@@ -1,0 +1,25 @@
+FFmpeg in Chromium, revision {CHROMIUM_FFMPEG_COMMIT}
+Copyright (c) the FFmpeg developers
+
+Electron {electron}, which Mr. Streamer runs on, plays audio and video in its window with Chromium's own build of FFmpeg. It is a separate library file: ffmpeg.dll on Windows, libffmpeg.so on Linux and libffmpeg.dylib on macOS. It is not the ffmpeg program in resources/ffmpeg, which has its own notice.
+
+Chromium configures it without FFmpeg's GPL parts, so it is licensed under the GNU Lesser General Public License, version 2.1 or later. The licence follows. Chromium's credits, under Chromium in this list, hold the notices of the other licences in its FFmpeg.
+
+Two sources are attached to this release.
+
+Chromium's FFmpeg at this revision, the one Chromium {CHROMIUM_VERSION} names in its DEPS file, with each platform's configuration in chromium/config/Chrome:
+https://github.com/Mr-Streamer-OSS/MrStreamer/releases/download/v{app}/chromium-ffmpeg-{CHROMIUM_FFMPEG_COMMIT}.tar.gz
+
+Electron {electron}, commit {ELECTRON_COMMIT}. Its DEPS file names Chromium {CHROMIUM_VERSION}, patches/ffmpeg holds its one change to this FFmpeg, and build/args/release.gn holds the arguments of its release build:
+https://github.com/Mr-Streamer-OSS/MrStreamer/releases/download/v{app}/electron-{electron}.tar.gz
+
+These two archives are not all of Chromium. Building the library also takes Chromium {CHROMIUM_VERSION} itself, its other dependencies and its build tools, and those come from their own servers, not from this release. docs/development/build-instructions-gn.md in Electron's archive lists what to install first. Then, with depot_tools:
+
+  mkdir electron && cd electron
+  gclient config --name "src/electron" --unmanaged https://github.com/electron/electron
+  gclient sync --with_branch_heads --with_tags
+  cd src/electron && git checkout v{electron} && gclient sync -f
+  cd .. && gn gen out/Release --args="import(\"//electron/build/args/release.gn\")"
+  ninja -C out/Release electron
+
+gclient checks out Chromium {CHROMIUM_VERSION} and this FFmpeg revision, and applies Electron's patches. The library is written to out/Release.

@@ -1,0 +1,9 @@
+StdUtils plug-in for NSIS, version 1.14
+Copyright (C) 2004-2018 LoRd_MuldeR <MuldeR2@GMX.de>
+
+Mr. Streamer's Windows setup program carries StdUtils.dll, unmodified, and so does the uninstaller it leaves in the app's folder. It is a separate file that NSIS unpacks and loads when either runs. The Microsoft Store package and the Mac and Linux builds don't contain it.
+
+StdUtils is under the GNU Lesser General Public License, version 2.1 or later. Its author's clarification about installers follows, then the licence.
+
+Its source is attached to this release, in the archive its author published:
+https://github.com/Mr-Streamer-OSS/MrStreamer/releases/download/v{app}/stdutils-1.14.zip

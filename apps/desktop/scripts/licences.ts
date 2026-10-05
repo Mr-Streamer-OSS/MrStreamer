@@ -7,7 +7,11 @@
 //
 // The build fails when a package declares no licence, has no licence file and no override, ships
 // under a licence missing from COMPATIBLE, refers to a licence in FULL_TEXT without including it,
-// or carries a package that is neither installed nor in the config.
+// or carries a package that is neither installed nor in the config. It also fails when Electron or
+// electron-builder isn't the version the config was reviewed for, and when the files a notice
+// links on the app's own release differ from the source archives the config has releases attach.
+// scripts/release-sources.ts prepares those archives, and scripts/installer-plugins.ts checks a
+// built Windows setup against the plug-ins the config lists.
 // docs/contributing/development.md describes the config.
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, realpath, writeFile } from "node:fs/promises";
@@ -22,8 +26,10 @@ type Notice = NoticeManifest["notices"][number];
  * Licences whose code may ship with the app's own under GPL-3.0: the FSF lists each as compatible
  * with version 3 (Apache-2.0 with version 3 only, MPL-2.0 through its secondary licence clause,
  * LGPL by conversion to the GPL, ZPL-2.1 too); BlueOak-1.0.0, dtoa and SunPro are permissive
- * licences with only a notice condition. GPL-2.0-only is missing on purpose: it can't combine with
- * GPL-3.0. Anything new needs a look at its terms before it goes on the list.
+ * licences with only a notice condition, and LZMA-SDK-9.22 places its code in the public domain.
+ * GPL-2.0-only is missing on purpose: it can't combine with GPL-3.0. Anything new needs a look at
+ * its terms before it goes on the list. A licence that can't go on it ships only as an exception
+ * of one described component, never of a package in the bundles.
  */
 const COMPATIBLE = new Set([
   "0BSD",
@@ -43,6 +49,7 @@ const COMPATIBLE = new Set([
   "LGPL-2.1-or-later",
   "LGPL-3.0-only",
   "LGPL-3.0-or-later",
+  "LZMA-SDK-9.22",
   "MIT",
   "MIT-0",
   "MPL-2.0",
@@ -60,6 +67,7 @@ const COMPATIBLE = new Set([
 const FULL_TEXT: Readonly<Record<string, string>> = {
   "Apache-2.0": "TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION",
   "GPL-2.0-or-later": "TERMS AND CONDITIONS FOR COPYING, DISTRIBUTION AND MODIFICATION",
+  "LGPL-2.1-or-later": "TERMS AND CONDITIONS FOR COPYING, DISTRIBUTION AND MODIFICATION",
 };
 
 /** Placeholders the app fills from the Electron it runs on; the build leaves them in. */
@@ -71,6 +79,10 @@ const TEXT_EXTENSIONS = new Set(["", ".md", ".markdown", ".txt", ".rst", ".mit",
 
 /** Between the texts of one notice, such as a package's LICENSE and NOTICE. */
 const SEPARATOR = "\n\n---\n\n";
+
+/** A link to a file on one of the app's own releases: the release's tag, then the file. */
+const RELEASE_LINK =
+  /https:\/\/github\.com\/Mr-Streamer-OSS\/MrStreamer\/releases\/download\/([^/\s]+)\/(\S+)/g;
 
 /** A component described in the config rather than found in node_modules. */
 const Component = type({
@@ -85,6 +97,36 @@ const Component = type({
   "credits?": "string",
 });
 type Component = typeof Component.infer;
+
+/** A component under `components`: what no bundle shows, some of it not open source. */
+const Shipped = Component.merge({
+  /**
+   * Licences in `licence` that COMPATIBLE doesn't list, each with why the installers carry the
+   * component anyway. For files that ship beside the app's code and that it can't replace, such as
+   * what Electron's download or the Windows setup program brings. The rest of the expression is
+   * still held to COMPATIBLE.
+   */
+  "exceptions?": { "[string]": "string" },
+});
+
+/** What the notices and source archives were reviewed for, for one version of a package. */
+const Reviewed = type({
+  /** The only version of the package the build accepts. */
+  version: "string",
+  /** Facts that hold for that version, as values for `{NAME}` placeholders. */
+  "pins?": { "[string]": "string" },
+});
+
+/**
+ * An archive every release attaches as `file`: downloaded from `url` and checked against its
+ * SHA-256, or cut from the repository `git` at `commit`, which makes a .tar.gz.
+ */
+const Source = type({ file: "string", url: "string", sha256: "string" }).or({
+  file: "string",
+  git: "string",
+  commit: "string",
+});
+export type Source = typeof Source.infer;
 
 const Override = type({
   /** Why the package needs help, for whoever reads the config next. */
@@ -113,11 +155,27 @@ const Config = type({
    */
   embedded: { "[string]": Component.array() },
   /**
-   * What no bundle shows: Chromium and Node.js inside Electron, the ffmpeg in resources/ffmpeg with
-   * the MinGW-w64 runtime in its Windows build, and the app itself.
+   * Packages whose version decides what else the installers carry, by name: Electron brings
+   * Chromium, its FFmpeg and Microsoft's files, electron-builder the Windows setup program. Under
+   * another version the build fails until someone reviews the notices, `sources` and `installer`.
+   * Notices can name the version as `{electron}`.
    */
-  components: Component.array(),
+  reviewed: { "[string]": Reviewed },
+  /**
+   * What no bundle shows: Chromium, its FFmpeg and Node.js inside Electron, Microsoft's files in
+   * Electron's Windows build, the ffmpeg in resources/ffmpeg with the MinGW-w64 runtime in its
+   * Windows build, the Windows setup program's parts, and the app itself.
+   */
+  components: Shipped.array(),
+  /** The source archives every release attaches. Each is linked from a notice. */
+  sources: Source.array(),
+  /**
+   * The plug-ins NSIS puts in the Windows setup and in the uninstaller it leaves in the app's
+   * folder, by file name, with their SHA-256.
+   */
+  installer: { setup: { "[string]": "string" }, uninstaller: { "[string]": "string" } },
 });
+type Config = typeof Config.infer;
 
 const PackageJson = type({
   name: "string",
@@ -185,14 +243,73 @@ export function thirdPartyNotices(
   });
 }
 
+/** licences.config.json of the app in `root`. */
+export async function readConfig(root: string): Promise<Config> {
+  return readJson(join(root, "licences.config.json"), Config);
+}
+
+/** The archives a release of the app in `root` attaches, with the version being built filled in. */
+export async function releaseSources(root: string): Promise<Source[]> {
+  const config = await readConfig(root);
+  const variables = { ...(await buildVariables(root)), ...pinned(config) };
+  return config.sources.map((source) => filledSource(source, variables));
+}
+
+/**
+ * What's wrong between the files of the app's own release that `notices` link, in a source, a
+ * homepage or a text, and the `files` the release of `version` attaches: a link to a file the
+ * release lacks or to another release, or an attached file no notice leads to.
+ */
+export function linkProblems(
+  notices: readonly Notice[],
+  version: string,
+  files: Iterable<string>,
+): string[] {
+  const attached = new Set(files);
+  const linked = new Set<string>();
+  const problems = new Set<string>();
+  for (const notice of notices) {
+    const text = typeof notice.text === "string" ? notice.text : "";
+    const places = [notice.source, notice.homepage ?? "", text].join("\n");
+    for (const [, tag = "", file = ""] of places.matchAll(RELEASE_LINK)) {
+      linked.add(file);
+      if (tag !== `v${version}`) {
+        problems.add(`${notice.id} links ${file} on release ${tag}, not on v${version}.`);
+      } else if (!attached.has(file)) {
+        problems.add(
+          `${notice.id} links ${file} on the release, which doesn't attach it: "sources" in licences.config.json lists what it does.`,
+        );
+      }
+    }
+  }
+  for (const file of attached) {
+    if (!linked.has(file)) problems.add(`The release attaches ${file}, which no notice links.`);
+  }
+  return [...problems];
+}
+
 /** The notices for `modules` and the config, sorted by name. Throws with every problem found. */
 export async function collectNotices({
   root,
   modules,
-  variables,
+  variables: build,
 }: NoticeInputs): Promise<NoticeManifest> {
-  const config = await readJson(join(root, "licences.config.json"), Config);
+  const config = await readConfig(root);
+  const variables = { ...build, ...pinned(config) };
   const problems: string[] = [];
+
+  // What was reviewed for one version of Electron or electron-builder says nothing about another.
+  for (const [name, { version }] of Object.entries(config.reviewed)) {
+    const manifest = join(root, "node_modules", name, "package.json");
+    const installed = existsSync(manifest)
+      ? (await readJson(manifest, type({ version: "string" }))).version
+      : null;
+    if (installed !== version) {
+      problems.push(
+        `${name} ${installed ? `${installed} is` : "isn't"} installed, and the notices and source archives were reviewed for ${version}: go through docs/maintainers/licences.md#upgrading-electron-or-electron-builder, then update "reviewed" in licences.config.json.`,
+      );
+    }
+  }
 
   // The files each installed package contributes, by package folder.
   const bundled = new Map<string, Set<string>>();
@@ -246,13 +363,19 @@ export async function collectNotices({
   }
   for (const stale of unused) problems.push(`"embedded" lists ${stale}, which no bundle carries.`);
 
+  // Only what "components" describes takes exceptions, by the id of its notice. A package with
+  // the same id fails the build as listed twice.
+  const exceptions = new Map<string, Readonly<Record<string, string>>>();
   const results = await Promise.allSettled([
     ...[...packages.values()].map((found) =>
       packageNotice(found, config.overrides[found.json.name], root, variables),
     ),
-    ...[...config.components, ...described].map((component) =>
-      componentNotice(component, root, variables),
-    ),
+    ...described.map((component) => componentNotice(component, root, variables)),
+    ...config.components.map(async (component) => {
+      const notice = await componentNotice(component, root, variables);
+      exceptions.set(notice.id, component.exceptions ?? {});
+      return notice;
+    }),
   ]);
   const notices: Notice[] = [];
   for (const result of results) {
@@ -264,10 +387,19 @@ export async function collectNotices({
   }
   const ids = new Set<string>();
   for (const notice of notices) {
-    if (!compatible(notice.licence)) {
+    const excepted = exceptions.get(notice.id) ?? {};
+    if (!accepted(notice.licence, excepted)) {
       problems.push(
         `${notice.id} is licensed ${notice.licence}, which isn't known to be compatible with GPL-3.0 (COMPATIBLE in scripts/licences.ts).`,
       );
+    }
+    const terms = notice.licence.split(/\s+(?:AND|OR)\s+|[()]/).map((term) => term.trim());
+    for (const licence of Object.keys(excepted)) {
+      if (COMPATIBLE.has(licence) || !terms.includes(licence)) {
+        problems.push(
+          `${notice.id} has an exception for ${licence}, which it doesn't need: its licence is ${notice.licence}.`,
+        );
+      }
     }
     const line = FULL_TEXT[notice.licence];
     if (line && typeof notice.text === "string" && !notice.text.includes(line)) {
@@ -278,6 +410,17 @@ export async function collectNotices({
     if (ids.has(notice.id)) problems.push(`${notice.id} is listed twice.`);
     ids.add(notice.id);
   }
+
+  // Every file a notice says is on this release has to be one the release attaches.
+  const files: string[] = [];
+  for (const source of config.sources) {
+    try {
+      files.push(filledSource(source, variables).file);
+    } catch (error) {
+      problems.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+  problems.push(...linkProblems(notices, variables["app"] ?? "", files));
   if (problems.length > 0) {
     throw new Error(
       `Third-party notices:\n${problems.map((problem) => `- ${problem}`).join("\n")}`,
@@ -353,6 +496,39 @@ async function componentNotice(
     homepage: component.homepage === undefined ? null : fill(component.homepage),
     text: credits === undefined ? await texts(app, files ?? [], fill) : { credits },
   };
+}
+
+/** What `reviewed` pins: each package's version under its name, and the facts recorded for it. */
+function pinned(config: Config): Record<string, string> {
+  const values: Record<string, string> = {};
+  for (const [name, { version, pins }] of Object.entries(config.reviewed)) {
+    Object.assign(values, { [name]: version }, pins);
+  }
+  return values;
+}
+
+/**
+ * `source` with its placeholders filled. Throws for a file name that isn't plain, a checksum that
+ * isn't a SHA-256, or a commit that isn't a full hash: a branch or a tag can move.
+ */
+function filledSource(source: Source, variables: Readonly<Record<string, string>>): Source {
+  const fill = (text: string) => filled(text, variables, `"sources" > ${source.file}`);
+  const file = fill(source.file);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(file)) {
+    throw new Error(`"sources" names ${file}, which isn't a plain file name.`);
+  }
+  if ("url" in source) {
+    const sha256 = fill(source.sha256);
+    if (!/^[0-9a-f]{64}$/.test(sha256)) {
+      throw new Error(`"sources" > ${file} needs a SHA-256 in lower-case hex.`);
+    }
+    return { file, url: fill(source.url), sha256 };
+  }
+  const commit = fill(source.commit);
+  if (!/^[0-9a-f]{40}$/.test(commit) || !file.endsWith(".tar.gz")) {
+    throw new Error(`"sources" > ${file} needs a full commit hash and a name ending in .tar.gz.`);
+  }
+  return { file, git: fill(source.git), commit };
 }
 
 /** `{app}`, the version being built, and what build-ffmpeg.sh pins, such as `{FFMPEG_VERSION}`. */
@@ -496,18 +672,18 @@ function repositoryOf(json: PackageJson): string | null {
 }
 
 /**
- * Whether an SPDX expression allows shipping with the app: every part of an AND, and some
- * alternative of an OR, is on the COMPATIBLE list.
+ * Whether the build accepts an SPDX expression: every part of an AND, and some alternative of an
+ * OR, is on the COMPATIBLE list or among the licences the component's config `excepted`.
  */
-function compatible(expression: string): boolean {
+function accepted(expression: string, excepted: Readonly<Record<string, string>>): boolean {
   const alternatives = splitOutside(expression, " OR ");
-  if (alternatives.length > 1) return alternatives.some(compatible);
+  if (alternatives.length > 1) return alternatives.some((each) => accepted(each, excepted));
   const parts = splitOutside(expression, " AND ");
-  if (parts.length > 1) return parts.every(compatible);
+  if (parts.length > 1) return parts.every((each) => accepted(each, excepted));
   const single = expression.trim();
   return single.startsWith("(") && single.endsWith(")")
-    ? compatible(single.slice(1, -1))
-    : COMPATIBLE.has(single);
+    ? accepted(single.slice(1, -1), excepted)
+    : COMPATIBLE.has(single) || Object.hasOwn(excepted, single);
 }
 
 /** `text` split at `separator`, except inside parentheses. */
