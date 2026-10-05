@@ -12,7 +12,7 @@ import { ipc } from "./support.ts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { player } from "../../src/renderer/src/player/player.ts";
-import { subtitleTrack } from "../../src/renderer/src/player/subtitles.ts";
+import { subtitleLayer } from "../../src/renderer/src/player/subtitles.ts";
 import { streams, type Rendition } from "./hls-stand-in.ts";
 
 vi.mock("hls.js", async (original) => {
@@ -93,9 +93,17 @@ const soundPlaying = () => {
   const { audioId, tracks } = player.state();
   return tracks?.audio.find((track) => track.id === (audioId ?? tracks.playing))?.label;
 };
-/** The lines on the element's subtitle track, as Chromium would show them. */
+/** Puts the picture at `position` seconds: happy-dom times no cues, so the test says where it is. */
+function skipTo(position: number): void {
+  player.element.currentTime = position;
+  player.element.dispatchEvent(new Event("seeked"));
+}
+/** What the viewer reads over the picture where it is, top to bottom. */
 const onScreen = () =>
-  [...(subtitleTrack(player.element).cues ?? [])].map((cue) => (cue as VTTCue).text);
+  [...subtitleLayer.querySelectorAll<HTMLElement>("[data-subtitle-text] > div")]
+    .filter((row) => row.style.visibility !== "hidden")
+    .map((row) => row.textContent)
+    .reverse();
 /** Whether CC says the chosen subtitles are loading. */
 const loading = () => player.state().subtitleLoading;
 const saved = () => ipc.argsOf("preferences.update");
@@ -136,6 +144,7 @@ describe("an HLS channel's tracks", () => {
 
     stream.captionLines(1, 4, 6, ["HELLO"]);
     await wait();
+    skipTo(5);
 
     expect(listed().subtitles).toEqual(["English", "Deutsch", "Captions"]);
     expect(player.state().subtitle).toBeNull();
@@ -168,7 +177,11 @@ describe("an HLS channel's tracks", () => {
       { start: 13, end: 15, text: "Aye." },
     ]);
 
-    expect(onScreen()).toEqual(["We sail at first light.", "Aye."]);
+    // Read twice, it would show twice, one over the other.
+    skipTo(11);
+    expect(onScreen()).toEqual(["We sail at first light."]);
+    skipTo(14);
+    expect(onScreen()).toEqual(["Aye."]);
     expect(saved()).toEqual([{ subtitleLanguage: "en" }]);
   });
 
@@ -194,6 +207,7 @@ describe("an HLS channel's tracks", () => {
     player.setSubtitle(subtitles("Deutsch"));
     // hls.js asked for it while English was chosen.
     stream.subtitleLines([{ start: 1, end: 2, text: "Too late." }], "English");
+    skipTo(1.5);
 
     expect(loading()).toBe(true);
     expect(onScreen()).toEqual([]);
@@ -228,7 +242,9 @@ describe("an HLS channel's tracks", () => {
   it("turns subtitles off and on again with C, with the lines read before", async () => {
     const stream = await playing("a");
     player.setSubtitle(subtitles("Deutsch"));
+    skipTo(11);
     stream.subtitleLines([{ start: 10, end: 12, text: "Wir segeln im Morgengrauen." }]);
+    expect(onScreen()).toEqual(["Wir segeln im Morgengrauen."]);
 
     player.toggleSubtitles();
 
@@ -264,6 +280,7 @@ describe("an HLS channel's tracks", () => {
     expect(loading()).toBe(false);
     stream.captionLines(1, 4, 6, ["FIRST ROW", "SECOND ROW"]);
     stream.captionLines(3, 4, 6, ["OTHER CHANNEL"]);
+    skipTo(5);
 
     // The rows of one screen are one line, and the subtitle rendition isn't loaded for them.
     expect(onScreen()).toEqual(["FIRST ROW\nSECOND ROW"]);
@@ -275,6 +292,8 @@ describe("an HLS channel's tracks", () => {
 
     expect(onScreen()).toEqual(["First line"]);
     expect(stream.subtitleTrack).toBe(0);
+    skipTo(8);
+    expect(onScreen()).toEqual([]);
   });
 
   it("names renditions by their language when the stream gives only a code, or nothing", async () => {
@@ -318,6 +337,7 @@ describe("an HLS channel's tracks", () => {
     expect(stream.audioTrack).toBe(1);
     expect(stream.subtitleTrack).toBe(0);
     stream.subtitleLines([{ start: 20, end: 22, text: "Noch da." }]);
+    skipTo(21);
     expect(onScreen()).toEqual(["Noch da."]);
   });
 
@@ -326,6 +346,7 @@ describe("an HLS channel's tracks", () => {
     player.setAudio(sound("Español")?.id ?? -1);
     player.setSubtitle(subtitles("Deutsch"));
     stream.subtitleLines([{ start: 10, end: 12, text: "Wir segeln im Morgengrauen." }]);
+    skipTo(11);
     const before = saved().length;
 
     stream.variant({
@@ -364,6 +385,7 @@ describe("an HLS channel's tracks", () => {
     first.variant({ audio: SOUND, subtitles: SUBTITLES });
     first.subtitleLines([{ start: 1, end: 2, text: "From the channel before." }]);
     await wait();
+    skipTo(1.5);
 
     expect(first.destroyed).toBe(true);
     expect(second).not.toBe(first);
@@ -376,6 +398,7 @@ describe("an HLS channel's tracks", () => {
     player.setAudio(sound("Español")?.id ?? -1);
     player.setSubtitle(subtitles("Deutsch"));
     first.subtitleLines([{ start: 10, end: 12, text: "Wir segeln im Morgengrauen." }]);
+    skipTo(11);
 
     // Another stream of the channel, as its other qualities are, lists them the other way round.
     const second = await reopened("a");
@@ -390,12 +413,11 @@ describe("an HLS channel's tracks", () => {
     expect(player.state().subtitle).toMatchObject({ label: "Deutsch" });
     // English, the stream's default and where Deutsch was listed before, is never loaded.
     expect(second.subtitlesLoaded).not.toContain("English");
-    // The new stream's clock starts again, so the lines of the one before are gone, and it has
-    // yet to read the subtitles.
+    // The line of the stream before went with it, and the new one has yet to read the subtitles.
     expect(onScreen()).toEqual([]);
     expect(loading()).toBe(true);
 
-    second.subtitleLines([{ start: 1, end: 2, text: "Noch da." }]);
+    second.subtitleLines([{ start: 10, end: 12, text: "Noch da." }]);
 
     expect(onScreen()).toEqual(["Noch da."]);
   });
@@ -434,6 +456,7 @@ describe("an HLS channel's tracks", () => {
     first.captionLines(1, 1, 3, ["HELLO"]);
     await wait();
     player.setSubtitle(subtitles("Captions"));
+    skipTo(2);
 
     const second = await reopened("a");
     second.variant({ audio: SOUND, subtitles: SUBTITLES });
@@ -466,6 +489,7 @@ describe("an HLS channel's tracks", () => {
     second.variant({ audio: SOUND, subtitles: SUBTITLES });
     second.captionLines(1, 1, 3, ["NOT ASKED FOR"]);
     await wait();
+    skipTo(2);
 
     expect(player.state().subtitle).toBeNull();
     expect(onScreen()).toEqual([]);
@@ -484,6 +508,7 @@ describe("an HLS channel's tracks", () => {
 
     second.captionLines(1, 1, 3, ["ANOTHER CHANNEL'S"]);
     await wait();
+    skipTo(2);
 
     expect(listed().subtitles).toEqual(["English", "Deutsch", "Captions"]);
     expect(player.state().subtitle).toBeNull();
@@ -496,6 +521,7 @@ describe("an HLS channel's tracks", () => {
 
     player.stop();
     stream.subtitleLines([{ start: 10, end: 12, text: "After the end." }]);
+    skipTo(11);
 
     expect(stream.destroyed).toBe(true);
     expect(onScreen()).toEqual([]);

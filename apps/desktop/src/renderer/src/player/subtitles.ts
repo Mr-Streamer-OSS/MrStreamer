@@ -244,7 +244,6 @@ export function setSubtitleLook(look: SubtitleLook): void {
  * it takes when neither comes.
  */
 export function subtitlePresenter(video: HTMLVideoElement) {
-  const text = subtitleTrack(video);
   const timing = pictureTrack(video);
   /** The last cue, which the next change ends when that comes before the end it has. */
   let last: VTTCue | null = null;

@@ -12,7 +12,8 @@
 //   Picking others shows that rendition's lines at their seconds; C turns them off, and on again
 //   with the lines hls.js had read before.
 // - A channel whose picture carries closed captions offers them under CC and shows them. After
-//   Stop and the same channel again they are still chosen, and show as the new stream brings them.
+//   Stop and the same channel again they are still chosen, and show as the new stream brings them,
+//   once: a line left from the stream before would show beside it.
 // - Back on the first channel, the sound and subtitles in the languages picked come on by
 //   themselves; a stream with nothing to choose shows neither button.
 // - After the keychain loses the link, the app asks for the link again, naming only its host, and
@@ -161,10 +162,8 @@ interface Playing {
   readonly paused: boolean;
   /** Bytes of sound the element decoded so far. */
   readonly sound: number;
-  /** The lines on the element's subtitle track that show at its position. */
+  /** The lines of text the viewer reads over the picture, top to bottom. */
   readonly lines: readonly string[];
-  /** Every line on that track. */
-  readonly loaded: number;
   /** Whether the CC button is there, and lit. */
   readonly cc: "on" | "off" | "absent";
   readonly soundButton: boolean;
@@ -173,14 +172,16 @@ interface Playing {
 function playing(page: Page): Promise<Playing> {
   return page.evaluate<Playing>(`(() => {
     const video = document.querySelector("video");
-    const track = [...video.textTracks].find((each) => each.kind === "subtitles");
     const cc = document.querySelector('[data-view="watch"] [aria-label^="Subtitles"]');
     return {
       time: video.currentTime,
       paused: video.paused,
       sound: video.webkitAudioDecodedByteCount ?? 0,
-      lines: [...(track?.activeCues ?? [])].map((cue) => cue.text),
-      loaded: track?.cues?.length ?? 0,
+      // What a style hides isn't part of a line's text, so a place left empty counts for nothing.
+      lines: [...document.querySelectorAll("[data-subtitle-text] > div")]
+        .map((line) => line.innerText)
+        .filter((text) => text !== "")
+        .reverse(),
       cc: !cc ? "absent" : cc.getAttribute("aria-pressed") === "true" ? "on" : "off",
       soundButton: !!document.querySelector('[data-view="watch"] [aria-label="Sound"]'),
     };
@@ -249,18 +250,21 @@ async function listsTracks(page: Page): Promise<{ ok: boolean; detail: string }>
   await waitFor(async () => (await playing(page)).sound > 0, 20_000).catch(() => {});
   const sound = await choices(page, "Sound");
   const subtitles = await choices(page, "Subtitles");
+  // Where "English line 3" of the stream's default subtitles would show.
+  await holdAt(page, 5);
   const now = await playing(page);
+  await resume(page);
   const ok =
     sound.join() === "*English,Español" &&
     subtitles.join() === "*Off,English,Deutsch,Français" &&
     now.cc === "off" &&
-    now.loaded === 0 &&
+    now.lines.length === 0 &&
     now.sound > 0 &&
     asked(/subtitles-/) === 0 &&
     asked(/sound-es/) === 0;
   return {
     ok,
-    detail: `Sound [${sound}], CC [${subtitles}], CC ${now.cc}, ${now.loaded} lines loaded, ${now.sound} bytes of sound decoded, ${asked(/subtitles-/)} subtitle requests`,
+    detail: `Sound [${sound}], CC [${subtitles}], CC ${now.cc}, ${now.lines.length} lines at 5 s, ${now.sound} bytes of sound decoded, ${asked(/subtitles-/)} subtitle requests`,
   };
 }
 
@@ -286,9 +290,9 @@ async function switchesSound(page: Page): Promise<{ ok: boolean; detail: string 
 
 async function showsSubtitles(page: Page): Promise<{ ok: boolean; detail: string }> {
   await choose(page, "Subtitles", "English");
-  await waitFor(async () => (await playing(page)).loaded > 0, 15_000).catch(() => {});
   // "English line 3" shows from 4.25 to 5.75 s.
   await holdAt(page, 5);
+  await waitFor(async () => (await playing(page)).lines.length > 0, 15_000).catch(() => {});
   const english = await playing(page);
   // "Français" has no line: its row says Loading until hls.js has read it, not until one comes.
   await choose(page, "Subtitles", "Français");
@@ -319,18 +323,18 @@ async function showsSubtitles(page: Page): Promise<{ ok: boolean; detail: string
     english.cc === "on" &&
     silent.row === "*Français" &&
     silent.cc === "on" &&
-    silent.loaded === 0 &&
+    silent.lines.length === 0 &&
     asked(/subtitles-fr\.vtt$/) > 0 &&
     german.lines.join() === "Deutsche Zeile 3" &&
     off.cc === "off" &&
-    off.loaded === 0 &&
+    off.lines.length === 0 &&
     on.cc === "on" &&
     on.row === "*Deutsch" &&
     on.lines.join() === "Deutsche Zeile 3" &&
     between.lines.length === 0;
   return {
     ok,
-    detail: `at 5 s "${english.lines}", without lines "${silent.row}" and ${silent.loaded} lines, then "${german.lines}"; C: ${off.cc} with ${off.loaded} lines, C: ${on.cc} "${on.row}" with "${on.lines}"; at 6 s ${between.lines.length} lines`,
+    detail: `at 5 s "${english.lines}", without lines "${silent.row}" and ${silent.lines.length} lines, then "${german.lines}"; C: ${off.cc} with ${off.lines.length} lines, C: ${on.cc} "${on.row}" with "${on.lines}"; at 6 s ${between.lines.length} lines`,
   };
 }
 
@@ -348,8 +352,7 @@ async function showsCaptions(page: Page): Promise<{ ok: boolean; detail: string 
   await holdAt(page, 3.5);
   const after = await playing(page);
   // Stop, then the same channel: a new stream, whose picture tells of its captions only at their
-  // first line. The lines of the stream before are marked, to tell them from the ones it brings.
-  const marked = await markedLines(page, true);
+  // first line.
   const stop = `document.querySelector('[data-view="watch"] [aria-label="Stop"]')`;
   await click(page, stop);
   await waitFor(() => page.evaluate<boolean>(`!${stop}`), 10_000);
@@ -360,7 +363,6 @@ async function showsCaptions(page: Page): Promise<{ ok: boolean; detail: string 
   await holdAt(page, 2);
   await waitFor(async () => (await playing(page)).lines.length > 0, 10_000).catch(() => {});
   const again = await playing(page);
-  const old = await markedLines(page, false);
   const said = (lines: readonly string[]) => lines.join(" ").replace(/\s+/g, " ").trim();
   const ok =
     listed.join() === "*Off,Captions" &&
@@ -368,37 +370,23 @@ async function showsCaptions(page: Page): Promise<{ ok: boolean; detail: string 
     shown.cc === "on" &&
     said(shown.lines) === "HELLO CAPTIONS" &&
     after.lines.length === 0 &&
-    marked > 0 &&
     reopened.cc === "on" &&
     kept.join() === "Off,*Captions" &&
-    said(again.lines) === "HELLO CAPTIONS" &&
-    old === 0;
+    // Said once: a line the stream before left behind would show beside the new one.
+    said(again.lines) === "HELLO CAPTIONS";
   return {
     ok,
-    detail: `CC [${listed}], at 2 s "${shown.lines.join(" | ")}", at 3.5 s ${after.lines.length} lines, Sound ${before.soundButton ? "shown" : "hidden"}; after Stop and the same channel CC ${reopened.cc} [${kept}], at 2 s "${again.lines.join(" | ")}", ${old} of ${marked} earlier lines left`,
+    detail: `CC [${listed}], at 2 s "${shown.lines.join(" | ")}", at 3.5 s ${after.lines.length} lines, Sound ${before.soundButton ? "shown" : "hidden"}; after Stop and the same channel CC ${reopened.cc} [${kept}], at 2 s "${again.lines.join(" | ")}"`,
   };
-}
-
-/**
- * How many lines on the element's subtitle track bear a mark, after marking all of them when
- * `mark` says so. A line read from a later stream bears none.
- */
-function markedLines(page: Page, mark: boolean): Promise<number> {
-  return page.evaluate<number>(`(() => {
-    const video = document.querySelector("video");
-    const track = [...video.textTracks].find((each) => each.kind === "subtitles");
-    const lines = [...(track?.cues ?? [])];
-    if (${mark}) for (const line of lines) line.id = "before-stop";
-    return lines.filter((line) => line.id === "before-stop").length;
-  })()`);
 }
 
 async function carriesOver(page: Page): Promise<{ ok: boolean; detail: string }> {
   const english = asked(/sound-en-\d+\.mpegts$/);
   await play(page, PLAYLIST_CHANNELS.tracks.name);
   await waitFor(async () => (await playing(page)).cc === "on", 15_000).catch(() => {});
-  await waitFor(async () => (await playing(page)).loaded > 0, 15_000).catch(() => {});
+  // "Deutsche Zeile 5" shows from 8.25 to 9.75 s.
   await holdAt(page, 9);
+  await waitFor(async () => (await playing(page)).lines.length > 0, 15_000).catch(() => {});
   const now = await playing(page);
   const sound = await choices(page, "Sound");
   const subtitles = await choices(page, "Subtitles");
