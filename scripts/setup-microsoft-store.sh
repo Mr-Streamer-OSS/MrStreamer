@@ -184,28 +184,37 @@ finish() {
 # Replace the example below. Set TOTAL_STAGES to match the stages you write.
 # ──────────────────────────────────────────────────────────────────────────
 #
-# Microsoft Store setup: the Partner Center steps only Wout can take, from a checkout of the
-# repository. The publisher account and the name reservation are done, and the package identity
-# lives in the MSIX packaging configuration. docs/maintainers/microsoft-store.md is the runbook.
+# Microsoft Store automation: `scripts/setup-microsoft-store.sh` from a checkout where `gh` is
+# signed in with admin access to the repository. It checks that Partner Center has a Microsoft
+# Entra tenant and an application that may submit, creates a GitHub environment only main can
+# use, stores the application's key there, checks the account without sending anything, and
+# turns submissions on last. docs/maintainers/microsoft-store.md explains each value, and how to
+# renew or revoke the key.
 #
-#   scripts/setup-microsoft-store.sh           every stage not done yet, in order
-#   scripts/setup-microsoft-store.sh submit    one stage again, by number or name
-#   scripts/setup-microsoft-store.sh --list    each stage and whether it's done
+#   scripts/setup-microsoft-store.sh           the stages still to do, in order
+#   scripts/setup-microsoft-store.sh --list    each stage and when it was done
+#   scripts/setup-microsoft-store.sh key       one stage again, by number or name: key renews the key
 #
-# Finished stages are recorded in the gitignored .local/microsoft-store-setup.state. Nothing here
-# asks for a password, an identity document, a tester's address or any other secret.
+# Finished stages and the two IDs are kept in the gitignored .local/, readable by you alone. The
+# key is typed hidden, goes to GitHub through gh's standard input, and is stored nowhere else.
 
 cd "$(git rev-parse --show-toplevel)"
-STATE_FILE=.local/microsoft-store-setup.state
-PARTNER_CENTER=https://aka.ms/submitwindowsapp
+umask 077
+STATE_FILE=.local/microsoft-store-automation.state
+ENV_FILE=.local/microsoft-store-automation.env
+STORE_ENV=microsoft-store
+PARTNER_CENTER=https://partner.microsoft.com/dashboard
+ME=scripts/setup-microsoft-store.sh
+REPO=""
 
-STAGES=(notifications testers ready pricing submit)
+STAGES=(tenant application environment key check activate)
 TITLES=(
-  "Partner Center · notification email"
-  "Partner Center · testers' group"
-  "Private submission · before you start"
-  "Private submission · pricing and availability"
-  "Private submission · options and submit"
+  "Partner Center · Microsoft Entra tenant"
+  "Partner Center · application with the Manager role"
+  "GitHub · environment for main alone"
+  "Partner Center · key"
+  "GitHub · read-only check"
+  "GitHub · turn submissions on"
 )
 TOTAL_STAGES=${#STAGES[@]}
 
@@ -230,7 +239,7 @@ list_stages() {
   local i on
   for i in "${!STAGES[@]}"; do
     if on=$(marked "${STAGES[$i]}"); then on="${GREEN}done $on${RESET}"; else on="to do"; fi
-    printf '  %s. %-14s %-48s %s\n' "$((i + 1))" "${STAGES[$i]}" "${TITLES[$i]}" "$on"
+    printf '  %s. %-12s %-52s %s\n' "$((i + 1))" "${STAGES[$i]}" "${TITLES[$i]}" "$on"
   done
 }
 
@@ -250,98 +259,328 @@ wrap_up() {
       printf '\n'
       list_stages
       printf '\n'
-      note "Run scripts/setup-microsoft-store.sh again to continue."
+      note "Run $ME again to continue."
       return
     fi
   done
   finish
-  note "Record the submission and its certification on its card in the GitHub project."
+  note "The next stable release is the first to go to the Store. Record how it went on its card."
 }
 
-stage_notifications() {
-  say "Certification results and required actions arrive by email once Partner Center has"
-  say "verified the address it sends them to."
-  open_url "https://partner.microsoft.com/dashboard/actioncenter/mypreferences"
-  step "In Action Center > My Preferences, verify the email address shown."
-  if ! confirm "Is the address verified?"; then
-    note "Run scripts/setup-microsoft-store.sh notifications once it is."
+# ask_id KEY "Prompt": ask until the answer is an ID such as 01234567-89ab-cdef-0123-456789abcdef.
+ask_id() {
+  ask "$1" "$2"
+  until [[ "${!1}" =~ ^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$ ]]; do
+    warn "An ID looks like 01234567-89ab-cdef-0123-456789abcdef."
+    ask "$1" "$2"
+  done
+}
+
+# branch_rule: print who may use the Store environment: "missing" when it doesn't exist, "any"
+# branch, the "protected" ones, or the branches and tags it lists, with commas between them.
+# Fails when GitHub can't be asked.
+branch_rule() {
+  local policy error
+  error=$(mktemp)
+  if ! policy=$(gh api "repos/$REPO/environments/$STORE_ENV" 2>"$error" \
+    --jq '.deployment_branch_policy | if . == null then "any" elif .protected_branches then "protected" else "listed" end'); then
+    if grep -q "HTTP 404" "$error"; then
+      rm -f "$error"
+      printf 'missing'
+      return 0
+    fi
+    cat "$error" >&2
+    rm -f "$error"
     return 1
   fi
-  mark notifications
+  rm -f "$error"
+  if [[ "$policy" != listed ]]; then
+    printf '%s' "$policy"
+    return 0
+  fi
+  gh api "repos/$REPO/environments/$STORE_ENV/deployment-branch-policies" \
+    --jq '[.branch_policies[] | if .type == "tag" then "tag:" + .name else .name end] | join(",")'
 }
 
-stage_testers() {
-  say "Only people in a known user group can see and install a private Store app. The"
-  say "addresses stay in Partner Center: this wizard never asks for them."
-  open_url "https://partner.microsoft.com/dashboard"
-  step "Expand Engage in the left menu, click Customer groups, then Create new group."
-  step "Name it, for example Mr. Streamer testers, and keep Known user group selected."
-  note "  A group can't be renamed or deleted later; its members can change."
-  step "Enter each tester's personal Microsoft account address, yours included."
-  note "  Work or school accounts can't see or install a private app."
-  step "Click Save. Changes to the members can take up to 30 minutes."
-  if ! confirm "Is the testers' group saved?"; then
-    note "Run scripts/setup-microsoft-store.sh testers once it is."
+# create_environment: make the Store environment with main as the only branch that may use it.
+# Doing it again changes nothing. A stage runs where the shell doesn't stop at a failed command,
+# so every command that changes something on GitHub is checked where it is called.
+create_environment() {
+  gh api -X PUT "repos/$REPO/environments/$STORE_ENV" >/dev/null \
+    -F 'deployment_branch_policy[protected_branches]=false' \
+    -F 'deployment_branch_policy[custom_branch_policies]=true' &&
+    gh api -X POST "repos/$REPO/environments/$STORE_ENV/deployment-branch-policies" >/dev/null \
+      -f name=main -f type=branch
+}
+
+# env_var NAME VALUE: set a variable of the Store environment. Never for the key: the value is
+# on gh's command line.
+env_var() {
+  if gh variable set "$1" --env "$STORE_ENV" --repo "$REPO" --body "$2" >/dev/null; then
+    printf '  %s✓ set%s %s in the %s environment\n' "$GREEN" "$RESET" "$1" "$STORE_ENV"
+  else
+    warn "couldn't set $1 in the $STORE_ENV environment"
     return 1
   fi
-  mark testers
 }
 
-stage_ready() {
-  say "The first submission decides for good whether the app can be private, so start it only"
-  say "when everything it needs is ready:"
-  step "The MSIX the agent built with the Partner Center identity, and its certification kit result."
-  step "The listing text, screenshots and logos, and the published privacy policy URL."
-  step "Certification notes with a lawful demo provider. Never your own subscription."
-  step "Microsoft's answers on HTTP providers and the adult tab, and your decision on what they require."
-  step "Your approval of this exact package for the testers."
-  if ! confirm "Is all of that ready?"; then
-    note "Run scripts/setup-microsoft-store.sh ready when it is."
+# hide_typing: stop the terminal showing what is typed, until show_typing or until the wizard
+# ends, Ctrl-C included.
+hide_typing() {
+  TTY_SHOWN=$(stty -g)
+  trap show_typing EXIT
+  stty -echo
+  TTY_HIDDEN=$(stty -g)
+}
+
+# show_typing: put the terminal back as hide_typing found it.
+show_typing() {
+  trap - EXIT
+  stty "$TTY_SHOWN"
+}
+
+# hidden_reply NAME "Prompt": between hide_typing and show_typing, read what is typed or pasted
+# into $NAME, without the whitespace around it. A paste can start with an empty line, hold several
+# lines or end without one, so this reads past the first line until nothing has arrived for 0.2
+# seconds. None of it is left for a later prompt, or for the shell once the wizard ends. Fails at
+# Ctrl-D.
+hidden_reply() {
+  local text more
+  printf '  %s%s%s ' "$BOLD" "$2" "$RESET"
+  if ! IFS= read -r text; then
+    printf '\n'
     return 1
   fi
-  mark ready
+  # Out of line mode a read ends after 0.2 seconds of silence, and gives a last line with no end.
+  stty -icanon min 0 time 2
+  while IFS= read -r more || [[ -n "$more" ]]; do
+    text+=$'\n'$more
+  done
+  stty "$TTY_HIDDEN"
+  printf '\n'
+  text="${text#"${text%%[![:space:]]*}"}"
+  text="${text%"${text##*[![:space:]]}"}"
+  printf -v "$1" '%s' "$text"
 }
 
-stage_pricing() {
-  say "Start the submission and make it private before anything else."
+# ask_key NAME: read the application's key into $NAME and ask whether to store it. Typing stays
+# hidden from the first prompt to the last answer, so a paste that arrives in parts never shows.
+# It asks again for a key that is empty or holds whitespace, and after an answer that is neither y
+# nor n, which may be more of the key. Fails at n and at Ctrl-D.
+ask_key() {
+  local pasted answer store=no
+  hide_typing
+  while hidden_reply pasted "Paste the key (hidden):"; do
+    if [[ ! "$pasted" =~ ^[[:graph:]]+$ ]]; then
+      warn "That is empty or holds a space or a line break, so it isn't the key. Paste it again."
+      continue
+    fi
+    hidden_reply answer "Store it as the secret STORE_CLIENT_SECRET of $STORE_ENV in $REPO? y or n (hidden):" || break
+    case "$answer" in
+      [Yy] | [Yy][Ee][Ss])
+        store=yes
+        break
+        ;;
+      [Nn] | [Nn][Oo]) break ;;
+    esac
+    warn "That was neither y nor n. In case it was more of the key, paste the key again."
+  done
+  show_typing
+  [[ "$store" == yes ]] || return 1
+  printf -v "$1" '%s' "$pasted"
+}
+
+stage_tenant() {
+  say "The Store's submission API signs in as an application of a Microsoft Entra tenant that"
+  say "is linked to the Partner Center account. This stage only checks that one is linked."
   open_url "$PARTNER_CENTER"
-  step "Open Mr. Streamer and click Start submission, or open the draft already there."
-  step "Open Pricing and availability."
-  step "Under Visibility > Audience, choose Private audience and pick the testers' group."
-  warn "Audience defaults to Public audience. Submitted once as public, the app can never be private."
-  step "Leave Make this product public on unchecked."
-  step "Under Pricing, set Base price to Free and keep No free trial. Keep the default markets."
-  step "Click Save."
-  if ! confirm "Does Pricing and availability show Private audience, the testers' group and Free?"; then
-    note "Nothing is submitted. Run scripts/setup-microsoft-store.sh pricing to try again."
+  step "Select the gear icon near the upper right corner, then Account settings."
+  step "In the Settings menu, select Tenants. A tenant listed there is linked."
+  note "  With none listed, the page offers two ways:"
+  note "  Associate Microsoft Entra ID with your Partner Center account links a directory you"
+  note "  already have: sign in with it, review its domain name and select Confirm."
+  note "  Create Microsoft Entra ID makes a new one at no charge and asks for the directory's"
+  note "  details and a global administrator account. Keep that account: the next stage needs it."
+  if ! confirm "Does Tenants list a tenant?"; then
+    note "Run $ME tenant once one is linked."
     return 1
   fi
-  mark pricing
+  mark tenant
 }
 
-stage_submit() {
-  say "Fill in the rest of the draft from what the agent prepared:"
-  step "Properties: the Entertainment category and the privacy policy URL."
-  step "Age ratings: answer every question honestly, the adult tab included."
-  step "Packages: upload the MSIX."
-  step "Store listings: the description, which says the app supplies no channels or subscription."
-  step "Submission options: under Publishing hold options, choose"
-  note "  Don't publish this submission until I select Publish now."
-  step "Submission options: paste the prepared text into Notes for certification."
-  step "Click Save, then open Pricing and availability once more."
-  if ! confirm "Still Private audience and Free, with the publishing hold set?"; then
-    note "Nothing is submitted. Fix the draft, then run scripts/setup-microsoft-store.sh submit."
+stage_application() {
+  say "GitHub signs in as an application of that tenant, added to Partner Center with the"
+  say "Manager role. Microsoft's submission API takes no lesser role."
+  warn "A Manager can change every product and user of the account: treat its key like your own sign-in."
+  open_url "$PARTNER_CENTER"
+  step "Gear icon > Account settings > User management, then the Microsoft Entra applications tab."
+  note "  This needs a Manager account that is also a global administrator of the tenant."
+  step "If an application for these releases is listed, select its name. Otherwise select"
+  step "Add Microsoft Entra application, then Create Microsoft Entra application:"
+  note "  Display name: for example Mr. Streamer Store releases."
+  note "  Reply URL: an address of yours no other application of the directory uses, for example"
+  note "  https://mrstreamer.app/store-releases. Nothing signs in there. Select Next."
+  note "  Under Roles applicable to developer programs choose Manager, select Create, then"
+  note "  select the application's name in the list."
+  step "Its page shows the Tenant ID and the Client ID. Neither is secret."
+  ask_id STORE_TENANT_ID "Paste the Tenant ID:"
+  ask_id STORE_CLIENT_ID "Paste the Client ID:"
+  write_env STORE_TENANT_ID "$STORE_TENANT_ID"
+  write_env STORE_CLIENT_ID "$STORE_CLIENT_ID"
+  if ! confirm "Does the application have the Manager role?"; then
+    note "Give it the role, then run $ME application."
     return 1
   fi
-  step "On the overview, click Submit for certification."
-  note "  Certification can take up to three business days. Because of the hold, testers get the"
-  note "  app only after you click Publish now on the certification status page, and then only"
-  note "  the testers' group can see it. Send them the private listing link from Product identity."
-  if ! confirm "Is it submitted?"; then
-    note "Run scripts/setup-microsoft-store.sh submit when you're ready."
+  mark application
+}
+
+stage_environment() {
+  local rule tenant client
+  say "The key goes into a GitHub environment that only workflows on main can use, so no other"
+  say "branch and no pull request can read it. This stage changes the settings of $REPO."
+  if ! tenant=$(_existing STORE_TENANT_ID) || ! client=$(_existing STORE_CLIENT_ID); then
+    note "Run $ME application first: it records the two IDs."
     return 1
   fi
-  mark submit
+  rule=$(branch_rule) || return 1
+  case "$rule" in
+    main)
+      say "The $STORE_ENV environment exists, for main alone."
+      ;;
+    # Missing, or left without a rule by an attempt that stopped halfway: no branch can use it yet.
+    missing | "")
+      if ! confirm "Create the $STORE_ENV environment in $REPO, limited to main?"; then
+        note "Nothing was changed. Run $ME environment when you're ready."
+        return 1
+      fi
+      if ! create_environment; then
+        warn "GitHub didn't take the environment or its rule. It needs admin access to $REPO."
+        note "Look at https://github.com/$REPO/settings/environments, then run $ME environment."
+        return 1
+      fi
+      ;;
+    *)
+      warn "The $STORE_ENV environment exists and allows: $rule."
+      open_url "https://github.com/$REPO/settings/environments"
+      step "Open $STORE_ENV. Under Deployment branches and tags choose Selected branches and tags,"
+      step "and leave main as its only rule."
+      pause "Press Enter once main is the only rule."
+      ;;
+  esac
+  rule=$(branch_rule) || return 1
+  if [[ "$rule" != main ]]; then
+    warn "The $STORE_ENV environment allows: ${rule:-nothing}. It must allow main alone."
+    note "Run $ME environment to try again."
+    return 1
+  fi
+  printf '  %s✓%s %s is limited to main\n' "$GREEN" "$RESET" "$STORE_ENV"
+  if ! confirm "Store the Tenant ID and the Client ID as variables of that environment?"; then
+    note "Run $ME environment when you're ready."
+    return 1
+  fi
+  env_var STORE_TENANT_ID "$tenant" || return 1
+  env_var STORE_CLIENT_ID "$client" || return 1
+  mark environment
+}
+
+stage_key() {
+  local rule key
+  if [[ ! -t 0 ]]; then
+    warn "The key is typed hidden, which takes a terminal. Run $ME key in one."
+    return 1
+  fi
+  rule=$(branch_rule) || return 1
+  if [[ "$rule" != main ]]; then
+    warn "The $STORE_ENV environment must exist for main alone before it gets the key."
+    note "Run $ME environment first."
+    return 1
+  fi
+  say "The key is the application's password. Partner Center shows it once. This wizard hands"
+  say "it to GitHub and keeps no copy: it is never printed, written to a file or put on a command line."
+  open_url "$PARTNER_CENTER"
+  step "Gear icon > Account settings > User management > Microsoft Entra applications."
+  step "Select the application's name. Its page lists its keys, with the day each one ends."
+  step "Select Add new key. The next screen shows the Client ID and the Key: copy the Key."
+  note "  It can't be shown again once you leave that screen."
+  if ! ask_key key; then
+    note "Nothing was stored. Remove the new key in Partner Center: nothing uses it."
+    return 1
+  fi
+  # printf is the shell's own, so the key reaches gh through a pipe and no process list shows it.
+  if ! printf '%s' "$key" | gh secret set STORE_CLIENT_SECRET --env "$STORE_ENV" --repo "$REPO" >/dev/null; then
+    warn "GitHub didn't take the secret. Nothing was stored."
+    note "Remove the new key in Partner Center, then run $ME key."
+    return 1
+  fi
+  key=""
+  printf '  %s✓ set%s the secret STORE_CLIENT_SECRET in the %s environment\n' "$GREEN" "$RESET" "$STORE_ENV"
+  step "Back on the application's page, the new key's row shows the day it ends."
+  # Asked afresh each time: a renewed key ends on another day than the one before it.
+  STORE_KEY_ENDS=""
+  until [[ "$STORE_KEY_ENDS" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; do
+    ask STORE_KEY_ENDS "That day, as YYYY-MM-DD:"
+  done
+  env_var STORE_CLIENT_SECRET_EXPIRES "$STORE_KEY_ENDS" || return 1
+  note "  The Store workflow warns from 30 days before that day. To renew, run $ME key,"
+  note "  then $ME check, and only then select Remove beside the old key."
+  note "  To revoke, select Remove beside a key, or Delete the application under User management:"
+  note "  either ends its access at once."
+  note "  Clear your clipboard now."
+  mark key
+}
+
+stage_check() {
+  say "A read-only run signs in with the key and reads the app and its published submission."
+  say "It sends and changes nothing, and runs while submissions are still off."
+  if ! gh workflow view microsoft-store.yml --repo "$REPO" >/dev/null 2>&1; then
+    warn "$REPO has no Microsoft Store workflow on its default branch yet."
+    note "Run $ME check once it is merged."
+    return 1
+  fi
+  if ! confirm "Start the preflight run on main now?"; then
+    note "Run $ME check when you're ready."
+    return 1
+  fi
+  if ! gh workflow run microsoft-store.yml --repo "$REPO" --ref main -f action=preflight; then
+    warn "GitHub didn't start the run."
+    note "Run $ME check to try again."
+    return 1
+  fi
+  open_url "https://github.com/$REPO/actions/workflows/microsoft-store.yml"
+  step "Open the newest run and wait for it to finish. Its summary lists what it found:"
+  note "  the application, the published submission with its audience and publishing mode, its"
+  note "  packages, listings and trailers, and any submission in progress."
+  step "Compare that with Partner Center. A failed run names what is wrong."
+  if ! confirm "Did the run pass, and does its summary match the listing?"; then
+    note "Fix what it names, then run $ME check."
+    return 1
+  fi
+  mark check
+}
+
+stage_activate() {
+  say "Turned on, every stable release sends its package to the Store once it is published."
+  say "Microsoft certifies it, and the public listing gives it to everyone as soon as it passes."
+  note "  Nightlies and dry runs never reach the Store. A submission that fails shows on the"
+  note "  release's run and leaves the release as it is."
+  if ! marked check >/dev/null; then
+    warn "The read-only check hasn't passed yet."
+    note "Run $ME check first."
+    return 1
+  fi
+  if ! confirm "Turn on Store submissions for stable releases of $REPO?"; then
+    note "Still off. Run $ME activate when you decide to."
+    return 1
+  fi
+  if ! gh variable set STORE_AUTOMATION_ENABLED --repo "$REPO" --body true >/dev/null; then
+    warn "GitHub didn't take the variable, so submissions are still off."
+    note "Run $ME activate to try again."
+    return 1
+  fi
+  printf '  %s✓ set%s the repository variable STORE_AUTOMATION_ENABLED\n' "$GREEN" "$RESET"
+  note "  To turn them off again:"
+  note "  gh variable set STORE_AUTOMATION_ENABLED --repo $REPO --body false"
+  mark activate
 }
 
 case "${1:-}" in
@@ -350,16 +589,26 @@ case "${1:-}" in
     exit 0
     ;;
   -h | --help)
-    sed -n '/^# Microsoft Store setup:/,/^# asks for/s/^# \{0,1\}//p' "$0"
+    sed -n '/^# Microsoft Store automation:/,/^# key is typed hidden/s/^# \{0,1\}//p' "$0"
     exit 0
     ;;
 esac
 
-if ! git check-ignore -q "$STATE_FILE"; then
-  printf '%s%s is not gitignored; stopping before writing to it.%s\n' "$RED" "$STATE_FILE" "$RESET" >&2
+for file in "$STATE_FILE" "$ENV_FILE"; do
+  if ! git check-ignore -q "$file"; then
+    printf '%s%s is not gitignored; stopping before writing to it.%s\n' "$RED" "$file" "$RESET" >&2
+    exit 1
+  fi
+done
+if ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
+  printf '%sSign in to GitHub first: gh auth login.%s\n' "$RED" "$RESET" >&2
   exit 1
 fi
+REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
 mkdir -p .local
+chmod 700 .local
+touch "$STATE_FILE" "$ENV_FILE"
+chmod 600 "$STATE_FILE" "$ENV_FILE"
 
 if [[ -n "${1:-}" ]]; then
   for i in "${!STAGES[@]}"; do
@@ -374,7 +623,7 @@ if [[ -n "${1:-}" ]]; then
   exit 1
 fi
 
-banner "Microsoft Store setup for Mr. Streamer"
+banner "Microsoft Store automation for $REPO"
 for i in "${!STAGES[@]}"; do
   marked "${STAGES[$i]}" >/dev/null && continue
   run_stage "$i" || break

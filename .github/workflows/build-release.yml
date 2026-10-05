@@ -2,11 +2,12 @@
 # the release and calls this, twice when a stable run publishes a nightly of main first;
 # docs/maintainers/releasing.md describes the process.
 #
-# Every job checks out the planned commit. Pull requests are dry runs: they build, sign and test,
-# keep the files as workflow artifacts and publish nothing, whatever the inputs say. Artifact names
-# carry the version, so the two releases of one run never mix files. It has no concurrency group
-# of its own: release.yml's queue already holds the whole run, and a group here that a release
-# run's own jobs shared could leave them waiting on that run.
+# Every job checks out the planned commit, except the Store job, which runs main's scripts on the
+# package the run built. Pull requests are dry runs: they build, sign and test, keep the files as
+# workflow artifacts and publish nothing, whatever the inputs say. Artifact names carry the
+# version, so the two releases of one run never mix files. It has no concurrency group of its own:
+# release.yml's queue already holds the whole run, and a group here that a release run's own jobs
+# shared could leave them waiting on that run.
 name: Build and publish a release
 
 on:
@@ -235,16 +236,19 @@ jobs:
           if-no-files-found: error
 
   # The Microsoft Store package, an MSIX of the same app, for dry runs and stable releases: only
-  # stable releases go to the Store. It waits for the installers, whose run caches ffmpeg, but
-  # nothing waits for it, so it can't hold up a release. Its file stays a workflow artifact, apart
-  # from the release-* artifacts publish attaches: never on the release or in the update feed, and
-  # never submitted to the Store.
+  # stable releases go to the Store. It waits for the installers, whose run caches ffmpeg, and
+  # publishing doesn't wait for it, so it can't hold up a release. Its file stays a workflow
+  # artifact, apart from the release-* artifacts publish attaches: never on the release or in the
+  # update feed. The store job below sends a stable release's to the Store.
   msix:
     name: Package Microsoft Store MSIX
     needs: [bundle, package]
     if: github.event_name == 'pull_request' || inputs.channel == 'stable'
     runs-on: windows-2025
     timeout-minutes: 45
+    outputs:
+      # The package's checksum, which the store job compares with the file it downloads.
+      sha256: ${{ steps.check.outputs.sha256 }}
     env:
       VERSION: ${{ inputs.version }}
       SHA: ${{ inputs.sha }}
@@ -276,14 +280,16 @@ jobs:
         run: pnpm exec electron-builder --win appx --x64 --publish never
 
       # Partner Center's identity exactly, the Store version for this release, and what the app
-      # needs at run time: ffmpeg, ffprobe and the notices Settings > About reads.
+      # needs at run time: ffmpeg, ffprobe and the notices Settings > About reads. The record it
+      # writes beside the package ties the file to the release and its commit by checksum.
       - name: Check the package
+        id: check
         run: |
           $makeappx = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\makeappx.exe" | Sort-Object FullName | Select-Object -Last 1
           & $makeappx.FullName unpack /p "dist/Mr-Streamer-$env:VERSION-win-x64.msix" /d "$env:RUNNER_TEMP\msix" /o | Out-Null
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           [xml]$manifest = Get-Content "$env:RUNNER_TEMP\msix\AppxManifest.xml"
-          $version = node --input-type=module -e 'import { packageVersion } from "./scripts/msix-version.ts"; console.log(packageVersion(process.argv[1]))' $env:VERSION
+          $version = node --input-type=module -e 'import { packageVersion } from "../../packages/contracts/src/package-version.ts"; console.log(packageVersion(process.argv[1]))' $env:VERSION
           $checks = @(
             @("Identity name", $manifest.Package.Identity.Name, "MrStreamerOSS.Mr.Streamer"),
             @("Publisher", $manifest.Package.Identity.Publisher, "CN=A132E842-C4C9-40BF-83C4-D304E7952C2D"),
@@ -300,9 +306,11 @@ jobs:
               "resources\ffmpeg\ffprobe.exe", "LICENSES.chromium.html", "LICENSE.electron.txt") {
             if (-not (Test-Path -LiteralPath "$env:RUNNER_TEMP\msix\app\$file")) { echo "::error::The package has no $file."; exit 1 }
           }
-          $record = "Mr. Streamer $env:VERSION is package $version, built from $env:SHA."
-          Set-Content "dist/Mr-Streamer-$env:VERSION-win-x64.msix.txt" $record
-          Add-Content $env:GITHUB_STEP_SUMMARY $record
+          $hash = (Get-FileHash "dist/Mr-Streamer-$env:VERSION-win-x64.msix" -Algorithm SHA256).Hash.ToLower()
+          [ordered]@{ version = $env:VERSION; packageVersion = $version; commit = $env:SHA; sha256 = $hash } |
+            ConvertTo-Json | Set-Content "dist/Mr-Streamer-$env:VERSION-win-x64.msix.json"
+          Add-Content $env:GITHUB_OUTPUT "sha256=$hash"
+          Add-Content $env:GITHUB_STEP_SUMMARY "Mr. Streamer $env:VERSION is package $version, built from $env:SHA. SHA-256 $hash."
 
       # Windows installs only signed packages. A certificate made here, with the package's
       # publisher as its subject and trusted on this runner alone, signs a copy to install; the
@@ -374,17 +382,29 @@ jobs:
             exit 1
           }
 
+      # Only a package that passed every step above gets this name, which is the one the Store
+      # job and a submission by hand take it under.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: success() || failure()
         with:
-          name: msix
+          name: msix-${{ inputs.version }}
           path: |
             apps/desktop/dist/*.msix
-            apps/desktop/dist/*.msix.txt
+            apps/desktop/dist/*.msix.json
             apps/desktop/dist/*.wack.xml
-          # A release's package is the one to submit to the Store by hand, so it's kept longer.
+          # A release's package is the one the Store gets, at once or in a later run, so it's
+          # kept longer.
           retention-days: ${{ github.event_name == 'pull_request' && 14 || 90 }}
           if-no-files-found: error
+      # What a failed check left, to look at. Never submitted.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: msix-failed-${{ inputs.version }}
+          path: |
+            apps/desktop/dist/*.msix
+            apps/desktop/dist/*.msix.json
+            apps/desktop/dist/*.wack.xml
+          retention-days: 14
 
   publish:
     name: Publish GitHub Release
@@ -459,6 +479,30 @@ jobs:
           else
             gh release edit "$TAG" --draft=false --latest
           fi
+
+  # Sends the stable release's package to the Microsoft Store, once the release is published and
+  # the package passed its checks: only for a stable release started by hand from main, never for
+  # a nightly, a dry run, a push or a tag. The release is out by then, and feed and finalize don't
+  # wait for this job, so a failure here shows on the run without holding up or undoing anything.
+  # It waits for Microsoft to take the upload, a few minutes, and not for certification, which can
+  # take days. Until the owner turns submissions on it says so and sends nothing;
+  # docs/maintainers/microsoft-store.md.
+  store:
+    name: Microsoft Store
+    needs: [publish, msix]
+    if: >-
+      inputs.channel == 'stable' && github.event_name == 'workflow_dispatch'
+      && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/microsoft-store.yml
+    with:
+      version: ${{ inputs.version }}
+      sha: ${{ inputs.sha }}
+      sha256: ${{ needs.msix.outputs.sha256 }}
+    # The called job reads its credential from the microsoft-store environment.
+    secrets: inherit
+    permissions:
+      contents: read
+      actions: read
 
   # Points the app's update feed at the release. A job that calls a workflow can't take
   # continue-on-error, so the input sets it on the called job: the release is out by now, and a

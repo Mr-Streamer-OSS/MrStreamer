@@ -1,11 +1,16 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
+import { artifactName, STORE_ENVIRONMENT } from "../scripts/store-release.ts";
 
 // A stable run can build and publish two releases, a nightly of main first and then the stable
 // release, through the same reusable workflows. Artifacts are named per run, so every artifact the
 // two calls upload needs a name of its own: deploy-pages refuses a name it finds twice. A dry run
 // can't deploy, so this reads the workflows and works out the names a run produces.
+//
+// A stable run also sends its package to the Microsoft Store, with the one credential these
+// workflows hold for it. No run can be tried without a real submission, so this also reads which
+// runs reach that job, what it is given, and what runs beside the credential.
 
 /** The parts of a workflow file this test reads. */
 interface Workflow {
@@ -17,12 +22,28 @@ interface Workflow {
 
 interface Job {
   readonly if?: string;
+  readonly needs?: string | readonly string[];
   /** A reusable workflow the job calls, and what it passes. */
   readonly uses?: string;
   readonly with?: Record<string, unknown>;
+  readonly secrets?: string;
+  readonly permissions?: Record<string, string>;
+  readonly environment?: { readonly name: string };
+  readonly concurrency?: Record<string, unknown>;
   readonly strategy?: { readonly matrix?: { readonly include?: Record<string, string>[] } };
-  readonly steps?: readonly { readonly uses?: string; readonly with?: Record<string, unknown> }[];
+  readonly steps?: readonly Step[];
 }
+
+interface Step {
+  readonly if?: string;
+  readonly uses?: string;
+  readonly run?: string;
+  readonly with?: Record<string, unknown>;
+  readonly env?: Record<string, string>;
+}
+
+const WORKFLOWS = ".github/workflows";
+const read = (name: string): Workflow => parse(readFileSync(`${WORKFLOWS}/${name}`, "utf8"));
 
 /** Answers an expression's name, such as `inputs.version`. */
 type Context = (name: string) => string;
@@ -109,6 +130,11 @@ describe("a stable run that publishes a nightly first", () => {
 
     expect(uploaded).toContain("release-mac-arm64-0.0.4-nightly.20261002.117");
     expect(uploaded).toContain("release-mac-arm64-0.0.4");
+    // Only the stable release builds a Store package.
+    expect(uploaded.filter((name) => name.startsWith("msix-"))).toEqual([
+      "msix-0.0.4",
+      "msix-failed-0.0.4",
+    ]);
     expect(uploaded.filter((name, index) => uploaded.indexOf(name) !== index)).toEqual([]);
   });
 
@@ -122,5 +148,120 @@ describe("a stable run that publishes a nightly first", () => {
     expect(first.uploaded).toEqual(expect.arrayContaining(first.deployed));
     // Artifacts of earlier attempts stay in the run, so a re-run deploys from new names.
     expect(run(2).deployed.filter((name) => first.uploaded.includes(name))).toEqual([]);
+  });
+});
+
+describe("sending a stable release to the Microsoft Store", () => {
+  const release = read("release.yml");
+  const build = read("build-release.yml");
+  const store = read("microsoft-store.yml");
+  const { gate, store: submit, ...others } = store.jobs;
+  const steps = submit?.steps ?? [];
+  const called = "./.github/workflows/microsoft-store.yml";
+
+  it("happens only for a published stable release started by hand from main, whose package passed", () => {
+    const job = build.jobs["store"];
+
+    expect(job?.uses).toBe(called);
+    expect(job?.needs).toEqual(["publish", "msix"]);
+    expect(job?.if?.split(/\s+/).join(" ")).toBe(
+      "inputs.channel == 'stable' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'",
+    );
+    // No push, tag, release, schedule or pull request starts the Store workflow itself.
+    expect(Object.keys(store.on)).toEqual(["workflow_call", "workflow_dispatch"]);
+    // And nothing else calls it or names its environment.
+    for (const file of readdirSync(WORKFLOWS)) {
+      const jobs = Object.entries(read(file).jobs);
+      const calling = jobs.filter(([, each]) => each.uses === called).map(([name]) => name);
+      expect(calling).toEqual(file === "build-release.yml" ? ["store"] : []);
+      const named = jobs.filter(([, each]) => each.environment?.name === STORE_ENVIRONMENT);
+      expect(named.map(([name]) => name)).toEqual(file === "microsoft-store.yml" ? ["store"] : []);
+    }
+  });
+
+  it("takes the package under the name the build job gives one that passed its checks", () => {
+    const version = known({ "inputs.version": "0.0.4" });
+    const uploads = (build.jobs["msix"]?.steps ?? []).filter((step) =>
+      step.uses?.startsWith("actions/upload-artifact@"),
+    );
+    const download = steps.find((step) => step.uses?.startsWith("actions/download-artifact@"));
+
+    // The upload without a condition runs only when every step before it succeeded.
+    expect(
+      uploads.map((step) => [step.if, evaluate(String(step.with?.["name"]), version)]),
+    ).toEqual([
+      [undefined, artifactName("0.0.4")],
+      ["failure()", "msix-failed-0.0.4"],
+    ]);
+    expect(evaluate(String(download?.with?.["name"]), version)).toBe(artifactName("0.0.4"));
+    expect(build.jobs["store"]?.with).toEqual({
+      version: "${{ inputs.version }}",
+      sha: "${{ inputs.sha }}",
+      sha256: "${{ needs.msix.outputs.sha256 }}",
+    });
+  });
+
+  it("names the environment only once the setup is checked, and queues behind any other Store job", () => {
+    expect(others).toEqual({});
+    expect(gate?.environment).toBeUndefined();
+    expect(JSON.stringify(gate)).not.toContain("secrets.");
+    expect(submit?.needs).toBe("gate");
+    expect(submit?.if).toBe("needs.gate.outputs.ready == 'true'");
+    expect(submit?.concurrency).toEqual({
+      group: "microsoft-store",
+      "cancel-in-progress": false,
+      queue: "max",
+    });
+  });
+
+  it("gives the credential to the last step of a job that runs main's scripts and installs nothing", () => {
+    const holding = steps.filter((step) => JSON.stringify(step).includes("secrets."));
+
+    expect(holding).toEqual([steps.at(-1)]);
+    expect(holding[0]?.env?.["STORE_CLIENT_SECRET"]).toBe("${{ secrets.STORE_CLIENT_SECRET }}");
+    for (const step of [...(gate?.steps ?? []), ...steps]) {
+      // Pinned actions, none of which installs packages, and a checkout of the run's own commit.
+      if (step.uses) expect(step.uses).toMatch(/^actions\/[\w-]+@[0-9a-f]{40}$/);
+      if (step.uses?.startsWith("actions/checkout@")) expect(step.with).toBeUndefined();
+      const commands = (step.run ?? "").split("\n").filter((line) => !/^(args[=+]|\[ )/.test(line));
+      for (const command of commands.filter(Boolean)) {
+        expect(command).toMatch(/^node scripts\/store-(release|submission)\.ts /);
+      }
+    }
+  });
+
+  it("is granted, by every workflow that calls it, the permissions its jobs ask for", () => {
+    const asked = [gate, submit].flatMap((job) => Object.entries(job?.permissions ?? {}));
+    const callers = [build.jobs["store"], release.jobs["release"], release.jobs["nightly-first"]];
+
+    expect(asked).toContainEqual(["actions", "read"]);
+    for (const caller of callers) {
+      for (const [scope, level] of asked) {
+        expect([level, "write"]).toContain(caller?.permissions?.[scope]);
+      }
+    }
+    // The called job's credential is the environment's, which reaches it only this way.
+    expect(build.jobs["store"]?.secrets).toBe("inherit");
+  });
+
+  it("reads only settings the setup wizard stores and the runbook explains", () => {
+    const text = readFileSync(`${WORKFLOWS}/microsoft-store.yml`, "utf8");
+    const settings = [
+      ...new Set([...text.matchAll(/\b(?:vars|secrets)\.(\w+)/g)].map(([, name]) => name)),
+    ];
+    const wizard = readFileSync("scripts/setup-microsoft-store.sh", "utf8");
+    const runbook = readFileSync("docs/maintainers/microsoft-store.md", "utf8");
+
+    expect(settings.toSorted()).toEqual([
+      "STORE_AUTOMATION_ENABLED",
+      "STORE_CLIENT_ID",
+      "STORE_CLIENT_SECRET",
+      "STORE_CLIENT_SECRET_EXPIRES",
+      "STORE_TENANT_ID",
+    ]);
+    for (const setting of settings) {
+      expect(wizard).toContain(setting);
+      expect(runbook).toContain(`\`${setting}\``);
+    }
   });
 });
