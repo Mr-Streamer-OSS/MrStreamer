@@ -148,6 +148,7 @@ sudo ip netns delete tv
 - closing it while the TV plays keeps its page, which pauses and plays the TV and tells the system so, while the app serves the TV on the one connection
 - the next episode starts on the TV ten seconds after the end, with the window closed for over a minute by then
 - the Dock brings the same window back, and there is one
+- a full-screen window leaves full screen as it goes out of sight
 - a TV that lets go with the window closed closes it, and nothing plays here
 - quitting with the window closed ends the TV's playback and the app, within 10 s
 
@@ -155,9 +156,9 @@ sudo ip netns delete tv
 node test/e2e/airplay-tv.ts node_modules/electron/dist/Electron.app/Contents/MacOS/Electron
 ```
 
-It takes about three minutes, one of them waiting: Chromium slows a hidden page's timers to one a minute only after the first, and a build that leaves the page throttled fails the next-episode check. It runs with `--use-mock-keychain` and a throwaway profile. It doesn't press the system's media keys, which go to whatever plays on the Mac, and reads what the page tells the system instead. `cast-tv.ts` doesn't run on a Mac reached over SSH: macOS refuses multicast to programs started that way, so the app's mDNS query never leaves.
+It takes about three minutes. One of them is a wait with the window closed, because Chromium slows a hidden page's timers to one a minute only after the first. A build that leaves the page throttled fails the next-episode check. It runs with `--use-mock-keychain` and a throwaway profile. It doesn't press the system's media keys, which go to whatever plays on the Mac, and reads what the page tells the system instead. `cast-tv.ts` doesn't run on a Mac reached over SSH, where macOS refuses multicast to programs started that way and the app's mDNS query never leaves.
 
-The real helper is checked on a Mac: `scripts/build-airplay-helper.sh mac-arm64`, then run it with nothing to read, and it says `hello` and exits. What nothing here covers is a receiver itself: discovery on a real network, the Windows firewall, what a TV's player accepts and how it behaves over hours. Nor does anything press a media key on macOS or Windows, or restart into an update with the window out of sight. That is tested by hand on a nightly, and the [project](https://github.com/orgs/Mr-Streamer-OSS/projects/1) card holds the result.
+The real helper is checked on a Mac: `scripts/build-airplay-helper.sh mac-arm64`, then run it with nothing to read, and it says `hello` and exits. What nothing here covers is a receiver itself: discovery on a real network, the Windows firewall, what a TV's player accepts and how it behaves over hours. Nor does anything press a media key on macOS or Windows, or restart into an update with the window out of sight. Those are tried by hand on a nightly, and the [project](https://github.com/orgs/Mr-Streamer-OSS/projects/1) card holds the result.
 
 ## Packaged app
 

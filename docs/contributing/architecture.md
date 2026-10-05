@@ -336,7 +336,7 @@ A channel follows the receiver's word too: one it holds paused or buffering, as 
 
 ### The window's lifetime
 
-On macOS the app outlives its window, and a receiver's playback needs the window's page: the page counts down to the next episode and holds the system's media session. So while a receiver is the output, connected or gone with what it played still to pick up (`output.remote`), closing the window only puts it out of sight (`index.ts`):
+On macOS the app outlives its window, and a receiver's playback needs the window's page, which counts down to the next episode and holds the system's media session. So while a receiver is the output, connected or gone with what it played still to pick up (`output.remote`), closing the window only puts it out of sight (`index.ts`):
 
 - **The page runs on as if on screen.** Chromium wakes a hidden page's timers once a minute after the first, which would hold the next episode back by minutes, so background throttling is off for the window while it is out of sight, and on again once it shows. A full-screen window leaves full screen first, since macOS shows a black screen in place of one that hides.
 - **The Dock brings the same window back.** `activate` shows it; there is never a second one.
