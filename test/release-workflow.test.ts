@@ -290,3 +290,35 @@ describe("sending a stable release to the Microsoft Store", () => {
     }
   });
 });
+
+// A release owes the sources of what its installers carry, and a pull request's dry run is the
+// only run that can show a source went missing before a release needs it.
+describe("the source archives of a release", () => {
+  const workflow: Workflow = parse(readFileSync(".github/workflows/build-release.yml", "utf8"));
+  const { sources, publish } = workflow.jobs;
+  const step = (job: Job | undefined, action: string) =>
+    job?.steps?.find((each) => each.uses?.startsWith(`actions/${action}@`));
+
+  it("are prepared and checked against the notices in a dry run too", () => {
+    // Publish is the job a pull request skips. This one has no condition.
+    expect(publish?.if).toBe("github.event_name != 'pull_request'");
+    expect(sources?.if).toBeUndefined();
+    expect(sources?.steps?.map((each) => each.run)).toContain(
+      'node scripts/release-sources.ts "$RUNNER_TEMP/sources"',
+    );
+  });
+
+  it("reach the release with the installers, which never publishes without them", () => {
+    expect(publish?.needs).toContain("sources");
+    const uploaded = evaluate(
+      String(step(sources, "upload-artifact")?.with?.["name"]),
+      known({ "inputs.version": "0.0.7" }),
+    );
+    const taken = evaluate(
+      String(step(publish, "download-artifact")?.with?.["pattern"]),
+      known({ "inputs.version": "0.0.7" }),
+    );
+    expect(uploaded).toBe("release-sources-0.0.7");
+    expect(new RegExp(`^${taken.replace("*", ".*")}$`).test(uploaded)).toBe(true);
+  });
+});

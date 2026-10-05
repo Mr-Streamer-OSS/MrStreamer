@@ -1,0 +1,11 @@
+Nsis7z plug-in for NSIS, version 19.00
+(c) brainsucker (Nik Medved), 2009. Updated by Marek Mizanin, 2011 and 2019, and Stuart Welch, 2015-2016.
+Uses 7-Zip source code, (C) 1999-2015 Igor Pavlov.
+
+Mr. Streamer's Windows setup program carries nsis7z.dll, unmodified, to unpack the app. It is a separate file that NSIS loads while the setup runs, and it isn't installed. The Microsoft Store package and the Mac and Linux builds don't contain it.
+
+The plug-in's project compiles 8 files of its own with 166 files of LZMA SDK 19.00, which Igor Pavlov placed in the public domain. The plug-in's archive carries only that public-domain text as its licence. Its author's page says the plug-in is distributed under the LGPL, as 7-Zip is. Mr. Streamer treats the plug-in's own files as under the GNU Lesser General Public License, version 2.1 or later. The archive's licence text follows, then the LGPL.
+
+Both sources are attached to this release, in the archives their authors published:
+https://github.com/Mr-Streamer-OSS/MrStreamer/releases/download/v{app}/nsis7z-19.00.7z
+https://github.com/Mr-Streamer-OSS/MrStreamer/releases/download/v{app}/lzma-sdk-19.00.7z

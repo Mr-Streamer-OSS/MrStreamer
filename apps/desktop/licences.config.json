@@ -56,6 +56,24 @@
       }
     ]
   },
+  "reviewed": {
+    "electron": {
+      "version": "44.4.5",
+      "pins": {
+        "ELECTRON_COMMIT": "694f45852a0f1726cd23bfd379854de489cccb65",
+        "CHROMIUM_VERSION": "152.0.7977.130",
+        "CHROMIUM_FFMPEG_COMMIT": "2b68d2babae73714846961fb0ee47e3b3d2e39a9",
+        "D3DCOMPILER_VERSION": "10.0.26100.7705",
+        "DXIL_VERSION": "1.8.2502.11"
+      }
+    },
+    "electron-builder": {
+      "version": "26.15.3",
+      "pins": {
+        "NSIS_BUNDLE": "3.0.4.1"
+      }
+    }
+  },
   "components": [
     {
       "name": "Chromium",
@@ -66,12 +84,31 @@
       "credits": "*"
     },
     {
+      "name": "FFmpeg in Chromium",
+      "version": "{CHROMIUM_FFMPEG_COMMIT}",
+      "licence": "LGPL-2.1-or-later",
+      "source": "https://github.com/Mr-Streamer-OSS/MrStreamer/releases/download/v{app}/chromium-ffmpeg-{CHROMIUM_FFMPEG_COMMIT}.tar.gz",
+      "homepage": "https://chromium.googlesource.com/chromium/third_party/ffmpeg/+/{CHROMIUM_FFMPEG_COMMIT}",
+      "files": ["licences/chromium/FFmpeg.txt", "licences/standard/LGPL-2.1.txt"]
+    },
+    {
       "name": "Node.js",
       "version": "{node}",
       "licence": "MIT",
       "source": "https://github.com/nodejs/node/tree/v{node}",
       "homepage": "https://nodejs.org",
       "credits": "Node.js"
+    },
+    {
+      "name": "Microsoft Direct3D compiler files",
+      "version": "{D3DCOMPILER_VERSION}, {DXIL_VERSION}",
+      "licence": "LicenseRef-proprietary",
+      "source": "https://learn.microsoft.com/en-us/legal/windows-sdk/redist",
+      "homepage": "https://learn.microsoft.com/en-us/legal/windows-sdk/license",
+      "files": ["licences/microsoft/Direct3D.txt"],
+      "exceptions": {
+        "LicenseRef-proprietary": "Microsoft's d3dcompiler_47.dll and dxil.dll, which Electron's Windows build carries beside its executable. They aren't open source, so they fit no list of GPL-compatible licences, and Chromium's graphics code needs them. Whether they may ship with a GPL app is open: docs/maintainers/licences.md#open-questions."
+      }
     },
     {
       "name": "FFmpeg",
@@ -102,6 +139,59 @@
       ]
     },
     {
+      "name": "NSIS",
+      "version": "{NSIS_BUNDLE}",
+      "licence": "Zlib",
+      "source": "https://sourceforge.net/projects/nsis/",
+      "homepage": "https://nsis.sourceforge.io",
+      "files": ["licences/nsis/NSIS.txt", "licences/nsis/COPYING"]
+    },
+    {
+      "name": "NSIS plug-in Nsis7z",
+      "version": "19.00",
+      "licence": "LGPL-2.1-or-later AND LZMA-SDK-9.22",
+      "source": "https://github.com/Mr-Streamer-OSS/MrStreamer/releases/download/v{app}/nsis7z-19.00.7z",
+      "homepage": "https://nsis.sourceforge.io/Nsis7z_plug-in",
+      "files": [
+        "licences/nsis/Nsis7z.txt",
+        "licences/nsis/Nsis7z-License.txt",
+        "licences/standard/LGPL-2.1.txt"
+      ]
+    },
+    {
+      "name": "NSIS plug-in SpiderBanner",
+      "version": "2016-06-25",
+      "licence": "LicenseRef-unstated",
+      "source": "https://github.com/Mr-Streamer-OSS/MrStreamer/releases/download/v{app}/spiderbanner-2016-06-25.zip",
+      "homepage": "https://nsis.sourceforge.io/SpiderBanner_plug-in",
+      "files": ["licences/nsis/SpiderBanner.txt"],
+      "exceptions": {
+        "LicenseRef-unstated": "Its archive holds its source and no licence, and its author's page states none. electron-builder puts it in every one-click setup, as a separate file NSIS loads. What its terms are is open: docs/maintainers/licences.md#open-questions."
+      }
+    },
+    {
+      "name": "NSIS plug-in StdUtils",
+      "version": "1.14",
+      "licence": "LGPL-2.1-or-later",
+      "source": "https://github.com/Mr-Streamer-OSS/MrStreamer/releases/download/v{app}/stdutils-1.14.zip",
+      "homepage": "https://github.com/lordmulder/stdutils",
+      "files": [
+        "licences/nsis/StdUtils.txt",
+        "licences/nsis/StdUtils-LGPL_CLARIFICATION.txt",
+        "licences/standard/LGPL-2.1.txt"
+      ]
+    },
+    {
+      "name": "NSIS plug-in WinShell",
+      "version": "20121005",
+      "licence": "LicenseRef-freeware",
+      "source": "https://nsis.sourceforge.io/WinShell_plug-in",
+      "files": ["licences/nsis/WinShell.txt"],
+      "exceptions": {
+        "LicenseRef-freeware": "Its author publishes it as \"Freeware\", as a binary, with no licence text and no source. electron-builder puts it in every setup and uninstaller, as a separate file NSIS loads. What its terms allow is open: docs/maintainers/licences.md#open-questions."
+      }
+    },
+    {
       "name": "Mr. Streamer",
       "version": "{app}",
       "licence": "GPL-3.0-only",
@@ -109,5 +199,63 @@
       "homepage": "https://mrstreamer.app",
       "files": ["licences/mr-streamer.txt", "../../LICENSE"]
     }
-  ]
+  ],
+  "sources": [
+    {
+      "file": "ffmpeg-{FFMPEG_VERSION}.tar.xz",
+      "url": "https://ffmpeg.org/releases/ffmpeg-{FFMPEG_VERSION}.tar.xz",
+      "sha256": "{FFMPEG_SHA256}"
+    },
+    {
+      "file": "x264-{X264_COMMIT}.tar.gz",
+      "git": "https://code.videolan.org/videolan/x264.git",
+      "commit": "{X264_COMMIT}"
+    },
+    {
+      "file": "chromium-ffmpeg-{CHROMIUM_FFMPEG_COMMIT}.tar.gz",
+      "git": "https://chromium.googlesource.com/chromium/third_party/ffmpeg",
+      "commit": "{CHROMIUM_FFMPEG_COMMIT}"
+    },
+    {
+      "file": "electron-{electron}.tar.gz",
+      "git": "https://github.com/electron/electron.git",
+      "commit": "{ELECTRON_COMMIT}"
+    },
+    {
+      "file": "stdutils-1.14.zip",
+      "url": "https://github.com/lordmulder/stdutils/releases/download/1.14/StdUtils.2018-10-27.zip",
+      "sha256": "3ffe893dc7477fdb1cac551a86ae017509e1f2d0ebdc7185fd0fbaf20870688c"
+    },
+    {
+      "file": "nsis7z-19.00.7z",
+      "url": "https://nsis.sourceforge.io/mediawiki/images/6/69/Nsis7z_19.00.7z",
+      "sha256": "6f2f3730049926f40442ee0c8b7d3e3dee7ace544d82467ff8059ea3f4201c58"
+    },
+    {
+      "file": "lzma-sdk-19.00.7z",
+      "url": "https://www.7-zip.org/a/lzma1900.7z",
+      "sha256": "00f569e624b3d9ed89cf8d40136662c4c5207eaceb92a70b1044c77f84234bad"
+    },
+    {
+      "file": "spiderbanner-2016-06-25.zip",
+      "url": "https://nsis.sourceforge.io/mediawiki/images/4/4c/SpiderBanner_plugin.zip",
+      "sha256": "45c79a024e5122834a3473a87649757bc11958a11602a3ce2d9f7ce006f0e2b7"
+    }
+  ],
+  "installer": {
+    "setup": {
+      "System.dll": "3eb38ae99653a7dbc724132ee240f6e5c4af4bfe7c01d31d23faf373f9f2eaca",
+      "nsExec.dll": "5d9ceb1ce5f35aea5f9e5a0c0edeeec04dfefe0c77890c80c70e98209b58b962",
+      "StdUtils.dll": "b72e9013a6204e9f01076dc38dabbf30870d44dfc66962adbf73619d4331601e",
+      "WinShell.dll": "9be85b986ea66a6997dde658abe82b3147ed2a1a3dcb784bb5176f41d22815a6",
+      "SpiderBanner.dll": "996a259e53ca18b89ec36d038c40148957c978c0fd600a268497d4c92f882a93",
+      "nsis7z.dll": "b393f05e8ff919ef071181050e1873c9a776e1a0ae8329aefff7007d0cadf592"
+    },
+    "uninstaller": {
+      "System.dll": "3eb38ae99653a7dbc724132ee240f6e5c4af4bfe7c01d31d23faf373f9f2eaca",
+      "nsExec.dll": "5d9ceb1ce5f35aea5f9e5a0c0edeeec04dfefe0c77890c80c70e98209b58b962",
+      "StdUtils.dll": "b72e9013a6204e9f01076dc38dabbf30870d44dfc66962adbf73619d4331601e",
+      "WinShell.dll": "9be85b986ea66a6997dde658abe82b3147ed2a1a3dcb784bb5176f41d22815a6"
+    }
+  }
 }

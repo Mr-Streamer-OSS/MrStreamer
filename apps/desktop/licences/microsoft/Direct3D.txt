@@ -1,0 +1,21 @@
+Microsoft's Direct3D compiler files, in the Windows builds
+
+Electron {electron}'s Windows build carries two files from Microsoft beside its executable. Mr. Streamer ships them unchanged in the Windows setup program and in the Microsoft Store package. The Mac and Linux builds don't contain them.
+
+d3dcompiler_47.dll, version {D3DCOMPILER_VERSION}
+Direct3D HLSL Compiler for Redistribution
+© Microsoft Corporation. All rights reserved.
+
+dxil.dll, version {DXIL_VERSION}
+DirectX Compiler - Out Of Band
+(c) Microsoft Corporation. All rights reserved.
+
+Microsoft owns both and licenses them under its own terms, not as open source. Mr. Streamer has no source for them and can't offer them under its own licence. Chromium's graphics code, ANGLE and Dawn, loads them to compile shaders.
+
+Chromium's build copies both from Microsoft's Windows SDK. Microsoft lists both names among the SDK's files that may be redistributed, under the SDK's licence terms:
+https://learn.microsoft.com/en-us/legal/windows-sdk/redist
+https://learn.microsoft.com/en-us/legal/windows-sdk/license
+
+This project hasn't confirmed which Microsoft terms Electron's builders redistribute them under.
+
+dxcompiler.dll, beside them, is another case: it is built from the open-source DirectX Shader Compiler, and Chromium's credits hold its licence.

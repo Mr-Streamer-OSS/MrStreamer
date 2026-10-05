@@ -27,7 +27,10 @@ async function app(files: Record<string, string>, config: object = {}): Promise<
       packages: {},
       overrides: {},
       embedded: {},
+      reviewed: {},
       components: [],
+      sources: [],
+      installer: { setup: {}, uninstaller: {} },
       ...config,
     }),
     ...files,
@@ -40,8 +43,12 @@ async function app(files: Record<string, string>, config: object = {}): Promise<
 }
 
 /** The problems a build of `root` with `modules` reports. */
-async function problems(root: string, modules: string[]): Promise<string> {
-  const failure = await collectNotices({ root, modules, variables: {} }).then(
+async function problems(
+  root: string,
+  modules: string[],
+  variables: Record<string, string> = {},
+): Promise<string> {
+  const failure = await collectNotices({ root, modules, variables }).then(
     () => new Error("The notices were written."),
     (error: unknown) => (error instanceof Error ? error : new Error(String(error))),
   );
@@ -229,6 +236,138 @@ describe("collecting notices", () => {
         text: `FFmpeg 9.0.2, source in v1.2.3\n\n---\n\n${GPL}`,
       },
     ]);
+  });
+
+  it("fails the build when a package isn't the version its notices were reviewed for", async () => {
+    const files = {
+      ...installed("electron", { version: "2.0.0", license: "MIT" }, { LICENSE: MIT }),
+      "licences/codec.txt": "Chromium's codec at {CODEC_COMMIT}, in Electron {electron}",
+    };
+    const reviewedFor = (version: string) =>
+      app(files, {
+        packages: { electron: "Every installer carries it." },
+        reviewed: { electron: { version, pins: { CODEC_COMMIT: "abc123" } } },
+        components: [
+          {
+            name: "Codec",
+            version: "{CODEC_COMMIT}",
+            licence: "MIT",
+            source: "https://example.com/codec/{CODEC_COMMIT}",
+            files: ["licences/codec.txt"],
+          },
+        ],
+      });
+
+    expect(await problems(await reviewedFor("1.0.0"), [])).toMatch(
+      /electron 2\.0\.0 is installed, and the notices and source archives were reviewed for 1\.0\.0/,
+    );
+    const { notices } = await collectNotices({
+      root: await reviewedFor("2.0.0"),
+      modules: [],
+      variables: {},
+    });
+    expect(notices).toContainEqual({
+      id: "Codec@abc123",
+      name: "Codec",
+      version: "abc123",
+      licence: "MIT",
+      source: "https://example.com/codec/abc123",
+      homepage: null,
+      text: "Chromium's codec at abc123, in Electron 2.0.0",
+    });
+  });
+
+  it("accepts a licence off the compatible list only as an explained exception of one component", async () => {
+    const files = {
+      ...installed("blob", { license: "LicenseRef-proprietary" }, { LICENSE: "No rights." }),
+      "licences/driver.txt": "A vendor's driver. All rights reserved.",
+    };
+    const driver = (licence: string, exceptions?: Record<string, string>) =>
+      app(files, {
+        components: [
+          {
+            name: "Driver",
+            version: "1",
+            licence,
+            source: "https://example.com/driver",
+            files: ["licences/driver.txt"],
+            ...(exceptions && { exceptions }),
+          },
+        ],
+      });
+    const explained = { "LicenseRef-proprietary": "The vendor's own file, beside the app." };
+
+    expect(await problems(await driver("LicenseRef-proprietary"), [])).toMatch(
+      /Driver@1 is licensed LicenseRef-proprietary, which isn't known to be compatible/,
+    );
+    const excepted = await driver("LicenseRef-proprietary", explained);
+    const { notices } = await collectNotices({ root: excepted, modules: [], variables: {} });
+    expect(notices.map(({ id, licence }) => ({ id, licence }))).toEqual([
+      { id: "Driver@1", licence: "LicenseRef-proprietary" },
+    ]);
+    // The exception is that component's alone: a bundled package under the same licence fails.
+    expect(await problems(excepted, [`${excepted}/node_modules/blob/index.js`])).toMatch(
+      /blob@1\.0\.0 is licensed LicenseRef-proprietary/,
+    );
+    // The rest of the component's licence is still held to the list.
+    expect(
+      await problems(await driver("GPL-2.0-only AND LicenseRef-proprietary", explained), []),
+    ).toMatch(/Driver@1 is licensed GPL-2\.0-only AND LicenseRef-proprietary/);
+    expect(await problems(await driver("MIT", explained), [])).toMatch(
+      /Driver@1 has an exception for LicenseRef-proprietary, which it doesn't need/,
+    );
+  });
+
+  it("needs every release file a notice links among the sources, and a notice for every source", async () => {
+    const release = "https://github.com/Mr-Streamer-OSS/MrStreamer/releases/download";
+    const files = {
+      "licences/codec.txt": `Codec, with its source and its patches on this release:\n${release}/v{app}/codec-1.tar.xz\n${release}/v{app}/patches-1.zip`,
+      "licences/old.txt": `Old, from an earlier release:\n${release}/v0.0.1/codec-1.tar.xz`,
+    };
+    const codec = {
+      name: "Codec",
+      version: "1",
+      licence: "MIT",
+      source: `${release}/v{app}/codec-1.tar.xz`,
+      files: ["licences/codec.txt"],
+    };
+    const old = {
+      ...codec,
+      name: "Old",
+      source: "https://example.com",
+      files: ["licences/old.txt"],
+    };
+    const download = (file: string) => ({
+      file,
+      url: `https://example.com/${file}`,
+      sha256: "0".repeat(64),
+    });
+    const both = [download("codec-1.tar.xz"), download("patches-1.zip")];
+    const build = (config: object) => app(files, { components: [codec], ...config });
+    const version = { app: "1.2.3" };
+
+    // A link in a notice's text counts like its source.
+    expect(await problems(await build({ sources: [both[0]] }), [], version)).toMatch(
+      /Codec@1 links patches-1\.zip on the release, which doesn't attach it/,
+    );
+    expect(
+      await problems(await build({ sources: [...both, download("extra-1.zip")] }), [], version),
+    ).toMatch(/The release attaches extra-1\.zip, which no notice links/);
+    expect(
+      await problems(await build({ components: [codec, old], sources: both }), [], version),
+    ).toMatch(/Old@1 links codec-1\.tar\.xz on release v0\.0\.1, not on v1\.2\.3/);
+    // A branch can move, so a repository is pinned by commit.
+    const branch = { file: "patches-1.tar.gz", git: "https://example.com/patches", commit: "main" };
+    expect(await problems(await build({ sources: [both[0], branch] }), [], version)).toMatch(
+      /patches-1\.tar\.gz needs a full commit hash/,
+    );
+
+    const { notices } = await collectNotices({
+      root: await build({ sources: both }),
+      modules: [],
+      variables: version,
+    });
+    expect(notices.map(({ source }) => source)).toEqual([`${release}/v1.2.3/codec-1.tar.xz`]);
   });
 });
 

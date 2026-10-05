@@ -1,0 +1,13 @@
+SpiderBanner plug-in for NSIS
+2006-2007, 2010-2011, 2013-2014, 2016 MouseHelmet Software
+Created by Jason Ross
+
+Mr. Streamer's Windows setup program carries SpiderBanner.dll, unmodified, to draw its progress window. It is a separate file that NSIS loads while the setup runs, and it isn't installed. The Microsoft Store package and the Mac and Linux builds don't contain it.
+
+Neither the plug-in's archive nor its author's page states a licence for it. The page is on the NSIS wiki, whose footer says its content is available under the zlib/libpng licence unless otherwise noted. This project doesn't know whether that covers the plug-in.
+
+The archive its author published, with the plug-in's source, is attached to this release:
+https://github.com/Mr-Streamer-OSS/MrStreamer/releases/download/v{app}/spiderbanner-2016-06-25.zip
+
+Its author's page:
+https://nsis.sourceforge.io/SpiderBanner_plug-in

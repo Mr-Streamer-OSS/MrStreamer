@@ -3,11 +3,11 @@
 # docs/maintainers/releasing.md describes the process.
 #
 # Every job checks out the planned commit, except the Store job, which runs main's scripts on the
-# package the run built. Pull requests are dry runs: they build, sign and test, keep the files as
-# workflow artifacts and publish nothing, whatever the inputs say. Artifact names carry the
-# version, so the two releases of one run never mix files. It has no concurrency group of its own:
-# release.yml's queue already holds the whole run, and a group here that a release run's own jobs
-# shared could leave them waiting on that run.
+# package the run built. Pull requests are dry runs: they build, sign and test, prepare the source
+# archives a release attaches, keep the files as workflow artifacts and publish nothing, whatever
+# the inputs say. Artifact names carry the version, so the two releases of one run never mix files.
+# It has no concurrency group of its own: release.yml's queue already holds the whole run, and a
+# group here that a release run's own jobs shared could leave them waiting on that run.
 name: Build and publish a release
 
 on:
@@ -184,6 +184,13 @@ jobs:
       - name: Build for Windows
         if: runner.os == 'Windows'
         run: pnpm exec electron-builder ${{ matrix.builder }} --publish never
+
+      # About has a notice for each plug-in NSIS puts in the setup and its uninstaller, and the
+      # release attaches their sources. A plug-in added or changed since they were reviewed stops
+      # the build here; docs/maintainers/licences.md#windows-setup-program.
+      - name: Check the setup's plug-ins
+        if: runner.os == 'Windows'
+        run: node scripts/installer-plugins.ts dist/*-setup.exe
 
       - name: Build for Linux
         if: runner.os == 'Linux'
@@ -410,9 +417,50 @@ jobs:
             apps/desktop/dist/*.wack.xml
           retention-days: 14
 
+  # The source archives the installers' licences ask for, which every release attaches: FFmpeg and
+  # x264, Chromium's FFmpeg and Electron, and the Windows setup's plug-ins. Each is checked against
+  # its pinned SHA-256 or commit, and the notices built into the app have to link exactly these
+  # files; docs/maintainers/licences.md#sources-on-every-release. Dry runs prepare and check them
+  # too, so a missing or changed source shows before a release needs it. As a release-* artifact,
+  # the archives reach publish with the installers.
+  sources:
+    name: Prepare sources
+    needs: bundle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      files: ${{ steps.prepare.outputs.files }}
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.sha }}
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The notices link the sources on the release of this version.
+      - run: npm pkg set version="${{ inputs.version }}"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: js-bundle-${{ inputs.version }}
+          path: apps/desktop/out
+      - id: prepare
+        run: node scripts/release-sources.ts "$RUNNER_TEMP/sources"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-sources-${{ inputs.version }}
+          path: ${{ runner.temp }}/sources/
+          retention-days: ${{ github.event_name == 'pull_request' && 14 || 3 }}
+          if-no-files-found: error
+
   publish:
     name: Publish GitHub Release
-    needs: [checks, package]
+    needs: [checks, package, sources]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -427,6 +475,8 @@ jobs:
       TAG: ${{ inputs.tag }}
       SHA: ${{ inputs.sha }}
       PREVIOUS_TAG: ${{ inputs.previous-tag }}
+      # The archives the sources job prepared, by name.
+      SOURCES: ${{ needs.sources.outputs.files }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -434,26 +484,20 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
+      # The installers of every platform, and the sources that go with them.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: release-*-${{ inputs.version }}
           path: release
           merge-multiple: true
-      - name: Check every platform's files are here
+      - name: Check every platform's files and every source are here
         run: |
+          [ -n "$SOURCES" ] || { echo "::error::The sources job named no source archives."; exit 1; }
           for pattern in "Mr-Streamer-$VERSION-mac-arm64.dmg" "Mr-Streamer-$VERSION-mac-arm64.zip" latest-mac.yml \
             "Mr-Streamer-$VERSION-win-x64-setup.exe" latest.yml \
-            "Mr-Streamer-$VERSION-linux-*.AppImage" "Mr-Streamer-$VERSION-linux-*.deb" latest-linux.yml; do
-            compgen -G "release/$pattern" >/dev/null || { echo "::error::No $pattern among the packaged files."; exit 1; }
+            "Mr-Streamer-$VERSION-linux-*.AppImage" "Mr-Streamer-$VERSION-linux-*.deb" latest-linux.yml $SOURCES; do
+            compgen -G "release/$pattern" >/dev/null || { echo "::error::No $pattern among the release's files."; exit 1; }
           done
-      # The installers contain FFmpeg and x264 under the GPL; their exact sources ship alongside.
-      - name: Add the FFmpeg and x264 sources
-        run: |
-          eval "$(grep -E '^(FFMPEG_VERSION|FFMPEG_SHA256|X264_COMMIT)=' apps/desktop/scripts/build-ffmpeg.sh)"
-          curl -sSfL -o "release/ffmpeg-$FFMPEG_VERSION.tar.xz" "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz"
-          echo "$FFMPEG_SHA256  release/ffmpeg-$FFMPEG_VERSION.tar.xz" | sha256sum -c -
-          git init -q x264 && git -C x264 fetch -q --depth 1 https://code.videolan.org/videolan/x264.git "$X264_COMMIT"
-          git -C x264 archive --format=tar.gz --prefix="x264-$X264_COMMIT/" -o "../release/x264-$X264_COMMIT.tar.gz" FETCH_HEAD
       - name: Write checksums and notes
         run: |
           (cd release && sha256sum * > SHA256SUMS.txt)

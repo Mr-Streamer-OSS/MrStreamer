@@ -19,13 +19,14 @@ Releases come from `.github/workflows/release.yml`, which plans them and runs `.
   - `package` builds each platform on its own runner, from the bundle:
     - the bundled ffmpeg, cached until `apps/desktop/scripts/build-ffmpeg.sh` changes
     - macOS arm64: the DMG, and the ZIP that in-app updates install. Signed with the Developer ID, notarized and stapled (`apps/desktop/scripts/notarize-dmg.ts`), then checked for signature, team, hardened runtime, Gatekeeper and both tickets. Missing secrets or a failed notarization fail the run.
-    - Windows x64: the NSIS installer, unsigned; see [Windows signing](#windows-signing)
+    - Windows x64: the NSIS installer, unsigned; see [Windows signing](#windows-signing). Its plug-ins must be the ones the notices describe; see [licences](licences.md#windows-setup-program)
     - Linux x64: the AppImage and deb
     - every `latest*.yml` must name the release version
     - the [packaged-app test](../contributing/testing.md#packaged-app) runs on the installed DMG, setup, deb and AppImage
-- Publishes only when every check and platform succeeded:
-  - checks that each platform's installers and update metadata are present
-  - attaches them with the FFmpeg and x264 sources the GPL requires, `SHA256SUMS.txt`, and the [notes](#release-notes)
+  - `sources` prepares the [source archives](licences.md#sources-on-every-release) a release attaches, each checked against its pinned SHA-256 or commit, and fails unless the bundle's notices link exactly those files
+- Publishes only when every check and platform succeeded and the sources are prepared:
+  - checks that each platform's installers and update metadata, and every source archive, are present
+  - attaches them with `SHA256SUMS.txt` and the [notes](#release-notes)
   - checks again that the tag is unused and the version sorts after every release it competes with
   - uploads into a draft, which the app can't see, then publishes it; publishing creates the tag on the planned commit
 - Then points the [update feed](#update-feed) at the release. Until then the app doesn't offer it.
@@ -142,7 +143,7 @@ A custom domain set there moves the feed to that domain's root. The workflow loo
 
 ## Dry runs
 
-Add the label **release dry run** to a pull request from a branch of this repository. The run builds, signs, notarizes and tests the pull request's head commit like a nightly, and builds and tests the [Microsoft Store package](#microsoft-store-package) too. It keeps the files as workflow artifacts for 14 days and publishes nothing, so no update channel can offer the build. `build-release.yml` never publishes for a pull request, whatever the plan says, and a dry run never plans a nightly first. It takes the label off at once; add it again to test a later commit. The plan also logs what a scheduled nightly and a stable release of the latest nightly would do on `main` at that moment, including any nightly that would go first.
+Add the label **release dry run** to a pull request from a branch of this repository. The run builds, signs, notarizes and tests the pull request's head commit like a nightly, prepares and checks the [source archives](licences.md#sources-on-every-release) a release would attach, and builds and tests the [Microsoft Store package](#microsoft-store-package) too. It keeps the files as workflow artifacts for 14 days and publishes nothing, so no update channel can offer the build. `build-release.yml` never publishes for a pull request, whatever the plan says, and a dry run never plans a nightly first. It takes the label off at once; add it again to test a later commit. The plan also logs what a scheduled nightly and a stable release of the latest nightly would do on `main` at that moment, including any nightly that would go first.
 
 Forks get no signing secrets, so their pull requests can't run it.
 
@@ -181,6 +182,7 @@ Once a stable release is published and its package passed every check, the run's
 
 ## Recovery
 
+- **Preparing the sources failed:** nothing was published. When an upstream server didn't answer, re-run the job. When a download no longer matches its SHA-256 or a commit is gone, upstream changed: find out why before touching the pin in `apps/desktop/licences.config.json`. When the notices and the sources differ, fix that on `main`; see [licences](licences.md#sources-on-every-release).
 - **A check or platform failed:** nothing was published. Re-run the failed jobs to retry the same commit and version, or fix it on `main` and let the next nightly pick it up. For stable, promote a nightly that has the fix.
 - **The nightly before a stable release failed:** the stable release hasn't built. Re-run the failed jobs, after fixing the cause when its feed failed; the stable release builds once the nightly is published and the feed names it. To get the nightly into the feed sooner, [regenerate the feed](#regenerating-the-feed) first.
 - **Publishing failed:** re-run the failed jobs. A broken attempt leaves at most a draft, which the next attempt deletes first.
@@ -188,7 +190,7 @@ Once a stable release is published and its package passed every check, the run's
 - **Finalize failed:** re-run it. It only moves `package.json` forward, so running it late or twice is harmless, and until it succeeds nightlies count from the published stable release.
 - **The feed wasn't updated:** the release is out, and the run's **Update feed** job shows why. Fix that, such as [enabling Pages](#enabling-pages), then [regenerate the feed](#regenerating-the-feed) by running **Update feed** on `main`. When the job couldn't reach the deployed feed or the Pages API, regenerating once GitHub answers again is enough.
 - **The Store job failed, or the MSIX job before it:** the release is out. The [Store runbook](microsoft-store.md#when-a-submission-fails) says what each failure needs.
-- **A bad release is out:** publish a fixed one. To stop offering it sooner, delete the release's three `latest*.yml` files, then regenerate the feed with **allow-regress**: without them the release counts neither for the feed nor for the app's fallback to GitHub's API, and the feed never goes back by itself. For a stable release, mark the stable release before it as latest too. Keep the release itself, with its installers and its FFmpeg and x264 sources. Whoever installed it is owed those sources under the GPL, and the release holds their only copy. None of this downgrades anyone who installed it.
+- **A bad release is out:** publish a fixed one. To stop offering it sooner, delete the release's three `latest*.yml` files, then regenerate the feed with **allow-regress**: without them the release counts neither for the feed nor for the app's fallback to GitHub's API, and the feed never goes back by itself. For a stable release, mark the stable release before it as latest too. Keep the release itself, with its installers and its [source archives](licences.md#sources-on-every-release). Whoever installed it is owed those sources under the GPL and the LGPL, and the release holds their only copy. None of this downgrades anyone who installed it.
 
 ## Permissions
 
