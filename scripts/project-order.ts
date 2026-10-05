@@ -1,9 +1,13 @@
-// Keeps the maintainers' GitHub project in working order: every release with unfinished work has
-// its own card, and the Order field numbers the cards in the order to work on them.
-// docs/maintainers/project-order.md describes the rules and the setup.
+// Keeps the maintainers' GitHub project in working order: a new draft lands in the Backlog, every
+// release with unfinished work has its own card, and the Order field numbers the cards in the
+// order to work on them. docs/maintainers/project-order.md describes the rules and the setup.
 //
 //   node scripts/project-order.ts           report what would change, and write nothing
-//   node scripts/project-order.ts --apply   add the release cards and write the Order values
+//   node scripts/project-order.ts --apply   write it: Backlog, release cards and Order values
+//
+// A draft made on the board has no Status. Without a release either it is a new idea, and gets
+// Backlog. An issue, a pull request and a draft that names a version are given their Status by
+// hand, and stop the run until then.
 //
 // A release's own card is titled "Release 0.0.7". A version on an unfinished card that no such
 // card exists for, Done and archived ones included, gets one: a draft with the release checklist,
@@ -18,10 +22,11 @@
 //      own card
 //   4. the number a card has now, then its id
 //
-// Reads Title, Status, Release, Blocked and Order. Titles only tell release cards apart and are
-// never printed, and it never asks for a card's text or issue, so a closed issue stays wherever
-// its card's Status puts it. It writes Order, and the fields a release card it adds or finds
-// unfinished still lacks. Archived cards are left as they are.
+// Reads Title, Status, Release, Blocked and Order, and whether a card is a draft. Titles only tell
+// release cards apart and are never printed, and it never asks for a card's text or issue, so a
+// closed issue stays wherever its card's Status puts it. It writes Order, Backlog on a new draft,
+// and the fields a release card it adds or finds unfinished still lacks. Archived cards are left
+// as they are.
 //
 // Reads and writes GitHub with gh, which holds the login. The workflow runs it with plain node
 // before installing packages, so it imports only node: modules and dependency-free files, by
@@ -80,6 +85,8 @@ export interface Card {
   /** The project item's id. */
   readonly id: string;
   readonly archived: boolean;
+  /** True for a draft, which lives on the project alone. False for an issue or pull request. */
+  readonly draft: boolean;
   /** Null when GitHub doesn't show it. */
   readonly title: string | null;
   /** The name of the Status option chosen. */
@@ -157,8 +164,13 @@ export interface Numbering {
   readonly changes: readonly Change[];
 }
 
-/** What a project needs: its release cards, and the numbering once it has them. */
+/**
+ * What a project needs: its new drafts in the Backlog, its release cards, and the numbering once
+ * it has both.
+ */
 export interface Plan extends Numbering {
+  /** The new drafts to put in the Backlog, by project item id. */
+  readonly backlog: readonly string[];
   readonly releases: readonly ReleaseCard[];
 }
 
@@ -232,8 +244,7 @@ function standingOf(card: Card, pins: Pins): Standing | string {
     return "has a Blocked value other than Blocked.";
   }
   if (card.status === "Backlog") {
-    const text = card.release?.trim() ?? "";
-    return text === "" || text === "Unscheduled"
+    return unscheduled(card.release)
       ? { card, tier: 2, release: null, lead: 0 }
       : "is in Backlog, so its Release must be Unscheduled or empty.";
   }
@@ -274,11 +285,32 @@ function versionOf(release: string | null): Version | null {
   return version && !version.nightly ? version : null;
 }
 
+/** True for a Release that plans nothing: empty, or the word Unscheduled. */
+function unscheduled(release: string | null): boolean {
+  const text = release?.trim() ?? "";
+  return text === "" || text === "Unscheduled";
+}
+
 /** The release a card is titled after: "Release 0.0.7" is 0.0.7's own card. Null for the rest. */
 function releaseOf(card: Card): string | null {
   const named = /^Release (\d+\.\d+\.\d+)$/.exec(card.title?.trim() ?? "")?.[1];
   const version = versionOf(named ?? null);
   return version && formatVersion(version);
+}
+
+/**
+ * True for a draft made on the board with nothing chosen yet: no Status, and no release. It is a
+ * new idea, and goes to the Backlog. A draft titled after a release is that release's own card,
+ * and follows `releaseCards` instead.
+ */
+function startsInBacklog(card: Card): boolean {
+  return (
+    card.draft &&
+    !card.archived &&
+    card.status === null &&
+    unscheduled(card.release) &&
+    releaseOf(card) === null
+  );
 }
 
 /**
@@ -318,6 +350,7 @@ function addedRelease(version: string): Card {
   return {
     id: title,
     archived: false,
+    draft: true,
     title,
     status: null,
     release: null,
@@ -337,8 +370,9 @@ function setUp(card: Card, version: string): Card {
 }
 
 /**
- * The release cards the project needs, and the order of its cards once it has them. Throws when
- * a title can't be read: it could be a release's own card, and adding another would double it.
+ * The new drafts that go to the Backlog, the release cards the project needs, and the order of
+ * its cards once both are done. Throws when a title can't be read: it could be a release's own
+ * card, and adding another would double it.
  */
 function plan(cards: readonly Card[], pins: Pins): Plan {
   const unread = cards.filter((card) => card.title === null);
@@ -350,13 +384,16 @@ function plan(cards: readonly Card[], pins: Pins): Plan {
       ].join("\n"),
     );
   }
+  const backlog = cards.filter(startsInBacklog);
   const releases = releaseCards(cards);
-  const unfinished = new Set(releases.map(({ card }) => card));
+  const changing = new Set([...backlog, ...releases.map(({ card }) => card)]);
   return {
+    backlog: backlog.map((card) => card.id),
     releases,
     ...planOrder(
       [
-        ...cards.filter((card) => !unfinished.has(card)),
+        ...cards.filter((card) => !changing.has(card)),
+        ...backlog.map((card) => ({ ...card, status: "Backlog" })),
         ...releases.map(({ card, version }) => setUp(card ?? addedRelease(version), version)),
       ],
       pins,
@@ -365,10 +402,10 @@ function plan(cards: readonly Card[], pins: Pins): Plan {
 }
 
 /**
- * Brings the project in order: reads every card, plans, and with `apply` adds and finishes
- * release cards and writes the Order values that differ. Throws without writing when the project
- * lacks a field, a page is missing or a card can't be placed, and after writing when the project
- * didn't end up as planned.
+ * Brings the project in order: reads every card, plans, and with `apply` puts new drafts in the
+ * Backlog, adds and finishes release cards and writes the Order values that differ. Throws
+ * without writing when the project lacks a field, a page is missing or a card can't be placed,
+ * and after writing when the project didn't end up as planned.
  */
 export async function maintainProject(
   project: Project,
@@ -377,19 +414,27 @@ export async function maintainProject(
 ): Promise<Outcome> {
   let board = await readBoard(project);
   let planned = plan(board.cards, pins);
-  const { releases } = planned;
-  if (!options.apply || releases.length + planned.changes.length === 0) {
+  const { backlog, releases } = planned;
+  if (!options.apply || backlog.length + releases.length + planned.changes.length === 0) {
     return { ...planned, written: false };
   }
 
-  if (releases.length > 0) {
+  if (backlog.length + releases.length > 0) {
+    // The plan above placed every card, so one that can't be placed stopped the run before this.
+    // Backlog goes first, straight after the read: GitHub can't write a Status only where it is
+    // still empty, so one chosen on the board between that read and this write is overwritten.
+    for (const card of backlog) {
+      const { field, option } = board.backlog;
+      await project.setField(field, card, { singleSelectOptionId: option });
+    }
     for (const release of releases) await setUpRelease(project, board, release);
     // The cards are numbered from what the project holds now, not from what this run expected.
     board = await readBoard(project);
     planned = plan(board.cards, pins);
-    if (planned.releases.length > 0) {
+    const pending = planned.backlog.length + planned.releases.length;
+    if (pending > 0) {
       throw new Error(
-        `${count(planned.releases.length, "release card")} didn't show as set up when the project was read again, so no Order was written. The next run looks again.`,
+        `${count(pending, "card")} didn't show as set up when the project was read again, so no Order was written. The next run looks again.`,
       );
     }
   }
@@ -400,13 +445,13 @@ export async function maintainProject(
   // GitHub can't write a number only where it is still the one that was read, so an edit made on
   // the board during the writes shows only now, as a project that is out of order again.
   const after = plan((await readBoard(project)).cards, pins);
-  const left = after.releases.length + after.changes.length;
+  const left = after.backlog.length + after.releases.length + after.changes.length;
   if (left > 0) {
     throw new Error(
       `The project was edited while it was written, and ${count(left, "change")} came due again. The next run takes over.`,
     );
   }
-  return { ...planned, releases, written: true };
+  return { ...planned, backlog, releases, written: true };
 }
 
 /**
@@ -439,7 +484,7 @@ async function setUpRelease(
   await project.setField(board.release, before.id, { text: version });
 }
 
-/** A single-select field's id, and the id of the option a new release card gets. */
+/** A single-select field's id, and the id of the one option this writes there. */
 interface Choice {
   readonly field: string;
   readonly option: string;
@@ -452,6 +497,8 @@ interface Board {
   readonly order: string;
   /** The Release field. */
   readonly release: string;
+  /** Status, and its Backlog. */
+  readonly backlog: Choice;
   /** Status, and its Planned. */
   readonly planned: Choice;
   /** Blocked, and its Blocked. */
@@ -465,6 +512,7 @@ async function readBoard(project: Project): Promise<Board> {
   const ids = {
     order: fieldOf(page, "Order", "NUMBER").id,
     release: fieldOf(page, "Release", "TEXT").id,
+    backlog: choiceOf(page, "Status", "Backlog"),
     planned: choiceOf(page, "Status", "Planned"),
     blocked: choiceOf(page, "Blocked", "Blocked"),
   };
@@ -524,6 +572,7 @@ const PAGE = `query($project: ID!, $after: String) {
         nodes {
           id
           isArchived
+          type
           title: fieldValueByName(name: "Title") { ... on ProjectV2ItemFieldTextValue { text } }
           status: fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } }
           release: fieldValueByName(name: "Release") { ... on ProjectV2ItemFieldTextValue { text } }
@@ -564,6 +613,8 @@ interface PageAnswer {
       readonly nodes: readonly {
         readonly id: string;
         readonly isArchived: boolean;
+        /** DRAFT_ISSUE, ISSUE or PULL_REQUEST, and REDACTED for a card the token can't see. */
+        readonly type: string;
         readonly title: { readonly text?: string | null } | null;
         readonly status: { readonly name?: string | null } | null;
         readonly release: { readonly text?: string | null } | null;
@@ -593,6 +644,7 @@ function githubProject(id: string): Project {
         cards: nodes.map((item) => ({
           id: item.id,
           archived: item.isArchived,
+          draft: item.type === "DRAFT_ISSUE",
           title: item.title?.text ?? null,
           status: item.status?.name ?? null,
           release: item.release?.text ?? null,
@@ -631,19 +683,24 @@ function github(query: string, variables: Record<string, unknown>): unknown {
   }
 }
 
-/** A line for the run, then one per release card and per number: the card, and what changes. */
-function describe({ releases, order, changes, written }: Outcome): string[] {
+/**
+ * A line for the run, then one per new draft, per release card and per number: the card, and what
+ * changes.
+ */
+function describe({ backlog, releases, order, changes, written }: Outcome): string[] {
   const cards = count(order.length, "unfinished card");
+  const drafts = count(backlog.length, "new draft");
   const added = count(releases.length, "release card");
   const numbers = count(changes.length, "Order value");
   const headline =
-    releases.length + changes.length === 0
+    backlog.length + releases.length + changes.length === 0
       ? `In order already: ${cards}, nothing to write.`
       : written
-        ? `Set up ${added} and wrote ${numbers}. ${cards} are in order.`
-        : `Preview: ${added} to set up and ${numbers} to change across ${cards}. Nothing was written.`;
+        ? `Put ${drafts} in the Backlog, set up ${added} and wrote ${numbers}. ${cards} are in order.`
+        : `Preview: ${drafts} to put in the Backlog, ${added} to set up and ${numbers} to change across ${cards}. Nothing was written.`;
   return [
     headline,
+    ...backlog.map((card) => `${card}: no Status → Backlog`),
     ...releases.map(
       ({ version, card }) => `Release ${version}: ${card ? `finish ${card.id}` : "new card"}`,
     ),
