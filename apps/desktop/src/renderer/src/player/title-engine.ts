@@ -19,7 +19,7 @@ import { readFeedLine, type SubtitleFeedLine as FeedLine } from "@mrstreamer/cor
 import type { SubtitleChange } from "@mrstreamer/core/subtitles/screen";
 import type { EngineError, StreamInfo } from "./engine.ts";
 import { readMp4Start } from "./mp4.ts";
-import { addTextCue, clearSubtitles, subtitlePresenter, subtitleTrack } from "./subtitles.ts";
+import { addTextCue, clearSubtitles, subtitlePresenter } from "./subtitles.ts";
 
 /** Stop reading once this much is buffered ahead, and read again below the second value. */
 const AHEAD_S = { stop: 60, resume: 40 } as const;
@@ -89,9 +89,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
   const subtitlesSignal = AbortSignal.any([abort.signal, subtitlesOff.signal]);
   const mediaSource = new MediaSource();
   const objectUrl = URL.createObjectURL(mediaSource);
-  const subtitles = subtitleTrack(video);
   clearSubtitles(video);
-  subtitles.mode = run.subtitle === null ? "disabled" : "showing";
   const presenter = run.subtitle === null ? null : subtitlePresenter(video);
   let buffer: SourceBuffer | null = null;
   let codecs: string | null = null;
@@ -467,7 +465,6 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     hideSubtitles() {
       subtitlesOff.abort();
       clearSubtitles(video);
-      subtitles.mode = "disabled";
       showsFrom = null;
       say(null);
     },
@@ -486,7 +483,6 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
       abort.abort();
       if (!settled) reject({ kind: "network", detail: "Stopped." } satisfies EngineError);
       clearSubtitles(video);
-      subtitles.mode = "disabled";
       video.pause();
       video.removeAttribute("src");
       video.load();

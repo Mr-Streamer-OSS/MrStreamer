@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SubtitleTrack } from "@mrstreamer/contracts/playback";
 import type { NowPlaying } from "../../src/renderer/src/player/title-player.ts";
 import { player } from "../../src/renderer/src/player/player.ts";
-import { setSubtitleDelay, subtitleTrack } from "../../src/renderer/src/player/subtitles.ts";
+import { setSubtitleDelay, subtitleLayer } from "../../src/renderer/src/player/subtitles.ts";
 import { titlePlayer } from "../../src/renderer/src/player/title-player.ts";
 
 const english: SubtitleTrack = {
@@ -60,9 +60,11 @@ async function opened(id: string): Promise<void> {
   await settle();
 }
 
-/** When the cue on screen starts, as the element's clock times it. */
-function cueStarts(): number[] {
-  return [...(subtitleTrack(player.element).cues ?? [])].map((cue) => cue.startTime);
+/** What the viewer reads over the picture once it is skipped to `position` seconds. */
+function shownAt(position: number): string {
+  player.element.currentTime = position;
+  player.element.dispatchEvent(new Event("seeked"));
+  return subtitleLayer.textContent;
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
@@ -79,11 +81,15 @@ describe("the playback menu's settings", () => {
     await opened("1");
     titlePlayer.setSpeed(1.5);
     setSubtitleDelay(player.element, 0.4);
-    expect(cueStarts()).toEqual([10.4]);
+    expect(shownAt(10.2)).toBe("");
+    expect(shownAt(10.5)).toBe("We sail at first light.");
+    expect(shownAt(12.2)).toBe("We sail at first light.");
 
     titlePlayer.setAudio(2);
     await settle();
-    expect(cueStarts()).toEqual([10.4]);
+    expect(shownAt(10.2)).toBe("");
+    expect(shownAt(10.5)).toBe("We sail at first light.");
+    expect(shownAt(12.2)).toBe("We sail at first light.");
     expect(player.element.playbackRate).toBe(1.5);
   });
 
@@ -95,7 +101,9 @@ describe("the playback menu's settings", () => {
     setSubtitleDelay(player.element, -1);
 
     await opened("2");
-    expect(cueStarts()).toEqual([10]);
+    expect(shownAt(9.5)).toBe("");
+    expect(shownAt(10.2)).toBe("We sail at first light.");
+    expect(shownAt(12.2)).toBe("");
     expect(player.element.playbackRate).toBe(1);
   });
 });

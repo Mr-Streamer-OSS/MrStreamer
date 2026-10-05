@@ -1,8 +1,10 @@
 // @vitest-environment happy-dom
-// CC on a playing movie: Off takes the subtitles off and keeps them off, though the run that was
-// showing them goes on sending. And a run with subtitles asks for the picture at once: what was
-// on screen at its position shows when the feed has it, the player says the subtitles are loading
-// until then, and that they can't be had when the feed says so.
+// CC on a playing movie: the lines due where the picture is show on the layer over it, stacked
+// while they overlap, and move at once when G or H shifts them. Off takes the subtitles off and
+// keeps them off, though the run that was showing them goes on sending. And a run with subtitles
+// asks for the picture at once: what was on screen at its position shows when the feed has it, the
+// player says the subtitles are loading until then, and that they can't be had when the feed says
+// so.
 import { ipc } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
@@ -10,8 +12,9 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SubtitleTrack } from "@mrstreamer/contracts/playback";
 import { TitleWatch } from "../../src/renderer/src/features/titles/TitleWatch.tsx";
+import { nudgeSubtitles } from "../../src/renderer/src/features/watch/PlaybackMenu.tsx";
 import { player } from "../../src/renderer/src/player/player.ts";
-import { subtitleTrack } from "../../src/renderer/src/player/subtitles.ts";
+import { subtitleLayer } from "../../src/renderer/src/player/subtitles.ts";
 import { titlePlayer } from "../../src/renderer/src/player/title-player.ts";
 
 const english: SubtitleTrack = {
@@ -23,10 +26,11 @@ const english: SubtitleTrack = {
   forced: false,
   default: false,
 };
+const dutch: SubtitleTrack = { ...english, id: 4, language: "nl", label: "Nederlands" };
 
-/** A line of the subtitle feed: text from `start` seconds for a minute. */
-const line = (start: number, text: string) =>
-  `${JSON.stringify({ at: start, until: start + 60, text })}\n`;
+/** A line of the subtitle feed: text from `start` seconds for a minute, or until `end`. */
+const line = (start: number, text: string, end = start + 60) =>
+  `${JSON.stringify({ at: start, until: end, text })}\n`;
 
 /**
  * Serves runs of the title, with subtitles the test sends while the run plays. The feed is ready
@@ -54,7 +58,7 @@ function serveRuns(ready = true) {
   return { send: (text: string) => send(text), pictures };
 }
 
-/** Opens the movie at `from` seconds, with English subtitles to choose. */
+/** Opens the movie at `from` seconds, with English and Dutch subtitles to choose. */
 async function opened(from: number): Promise<void> {
   ipc.reset();
   const answer = ipc.hold("playback.openTitle");
@@ -74,17 +78,24 @@ async function opened(from: number): Promise<void> {
     url: "http://127.0.0.1/title/s1.mp4",
     duration: 600,
     audio: [],
-    subtitles: [english],
+    subtitles: [english, dutch],
   });
   await settle();
+  // No picture comes here, so nothing moves the element's clock: it is put where the run starts.
+  player.element.currentTime = from;
 }
 
-/** What the viewer sees on the subtitle track. */
+/** Puts the picture at `position` seconds, as a skip within what is loaded does. */
+function skipTo(position: number): void {
+  player.element.currentTime = position;
+  player.element.dispatchEvent(new Event("seeked"));
+}
+
+/** What the viewer reads over the picture, top to bottom; "" is a place a line left empty. */
 function shown(): string[] {
-  const track = subtitleTrack(player.element);
-  return track.mode === "showing"
-    ? [...(track.cues ?? [])].map((each) => (each as VTTCue).text)
-    : [];
+  return [...subtitleLayer.querySelectorAll<HTMLElement>("[data-subtitle-text] > div")]
+    .map((row) => (row.style.visibility === "hidden" ? "" : row.textContent))
+    .reverse();
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
@@ -122,10 +133,91 @@ describe("subtitles on a playing movie", () => {
     await settle();
     expect(shown()).toEqual(["We sail at first light."]);
 
+    // Off is instant: the line goes with the click, not with its end.
     titlePlayer.setSubtitle(null);
+    expect(shown()).toEqual([]);
     runs.send(line(1, "The tide waits for no one."));
     await settle();
     expect(shown()).toEqual([]);
+  });
+
+  it("give way at once to another track", async () => {
+    const runs = serveRuns();
+    await opened(0);
+
+    titlePlayer.setSubtitle(english);
+    await settle();
+    runs.send(line(0, "We sail at first light."));
+    await settle();
+    expect(shown()).toEqual(["We sail at first light."]);
+
+    // The English line doesn't wait on screen for the Dutch run to bring its own.
+    titlePlayer.setSubtitle(dutch);
+    expect(shown()).toEqual([]);
+    await settle();
+    runs.send(line(0, "We varen bij het eerste licht."));
+    await settle();
+    expect(shown()).toEqual(["We varen bij het eerste licht."]);
+  });
+
+  it("show the lines due where the picture is, each staying where it first showed", async () => {
+    const runs = serveRuns();
+    await opened(0);
+
+    titlePlayer.setSubtitle(english);
+    await settle();
+    runs.send(
+      line(10, "Who goes there?", 14) +
+        line(12, "Only the night watch.\nAnd the fog.", 16) +
+        line(14.5, "Then pass.", 18),
+    );
+    await settle();
+    expect(shown()).toEqual([]);
+
+    skipTo(11);
+    expect(shown()).toEqual(["Who goes there?"]);
+    // A second speaker joins above the first, on two lines.
+    skipTo(13);
+    expect(shown()).toEqual(["Only the night watch.\nAnd the fog.", "Who goes there?"]);
+    // The first line ends: the second stays where it is being read, over an empty place.
+    skipTo(14.2);
+    expect(shown()).toEqual(["Only the night watch.\nAnd the fog.", ""]);
+    // The third takes that place.
+    skipTo(15);
+    expect(shown()).toEqual(["Only the night watch.\nAnd the fog.", "Then pass."]);
+    skipTo(17);
+    expect(shown()).toEqual(["Then pass."]);
+    // A line ends at its end time, and a skip back shows what was due then.
+    skipTo(18);
+    expect(shown()).toEqual([]);
+    skipTo(11);
+    expect(shown()).toEqual(["Who goes there?"]);
+  });
+
+  it("move at once when G or H shifts them", async () => {
+    const runs = serveRuns();
+    await opened(0);
+    const note = await watching();
+
+    await act(async () => titlePlayer.setSubtitle(english));
+    await act(settle);
+    runs.send(line(10, "Who goes there?", 14));
+    await act(settle);
+    skipTo(10.05);
+    expect(shown()).toEqual(["Who goes there?"]);
+
+    // H: a tenth of a second later, which is after where the picture stands.
+    await act(async () => nudgeSubtitles(english, 1));
+    expect(shown()).toEqual([]);
+    expect(note()).toBe("Subtitles 0.1 s later");
+    // G takes it back, and once more: earlier, the line has ended at 13.9 s.
+    await act(async () => nudgeSubtitles(english, -1));
+    expect(shown()).toEqual(["Who goes there?"]);
+    skipTo(13.95);
+    expect(shown()).toEqual(["Who goes there?"]);
+    await act(async () => nudgeSubtitles(english, -1));
+    expect(shown()).toEqual([]);
+    expect(note()).toBe("Subtitles 0.1 s earlier");
   });
 
   it("load beside the picture, and show what was on screen once the feed has it", async () => {
@@ -167,10 +259,12 @@ describe("subtitles on a playing movie", () => {
     expect(note()).toBe("Subtitles unavailable");
     expect(shown()).toEqual([]);
 
-    // The next line the run reads stands on its own.
+    // The next line the run reads stands on its own, and shows once the picture gets there.
     runs.send('{"ready":true,"at":141}\n');
     runs.send(line(141, "The tide waits for no one."));
     await act(settle);
+    expect(shown()).toEqual([]);
+    skipTo(141);
     expect(shown()).toEqual(["The tide waits for no one."]);
 
     // Off takes the note with the subtitles.

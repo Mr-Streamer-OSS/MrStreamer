@@ -2,7 +2,7 @@
 // recorded; a call the test holds answers when the test says, the preferences otherwise answer
 // with the defaults, and anything else never answers. Tests send its events themselves. Import it
 // first, before the renderer's modules: it also stands in for Media Source Extensions, which
-// happy-dom lacks.
+// happy-dom lacks, and for a text track's hidden mode, which it refuses.
 import type { AppError, Result } from "@mrstreamer/contracts/errors";
 import type {
   BridgeApi,
@@ -84,6 +84,23 @@ Object.assign(globalThis, { MediaSource: StandInMediaSource });
 const objectUrl = URL.createObjectURL.bind(URL);
 URL.createObjectURL = (object) =>
   object instanceof StandInMediaSource ? "blob:stand-in" : objectUrl(object);
+
+/**
+ * happy-dom refuses a text track's "hidden" mode, in which a browser times the cues and draws
+ * none, and lists the cues of no track it leaves disabled. Showing stands in for it here: the cues
+ * are listed, and happy-dom draws nothing either way. It times none, so a test moves the element's
+ * clock and sends `seeked` itself.
+ */
+const inherited: object = Object.getPrototypeOf(TextTrack.prototype);
+Object.defineProperty(TextTrack.prototype, "mode", {
+  configurable: true,
+  get(this: TextTrack): TextTrackMode {
+    return Reflect.get(inherited, "mode", this);
+  },
+  set(this: TextTrack, mode: TextTrackMode) {
+    Reflect.set(inherited, "mode", mode === "hidden" ? "showing" : mode, this);
+  },
+});
 
 // The contract types each method's answer; the stand-in answers whatever the test gives.
 const api: BridgeApi = bridge as unknown as BridgeApi;
