@@ -194,8 +194,11 @@ async function chooseTv(page: Page): Promise<void> {
 }
 
 let broke = false;
+/** The app's window, as far as the script got, for what it showed when a step failed. */
+let opened: Page | null = null;
 try {
   let page = await connect(port);
+  opened = page;
   await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
   await login(page, provider);
 
@@ -219,6 +222,7 @@ try {
   await waitFor(shows(true), 15_000);
   page.close();
   page = await connect(port);
+  opened = page;
   await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
   await waitFor(() => page.evaluate<boolean>("!!document.querySelector('header')"), 30_000);
   check((await output(page))?.kind === "local", "The Dock opens a new window, playing here");
@@ -309,6 +313,7 @@ try {
   await waitFor(shows(true), 15_000);
   page.close();
   page = await connect(port);
+  opened = page;
   await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
   await waitFor(() => page.evaluate<boolean>("!!document.querySelector('header')"), 30_000);
 
@@ -344,6 +349,20 @@ try {
   );
 } catch (error) {
   console.error(`FAIL ${String(error)}`);
+  // A wait that ran out doesn't say what happened instead. The window and the helper do.
+  const view = await opened
+    ?.evaluate<string>(
+      `(document.querySelector("[data-view]") ?? document.body).innerText.replaceAll("\\n", " | ").slice(0, 400)`,
+    )
+    .catch(() => null);
+  const status = opened ? await output(opened).catch(() => null) : null;
+  console.error(`     The window showed: ${view ?? "nothing"}`);
+  console.error(
+    `     Output ${status?.kind ?? "unknown"}, the helper's last commands: ${helper.commands
+      .slice(-6)
+      .map((command) => command.cmd)
+      .join(", ")}`,
+  );
   broke = true;
 } finally {
   app.kill("SIGKILL");
