@@ -165,10 +165,14 @@ function cancelZap(): void {
   zapTimer = null;
 }
 
-/** Stops the engine and closes the provider connection of the current stream. */
+/**
+ * Stops the engine and closes the provider connection of the current stream. Its subtitles go
+ * with it: their cues are on the clock of a stream that no longer plays.
+ */
 function release(): void {
   if (!current) return;
   current.engine.destroy();
+  clearSubtitles(video);
   void call("playback.close", { sessionId: current.sessionId }).catch(() => {});
   current = null;
 }
@@ -225,8 +229,6 @@ async function start(
 
   let engine = createEngine(session.format, video, session.url);
   current = { sessionId: session.sessionId, engine };
-  // A new stream starts its clock again: cues of the one before would show at the wrong time.
-  clearSubtitles(video);
   restartSubtitles();
   engine.onPrivateData(showSubtitles);
   let failure = await startFailure(engine);

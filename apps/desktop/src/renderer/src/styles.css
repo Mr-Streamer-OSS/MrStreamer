@@ -74,20 +74,27 @@ input {
 }
 
 /*
- * Subtitles, text and pictures alike, show only in Watch and a playing title, not in the muted
- * previews, and rise above the player's controls while they show. The viewer's look sets their
- * size (`--subtitle-scale`, which player/subtitles.ts also draws pictures at), a shadow in place
- * of the box behind text, and a higher place for both.
+ * Subtitles, text and pictures alike, are on a layer of their own over the picture
+ * (player/subtitles.ts). It shows only in Watch and a playing title, not in the muted previews.
+ * There it sits above the player's controls and their gradient, so subtitles are as bright while
+ * the controls show, and under what opens over the picture: the channel list, the end of an
+ * episode, the window bar and the menus. It rises above the controls while they show. The
+ * viewer's look sets the size (`--subtitle-scale`, which subtitles.ts also draws pictures at), a
+ * shadow in place of the box behind text, and a higher place for both.
  */
-video::-webkit-media-text-track-container,
 [data-subtitles] {
   visibility: hidden;
+  container-type: size;
 }
-[data-view] video::-webkit-media-text-track-container,
 [data-view] [data-subtitles] {
   visibility: visible;
+  z-index: 15;
   transition: translate 150ms;
   translate: 0 calc(-1 * var(--subtitle-raise, 0%) - var(--subtitle-controls, 0rem));
+}
+/* The mini player's controls are a step higher than the full window's. */
+[data-mini] [data-subtitles] {
+  z-index: 25;
 }
 [data-view="watch"][data-controls] {
   --subtitle-controls: 5.5rem;
@@ -101,10 +108,32 @@ video::-webkit-media-text-track-container,
 :root[data-subtitle-position="high"] {
   --subtitle-raise: 12%;
 }
-[data-view] video::cue {
-  font-size: calc(var(--subtitle-scale, 1) * 100%);
+/*
+ * Text is laid out where Chromium lays out cues it draws itself: white, in the system's
+ * sans-serif at 5% of the picture element's smaller side, centred, on a box that hugs each line,
+ * 4px above the foot or the cue under it.
+ */
+[data-subtitle-text] {
+  position: absolute;
+  inset: auto 0 4px;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 4px;
+  font: calc(5cqmin * var(--subtitle-scale, 1)) sans-serif;
+  color: #fff;
+  text-align: center;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
-:root[data-subtitle-background="shadow"] [data-view] video::cue {
+/* A cue, and the box behind its text. Each line finds its own direction, for Arabic or Hebrew. */
+[data-subtitle-text] > div {
+  unicode-bidi: plaintext;
+}
+[data-subtitle-text] > div > span {
+  padding: 2px;
+  background-color: rgb(0 0 0 / 80%);
+}
+:root[data-subtitle-background="shadow"] [data-subtitle-text] > div > span {
   background-color: transparent;
   text-shadow:
     0 0 0.1em #000,

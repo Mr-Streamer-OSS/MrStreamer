@@ -622,7 +622,10 @@ function NextUp({ series }: { series: SeriesDetails }) {
   );
 }
 
-/** Next Up's layout: a dimmed still, and along the bottom a line, a title, a detail and actions. */
+/**
+ * Next Up's layout: a dimmed still, and along the bottom a line, a title, a detail and actions. It
+ * covers the picture and the subtitles on it, whose layer is above the controls (see styles.css).
+ */
 function EndOfEpisode({
   artworkUrl,
   line,
@@ -637,7 +640,7 @@ function EndOfEpisode({
   children: ReactNode;
 }) {
   return (
-    <div className="absolute inset-0 z-10">
+    <div className="absolute inset-0 z-20">
       <div className="absolute inset-0 opacity-35">
         <Artwork url={artworkUrl} name={title} size="full" plain />
       </div>

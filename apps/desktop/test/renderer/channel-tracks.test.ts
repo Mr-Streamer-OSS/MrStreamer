@@ -2,11 +2,13 @@
 // A channel's sound and subtitle tracks are its own: switching channels, with a click or the
 // arrow keys, starts the next one with the viewer's languages rather than the last one's tracks.
 // Captions have no language, so picking them leaves the remembered subtitle language as it was.
+// A channel that stops takes the subtitles on screen with it.
 import { ipc } from "./support.ts";
 import { describe, expect, it } from "vitest";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { ChannelTracks, SubtitleTrack } from "@mrstreamer/contracts/playback";
 import { player } from "../../src/renderer/src/player/player.ts";
+import { addTextCue, subtitleLayer } from "../../src/renderer/src/player/subtitles.ts";
 
 const channel = (id: string): LiveChannel => ({
   id,
@@ -85,6 +87,21 @@ describe("switching channels", () => {
     },
     10_000,
   );
+});
+
+describe("stopping a channel", () => {
+  it("takes its subtitles off the screen", async () => {
+    ipc.reset();
+    await playing("a", tracksOfA);
+    player.setSubtitle(tracksOfA.subtitles[0]!);
+    // The element's own engine passes no teletext here, so a row goes on the track as the
+    // decoder puts one: from the start, with no end yet.
+    addTextCue(player.element, 0, Number.MAX_VALUE, "EERSTE RIJ");
+    expect(subtitleLayer.textContent).toBe("EERSTE RIJ");
+
+    player.stop();
+    expect(subtitleLayer.textContent).toBe("");
+  });
 });
 
 describe("picking subtitles", () => {
