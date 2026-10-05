@@ -22,13 +22,17 @@ apps/desktop         The app, package name mrstreamer
                      metadata
     playback         Stream inspection, HLS playlists through the proxy, the clean start, the
                      sound track choice, captions copied out of the pictures and ffmpeg
-                     conversion behind the proxy; probing and ffmpeg runs for movies and episodes
+                     conversion behind the proxy; probing and ffmpeg runs for movies and episodes;
+                     the segments, playlists and indexes a receiver on the network is served
+    receivers        The port a receiver adapter fills, and the two that do: Google Cast, a
+                     sender of its own, and AirPlay, through the helper in native/airplay
     platform         Keychain-backed secrets, atomic JSON files, the guide and viewing stores, the
                      electron-updater installer, the diagnostics log
   src/preload        The typed bridge exposed to the UI
   src/renderer       React UI; player/ holds the playback engines, the live and title player
                      controllers, Picture, and the subtitles drawn over it
   src/shared         What main and the renderer share inside the app: window bar sizes
+  native/airplay     The Swift helper that plays on AirPlay receivers, one executable for macOS
   scripts            Icons, the DMG background, signing, notarization, ffmpeg builds, third-party
                      notices, the Store package's version, guide and viewing record measurements,
                      the website's demo subscription and captures
@@ -155,6 +159,7 @@ The main process runs every service on one [Effect](https://effect.website) runt
 | `Library`       | `services/library.ts`              | The catalogue, its cache and refreshes                                                                                                                                                                    |
 | `OnDemand`      | `services/ondemand.ts`             | Movies and series, through the catalogue worker                                                                                                                                                           |
 | `Playback`      | `services/playback.ts`             | Stream sessions and the loopback proxy                                                                                                                                                                    |
+| `Output`        | `services/output.ts`               | The receiver on the network that has playback, what it plays, and its progress                                                                                                                            |
 | `Updates`       | `services/updates.ts`              | The release channel, checks, downloads and the install                                                                                                                                                    |
 | `Guide`         | `@mrstreamer/core/guide/service`   | The programme guide                                                                                                                                                                                       |
 | `ViewingRecord` | `@mrstreamer/core/viewing/service` | Favourites, watch history and title progress                                                                                                                                                              |
@@ -162,7 +167,7 @@ The main process runs every service on one [Effect](https://effect.website) runt
 
 A service is a `Context.Service` class with a `layer`, and reaches the others through the context rather than callbacks. Services whose rules run without the platform live in `packages/core` and ask for what they need through ports, services of their own that the app supplies: the guide's are `GuideSource` (the subscription and its download), `GuideCatalogue` (guide ids) and `GuideStore` (the saved document, `platform/guide-store.ts`). The others live in the app. Every expected failure is a `Failed` from `@mrstreamer/core/failure`, carrying the `AppError` the UI shows; a provider adapter's `AppFailure` keeps its error, anything else counts as unexpected.
 
-Background work, downloads and stream sessions run in their service's scope. Quitting closes open streams at once, so no ffmpeg or provider connection outlives the app, then holds the quit until the runtime is disposed of and exits (`index.ts`); a second quit meanwhile changes nothing. Disposing takes a few hundredths of a second, and up to 2 s while the movie and series lists are being saved. An update's restart goes through the same path: electron-updater starts the installer, or on macOS hands the update to Squirrel, before it asks the app to quit, so the wait only delays the exit the installer waits for. Disposing stops the calls still running; they answer nobody and aren't logged. Tests build the same layers with the fake provider; `apps/desktop/test/support.ts` makes a runtime per test and calls services with promises, and guide tests move a `TestClock` instead of waiting.
+Background work, downloads and stream sessions run in their service's scope. Quitting closes open streams at once, so no ffmpeg or provider connection outlives the app, then holds the quit until the runtime is disposed of and exits (`index.ts`); a second quit meanwhile changes nothing. Disposing also ends what a receiver plays and lets go of it, each adapter within its own bound: 1.5 s for a Cast device to confirm, and the time the AirPlay helper takes to exit before it is killed. Disposing takes a few hundredths of a second, and up to 2 s while the movie and series lists are being saved. An update's restart goes through the same path: electron-updater starts the installer, or on macOS hands the update to Squirrel, before it asks the app to quit, so the wait only delays the exit the installer waits for. Disposing stops the calls still running; they answer nobody and aren't logged. Tests build the same layers with the fake provider; `apps/desktop/test/support.ts` makes a runtime per test and calls services with promises, and guide tests move a `TestClock` instead of waiting.
 
 ## Diagnostics
 
@@ -281,6 +286,65 @@ What is kept is of one file (`playback/source-identity.ts`). Each answer's size 
 Measured with Electron 44 against the fake provider: a run starts in about 1.1 s and a seek outside the buffer in 0.9 s; starting 10 minutes into a file read 57 MB, probe and a minute ahead included, and nothing more while paused. [Playback evaluation](playback-evaluation.md#movies-and-episodes) records how this design was chosen.
 
 Against a synthetic provider with one connection that takes 20 ms a request and sends a 7.5 Mbit/s file at ten times that speed, the first picture after a skip came as soon with the feed asked as without it, 0.8 s. A PGS picture that began two seconds before the position took 28 requests and 6.4 MB: 1.3 s with the provider to itself, and 8 s after the picture beside a run still filling its buffer. At twice the bitrate the same reading ran out of its 30 s, and at one and a quarter it never got a turn; the picture played the same either way. A picture that began 16 s before the position is more than a reading may take there, 18 MB.
+
+## Receivers
+
+Playback goes to this computer or to one receiver on the local network: a Google Cast device on Windows, an AirPlay receiver on macOS. Linux builds offer neither; `MR_STREAMER_CAST=on` turns Cast on there for trying it. Nothing has been tried on a real receiver yet: the suites and the [end-to-end run](testing.md#receivers) play on stand-ins, and the first hardware test is the owner's, on a nightly.
+
+`services/output.ts` owns it. It holds the adapters (`receivers/adapter.ts` is their port), the receiver connected, and what it plays. Each thing sent to a receiver gets a generation number. A command names the generation it is for, and a command or a receiver's word about an earlier one is dropped, so a late status never moves the wrong title. What the receiver confirms is the state: `output.changed` carries it to the window, and the window's controllers show it rather than what they asked for. A title counts as ended only when the receiver says it played to the end, never when it was stopped, replaced or lost.
+
+The service opens the session itself through `Playback`, so there is still one session and one provider connection: opening for a receiver closes what played here, and the other way round. It saves a title's progress from the position the receiver confirmed, once a minute and on pause, end and stop, under the account the play began with; connecting another account ends receiver playback first. A receiver that takes a load and asks this computer for nothing within 10 s fails as `not-fetched`, which is how a firewall shows; the next try is served on this computer's next address, where it has several. Going back to this computer closes the receiver's session before anything opens here.
+
+### What a receiver is served
+
+A receiver can't reach `127.0.0.1`, and must never see a provider address. A receiver session gets a listener of its own on the address of this computer that reaches the receiver: the one the Cast connection uses, or the best ranked private address for AirPlay, where the system doesn't say (`playback/lan.ts` leaves out tunnels and carrier-grade NAT). It serves only `/r/<token>/…`, to clients on private addresses, with a fresh token for every load, and it closes with the session. The proxy's own routes, `/stream`, `/source`, `/title`, `/report` and `/hls`, stay on loopback. The private-address check narrows who can ask; the token is what keeps the stream to its receiver.
+
+A movie or episode is served as HLS with a playlist of the whole title, so the receiver knows its length and can skip anywhere (`playback/receiver.ts`). Segments are made when asked for: ffmpeg's `segment` muxer runs from the segment the receiver wants and POSTs each one back to the proxy on loopback.
+
+- **Copied video** is cut at keyframes the file's index names: Matroska Cues (`playback/matroska.ts`) or an MP4's sample tables (`playback/mp4-index.ts`), read with a few range requests. Segments are about 4 s and as uneven as the keyframes.
+- **Every segment is checked** before a receiver gets it: its first picture must have the time the playlist promised and its last must fall before the next segment's. An index that lies, or one too sparse to cut by, makes the session convert from there on.
+- **Converted video** gets keyframes forced at the same starts, so the playlist never changes.
+- **The clock** is the title's: the first picture of the file sits at 10 s in every segment's timestamps, whichever run made it.
+- **Sound** the receiver decodes is copied and the rest becomes stereo AAC. Both adapters name H.264 and AAC only until a receiver has shown more.
+- **Text subtitles** go beside the picture as a WebVTT rendition, one track per load, cut at the same starts. A line that began before a skip is read from the file's index as for this computer. Picture subtitles, teletext and captions aren't sent: the picture is never re-encoded to burn them in, and the menus mark them "Here only".
+- **ffmpeg never runs ahead.** It doesn't wait for a POST's answer, so each segment's address carries a user name, which makes ffmpeg send `Expect: 100-continue`, and the proxy answers only when its store has room: at most three segments ahead of the receiver and one behind, and no new one while it holds 160 MiB (`playback/segment-store.ts`). A segment is 96 MiB at most, so the store stays under 256 MiB. A receiver that stays away lets the run end and the provider's connection go; asking again starts one. A segment not made within 30 s answers 504.
+- **A file the provider replaces** mid-session ends the load, as its index no longer describes it. Any answer of another file than ffprobe read counts, by its size or, at the same size, by its server's mark.
+
+A channel is cut into 2 s segments by the same muxer from the one upstream stream, kept in memory, the newest four in its playlist. A channel that is HLS already keeps its playlists, with their addresses pointed at this computer as for the local player.
+
+### Google Cast
+
+`receivers/cast` is a sender of its own, with what playing one HLS stream needs: `discovery.ts` asks for `_googlecast._tcp` over mDNS while the list is open, `channel.ts` frames the Cast channel's messages by hand, and `session.ts` starts Google's Default Media Receiver, loads the address and follows its status. Frames, names and waits are bounded, unknown fields are skipped, and a message sent in parts is put together up to a limit. The suite reads and writes the same bytes with protobufjs and Chromium's `cast_channel.proto`, so the hand-written framing can't drift from the schema.
+
+The Cast channel is TLS, and the app accepts the device's certificate without checking it and skips Cast's device authentication. A device on the network could therefore pose as a Cast device and receive a stream address. It gets no login and no provider address, and the address works only while that stream plays. Verifying devices needs Google's certificate chain and revocation lists, which is why the alternative is a maintained Cast library rather than more code here.
+
+A connect given up while the device still starts the app stops that app once the device names it, and the next connect waits for that, so the stop can't reach the app the next one starts.
+
+### AirPlay
+
+Electron can't AirPlay a stream, so the app comes with a helper: one Swift executable (`native/airplay`, built by `scripts/build-airplay-helper.sh`) around `AVPlayer`, `AVRoutePickerView` and `AVRouteDetector`, for macOS 12 and later. `receivers/airplay` starts it on first use and speaks JSON lines with it over stdin and stdout; a helper that names another protocol version is refused. The system's own list picks the receiver, opened at the output button, and the app never learns the receiver's name. macOS names no route a player uses. The one documented sign that the viewer chose a receiver is `isExternalPlaybackActive`, which shows only for a player that holds video, so while the viewer chooses the helper's player holds two seconds of black picture of its own, paused and without sound. A connect counts only once that sign is on, and it stays the authority after: off for good means the receiver let go. A helper that dies is started again three times at most, and quitting kills what doesn't exit.
+
+### In the window
+
+`player/output.ts` keeps the status for the views. The two player controllers follow it: with a receiver connected, what they are asked to play goes there through `output.playChannel` or `output.openTitle` and `output.playTitle`, and their state is the receiver's. A channel or title playing here when a receiver connects moves to it at its position with its tracks, and Play here lets the receiver go first, then plays here from where it was. Opening the list again changes nothing by itself: the receiver plays on while the list is open, and stays when the list closes with nothing picked or with the same receiver. Another receiver takes its place only once it answered, and a title is then opened and loaded afresh there at the position last confirmed, as it is when a lost connection comes back. A receiver that lets go by itself leaves a title held, or closes it when its view isn't on screen, and leaves a channel stopped.
+
+The output button sits between the volume and the mini player (`features/watch/Output.tsx`). Where the app lists receivers itself it opens a menu like Sound's, which closes once the receiver answers; where only the system does, it opens the system's list. A connect that reaches no receiver says why for a few seconds while what played here plays on, and one the viewer gives up says nothing. It shows on macOS whether or not a receiver is in reach, since the system's list is also where a missing one is diagnosed. `features/watch/ReceiverBar.tsx` stands at the foot of every page while a receiver is connected, and pages and the details sheet end above it (`--receiver-bar`). No page previews meanwhile, since the provider's one connection is the receiver's: the main process refuses a preview's open while a receiver is the output, and `Playback.open` refuses it again in the open's own turn while a receiver's session is open, so a preview asked for just before a receiver began closes nothing.
+
+A channel follows the receiver's word too: one it holds paused or buffering, as after Pause on the TV's remote, reads so in Watch, in the bar and in the system's controls, and the system's Play has the receiver play on with the stream it holds (`output.command`) instead of opening the channel again.
+
+`player/media-session.ts` plays a silent loop in step with the receiver, because Chromium offers the system only a window that makes sound: the media keys and the system's controls then work the receiver. The app holds a power save blocker while a receiver plays, so the computer doesn't sleep under it. A page that starts while a receiver plays, as after a reload, asks `output.status` and `output.playingTitle` and takes up what plays (`app/receiver-playback.ts`). The lists say what it is, so it takes up only what the receiver still plays once they answered, the same receiver, session and load, as the status says it by then, and nothing once the pages made way for the login form, the account changed or the viewer played something else.
+
+### The window's lifetime
+
+On macOS the app outlives its window, and a receiver's playback needs the window's page, which counts down to the next episode and holds the system's media session. So while a receiver is the output, connected or gone with what it played still to pick up (`output.remote`), closing the window only puts it out of sight (`index.ts`):
+
+- **The page runs on as if on screen.** Chromium wakes a hidden page's timers once a minute after the first, which would hold the next episode back by minutes, so background throttling is off for the window while it is out of sight, and on again once it shows. A full-screen window leaves full screen first, since macOS shows a black screen in place of one that hides.
+- **The Dock brings the same window back.** `activate` shows it; there is never a second one.
+- **The window closes for good once the receiver lets go**, before its page hears of it. Nothing plays here unseen, and no preview takes the provider's connection for a window nobody sees.
+- **With no window, nothing plays and nothing connects.** A window closed while playback is here ends its streams, as before, and gives up a connect still under way.
+- **Quitting closes the window whatever plays.** `before-quit` says so before the windows are asked to close. An update's restart closes the windows before `before-quit`, so Electron's `before-quit-for-update` says so too; without it the restart would wait forever for a window that only went out of sight. The quit then ends the receiver's playback within each adapter's own bound.
+
+Windows and Linux quit with their window, which ends the receiver's playback.
 
 ## Updates
 

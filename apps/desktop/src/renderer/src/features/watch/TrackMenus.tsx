@@ -4,13 +4,13 @@
 import { Popover } from "@base-ui/react/popover";
 import { AudioLines, Captions } from "lucide-react";
 import { useRef, type KeyboardEvent, type ReactNode } from "react";
-import type { AudioTrack, SubtitleTrack } from "@mrstreamer/contracts/playback";
+import type { AudioTrack, SubtitleFormat, SubtitleTrack } from "@mrstreamer/contracts/playback";
 import { Button } from "../../components/ui/button.tsx";
 import { Tooltip } from "../../components/ui/tooltip.tsx";
 import { cn } from "../../lib/utils.ts";
 
 /** Which menu is open over the controls, so Escape closes it before anything else. */
-export type TrackMenu = "sound" | "subtitles" | "playback" | "quality" | null;
+export type TrackMenu = "sound" | "subtitles" | "playback" | "quality" | "output" | null;
 
 export function TrackMenus({
   audio,
@@ -18,6 +18,8 @@ export function TrackMenus({
   subtitles,
   subtitle,
   subtitleNote = null,
+  shows = null,
+  hereOnly = null,
   open,
   onOpenChange,
   onAudio,
@@ -30,6 +32,13 @@ export function TrackMenus({
   subtitle: SubtitleTrack | null;
   /** What to say beside the chosen subtitle track, such as that it is still loading. */
   subtitleNote?: string | null;
+  /**
+   * While a receiver on the network plays: the kinds of subtitles it shows. The others stay
+   * listed, marked as playing here only. Null while it plays here, which shows them all.
+   */
+  shows?: readonly SubtitleFormat[] | null;
+  /** Why some subtitles play here only, said at the foot of their menu. */
+  hereOnly?: string | null;
   open: TrackMenu;
   onOpenChange: (open: TrackMenu) => void;
   onAudio: (id: number) => void;
@@ -78,11 +87,13 @@ export function TrackMenus({
           </Choice>
           {subtitles.map((track) => {
             const chosen = track.id === subtitle?.id && track.page === subtitle.page;
+            const elsewhere = shows !== null && !shows.includes(track.format);
             return (
               <Choice
                 key={`${track.id}:${track.page}`}
                 chosen={chosen}
-                note={chosen ? subtitleNote : null}
+                disabled={elsewhere}
+                note={elsewhere ? "Here only" : chosen ? subtitleNote : null}
                 onChoose={() => {
                   onSubtitle(track);
                   onOpenChange(null);
@@ -92,6 +103,9 @@ export function TrackMenus({
               </Choice>
             );
           })}
+          {shows !== null && subtitles.some((track) => !shows.includes(track.format)) && (
+            <MenuNote>{hereOnly}</MenuNote>
+          )}
         </Menu>
       )}
     </>
@@ -195,14 +209,29 @@ function moveFocus(event: KeyboardEvent<HTMLDivElement>): void {
   target.focus();
 }
 
-/** One of a menu's choices, marked when chosen, with a word at its end when there is one to say. */
+/** A line of small text at the foot of a menu, saying what its rows can't. */
+export function MenuNote({ children }: { children: ReactNode }) {
+  if (!children) return null;
+  return (
+    <p className="px-2 pt-1.5 pb-1 text-[0.8125rem] leading-snug text-muted-foreground">
+      {children}
+    </p>
+  );
+}
+
+/**
+ * One of a menu's choices, marked when chosen, with a word at its end when there is one to say.
+ * A `disabled` one stays listed, dimmed, and can't be chosen.
+ */
 export function Choice({
   chosen,
+  disabled = false,
   note = null,
   onChoose,
   children,
 }: {
   chosen: boolean;
+  disabled?: boolean;
   note?: string | null;
   onChoose: () => void;
   children: ReactNode;
@@ -211,11 +240,12 @@ export function Choice({
     <button
       data-item
       aria-pressed={chosen}
+      disabled={disabled}
       onMouseDown={(event) => event.preventDefault()}
       onClick={onChoose}
       className={cn(
-        "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left outline-none focus-visible:bg-white/10",
-        chosen ? "text-white" : "text-foreground/80 hover:bg-white/6",
+        "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left outline-none focus-visible:bg-white/10 disabled:opacity-40",
+        chosen ? "text-white" : "text-foreground/80 enabled:hover:bg-white/6",
       )}
     >
       <span className={cn("size-1.5 flex-none rounded-full", chosen && "bg-white")} />

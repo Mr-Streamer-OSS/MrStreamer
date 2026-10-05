@@ -17,6 +17,7 @@ import type { Secrets } from "./platform/secrets.ts";
 import { viewingStoreLayer } from "./platform/viewing-store.ts";
 import { Library } from "./services/library.ts";
 import { OnDemand, type OnDemandDeps } from "./services/ondemand.ts";
+import { Output, type OutputDeps } from "./services/output.ts";
 import { appNotices, Licences } from "./services/licences.ts";
 import { Playback } from "./services/playback.ts";
 import { Settings } from "./services/preferences.ts";
@@ -40,6 +41,8 @@ export interface MainConfig {
   readonly region: string;
   /** Another TMDB API, for tests. */
   readonly tmdbApi?: string;
+  /** How this build reaches receivers on the network; none when absent. */
+  readonly output?: OutputDeps;
 }
 
 export type MainServices =
@@ -48,6 +51,7 @@ export type MainServices =
   | Library
   | OnDemand
   | Playback
+  | Output
   | Updates
   | Guide
   | ViewingRecord
@@ -131,7 +135,8 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
       ),
     ),
   );
-  return Layer.mergeAll(guide, viewing).pipe(
+  const output = Output.layer(config.output ?? { adapters: [] }).pipe(Layer.provide(viewing));
+  return Layer.mergeAll(guide, viewing, output).pipe(
     Layer.provideMerge(services),
     Layer.provideMerge(diagnosticsLogLayer(dataDir)),
   );

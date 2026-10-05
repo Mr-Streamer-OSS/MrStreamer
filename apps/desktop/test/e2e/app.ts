@@ -27,8 +27,11 @@ export function launch(
 
 export type Page = Awaited<ReturnType<typeof connect>>;
 
-/** A minimal DevTools protocol client for the app's window. */
-export async function connect(port: number) {
+/**
+ * A minimal DevTools protocol client for the app's window, or for its main process ("node") when
+ * the app was started with `--inspect=<port>`.
+ */
+export async function connect(port: number, kind: "page" | "node" = "page") {
   let url: string | undefined;
   for (let attempt = 0; attempt < 150 && !url; attempt++) {
     await delay(200);
@@ -37,10 +40,11 @@ export async function connect(port: number) {
         type: string;
         webSocketDebuggerUrl: string;
       }[];
-      url = targets.find((target) => target.type === "page")?.webSocketDebuggerUrl;
+      url = targets.find((target) => target.type === kind)?.webSocketDebuggerUrl;
     } catch {}
   }
-  if (!url) throw new Error("The app opened no window within 30 s.");
+  if (!url)
+    throw new Error(`The app opened no ${kind === "page" ? "window" : "inspector"} within 30 s.`);
   const socket = new WebSocket(url);
   await new Promise((resolve, reject) => {
     socket.addEventListener("open", resolve, { once: true });
@@ -140,6 +144,25 @@ export async function key(page: Page, name: string, code: number): Promise<void>
       windowsVirtualKeyCode: code,
     });
   }
+}
+
+/** Whether the window shows `words`, in the element `selector` names or anywhere. */
+export const says =
+  (page: Page, words: string, selector = "body") =>
+  async () =>
+    (
+      await page.evaluate<string>(
+        `document.querySelector(${JSON.stringify(selector)})?.innerText ?? ""`,
+      )
+    ).includes(words);
+
+/** Clicks the button whose text starts with `label`, or that has it as its label, once there is one. */
+export async function press(page: Page, label: string): Promise<void> {
+  const button = `[...document.querySelectorAll("button")].find((b) =>
+    b.textContent.trim().startsWith(${JSON.stringify(label)}) ||
+    b.getAttribute("aria-label") === ${JSON.stringify(label)})`;
+  await waitFor(() => page.evaluate<boolean>(`!!${button}`), 20_000);
+  await page.evaluate(`${button}.click()`);
 }
 
 export async function waitFor(check: () => Promise<boolean>, timeoutMs = 60_000): Promise<void> {

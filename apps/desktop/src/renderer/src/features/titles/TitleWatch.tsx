@@ -5,9 +5,13 @@
 //   Space or K pauses, Left and Right skip 10 seconds, Up and Down change the volume, F is full
 //   screen, M mutes, C turns subtitles on or off, N plays the next episode, also during the
 //   countdown, G and H move subtitles earlier or later, < and > play slower or faster, P shrinks
-//   the window into the mini player and back. While a menu is open, keys are its own: Escape
-//   closes it, then leaves full screen or the mini player, then goes back.
+//   the window into the mini player and back, O opens the chooser of where it plays. While a menu
+//   is open, keys are its own: Escape closes it, then leaves full screen or the mini player, then
+//   goes back.
 // In the mini player the picture fills the small window, with a few controls along its foot.
+// While a receiver on the network plays the title, the same controls command it and show what it
+// confirmed, the picture area says where it plays, and the controls stay: there is no picture to
+// clear. Going back leaves the receiver playing; only Play here, or quitting, ends it.
 import { Slider as SliderPrimitive } from "@base-ui/react/slider";
 import { Maximize, Minimize, Pause, Play, RotateCcw, RotateCw, SkipForward } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -25,12 +29,21 @@ import { clock, runtime } from "../../lib/titles.ts";
 import { cn } from "../../lib/utils.ts";
 import { WINDOW_BAR } from "../../../../shared/window-bar.ts";
 import { useTitleSession } from "../../player/media-session.ts";
+import { outputs, useOutput, where } from "../../player/output.ts";
 import { Picture } from "../../player/Picture.tsx";
 import { player, type PlaybackProblem } from "../../player/player.ts";
 import { titlePlayer, useTitlePlayer, type TitlePlayerState } from "../../player/title-player.ts";
-import { Flash, flashNote } from "../watch/Flash.tsx";
+import { Flash, flash, flashNote } from "../watch/Flash.tsx";
 import { useFullscreen, useWake } from "../watch/layout.ts";
-import { MiniControls, MiniPlayerButton } from "../watch/MiniPlayer.tsx";
+import { MINI_NEEDS_PICTURE, MiniControls, MiniPlayerButton } from "../watch/MiniPlayer.tsx";
+import {
+  ConnectingNote,
+  openChooser,
+  OutputButton,
+  PlayHere,
+  ReceiverLine,
+  receiverProblem,
+} from "../watch/Output.tsx";
 import { nudgeSubtitles, PlaybackMenu, stepSpeed } from "../watch/PlaybackMenu.tsx";
 import { TrackMenus, type TrackMenu } from "../watch/TrackMenus.tsx";
 import { VolumeControl } from "../watch/VolumeControl.tsx";
@@ -41,9 +54,12 @@ const SKIP_S = 10;
 /** How long the note that subtitles can't be had stays. */
 const SUBTITLES_UNAVAILABLE_MS = 5000;
 
-/** Leaves the title, saving how far it got, back to its details or the page. */
+/**
+ * Leaves the title, saving how far it got, back to its details or the page. One that plays on a
+ * receiver plays on there, with its controls a click away at the foot of every page.
+ */
 function leave(): void {
-  titlePlayer.close();
+  if (!titlePlayer.onReceiver()) titlePlayer.close();
   useUi.setState({ playingTitle: false });
 }
 
@@ -70,7 +86,20 @@ export function TitleWatch() {
   const continued = useTitlePlayer((state) => state.continued);
   const subtitleStatus = useTitlePlayer((state) => state.subtitleStatus);
   const [menu, setMenu] = useState<TrackMenu>(null);
+  // The title plays on a receiver on the network, or did until its connection broke.
+  const remote = useTitlePlayer((state) => state.shows !== null);
   useTitleSession();
+
+  // What happens to the title when a receiver lets go of it depends on whether it is on screen.
+  useEffect(() => {
+    titlePlayer.setShown(true);
+    return () => titlePlayer.setShown(false);
+  }, []);
+
+  // The mini player is a small picture, and a receiver leaves none here.
+  useEffect(() => {
+    if (remote && miniPlayer.on()) void miniPlayer.leave();
+  }, [remote]);
 
   // How the chosen subtitles stand after a skip, where a changed speed shows: loading for as long
   // as it lasts, and that they can't be had for a few seconds. The picture plays either way.
@@ -122,21 +151,28 @@ export function TitleWatch() {
           titlePlayer.skip(SKIP_S);
           break;
         case "ArrowUp":
-        case "ArrowDown": {
-          const { volume } = player.state();
-          player.setVolume(volume + (event.key === "ArrowUp" ? 0.05 : -0.05));
+        case "ArrowDown":
+          if (!player.nudgeVolume(event.key === "ArrowUp" ? 0.05 : -0.05)) {
+            flash("TV remote sets volume");
+          }
           break;
-        }
         case "f":
           if (miniPlayer.on()) void miniPlayer.leave(true);
           else current.toggleFullscreen();
           break;
         case "p":
         case "P":
-          void miniPlayer.toggle();
+          if (titlePlayer.onReceiver()) flash(MINI_NEEDS_PICTURE);
+          else void miniPlayer.toggle();
+          break;
+        case "o":
+        case "O":
+          // The chooser opens over the full window's controls.
+          if (miniPlayer.on()) void miniPlayer.leave();
+          openChooser(() => setMenu("output"));
           break;
         case "m":
-          player.toggleMute();
+          if (!player.toggleMute()) flash("TV remote sets volume");
           break;
         case "c":
           titlePlayer.toggleSubtitles();
@@ -148,11 +184,15 @@ export function TitleWatch() {
         case "G":
         case "h":
         case "H":
-          nudgeSubtitles(titlePlayer.state().subtitle, event.key.toLowerCase() === "g" ? -1 : 1);
+          if (titlePlayer.onReceiver()) flash("Subtitle timing plays here only");
+          else {
+            nudgeSubtitles(titlePlayer.state().subtitle, event.key.toLowerCase() === "g" ? -1 : 1);
+          }
           break;
         case "<":
         case ">":
-          stepSpeed(event.key === "<" ? -1 : 1);
+          if (titlePlayer.onReceiver()) flash("Speed plays here only");
+          else stepSpeed(event.key === "<" ? -1 : 1);
           break;
         case "Escape":
           if (document.fullscreenElement) void document.exitFullscreen();
@@ -172,7 +212,7 @@ export function TitleWatch() {
   }, []);
 
   if (!now) return null;
-  const controlsVisible = awake || phase.kind !== "playing" || menu !== null;
+  const controlsVisible = awake || phase.kind !== "playing" || menu !== null || remote;
   // An episode's end, and a next episode that didn't start, take the controls' place.
   const nextUp =
     now.series &&
@@ -304,6 +344,10 @@ export function TitleWatch() {
                 </Button>
               )}
               <VolumeControl />
+              <OutputButton
+                open={menu === "output"}
+                onOpenChange={(open) => setMenu(open ? "output" : null)}
+              />
               <MiniPlayerButton />
               <Tooltip label={fullscreen ? "Exit full screen" : "Full screen"}>
                 <Button
@@ -320,6 +364,7 @@ export function TitleWatch() {
         </div>
       )}
       <Flash />
+      <ConnectingNote />
     </div>
   );
 }
@@ -350,6 +395,8 @@ function PlayPause({ size = "icon" }: { size?: "icon" | "icon-sm" }) {
 function Scrubber() {
   const position = useTitlePlayer((state) => state.position);
   const duration = useTitlePlayer((state) => state.duration);
+  // On a receiver, after a skip: where it last said it was, until it has caught up.
+  const confirmed = useTitlePlayer((state) => state.confirmed);
   const [dragging, setDragging] = useState<number | null>(null);
   const shown = dragging ?? position;
   if (!duration) {
@@ -373,8 +420,15 @@ function Scrubber() {
         className="flex-1"
       >
         <SliderPrimitive.Control className="flex h-6 w-full touch-none items-center">
-          <SliderPrimitive.Track className="h-1 w-full rounded-full bg-white/25">
+          <SliderPrimitive.Track className="relative h-1 w-full rounded-full bg-white/25">
             <SliderPrimitive.Indicator className="rounded-full bg-white" />
+            {confirmed !== null && (
+              <span
+                aria-hidden
+                className="absolute top-1/2 size-3 -translate-1/2 rounded-full ring-2 ring-white/70"
+                style={{ left: `${(Math.min(confirmed, duration) / duration) * 100}%` }}
+              />
+            )}
             <SliderPrimitive.Thumb
               aria-label="Position"
               className="size-3.5 rounded-full bg-white shadow-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -395,6 +449,7 @@ function Tracks({ menu, onMenu }: { menu: TrackMenu; onMenu: (menu: TrackMenu) =
   const subtitle = useTitlePlayer((state) => state.subtitle);
   const subtitleStatus = useTitlePlayer((state) => state.subtitleStatus);
   const speed = useTitlePlayer((state) => state.speed);
+  const shows = useTitlePlayer((state) => state.shows);
   return (
     <>
       <TrackMenus
@@ -402,6 +457,8 @@ function Tracks({ menu, onMenu }: { menu: TrackMenu; onMenu: (menu: TrackMenu) =
         audioId={audioId}
         subtitles={subtitles}
         subtitle={subtitle}
+        shows={shows}
+        hereOnly="Picture subtitles, teletext and captions play on this computer only."
         subtitleNote={
           subtitleStatus === "loading"
             ? "Loading"
@@ -418,6 +475,7 @@ function Tracks({ menu, onMenu }: { menu: TrackMenu; onMenu: (menu: TrackMenu) =
         speed={{ value: speed, onChange: (next) => titlePlayer.setSpeed(next) }}
         subtitles={subtitles}
         subtitle={subtitle}
+        hereOnly={shows !== null}
         open={menu === "playback"}
         onOpenChange={(next) => onMenu(next ? "playback" : null)}
       />
@@ -430,7 +488,63 @@ function State() {
   const phase = useTitlePlayer((state) => state.phase);
   const now = useTitlePlayer((state) => state.now);
   const next = useTitlePlayer((state) => state.next);
-  if (!now || phase.kind === "playing" || phase.kind === "paused") return null;
+  const position = useTitlePlayer((state) => state.position);
+  const skipping = useTitlePlayer((state) => state.confirmed !== null);
+  const remote = useTitlePlayer((state) => state.shows !== null);
+  const output = useOutput((state) => state.status.output);
+  // On a receiver there is never a picture here: this says what it does and where.
+  const receiver =
+    remote && (output.kind === "receiver" || output.kind === "lost") ? output.receiver : null;
+  if (!now) return null;
+  if (receiver && phase.kind !== "ended" && phase.kind !== "reconnecting") {
+    const on = where(receiver);
+    if (phase.kind === "failed") {
+      const { problem } = phase;
+      const failed =
+        problem.kind === "receiver"
+          ? receiverProblem(
+              problem.failure,
+              problem.lost,
+              receiver,
+              `${now.name} stopped at ${clock(position)}.`,
+            )
+          : null;
+      return (
+        <Stated
+          title={failed?.title ?? problemTitle(problem)}
+          body={failed?.body ?? problemBody(problem)}
+        >
+          {(failed?.retry ?? true) && (
+            <Button variant="primary" onClick={() => titlePlayer.retry()}>
+              <RotateCw />
+              Try again
+            </Button>
+          )}
+          <PlayHere />
+        </Stated>
+      );
+    }
+    return (
+      <Stated
+        line={
+          <ReceiverLine receiver={receiver}>
+            {phase.kind === "playing"
+              ? "Playing"
+              : phase.kind === "paused"
+                ? "Paused"
+                : skipping
+                  ? "Buffering"
+                  : "Loading"}{" "}
+            {on}
+          </ReceiverLine>
+        }
+        body={skipping && phase.kind === "starting" ? `Seeking to ${clock(position)}` : null}
+      >
+        <PlayHere />
+      </Stated>
+    );
+  }
+  if (phase.kind === "playing" || phase.kind === "paused") return null;
   let body: ReactNode = null;
   let actions: ReactNode = null;
   let title = now.name;
@@ -456,6 +570,7 @@ function State() {
           <Button variant="secondary" onClick={leave}>
             Back
           </Button>
+          {receiver && <PlayHere />}
         </>
       );
       break;
@@ -479,10 +594,31 @@ function State() {
       break;
   }
   return (
+    <Stated title={title} body={body}>
+      {actions}
+      {receiver && phase.kind === "reconnecting" && <PlayHere />}
+    </Stated>
+  );
+}
+
+/** What stands where the picture would be: a receiver's line or a title, a body, and actions. */
+function Stated({
+  line,
+  title,
+  body,
+  children,
+}: {
+  line?: ReactNode;
+  title?: string;
+  body?: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
     <div className="pointer-events-auto flex max-w-[34rem] flex-col items-center px-8 text-center">
-      <h2 className="text-3xl font-semibold tracking-tight text-balance">{title}</h2>
+      {line}
+      {title && <h2 className="text-3xl font-semibold tracking-tight text-balance">{title}</h2>}
       {body && <p className="mt-3 text-[0.9375rem] text-muted-foreground">{body}</p>}
-      {actions && <div className="mt-7 flex items-center gap-3">{actions}</div>}
+      {children && <div className="mt-7 flex items-center gap-3">{children}</div>}
     </div>
   );
 }
@@ -518,6 +654,8 @@ function problemTitle(problem: PlaybackProblem): string {
       return "Provider error";
     case "app":
       return "Can't open this title";
+    case "receiver":
+      return receiverProblem(problem.failure, problem.lost, outputs.receiver(), null).title;
   }
 }
 
@@ -536,6 +674,8 @@ function problemBody(problem: PlaybackProblem, what = "title"): string {
       return `The provider answered with HTTP ${problem.status}.`;
     case "app":
       return describeError(problem.error);
+    case "receiver":
+      return receiverProblem(problem.failure, problem.lost, outputs.receiver(), null).body;
   }
 }
 
@@ -549,6 +689,11 @@ function NextUp({ series }: { series: SeriesDetails }) {
   const phase = useTitlePlayer((state) => state.phase);
   const next = useTitlePlayer((state) => state.next);
   const countdown = useTitlePlayer((state) => state.countdown);
+  const remote = useTitlePlayer((state) => state.shows !== null);
+  const output = useOutput((state) => state.status.output);
+  // On a receiver, where the next one plays, and the way back.
+  const receiver =
+    remote && (output.kind === "receiver" || output.kind === "lost") ? output.receiver : null;
   if (now?.title.kind !== "episode") return null;
   if (phase.kind === "failed") {
     return (
@@ -600,7 +745,10 @@ function NextUp({ series }: { series: SeriesDetails }) {
         ) : (
           <>
             {length && `${length} · `}
-            <span className="text-foreground">Plays in {countdown}</span>
+            <span className="text-foreground">
+              Plays in {countdown}
+              {receiver && ` ${where(receiver)}`}
+            </span>
           </>
         )
       }
@@ -618,6 +766,7 @@ function NextUp({ series }: { series: SeriesDetails }) {
           Cancel
         </Button>
       )}
+      {receiver && <PlayHere size="lg" />}
     </EndOfEpisode>
   );
 }

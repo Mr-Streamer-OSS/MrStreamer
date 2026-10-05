@@ -12,6 +12,7 @@ Data controller: Wout Stiens, Belgium, publishing as Mr Streamer OSS. Contact: p
 - Your login, settings, favourites and viewing history are stored only on your computer.
 - To play anything, the app connects to the provider or playlist you add, and the servers it points to. They can see what you watch, and a provider receives your login. Images and film information come from other services, and update checks go to GitHub.
 - If your provider has no encrypted address, your login is sent unencrypted. The app tells you before it does this.
+- When you play on a TV, the TV fetches the stream from your computer over your local network. It never receives your login or your provider's address.
 
 ## Data stored on your computer
 
@@ -64,6 +65,17 @@ When TMDB is enabled, Mr. Streamer asks TMDB about the movies and series your pr
 ### Update checks
 
 About 20 seconds after it starts, and every four hours after that, Mr. Streamer checks GitHub for new versions. GitHub hosts our releases and the update list, and receives your IP address and app version with each check. Updates download only when you choose **Download**. Update checks cannot be turned off in Settings. Copies installed from the Microsoft Store receive updates through the Store. [GitHub's privacy statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement) applies.
+
+### A TV on your network
+
+Mr. Streamer can play on a TV or other receiver on your local network: with Google Cast on Windows, and with AirPlay on macOS. Nothing here happens until you open the list of receivers.
+
+- **Finding receivers.** On Windows, while the list is open, Mr. Streamer asks your local network which Google Cast devices are there (mDNS). The devices that answer send their name and address, which stay in memory. On macOS, the system finds AirPlay receivers and shows its own list; Mr. Streamer learns only whether one exists, not which.
+- **What the receiver gets.** The receiver gets an address on your computer that holds a random token, and fetches the stream from it over your local network, unencrypted. The address works only while that stream plays, and only for devices on your local network. A Cast device also gets the name of what plays and, for movies and series, the address of its picture at TMDB, which the device loads itself. The receiver never gets your login, your provider's address or your playlist link: your computer fetches from the provider and passes the stream on.
+- **Google and Apple.** A Cast device runs Google's media receiver, which it loads from Google, and Google's terms apply to what the device reports. Mr. Streamer connects to a Cast device without verifying that Google certified it. AirPlay is handled by macOS and the receiver, under Apple's terms.
+- **Other devices on your network.** While a receiver plays, a device on your local network that learns the stream's address, which is random and changes with every stream, could fetch that stream too.
+
+Your provider still sees one connection, from your computer.
 
 ### Links
 

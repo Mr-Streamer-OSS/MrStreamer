@@ -5,8 +5,10 @@
 //   Enter plays, Left swaps to the lists and Right swaps back. Backspace returns to the previous
 //   channel, digits jump to a number, F is full screen, M mutes, C turns subtitles on or off, G
 //   and H move them earlier or later, I shows the details, S stars, Q opens the quality menu of a
-//   channel with several streams, P shrinks the window into the mini player and back. While a
-//   menu is open, keys are its own.
+//   channel with several streams, P shrinks the window into the mini player and back, O opens the
+//   chooser of where it plays. While a menu is open, keys are its own.
+// While a receiver on the network plays the channel, the controls stay: there is no picture to
+// clear. Leaving Watch leaves the receiver playing; only Stop and Play here end it.
 // In the mini player the picture fills the small window; opening the list puts the window back.
 import { Play, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -21,6 +23,7 @@ import { useCategoryMap, useToggleFavourite } from "../../lib/queries.ts";
 import { cn } from "../../lib/utils.ts";
 import { WINDOW_BAR } from "../../../../shared/window-bar.ts";
 import { useLiveSession } from "../../player/media-session.ts";
+import { useOutput } from "../../player/output.ts";
 import { Picture } from "../../player/Picture.tsx";
 import { player, usePlayer } from "../../player/player.ts";
 import { useOpenGroups } from "../live/ListPicker.tsx";
@@ -33,11 +36,12 @@ import {
   type ListEntry,
 } from "../live/lists.ts";
 import { ChannelOverlay } from "./ChannelOverlay.tsx";
-import { Flash } from "./Flash.tsx";
+import { Flash, flash } from "./Flash.tsx";
 import { useFullscreen, useWake } from "./layout.ts";
-import { MiniControls } from "./MiniPlayer.tsx";
+import { MINI_NEEDS_PICTURE, MiniControls } from "./MiniPlayer.tsx";
 import { NowPlayingBar } from "./NowPlaying.tsx";
 import { numberEntry, NumberEntry } from "./NumberEntry.tsx";
+import { ConnectingNote, openChooser } from "./Output.tsx";
 import { nudgeSubtitles } from "./PlaybackMenu.tsx";
 import { PlaybackState, problemTitle } from "./PlaybackState.tsx";
 import type { TrackMenu } from "./TrackMenus.tsx";
@@ -65,7 +69,16 @@ export function WatchScreen() {
   const [selected, setSelected] = useState(0);
   const [entry, setEntry] = useState(0);
   const [menu, setMenu] = useState<TrackMenu>(null);
+  // A receiver on the network has playback, or had it until its connection broke.
+  const remote = useOutput(
+    (state) => state.status.output.kind === "receiver" || state.status.output.kind === "lost",
+  );
   useLiveSession(channel);
+
+  // The mini player is a small picture, and a receiver leaves none here.
+  useEffect(() => {
+    if (remote && miniPlayer.on()) void miniPlayer.leave();
+  }, [remote]);
 
   // Nothing to watch, as after switching accounts: back to the page.
   useEffect(() => {
@@ -220,19 +233,29 @@ export function WatchScreen() {
           break;
         case "p":
         case "P":
-          void miniPlayer.toggle();
+          if (player.onReceiver()) flash(MINI_NEEDS_PICTURE);
+          else void miniPlayer.toggle();
+          break;
+        case "o":
+        case "O":
+          // The chooser opens over the full window's controls.
+          if (miniPlayer.on()) void miniPlayer.leave();
+          wake();
+          openChooser(() => setMenu("output"));
           break;
         case "m":
-          player.toggleMute();
+          if (!player.toggleMute()) flash("TV remote sets volume");
           break;
         case "c":
-          player.toggleSubtitles();
+          if (player.onReceiver()) flash("Live subtitles play here only");
+          else player.toggleSubtitles();
           break;
         case "g":
         case "G":
         case "h":
         case "H":
-          nudgeSubtitles(player.state().subtitle, event.key.toLowerCase() === "g" ? -1 : 1);
+          if (player.onReceiver()) flash("Subtitle timing plays here only");
+          else nudgeSubtitles(player.state().subtitle, event.key.toLowerCase() === "g" ? -1 : 1);
           break;
         case "i":
           wake();
@@ -261,7 +284,7 @@ export function WatchScreen() {
   }, []);
 
   if (!channel) return null;
-  const controlsVisible = awake || phase.kind !== "playing" || menu !== null;
+  const controlsVisible = awake || phase.kind !== "playing" || menu !== null || remote;
   if (mini) {
     const playing = phase.kind !== "idle" && phase.kind !== "failed";
     return (
@@ -322,7 +345,7 @@ export function WatchScreen() {
       onMouseMove={wake}
       className={cn(
         "fixed inset-0 z-30 overflow-hidden bg-black",
-        !awake && phase.kind === "playing" && !channelsOpen && "cursor-none",
+        !controlsVisible && !channelsOpen && "cursor-none",
       )}
     >
       {/* In a window the picture starts below the bar, so the bar never draws on it. */}
@@ -380,6 +403,7 @@ export function WatchScreen() {
       />
       <NumberEntry onChannel={(target) => player.play(target)} />
       <Flash />
+      <ConnectingNote />
     </div>
   );
 }

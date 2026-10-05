@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Built into the helper's executable by scripts/build-airplay-helper.sh; it has no bundle. -->
+<plist version="1.0">
+  <dict>
+    <key>CFBundleIdentifier</key>
+    <string>app.mrstreamer.player.airplay</string>
+    <!-- The name the system shows where it asks the viewer something about AirPlay. -->
+    <key>CFBundleName</key>
+    <string>Mr. Streamer</string>
+    <key>CFBundleExecutable</key>
+    <string>MrStreamerAirPlay</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>12.0</string>
+    <!-- No Dock icon and no menu bar. -->
+    <key>LSUIElement</key>
+    <true/>
+    <!-- The media is served by the app on this computer's local network address, over http. -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+      <key>NSAllowsLocalNetworking</key>
+      <true/>
+    </dict>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Mr. Streamer plays on AirPlay receivers on your network.</string>
+  </dict>
+</plist>

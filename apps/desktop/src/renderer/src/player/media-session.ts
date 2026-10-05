@@ -9,11 +9,20 @@
 // offer the system, so Watch in the app starts it again. Artwork must be http or https, or a data
 // URL; Chromium refuses the app's own file:// pictures. Only Watch and a playing title present
 // anything, so the muted previews leave the system alone.
+//
+// What a receiver on the network plays answers the same buttons, from what it last confirmed, in
+// its player's view and from the bar at the foot of the pages. A channel the receiver itself holds
+// paused, as after Pause on the TV's remote, shows as paused, and play has the receiver play on
+// with the stream it has. Chromium offers the system only a window that plays sound itself, and a
+// receiver's playback makes none here, so a silent loop plays in step with the receiver meanwhile
+// (`carry`). A window closed on macOS while a receiver plays is only out of sight, so its session
+// and the media keys go on (see the main process's index.ts).
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { queries } from "../lib/queries.ts";
-import { player, usePlayer } from "./player.ts";
+import { useOutput } from "./output.ts";
+import { player, receiverState, usePlayer } from "./player.ts";
 import { titlePlayer, useTitlePlayer } from "./title-player.ts";
 
 /** How far the system's back and forward buttons skip when they don't say. */
@@ -40,6 +49,63 @@ const session = "mediaSession" in navigator ? navigator.mediaSession : null;
  * a view that closes clears the session only while it is still its own.
  */
 let owner: object | null = null;
+
+/** Plays nothing audible, in step with a receiver, while one plays what a view presents. */
+let silent: HTMLAudioElement | null = null;
+let letGo: ReturnType<typeof setTimeout> | null = null;
+
+/** Ten seconds of 8-bit silence at 8 kHz. Chromium offers the system nothing under five seconds. */
+function silence(): HTMLAudioElement {
+  const samples = 80_000;
+  const bytes = new Uint8Array(44 + samples).fill(128, 44);
+  const view = new DataView(bytes.buffer);
+  const text = (at: number, value: string) => {
+    for (let index = 0; index < value.length; index++) {
+      view.setUint8(at + index, value.charCodeAt(index));
+    }
+  };
+  text(0, "RIFF");
+  view.setUint32(4, 36 + samples, true);
+  text(8, "WAVEfmt ");
+  view.setUint32(16, 16, true);
+  // PCM, one channel, 8000 samples and bytes a second, one byte each.
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, 8000, true);
+  view.setUint32(28, 8000, true);
+  view.setUint16(32, 1, true);
+  view.setUint16(34, 8, true);
+  text(36, "data");
+  view.setUint32(40, samples, true);
+  const audio = new Audio(URL.createObjectURL(new Blob([bytes], { type: "audio/wav" })));
+  audio.loop = true;
+  return audio;
+}
+
+/**
+ * Keeps the system's session for what a receiver plays: the silent loop plays while the receiver
+ * does and pauses when it does, so the system shows the right button and sends the right action.
+ * Null ends it, a moment later, so one view handing over to the next keeps the session.
+ */
+function carry(state: "playing" | "paused" | null): void {
+  if (!session) return;
+  if (letGo) clearTimeout(letGo);
+  letGo = null;
+  if (state === null) {
+    letGo = setTimeout(() => {
+      if (!silent) return;
+      silent.pause();
+      URL.revokeObjectURL(silent.src);
+      silent.removeAttribute("src");
+      silent.load();
+      silent = null;
+    });
+    return;
+  }
+  silent ??= silence();
+  if (state === "playing") void silent.play().catch(() => {});
+  else silent.pause();
+}
 
 /** Answers the actions in `handlers`; the system leaves out the rest. */
 function answer(handlers: Handlers): void {
@@ -103,8 +169,13 @@ export function useTitleSession(): void {
     // An episode's detail reads "S1 E3 · Its name".
     const [label, ...name] = now.detail?.split(" · ") ?? [];
     const episode = now.title.kind === "episode";
+    // On a receiver the element here plays nothing: whether it plays is the receiver's word.
+    const paused = () =>
+      titlePlayer.onReceiver()
+        ? titlePlayer.state().phase.kind !== "playing"
+        : player.element.paused;
     const pause = () => {
-      if (!player.element.paused) titlePlayer.togglePause();
+      if (!paused()) titlePlayer.togglePause();
     };
     present(
       view,
@@ -116,7 +187,7 @@ export function useTitleSession(): void {
       },
       {
         play: () => {
-          if (player.element.paused) titlePlayer.togglePause();
+          if (paused()) titlePlayer.togglePause();
         },
         pause,
         stop: pause,
@@ -152,15 +223,43 @@ export function useTitleSession(): void {
       for (const event of events) video.removeEventListener(event, update);
     };
   }, [view, duration]);
+
+  // On a receiver: where it said it was, whenever its state changes or a skip is on its way.
+  const remote = useTitlePlayer((state) => state.shows !== null);
+  const skipping = useTitlePlayer((state) => state.confirmed !== null);
+  useEffect(() => {
+    if (!remote || !duration || !session || owner !== view) return;
+    const { position } = titlePlayer.state();
+    session.setPositionState({
+      duration,
+      position: Math.min(Math.max(0, position), duration),
+      playbackRate: 1,
+    });
+  }, [view, remote, duration, phase, skipping]);
+  useCarried(remote && now !== null, phase === "playing");
+}
+
+/** Holds the system's session while a receiver plays what the view presents, in step with it. */
+function useCarried(remote: boolean, playing: boolean): void {
+  useEffect(() => {
+    if (remote) return () => carry(null);
+  }, [remote]);
+  useEffect(() => {
+    if (remote) carry(playing ? "playing" : "paused");
+  }, [remote, playing]);
 }
 
 /**
  * The channel in Watch in the system's controls: the programme on now, the channel and its logo.
- * Play starts a stopped channel, pause and stop stop it.
+ * Play starts a stopped channel, or has a receiver play on with one it holds paused; pause and
+ * stop stop it.
  */
 export function useLiveSession(channel: LiveChannel | null): void {
   const phase = usePlayer((state) => state.phase.kind);
   const live = phase !== "idle" && phase !== "failed";
+  // Only a receiver holds a channel that is on paused: the system shows what it said.
+  const held = usePlayer((state) => receiverState(state.phase) === "paused");
+  const playing = live && !held;
   const listings = useQuery(queries.listings(channel ? [channel.id] : []));
   const programme = (channel && listings.data?.[channel.id]?.now?.title) ?? null;
   const view = useView();
@@ -179,6 +278,8 @@ export function useLiveSession(channel: LiveChannel | null): void {
         play: () => {
           const { phase: now } = player.state();
           if (now.kind === "idle" || now.kind === "failed") player.play(channel);
+          // One a receiver holds paused plays on there. Any other is on its way already.
+          else player.resume();
         },
         pause: stop,
         stop,
@@ -188,5 +289,9 @@ export function useLiveSession(channel: LiveChannel | null): void {
     session?.setPositionState();
   }, [view, channel, programme]);
 
-  useEffect(() => showState(view, live ? "playing" : "paused"), [view, live]);
+  useEffect(() => showState(view, playing ? "playing" : "paused"), [view, playing]);
+  // On a receiver the channel makes no sound here. `stopped` tells its Stop from a preview's end.
+  const remote = useOutput((state) => state.status.output.kind === "receiver");
+  const stopped = usePlayer((state) => state.stopped);
+  useCarried(remote && channel !== null && (live || stopped), playing);
 }

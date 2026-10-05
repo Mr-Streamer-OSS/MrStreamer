@@ -28,7 +28,7 @@ import {
 } from "../../player/subtitles.ts";
 import { SPEEDS, titlePlayer, type Speed } from "../../player/title-player.ts";
 import { flash } from "./Flash.tsx";
-import { Choice, Menu } from "./TrackMenus.tsx";
+import { Choice, Menu, MenuNote } from "./TrackMenus.tsx";
 
 type Page = "speed" | "timing" | "look";
 
@@ -70,6 +70,7 @@ export function PlaybackMenu({
   speed,
   subtitles,
   subtitle,
+  hereOnly = false,
   open,
   onOpenChange,
 }: {
@@ -78,6 +79,8 @@ export function PlaybackMenu({
   subtitles: readonly SubtitleTrack[];
   /** The subtitles on screen, or null while they're off. */
   subtitle: SubtitleTrack | null;
+  /** A receiver on the network plays: these settings are this computer's, listed and not set. */
+  hereOnly?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -87,6 +90,33 @@ export function PlaybackMenu({
     subtitles.length > 0 && ("look" as const),
   ].filter((page) => page !== false && page !== null);
   if (pages.length === 0) return null;
+  if (hereOnly) {
+    return (
+      <Menu
+        label="Playback"
+        open={open}
+        onOpenChange={onOpenChange}
+        trigger={<SlidersHorizontal />}
+      >
+        {speed !== undefined && (
+          <Choice chosen={false} disabled note="1×" onChoose={() => {}}>
+            Speed
+          </Choice>
+        )}
+        <Choice chosen={false} disabled onChoose={() => {}}>
+          Subtitle timing
+        </Choice>
+        <Choice chosen={false} disabled onChoose={() => {}}>
+          Subtitle look
+        </Choice>
+        <MenuNote>
+          {speed !== undefined
+            ? "Speed and the subtitle settings apply on this computer only."
+            : "The subtitle settings apply on this computer only."}
+        </MenuNote>
+      </Menu>
+    );
+  }
   return (
     <Menu label="Playback" open={open} onOpenChange={onOpenChange} trigger={<SlidersHorizontal />}>
       <Pages

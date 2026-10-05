@@ -86,7 +86,7 @@ export function DetailsView({ target }: { target: DetailsTarget }) {
     <Dialog.Root open onOpenChange={(open) => !open && close()}>
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 z-20 bg-black/65 transition-opacity duration-200 data-ending-style:opacity-0 data-starting-style:opacity-0" />
-        <Dialog.Popup className="fixed inset-x-[max(1.5rem,calc((100vw-68rem)/2))] top-[3.75rem] bottom-0 z-20 overflow-y-auto overscroll-contain rounded-t-3xl bg-[#0b0b0c] shadow-2xl ring-1 ring-white/10 outline-none transition-[opacity,translate] duration-200 data-ending-style:translate-y-4 data-ending-style:opacity-0 data-starting-style:translate-y-4 data-starting-style:opacity-0">
+        <Dialog.Popup className="fixed inset-x-[max(1.5rem,calc((100vw-68rem)/2))] top-[3.75rem] bottom-[var(--receiver-bar,0px)] z-20 overflow-y-auto overscroll-contain rounded-t-3xl bg-[#0b0b0c] shadow-2xl ring-1 ring-white/10 outline-none transition-[opacity,translate] duration-200 data-ending-style:translate-y-4 data-ending-style:opacity-0 data-starting-style:translate-y-4 data-starting-style:opacity-0">
           {details.data ? (
             <Content
               details={details.data}

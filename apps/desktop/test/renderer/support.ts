@@ -1,15 +1,19 @@
 // Stands in for the main process in the renderer's tests, which run with happy-dom. Every call is
 // recorded; a call the test holds answers when the test says, the preferences otherwise answer
-// with the defaults and what the test says the viewer saved, and anything else never answers. Tests send its events themselves. Import it
+// with the defaults and what the test says the viewer saved, and anything else never answers.
+// Like the main process, it refuses a call whose input the contract doesn't allow, so a view
+// can't pass here with a call that fails there. Tests send its events themselves. Import it
 // first, before the renderer's modules: it also stands in for Media Source Extensions, which
 // happy-dom lacks, and for a text track's hidden mode, which it refuses.
+import { type } from "arktype";
 import type { AppError, Result } from "@mrstreamer/contracts/errors";
-import type {
-  BridgeApi,
-  IpcEvent,
-  IpcEvents,
-  IpcMethod,
-  IpcOutput,
+import {
+  ipcInputs,
+  type BridgeApi,
+  type IpcEvent,
+  type IpcEvents,
+  type IpcMethod,
+  type IpcOutput,
 } from "@mrstreamer/contracts/ipc";
 import { defaultPreferences, type Preferences } from "@mrstreamer/contracts/preferences";
 
@@ -52,6 +56,14 @@ export const ipc = {
 
 const bridge = {
   invoke(method: IpcMethod, args?: unknown): Promise<Result<unknown>> {
+    const schema: () => (data: unknown) => unknown = ipcInputs[method];
+    const input = schema()(args);
+    if (input instanceof type.errors) {
+      return Promise.resolve({
+        ok: false,
+        error: { kind: "invalid-input", detail: `${method}: ${input.summary}` },
+      });
+    }
     calls.push({ method, args });
     const answer = held.get(method)?.shift();
     if (answer) return answer;

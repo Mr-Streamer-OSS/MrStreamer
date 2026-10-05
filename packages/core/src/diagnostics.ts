@@ -49,6 +49,21 @@ export type Diagnostic =
       readonly outcome: "ok" | StreamFailure["kind"];
     }
   /**
+   * A run of a movie or episode made into a stream for a receiver on the network: what it copied
+   * or converted, how long its first segment took, and where a copied picture's segments start:
+   * on the keyframes the file's index names (`cues` in Matroska, `samples` in MP4). `mismatch`
+   * when the index named a keyframe the run didn't start on, after which the picture converts;
+   * `none` for a converted picture.
+   */
+  | {
+      readonly op: "receiver";
+      readonly ms: number;
+      readonly video: "copy" | "convert" | "none";
+      readonly audio: "copy" | "convert" | "none";
+      readonly index: "cues" | "samples" | "none" | "mismatch";
+      readonly outcome: "ok" | StreamFailure["kind"];
+    }
+  /**
    * The subtitles a movie or episode has on screen at a position, read beside a run from there:
    * what that took of the provider's file, nothing when they had been read before, and why they
    * couldn't be had when they couldn't.

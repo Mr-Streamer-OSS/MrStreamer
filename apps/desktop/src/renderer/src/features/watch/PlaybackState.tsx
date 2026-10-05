@@ -1,5 +1,9 @@
 // What the picture area says when there is no picture: idle, tuning, reconnecting or failed. A
 // quality chosen for the channel that fails says so, and offers another instead of playing it.
+// While a receiver on the network plays the channel there is never a picture here: the same place
+// says what the receiver last confirmed of it and where, paused and buffering included, and always
+// offers Play here. A channel that failed there keeps saying so under that receiver's name while
+// it is reached again, or another in its place.
 import { useQuery } from "@tanstack/react-query";
 import { Play, RotateCw, SkipForward } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -8,9 +12,11 @@ import { useUi } from "../../app/ui-store.ts";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { describeError } from "../../lib/errors.ts";
+import { outputs, useOutput, where } from "../../player/output.ts";
 import { qualityName } from "../../lib/quality.ts";
 import { queries, useChooseQuality } from "../../lib/queries.ts";
-import { player, usePlayer, type PlaybackProblem } from "../../player/player.ts";
+import { player, receiverState, usePlayer, type PlaybackProblem } from "../../player/player.ts";
+import { PlayHere, ReceiverLine, receiverProblem } from "./Output.tsx";
 import { useChannelQuality } from "./quality.ts";
 
 interface Message {
@@ -32,6 +38,105 @@ export function PlaybackState({
   const quality = useChannelQuality(channel);
   const chooseQuality = useChooseQuality();
   const playlist = useQuery(queries.subscription()).data?.kind === "m3u";
+  const output = useOutput((state) => state.status.output);
+  const connectingFrom = useOutput((state) => state.connectingFrom);
+  // The connect under way names the receiver it reaches, which need not be the one that failed.
+  const receiver =
+    output.kind === "receiver" || output.kind === "lost"
+      ? output.receiver
+      : phase.kind === "failed" && phase.problem.kind === "receiver"
+        ? connectingFrom
+        : null;
+  if (receiver) {
+    const on = where(receiver);
+    if (phase.kind === "failed") {
+      const { problem } = phase;
+      const failed =
+        problem.kind === "receiver"
+          ? receiverProblem(problem.failure, problem.lost, receiver, null)
+          : null;
+      const provider = failed ? null : problemMessage(problem, channel, onNext, playlist);
+      return (
+        <Block
+          title={failed?.title ?? provider?.title ?? ""}
+          body={failed?.body ?? provider?.body}
+          actions={
+            <>
+              {failed
+                ? failed.retry &&
+                  output.kind !== "connecting" && (
+                    <Button
+                      variant="primary"
+                      onClick={() =>
+                        problem.kind === "receiver" && problem.lost
+                          ? outputs.reconnect()
+                          : player.retry()
+                      }
+                    >
+                      <RotateCw />
+                      Try again
+                    </Button>
+                  )
+                : provider?.actions}
+              <PlayHere />
+            </>
+          }
+        />
+      );
+    }
+    if (phase.kind === "reconnecting") {
+      return (
+        <Block
+          title="Connection lost"
+          body={`Reconnecting to ${channel.title}, attempt ${phase.attempt} of ${phase.of}.`}
+          actions={
+            <>
+              <Button variant="ghost" onClick={() => player.stop()}>
+                Stop
+              </Button>
+              <PlayHere />
+            </>
+          }
+        />
+      );
+    }
+    // The receiver's own word once it started the channel: its remote pauses what the app can't.
+    const said = receiverState(phase);
+    return (
+      <Block
+        line={
+          <ReceiverLine receiver={receiver}>
+            {phase.kind === "idle"
+              ? "Stopped"
+              : phase.kind === "tuning" || said === "loading"
+                ? "Loading"
+                : said === "paused"
+                  ? "Paused"
+                  : said === "buffering"
+                    ? "Buffering"
+                    : "Playing"}{" "}
+            {on}
+          </ReceiverLine>
+        }
+        body={
+          phase.kind === "tuning" ? (
+            <Elapsed since={phase.since} what={`Tuning ${channel.title}`} />
+          ) : undefined
+        }
+        actions={
+          <>
+            {phase.kind === "idle" && (
+              <Button variant="primary" onClick={onWatch}>
+                <Play className="fill-current" />
+                Watch
+              </Button>
+            )}
+            <PlayHere />
+          </>
+        }
+      />
+    );
+  }
   if (phase.kind === "playing") return null;
 
   let message: Message;
@@ -182,6 +287,10 @@ function problemMessage(
         body: `The provider answered with HTTP ${problem.status}.`,
         actions: retry,
       };
+    case "receiver": {
+      const failed = receiverProblem(problem.failure, problem.lost, outputs.failedOn(), null);
+      return { title: failed.title, body: failed.body };
+    }
     case "app":
       return {
         title: "Can't open this channel",
@@ -199,11 +308,39 @@ function problemMessage(
 }
 
 /** "Tuning · 3 s", updated once a second. */
-function Elapsed({ since }: { since: number }) {
+function Elapsed({ since, what = "Tuning" }: { since: number; what?: string }) {
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
-  return <>Tuning · {Math.max(0, Math.floor((now - since) / 1000))} s</>;
+  return (
+    <>
+      {what} · {Math.max(0, Math.floor((now - since) / 1000))} s
+    </>
+  );
+}
+
+/** What a receiver's state says where the picture would be: a line or a title, a body, actions. */
+function Block({
+  line,
+  title,
+  body,
+  actions,
+}: {
+  line?: ReactNode;
+  title?: string;
+  body?: ReactNode;
+  actions: ReactNode;
+}) {
+  return (
+    <div className="pointer-events-auto flex max-w-[34rem] flex-col items-center px-8 text-center">
+      {line}
+      {title && <h2 className="text-3xl font-semibold tracking-tight text-balance">{title}</h2>}
+      {body && (
+        <p className="mt-3 text-[0.9375rem] leading-relaxed text-muted-foreground">{body}</p>
+      )}
+      <div className="mt-5 flex items-center gap-3">{actions}</div>
+    </div>
+  );
 }
