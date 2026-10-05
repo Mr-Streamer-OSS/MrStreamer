@@ -33,7 +33,6 @@ if (lanAddresses().length === 0) {
   throw new Error("This computer has no address on a local network for a TV to reach.");
 }
 
-const work = mkdtempSync(join(tmpdir(), "mr-streamer-airplay-list-"));
 const results: boolean[] = [];
 function check(ok: boolean, what: string, detail = ""): void {
   results.push(ok);
@@ -48,41 +47,76 @@ function within<T>(what: string, ms: number, pending: Promise<T>): Promise<T> {
   ]);
 }
 
-// The app, started from a folder that holds the stand-in where it looks for its AirPlay helper.
-const helper = await startFakeAirplayHelper();
-const desktop = fileURLToPath(new URL("../..", import.meta.url));
-const built = JSON.parse(readFileSync(join(desktop, "package.json"), "utf8")) as {
-  readonly productName: string;
-  readonly version: string;
-  readonly main: string;
-};
-const folder = join(work, "app");
-const standIn = join(folder, "vendor", "airplay", "mac-arm64", "MrStreamerAirPlay");
-mkdirSync(join(standIn, ".."), { recursive: true });
-symlinkSync(join(desktop, "out"), join(folder, "out"));
-writeFileSync(
-  join(folder, "package.json"),
-  JSON.stringify({
-    name: "mrstreamer",
-    productName: built.productName,
-    version: built.version,
-    type: "module",
-    main: built.main,
-  }),
-);
-writeFileSync(
-  standIn,
-  `#!/bin/sh\nexec ${[helper.helper, ...helper.args].map((part) => `'${part}'`).join(" ")}\n`,
-  { mode: 0o755 },
-);
+/**
+ * How each thing the script started ends, in the order they started. `takeDown` runs them from
+ * the last, however the script goes, so a start that fails halfway ends what it had started and
+ * nothing else.
+ */
+const started: (() => unknown)[] = [];
+async function takeDown(): Promise<void> {
+  for (const end of started.reverse()) await end();
+}
 
-const provider = await startFakeProvider();
-const port = 20000 + Math.floor(Math.random() * 20000);
-const app = launch(executable, [`--inspect=${port + 1}`, "--use-mock-keychain", folder, ...rest], {
-  port,
-  profile: join(work, "profile"),
+/**
+ * The app, started from a folder that holds the stand-in where it looks for its AirPlay helper,
+ * with the inspector of its main process.
+ */
+const start = async () => {
+  const work = mkdtempSync(join(tmpdir(), "mr-streamer-airplay-list-"));
+  started.push(() => rmSync(work, { recursive: true, force: true, maxRetries: 5 }));
+  const helper = await startFakeAirplayHelper();
+  started.push(() => helper.close());
+  const desktop = fileURLToPath(new URL("../..", import.meta.url));
+  const built = JSON.parse(readFileSync(join(desktop, "package.json"), "utf8")) as {
+    readonly productName: string;
+    readonly version: string;
+    readonly main: string;
+  };
+  const folder = join(work, "app");
+  const standIn = join(folder, "vendor", "airplay", "mac-arm64", "MrStreamerAirPlay");
+  mkdirSync(join(standIn, ".."), { recursive: true });
+  symlinkSync(join(desktop, "out"), join(folder, "out"));
+  writeFileSync(
+    join(folder, "package.json"),
+    JSON.stringify({
+      name: "mrstreamer",
+      productName: built.productName,
+      version: built.version,
+      type: "module",
+      main: built.main,
+    }),
+  );
+  writeFileSync(
+    standIn,
+    `#!/bin/sh\nexec ${[helper.helper, ...helper.args].map((part) => `'${part}'`).join(" ")}\n`,
+    { mode: 0o755 },
+  );
+
+  const provider = await startFakeProvider();
+  started.push(() => provider.close());
+  const port = 20000 + Math.floor(Math.random() * 20000);
+  const app = launch(
+    executable,
+    [`--inspect=${port + 1}`, "--use-mock-keychain", folder, ...rest],
+    { port, profile: join(work, "profile") },
+  );
+  // Killed, the app takes a moment to let go of its profile, which the folder holds.
+  started.push(async () => {
+    app.kill("SIGKILL");
+    await delay(1000);
+  });
+  // An app that can't start, as from a wrong path, fails the wait for its inspector.
+  const main = await Promise.race([
+    connect(port + 1, "node"),
+    new Promise<never>((_, reject) => app.once("error", reject)),
+  ]);
+  started.push(() => main.close());
+  return { helper, provider, port, main };
+};
+const { helper, provider, port, main } = await start().catch(async (error: unknown) => {
+  await takeDown();
+  throw error;
 });
-const main = await connect(port + 1, "node");
 
 interface Box {
   readonly x: number;
@@ -209,6 +243,7 @@ async function tvLost(page: Page, tv: Awaited<ReturnType<typeof tvPlays>>): Prom
 let broke = false;
 try {
   const page = await connect(port);
+  started.push(() => page.close());
   await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
   await login(page, provider);
   await playEpisode(page);
@@ -311,8 +346,6 @@ try {
     "A window out of sight opens no list",
     `answered ${answer.ok ? answer.value?.output.kind : "an error"}`,
   );
-  page.close();
-  main.close();
 } catch (error) {
   console.error(`FAIL ${String(error)}`);
   console.error(
@@ -323,10 +356,6 @@ try {
   );
   broke = true;
 } finally {
-  app.kill("SIGKILL");
-  await helper.close();
-  await provider.close();
-  await delay(1000);
-  rmSync(work, { recursive: true, force: true, maxRetries: 5 });
+  await takeDown();
 }
 process.exit(broke || results.includes(false) ? 1 : 0);

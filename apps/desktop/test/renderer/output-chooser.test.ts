@@ -120,25 +120,34 @@ describe("the system's list of receivers", () => {
     expect(asked()).toEqual([{ anchor: BUTTON }, { anchor: BUTTON }]);
   });
 
-  it("opens from the mini player only once the window is back, at the button it then shows", async () => {
-    await watching();
-    ipc.hold("window.setMiniPlayer").resolve(null);
-    await act(() => app.miniPlayer.enter());
-    // The mini player has no output button for the list to open at.
-    expect(container.querySelector("[data-output]")).toBeNull();
+  it.each([
+    { how: "O", keys: ["o"] },
+    { how: "O twice", keys: ["o", "o"] },
+    { how: "Escape, then O", keys: ["Escape", "o"] },
+  ])(
+    "opens from the mini player only once the window is back, at the button it then shows: $how",
+    async ({ keys }) => {
+      await watching();
+      ipc.hold("window.setMiniPlayer").resolve(null);
+      await act(() => app.miniPlayer.enter());
+      // The mini player has no output button for the list to open at.
+      expect(container.querySelector("[data-output]")).toBeNull();
 
-    const back = ipc.hold("window.setMiniPlayer");
-    await key("o");
-    expect(ipc.argsOf("window.setMiniPlayer")).toEqual([{ on: true }, { on: false }]);
-    // The window is still on its way back: nothing is measured or asked for yet.
-    expect(asked()).toEqual([]);
+      const back = ipc.hold("window.setMiniPlayer");
+      for (const each of keys) await key(each);
+      // The window goes back once, whichever key asked first.
+      expect(ipc.argsOf("window.setMiniPlayer")).toEqual([{ on: true }, { on: false }]);
+      // It is still on its way back: nothing is measured or asked for yet.
+      expect(asked()).toEqual([]);
 
-    await act(async () => {
-      back.resolve(null);
-      await settle();
-    });
-    expect(asked()).toEqual([{ anchor: BUTTON }]);
-  });
+      await act(async () => {
+        back.resolve(null);
+        await settle();
+      });
+      // Each O asks, as it does in the full window.
+      expect(asked()).toEqual(keys.filter((each) => each === "o").map(() => ({ anchor: BUTTON })));
+    },
+  );
 
   it("opens in the middle of the window where no view shows the button, not where it was", async () => {
     await watching();

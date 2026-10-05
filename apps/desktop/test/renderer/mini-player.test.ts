@@ -37,4 +37,32 @@ describe("the mini player", () => {
     await settle();
     expect(asked()).toEqual([{ on: true }, { on: false }, { on: true }, { on: false }]);
   });
+
+  it("puts the window back again when it shrank on its way back, and waits for that way back", async () => {
+    const { miniPlayer, openWatch } = await loaded(true);
+    openWatch();
+    ipc.hold("window.setMiniPlayer").resolve(null);
+    await miniPlayer.enter();
+
+    // P three times, faster than the main process moves the window: out, in again, and out.
+    const first = ipc.hold("window.setMiniPlayer");
+    void miniPlayer.toggle();
+    ipc.hold("window.setMiniPlayer").resolve(null);
+    await miniPlayer.toggle();
+    const second = ipc.hold("window.setMiniPlayer");
+    void miniPlayer.toggle();
+    expect(asked()).toEqual([{ on: true }, { on: false }, { on: true }, { on: false }]);
+
+    // The first way back ends while the second is under way, so the window isn't back yet.
+    first.resolve(null);
+    await settle();
+    let back = false;
+    void miniPlayer.leave().then(() => (back = true));
+    await settle();
+    expect(back).toBe(false);
+
+    second.resolve(null);
+    await settle();
+    expect(back).toBe(true);
+  });
 });

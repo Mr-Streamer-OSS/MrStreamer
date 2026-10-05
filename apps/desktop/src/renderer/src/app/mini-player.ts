@@ -25,6 +25,8 @@ export function useMiniPlayer<T>(selector: (state: MiniPlayerState) => T): T {
 
 /** The window was full screen before it shrank, and goes back to it. */
 let fromFullScreen = false;
+/** The window's last way back, under way or done, which `leave` waits for when it starts none. */
+let back: Promise<void> = Promise.resolve();
 
 /** Shrinks the window into the mini player, leaving full screen first. */
 async function enter(): Promise<void> {
@@ -39,13 +41,21 @@ async function enter(): Promise<void> {
 /**
  * Puts the window back where it was, full screen again if it was; `fullScreen` says otherwise, as
  * F asks for full screen and a view closing for none.
+ *
+ * Resolves once the main process has put the window back. A call while it is on its way back
+ * starts nothing and waits for that same end, so what needs the full window, as the output
+ * chooser does, never gets ahead of it.
  */
-async function leave(fullScreen = fromFullScreen): Promise<void> {
-  if (!useMini.getState().on) return;
+function leave(fullScreen = fromFullScreen): Promise<void> {
+  if (!useMini.getState().on) return back;
   useMini.setState({ on: false });
   fromFullScreen = false;
-  await call("window.setMiniPlayer", { on: false }).catch(() => {});
-  if (fullScreen) void document.documentElement.requestFullscreen().catch(() => {});
+  back = call("window.setMiniPlayer", { on: false })
+    .catch(() => {})
+    .then(() => {
+      if (fullScreen) void document.documentElement.requestFullscreen().catch(() => {});
+    });
+  return back;
 }
 
 export const miniPlayer = {
