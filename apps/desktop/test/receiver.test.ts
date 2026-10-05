@@ -3,7 +3,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
-import type { Codec } from "@mrstreamer/contracts/playback";
+import type { Codec, StreamFailure } from "@mrstreamer/contracts/playback";
 import * as Layer from "effect/Layer";
 import { Playback, type PlaybackDeps, type ReceiverTarget } from "../src/main/services/playback.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
@@ -44,10 +44,13 @@ async function receiver(deps: Partial<PlaybackDeps> = {}, options: FakeProviderO
   const source = await subscriptions.source();
   const playback = await promised(runtime, Playback);
   const closed: string[] = [];
+  /** What whoever opened a session was told went wrong with its stream. */
+  const failed: StreamFailure[] = [];
   const target: ReceiverTarget = {
     address: "127.0.0.1",
     decoders: RECEIVER,
     closed: () => closed.push("closed"),
+    failed: (failure) => failed.push(failure),
   };
   /**
    * Opens a test movie by name for the receiver, the way the app opens it from the catalogue.
@@ -79,7 +82,13 @@ async function receiver(deps: Partial<PlaybackDeps> = {}, options: FakeProviderO
     const main = await playlist(loaded.url);
     return { opened, loaded, main, video: await playlist(main.stream ?? "") };
   };
-  return { provider, playback, open, load, target, closed, source };
+  /** A test movie by the start of its name. */
+  const movie = (name: string) => {
+    const found = provider.titles.movies.find((each) => each.name.startsWith(name));
+    if (!found) throw new Error(`No movie ${name}`);
+    return found;
+  };
+  return { provider, playback, open, load, movie, target, closed, failed, source };
 }
 
 interface Listed {
@@ -408,6 +417,88 @@ describe.skipIf(!hasTools)("a movie for a receiver", () => {
     expect(lines.lines).toEqual([[29, 33, "Across thirty"]]);
     expect(provider.mostFilesAtOnce()).toBe(1);
   });
+
+  it("answers for a segment's subtitles in time while the line from before a skip is still being read", async () => {
+    const { provider, playback, open } = await receiver({ receiver: { cuesMs: 150 } });
+    const opened = await open(MATROSKA, "title-receiver.mkv");
+    const english = opened.subtitles.find((track) => track.language === "en");
+    const loaded = await playback.loadReceiverTitle(opened.sessionId, {
+      audio: null,
+      subtitle: english!.id,
+    });
+    const main = await playlist(loaded!.url);
+    const video = await playlist(main.stream!);
+    const subtitles = await playlist(main.subtitles!);
+    const at = video.segments.findIndex((each) => Math.abs(each.at - 30) < 0.01);
+    // Reading what the track held before the position takes the provider a while.
+    provider.slowFileParts(400);
+
+    await segment(video.segments[at]!.url);
+    await segment(video.segments[at + 1]!.url);
+    const asked = performance.now();
+    const soon = await cues(subtitles.segments[at]!.url);
+    // The picture's own reading has no line that began before it: the segment goes without.
+    expect(soon.status).toBe(200);
+    expect(soon.lines).toEqual([]);
+    expect(performance.now() - asked).toBeLessThan(1000);
+    // A receiver that leaves while it waits is let go of, and the next one still gets an answer.
+    const leaving = new AbortController();
+    const left = fetch(subtitles.segments[at]!.url, { signal: leaving.signal }).catch(() => null);
+    setTimeout(() => leaving.abort(), 50);
+    expect(await left).toBeNull();
+    // Once the reading is done, the line that was on screen at the position is there.
+    await vi.waitFor(
+      async () =>
+        expect((await cues(subtitles.segments[at]!.url)).lines).toEqual([
+          [29, 33, "Across thirty"],
+        ]),
+      { timeout: 10_000, interval: 300 },
+    );
+  }, 15_000);
+
+  it("ends what a receiver was sent when the provider puts another file behind the title", async () => {
+    const { provider, load, open, movie, failed } = await receiver();
+    const { video, loaded } = await load(MATROSKA, "title-receiver.mkv");
+    expect((await segment(video.segments[0]!.url)).status).toBe(200);
+
+    provider.replaceMovieFile(movie(MATROSKA).id, "title-h264-eac3-subs.mkv");
+    // The playlist the receiver holds is of the file that is gone: nothing more is made of it.
+    const next = await fetch(video.segments[5]!.url);
+    expect(next.status).toBeGreaterThanOrEqual(400);
+    expect(failed).toEqual([expect.objectContaining({ kind: "network" })]);
+    expect((await fetch(loaded.url)).status).toBe(410);
+    expect((await fetch(video.segments[0]!.url)).status).toBe(410);
+    // Opened again, the title is the new file: its own length and playlist.
+    const again = await open(MATROSKA);
+    expect(again.duration).toBeCloseTo(20, 0);
+    expect(provider.mostFilesAtOnce()).toBe(1);
+  });
+
+  it("gives up a segment the provider doesn't send in time, and makes it when asked again", async () => {
+    const { provider, playback, load, movie, failed } = await receiver({
+      receiver: { segmentMs: 1500 },
+    });
+    const { opened, video } = await load(MATROSKA, "title-receiver.mkv");
+    // The provider stops in the middle of the file, as a stalled connection does: inside the
+    // segment that starts at 30 s, which a reading from there never gets to the end of.
+    const at = video.segments.findIndex((each) => Math.abs(each.at - 30) < 0.01);
+    provider.stallMovieFile(movie(MATROSKA).id, 200_000, 60_000);
+
+    const asked = performance.now();
+    const stalled = await fetch(video.segments[at]!.url);
+    expect(stalled.status).toBe(504);
+    expect(performance.now() - asked).toBeLessThan(4000);
+    expect(failed).toEqual([expect.objectContaining({ kind: "network" })]);
+    expect(await playback.failure(opened.sessionId)).toMatchObject({ kind: "network" });
+    // The reading ended with the request: the provider's connection is free again.
+    await vi.waitFor(() => expect(provider.activeStreams()).toBe(0));
+
+    provider.stallMovieFile(movie(MATROSKA).id, 200_000, 0);
+    const made = await segment(video.segments[at]!.url);
+    expect(made.status).toBe(200);
+    expect(made.from).toBeCloseTo(video.segments[at]!.at, 2);
+    expect(provider.mostFilesAtOnce()).toBe(1);
+  }, 15_000);
 
   it("leaves subtitles that are pictures out, and the picture as it is", async () => {
     const { playback, open } = await receiver();

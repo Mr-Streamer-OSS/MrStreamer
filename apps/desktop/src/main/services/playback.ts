@@ -236,6 +236,11 @@ const INDEX_LIMITS = { bytes: 24 * 1024 * 1024, requests: 96, ms: 20_000 } as co
 const RECEIVER_IDLE_MS = 5 * 60_000;
 /** How long a receiver's request for a segment's subtitles waits for the run to have read them. */
 const CUES_WAIT_MS = 15_000;
+/**
+ * How long a receiver's request for a segment waits for it to be made. A provider or an ffmpeg
+ * that takes longer has stopped: the request ends, and so does the run.
+ */
+const SEGMENT_WAIT_MS = 30_000;
 /** The lines of a channel's playlist for a receiver, and how many it needs before it is given out. */
 const LIVE_LIST = { kept: 6, least: 2 } as const;
 /** How long a receiver's request for a channel's playlist waits for its first segments. */
@@ -266,6 +271,8 @@ interface Lan {
   readonly origin: string;
   /** How often the receiver asked for something of the session: none means it can't reach here. */
   requests: number;
+  /** Tells whoever opened the session that its stream can't go on; see `ReceiverTarget.failed`. */
+  readonly failed: (failure: StreamFailure) => void;
 }
 
 /** A receiver on the local network that plays a session, in place of the UI's player. */
@@ -276,6 +283,12 @@ export interface ReceiverTarget {
   readonly decoders: readonly Codec[];
   /** Hears that the session closed, whoever closed it. */
   readonly closed?: () => void;
+  /**
+   * Hears that the stream can't go on though the session is open: the provider stopped sending
+   * a title's file, or put another file behind its address. What the receiver asks for next
+   * fails; opening the title again reads it afresh.
+   */
+  readonly failed?: (failure: StreamFailure) => void;
 }
 
 /** A channel's stream as a receiver plays it. */
@@ -323,6 +336,8 @@ interface TitleReceiver {
   plan: SegmentPlan;
   /** Where the plan's starts come from, for the diagnostics. */
   readonly index: "cues" | "samples" | "none";
+  /** The size of the file the plan was made of, when the provider said: another size is another file. */
+  readonly size: number | null;
   /** What the receiver was last sent: the tracks chosen, under a token of their own. */
   load: TitleLoad | null;
 }
@@ -549,9 +564,15 @@ export interface PlaybackDeps {
   readonly upstream?: Partial<UpstreamLimits>;
   /**
    * For a receiver's title, when not as usual: how long a run goes on with nothing asked of it,
-   * in ms, and how much of the title waits in memory.
+   * how long a request waits for a segment and for a segment's subtitles, in ms, and how much of
+   * the title waits in memory.
    */
-  readonly receiver?: { readonly idleMs?: number; readonly segments?: Partial<SegmentLimits> };
+  readonly receiver?: {
+    readonly idleMs?: number;
+    readonly segmentMs?: number;
+    readonly cuesMs?: number;
+    readonly segments?: Partial<SegmentLimits>;
+  };
 }
 
 export class Playback extends Context.Service<
@@ -1136,6 +1157,28 @@ function make(deps: PlaybackDeps) {
         session.kept = fileKept();
         probes.delete(session.upstreamUrl);
         session.feed?.changed();
+      }
+      // A receiver holds a playlist of the file as it was read when the title opened: its length,
+      // its tracks and where its segments start. A file of another size is another file, of
+      // which none of that holds, so what the receiver was sent ends there rather than go on as a
+      // mixture of the two. Opening the title again reads the new file.
+      const receiver = session.receiver;
+      if (
+        receiver?.load &&
+        receiver.size !== null &&
+        held &&
+        held.size !== null &&
+        held.size !== receiver.size
+      ) {
+        const failure: StreamFailure = {
+          kind: "network",
+          detail: "The provider put another file behind this title while it played.",
+        };
+        session.failure = failure;
+        const { load } = receiver;
+        receiver.load = null;
+        load.closed.abort();
+        session.lan?.failed(failure);
       }
       return held;
     }
@@ -2508,11 +2551,25 @@ function make(deps: PlaybackDeps) {
         index <= run.next + 1 &&
         index < run.from + run.count;
       if (!load.store.has(index) && !coming) startRun(session, receiver, load, index);
+      const late = AbortSignal.timeout(deps.receiver?.segmentMs ?? SEGMENT_WAIT_MS);
       const segment = await load.store.take(
         index,
-        AbortSignal.any([load.closed.signal, left.signal]),
+        AbortSignal.any([load.closed.signal, left.signal, late]),
       );
       noteAhead(session, load);
+      if (!segment && late.aborted && !left.signal.aborted && !load.closed.signal.aborted) {
+        // The provider, or the ffmpeg reading it, has stopped. The run ends, which frees the
+        // provider, and whoever opened the session hears; asking again starts a new one.
+        const failure: StreamFailure = (session.failure ??= {
+          kind: "network",
+          detail: "The provider did not send the file in time.",
+        });
+        load.run?.stop();
+        load.store.fail();
+        session.lan?.failed(failure);
+        if (!response.destroyed) response.writeHead(504).end();
+        return;
+      }
       if (response.destroyed) return;
       if (!segment) {
         const failure = session.failure;
@@ -2873,7 +2930,7 @@ function make(deps: PlaybackDeps) {
       const signal = AbortSignal.any([
         load.closed.signal,
         left.signal,
-        AbortSignal.timeout(CUES_WAIT_MS),
+        AbortSignal.timeout(deps.receiver?.cuesMs ?? CUES_WAIT_MS),
       ]);
       const reader = () => {
         const run = load.run;
@@ -2881,14 +2938,9 @@ function make(deps: PlaybackDeps) {
       };
       await until(load.changed, () => reader() !== null, signal);
       const run = reader();
-      const before = run
-        ? await Promise.race([
-            run.before,
-            new Promise<null>((resolve) =>
-              signal.addEventListener("abort", () => resolve(null), { once: true }),
-            ),
-          ])
-        : null;
+      // What came before the run's start is still being read, or the wait is already over: the
+      // segment goes without it then.
+      const before = run ? await unlessAborted(run.before, signal) : null;
       if (response.destroyed) return;
       const { plan } = receiver;
       const entries = run
@@ -3077,6 +3129,7 @@ function make(deps: PlaybackDeps) {
         return {
           origin: `http://${receiver.address}:${listening.port}`,
           requests: 0,
+          failed: (failure) => receiver.failed?.(failure),
         } satisfies Lan;
       });
 
@@ -3336,7 +3389,7 @@ function make(deps: PlaybackDeps) {
                 },
               });
             }
-            session.receiver = { ...planned, load: null };
+            session.receiver = { ...planned, size: session.identity.size, load: null };
             return {
               sessionId: session.id,
               title,
@@ -3621,6 +3674,19 @@ function textRelay(): TextRelay {
       return () => listeners.delete(listener);
     },
   };
+}
+
+/** What `promise` resolves with, or null once `signal` aborts, whichever comes first. */
+function unlessAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T | null> {
+  if (signal.aborted) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const aborted = () => resolve(null);
+    signal.addEventListener("abort", aborted, { once: true });
+    void promise.then((value) => {
+      signal.removeEventListener("abort", aborted);
+      resolve(value);
+    });
+  });
 }
 
 /** Tells everyone waiting on `changed` to look again. */
