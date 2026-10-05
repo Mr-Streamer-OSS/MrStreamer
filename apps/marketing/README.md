@@ -1,15 +1,18 @@
 # The website
 
-One static page for `https://mrstreamer.app`, built with Vite from plain HTML, CSS and a small TypeScript file. Its pictures are captures of the real app, kept in `docs/assets` and described in [marketing artwork](../../docs/contributing/marketing-artwork.md).
+Three static pages for `https://mrstreamer.app`, built with Vite from plain HTML, CSS and a small TypeScript file: the home page, the privacy policy and the page for a missing address. The home page's pictures are captures of the real app, kept in `docs/assets` and described in [marketing artwork](../../docs/contributing/marketing-artwork.md).
 
-| File                        | Holds                                                                       |
-| --------------------------- | --------------------------------------------------------------------------- |
-| `index.html`                | The page and everything it says                                             |
-| `src/styles.css`            | The layout                                                                  |
-| `src/main.ts`               | Website page-view analytics                                                 |
-| `scripts/prepare-assets.ts` | Cuts the page's pictures, icons and social picture into `public/generated/` |
-| `scripts/package-vercel.ts` | Packs the built page for Vercel in `.vercel/output/` and checks the package |
-| `public/`                   | `robots.txt` and `sitemap.xml`                                              |
+| File                        | Holds                                                                                  |
+| --------------------------- | -------------------------------------------------------------------------------------- |
+| `index.html`                | The home page and everything it says                                                   |
+| `privacy/index.html`        | The privacy page around the policy. The build puts `docs/privacy.md` in it             |
+| `404.html`                  | The page for an address that has none                                                  |
+| `src/styles.css`            | The layout                                                                             |
+| `src/main.ts`               | Website page-view analytics, on every page                                             |
+| `vite.config.ts`            | Builds the pages, renders the policy, and answers the addresses below on your computer |
+| `scripts/prepare-assets.ts` | Cuts the pictures, icons and social picture into `public/generated/`                   |
+| `scripts/package-vercel.ts` | Packs the built site for Vercel in `.vercel/output/`, with its routes, and checks it   |
+| `public/`                   | `robots.txt` and `sitemap.xml`                                                         |
 
 `public/generated/`, `dist/` and `.vercel/` are built and stay out of git.
 
@@ -19,21 +22,32 @@ From the repository root, with Node 24 and pnpm 11:
 
 ```sh
 pnpm install
-pnpm dev:marketing       # the page with live reload, on http://localhost:5173
-pnpm build:marketing     # pictures, page and the Vercel package
-pnpm preview:marketing   # the built page, on http://localhost:4173
+pnpm dev:marketing       # the site with live reload, on http://localhost:5173
+pnpm build:marketing     # pictures, pages and the Vercel package
+pnpm preview:marketing   # the built site, on http://localhost:4173
 ```
 
-`pnpm build:marketing` fails when the page names a file that isn't in the package, or when the address, description, social picture, `robots.txt`, sitemap or privacy route is missing. `pnpm typecheck`, `pnpm lint`, `pnpm knip` and `pnpm fmt:check` cover this folder with the rest of the repository.
+`pnpm build:marketing` fails when a page names a file that isn't in the package, when the home or privacy page lacks its address, description or social picture, when the privacy page doesn't hold the whole policy, or when the sitemap misses a page. `scripts/package-vercel.ts` lists every check. `pnpm typecheck`, `pnpm lint`, `pnpm knip` and `pnpm fmt:check` cover this folder with the rest of the repository.
 
-`/privacy` redirects only on Vercel. Locally it answers the page.
+## Addresses
+
+Both local servers and Vercel answer the same addresses, with or without a query:
+
+| Address                                         | Answers                       |
+| ----------------------------------------------- | ----------------------------- |
+| `/`                                             | The home page                 |
+| `/privacy` and `/privacy/`                      | The privacy policy            |
+| A file, such as `/robots.txt` or `/sitemap.xml` | The file                      |
+| Any other address, and `/404.html`              | The 404 page, with status 404 |
+
+`vite.config.ts` answers them for `pnpm dev:marketing` and `pnpm preview:marketing`. `scripts/package-vercel.ts` writes them as routes in `.vercel/output/config.json` for Vercel. An address added to one goes in the other too.
 
 ## Change it
 
 - Keep the words true and few. Every claim on the page comes from the README or the docs. The app's limits are in [what plays](../../docs/user/playback.md).
 - True black, white text, minimal copy and no page animations. Screenshots describe the app; download buttons name the platforms.
 - New pictures come from new captures. Follow the [artwork recipe](../../docs/contributing/marketing-artwork.md). A phone shows a part of each window, set in `prepare-assets.ts`, with its size repeated in `index.html`.
-- The privacy policy stays in `docs/privacy.md`. The app and the Store listing link to `https://mrstreamer.app/privacy`, which this site redirects there.
+- The privacy policy has one source, `docs/privacy.md`. The build renders it into `https://mrstreamer.app/privacy`, where the app and the Store listing link. Edit the Markdown, never the page. A merge to `main` that changes it publishes the site again.
 
 ## Website analytics
 
@@ -117,8 +131,9 @@ npx --yes vercel@62.2.0 deploy --prebuilt --prod --cwd apps/marketing
 
 A project's first deployment is its production deployment. No domain is attached yet, so it is live only at the project's `vercel.app` address. Check there:
 
-- The page, on a wide screen and a phone.
-- `/privacy` and `/privacy/` both go to the privacy policy on GitHub.
+- The home page and `/privacy`, on a wide screen and a phone.
+- `/privacy` and `/privacy/` both show the whole policy.
+- An address with no page, such as `/nothing/here`, shows Page not found.
 - `/robots.txt`, `/sitemap.xml` and `/generated/social.png` answer.
 
 ### 6. Move the domain
@@ -137,8 +152,9 @@ Then check:
 ```sh
 curl -sI https://mrstreamer.app/ | head -1                         # 200
 curl -sI "https://www.mrstreamer.app/x?y=1" | grep -i location     # https://mrstreamer.app/x?y=1
-curl -sI https://mrstreamer.app/privacy | grep -i location         # the policy on GitHub
-curl -sI https://mrstreamer.app/privacy/ | grep -i location        # the same
+curl -sI https://mrstreamer.app/privacy | head -1                  # 200
+curl -sI https://mrstreamer.app/privacy/ | head -1                 # 200
+curl -sI "https://mrstreamer.app/nothing/here?y=1" | head -1       # 404
 ```
 
 Send a message to `hello@mrstreamer.app` and see it arrive. Open Settings > About in the app and follow its Website and Privacy links.
@@ -154,6 +170,7 @@ Watch that run publish. From then on, a merge to `main` that changes any of thes
 
 - `apps/marketing/`
 - `docs/assets/`
+- `docs/privacy.md`
 - `apps/desktop/assets/brand/mark.svg`
 - `package.json`, `pnpm-workspace.yaml` or `pnpm-lock.yaml`
 - either marketing workflow
@@ -181,7 +198,7 @@ When the token expires, make a new one and set `VERCEL_TOKEN` again. A run witho
 Not set up, and not tried. It replaces the workflow, so do both of these first:
 
 1. Set `MARKETING_DEPLOY_ENABLED` to `false`.
-2. Confirm on a preview deployment that `/privacy` still redirects.
+2. Confirm on a preview deployment that `/privacy` shows the policy and an address with no page answers 404.
 
 Only then connect the repository in the project's Settings > Git, and give the project these settings:
 

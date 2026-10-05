@@ -12,7 +12,7 @@ Settings > About shows:
 - Every component the installers ship, with its licence. The build fails when one has none (see [development](../contributing/development.md#third-party-notices)). That includes the MinGW-w64 runtime and winpthreads, which the Windows ffmpeg links in statically.
 - Chromium's credits, which hold Node.js's licence and those of the LGPL parts inside Chromium, and Electron's MIT licence. Every installer keeps `LICENSES.chromium.html` and `LICENSE.electron.txt`: beside the executable on Linux and Windows, in the app's Resources on macOS.
 - Source links: the commit the build comes from (`__BUILD_COMMIT__`), Chromium's source at its exact tag and Node.js's at its tag.
-- The privacy policy at `https://mrstreamer.app/privacy`, which redirects to `docs/privacy.md` on `main`. Keep that file where it is.
+- The privacy policy at `https://mrstreamer.app/privacy`, which the website builds from `docs/privacy.md` on `main`. Keep that file where it is.
 
 ## FFmpeg and x264 sources
 

@@ -34,8 +34,9 @@ apps/desktop         The app, package name mrstreamer
                      the website's demo subscription and captures
   test               Service suites, the fake provider, codec and title clips, packaged-app test,
                      measurements
-apps/marketing       The website, package name mrstreamer-marketing: one static page built by Vite
-                     from the app captures in docs/assets. Depends on nothing else in the workspace.
+apps/marketing       The website, package name mrstreamer-marketing: static pages built by Vite
+                     from the app captures in docs/assets and the privacy policy in
+                     docs/privacy.md. Depends on nothing else in the workspace.
 scripts              Release planning, the update feed and CI signing, run from the repository root
 test                 The release planning suite, and the website's publishing workflow
 ```

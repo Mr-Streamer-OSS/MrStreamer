@@ -28,6 +28,7 @@ on:
     paths:
       - apps/marketing/**
       - docs/assets/**
+      - docs/privacy.md
       - apps/desktop/assets/brand/mark.svg
       - package.json
       - pnpm-workspace.yaml
@@ -49,7 +50,7 @@ concurrency:
 
 env:
   MARKETING_INPUTS: >-
-    apps/marketing docs/assets apps/desktop/assets/brand/mark.svg package.json pnpm-workspace.yaml
+    apps/marketing docs/assets docs/privacy.md apps/desktop/assets/brand/mark.svg package.json pnpm-workspace.yaml
     pnpm-lock.yaml .github/workflows/marketing.yml .github/workflows/marketing-deploy.yml
 
 jobs:
