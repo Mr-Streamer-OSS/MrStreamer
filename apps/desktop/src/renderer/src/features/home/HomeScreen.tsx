@@ -4,7 +4,7 @@
 // opens the whole list in Live TV, Movies or Series.
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, Play, Volume2, VolumeX } from "lucide-react";
-import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import type { Listing } from "@mrstreamer/contracts/guide";
 import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
 import type { Title, TitleKind } from "@mrstreamer/contracts/ondemand";
@@ -20,7 +20,7 @@ import { appError, describeError } from "../../lib/errors.ts";
 import { categoryOf, channelLine, clockTime, progressOf, timeLeft } from "../../lib/format.ts";
 import { queries, useCategoryMap, useLastChannel } from "../../lib/queries.ts";
 import { useContinueWatching, useRemoveFromContinue, useResume } from "../../lib/titles.ts";
-import { useRem } from "../../lib/use-rem.ts";
+import { useFit } from "../../lib/use-fit.ts";
 import { Picture } from "../../player/Picture.tsx";
 import { player, usePlayer } from "../../player/player.ts";
 import { WINDOW_BAR } from "../../../../shared/window-bar.ts";
@@ -34,7 +34,6 @@ const NO_TITLES: readonly Title[] = [];
 /** Tile widths: channels and stills at 16:9, posters at 2:3. */
 const TILE_REM = 13;
 const POSTER_REM = 8.5;
-const GAP_REM = 1;
 
 /** Channels without those for adults, which show only in Live TV. */
 function ordinary(channels: readonly LiveChannel[] | undefined): readonly LiveChannel[] {
@@ -73,10 +72,7 @@ export function HomeScreen({ active }: { active: boolean }) {
   );
   const status = useQuery(queries.libraryStatus());
 
-  const [grid, width] = useWidth();
-  const rem = useRem();
-  const fit = (tileRem: number) =>
-    Math.max(1, Math.floor((width + GAP_REM * rem) / (tileRem * rem + GAP_REM * rem)));
+  const [grid, fit] = useFit();
   const columns = fit(TILE_REM);
   const posters = fit(POSTER_REM);
   const shown = {
@@ -233,22 +229,6 @@ export function HomeScreen({ active }: { active: boolean }) {
 function useNewest(kind: TitleKind, count: number): readonly Title[] {
   const page = useQuery(queries.collection(kind, "new-month", undefined, 0, Math.max(count, 1)));
   return page.data?.titles.slice(0, count) ?? NO_TITLES;
-}
-
-/** The width inside the sections' padding, measured on the element the returned ref is given. */
-function useWidth(): [ref: (element: HTMLDivElement | null) => void, width: number] {
-  const rem = useRem();
-  const [width, setWidth] = useState(0);
-  const observer = useRef<ResizeObserver | null>(null);
-  const ref = useCallback((element: HTMLDivElement | null) => {
-    observer.current?.disconnect();
-    observer.current = null;
-    if (!element) return;
-    observer.current = new ResizeObserver(() => setWidth(element.clientWidth));
-    observer.current.observe(element);
-  }, []);
-  // The sections' side padding is 2.5rem each.
-  return [ref, Math.max(0, width - 5 * rem)];
 }
 
 function Hero({
