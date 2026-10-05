@@ -98,6 +98,18 @@ let away = false;
  * page is elsewhere or out of sight (see `start`).
  */
 let listedFrom: { readonly window: BrowserWindow; readonly page: Rectangle } | null = null;
+/** How long to wait for a window on its way into full screen to say it arrived. */
+const FULL_SCREEN_MS = 2000;
+/**
+ * How long the system's list waits after the window arrived in full screen. As macOS finishes
+ * the change of Space it gives the window's app the front once more, and takes it from the helper
+ * when that has just opened the list, which then closes by itself. On one Mac that happened to
+ * lists opened up to 63 ms after `enter-full-screen` and to none from 65 ms on. The system names
+ * no event for it, so this is that time with room to spare.
+ */
+const FULL_SCREEN_SETTLE_MS = 250;
+/** When the window arrived in full screen, by `performance.now()`; null once it has left it. */
+let filledAt: number | null = null;
 /** The smallest the window gets, except as the mini player. */
 const MIN_SIZE = { minWidth: 960, minHeight: 600 } as const;
 /** Each window's mini player, which remembers where the window was. */
@@ -138,6 +150,31 @@ function onScreen(window: BrowserWindow): boolean {
     !window.isMinimized() &&
     !(isMac && app.isHidden())
   );
+}
+
+/**
+ * Resolves once `window` has settled in full screen, for one on its way there or just arrived,
+ * and at once for any other. A list opened before that loses the front to the window's app, and
+ * closes by itself (see `FULL_SCREEN_SETTLE_MS`). The way out of full screen takes no list down.
+ */
+async function settledInFullScreen(window: BrowserWindow): Promise<void> {
+  // On its way: the window says it is full screen from the start, and tells when it arrived.
+  if (filledAt === null && window.isFullScreen()) {
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, FULL_SCREEN_MS);
+      window.once("enter-full-screen", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
+  const settle = filledAt === null ? 0 : filledAt + FULL_SCREEN_SETTLE_MS - performance.now();
+  if (settle > 0) await new Promise((resolve) => setTimeout(resolve, settle));
+}
+
+/** Whether the window's page is at the same place and of the same size as it was. */
+function samePage(now: Rectangle, was: Rectangle): boolean {
+  return now.x === was.x && now.y === was.y && now.width === was.width && now.height === was.height;
 }
 
 /**
@@ -211,8 +248,14 @@ function openWindow(
   window.once("ready-to-show", () => window.show());
   // Full screen hides the traffic lights and the Windows controls; the top bar takes their room.
   const fullScreen = () => emit(window.webContents, "window.fullScreen", window.isFullScreen());
-  window.on("enter-full-screen", fullScreen);
-  window.on("leave-full-screen", fullScreen);
+  window.on("enter-full-screen", () => {
+    filledAt = performance.now();
+    fullScreen();
+  });
+  window.on("leave-full-screen", () => {
+    filledAt = null;
+    fullScreen();
+  });
   window.webContents.on("did-finish-load", fullScreen);
   window.on("close", (event) => {
     if (!keeps()) return;
@@ -225,6 +268,7 @@ function openWindow(
     if (mainWindow === window) {
       mainWindow = null;
       away = false;
+      filledAt = null;
     }
     // Nothing can be watching once the window is gone, so release the provider connection.
     closeStreams();
@@ -488,20 +532,27 @@ async function start(): Promise<void> {
       "output.status": () => output.status,
       "output.scan": ({ on }) => Effect.as(output.scan(on), null),
       "output.connect": ({ receiverId }) => output.connect(receiverId),
-      "output.pick": ({ anchor }) => {
-        const from = mainWindow && listPlace(mainWindow, anchor);
-        // No window on screen for the list to open from: nothing changes.
-        if (!mainWindow || !from) return output.status;
-        const mine = { window: mainWindow, page: from.page };
-        listedFrom = mine;
-        return output.pick(from.place).pipe(
-          Effect.ensuring(
-            Effect.sync(() => {
-              if (listedFrom === mine) listedFrom = null;
-            }),
-          ),
-        );
-      },
+      "output.pick": ({ anchor }) =>
+        Effect.gen(function* () {
+          const window = mainWindow;
+          const asked = window && listPlace(window, anchor);
+          if (window && asked) yield* Effect.promise(() => settledInFullScreen(window));
+          const from = mainWindow && listPlace(mainWindow, anchor);
+          // No window on screen for the list to open from, or one that went elsewhere while the
+          // list waited, which leaves the place asked for behind: nothing changes.
+          if (!mainWindow || !asked || !from || !samePage(from.page, asked.page)) {
+            return yield* output.status;
+          }
+          const mine = { window: mainWindow, page: from.page };
+          listedFrom = mine;
+          return yield* output.pick(from.place).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                if (listedFrom === mine) listedFrom = null;
+              }),
+            ),
+          );
+        }),
       "output.disconnect": () => Effect.as(output.disconnect, null),
       "output.playChannel": ({ channelId, variant, audio, audioLanguage, name }) =>
         Effect.gen(function* () {
@@ -611,16 +662,7 @@ async function start(): Promise<void> {
    */
   const followList = (window: BrowserWindow) => {
     if (listedFrom?.window !== window) return;
-    const { page } = listedFrom;
-    const now = onScreen(window) ? window.getContentBounds() : null;
-    if (
-      now?.x === page.x &&
-      now.y === page.y &&
-      now.width === page.width &&
-      now.height === page.height
-    ) {
-      return;
-    }
+    if (onScreen(window) && samePage(window.getContentBounds(), listedFrom.page)) return;
     listedFrom = null;
     void runtime.runFork(output.closePicker);
   };
