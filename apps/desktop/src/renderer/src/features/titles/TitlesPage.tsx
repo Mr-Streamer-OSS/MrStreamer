@@ -35,6 +35,7 @@ import {
   type ContinueEntry,
 } from "../../lib/titles.ts";
 import { useDebounced } from "../../lib/use-debounced.ts";
+import { useFit } from "../../lib/use-fit.ts";
 import { cn } from "../../lib/utils.ts";
 import { CollectionGrid, TitleGrid, useCollection } from "./CollectionGrid.tsx";
 
@@ -364,6 +365,9 @@ function Rows({
   const continuing = useContinueWatching();
   const play = useResume();
   const removal = useRemoveFromContinue();
+  const [box, fit] = useFit();
+  const stills = fit(STILL_REM);
+  const posters = fit(POSTER_REM);
   const mine = continuing.entries.filter((entry) => entry.title.kind === kind);
   // Titles like the one watched last, by the version that was watched.
   const last = mine[0]?.progress.title;
@@ -378,13 +382,13 @@ function Rows({
     featured &&
     mine.find((entry) => entry.title.versions.some((version) => version.id === featured.id));
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-10 pb-16">
+    <div ref={box} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-10 pb-16">
       {featured && <Featured title={featured} resume={resume ?? null} />}
       <div className="space-y-9">
         {tab === "for-you" && mine.length > 0 && (
           <div>
-            <Section title="Continue watching" tileRem={STILL_REM}>
-              {mine.map((entry) => (
+            <Section title="Continue watching" columns={stills}>
+              {mine.slice(0, stills).map((entry) => (
                 <StillTile
                   key={entry.key}
                   artworkUrl={entry.artworkUrl}
@@ -409,9 +413,9 @@ function Rows({
             title={row.name}
             count={row.total}
             onAll={() => onOpen(row.id)}
-            tileRem={POSTER_REM}
+            columns={posters}
           >
-            {row.titles.map((title) => (
+            {row.titles.slice(0, posters).map((title) => (
               <PosterTile
                 key={title.id}
                 title={title}
@@ -561,18 +565,19 @@ function CollectionTileButton({ tile, onOpen }: { tile: CollectionTile; onOpen: 
   );
 }
 
-/** A row: a heading with All, and as many tiles as fit across, in one line. */
+/** A row: a heading with All, over one line of tiles; the rest of the row is behind All. */
 function Section({
   title,
   count,
   onAll,
-  tileRem,
+  columns,
   children,
 }: {
   title: string;
   count?: number;
   onAll?: () => void;
-  tileRem: number;
+  /** How many tiles fit across. The row is given no more, so none wraps. */
+  columns: number;
   children: ReactNode;
 }) {
   return (
@@ -590,14 +595,9 @@ function Section({
           </button>
         )}
       </div>
-      {/* One line of tiles: the rest of the row is behind All. */}
       <div
-        className="grid gap-x-4 overflow-hidden"
-        style={{
-          gridTemplateColumns: `repeat(auto-fill, minmax(${tileRem}rem, 1fr))`,
-          gridTemplateRows: "auto",
-          gridAutoRows: "0px",
-        }}
+        className="grid gap-x-4"
+        style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
       >
         {children}
       </div>
