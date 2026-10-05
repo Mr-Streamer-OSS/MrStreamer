@@ -209,6 +209,41 @@ describe("Cast adapter", () => {
     expect(events).toEqual([]);
   });
 
+  it("starts the next connect only once a connect given up has stopped its app", async () => {
+    const { receiver, adapter } = await setup();
+    receiver.answers.launch = "ignore";
+    const giveUp = new AbortController();
+    const request = { kind: "receiver", id: receiver.receiver.id } as const;
+    const first = adapter.connect(request, giveUp.signal);
+    await expect.poll(() => receiver.requests("LAUNCH").length).toBe(1);
+    giveUp.abort();
+    await failure(first);
+
+    // Connected to again at once, while the TV still starts the app for the connect before.
+    receiver.answers.launch = "start";
+    const second = adapter.connect(request, never);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(receiver.requests("LAUNCH")).toHaveLength(1);
+
+    receiver.app = { sessionId: "late", transportId: "transport-late" };
+    receiver.send(
+      {
+        type: "RECEIVER_STATUS",
+        requestId: receiver.requests("LAUNCH")[0]?.requestId,
+        status: { applications: [{ appId: "CC1AD845", ...receiver.app }] },
+      },
+      { sourceId: "receiver-0", namespace: RECEIVER },
+    );
+
+    // The stop of the first one's app is not the end of the second one's.
+    const connection = await second;
+    const types = receiver.received.map((message) => message.payload.type);
+    expect(types.indexOf("STOP")).toBeLessThan(types.lastIndexOf("LAUNCH"));
+    expect(receiver.requests("STOP")).toMatchObject([{ sessionId: "late" }]);
+    expect(receiver.app).not.toBeNull();
+    await connection?.disconnect();
+  });
+
   it("loads a title at a position, held on its first picture", async () => {
     const { receiver, connection, events } = await connected();
     const title = "Amélie: Le Fabuleux Destin d'Amélie Poulain, version restaurée ".repeat(3);

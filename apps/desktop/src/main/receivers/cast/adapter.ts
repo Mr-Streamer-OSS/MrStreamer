@@ -21,6 +21,11 @@ export function castAdapter(options: CastOptions = {}): ReceiverAdapter {
   /** The connect under way: the next one, and closing, give it up. */
   let connecting = new AbortController();
   let session: Session | null = null;
+  /**
+   * A connect given up may still have its app to stop on the receiver. The next connect waits
+   * for that, at most as long as a launch takes, so the stop never reaches the app it starts.
+   */
+  let leaving: Promise<void> = Promise.resolve();
   let closed = false;
 
   const emit = (event: AdapterEvent) => {
@@ -47,11 +52,13 @@ export function castAdapter(options: CastOptions = {}): ReceiverAdapter {
       const mine = (connecting = new AbortController());
       // One receiver at a time: the one before is let go of first.
       await session?.disconnect();
+      await leaving;
       const opened = await openSession(
         endpoint,
         timings,
         emit,
         AbortSignal.any([signal, mine.signal]),
+        (stopped) => (leaving = stopped),
       );
       session = opened;
       if (closed) {

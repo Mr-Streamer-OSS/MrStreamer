@@ -76,7 +76,7 @@ export interface ScreenRect {
   readonly height: number;
 }
 
-export type ConnectRequest =
+type ConnectRequest =
   /** A receiver the adapter listed, by its id. */
   | { readonly kind: "receiver"; readonly id: string }
   /** The system's own list of receivers, opened at `anchor`. */

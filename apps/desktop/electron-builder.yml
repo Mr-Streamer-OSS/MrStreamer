@@ -42,6 +42,13 @@ mac:
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   artifactName: Mr-Streamer-${version}-mac-${arch}.${ext}
+  # The helper that plays on AirPlay receivers, built by scripts/build-airplay-helper.sh. It is
+  # signed with the app, and the app asks for the local network in its name.
+  extraResources:
+    - from: vendor/airplay/mac-${arch}
+      to: airplay
+  extendInfo:
+    NSLocalNetworkUsageDescription: Mr. Streamer plays on TVs and speakers on your network.
 # The window takes its size from the background, which `pnpm dmg:background` renders.
 dmg:
   title: Mr. Streamer

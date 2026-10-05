@@ -151,13 +151,15 @@ function stateOf(status: MediaStatus, shown: boolean): TransportState | "failed"
 /**
  * Connects to the receiver at `endpoint` and starts the media app on it. `emit` hears the
  * receiver's news from then on, none of it before this resolves. Rejects with `ReceiverFailed`,
- * also when `signal` aborts first, and leaves nothing connected.
+ * also when `signal` aborts first, and leaves nothing connected. A connect given up while the
+ * receiver starts the app still has that app to stop: `leaves` is handed the wait for it.
  */
 export async function openSession(
   endpoint: CastEndpoint,
   timings: CastTimings,
   emit: (event: AdapterEvent) => void,
   signal: AbortSignal,
+  leaves: (stopped: Promise<void>) => void = () => {},
 ): Promise<Session> {
   /** Aborts when the session ends, whichever way: it stops a reconnect that is under way. */
   const ended = new AbortController();
@@ -527,19 +529,21 @@ export async function openSession(
     closed = true;
     // The receiver may be starting the app still. It is stopped once the receiver names it, and
     // the channel stays just long enough to hear that.
-    void launching
-      .catch(() => {})
-      .then(() => {
-        const sessionId = started()?.sessionId;
-        if (sessionId) {
-          channel?.send(PLATFORM, NAMESPACE.receiver, {
-            type: "STOP",
-            sessionId,
-            requestId: nextRequest++,
-          });
-        }
-        end();
-      });
+    leaves(
+      launching
+        .catch(() => {})
+        .then(() => {
+          const sessionId = started()?.sessionId;
+          if (sessionId) {
+            channel?.send(PLATFORM, NAMESPACE.receiver, {
+              type: "STOP",
+              sessionId,
+              requestId: nextRequest++,
+            });
+          }
+          end();
+        }),
+    );
     throw error;
   }
 

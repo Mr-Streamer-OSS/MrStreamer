@@ -23,6 +23,8 @@ Genres, streaming services and popularity in Movies and Series come from TMDB. A
 
 Streams the player can't decode go through ffmpeg, and every movie and episode goes through ffprobe and ffmpeg (see [architecture](architecture.md#playback)). Development builds use the `ffmpeg` and `ffprobe` on your PATH (`brew install ffmpeg`, `apt install ffmpeg` or `winget install Gyan.FFmpeg`); packaged builds use their bundled copies.
 
+Playing on a TV uses Google Cast on Windows and AirPlay on macOS (see [architecture](architecture.md#receivers)). Cast needs nothing built. AirPlay needs the helper: `apps/desktop/scripts/build-airplay-helper.sh mac-arm64` on a Mac with Xcode's command line tools puts it in `apps/desktop/vendor/airplay`, where `pnpm dev` and `pnpm dist:mac` find it; without it a Mac build offers no output button. The ffmpeg on your PATH needs the `segment` muxer, which the usual builds have.
+
 Environment variables for testing:
 
 | Variable                    | Effect                                                                                                                                                           |
@@ -33,6 +35,8 @@ Environment variables for testing:
 | `MR_STREAMER_UPDATE_CHECKS` | `off` stops the automatic update checks; checking from Settings still works. The packaged-app test and the measurements set it.                                  |
 | `MR_STREAMER_TMDB_KEY`      | A TMDB key or read access token. At build time it's built into the app; at run time it replaces the built-in one. A key set in Settings still comes first.       |
 | `MR_STREAMER_TMDB_API`      | A TMDB-compatible API instead of `https://api.themoviedb.org/3`, such as the tests' fake.                                                                        |
+| `MR_STREAMER_CAST`          | `on` offers Google Cast on macOS and Linux too, where nobody has tried it.                                                                                       |
+| `MR_STREAMER_AIRPLAY_LOG`   | `1` prints what the AirPlay helper says to the terminal: the record of what a receiver did.                                                                      |
 
 ## Installers
 

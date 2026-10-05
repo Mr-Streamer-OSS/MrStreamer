@@ -68,7 +68,7 @@ function describeStreamFailure(failure: StreamFailure): string {
 }
 
 /** Why a receiver on the network doesn't play. */
-export function describeOutputFailure(failure: OutputFailure): string {
+function describeOutputFailure(failure: OutputFailure): string {
   switch (failure.kind) {
     case "unreachable":
       return "The receiver didn't answer.";

@@ -239,7 +239,7 @@ describe.skipIf(!hasTools)("playback on a receiver", () => {
     );
 
     // Played again, and the TV's connection breaks for good: gone, and never an end.
-    const second = await play(100);
+    await play(100);
     tv.status({ playerState: "PLAYING", currentTime: 101 });
     tv.refusing = true;
     tv.drop();

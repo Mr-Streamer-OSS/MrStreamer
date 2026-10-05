@@ -38,6 +38,32 @@ Providers keep movies and episodes as files, mostly MKV and MP4 and a few AVI. M
 
 A movie starts about a second after you choose it. Skipping into what's already loaded is instant; skipping further away starts it again from there, which takes about a second too. With subtitles on, the picture starts as soon as without them, and the subtitles already on screen at that moment follow as soon as Mr. Streamer has read them: "Subtitles loading" shows at the top right meanwhile.
 
+## Playing on a TV
+
+Mr. Streamer sends what you watch to a TV on your network: with AirPlay on macOS, and with Google Cast on Windows. The Linux builds play on the computer only. The TV fetches the stream from your computer, so the computer has to stay on and on the same network for as long as the TV plays. Mr. Streamer keeps it awake meanwhile.
+
+Press the TV button beside the volume, or **O**. On Windows, pick a Cast device from the list. On macOS the button opens Apple's own AirPlay list, where a TV may ask for a code the first time. What you watch plays on here until the TV answers, and **This computer** cancels.
+
+While the TV plays:
+
+- The controls in Mr. Streamer work the TV: pause, skipping, the scrubber, the next episode, channel up and down, and the volume where the TV lets an app set it. They show what the TV last confirmed. After a skip the scrubber stays where you put it, with a ring where the TV still is, until the TV catches up.
+- **Back** and **Escape** leave the player and the TV plays on. A bar at the foot of every page says what plays where, with Stop and **Play here**; clicking what plays opens its controls again.
+- **Stop** ends the stream and keeps the TV, so the next thing you play goes there too. **Disconnect** in the bar then lets the TV go.
+- **Play here** ends playback on the TV and carries on in Mr. Streamer from where the TV was, with the same sound and subtitles.
+- Home and Live TV show no preview, since your subscription's one connection is the TV's.
+- Closing the window on macOS leaves the TV playing, and the Dock icon brings its controls back. Quitting Mr. Streamer ends it.
+- How far you got in a movie or episode is saved as it is on your computer.
+
+| What you play                                              | What the TV gets                                    |
+| ---------------------------------------------------------- | --------------------------------------------------- |
+| H.264 video with AAC sound                                 | Sent as it is                                       |
+| Other video or sound, such as HEVC or Dolby Digital        | Converted to H.264 and stereo AAC on your computer  |
+| Text subtitles of a movie or episode                       | Shown by the TV                                     |
+| Subtitles stored as pictures, teletext and closed captions | Play on this computer only; the menu says Here only |
+| A channel's subtitles                                      | Play on this computer only                          |
+
+A movie or episode starts later on a TV than on your computer, and so does a skip to a part the TV hasn't loaded: your computer cuts the stream into pieces of a few seconds for it. For the same reason a channel plays some seconds behind what your computer would show.
+
 ## Known limits
 
 - Live subtitles show from their next line after you turn them on, and another sound track starts the channel again, except on HLS channels.
@@ -48,6 +74,9 @@ A movie starts about a second after you choose it. Skipping into what's already 
 - Converting an HEVC or Xvid picture uses much more of your computer's processor than playing it as it is.
 - A damaged broadcast can take more than ten seconds to start, while Mr. Streamer retries it with the picture re-encoded.
 - Interlaced channels that play directly, common in European HD broadcasts, aren't deinterlaced; fast motion can show fine horizontal lines.
+- On a TV, a movie or episode plays at normal speed, subtitle timing can't be shifted, and the mini player is off, since it has no picture to show. Video the TV could play itself, such as HEVC, is still converted on your computer.
+- The keyboard's media keys and your system's media controls work a TV only while Mr. Streamer's window is open.
+- Playing on a TV is new. If yours doesn't show up or doesn't play, please [report it](https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose) with its make and model.
 
 ## When something won't play
 
@@ -58,3 +87,4 @@ Mr. Streamer tells you why:
 - **Couldn't reconnect**: the stream stopped arriving and reconnecting didn't help, often a network problem.
 - **Can't play this channel** or **Can't play this title**: it uses a format Mr. Streamer can't play or convert. Please [report it](https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose) with its name and the details shown.
 - **Not available**: the provider has no file for that movie or episode right now; some providers list titles whose files are gone.
+- **… didn't answer**, **… connection lost**, **… got no stream** or **… can't play this**, with your TV's name: see [Playing on a TV](troubleshooting.md#playing-on-a-tv).

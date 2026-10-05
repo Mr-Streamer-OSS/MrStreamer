@@ -48,7 +48,7 @@ const CONVERT_CUT_S = 0.5;
 /** Where a title's first picture sits on a receiver's MPEG-TS clock, in seconds. */
 const TS_START_S = 10;
 /** Split times one run is given at most, which keeps its command line within every system's limit. */
-export const RUN_SEGMENTS = 1200;
+const RUN_SEGMENTS = 1200;
 
 /** Where the segments of a movie or episode start. */
 export interface SegmentPlan {
@@ -113,15 +113,8 @@ export function convertPlan(first: number, end: number): SegmentPlan | null {
 }
 
 /** How long segment `index` lasts, in seconds. */
-export function segmentLength(plan: SegmentPlan, index: number): number {
+function segmentLength(plan: SegmentPlan, index: number): number {
   return (plan.starts[index + 1] ?? plan.end) - plan.starts[index]!;
-}
-
-/** The segment that holds `position`, seconds from the file's first picture. */
-export function segmentAt(plan: SegmentPlan, position: number): number {
-  const time = plan.starts[0]! + position;
-  const after = plan.starts.findIndex((start) => start > time);
-  return after === -1 ? plan.starts.length - 1 : Math.max(0, after - 1);
 }
 
 /** How ffmpeg starts and cuts a run of a plan's segments. */

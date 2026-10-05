@@ -43,6 +43,17 @@ The Windows installer isn't code-signed yet, so SmartScreen shows "Windows prote
 - **Movies or Series stay empty:** the first load of a large list takes a few seconds. If the provider offers no movies or series, the pages say so. A failed refresh keeps the last lists; Settings > Subscription says why and refreshes them on their own.
 - **No genres or streaming services:** they come from TMDB, which takes about a quarter of an hour the first time on a large subscription. Settings > General shows how far it got beside TMDB, or that TMDB refused the key; **Own key…** takes your own. Titles your provider lists without a TMDB id never get them.
 
+## Playing on a TV
+
+- **No TV in the list on Windows:** the list shows Google Cast devices that answer on your network. The TV and your computer have to be on the same network, and guest and "isolated" Wi-Fi networks keep devices from seeing each other. A VPN on your computer hides the network from Mr. Streamer too.
+- **No TV in Apple's list on macOS:** the list is macOS's own, and Mr. Streamer can't see what is in it. Turn AirPlay on in the TV's settings and check that both are on the same network. If macOS asked whether Mr. Streamer may find devices on your local network and you declined, allow it in System Settings > Privacy & Security > Local Network.
+- **"… didn't answer":** the TV was found and didn't take the connection. Check that it's on, then **Try again**.
+- **"… got no stream":** the TV connected and never fetched the stream from your computer. On Windows the firewall is the usual cause: in Windows Security, open **Allow an app through firewall** and tick **Private** for Mr. Streamer. On any system, a VPN or a TV on another network does the same.
+- **"… can't play this":** the TV took the stream and couldn't play it. **Play here** carries on in Mr. Streamer. Please report it with the TV's make and model.
+- **"… connection lost":** the TV stopped answering, as when it is switched off or leaves the network. **Try again** connects again and carries on from where it stopped.
+- **"No local network":** your computer is offline or on a VPN only, so a TV can't reach it.
+- **The TV stops when the computer sleeps:** the stream comes from your computer. Mr. Streamer keeps it awake while a TV plays, and closing a laptop's lid still puts it to sleep.
+
 ## Updates
 
 - **"GitHub is limiting requests":** Mr. Streamer asked GitHub directly, because the update list it normally reads wasn't there, and GitHub allows only so many requests an hour from one network, shared by everyone on it. Mr. Streamer waits until GitHub allows requests again and tries by itself; nothing needs doing.

@@ -13,6 +13,7 @@ import { Button } from "../../components/ui/button.tsx";
 import { Tooltip } from "../../components/ui/tooltip.tsx";
 import { queries } from "../../lib/queries.ts";
 import { clock } from "../../lib/titles.ts";
+import { useLiveSession, useTitleSession } from "../../player/media-session.ts";
 import { outputs, receiverName, useOutput, where } from "../../player/output.ts";
 import { player, usePlayer } from "../../player/player.ts";
 import { titlePlayer, useTitlePlayer, type NowPlaying } from "../../player/title-player.ts";
@@ -112,6 +113,8 @@ function TitleOn({ now, receiver }: { now: NowPlaying; receiver: Receiver }) {
   const phase = useTitlePlayer((state) => state.phase);
   const position = useTitlePlayer((state) => state.position);
   const duration = useTitlePlayer((state) => state.duration);
+  // The system's media controls stay with the title while its view is closed.
+  useTitleSession();
   const state =
     phase.kind === "failed"
       ? phase.problem.kind === "receiver"
@@ -178,6 +181,8 @@ function ChannelOn({ channel, receiver }: { channel: LiveChannel; receiver: Rece
   const list = useUi((state) => state.list);
   const channels = useListChannels(list).channels;
   const programme = useQuery(queries.listings([channel.id])).data?.[channel.id]?.now?.title ?? null;
+  // The system's media controls stay with the channel while Watch is closed.
+  useLiveSession(channel);
   const state =
     phase.kind === "failed"
       ? phase.problem.kind === "receiver"

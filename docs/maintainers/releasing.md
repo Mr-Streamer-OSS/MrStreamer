@@ -17,7 +17,8 @@ Releases come from `.github/workflows/release.yml`, which plans them and runs `.
   - the [CI](../contributing/testing.md#ci) Check and Test jobs
   - `bundle` builds the JavaScript once, with the release version, and hands it to every platform as the `js-bundle-<version>` artifact
   - `package` builds each platform on its own runner, from the bundle:
-    - the bundled ffmpeg, cached until `apps/desktop/scripts/build-ffmpeg.sh` changes
+    - the bundled ffmpeg, cached until `apps/desktop/scripts/build-ffmpeg.sh` changes, and checked for the `segment` muxer that playing on a TV needs
+    - macOS only: the AirPlay helper (`apps/desktop/scripts/build-airplay-helper.sh`), which goes into the app's resources, is signed with it, and must say hello when run from the signed app
     - macOS arm64: the DMG, and the ZIP that in-app updates install. Signed with the Developer ID, notarized and stapled (`apps/desktop/scripts/notarize-dmg.ts`), then checked for signature, team, hardened runtime, Gatekeeper and both tickets. Missing secrets or a failed notarization fail the run.
     - Windows x64: the NSIS installer, unsigned; see [Windows signing](#windows-signing). Its plug-ins must be the ones the notices describe; see [licences](licences.md#windows-setup-program)
     - Linux x64: the AppImage and deb

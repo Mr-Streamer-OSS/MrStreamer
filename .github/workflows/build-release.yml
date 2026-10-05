@@ -138,6 +138,14 @@ jobs:
         if: steps.ffmpeg.outputs.cache-hit != 'true' && runner.os == 'Windows'
         shell: msys2 {0}
         run: scripts/build-ffmpeg.sh win-x64
+      - name: Check ffmpeg cuts segments for receivers
+        # A cached build from before the segment muxer would play on no TV.
+        run: |
+          muxers=$(vendor/ffmpeg/${{ matrix.target }}/ffmpeg -hide_banner -muxers)
+          grep -qw segment <<<"$muxers"
+      - name: Build the AirPlay helper
+        if: runner.os == 'macOS'
+        run: scripts/build-airplay-helper.sh mac-arm64
 
       - run: npm pkg set version="$VERSION"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -178,6 +186,14 @@ jobs:
           spctl --assess --type open --context context:primary-signature --verbose dist/*.dmg
           xcrun stapler validate "$app"
           xcrun stapler validate dist/*.dmg
+
+      - name: Check the AirPlay helper starts
+        if: runner.os == 'macOS'
+        # Signed and under the hardened runtime, as it ships. With nothing to read it says hello
+        # and exits.
+        run: |
+          said=$("dist/mac-arm64/Mr. Streamer.app/Contents/Resources/airplay/MrStreamerAirPlay" </dev/null)
+          grep -q '"type":"hello"' <<<"$said"
 
       # Windows installers are unsigned for now. Signing belongs here, as its own step with its
       # own secrets, without touching the Mac certificate; docs/maintainers/signing.md.

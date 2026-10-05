@@ -7,8 +7,10 @@
 // it shows a movie's PGS subtitles and its DVD subtitles, which the bundled ffmpeg sends beside the
 // picture, as stored and as DVB, for the app to draw, and starts it again inside a subtitle and
 // between two. Then it shows the movie's French subtitles, which are text, with a class on the
-// line that the app's own styles know, and skips past them. Last, it opens Chromium's and
-// Node.js's notices, which come from the credits page the installer must keep.
+// line that the app's own styles know, and skips past them. Then it asks what the build sends
+// playback to: AirPlay on macOS, which takes the helper the app comes with, Google Cast on
+// Windows, nothing on Linux. Last, it opens Chromium's and Node.js's notices, which come from
+// the credits page the installer must keep.
 //
 //   node test/e2e/packaged-app.ts <app executable> [-- extra app arguments]
 //
@@ -18,9 +20,9 @@
 // when left, both subtitle tracks draw over the picture while they are due, a subtitle that began
 // before the position a run starts from shows once it has loaded and one that ended before it
 // doesn't, the text subtitle shows its line in place of the pictures, whatever its class, and no
-// longer after a skip past it, and both notices have text. The app runs with a throwaway profile
-// and remote debugging on a random port; on macOS pass --use-mock-keychain so the test never
-// touches a real keychain.
+// longer after a skip past it, the build offers its system's receivers, and both notices have
+// text. The app runs with a throwaway profile and remote debugging on a random port; on macOS
+// pass --use-mock-keychain so the test never touches a real keychain.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -64,6 +66,9 @@ try {
   const subtitles = await pictureSubtitles(page);
   console.log(`${subtitles.ok ? "PASS" : "FAIL"} Subtitles draw: ${subtitles.detail}`);
   failed ||= !subtitles.ok;
+  const outputs = await receivers(page);
+  console.log(`${outputs.ok ? "PASS" : "FAIL"} Receivers this build plays on: ${outputs.detail}`);
+  failed ||= !outputs.ok;
   const notices = await creditsNotices(page);
   console.log(`${notices.ok ? "PASS" : "FAIL"} Chromium's credits open: ${notices.detail}`);
   failed ||= !notices.ok;
@@ -313,6 +318,20 @@ async function pictureSubtitles(page: Page): Promise<{ ok: boolean; detail: stri
       skipped === "",
     detail: `${english} pixels of PGS at 2.5 s, ${dutch} of DVD subtitles at 8.5 s, ${inside} of PGS in a run from 6.5 s, ${after} of DVD subtitles in a run from 7.5 s, "${french}" as text in a run from 6.5 s with ${pictures} pixels of pictures, "${skipped}" after a skip to 7.5 s`,
   };
+}
+
+/**
+ * What the build sends playback to, which on macOS takes the helper the app comes with, where the
+ * app looks for it. Whether that helper runs, the release workflow checks on the signed build.
+ */
+async function receivers(page: Page): Promise<{ ok: boolean; detail: string }> {
+  const expected =
+    process.platform === "darwin" ? ["airplay"] : process.platform === "win32" ? ["cast"] : [];
+  const status = await page.evaluate<{ value?: { offers: string[] } }>(
+    `window.mrStreamer.invoke("output.status")`,
+  );
+  const offers = status.value?.offers ?? [];
+  return { ok: offers.join() === expected.join(), detail: offers.join(", ") || "none" };
 }
 
 /**

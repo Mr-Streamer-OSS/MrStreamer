@@ -529,7 +529,7 @@ function toolPath(tool: "ffmpeg" | "ffprobe"): string | null {
  * The ways this build reaches receivers on the network. AirPlay on macOS, through the helper the
  * app comes with (see scripts/build-airplay-helper.sh), where it is there. Google Cast on Windows;
  * on other systems only when MR_STREAMER_CAST=on asks for it, since nobody has tried it there.
- * MR_STREAMER_CASTING_LAB=1 prints what the AirPlay helper says, which is the record of what a
+ * MR_STREAMER_AIRPLAY_LOG=1 prints what the AirPlay helper says, which is the record of what a
  * receiver did.
  */
 function receiverAdapters(): ReceiverAdapter[] {
@@ -542,7 +542,7 @@ function receiverAdapters(): ReceiverAdapter[] {
       adapters.push(
         airplayAdapter({
           helper,
-          ...(process.env["MR_STREAMER_CASTING_LAB"] === "1"
+          ...(process.env["MR_STREAMER_AIRPLAY_LOG"] === "1"
             ? { log: (line) => console.error(`[airplay] ${line}`) }
             : {}),
         }),
