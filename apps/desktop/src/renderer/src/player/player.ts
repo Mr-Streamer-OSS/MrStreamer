@@ -23,7 +23,9 @@
 // there: the main process opens it for the receiver, and the state here is what the receiver
 // confirmed. Nothing previews meanwhile, as a preview would take the provider's connection from
 // the receiver. A channel has no pause and no subtitles there; one the receiver itself holds
-// paused or buffering, as after Pause on the TV's remote, says so here.
+// paused or buffering, as after Pause on the TV's remote, says so here. What the receiver says is
+// shown as it says it, and only its word that the channel plays makes it one that started: a
+// receiver can hold a channel paused or buffering before it ever got its stream.
 import { createStore, useStore } from "zustand";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import type {
@@ -109,8 +111,8 @@ type PlayerPhase =
   | { readonly kind: "tuning"; readonly since: number }
   | { readonly kind: "playing"; readonly engine: EngineName }
   /**
-   * A receiver on the network started it. `state` is its last word on it: it plays, is paused
-   * there, as from the TV's remote, or waits for more of the stream.
+   * A receiver on the network has it. `state` is its last word on it: it plays, is paused there,
+   * as from the TV's remote, or waits for the stream, which it may do before it ever played.
    */
   | { readonly kind: "playing"; readonly engine: "receiver"; readonly state: ReceiverState }
   | { readonly kind: "reconnecting"; readonly attempt: number; readonly of: number }
@@ -170,8 +172,8 @@ export function usePlayer<T>(selector: (state: PlayerState) => T): T {
 }
 
 /**
- * What the receiver last said of the channel it started, for the views to say. Null while the
- * channel plays here, and until the receiver starts it.
+ * What the receiver last said of the channel it has, for the views to say. Null while the channel
+ * plays here, and until the receiver says more of it than that it loads.
  */
 export function receiverState(phase: PlayerState["phase"]): ReceiverState | null {
   return phase.kind === "playing" && phase.engine === "receiver" ? phase.state : null;
@@ -200,10 +202,10 @@ let shown: {
 /** The subtitles chosen last on this channel, which C turns on again. */
 let lastSubtitle: SubtitleTrack | null = null;
 /**
- * The selected channel is the receiver's: the load that plays there, null until it was taken, and
- * how often it was tried again.
+ * The selected channel is the receiver's: the load that plays there, null until it was taken, how
+ * often it was tried again, and whether the receiver said it plays.
  */
-let onReceiver: { load: number | null; attempt: number } | null = null;
+let onReceiver: { load: number | null; attempt: number; started: boolean } | null = null;
 /** The viewer asked for this computer, so the channel goes on here when the receiver is let go of. */
 let returning = false;
 
@@ -340,7 +342,7 @@ async function startOnReceiver(channel: LiveChannel, attempt: number): Promise<v
   quiet = false;
   if (attempt === 0) tune(channel);
   release();
-  onReceiver = { load: null, attempt };
+  onReceiver = { load: null, attempt, started: false };
   store.setState({
     channel,
     stopped: false,
@@ -385,27 +387,28 @@ async function startOnReceiver(channel: LiveChannel, attempt: number): Promise<v
 }
 
 /**
- * Takes the receiver's word on the channel it plays. Its first word past loading starts the
- * channel, also when that holds it paused; what it says from then on only changes the state.
+ * Takes the receiver's word on the channel it has. Its state shows from its first word past
+ * loading, whatever that is. Only its word that the channel plays starts it: paused or buffering
+ * before that says it is ready for the stream, not that the stream came.
  */
 function followReceiver(media: RemoteMedia): void {
   const { channel, phase } = store.getState();
   // A channel has no end: the main process says its stream stopped instead.
-  if (!channel || media.state === "ended") return;
-  const started = phase.kind === "playing";
-  if (!started && media.state === "loading") return;
+  if (!channel || !onReceiver || media.state === "ended") return;
+  if (phase.kind !== "playing" && media.state === "loading") return;
   if (receiverState(phase) !== media.state) {
     store.setState({ phase: { kind: "playing", engine: "receiver", state: media.state } });
   }
-  if (started) return;
+  if (onReceiver.started || media.state !== "playing") return;
+  onReceiver.started = true;
+  // A stream that played gets every reconnect attempt when it breaks later.
+  onReceiver.attempt = 0;
   const mine = selection;
   void loadStream(mine, media.sessionId);
   void loadTracks(mine, media.sessionId);
   void call("viewing.recordWatch", { commandId: crypto.randomUUID(), channelId: channel.id }).catch(
     () => {},
   );
-  // A stream that played gets every reconnect attempt when it breaks later.
-  if (onReceiver) onReceiver.attempt = 0;
 }
 
 /**
@@ -873,7 +876,7 @@ export const player = {
     if (onReceiver) return;
     selection++;
     tune(channel);
-    onReceiver = { load: media.generation, attempt: 0 };
+    onReceiver = { load: media.generation, attempt: 0, started: false };
     store.setState({ channel, stopped: false, phase: { kind: "tuning", since: media.at } });
     followReceiver(media);
   },

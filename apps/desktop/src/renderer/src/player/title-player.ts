@@ -18,7 +18,9 @@
 // opened and loaded through the main process, the controls here command the receiver, and the
 // position, the length and whether it plays are what the receiver last confirmed. The main process
 // saves how far it got. Connecting a receiver while a title plays here moves it there at its
-// position, with its tracks; going back to this computer brings it back the same way.
+// position, with its tracks; going back to this computer brings it back the same way. A receiver
+// that takes another's place, or is reached again after its connection broke, has nothing of the
+// title: it is opened and loaded there afresh, where it was, paused when it was.
 import { createStore, useStore } from "zustand";
 import type { Episode, SeriesDetails, TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { OutputStatus, RemoteMedia } from "@mrstreamer/contracts/output";
@@ -202,11 +204,16 @@ let countdownHeld = false;
 /** This play of the last episode has recorded that its series is finished. */
 let seriesFinished = false;
 /**
- * The open title is the receiver's: its session there, the load that plays (null while none
- * does), and the subtitle track that load carries.
+ * The open title is the receiver's: its session there (null until it is opened for that
+ * receiver), the load that plays (null while none does), the subtitle track that load carries, and
+ * whether it is held paused, which the phase stops saying while it loads and once it failed.
  */
-let receiver: { sessionId: string | null; load: number | null; subtitle: number | null } | null =
-  null;
+let receiver: {
+  sessionId: string | null;
+  load: number | null;
+  subtitle: number | null;
+  paused: boolean;
+} | null = null;
 /** What the receiver last confirmed of the load, which the position moves on from while it plays. */
 let confirmedMedia: RemoteMedia | null = null;
 let ticking: ReturnType<typeof setInterval> | null = null;
@@ -493,7 +500,7 @@ async function openOnReceiver(
   keep: { readonly audioId: number | null; readonly subtitle: SubtitleTrack | null } | null,
   paused = false,
 ): Promise<void> {
-  receiver = { sessionId: null, load: null, subtitle: null };
+  receiver = { sessionId: null, load: null, subtitle: null, paused };
   confirmedMedia = null;
   try {
     const [opened, preferences] = await Promise.all([
@@ -530,6 +537,8 @@ async function openOnReceiver(
     store.setState({ phase: { kind: "failed", problem: receiverProblem(cause) } });
     return;
   }
+  // One that played to its end stays there, open on this receiver for Play again.
+  if (store.getState().phase.kind === "ended") return;
   await loadOnReceiver(from, paused);
 }
 
@@ -542,6 +551,7 @@ async function loadOnReceiver(start: number, paused = false): Promise<void> {
   stopTicking();
   released = null;
   receiver.load = null;
+  receiver.paused = paused;
   confirmedMedia = null;
   store.setState({ phase: { kind: "starting" }, position: start, confirmed: null });
   try {
@@ -593,6 +603,7 @@ function follow(media: RemoteMedia): void {
       break;
     case "playing":
     case "paused":
+      if (receiver) receiver.paused = media.state === "paused";
       store.setState({
         ...next,
         phase: { kind: media.state },
@@ -643,12 +654,59 @@ function command(
 }
 
 /**
- * Moves the title that plays here to the receiver that just connected, at its position and with
- * its tracks: this computer's run and session end first.
+ * Stops following the receiver that had the title, which is gone or was let go of: its session
+ * and its load are no more, and what was still asked of it answers nobody. Whether the title was
+ * held paused stays, for whatever plays it next. Returns where it was: where the viewer skipped
+ * to, else the receiver's last word, moved on while it played.
  */
-function moveToReceiver(): void {
+function stopFollowing(): number {
+  const { position, confirmed } = store.getState();
+  const at =
+    confirmed === null && confirmedMedia?.state === "playing"
+      ? positionOf(confirmedMedia)
+      : position;
+  generation++;
+  stopTicking();
+  stopCountdown();
+  confirmedMedia = null;
+  released = null;
+  receiver = { sessionId: null, load: null, subtitle: null, paused: receiver?.paused ?? false };
+  return at;
+}
+
+/**
+ * The receiver that had the title makes way for another, or is reached again after its connection
+ * broke. Nothing plays the title until one answers: it waits where it was, as while it opens, and
+ * one that played to its end stays at its end.
+ */
+function awaitReceiver(): number {
+  const ended = store.getState().phase.kind === "ended";
+  const at = stopFollowing();
+  store.setState({
+    position: at,
+    confirmed: null,
+    ...(ended ? {} : { phase: { kind: "opening" } }),
+  });
+  return at;
+}
+
+/**
+ * Moves the title to the receiver that just connected, at its position and with its tracks. One
+ * that plays here ends its run and session first. One a receiver had already is opened and loaded
+ * afresh, as the receiver that answered has nothing of it: paused when it was, and only opened
+ * when it had played to its end. `media` is what that receiver plays as it connects.
+ */
+function moveToReceiver(media: RemoteMedia | null): void {
   const { now, position, audioId, subtitle } = store.getState();
-  if (!now || receiver) return;
+  if (!now) return;
+  if (receiver) {
+    // It plays the load the title follows, as one taken up before this word of it came: nothing
+    // took its place.
+    if (media && media.generation === receiver.load) return follow(media);
+    const { paused } = receiver;
+    const at = awaitReceiver();
+    return void openOnReceiver(++generation, now, at, { audioId, subtitle }, paused);
+  }
   const paused = pausedByViewer();
   save();
   const mine = ++generation;
@@ -675,7 +733,7 @@ async function moveHere(): Promise<void> {
   const { now, position, phase } = store.getState();
   if (!now || !receiver) return;
   const asked = returning;
-  const held = !asked || phase.kind === "paused" || phase.kind === "ended";
+  const held = !asked || receiver.paused || phase.kind === "ended";
   returning = false;
   receiver = null;
   confirmedMedia = null;
@@ -719,24 +777,27 @@ async function moveHere(): Promise<void> {
 function outputChanged(status: OutputStatus, before: OutputStatus): void {
   const { output } = status;
   if (!store.getState().now) return;
-  if (output.kind === "receiver" && before.output.kind !== "receiver") return moveToReceiver();
+  if (output.kind === "receiver" && before.output.kind !== "receiver") {
+    return moveToReceiver(output.media);
+  }
   if (!receiver) return;
   if (output.kind === "local") return void moveHere();
+  if (output.kind === "connecting") {
+    if (before.output.kind !== "connecting") awaitReceiver();
+    return;
+  }
   if (output.kind === "lost") {
-    stopTicking();
-    stopCountdown();
-    generation++;
-    receiver.load = null;
     store.setState({
+      position: stopFollowing(),
+      confirmed: null,
       phase: {
         kind: "failed",
         problem: { kind: "receiver", failure: output.failure, lost: true },
       },
-      confirmed: null,
     });
     return;
   }
-  if (output.kind !== "receiver" || receiver.load === null) return;
+  if (receiver.load === null) return;
   if (output.media?.generation === receiver.load) return follow(output.media);
   if (output.media) return;
   // The receiver holds the load no more: it failed there, or was stopped there.
@@ -759,6 +820,7 @@ function outputChanged(status: OutputStatus, before: OutputStatus): void {
     });
   } else if (store.getState().phase.kind !== "ended") {
     released = position;
+    receiver.paused = true;
     store.setState({ position, confirmed: null, phase: { kind: "paused" } });
   }
 }
@@ -910,11 +972,8 @@ export const titlePlayer = {
     const { now, phase, position, continued, audioId, subtitle } = store.getState();
     if (!now || phase.kind !== "failed") return;
     if (receiver) {
-      // A receiver that is gone has to be connected to again, which moves the title back to it.
-      if (phase.problem.kind === "receiver" && phase.problem.lost) {
-        receiver = null;
-        return outputs.reconnect();
-      }
+      // A receiver that is gone has to be connected to again, which loads the title there again.
+      if (phase.problem.kind === "receiver" && phase.problem.lost) return outputs.reconnect();
       // Opened afresh: what failed may have closed its session.
       store.setState({ phase: { kind: "opening" } });
       return void openOnReceiver(++generation, now, position, { audioId, subtitle });
@@ -965,7 +1024,7 @@ export const titlePlayer = {
       void call("preferences.update", { audioLanguage: track.language }).catch(() => {});
     }
     // Another sound track is another load on a receiver, from where it is.
-    if (receiver) return void loadOnReceiver(position, pausedByViewer());
+    if (receiver) return void loadOnReceiver(position, receiver.paused);
     save();
     void run(position, 0, pausedByViewer());
   },
@@ -983,7 +1042,7 @@ export const titlePlayer = {
       if (!track) command({ command: "subtitles", on: false });
       else if (receiver.load !== null && receiver.subtitle === track.id) {
         command({ command: "subtitles", on: true });
-      } else void loadOnReceiver(position, pausedByViewer());
+      } else void loadOnReceiver(position, receiver.paused);
       return;
     }
     if ((track && !SHOWN_SUBTITLES.has(track.format)) || !session) return;
@@ -1086,6 +1145,7 @@ export const titlePlayer = {
       sessionId: playing.sessionId,
       load: media.generation,
       subtitle: playing.subtitleId,
+      paused: false,
     };
     store.setState({
       ...idle,
