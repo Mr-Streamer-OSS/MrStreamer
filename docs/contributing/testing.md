@@ -152,7 +152,7 @@ sudo ip netns delete tv
 - the Dock brings the same window back, and there is one
 - a full-screen window leaves full screen as it goes out of sight
 - a TV that lets go with the window closed closes it, and nothing plays here
-- quitting with the window closed ends the TV's playback and the app, within 10 s
+- quitting with the window closed ends the TV's playback and the app, within 10 s, and nothing holds the provider's connection two seconds on
 
 ```sh
 node test/e2e/airplay-tv.ts node_modules/electron/dist/Electron.app/Contents/MacOS/Electron
