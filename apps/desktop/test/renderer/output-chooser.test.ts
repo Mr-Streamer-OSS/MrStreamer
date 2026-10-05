@@ -2,14 +2,16 @@
 // Where the system's list of receivers is asked to open: at the output button as the view shows
 // it at that moment. From the mini player, which has no such button, the window goes back first
 // and the list is asked for once it has, full screen again where it was. An O the viewer overtook
-// asks for none. Where no view shows the button, the list opens in the middle of the window,
-// never where it opened before.
+// asks for none, and neither does one whose view closed or whose account went, whatever is open
+// in its place by then. Where no view shows the button, the list opens in the middle of the
+// window, never where it opened before.
 import { fullScreen, ipc } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, createElement } from "react";
+import { act, createElement, type FunctionComponent } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
+import type { Title } from "@mrstreamer/contracts/ondemand";
 import type { Output, OutputStatus, Receiver } from "@mrstreamer/contracts/output";
 
 const airplay: Receiver = { id: "airplay", kind: "airplay", name: null };
@@ -34,6 +36,25 @@ const channel: LiveChannel = {
   variants: [{ id: "a", name: "NL | a", tags: [], quality: null }],
 };
 
+const movie: Title = {
+  kind: "movie",
+  id: "m1",
+  name: "Low Tide (EN)",
+  title: "Low Tide",
+  originalTitle: null,
+  originalLanguage: "en",
+  tags: ["EN"],
+  year: 2024,
+  posterUrl: null,
+  backdropUrl: null,
+  rating: null,
+  addedAt: null,
+  adult: false,
+  tmdbId: "1",
+  genres: [],
+  versions: [{ id: "m1", tags: ["EN"] }],
+};
+
 /** Where the output button is in the full window. happy-dom lays nothing out, so this says. */
 const BUTTON = { x: 1100, y: 720, width: 44, height: 44 };
 /** Where it is once the page fills the screen. */
@@ -45,13 +66,26 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 async function loaded() {
   const available = ipc.hold("window.miniPlayerAvailable");
   const { miniPlayer } = await import("../../src/renderer/src/app/mini-player.ts");
-  const { closeWatch, openWatch } = await import("../../src/renderer/src/app/ui-store.ts");
+  const ui = await import("../../src/renderer/src/app/ui-store.ts");
+  const { TitleWatch } = await import("../../src/renderer/src/features/titles/TitleWatch.tsx");
   const { WatchScreen } = await import("../../src/renderer/src/features/watch/WatchScreen.tsx");
+  const { movieNow, playTitle } = await import("../../src/renderer/src/lib/titles.ts");
   const { outputs } = await import("../../src/renderer/src/player/output.ts");
   const { player } = await import("../../src/renderer/src/player/player.ts");
+  const { titlePlayer } = await import("../../src/renderer/src/player/title-player.ts");
   available.resolve(true);
   await settle();
-  return { miniPlayer, closeWatch, openWatch, WatchScreen, outputs, player };
+  return {
+    ...ui,
+    miniPlayer,
+    TitleWatch,
+    WatchScreen,
+    movieNow,
+    playTitle,
+    outputs,
+    player,
+    titlePlayer,
+  };
 }
 
 let app: Awaited<ReturnType<typeof loaded>>;
@@ -61,23 +95,37 @@ let unmount = () => {};
 /** The places the system's list was asked to open at so far. */
 const asked = () => ipc.argsOf("output.pick");
 
-/** Watch on channel `a`, which plays here, as the window shows it. */
-async function watching(): Promise<void> {
+/** Shows `view` as the window does once `open` asked for it. */
+async function show(view: FunctionComponent, open: () => void): Promise<void> {
   const root = createRoot(container);
   unmount = () => act(() => root.unmount());
   await act(async () => {
-    app.openWatch();
-    app.player.play(channel);
+    open();
     root.render(
-      createElement(
-        QueryClientProvider,
-        { client: new QueryClient() },
-        createElement(app.WatchScreen),
-      ),
+      createElement(QueryClientProvider, { client: new QueryClient() }, createElement(view)),
     );
     await settle();
   });
 }
+
+/** Watch on channel `a`, which plays here, as the window shows it. */
+const watching = () =>
+  show(app.WatchScreen, () => {
+    app.openWatch();
+    app.player.play(channel);
+  });
+
+/** The two views with an output button: how the window comes to show each, and how it is left. */
+const views = {
+  Watch: { show: watching, leave: () => app.closeWatch() },
+  "a title": {
+    show: () => show(app.TitleWatch, () => app.playTitle(app.movieNow(movie, null), 0)),
+    leave: () => {
+      app.titlePlayer.close();
+      app.useUi.setState({ playingTitle: false });
+    },
+  },
+};
 
 const key = (name: string) =>
   act(async () => {
@@ -130,6 +178,7 @@ afterEach(async () => {
   unmount = () => {};
   await act(async () => {
     app.closeWatch();
+    views["a title"].leave();
     app.player.reset();
     await settle();
   });
@@ -259,6 +308,44 @@ describe("the system's list of receivers", () => {
     await act(async () => app.closeWatch());
     await after(() => back.resolve(null));
     expect(asked()).toEqual([]);
+  });
+
+  it.each(["Watch", "a title"] as const)(
+    "opens nothing in a view opened in place of the one that asked, until its own O: %s",
+    async (view) => {
+      await views[view].show();
+      await shrunk();
+
+      const back = ipc.hold("window.setMiniPlayer");
+      await key("o");
+      // The viewer leaves the view and opens it again before the window is back.
+      await unmount();
+      await act(async () => views[view].leave());
+      await views[view].show();
+      await after(() => back.resolve(null));
+      expect(asked()).toEqual([]);
+
+      await key("o");
+      expect(asked()).toEqual([{ anchor: BUTTON }]);
+    },
+  );
+
+  it("opens nothing once the account changed, with Watch open again by then, until the next O", async () => {
+    await watching();
+    await shrunk();
+
+    const back = ipc.hold("window.setMiniPlayer");
+    await key("o");
+    // Another account, and Watch again before the page drew anything: the view never left it.
+    await act(async () => {
+      app.resetForAccount();
+      app.openWatch();
+    });
+    await after(() => back.resolve(null));
+    expect(asked()).toEqual([]);
+
+    await key("o");
+    expect(asked()).toEqual([{ anchor: BUTTON }]);
   });
 
   it("opens all the same when the main process could not put the window back, and for the next O", async () => {

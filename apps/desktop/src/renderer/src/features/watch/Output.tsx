@@ -11,6 +11,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { OutputFailure, Receiver } from "@mrstreamer/contracts/output";
 import { miniPlayer } from "../../app/mini-player.ts";
 import { isMac } from "../../app/platform.ts";
+import { useUi } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { Tooltip } from "../../components/ui/tooltip.tsx";
 import { outputs, receiverName, useOutput, where } from "../../player/output.ts";
@@ -36,11 +37,15 @@ export function playHere(): void {
  * O: opens the chooser, over the full window's controls. The mini player has none, so the window
  * goes back first, and the chooser opens once it has, full screen again where it was. An O the
  * viewer overtook opens nothing: with the mini player asked for again, or the view closed, no
- * controls are left to open over. Where the app lists receivers itself, `showList` opens that
- * list; where only the system knows them, its list opens at the output button.
+ * controls are left to open over. `view` ends with the view that took the O, so one that opened
+ * in its place meanwhile, or under another account, gets no chooser it never asked for. Where the
+ * app lists receivers itself, `showList` opens that list; where only the system knows them, its
+ * list opens at the output button.
  */
-export async function openChooser(showList: () => void): Promise<void> {
+export async function openChooser(showList: () => void, view: AbortSignal): Promise<void> {
+  const { account } = useUi.getState();
   if (!(await miniPlayer.leave())) return;
+  if (view.aborted || account !== useUi.getState().account) return;
   const { offers } = outputs.status();
   if (offers.length === 0) return;
   if (offers.includes("cast")) return showList();

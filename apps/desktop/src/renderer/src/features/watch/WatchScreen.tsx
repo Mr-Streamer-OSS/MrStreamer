@@ -151,6 +151,8 @@ export function WatchScreen() {
     menu,
   };
   useEffect(() => {
+    // Ends with this view, and with it an O that still waits for the window.
+    const view = new AbortController();
     function onKey(event: KeyboardEvent) {
       const ui = useUi.getState();
       if (event.defaultPrevented || isTyping(event) || hasModifier(event) || event.isComposing)
@@ -239,7 +241,7 @@ export function WatchScreen() {
         case "o":
         case "O":
           wake();
-          void openChooser(() => setMenu("output"));
+          void openChooser(() => setMenu("output"), view.signal);
           break;
         case "m":
           if (!player.toggleMute()) flash("TV remote sets volume");
@@ -278,7 +280,10 @@ export function WatchScreen() {
     }
     // Before tooltips and popovers see the key: a tooltip on screen would keep Escape to itself.
     window.addEventListener("keydown", onKey, { capture: true });
-    return () => window.removeEventListener("keydown", onKey, { capture: true });
+    return () => {
+      view.abort();
+      window.removeEventListener("keydown", onKey, { capture: true });
+    };
   }, []);
 
   if (!channel) return null;
