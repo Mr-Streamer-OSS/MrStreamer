@@ -3,6 +3,11 @@
 // account changes. Browsing and playback never wait for it: lookups answer empty until a guide
 // has loaded.
 //
+// A subscription can answer that it has no guide, as a playlist does whose first line names none.
+// That is an answer like any other: a guide loaded before is dropped, the status says so, and the
+// service doesn't ask again on its own until the app starts again. Only a refresh the viewer asks
+// for does. Until a subscription has answered, whether it has a guide is unknown.
+//
 // The app supplies three ports: the subscription and its download, the catalogue's guide ids, and
 // a store for the document as it arrived. Downloads run in the service's scope, so `clear` and
 // shutdown stop them, and a load or download that finishes after a `clear` changes nothing.
@@ -18,6 +23,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import { diagnosed } from "../diagnostics.ts";
 import { Failed, failedWith } from "../failure.ts";
+import type { LiveGuide } from "../provider.ts";
 import {
   channelsCovered,
   indexProgrammes,
@@ -37,7 +43,8 @@ const CHECK_EVERY = "15 minutes";
 export interface GuideSubscription {
   /** Changes when the account does. */
   readonly key: string;
-  download(signal: AbortSignal): Promise<ReadableStream<Uint8Array>>;
+  /** Asks the subscription for its guide now: the document, or that it has none. */
+  download(signal: AbortSignal): Promise<LiveGuide>;
 }
 
 /** Which subscription is connected. */
@@ -86,15 +93,25 @@ export class Guide extends Context.Service<
     schedule(channelId: string): Effect.Effect<readonly Programme[]>;
     /** Programmes on now or later whose title matches, on now first. */
     search(query: string): Effect.Effect<readonly ProgrammeMatch[]>;
-    /** How many channels the loaded guide covers, and when it was downloaded. */
+    /**
+     * How many channels the loaded guide covers and when it was downloaded, or that the
+     * subscription has none.
+     */
     readonly status: Effect.Effect<GuideStatus>;
-    /** Downloads the guide. Concurrent calls share a download; a failure keeps the guide. */
+    /**
+     * Asks the subscription for its guide and downloads it. Concurrent calls share a download; a
+     * failure keeps the guide. A subscription that answers it has none succeeds, and a guide
+     * loaded before goes.
+     */
     readonly refresh: Effect.Effect<void, Failed>;
-    /** Downloads the guide when there is none or it is six hours old. */
+    /**
+     * Downloads the guide when there is none or it is six hours old. A subscription that
+     * answered it has none isn't asked again.
+     */
     readonly refreshIfStale: Effect.Effect<void, Failed>;
     /** Forgets the guide and stops a download, for when the account changes or goes. */
     readonly clear: Effect.Effect<void>;
-    /** Emits whenever a new guide is loaded. */
+    /** Emits whenever a new guide is loaded, or the one loaded is dropped. */
     readonly changes: Stream.Stream<void>;
   }
 >()("mrstreamer/Guide") {
@@ -111,7 +128,12 @@ function make() {
     const loadOne = yield* Semaphore.make(1);
 
     let loaded: Loaded | null = null;
-    /** Rises on every `clear`, so work that started before it doesn't apply its result. */
+    /** The subscription that answered it has no guide, by key, until it answers otherwise. */
+    let absent: string | null = null;
+    /**
+     * Rises whenever the guide is dropped, by `clear` or by a subscription that has none any
+     * more, so work that started before it doesn't apply its result.
+     */
     let generation = 0;
     /** The fiber of each download, for its own cleanup to recognise it. */
     const fiberOf = new WeakMap<object, Fiber.Fiber<void, Failed>>();
@@ -123,7 +145,8 @@ function make() {
     /** The guide of the current subscription: from memory, or read from the store once. */
     const current = Effect.gen(function* () {
       const subscription = yield* source.current;
-      if (!subscription) return null;
+      // Nothing is kept for a subscription without a guide, so there is nothing to read.
+      if (!subscription || absent === subscription.key) return null;
       if (loaded?.key === subscription.key) return loaded;
       return yield* loadOne.withPermits(1)(readStored(subscription.key));
     });
@@ -158,27 +181,48 @@ function make() {
         return loaded;
       });
 
-    /** Downloads, saving as it arrives; the new guide replaces the old only once complete. */
+    /**
+     * Asks for the guide and downloads it, saving as it arrives; the new guide replaces the old
+     * only once complete. A subscription that has none leaves none behind, in memory or on disk.
+     */
     const download = (subscription: GuideSubscription) =>
       Effect.gen(function* () {
         const started = generation;
         const fetchedAt = yield* Clock.currentTimeMillis;
+        // Asking and reading share one signal, so stopping the download stops either.
         const index = yield* Effect.acquireUseRelease(
           store.save(subscription.key, fetchedAt),
           (draft) =>
             Effect.tryPromise({
-              try: async (signal) =>
-                indexProgrammes(saving(await subscription.download(signal), draft), fetchedAt),
+              try: async (signal) => {
+                const guide = await subscription.download(signal);
+                return guide.kind === "none"
+                  ? null
+                  : indexProgrammes(saving(guide.body, draft), fetchedAt);
+              },
               catch: failedWith,
             }),
           (draft, exit) =>
             Effect.promise(async () => {
-              const keep = Exit.isSuccess(exit) && generation === started;
+              const keep = Exit.isSuccess(exit) && exit.value !== null && generation === started;
               await (keep ? draft.commit() : draft.discard());
             }),
         );
         const now = yield* source.current;
         if (generation !== started || now?.key !== subscription.key) return;
+        if (index === null) {
+          const known = absent === subscription.key;
+          absent = subscription.key;
+          // Asked again and still none: nothing changed, so nothing is told.
+          if (known) return;
+          // A guide loaded or being read from disk is the one the subscription had before.
+          generation++;
+          loaded = null;
+          yield* store.clear;
+          yield* PubSub.publish(updates, undefined);
+          return;
+        }
+        absent = null;
         loaded = { key: subscription.key, fetchedAt, ...index };
         yield* PubSub.publish(updates, undefined);
       }).pipe(diagnosed("guide"));
@@ -207,6 +251,9 @@ function make() {
     });
 
     const refreshIfStale = Effect.gen(function* () {
+      const subscription = yield* source.current;
+      // Known to have none: asking again every check would only read the playlist over and over.
+      if (subscription && absent === subscription.key) return;
       const guide = yield* current;
       const now = yield* Clock.currentTimeMillis;
       if (guide && now - guide.fetchedAt < MAX_AGE_MS) return;
@@ -256,19 +303,22 @@ function make() {
           ),
         ),
       status: Effect.gen(function* () {
+        const subscription = yield* source.current;
+        if (subscription && absent === subscription.key) return statusOf(null, 0, "none");
         const found = yield* context;
-        return found
-          ? {
-              channels: channelsCovered(found.guide, found.channels),
-              fetchedAt: found.guide.fetchedAt,
-            }
-          : { channels: 0, fetchedAt: (yield* current)?.fetchedAt ?? null };
+        if (found) {
+          return statusOf(found.guide, channelsCovered(found.guide, found.channels), "available");
+        }
+        // Loaded, but the catalogue it is counted against isn't.
+        const guide = yield* current;
+        return statusOf(guide, 0, guide ? "available" : "unknown");
       }),
       refresh,
       refreshIfStale,
       clear: Effect.gen(function* () {
         generation++;
         loaded = null;
+        absent = null;
         const running = downloading;
         downloading = null;
         if (running) yield* Fiber.interrupt(running.fiber);
@@ -277,6 +327,14 @@ function make() {
       changes: Stream.fromPubSub(updates),
     };
   });
+}
+
+function statusOf(
+  guide: Loaded | null,
+  channels: number,
+  availability: GuideStatus["availability"],
+): GuideStatus {
+  return { channels, fetchedAt: guide?.fetchedAt ?? null, availability };
 }
 
 /** Passes the download on while saving it, as it came, to `draft`. */

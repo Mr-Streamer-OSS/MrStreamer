@@ -20,10 +20,19 @@ export interface ProgrammeMatch {
   readonly programme: Programme;
 }
 
+/**
+ * Whether the subscription has a programme guide. `unknown`: it hasn't answered yet, as before
+ * the first download or when asking failed. `available`: a guide of it is loaded. `none`: it
+ * answered that it has none, as a playlist does whose first line names no guide.
+ */
+export type GuideAvailability = "unknown" | "available" | "none";
+
 /** The guide as Settings shows it: how many channels it covers, and since when. */
 export interface GuideStatus {
   /** Channels of the catalogue with programmes in the guide. */
   readonly channels: number;
-  /** Epoch milliseconds of the download, or null before one. */
+  /** Epoch milliseconds of the download, or null before one, or without a guide. */
   readonly fetchedAt: number | null;
+  /** Where the guide comes from stays in the main process: this says only whether there is one. */
+  readonly availability: GuideAvailability;
 }

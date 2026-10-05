@@ -40,7 +40,7 @@ export function App() {
       <p className="p-10 text-sm text-destructive">{describeError(appError(subscription.error))}</p>
     );
   }
-  if (!subscription.data || subscription.data.needsPassword || editingLogin) {
+  if (!subscription.data || subscription.data.needsSecret || editingLogin) {
     return <ConnectScreen existing={subscription.data} />;
   }
   return <Shell liveOnly={subscription.data.kind === "m3u"} />;

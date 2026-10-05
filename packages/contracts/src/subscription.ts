@@ -1,4 +1,5 @@
-// Subscription types shared by the main process and the UI. The password never leaves the main process.
+// Subscription types shared by the main process and the UI. The password never leaves the main
+// process, nor does a playlist's link: the UI sees only its origin.
 
 export type AccountState = "active" | "expired" | "banned" | "disabled" | "unknown";
 
@@ -25,9 +26,9 @@ export interface SubscriptionSummary {
   readonly username: string;
   readonly account: AccountStatus;
   /**
-   * True when the saved password, or a playlist's link, can no longer be read, for example after
-   * the keychain denied access. The subscription stays, but nothing plays until the user enters
-   * it again.
+   * True when the saved secret can no longer be read, for example after the keychain denied
+   * access: the password, or for a playlist its whole link. The subscription stays, but nothing
+   * plays until the user enters it again. `kind` says which to ask for.
    */
-  readonly needsPassword: boolean;
+  readonly needsSecret: boolean;
 }

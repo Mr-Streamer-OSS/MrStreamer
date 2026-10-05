@@ -3,6 +3,7 @@
 import Hls from "hls.js";
 import mpegts from "mpegts.js";
 import type { StreamFormat } from "@mrstreamer/contracts/playback";
+import { hlsTracks, type EngineTracks, type SoundChoice } from "./hls-tracks.ts";
 
 /** The picture may run this far behind the newest data before it jumps forward. */
 const LIVE_MAX_LATENCY_S = 8;
@@ -57,14 +58,30 @@ export interface Engine {
    * travel, with its time on the element's clock in seconds. Only MPEG-TS streams have them.
    */
   onPrivateData(listener: (pid: number, data: Uint8Array, at: number) => void): void;
+  /**
+   * The stream's sound and subtitle tracks, where the engine reads and switches them itself: an
+   * HLS stream declares them in playlists only its player sees whole. Null otherwise: the main
+   * process reads an MPEG-TS channel's tracks from its program table, and Chromium's own player
+   * offers none to choose from, so a stream it plays shows no Sound or CC.
+   */
+  readonly tracks: EngineTracks | null;
   info(): StreamInfo;
   /** Stops playback, closes the connection and frees the video element. */
   destroy(): void;
 }
 
-export function createEngine(format: StreamFormat, video: HTMLVideoElement, url: string): Engine {
+/**
+ * An engine for a stream in `format`. `sound` is the sound to start with where the engine picks
+ * it: the main process picked it already for the streams it reads.
+ */
+export function createEngine(
+  format: StreamFormat,
+  video: HTMLVideoElement,
+  url: string,
+  sound: SoundChoice,
+): Engine {
   if (format === "mpegts") return mpegtsEngine(video, url);
-  if (Hls.isSupported()) return hlsEngine(video, url);
+  if (Hls.isSupported()) return hlsEngine(video, url, sound);
   return nativeEngine(video, url);
 }
 
@@ -121,6 +138,7 @@ function mpegtsEngine(video: HTMLVideoElement, url: string): Engine {
     onPrivateData(listener) {
       privateData = listener;
     },
+    tracks: null,
     info() {
       // createPlayer returns the base Player type; for MSE playback mediaInfo carries codec details.
       const media: mpegts.MSEPlayerMediaInfo = player.mediaInfo;
@@ -148,15 +166,15 @@ function mpegtsError(type: unknown, detail: unknown, info: unknown): EngineError
   return { kind: "media", detail: message };
 }
 
-function hlsEngine(video: HTMLVideoElement, url: string): Engine {
-  // Watch offers no subtitles for HLS, so none show on their own: hls.js would turn on a
-  // stream's default subtitles and its captions, with no way to turn them off.
-  const hls = new Hls({ enableWorker: true, enableCEA708Captions: false });
-  hls.subtitleDisplay = false;
-  hls.on(Hls.Events.SUBTITLE_TRACK_SWITCH, (_event, data) => {
-    if (data.id !== -1) hls.subtitleTrack = -1;
+function hlsEngine(video: HTMLVideoElement, url: string, sound: SoundChoice): Engine {
+  // hls.js puts no subtitles on the element by itself: their lines go to the player as events,
+  // only for the track the viewer chose (see ./hls-tracks.ts).
+  const hls = new Hls({ enableWorker: true, renderTextTracksNatively: false });
+  const tracks = hlsTracks(hls, video, sound);
+  const life = lifecycle(video, () => {
+    tracks.release();
+    hls.destroy();
   });
-  const life = lifecycle(video, () => hls.destroy());
   hls.on(Hls.Events.ERROR, (_event, data) => {
     if (!data.fatal) return;
     if (data.type === Hls.ErrorTypes.NETWORK_ERROR)
@@ -174,6 +192,7 @@ function hlsEngine(video: HTMLVideoElement, url: string): Engine {
     name: "hls.js",
     ...life.handle,
     onPrivateData: () => {},
+    tracks: tracks.handle,
     info() {
       const level = hls.levels[hls.currentLevel];
       return {
@@ -196,6 +215,7 @@ export function nativeEngine(video: HTMLVideoElement, url: string): Engine {
     name: "native",
     ...life.handle,
     onPrivateData: () => {},
+    tracks: null,
     info: () => elementInfo(video),
   };
 }
@@ -203,7 +223,13 @@ export function nativeEngine(video: HTMLVideoElement, url: string): Engine {
 function failedEngine(name: EngineName, video: HTMLVideoElement, error: EngineError): Engine {
   const life = lifecycle(video, () => {});
   life.fail(error);
-  return { name, ...life.handle, onPrivateData: () => {}, info: () => elementInfo(video) };
+  return {
+    name,
+    ...life.handle,
+    onPrivateData: () => {},
+    tracks: null,
+    info: () => elementInfo(video),
+  };
 }
 
 /**

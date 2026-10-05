@@ -4,7 +4,7 @@
 
 Mr. Streamer plays live channels your provider delivers as MPEG-TS, the format most Xtream Codes providers use, and radio channels that send plain MP3 or AAC audio.
 
-An M3U playlist lists most channels as HLS, addresses ending in `.m3u8`. Those play as they arrive, without converting: H.264 video with AAC or MP3 sound everywhere, and HEVC on macOS. They play their default sound and show no subtitles. Mr. Streamer leaves out playlist entries it can't play at all: DASH (`.mpd`) and addresses that don't start with `http` or `https`, such as `rtmp`.
+An M3U playlist lists most channels as HLS, addresses ending in `.m3u8`. Those play as they arrive, without converting: H.264 video with AAC or MP3 sound everywhere, and HEVC on macOS. Where a stream offers several sound tracks, subtitles or closed captions, **Sound** and **CC** list them as on any channel, and another sound track plays without the channel starting again. Mr. Streamer leaves out playlist entries it can't play at all: DASH (`.mpd`) and addresses that don't start with `http` or `https`, such as `rtmp`.
 
 Most channels play directly. For the rest, Mr. Streamer converts only what the player can't handle, on your computer, while you watch:
 
@@ -40,7 +40,8 @@ A movie starts about a second after you choose it. Skipping into what's already 
 
 ## Known limits
 
-- Live subtitles show from their next line after you turn them on, and another sound track starts the channel again.
+- Live subtitles show from their next line after you turn them on, and another sound track starts the channel again, except on HLS channels.
+- An HLS channel shows the subtitles its stream lists and the closed captions in its picture. DVB subtitles and teletext inside an HLS stream don't show.
 - Surround sound that needs converting plays as stereo.
 - After you skip in a movie or episode, the subtitle already on screen at that moment can't always be had: Mr. Streamer reads only a little of the file for it, and only while the picture can spare the connection. That works for MKV files when the subtitle began shortly before, and for MP4 files with text subtitles; a line that began long before, a slow connection, and other kinds of files leave it out. "Subtitles unavailable" then shows for a few seconds, the movie plays on, and the subtitles are back from the next line.
 - Closed captions come from the CEA-608 data most broadcasts carry. A channel or file that sends captions only in the newer CEA-708 form shows none.

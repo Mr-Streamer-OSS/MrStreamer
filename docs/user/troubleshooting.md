@@ -11,13 +11,15 @@ Mr. Streamer keeps everything on your computer, in one folder:
 | Windows, from the Store | `%LOCALAPPDATA%\Packages\MrStreamerOSS.Mr.Streamer_5yzg1erdm3xmr\LocalCache\Roaming\Mr. Streamer Store` |
 | Linux                   | `~/.config/Mr. Streamer`                                                                                |
 
-It holds your subscription with its encrypted password, your preferences, favourites, watch history and how far you got in movies and episodes, copies of your channel list, programme guide and movie and series lists, what TMDB said about your movies and series, your update channel, and a diagnostics log. Chromium's cache of posters and pictures there stays under 64 MB. Uninstalling leaves the folder in place, so a reinstall picks up where you left off; only the copy from the Microsoft Store takes its folder with it. Delete the folder to remove everything but the password's key in your keychain and a downloaded update; the [privacy policy](../privacy.md#deleting-your-data) says where those are.
+It holds your subscription with its encrypted password or playlist link, your preferences, favourites, watch history and how far you got in movies and episodes, copies of your channel list, programme guide and movie and series lists, what TMDB said about your movies and series, your update channel, and a diagnostics log. Chromium's cache of posters and pictures there stays under 64 MB. Uninstalling leaves the folder in place, so a reinstall picks up where you left off; only the copy from the Microsoft Store takes its folder with it. Delete the folder to remove everything but the password's key in your keychain and a downloaded update; the [privacy policy](../privacy.md#deleting-your-data) says where those are.
 
-Your password is encrypted with a key your system keeps: the macOS Keychain, Windows' user encryption, or the desktop keyring on Linux.
+Your password, or a playlist's link, is encrypted with a key your system keeps: the macOS Keychain, Windows' user encryption, or the desktop keyring on Linux.
 
-## Mr. Streamer asks for my password again
+## Mr. Streamer asks for my password or playlist link again
 
 Your system no longer gives Mr. Streamer the key to your saved password. That happens after a keychain reset, when you deny access, or after replacing the app with a differently signed build. Enter the password again; the rest of the login is filled in.
+
+For a playlist, the whole link was encrypted, because a link can hold a token. Mr. Streamer can only say which host it came from, so paste the link again. The same link brings back your favourites and watch history.
 
 On macOS, if it keeps asking: open Keychain Access, delete the item named **Mr. Streamer Safe Storage**, then quit and reopen Mr. Streamer.
 
@@ -35,7 +37,7 @@ The Windows installer isn't code-signed yet, so SmartScreen shows "Windows prote
 - **"… has no encrypted connection":** the address you typed doesn't work over https, so Mr. Streamer stopped before sending your login. **Connect without encryption** connects over http instead: your username and password then travel as plain text, so anyone on your network or between you and your provider can read them. If your provider offers an https address, use that. An address you type with `http://` connects over http straight away; the line under the field says so, and Settings > Subscription marks the login "not encrypted".
 - **"The server doesn't offer an encrypted connection at this address":** you typed `https://`, and the server answers only over http. Mr. Streamer never falls back to http on its own. Type the address without `https://` to be asked, or with `http://`.
 - **"The provider rejected this username or password":** check the login with your provider, then choose **Edit** beside Login in Settings > Subscription.
-- **No programme information for a channel:** your provider's guide doesn't cover it. Many providers cover only some channels. A playlist's guide is the one its first line names, and many name none. When a guide download fails, the last guide stays in use and Mr. Streamer tries again later; the refresh button beside Guide in Settings > Subscription tries now.
+- **No programme information for a channel:** your provider's guide doesn't cover it. Many providers cover only some channels. A playlist's guide is the one its first line names, and many name none: Settings > Subscription then says "none in this playlist" beside Guide. That is no error. The refresh button there reads the playlist's first line again, so a guide its publisher adds later is found, and one it drops goes. When a guide download fails, the last guide stays in use and Mr. Streamer tries again later; the refresh button beside Guide tries now.
 - **"Channels unavailable":** the provider didn't send the channel list. **Try again**, or check your internet connection. When a refresh fails, Mr. Streamer keeps showing the last channel list it received, and Settings > Subscription says why the list may be out of date; the refresh button beside Channels tries again.
 - **No Movies or Series in the top bar:** a playlist link without a login brings live TV only.
 - **Movies or Series stay empty:** the first load of a large list takes a few seconds. If the provider offers no movies or series, the pages say so. A failed refresh keeps the last lists; Settings > Subscription says why and refreshes them on their own.

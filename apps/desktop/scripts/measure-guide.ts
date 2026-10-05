@@ -66,10 +66,12 @@ async function create() {
           Layer.succeed(GuideSource, {
             current: Effect.succeed({
               key: "measure",
-              download: async () =>
-                Readable.toWeb(
+              download: async () => ({
+                kind: "document" as const,
+                body: Readable.toWeb(
                   createReadStream(documentPath, { highWaterMark: CHUNK_BYTES }),
                 ) as ReadableStream<Uint8Array>,
+              }),
             }),
           }),
           Layer.succeed(GuideCatalogue, { channels: Effect.succeed(guideChannels) }),

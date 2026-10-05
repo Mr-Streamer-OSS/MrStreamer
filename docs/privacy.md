@@ -51,7 +51,7 @@ Over http, your username and password are sent as plain text, and anyone on your
 
 ### A playlist
 
-When you add a playlist link, Mr. Streamer downloads the playlist from that address when you connect, each time the app starts, when you open Settings > Subscription, and when it refreshes the channel list. To play a channel, it connects to the address the playlist lists for that channel, often on another server, and follows that server's redirects, often to further servers. If the playlist names a programme guide, the app downloads it from the server named. Each of these servers receives your IP address and the app version, or the browser identification and referring address the playlist names for that channel. The servers that play a channel can see what you watch, and when. A playlist link without a login sends no username or password. A channel listed with an `http://` address plays unencrypted.
+When you add a playlist link, Mr. Streamer downloads the playlist from that address when you connect, each time the app starts, when you open Settings > Subscription, and when it refreshes the channel list or the guide. To play a channel, it connects to the address the playlist lists for that channel, often on another server, and follows that server's redirects, often to further servers. If the playlist names a programme guide, the app downloads it from the server named. Each of these servers receives your IP address and the app version, or the browser identification and referring address the playlist names for that channel. The servers that play a channel can see what you watch, and when. A playlist link without a login sends no username or password. A channel listed with an `http://` address plays unencrypted.
 
 ### Images
 

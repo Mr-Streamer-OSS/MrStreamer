@@ -123,6 +123,7 @@ function Controls({
   const tracks = usePlayer((state) => state.tracks);
   const audioId = usePlayer((state) => state.audioId);
   const subtitle = usePlayer((state) => state.subtitle);
+  const subtitleLoading = usePlayer((state) => state.subtitleLoading);
   const active = usePlayer((state) => state.phase.kind !== "idle" && state.phase.kind !== "failed");
   const previous = usePlayer((state) => state.previous);
   const playing = usePlayer(
@@ -198,6 +199,7 @@ function Controls({
           audioId={audioId ?? tracks.playing}
           subtitles={tracks.subtitles}
           subtitle={subtitle}
+          subtitleNote={subtitleLoading ? "Loading" : null}
           open={menu}
           onOpenChange={onMenu}
           onAudio={(id) => player.setAudio(id)}

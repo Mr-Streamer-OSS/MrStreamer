@@ -1,6 +1,6 @@
 // Stands in for the main process in the renderer's tests, which run with happy-dom. Every call is
 // recorded; a call the test holds answers when the test says, the preferences otherwise answer
-// with the defaults, and anything else never answers. Tests send its events themselves. Import it
+// with the defaults and what the test says the viewer saved, and anything else never answers. Tests send its events themselves. Import it
 // first, before the renderer's modules: it also stands in for Media Source Extensions, which
 // happy-dom lacks, and for a text track's hidden mode, which it refuses.
 import type { AppError, Result } from "@mrstreamer/contracts/errors";
@@ -11,11 +11,12 @@ import type {
   IpcMethod,
   IpcOutput,
 } from "@mrstreamer/contracts/ipc";
-import { defaultPreferences } from "@mrstreamer/contracts/preferences";
+import { defaultPreferences, type Preferences } from "@mrstreamer/contracts/preferences";
 
 const held = new Map<IpcMethod, Promise<Result<unknown>>[]>();
 const listeners = new Map<string, Set<(payload: unknown) => void>>();
 const calls: { readonly method: IpcMethod; readonly args: unknown }[] = [];
+let preferences = defaultPreferences;
 
 export const ipc = {
   /** The arguments of each call to `method` so far. */
@@ -37,10 +38,15 @@ export const ipc = {
   emit<E extends IpcEvent>(event: E, payload: IpcEvents[E]): void {
     for (const listener of listeners.get(event) ?? []) listener(payload);
   },
-  /** Forgets the calls and held answers of the test before. */
+  /** Answers the preferences with `saved` over the defaults, as after the viewer set them. */
+  prefer(saved: Partial<Preferences>): void {
+    preferences = { ...defaultPreferences, ...saved };
+  },
+  /** Forgets the calls, held answers and saved preferences of the test before. */
   reset(): void {
     calls.length = 0;
     held.clear();
+    preferences = defaultPreferences;
   },
 };
 
@@ -50,7 +56,7 @@ const bridge = {
     const answer = held.get(method)?.shift();
     if (answer) return answer;
     if (method === "preferences.get") {
-      return Promise.resolve({ ok: true, value: defaultPreferences });
+      return Promise.resolve({ ok: true, value: preferences });
     }
     return new Promise(() => {});
   },

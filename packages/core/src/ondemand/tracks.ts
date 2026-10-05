@@ -1,5 +1,7 @@
 // Sound and subtitle tracks as the viewer chooses them: named in their own language ("Deutsch",
-// "Nederlands"), with what sets them apart, and which ones play unless the viewer picks.
+// "Nederlands"), with what sets them apart, and which ones play unless the viewer picks. A file's
+// or a channel's tracks are named from what a probe finds; an HLS stream's by the names its
+// playlist gives them.
 import type {
   AudioTrack,
   ChannelTracks,
@@ -99,15 +101,7 @@ export function subtitleTracks(tracks: readonly SubtitleFacts[]): SubtitleTrack[
     }
     return { track, label: parts.join(" · ") };
   });
-  // Tracks that read the same in different formats, as a channel's teletext and DVB subtitles in
-  // one language, are told apart by format before anything else.
-  const told = labelled.map(({ track, label }) => {
-    const twins = labelled.filter((other) => other.label === label);
-    return twins.some((other) => other.track.format !== track.format)
-      ? { track, label: `${label} · ${FORMAT_NAMES[track.format]}` }
-      : { track, label };
-  });
-  return distinct(told).map(({ track, label }) => ({
+  return apart(labelled).map(({ track, label }) => ({
     id: track.id,
     page: track.page,
     format: track.format,
@@ -116,6 +110,109 @@ export function subtitleTracks(tracks: readonly SubtitleFacts[]): SubtitleTrack[
     forced: track.forced || (track.name !== null && /forced/i.test(track.name)),
     default: track.default,
   }));
+}
+
+/**
+ * A sound or subtitle rendition of an HLS stream as its playlist declares it (#EXT-X-MEDIA), or a
+ * caption channel the stream declares or carries in its picture.
+ */
+export interface RenditionFacts {
+  /** A number that stays the rendition's own; pass it back to choose it. */
+  readonly id: number;
+  /** NAME as written: "English", "Director's commentary", or only a language's code, "eng". */
+  readonly name: string | null;
+  /** LANGUAGE as written, or null. */
+  readonly language: string | null;
+  readonly default: boolean;
+  readonly forced: boolean;
+  /**
+   * CHARACTERISTICS says it is made for viewers who can't see the picture, as sound that
+   * describes it, or can't hear the sound, as subtitles that describe that.
+   */
+  readonly accessible: boolean;
+}
+
+export interface SubtitleRenditionFacts extends RenditionFacts {
+  /** A caption channel (1 for CC1); null for a subtitle rendition. */
+  readonly page: number | null;
+  readonly format: "text" | "captions";
+}
+
+/**
+ * An HLS stream's sound renditions as the viewer chooses them: by the name the stream gives
+ * each, "Director's commentary"; by its language where that name is missing or only the
+ * language's code, "eng"; else "Track 2", by its place in the list.
+ */
+export function renditionAudio(renditions: readonly RenditionFacts[]): AudioTrack[] {
+  const labelled = renditions.map((rendition, at) =>
+    named(rendition, `Track ${at + 1}`, [rendition.accessible && "Audio description"]),
+  );
+  return distinct(labelled).map(({ track, label }) => ({
+    id: track.id,
+    language: track.language,
+    label,
+    default: track.default,
+  }));
+}
+
+/**
+ * An HLS stream's subtitle renditions, as text, and its caption channels, named as its sound
+ * renditions are. Captions without a name or a language read "Captions".
+ */
+export function renditionSubtitles(renditions: readonly SubtitleRenditionFacts[]): SubtitleTrack[] {
+  const labelled = renditions.map((rendition, at) =>
+    named(rendition, rendition.format === "captions" ? "Captions" : `Track ${at + 1}`, [
+      rendition.forced && "Forced",
+      rendition.accessible && "SDH",
+    ]),
+  );
+  return apart(labelled).map(({ track, label }) => ({
+    id: track.id,
+    page: track.page,
+    format: track.format,
+    language: track.language,
+    label,
+    forced: track.forced,
+    default: track.default,
+  }));
+}
+
+/**
+ * A rendition with its label: the stream's own name for it, as it is. A name that is missing, or
+ * only a language's code ("eng", "DE"), gives way to the language's own name, else `fallback`,
+ * with the `marks` that set the rendition apart. The language is the one declared, else the one
+ * such a name is the code of.
+ */
+function named<T extends RenditionFacts>(
+  rendition: T,
+  fallback: string,
+  marks: readonly (string | false)[],
+) {
+  const name = rendition.name?.trim() || null;
+  const coded = name !== null && /^[a-z]{2,3}$/i.test(name) && languageName(name) !== null;
+  const own = coded ? null : name;
+  const language = languageCode(rendition.language) ?? (coded ? languageCode(name) : null);
+  return {
+    // The name is the label or says nothing more, so it tells no two renditions apart.
+    track: { ...rendition, name: null, language },
+    label: own ?? [languageName(language) ?? fallback, ...marks].filter(Boolean).join(" · "),
+  };
+}
+
+/**
+ * Subtitle tracks that read the same in different formats, as a channel's teletext and DVB
+ * subtitles in one language, told apart by format before anything else.
+ */
+function apart<T extends TrackFacts & { readonly format: SubtitleFormat }>(
+  labelled: readonly { track: T; label: string }[],
+): { track: T; label: string }[] {
+  const told = labelled.map(({ track, label }) => {
+    const twins = labelled.filter((other) => other.label === label);
+    return twins.some((other) => other.track.format !== track.format)
+      ? { track, label: `${label} · ${FORMAT_NAMES[track.format]}` }
+      : { track, label };
+  });
+  return distinct(told);
 }
 
 const FORMAT_NAMES: Record<SubtitleFormat, string> = {

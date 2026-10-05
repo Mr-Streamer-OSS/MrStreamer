@@ -1,5 +1,5 @@
-// Drives a built app over the DevTools protocol, against the fake provider. Shared by the
-// packaged-app test and the measuring script.
+// Drives a built app over the DevTools protocol, against the fake provider or the fake playlist
+// host. Shared by the packaged-app test, the playlist test and the measuring script.
 import { spawn, type ChildProcess } from "node:child_process";
 import type { FakeProvider } from "../fake-provider.ts";
 
@@ -94,7 +94,26 @@ export async function login(page: Page, provider: FakeProvider): Promise<void> {
   await waitFor(() =>
     page.evaluate<boolean>("document.querySelectorAll('form input').length >= 3"),
   );
-  const fields = [provider.url, "demo", "demo"];
+  await submit(page, [provider.url, "demo", "demo"]);
+}
+
+/**
+ * Connects a playlist by its link, through the Connect screen's M3U link field, and waits for
+ * the channels. The screen may already ask for the link alone, as when its keychain lost it.
+ */
+export async function connectPlaylist(page: Page, link: string): Promise<void> {
+  await waitFor(() => page.evaluate<boolean>("!!document.querySelector('form input')"));
+  await page.evaluate(
+    `[...document.querySelectorAll("form button")].find((b) => b.textContent.trim() === "Use an M3U link")?.click()`,
+  );
+  await waitFor(() =>
+    page.evaluate<boolean>("document.querySelectorAll('form input').length === 1"),
+  );
+  await submit(page, [link]);
+}
+
+/** Types `fields` into the Connect screen's fields, in order, connects, and waits for the app. */
+async function submit(page: Page, fields: readonly string[]): Promise<void> {
   await page.evaluate(`(() => {
     const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
     const fields = ${JSON.stringify(fields)};

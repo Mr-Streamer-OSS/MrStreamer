@@ -69,19 +69,27 @@ export interface LivePlaying {
   readonly failed: readonly { readonly variantId: string; readonly failure: StreamFailure }[];
 }
 
-/** The sound and subtitle tracks of a playing channel, from its program table. */
+/**
+ * The sound and subtitle tracks of a playing channel: from its program table, or for an HLS
+ * stream from what its playlists declare and the captions its picture carries.
+ */
 export interface ChannelTracks {
   readonly audio: readonly AudioTrack[];
   readonly subtitles: readonly SubtitleTrack[];
   /**
    * The sound track the stream plays, by id: the one asked for, else the one in the viewer's
-   * language, else the channel's first. Null when the channel has none.
+   * language, else the channel's first or the stream's default. Null when the channel has none,
+   * or declares none.
    */
   readonly playing: number | null;
 }
 
 export interface AudioTrack {
-  /** The track's number in a file, or its PID in a channel; pass it back to choose it. */
+  /**
+   * The track's number in a file, its PID in a channel, or for an HLS stream's rendition a number
+   * worked out from what the playlist declares about it, the same whenever the channel lists it;
+   * pass it back to choose it.
+   */
   readonly id: number;
   /** ISO 639 language code as the file names it, or null. */
   readonly language: string | null;
@@ -101,7 +109,9 @@ export type SubtitleFormat = "text" | "picture" | "teletext" | "captions";
 export interface SubtitleTrack {
   /**
    * The track's number in a file, or its PID in a channel. Captions inside the picture use the
-   * picture's.
+   * picture's. An HLS stream's rendition has a number worked out from what the playlist declares
+   * about it, the same whenever the channel lists it, and its caption channels share one no
+   * rendition has.
    */
   readonly id: number;
   /**

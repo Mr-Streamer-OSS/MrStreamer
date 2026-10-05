@@ -19,6 +19,11 @@ export function categoryOf(
   return channel.categoryIds.map((id) => categories.get(id)?.title).find(Boolean) ?? "";
 }
 
+/** A server's host, without its scheme: "tv.example.net:8080". */
+export function hostOf(server: string): string {
+  return URL.parse(server)?.host || server;
+}
+
 /** "1080p · 50 fps · Stereo" from whatever the engine knows. */
 export function techLine(info: StreamInfo | null): string {
   if (!info) return "";
