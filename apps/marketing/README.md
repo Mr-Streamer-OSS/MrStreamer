@@ -2,17 +2,20 @@
 
 Three static pages for `https://mrstreamer.app`, built with Vite from plain HTML, CSS and a small TypeScript file: the home page, the privacy policy and the page for a missing address. The home page's pictures are captures of the real app, kept in `docs/assets` and described in [marketing artwork](../../docs/contributing/marketing-artwork.md).
 
-| File                        | Holds                                                                                  |
-| --------------------------- | -------------------------------------------------------------------------------------- |
-| `index.html`                | The home page and everything it says                                                   |
-| `privacy/index.html`        | The privacy page around the policy. The build puts `docs/privacy.md` in it             |
-| `404.html`                  | The page for an address that has none                                                  |
-| `src/styles.css`            | The layout, and the motion's keyframes                                                 |
-| `src/main.ts`               | Page-view analytics on every page, and what moves on the home page                     |
-| `vite.config.ts`            | Builds the pages, renders the policy, and answers the addresses below on your computer |
-| `scripts/prepare-assets.ts` | Cuts the pictures, icons and social picture into `public/generated/`                   |
-| `scripts/package-vercel.ts` | Packs the built site for Vercel in `.vercel/output/`, with its routes, and checks it   |
-| `public/`                   | `robots.txt` and `sitemap.xml`                                                         |
+| File                        | Holds                                                                                             |
+| --------------------------- | ------------------------------------------------------------------------------------------------- |
+| `index.html`                | The home page and what it says                                                                    |
+| `privacy/index.html`        | The privacy page around the policy. The build puts `docs/privacy.md` in it                        |
+| `404.html`                  | The page for an address that has none                                                             |
+| `src/styles.css`            | The layout, which download button shows, and the motion's keyframes                               |
+| `src/main.ts`               | Page-view analytics on every page. On the home page, what moves and the newest download links     |
+| `src/system.ts`             | Which system a visitor is on, for the hero's one download button                                  |
+| `src/downloads.ts`          | Where the current stable release's installers are, and how the page shows them                    |
+| `vite.config.ts`            | Builds the pages, renders the policy, and answers the addresses below on your computer            |
+| `scripts/prepare-assets.ts` | Cuts the pictures, icons and social picture into `public/generated/`                              |
+| `scripts/package-vercel.ts` | Packs the built site for Vercel in `.vercel/output/`, with its routes, and checks it              |
+| `public/`                   | `robots.txt`, `sitemap.xml`, and in `icons/` the Store badge and the Apple and Linux marks        |
+| `test/`                     | The download button for each system, the installers the page links, and the page under its styles |
 
 `public/generated/`, `dist/` and `.vercel/` are built and stay out of git.
 
@@ -27,7 +30,7 @@ pnpm build:marketing     # pictures, pages and the Vercel package
 pnpm preview:marketing   # the built site, on http://localhost:4173
 ```
 
-`pnpm build:marketing` fails when a page names a file that isn't in the package, when the home or privacy page lacks its address, description or social picture, when the privacy page doesn't hold the whole policy, or when the sitemap misses a page. `scripts/package-vercel.ts` lists every check. `pnpm typecheck`, `pnpm lint`, `pnpm knip` and `pnpm fmt:check` cover this folder with the rest of the repository.
+`pnpm build:marketing` fails when a page names a file that isn't in the package, when the home or privacy page lacks its address, description or social picture, when the privacy page doesn't hold the whole policy, or when the sitemap misses a page. It also fails when the home page lacks the script that picks its download button, links an installer outside the project's releases, or describes the app to search engines in data that doesn't read. `scripts/package-vercel.ts` lists every check. The build reads the update feed and asks GitHub about four files, and builds without either ([downloads](#downloads)). `pnpm test`, `pnpm typecheck`, `pnpm lint`, `pnpm knip` and `pnpm fmt:check` cover this folder with the rest of the repository.
 
 ## Addresses
 
@@ -47,10 +50,74 @@ Vercel alone answers `/_vercel/insights/`, for [website analytics](#website-anal
 ## Change it
 
 - Keep the words true and few. Every claim on the page comes from the README or the docs. The app's limits are in [what plays](../../docs/user/playback.md).
-- True black, white text, minimal copy. Screenshots describe the app, so a feature is its name beside its window, with no paragraph under it.
-- Nothing moves by itself. The hero rises in once, each feature's name and window rise in once as they scroll into view, and the hero's window tips upright as the page scrolls. Each animation ends. Once the page is open, the script works only after a scroll, a resize or a changed preference. With reduced motion nothing moves. Without JavaScript the hero still rises in, and the rest is in place.
+- True black, white text, minimal copy. Screenshots describe the app, so a feature is its name and one sentence beside its window.
+- The page order is the bar, the hero, the Home window, the three features, What you need, Questions, Downloads, the footer. The hero has the page's one button. The bar links Downloads as text.
+- The title and description name the product, that it is free, and the three systems. The `SoftwareApplication` data in the head repeats what the page says and nothing else: no rating, no review count, no version. The canonical address, `robots.txt` and `sitemap.xml` cover the two pages there are. Add no page for a single system or search phrase.
+- Nothing moves by itself, and every animation runs once and ends:
+  - As the page opens, the bar drops in, the headline and lead rise, the one button pops, its line rises and the Home window stands up, or only rises while the layout is stacked. This is CSS alone, so it runs without JavaScript.
+  - As a part scrolls into view, a feature's text slides in from the page's edge while a black panel wipes off its window. What you need and each question rise in, and each download row slides in from the left, questions and rows one after another. What is on screen when the page opens stays as it is.
+  - As the page scrolls, the Home window tips upright. Upright, it has no transform left.
+  - The button lifts 2 px under the pointer or the keyboard's focus.
+
+  Only `transform` and `opacity` change. `main.ts` adds `revealed` to a part once and takes it off when its animation ends or is dropped, so no class, panel or layer stays behind. Once the page is open, the script works only after a scroll, a resize or a changed preference. With reduced motion nothing moves, also when the preference changes while the page is open. Nothing waits hidden for the script. An animation only starts from hidden, and a part that never animates is in place.
+
 - New pictures come from new captures. Follow the [artwork recipe](../../docs/contributing/marketing-artwork.md). A phone shows a part of each window, set in `prepare-assets.ts`, with its size repeated in `index.html`.
 - The privacy policy has one source, `docs/privacy.md`. The build renders it into `https://mrstreamer.app/privacy`, where the app and the Store listing link. Edit the Markdown, never the page. A merge to `main` that changes it publishes the site again.
+
+## Downloads
+
+The hero offers one download, for the visitor's system. Downloads, above the footer, lists every installer for everyone.
+
+### One button
+
+`src/system.ts` names the visitor's system from the browser's user agent, its touch points and, in Chromium, the platform it reports. The build writes that function's own text into the head of `index.html`, where it runs before the page paints and sets `data-os` on `<html>`. `styles.css` shows the button and line that match, so the button never swaps after it shows.
+
+| Visitor                                  | Button                  | Goes to                |
+| ---------------------------------------- | ----------------------- | ---------------------- |
+| Windows                                  | Microsoft's Store badge | The Store listing      |
+| Mac                                      | Download for Mac        | The DMG                |
+| Linux on a computer                      | Download for Linux      | The AppImage           |
+| Anyone else, and anyone with scripts off | Downloads               | The list at the bottom |
+
+Anyone else is a phone, a tablet, an iPad asking for the desktop site, ChromeOS, a console, a television, another Unix, or a browser whose reported platform and user agent disagree. A computer's Linux browser writes X11 or Wayland beside Linux in its user agent, and a television's doesn't. The setup .exe and the .deb are never in the hero.
+
+The script knows the system and not the processor. An Intel Mac gets the Mac button, so the line under each button names the hardware its file needs and links the list. It asks the browser for no detailed hints, stores nothing and sends nothing.
+
+### Which release the links point at
+
+`index.html` is written with every installer link on the [Releases page](https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest), a label that says so, and no version. That is what the page shows when nothing is known. Two steps point the links at files, both in `src/downloads.ts`:
+
+1. **The build** reads the stable version from the [update feed](../../docs/maintainers/releasing.md#update-feed), then asks GitHub for each of the four installers by its address, one HEAD request each. It writes the ones GitHub answers for into the page, and the version under the Mac and Linux buttons. The built page links files without scripts.
+2. **The open page** requests the feed once, with no retry and no polling. The feed lists the installers its stable release carries, and the page shows that release. A stable release reaches visitors this way without a new build of the site, once the release workflow has published the feed and GitHub's ten-minute cache of it has passed.
+
+A release doesn't rebuild the site. The release workflow acts as `GITHUB_TOKEN`, and what that token pushes or publishes starts no other workflow. The built page moves to a new release with the next merge that changes the website, or when you run **Marketing deploy** by hand.
+
+| When                                                    | The page links                                                                                     |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| The build and the feed name the same release            | That release's files                                                                               |
+| A stable release came out after the build               | With scripts, the new release. Without, the one the build found, whose files stay on GitHub        |
+| The build couldn't read the feed                        | The Releases page, until the open page reads the feed. The build prints a warning and still passes |
+| The release lacks an installer, or GitHub didn't answer | The Releases page for that installer, files for the others                                         |
+| The visitor's browser can't reach the feed              | What the build wrote                                                                               |
+| The feed was written before feeds listed installers     | What the build wrote                                                                               |
+| The feed names a nightly, or files outside this project | The open page keeps what the build wrote. A build links the Releases page                          |
+| A stable release was withdrawn and the feed moved back  | With scripts, the release the feed names now                                                       |
+
+A link is never guessed and never taken from the feed. Its address is this repository's release folder, a version shaped like a stable one, and a file name from `INSTALLERS` in `downloads.ts`, which follow `artifactName` in `apps/desktop/electron-builder.yml`. Rename an installer there and the page links the Releases page for it until `INSTALLERS` follows. The version shows only beside a button whose file is linked.
+
+The request for the feed goes to GitHub Pages. The [privacy policy](../../docs/privacy.md#the-website) says what GitHub receives.
+
+### The badge and the marks
+
+`public/icons/` holds three files, served from the site so the page asks no one else for them. Each loads lazily, so only the visitor whose button shows it fetches it. With scripts off a browser fetches all three.
+
+| File                  | From                                                                                                           |
+| --------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `microsoft-store.svg` | Microsoft's light Store badge, `https://get.microsoft.com/images/en-us%20light.svg`, byte for byte, 161 by 44  |
+| `apple.svg`           | The Apple logo as [Simple Icons](https://simpleicons.org) 15.22.0 draws it, CC0 1.0. A trademark of Apple Inc. |
+| `linux.svg`           | Tux as Simple Icons 15.22.0 draws it, CC0 1.0. Larry Ewing drew Tux. Linux is a trademark of Linus Torvalds    |
+
+Keep the badge as Microsoft publishes it: no new colour, crop or redrawing, and its own proportions. There is no Mac App Store listing, so the Mac and Linux buttons are plain buttons with the system's mark and never a store badge.
 
 ## Website analytics
 

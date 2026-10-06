@@ -34,7 +34,7 @@ const NOW = Date.parse("2026-10-02T12:00:00Z");
 const MAIN = "refs/heads/main";
 const REPOSITORY = "https://github.com/owner/app";
 
-/** A published release with every platform's files. */
+/** A published release with every platform's update files, and the DMG as its one installer. */
 function published(tag: string, hoursAgo: number, prerelease = tag.includes("-")): GitHubRelease {
   return {
     tag,
@@ -593,9 +593,43 @@ describe("update feed", () => {
         files: "https://github.com/owner/app/releases/download/v0.0.2",
         notes: "Notes for v0.0.2",
         platforms: ["latest-mac.yml", "latest.yml", "latest-linux.yml"],
+        installers: ["Mr-Streamer-v0.0.2.dmg"],
       },
       nightly: null,
     });
+  });
+
+  it("lists the installers a release carries, for the website, and none of its other files", () => {
+    const release = (assets: string[]) =>
+      feedOf([
+        { ...published("v0.0.7", 1, false), assets: [...published("v0.0.7", 1).assets, ...assets] },
+      ]);
+
+    expect(
+      release([
+        "Mr-Streamer-0.0.7-win-x64-setup.exe",
+        "Mr-Streamer-0.0.7-win-x64-setup.exe.blockmap",
+        "Mr-Streamer-0.0.7-linux-x86_64.AppImage",
+        "Mr-Streamer-0.0.7-linux-amd64.deb",
+        "Mr-Streamer-0.0.7-mac-arm64.zip",
+        "SHA256SUMS.txt",
+        "ffmpeg-9.0.2.tar.xz",
+      ]).stable?.installers,
+    ).toEqual([
+      "Mr-Streamer-v0.0.7.dmg",
+      "Mr-Streamer-0.0.7-win-x64-setup.exe",
+      "Mr-Streamer-0.0.7-linux-x86_64.AppImage",
+      "Mr-Streamer-0.0.7-linux-amd64.deb",
+    ]);
+    // A release without one of them still enters the feed: the app updates from latest*.yml.
+    expect(
+      feedOf([
+        {
+          ...published("v0.0.7", 1, false),
+          assets: ["latest-mac.yml", "latest.yml", "latest-linux.yml"],
+        },
+      ]).stable,
+    ).toMatchObject({ version: "0.0.7", installers: [] });
   });
 
   it("leaves out drafts, mismatched pre-release flags and releases missing a platform", () => {
@@ -756,6 +790,11 @@ describe("update feed", () => {
     const json: Record<string, unknown> = JSON.parse(JSON.stringify(feed));
 
     expect(readFeed(json)).toEqual(feed);
+    // A feed deployed before installers were listed reads as it is, without them, and so does
+    // one whose list can't be read: the app updates from either.
+    const { installers: _, ...before } = feed.stable!;
+    expect(readFeed({ ...json, stable: before }).stable).toEqual(before);
+    expect(readFeed({ ...json, stable: { ...before, installers: [7] } }).stable).toEqual(before);
     expect(() => readFeed({ ...json, schema: 2 })).toThrow("schema 1");
     expect(() => readFeed({ ...json, stable: feed.nightly })).toThrow("stable release has version");
     expect(() => readFeed({ ...json, nightly: { ...feed.nightly, files: undefined } })).toThrow(

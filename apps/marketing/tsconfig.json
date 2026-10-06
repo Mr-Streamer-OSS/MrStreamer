@@ -1,9 +1,9 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    // The page's script runs in a browser, the build scripts in Node.
+    // The page's script runs in a browser, the build scripts and the tests in Node.
     "lib": ["ES2024", "DOM", "DOM.Iterable"],
     "types": ["node", "vite/client"]
   },
-  "include": ["src", "scripts", "vite.config.ts"]
+  "include": ["src", "scripts", "test", "vite.config.ts"]
 }

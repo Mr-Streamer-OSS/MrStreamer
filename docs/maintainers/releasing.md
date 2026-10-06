@@ -102,7 +102,13 @@ The app looks for updates in `updates.json` at the root of the repository's GitH
     "page": "https://github.com/Mr-Streamer-OSS/MrStreamer/releases/tag/v0.0.2",
     "files": "https://github.com/Mr-Streamer-OSS/MrStreamer/releases/download/v0.0.2",
     "notes": "**Stable** · built from ...",
-    "platforms": ["latest-mac.yml", "latest.yml", "latest-linux.yml"]
+    "platforms": ["latest-mac.yml", "latest.yml", "latest-linux.yml"],
+    "installers": [
+      "Mr-Streamer-0.0.2-linux-amd64.deb",
+      "Mr-Streamer-0.0.2-linux-x86_64.AppImage",
+      "Mr-Streamer-0.0.2-mac-arm64.dmg",
+      "Mr-Streamer-0.0.2-win-x64-setup.exe"
+    ]
   },
   "nightly": {
     "version": "0.0.3-nightly.20261001.32",
@@ -110,7 +116,8 @@ The app looks for updates in `updates.json` at the root of the repository's GitH
     "page": "https://github.com/Mr-Streamer-OSS/MrStreamer/releases/tag/v0.0.3-nightly.20261001.32",
     "files": "https://github.com/Mr-Streamer-OSS/MrStreamer/releases/download/v0.0.3-nightly.20261001.32",
     "notes": "**Nightly** · built from ...",
-    "platforms": ["latest-mac.yml", "latest.yml", "latest-linux.yml"]
+    "platforms": ["latest-mac.yml", "latest.yml", "latest-linux.yml"],
+    "installers": ["..."]
   }
 }
 ```
@@ -120,6 +127,7 @@ The app looks for updates in `updates.json` at the root of the repository's GitH
 - Versions 0.0.3 and earlier offer Nightly users the higher of `stable` and `nightly`, so they still get each stable release and each nightly after it, as before.
 - Feeds deployed before 0.0.4 named the highest release of either channel as `nightly`, a stable release right after one. The next publication replaces such an entry with the highest nightly even when it's lower, since only versions 0.0.3 and earlier took a stable release from `nightly`, and they still find it as `stable`.
 - `files` is the folder electron-updater reads the release's `latest*.yml` and installers from. `notes` is the release body, in Markdown.
+- `installers` names the release's files that end in `.dmg`, `.exe`, `.AppImage` or `.deb`. The website's home page links the stable release's, and only the ones listed ([the website's downloads](../../apps/marketing/README.md#downloads)). The app doesn't read the list, and a release that lacks an installer still enters the feed. A feed written before the list existed has none, and the website then keeps the links it was built with.
 - A release counts only when it's published, its version and pre-release flag name the same channel, and it carries `latest-mac.yml`, `latest.yml` and `latest-linux.yml`. One missing a platform is incomplete and never enters the feed.
 
 `.github/workflows/update-feed.yml` writes the feed with `release-plan.ts feed` and deploys it, with an empty `.nojekyll`, after every published nightly and stable release. Dry runs publish nothing. Publications wait in a queue of their own and are never cancelled, so each reads the releases after the one before it deployed.

@@ -1,7 +1,8 @@
 // The update feed: updates.json at the root of the project's GitHub Pages site, naming the newest
 // release on each channel. The release workflow writes it after every release with
 // `scripts/release-plan.ts feed`; the app reads it to find updates and downloads them from GitHub
-// Releases. docs/maintainers/releasing.md describes the policy.
+// Releases, and the website reads it to link the newest stable installers.
+// docs/maintainers/releasing.md describes the policy.
 //
 // Release jobs run this with plain node before installing packages, so it imports only
 // ./version.ts, by relative path.
@@ -16,6 +17,9 @@ import {
 
 /** The update metadata electron-builder writes for macOS, Windows and Linux. */
 const PLATFORM_FILES = ["latest-mac.yml", "latest.yml", "latest-linux.yml"] as const;
+
+/** How the files people install end: the DMG, the setup .exe, the AppImage and the deb. */
+const INSTALLER_ENDINGS = [".dmg", ".exe", ".AppImage", ".deb"] as const;
 
 export interface UpdateFeed {
   readonly schema: 1;
@@ -47,6 +51,12 @@ export interface FeedRelease {
   readonly notes: string;
   /** Which of latest-mac.yml, latest.yml and latest-linux.yml the release carries. */
   readonly platforms: readonly string[];
+  /**
+   * The names of the installers the release carries, such as Mr-Streamer-0.0.7-mac-arm64.dmg. The
+   * website links only these (apps/marketing/src/downloads.ts); the app doesn't read them. Feeds
+   * written before the list existed lack it.
+   */
+  readonly installers?: readonly string[];
 }
 
 /** A release as GitHub lists it, with what the feed needs. */
@@ -91,6 +101,9 @@ export function buildFeed(
         files: `${repository}/releases/download/${release.tag}`,
         notes: release.notes,
         platforms,
+        installers: release.assets.filter((name) =>
+          INSTALLER_ENDINGS.some((ending) => name.endsWith(ending)),
+        ),
       };
       return [{ version, entry }];
     })
@@ -160,12 +173,9 @@ function readRelease(json: unknown, channel: Channel): FeedRelease | null {
     return value;
   };
   const platforms = json["platforms"];
-  if (
-    !Array.isArray(platforms) ||
-    !platforms.every((file): file is string => typeof file === "string")
-  ) {
-    throw malformed;
-  }
+  // The app never reads the installers, so a list it can't read is left out, not refused.
+  const installers = json["installers"];
+  if (!isNames(platforms)) throw malformed;
   const version = parseVersion(text("version"));
   if (!version || (channel === "stable" && version.nightly)) {
     throw new Error(`The feed's ${channel} release has version "${text("version")}".`);
@@ -177,7 +187,12 @@ function readRelease(json: unknown, channel: Channel): FeedRelease | null {
     files: text("files"),
     notes: text("notes"),
     platforms,
+    ...(isNames(installers) && { installers }),
   };
+}
+
+function isNames(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((name) => typeof name === "string");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
