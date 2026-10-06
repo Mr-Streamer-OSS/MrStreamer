@@ -302,7 +302,8 @@ export function verifyPackage(
   const manifest = readZipEntry(bytes, "AppxManifest.xml")?.toString("utf8");
   const identity = /<Identity\b[^>]*>/.exec(manifest ?? "")?.[0];
   if (!identity) throw new Error("The package has no manifest with an identity.");
-  const attribute = (name: string) => new RegExp(`\\s${name}="([^"]*)"`).exec(identity)?.[1];
+  // electron-builder writes the publisher in single quotes and the other attributes in double.
+  const attribute = (name: string) => new RegExp(`\\s${name}=(["'])(.*?)\\1`).exec(identity)?.[2];
   differs("The package's identity name", attribute("Name"), STORE_APP.identityName);
   differs("The package's publisher", attribute("Publisher"), STORE_APP.publisher);
   differs("The package's architecture", attribute("ProcessorArchitecture"), STORE_APP.architecture);
