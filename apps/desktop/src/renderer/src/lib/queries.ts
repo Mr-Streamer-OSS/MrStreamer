@@ -1,4 +1,6 @@
 // React Query bindings for the IPC contract. Components read data through these hooks only.
+// Whatever a provider lists is asked for with the subscription it belongs to, and cached under
+// both: a provider's ids mean nothing without their subscription.
 import { queryOptions, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import type { IpcInput, IpcOutput } from "@mrstreamer/contracts/ipc";
@@ -9,7 +11,9 @@ import type {
   RowTab,
   TitleKind,
 } from "@mrstreamer/contracts/ondemand";
-import type { Viewing } from "@mrstreamer/contracts/viewing";
+import type { SubscriptionPreferences } from "@mrstreamer/contracts/preferences";
+import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
+import type { TitleFilter, Viewing } from "@mrstreamer/contracts/viewing";
 import { player } from "../player/player.ts";
 import { call, listen } from "./ipc.ts";
 
@@ -23,6 +27,16 @@ export const queries = {
     queryOptions({
       queryKey: ["preferences"],
       queryFn: () => call("preferences.get"),
+      staleTime: Infinity,
+    }),
+  /**
+   * What the viewer left a subscription at: the last channel and category, and the versions and
+   * streams picked in it.
+   */
+  subscriptionPreferences: (subscriptionId: string) =>
+    queryOptions({
+      queryKey: ["subscription-preferences", subscriptionId],
+      queryFn: () => call("subscription.preferences", { subscriptionId }),
       staleTime: Infinity,
     }),
   /** Favourites and recently watched channels. Kept current by `syncViewing`. */
@@ -46,26 +60,27 @@ export const queries = {
       queryFn: () => call("library.categories"),
       staleTime: Infinity,
     }),
-  /** All channels when `categoryId` is null. */
-  channels: (categoryId: string | null) =>
+  /** All channels when `category` is null. */
+  channels: (category: OwnedId | null) =>
     queryOptions({
-      queryKey: ["library", "channels", categoryId],
-      queryFn: () => call("library.channels", categoryId === null ? {} : { categoryId }),
+      queryKey: ["library", "channels", category && ownedKey(category)],
+      queryFn: () =>
+        call("library.channels", category === null ? {} : { category: ownedId(category) }),
       staleTime: Infinity,
     }),
-  channel: (channelId: string) =>
+  channel: (channel: OwnedId) =>
     queryOptions({
-      queryKey: ["library", "channel", channelId],
-      queryFn: () => call("library.channel", { channelId }),
+      queryKey: ["library", "channel", ownedKey(channel)],
+      queryFn: () => call("library.channel", { channel: ownedId(channel) }),
       staleTime: Infinity,
     }),
-  /** Channels by id, in the order given. */
-  channelsById: (ids: readonly string[]) =>
+  /** The given channels, in the order given. */
+  channelsOf: (channels: readonly OwnedId[]) =>
     queryOptions({
-      queryKey: ["library", "ids", ...ids],
-      queryFn: () => call("library.channels", { ids: [...ids] }),
+      queryKey: ["library", "of", ...channels.map(ownedKey)],
+      queryFn: () => call("library.channels", { channels: channels.map(ownedId) }),
       staleTime: Infinity,
-      enabled: ids.length > 0,
+      enabled: channels.length > 0,
     }),
   /** Kept current by `syncUpdates`, so it never needs refetching. */
   updates: () =>
@@ -81,20 +96,23 @@ export const queries = {
       staleTime: Infinity,
       enabled: query.trim().length > 0,
     }),
-  /** Now and next for the given channels. Channels without guide data are missing. */
-  listings: (channelIds: readonly string[]) =>
+  /**
+   * Now and next for the given channels, by each channel's `ownedKey`. Channels without guide
+   * data are missing.
+   */
+  listings: (channels: readonly OwnedId[]) =>
     queryOptions({
-      queryKey: ["guide", "listings", ...channelIds],
-      queryFn: () => call("guide.listings", { channelIds: [...channelIds] }),
-      enabled: channelIds.length > 0,
+      queryKey: ["guide", "listings", ...channels.map(ownedKey)],
+      queryFn: () => call("guide.listings", { channels: channels.map(ownedId) }),
+      enabled: channels.length > 0,
       staleTime: LISTINGS_REFRESH_MS / 2,
       refetchInterval: LISTINGS_REFRESH_MS,
       placeholderData: (previous) => previous,
     }),
-  schedule: (channelId: string) =>
+  schedule: (channel: OwnedId) =>
     queryOptions({
-      queryKey: ["guide", "schedule", channelId],
-      queryFn: () => call("guide.schedule", { channelId }),
+      queryKey: ["guide", "schedule", ownedKey(channel)],
+      queryFn: () => call("guide.schedule", { channel: ownedId(channel) }),
       staleTime: LISTINGS_REFRESH_MS,
     }),
   programmes: (query: string) =>
@@ -106,8 +124,8 @@ export const queries = {
     }),
   /**
    * What a search finds in the programmes of one list's channels, on now and later until
-   * `until`: a category's, those with `ids`, or every channel. The answer names the search it is
-   * for, so rows can keep to one answer while the next is asked for.
+   * `until`: a category's, the given ones, or every channel, by each channel's `ownedKey`. The
+   * answer names the search it is for, so rows can keep to one answer while the next is asked for.
    */
   listSearch: (
     list: Omit<IpcInput<"guide.searchList">, "query" | "until">,
@@ -134,11 +152,11 @@ export const queries = {
       queryFn: () => call("ondemand.status"),
       staleTime: Infinity,
     }),
-  /** A tab's rows; For you starts with titles like `like`, one watched lately. */
-  rows: (kind: TitleKind, tab: RowTab, like: string | null) =>
+  /** A tab's rows; For you starts with titles like `like`, a version of one watched lately. */
+  rows: (kind: TitleKind, tab: RowTab, like: OwnedId | null) =>
     queryOptions({
-      queryKey: ["ondemand", "rows", kind, tab, like],
-      queryFn: () => call("ondemand.rows", { kind, tab, ...(like ? { like } : {}) }),
+      queryKey: ["ondemand", "rows", kind, tab, like && ownedKey(like)],
+      queryFn: () => call("ondemand.rows", { kind, tab, ...(like ? { like: ownedId(like) } : {}) }),
       staleTime: Infinity,
       placeholderData: (previous) => previous,
     }),
@@ -180,42 +198,45 @@ export const queries = {
       staleTime: Infinity,
       enabled: query.trim().length > 0,
     }),
-  /** Titles from the lists, by the id of any version; asks the provider nothing. */
-  titles: (kind: TitleKind, ids: readonly string[]) =>
+  /** Titles from the lists, by any of their versions; asks the provider nothing. */
+  titles: (kind: TitleKind, versions: readonly OwnedId[]) =>
     queryOptions({
-      queryKey: ["ondemand", "titles", kind, ids],
-      queryFn: () => call("ondemand.titles", { kind, ids: [...ids] }),
-      enabled: ids.length > 0,
+      queryKey: ["ondemand", "titles", kind, versions.map(ownedKey)],
+      queryFn: () => call("ondemand.titles", { kind, versions: versions.map(ownedId) }),
+      enabled: versions.length > 0,
     }),
-  details: (kind: TitleKind, id: string) =>
+  /** The details of one version of a movie or series. */
+  details: (kind: TitleKind, version: OwnedId) =>
     queryOptions({
-      queryKey: ["ondemand", "details", kind, id],
-      queryFn: () => call("ondemand.details", { kind, id }),
+      queryKey: ["ondemand", "details", kind, ownedKey(version)],
+      queryFn: () => call("ondemand.details", { kind, version: ownedId(version) }),
       staleTime: 30 * 60_000,
     }),
   /**
    * The episodes of a series version's season with TMDB's details, for when it shows. Read again
    * each time it shows: the main process keeps what TMDB said, and asks again what it didn't.
    */
-  season: (id: string, season: number) =>
+  season: (series: OwnedId, season: number) =>
     queryOptions({
-      queryKey: ["ondemand", "season", id, season],
-      queryFn: () => call("ondemand.season", { id, season }),
+      queryKey: ["ondemand", "season", ownedKey(series), season],
+      queryFn: () => call("ondemand.season", { series: ownedId(series), season }),
     }),
   /**
-   * How far movies, or every episode of series, got: each id a language version of one title.
-   * Kept current by `syncViewing`.
+   * How far movies, or every episode of series, got: each a language version of one title. Kept
+   * current by `syncViewing`.
    */
-  progress: (filter: {
-    readonly movieIds?: readonly string[];
-    readonly seriesIds?: readonly string[];
-  }) =>
+  progress: (titles: TitleFilter) =>
     queryOptions({
-      queryKey: ["viewing", "progress", filter.movieIds ?? [], filter.seriesIds ?? []],
+      queryKey: [
+        "viewing",
+        "progress",
+        (titles.movies ?? []).map(ownedKey),
+        (titles.series ?? []).map(ownedKey),
+      ],
       queryFn: () =>
         call("viewing.progress", {
-          ...(filter.movieIds ? { movieIds: [...filter.movieIds] } : {}),
-          ...(filter.seriesIds ? { seriesIds: [...filter.seriesIds] } : {}),
+          ...(titles.movies ? { movies: titles.movies.map(ownedId) } : {}),
+          ...(titles.series ? { series: titles.series.map(ownedId) } : {}),
         }),
       staleTime: Infinity,
     }),
@@ -234,15 +255,15 @@ export const queries = {
 };
 
 /** Stars or unstars a channel. The favourites list updates as soon as the main process has it. */
-export function useToggleFavourite(): (channelId: string) => void {
+export function useToggleFavourite(): (channel: OwnedId) => void {
   const client = useQueryClient();
   return useCallback(
-    (channelId: string) => {
+    (channel: OwnedId) => {
       const favourites = client.getQueryData(queries.viewing().queryKey)?.favourites ?? [];
       void call("viewing.setFavourite", {
         commandId: crypto.randomUUID(),
-        channelId,
-        favourite: !favourites.includes(channelId),
+        channel: ownedId(channel),
+        favourite: !favourites.some((each) => sameOwned(each, channel)),
       }).then(
         (viewing) => keepViewing(client, viewing),
         () => {},
@@ -253,25 +274,38 @@ export function useToggleFavourite(): (channelId: string) => void {
 }
 
 /**
- * Remembers which of a channel's streams plays, or Automatic with null, and opens the channel again
- * with it once saved.
+ * Changes what the viewer left a subscription at, and keeps the answer for every view that reads
+ * it.
+ */
+export async function updateSubscriptionPreferences(
+  client: QueryClient,
+  subscriptionId: string,
+  patch: Partial<SubscriptionPreferences>,
+): Promise<void> {
+  const saved = await call("subscription.updatePreferences", { subscriptionId, patch });
+  client.setQueryData(queries.subscriptionPreferences(subscriptionId).queryKey, saved);
+}
+
+/**
+ * Remembers which of a channel's streams plays, or Automatic with null, among its subscription's
+ * picks, and opens the channel again with it once saved.
  */
 export function useChooseQuality(): (channel: LiveChannel, variantId: string | null) => void {
   const client = useQueryClient();
   return useCallback(
     (channel: LiveChannel, variantId: string | null) => {
       void (async () => {
-        const preferences = await client.fetchQuery(queries.preferences());
+        const { subscriptionId } = channel;
+        const left = await client.fetchQuery(queries.subscriptionPreferences(subscriptionId));
         // A choice kept under another of the channel's streams' ids goes too.
-        const others = Object.entries(preferences.channelVariants ?? {}).filter(
+        const others = Object.entries(left.channelVariants ?? {}).filter(
           ([id]) => !channel.variants.some((variant) => variant.id === id),
         );
         const channelVariants = Object.fromEntries(
           variantId === null ? others : [...others, [channel.id, variantId]],
         );
-        const saved = await call("preferences.update", { channelVariants });
-        client.setQueryData(queries.preferences().queryKey, saved);
-        if (player.current()?.id === channel.id) player.reopen();
+        await updateSubscriptionPreferences(client, subscriptionId, { channelVariants });
+        if (sameOwned(player.current(), channel)) player.reopen();
       })().catch(() => {});
     },
     [client],
@@ -285,28 +319,57 @@ export function keepViewing(client: QueryClient, viewing: Viewing): void {
   );
 }
 
-/** The last watched channel, or null before the first or once the catalogue no longer has it. */
-export function useLastChannel(): LiveChannel | null {
-  const { data: preferences } = useQuery(queries.preferences());
-  const channelId = preferences?.lastChannelId ?? null;
-  const { data } = useQuery({ ...queries.channel(channelId ?? ""), enabled: channelId !== null });
-  return (channelId !== null && data) || null;
+/**
+ * What the viewer left the saved subscription at, with that subscription's id; undefined until
+ * both are known, and without a subscription. `refetchOnMount` reads it afresh as a view opens:
+ * the main process notes the channel watched last without going through this cache.
+ */
+export function useSubscriptionPreferences(
+  refetchOnMount?: "always",
+): (SubscriptionPreferences & { readonly subscriptionId: string }) | undefined {
+  const subscriptionId = useQuery(queries.subscription()).data?.id;
+  const { data } = useQuery({
+    ...queries.subscriptionPreferences(subscriptionId ?? ""),
+    enabled: subscriptionId !== undefined,
+    ...(refetchOnMount ? { refetchOnMount } : {}),
+  });
+  return useMemo(
+    () => (subscriptionId !== undefined && data ? { ...data, subscriptionId } : undefined),
+    [subscriptionId, data],
+  );
 }
 
-/** The ids of the favourite channels, in their saved order. */
-export function useFavouriteIds(): ReadonlySet<string> {
+/** The last watched channel, or null before the first or once the catalogue no longer has it. */
+export function useLastChannel(): LiveChannel | null {
+  const left = useSubscriptionPreferences();
+  const last = useMemo(
+    () =>
+      left && left.lastChannelId !== null
+        ? { subscriptionId: left.subscriptionId, id: left.lastChannelId }
+        : null,
+    [left],
+  );
+  const { data } = useQuery({
+    ...queries.channel(last ?? { subscriptionId: "", id: "" }),
+    enabled: last !== null,
+  });
+  return (last !== null && data) || null;
+}
+
+/** The favourite channels, by `ownedKey`, in their saved order. */
+export function useFavouriteKeys(): ReadonlySet<string> {
   const { data } = useQuery(queries.viewing());
-  return useMemo(() => new Set(data?.favourites), [data]);
+  return useMemo(() => new Set(data?.favourites.map(ownedKey)), [data]);
 }
 
 function useCategories() {
   return useQuery(queries.categories());
 }
 
-/** Categories by id, for labelling channels. */
+/** Categories by `ownedKey`, for labelling channels. */
 export function useCategoryMap(): ReadonlyMap<string, Category> {
   const { data } = useCategories();
-  return useMemo(() => new Map(data?.map((category) => [category.id, category])), [data]);
+  return useMemo(() => new Map(data?.map((category) => [ownedKey(category), category])), [data]);
 }
 
 /** Refetches library data whenever the main process reports a new catalogue. */
@@ -323,8 +386,8 @@ export function syncLibraryUpdates(client: QueryClient): () => void {
  * details once TMDB's arrived after them.
  */
 export function syncOnDemand(client: QueryClient): () => void {
-  const stopDetails = listen("ondemand.detailsChanged", ({ kind, id }) => {
-    void client.invalidateQueries({ queryKey: queries.details(kind, id).queryKey });
+  const stopDetails = listen("ondemand.detailsChanged", ({ kind, ...version }) => {
+    void client.invalidateQueries({ queryKey: queries.details(kind, version).queryKey });
   });
   const stopLists = listen("ondemand.updated", () => {
     // Lists change with a refresh and as TMDB's metadata arrives. A season shown is read again

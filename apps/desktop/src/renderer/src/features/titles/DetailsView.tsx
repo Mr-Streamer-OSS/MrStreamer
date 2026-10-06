@@ -21,6 +21,7 @@ import type {
   Title,
   TitleDetails,
 } from "@mrstreamer/contracts/ondemand";
+import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type { TitleProgress } from "@mrstreamer/contracts/viewing";
 import { nextEpisode } from "@mrstreamer/core/ondemand/details";
 import { versionLabels } from "@mrstreamer/core/ondemand/languages";
@@ -52,29 +53,30 @@ const close = () => useUi.setState({ details: null });
 interface Versions {
   /** The title from the lists, with every version; null when they don't have it. */
   readonly title: Title | null;
-  readonly playing: string;
-  readonly picked: string | null;
+  readonly playing: OwnedId;
+  readonly picked: OwnedId | null;
   /** The version Automatic plays, which its line in the menu names. */
-  readonly automatic: string;
+  readonly automatic: OwnedId;
 }
 
 export function DetailsView({ target }: { target: DetailsTarget }) {
   // Which version plays comes from the lists, the progress and the picks, all read without the
   // network, so only that version's details are asked for.
-  const listed = useQuery(queries.titles(target.kind, [target.id]));
+  const listed = useQuery(queries.titles(target.kind, [target]));
   const title = listed.data?.[0] ?? null;
-  const ids = title?.versions.map((version) => version.id) ?? [];
+  const versions = title?.versions ?? [];
   const progress = useQuery({
-    ...queries.progress(target.kind === "movie" ? { movieIds: ids } : { seriesIds: ids }),
-    enabled: ids.length > 0,
+    ...queries.progress(target.kind === "movie" ? { movies: versions } : { series: versions }),
+    enabled: versions.length > 0,
   });
-  const preferences = useQuery(queries.preferences());
-  const picked = title ? pickedVersion(title, preferences.data) : null;
+  // The picks of the subscription the title was opened from.
+  const picks = useQuery(queries.subscriptionPreferences(target.subscriptionId));
+  const picked = title ? pickedVersion(title, picks.data) : null;
   const automatic = title
-    ? automaticVersion(title, progress.data ?? [], target.id, target.asked)
-    : target.id;
+    ? automaticVersion(title, progress.data ?? [], target, target.asked)
+    : ownedId(target);
   const playing = picked ?? automatic;
-  const known = !listed.isPending && (!title || !progress.isPending) && !preferences.isPending;
+  const known = !listed.isPending && (!title || !progress.isPending) && !picks.isPending;
   // Another version's details replace these once they arrive; nothing plays from them meanwhile.
   // A new target mounts a new sheet (see App), so these are only ever the same title's.
   const details = useQuery({
@@ -271,13 +273,11 @@ function MovieActions({
   versions: Versions;
   switching: boolean;
 }) {
-  const progress = useQuery(
-    queries.progress({ movieIds: details.title.versions.map((version) => version.id) }),
-  );
+  const progress = useQuery(queries.progress({ movies: details.title.versions }));
   // Progress counts across versions: Resume carries on from there in the version that plays.
   const current = progress.data?.toSorted((a, b) => b.at - a.at)[0];
   const partly = current && !current.finished && current.position > 0;
-  const now = movieNow({ ...details.title, id: versions.playing }, details.backdropUrl);
+  const now = movieNow({ ...details.title, ...versions.playing }, details.backdropUrl);
   const removal = useRemoveFromContinue();
   const listed = useInContinueWatching(details.title);
   return (
@@ -302,7 +302,7 @@ function episodeOf(episodes: readonly Episode[], progress: TitleProgress): Episo
   const { title } = progress;
   if (title.kind !== "episode") return undefined;
   return (
-    episodes.find((episode) => episode.id === title.id) ??
+    episodes.find((episode) => sameOwned(episode, title)) ??
     episodes.find((episode) => episode.season === title.season && episode.number === title.episode)
   );
 }
@@ -335,9 +335,7 @@ function SeriesActions({
   versions: Versions;
   switching: boolean;
 }) {
-  const progress = useQuery(
-    queries.progress({ seriesIds: details.title.versions.map((version) => version.id) }),
-  );
+  const progress = useQuery(queries.progress({ series: details.title.versions }));
   const removal = useRemoveFromContinue();
   const listed = useInContinueWatching(details.title);
   const target = resumeTarget(details, progress.data ?? []);
@@ -387,7 +385,7 @@ function Actions({
   const { title, playing, automatic } = versions;
   const all = title?.versions ?? [];
   const labels = versionLabels(all, title?.originalLanguage ?? null);
-  const labelOf = (id: string) => labels[all.findIndex((version) => version.id === id)];
+  const labelOf = (named: OwnedId) => labels[all.findIndex((version) => sameOwned(version, named))];
   const label = labelOf(playing);
   const several = title !== null && all.length > 1;
   return (
@@ -446,6 +444,7 @@ function Actions({
   );
 }
 
+/** The menu's value for Automatic. A version's is its `ownedKey`, which always holds a colon. */
 const AUTOMATIC = "automatic";
 
 /** The arrow beside Play: Automatic, or one version, remembered for the title. */
@@ -457,7 +456,7 @@ function VersionMenu({
   children,
 }: {
   title: Title;
-  picked: string | null;
+  picked: OwnedId | null;
   labels: readonly string[];
   /** What Automatic plays. */
   automatic: string | null;
@@ -482,15 +481,17 @@ function VersionMenu({
         <Menu.Positioner side="bottom" align="start" sideOffset={8} className="z-[60]">
           <Menu.Popup className="max-h-[60vh] w-max min-w-[18rem] max-w-[26rem] overflow-y-auto rounded-2xl bg-popover p-2 text-[0.9375rem] shadow-2xl ring-1 ring-white/12 outline-none transition-[opacity,scale] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
             <Menu.RadioGroup
-              value={picked ?? AUTOMATIC}
-              onValueChange={(value: string) => pick(title, value === AUTOMATIC ? null : value)}
+              value={picked ? ownedKey(picked) : AUTOMATIC}
+              onValueChange={(value: string) =>
+                pick(title, title.versions.find((version) => ownedKey(version) === value) ?? null)
+              }
             >
               <VersionItem value={AUTOMATIC}>
                 Automatic
                 {automatic && <span className="text-muted-foreground"> · {automatic}</span>}
               </VersionItem>
               {title.versions.map((version, index) => (
-                <VersionItem key={version.id} value={version.id}>
+                <VersionItem key={ownedKey(version)} value={ownedKey(version)}>
                   {labels[index]}
                 </VersionItem>
               ))}
@@ -546,10 +547,8 @@ function creditsOf(episode: Partial<EpisodeDetails>): string {
 }
 
 function Episodes({ details }: { details: SeriesDetails }) {
-  const progress = useQuery(
-    queries.progress({ seriesIds: details.title.versions.map((version) => version.id) }),
-  );
-  const byEpisode = new Map((progress.data ?? []).map((entry) => [entry.title.id, entry]));
+  const progress = useQuery(queries.progress({ series: details.title.versions }));
+  const byEpisode = new Map((progress.data ?? []).map((entry) => [ownedKey(entry.title), entry]));
   // Another version's episodes count by season and number; the latest wins.
   const byNumber = new Map(
     (progress.data ?? [])
@@ -568,7 +567,7 @@ function Episodes({ details }: { details: SeriesDetails }) {
   // TMDB's details for the season shown, asked for as it shows. The provider's episodes stand
   // until they come, and the rows grow once, together.
   const enriched = useQuery({
-    ...queries.season(details.title.id, shown?.number ?? season),
+    ...queries.season(details.title, shown?.number ?? season),
     enabled: shown !== undefined,
   });
   if (!shown) return null;
@@ -598,8 +597,8 @@ function Episodes({ details }: { details: SeriesDetails }) {
       <div>
         {episodes.map((episode) => {
           const done =
-            byEpisode.get(episode.id) ?? byNumber.get(`${episode.season}:${episode.number}`);
-          const current = target?.episode.id === episode.id;
+            byEpisode.get(ownedKey(episode)) ?? byNumber.get(`${episode.season}:${episode.number}`);
+          const current = sameOwned(target?.episode, episode);
           const partly = done && !done.finished && done.position > 0 ? done : undefined;
           const facts = [
             episode.airDate ? airDate(episode.airDate) : null,

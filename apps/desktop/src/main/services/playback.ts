@@ -42,6 +42,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { Readable, Transform } from "node:stream";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
+import type { OwnedId } from "@mrstreamer/contracts/subscription";
 import type {
   AudioTrack,
   ChannelTracks,
@@ -294,7 +295,7 @@ export interface ReceiverTarget {
 /** A channel's stream as a receiver plays it. */
 export interface ReceiverStream {
   readonly sessionId: string;
-  readonly channelId: string;
+  readonly channel: OwnedId;
   /** An HLS playlist on this computer's address on the local network. Carries no login. */
   readonly url: string;
 }
@@ -378,7 +379,7 @@ interface ReceiverRun {
 
 interface LiveSession extends SessionBase {
   readonly kind: "live";
-  readonly channelId: string;
+  readonly channel: OwnedId;
   /**
    * The channel's streams to try, in order, with their upstream addresses and the headers each
    * wants on every request, such as a playlist's User-Agent.
@@ -580,10 +581,12 @@ export class Playback extends Context.Service<
   Playback,
   {
     /**
-     * Opens a stream for a channel. Closes any open stream first. `variants` are the channel's
-     * streams to try in turn, the channel's id alone when absent. `decoders` lists what the UI's
-     * player decodes; the proxy converts the rest. `repair` re-encodes the picture too, for a
-     * broadcast the player failed to decode: ffmpeg conceals damage that stops the player.
+     * Opens a stream for a channel, at the provider of the subscription it names. Closes any open
+     * stream first; a channel of a subscription that isn't saved fails with `no-subscription`
+     * before anything closes. `variants` are the channel's streams to try in turn, the channel's
+     * id alone when absent. `decoders` lists what the UI's player decodes; the proxy converts the
+     * rest. `repair` re-encodes the picture too, for a broadcast the player failed to decode:
+     * ffmpeg conceals damage that stops the player.
      *
      * `preview` says nobody chose to watch it, as a page's muted preview. It closes nothing a
      * receiver plays: the open fails while a receiver's session is open, and that is looked at
@@ -591,7 +594,7 @@ export class Playback extends Context.Service<
      * stream too.
      */
     open(
-      channelId: string,
+      channel: OwnedId,
       decoders: readonly Codec[],
       options?: {
         readonly variants?: readonly string[];
@@ -602,9 +605,10 @@ export class Playback extends Context.Service<
       },
     ): Effect.Effect<StreamSession, Failed>;
     /**
-     * Opens a movie or episode from its provider file: closes any open stream, reads which
-     * tracks the file holds and hands the UI an address to play it from any position. Fails with
-     * a `stream` error when the provider refuses the file or it can't play here.
+     * Opens a movie or episode from its provider file, through the subscription the title names:
+     * closes any open stream, reads which tracks the file holds and hands the UI an address to
+     * play it from any position. Fails with a `stream` error when the provider refuses the file
+     * or it can't play here.
      */
     openTitle(
       title: TitleRef,
@@ -631,7 +635,7 @@ export class Playback extends Context.Service<
      * address.
      */
     openReceiver(
-      channelId: string,
+      channel: OwnedId,
       receiver: ReceiverTarget,
       options?: {
         readonly variants?: readonly string[];
@@ -3158,7 +3162,7 @@ function make(deps: PlaybackDeps) {
 
     /** Opens a channel's session after closing any other, for the UI's player or `receiver`. */
     const liveSession = (
-      channelId: string,
+      channel: OwnedId,
       decoders: readonly Codec[],
       options: {
         readonly variants?: readonly string[];
@@ -3169,8 +3173,7 @@ function make(deps: PlaybackDeps) {
       receiver: ReceiverTarget | null,
     ) =>
       Effect.gen(function* () {
-        const source = yield* subscriptions.source;
-        if (!source) return yield* new Failed({ error: { kind: "no-subscription" } });
+        const source = yield* subscriptions.sourceOf(channel.subscriptionId);
         yield* closeAll;
 
         const now = Date.now();
@@ -3179,7 +3182,7 @@ function make(deps: PlaybackDeps) {
         // engine by the format before the stream starts, so those of another format than the
         // first's stay out.
         const listed = yield* Effect.forEach(
-          options.variants?.length ? options.variants : [channelId],
+          options.variants?.length ? options.variants : [channel.id],
           (id) =>
             Effect.tryPromise({
               try: (signal) => source.provider.liveStream(id, signal),
@@ -3211,7 +3214,7 @@ function make(deps: PlaybackDeps) {
           kind: "live",
           id,
           token,
-          channelId,
+          channel,
           variants,
           delivered: { variantId: null, failed: [] },
           request: source.provider.request,
@@ -3250,8 +3253,7 @@ function make(deps: PlaybackDeps) {
       receiver: ReceiverTarget | null,
     ) =>
       Effect.gen(function* () {
-        const source = yield* subscriptions.source;
-        if (!source) return yield* new Failed({ error: { kind: "no-subscription" } });
+        const source = yield* subscriptions.sourceOf(title.subscriptionId);
         yield* closeAll;
         const id = randomUUID();
         const { closed, scope: forked, lan } = yield* sessionScope(id, receiver);
@@ -3305,7 +3307,7 @@ function make(deps: PlaybackDeps) {
 
     return {
       open: (
-        channelId: string,
+        channel: OwnedId,
         decoders: readonly Codec[],
         options: {
           readonly variants?: readonly string[];
@@ -3324,11 +3326,11 @@ function make(deps: PlaybackDeps) {
                 error: { kind: "unexpected", detail: "A receiver has playback." },
               });
             }
-            const session = yield* liveSession(channelId, decoders, options, null);
+            const session = yield* liveSession(channel, decoders, options, null);
             const extension = session.format === "mpegts" ? "ts" : "m3u8";
             return {
               sessionId: session.id,
-              channelId,
+              channel,
               url: `${base}/stream/${session.token}.${extension}`,
               format: session.format,
             };
@@ -3351,7 +3353,7 @@ function make(deps: PlaybackDeps) {
         ),
 
       openReceiver: (
-        channelId: string,
+        channel: OwnedId,
         receiver: ReceiverTarget,
         options: {
           readonly variants?: readonly string[];
@@ -3361,12 +3363,12 @@ function make(deps: PlaybackDeps) {
       ) =>
         openOne(
           Effect.gen(function* () {
-            const session = yield* liveSession(channelId, receiver.decoders, options, receiver);
+            const session = yield* liveSession(channel, receiver.decoders, options, receiver);
             // The provider's stream starts now, so the receiver finds segments when it asks.
             if (session.receiver && !session.hls) void runLive(session, session.receiver);
             return {
               sessionId: session.id,
-              channelId,
+              channel,
               url: `${session.lan?.origin}/r/${session.receiver?.token}/live.m3u8`,
             };
           }),

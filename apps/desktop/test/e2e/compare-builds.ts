@@ -21,10 +21,10 @@ import { connect, delay, launch } from "./app.ts";
 /** How much worse a median may get before the report warns. */
 const BUDGET = 0.1;
 /**
- * Differences smaller than this are noise, whatever share they are: a point of CPU, 10 MB, 20 ms.
- * Every extra stream opened at the provider counts.
+ * Differences smaller than this are noise, whatever share they are: 10 MB, 20 ms. Every extra
+ * stream opened at the provider counts.
  */
-const NOISE = { "%": 1, MB: 10, ms: 20, count: 0 };
+const NOISE = { MB: 10, ms: 20, count: 0 };
 /** What measure-app.ts writes with `--json`: every run of every measure. */
 const Results = type({ "[string]": "number[]" });
 
@@ -116,7 +116,7 @@ async function warmUp(executable: string): Promise<void> {
   }
 }
 
-/** The middle value, or the mean of the two middle ones: idle measures give one value a run. */
+/** The middle value, or the mean of the two middle ones: some measures give one value a run. */
 function median(values: readonly number[]): number {
   const sorted = values.toSorted((a, b) => a - b);
   const middle = sorted.length / 2;
@@ -131,7 +131,6 @@ function shown(measure: string, value: number): string {
 
 /** The unit a measure is in: named in brackets, or milliseconds. */
 function unitOf(measure: string): keyof typeof NOISE {
-  if (measure.includes("(%)")) return "%";
   if (measure.includes("(MB)")) return "MB";
   if (measure.includes("(count)")) return "count";
   return "ms";

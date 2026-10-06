@@ -96,12 +96,14 @@ async function casting(options: { fetchMs?: number; checkpointMs?: number } = {}
   const viewing = await promised(runtime, ViewingRecord);
   const changes = await collect(runtime, (await runtime.runPromise(Output)).changes);
 
+  /** Names a channel or title of the connected subscription by the provider's id. */
+  const own = (id: string) => ({ subscriptionId: source!.id, id });
   const movie = provider.titles.movies.find((each) => each.name.startsWith(MOVIE))!;
-  const title: TitleRef = { kind: "movie", id: String(movie.id) };
+  const title: TitleRef = { kind: "movie", ...own(String(movie.id)) };
   const file = source!.provider.titleFile("movie", title.id, movie.container);
   /** A channel that streams without end. */
-  const channel = String(
-    provider.catalogue.channels.find((each) => !each.offline && !each.fixture)!.streamId,
+  const channel = own(
+    String(provider.catalogue.channels.find((each) => !each.offline && !each.fixture)!.streamId),
   );
   /** Connects to the TV, as picking it in the app's list does. */
   const connect = async () => {
@@ -137,10 +139,15 @@ async function casting(options: { fetchMs?: number; checkpointMs?: number } = {}
     return fetch(new URL(first, video).href);
   };
   const state = async () => (await output.status()).output;
-  /** How far the record says the movie got under the connected account, in seconds; null when it has nothing. */
-  const saved = async () => (await viewing.progress({ movieIds: [title.id] }))[0]?.position ?? null;
+  /**
+   * How far the record says the movie got, in seconds, for the subscription connected first or
+   * for `subscriptionId`, which lists a movie under the same id; null when it has nothing.
+   */
+  const saved = async (subscriptionId = title.subscriptionId) =>
+    (await viewing.progress({ movies: [{ subscriptionId, id: title.id }] }))[0]?.position ?? null;
   return {
     saved,
+    own,
     provider,
     tv,
     helper,
@@ -376,13 +383,42 @@ describe.skipIf(!hasTools)("playback on a receiver", () => {
     expect(await saved()).toBeGreaterThanOrEqual(80);
     expect(await state()).toMatchObject({ kind: "receiver", media: null, failure: null });
     expect(tv.requests("STOP").length).toBeGreaterThan(stops);
-    await subscriptions.connect({ server: other.url, username: "demo", password: "demo" });
+    const next = await subscriptions.connect({
+      server: other.url,
+      username: "demo",
+      password: "demo",
+    });
 
     // What the TV says after that is of a load that is gone: the new account's record stays empty.
     tv.status({ playerState: "PAUSED", currentTime: 120 });
     await output.command(media.generation, { command: "seek", position: 140 });
     await new Promise((resolve) => setTimeout(resolve, 200));
-    expect(await saved()).toBeNull();
+    expect(await saved(next.id)).toBeNull();
+  });
+
+  it("never files a receiver's progress under a subscription that took the other's place", async () => {
+    const { tv, subscriptions, connect, play, state, saved } = await casting();
+    // It lists a movie under the same id as the one that plays.
+    const other = await fakeProvider({ maxConnections: 1 });
+    await connect();
+    await play(10);
+    tv.status({ playerState: "PLAYING", currentTime: 80 });
+    await eventually(async () => expect(await state()).toMatchObject({ media: { position: 80 } }));
+
+    // Another login is stored while the receiver still plays the first one's movie.
+    const next = await subscriptions.connect({
+      server: other.url,
+      username: "demo",
+      password: "demo",
+    });
+    // A pause saves how far it got: that is the first subscription's, which is gone.
+    tv.status({ playerState: "PAUSED", currentTime: 120 });
+    await eventually(async () =>
+      expect(await state()).toMatchObject({ media: { state: "paused", position: 120 } }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    expect(await saved(next.id)).toBeNull();
   });
 
   it("has the receiver stop when something plays here instead, but not for a page's preview", async () => {
@@ -408,11 +444,11 @@ describe.skipIf(!hasTools)("playback on a receiver", () => {
   });
 
   it("plays a channel on the receiver, and says why when its stream stops", async () => {
-    const { provider, tv, output, connect, loaded, state } = await casting();
+    const { provider, tv, output, connect, loaded, state, own } = await casting();
     await connect();
     const offline = provider.catalogue.channels.find((each) => each.name === "TEST | H.264 + AAC")!;
 
-    const media = await output.playChannel(String(offline.streamId), {
+    const media = await output.playChannel(own(String(offline.streamId)), {
       variants: [String(offline.streamId)],
       shown: { name: "A channel" },
     });

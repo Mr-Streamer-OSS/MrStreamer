@@ -186,10 +186,24 @@ export interface FakeProvider {
   serveGuide(answer: string | number | "hold" | null, options?: { pieceBytes?: number }): void;
   /** How many times xmltv.php was requested. */
   guideRequests(): number;
+  /**
+   * Leaves requests for the channel list, the guide or the movie and series lists unanswered.
+   * `arrived` settles when the first reaches the provider, and `release` has them answered.
+   */
+  hold(what: Held): { readonly arrived: Promise<void>; release(): void };
   /** How many stream requests reached the provider. */
   streamRequests(): number;
   close(): Promise<void>;
 }
+
+/** Requests a test can keep waiting, by what they ask for. */
+type Held = "channels" | "guide" | "titles";
+/** What each `player_api.php` action a test can hold asks for. */
+const HELD_ACTIONS: Readonly<Record<string, Held>> = {
+  get_live_streams: "channels",
+  get_vod_streams: "titles",
+  get_series: "titles",
+};
 
 /** The fixture channels, in the order the test category lists them. */
 const FIXTURE_CHANNELS: readonly { name: string; fixture: string | null }[] = [
@@ -253,11 +267,23 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
   let guidePieceBytes = 0;
   let guideCount = 0;
   let streamCount = 0;
+  /** What a test asked to keep waiting, until it releases each. */
+  const held = new Map<Held, { readonly arrived: () => void; readonly released: Promise<void> }>();
+  /** Answers a request now, or once the test releases it when it is being held. */
+  const answering = (what: Held, answer: () => void): void => {
+    const hold = held.get(what);
+    if (!hold) return answer();
+    hold.arrived();
+    void hold.released.then(answer);
+  };
 
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", origin);
-    if (url.pathname === "/player_api.php") return api(url, response);
-    if (url.pathname === "/xmltv.php") return guide(url, response);
+    if (url.pathname === "/player_api.php") {
+      const what = HELD_ACTIONS[url.searchParams.get("action") ?? ""];
+      return what ? answering(what, () => api(url, response)) : api(url, response);
+    }
+    if (url.pathname === "/xmltv.php") return answering("guide", () => guide(url, response));
     const live = /^\/live\/([^/]+)\/([^/]+)\/(\d+)\.ts$/.exec(url.pathname);
     if (live) return stream(live[1] ?? "", live[2] ?? "", live[3] ?? "", request, response);
     const title = /^\/(movie|series)\/([^/]+)\/([^/]+)\/(\d+)\.(\w+)$/.exec(url.pathname);
@@ -627,6 +653,18 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
       guidePieceBytes = options.pieceBytes ?? 0;
     },
     guideRequests: () => guideCount,
+    hold(what) {
+      const arrived = Promise.withResolvers<void>();
+      const released = Promise.withResolvers<void>();
+      held.set(what, { arrived: arrived.resolve, released: released.promise });
+      return {
+        arrived: arrived.promise,
+        release() {
+          held.delete(what);
+          released.resolve();
+        },
+      };
+    },
     streamRequests: () => streamCount,
     close: () =>
       new Promise((resolve) => {

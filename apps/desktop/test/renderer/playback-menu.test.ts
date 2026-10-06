@@ -2,7 +2,7 @@
 // What the playback menu sets lives in the player, not on one run: a movie's speed and its
 // subtitles' timing hold through another sound track, which starts a new run, and the next title
 // starts at its own speed and on time.
-import { ipc } from "./support.ts";
+import { ipc, SUBSCRIPTION } from "./support.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SubtitleTrack } from "@mrstreamer/contracts/playback";
 import type { NowPlaying } from "../../src/renderer/src/player/title-player.ts";
@@ -21,7 +21,7 @@ const english: SubtitleTrack = {
 };
 
 const movie = (id: string): NowPlaying => ({
-  title: { kind: "movie", id },
+  title: { kind: "movie", subscriptionId: SUBSCRIPTION, id },
   name: "Night Harbour",
   detail: null,
   artworkUrl: null,
@@ -46,7 +46,7 @@ async function opened(id: string): Promise<void> {
   void titlePlayer.open(movie(id), 0);
   answer.resolve({
     sessionId: id,
-    title: { kind: "movie", id },
+    title: { kind: "movie", subscriptionId: SUBSCRIPTION, id },
     url: `http://127.0.0.1/title/${id}.mp4`,
     duration: 600,
     audio: [

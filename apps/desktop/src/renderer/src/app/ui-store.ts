@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { TitleKind } from "@mrstreamer/contracts/ondemand";
+import { sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { titlePlayer } from "../player/title-player.ts";
 
 /** The page under everything else. Watch, details and playing a title open over it. */
@@ -18,12 +19,11 @@ export type ChannelList =
   | { readonly kind: "favourites" }
   | { readonly kind: "recent" }
   | { readonly kind: "all" }
-  | { readonly kind: "category"; readonly id: string };
+  | { readonly kind: "category"; readonly category: OwnedId };
 
-/** A movie or series whose details are on screen. */
-export interface DetailsTarget {
+/** A movie or series whose details are on screen: one of its versions. */
+export interface DetailsTarget extends OwnedId {
   readonly kind: TitleKind;
-  readonly id: string;
   /** The opener asked for this version, as the 4K tab does, even if the title shows it first. */
   readonly asked?: boolean;
 }
@@ -115,5 +115,8 @@ export function openDetails(target: DetailsTarget): void {
 
 /** Whether two lists are the same. */
 export function sameList(a: ChannelList, b: ChannelList): boolean {
-  return a.kind === b.kind && (a.kind !== "category" || (b.kind === "category" && a.id === b.id));
+  return (
+    a.kind === b.kind &&
+    (a.kind !== "category" || (b.kind === "category" && sameOwned(a.category, b.category)))
+  );
 }

@@ -21,7 +21,11 @@ import { Input } from "../../components/ui/input.tsx";
 import { appError, describeError } from "../../lib/errors.ts";
 import { call } from "../../lib/ipc.ts";
 import { preferenceName } from "../../lib/quality.ts";
-import { queries } from "../../lib/queries.ts";
+import {
+  queries,
+  updateSubscriptionPreferences,
+  useSubscriptionPreferences,
+} from "../../lib/queries.ts";
 import { UpdatesSection } from "../updates/UpdatesSection.tsx";
 import { Row, Section, Select } from "./Rows.tsx";
 
@@ -55,7 +59,9 @@ export function GeneralSection() {
   const audio = preferences.data?.audioLanguage ?? titles;
   const subtitles = preferences.data?.subtitleLanguage ?? FORCED;
 
-  const ownQualities = Object.keys(preferences.data?.channelVariants ?? {}).length;
+  // The streams picked are the subscription's. Read afresh too: Watch picks them.
+  const left = useSubscriptionPreferences("always");
+  const ownQualities = Object.keys(left?.channelVariants ?? {}).length;
 
   return (
     <>
@@ -76,7 +82,13 @@ export function GeneralSection() {
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => update.mutate({ channelVariants: {} })}
+              onClick={() => {
+                if (!left) return;
+                const { subscriptionId } = left;
+                void updateSubscriptionPreferences(client, subscriptionId, {
+                  channelVariants: {},
+                }).catch(() => {});
+              }}
             >
               Reset
             </Button>

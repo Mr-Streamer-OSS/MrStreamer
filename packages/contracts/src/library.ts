@@ -7,6 +7,8 @@ import type { AppError } from "./errors.ts";
  * @mrstreamer/core/catalogue/variants).
  */
 export interface LiveChannel {
+  /** The subscription that lists it. With `id`, it names the channel (`OwnedId`). */
+  readonly subscriptionId: string;
   /**
    * Stable within one subscription: the lowest of its streams' ids. Any of its streams' ids finds
    * the channel too, so favourites and history kept by stream still do.
@@ -21,7 +23,7 @@ export interface LiveChannel {
   /** The provider's channel number of its first stream, if it assigns one. */
   readonly number: number | null;
   readonly logoUrl: string | null;
-  /** Every category one of its streams is in. */
+  /** Every category one of its streams is in, by the ids of its own subscription's categories. */
   readonly categoryIds: readonly string[];
   /** Its streams, in the provider's order. */
   readonly variants: readonly ChannelVariant[];
@@ -49,6 +51,8 @@ export interface ChannelVariant {
 }
 
 export interface Category {
+  /** The subscription that lists it. With `id`, it names the category (`OwnedId`). */
+  readonly subscriptionId: string;
   readonly id: string;
   /** The provider's name: "BE | VLAANDEREN". */
   readonly name: string;

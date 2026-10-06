@@ -1,7 +1,7 @@
 // How far movies and episodes got, as rules without storage: what a checkpoint changes, when a
 // title counts as finished, and what Continue watching shows. The viewing store keeps one row per
 // title and account and runs these on it.
-import { titleKey, type TitleRef } from "@mrstreamer/contracts/ondemand";
+import { titleKey, type RawTitleRef } from "@mrstreamer/contracts/ondemand";
 import { CONTINUE_OFFERED, type TitleProgress } from "@mrstreamer/contracts/viewing";
 
 /** A title counts as started, and shows in Continue watching, after this many seconds. */
@@ -12,8 +12,16 @@ const CREDITS_SHARE = 0.05;
 /** Short titles still leave this much at the end. */
 const MIN_CREDITS_SECONDS = 30;
 
+/**
+ * How far a movie or an episode got in one account, by the provider's own ids. The service makes
+ * a `TitleProgress` of it by saying which subscription's.
+ */
+export interface RawProgress extends Omit<TitleProgress, "title"> {
+  readonly title: RawTitleRef;
+}
+
 /** What the store keeps per title and account. */
-export interface TitleRow extends TitleProgress {
+export interface TitleRow extends RawProgress {
   /** Taken out of Continue watching, until a play begun after `removedAt`. */
   readonly hidden: boolean;
   /**
@@ -36,7 +44,7 @@ export function isFinished(position: number, duration: number): boolean {
  */
 export function progressed(
   checkpoint: {
-    readonly title: TitleRef;
+    readonly title: RawTitleRef;
     readonly position: number;
     readonly duration: number;
     readonly since: number;
@@ -57,7 +65,7 @@ export function progressed(
 }
 
 /** What taking `title` out of Continue watching applies to: the movie, or the episode's series. */
-export function removalScope(title: TitleRef): string {
+export function removalScope(title: RawTitleRef): string {
   return title.kind === "movie" ? titleKey(title) : `series:${title.seriesId}`;
 }
 
@@ -65,7 +73,7 @@ export function removalScope(title: TitleRef): string {
  * The keys of the rows that removing `title` from Continue watching hides: the movie, or every
  * episode of the series, so the series goes as a whole.
  */
-export function removedKeys(title: TitleRef, rows: readonly TitleRow[]): string[] {
+export function removedKeys(title: RawTitleRef, rows: readonly TitleRow[]): string[] {
   if (title.kind === "movie") return [titleKey(title)];
   return rows
     .filter((row) => row.title.kind === "episode" && row.title.seriesId === title.seriesId)
@@ -77,7 +85,7 @@ export function removedKeys(title: TitleRef, rows: readonly TitleRow[]): string[
  * the episode played last, finished or not, so its next one can be offered. Hidden rows stay out.
  * Most recent first, at most `CONTINUE_OFFERED`.
  */
-export function continueWatching(rows: readonly TitleRow[]): TitleProgress[] {
+export function continueWatching(rows: readonly TitleRow[]): RawProgress[] {
   const latestPerSeries = new Map<string, TitleRow>();
   /** Series with an episode watched past its start, so a few seconds of a pilot don't count. */
   const started = new Set<string>();

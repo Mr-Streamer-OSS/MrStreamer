@@ -5,7 +5,7 @@
 // receiver on the network plays is paused and played by what the receiver last said, since
 // nothing plays in the window then: a channel paused with the TV's remote shows as paused, and
 // play has the receiver play on with the stream it has.
-import { ipc } from "./support.ts";
+import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
@@ -38,6 +38,7 @@ const { player } = await import("../../src/renderer/src/player/player.ts");
 const { titlePlayer } = await import("../../src/renderer/src/player/title-player.ts");
 
 const channel = (title: string): LiveChannel => ({
+  subscriptionId: SUBSCRIPTION,
   id: title,
   name: `NL | ${title}`,
   title,
@@ -84,7 +85,7 @@ describe("the system's media controls", () => {
   it("pause and play a movie on a receiver by what the receiver said", async () => {
     ipc.reset();
     const tv = { id: "tv", kind: "cast", name: "Living Room TV" } as const;
-    const title = { kind: "movie", id: "m1" } as const;
+    const title = { kind: "movie", subscriptionId: SUBSCRIPTION, id: "m1" } as const;
     const media = (state: RemoteMedia["state"]): RemoteMedia => ({
       generation: 1,
       sessionId: "r1",
@@ -155,7 +156,7 @@ describe("the system's media controls", () => {
     const media = (state: RemoteMedia["state"]): RemoteMedia => ({
       generation: 4,
       sessionId: "r4",
-      item: { kind: "channel", channelId: arena.id },
+      item: { kind: "channel", channel: { subscriptionId: SUBSCRIPTION, id: arena.id } },
       state,
       position: 0,
       at: Date.now(),

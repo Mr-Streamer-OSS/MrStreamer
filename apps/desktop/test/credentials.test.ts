@@ -127,9 +127,13 @@ describe("credential protection", () => {
       return null;
     });
     const { subscriptions, playback } = await app(panel.fetch);
-    await subscriptions.connect({ server: "https://panel.test", ...LOGIN });
+    const { id: subscriptionId } = await subscriptions.connect({
+      server: "https://panel.test",
+      ...LOGIN,
+    });
+    const own = (id: string) => ({ subscriptionId, id });
 
-    const refused = await playback.open(leaky, ["h264", "aac", "mp3"]);
+    const refused = await playback.open(own(leaky), ["h264", "aac", "mp3"]);
     expect((await fetch(refused.url)).status).toBe(502);
     expect(await playback.failure(refused.sessionId)).toMatchObject({
       kind: "network",
@@ -137,7 +141,7 @@ describe("credential protection", () => {
     });
     expect(provider.streamRequests()).toBe(0);
 
-    const played = await playback.open(tokened, ["h264", "aac", "mp3"]);
+    const played = await playback.open(own(tokened), ["h264", "aac", "mp3"]);
     const bytes = (await (await fetch(played.url)).arrayBuffer()).byteLength;
     expect(bytes).toBeGreaterThan(0);
     expect(provider.streamRequests()).toBe(1);
@@ -252,8 +256,11 @@ describe("credential protection", () => {
 
     const connectError = await failure(subscriptions.connect({ server: provider.url, ...LOGIN }));
     failing = "/live/";
-    await subscriptions.connect({ server: provider.url, ...LOGIN });
-    const session = await playback.open(channel(provider, "TEST | H.264 + AAC"), ["h264", "aac"]);
+    const { id: subscriptionId } = await subscriptions.connect({ server: provider.url, ...LOGIN });
+    const session = await playback.open(
+      { subscriptionId, id: channel(provider, "TEST | H.264 + AAC") },
+      ["h264", "aac"],
+    );
     await (await fetch(session.url)).arrayBuffer();
     const streamError = await playback.failure(session.sessionId);
 

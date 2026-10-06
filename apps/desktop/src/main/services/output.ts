@@ -17,10 +17,11 @@
 // back to this computer, another receiver, another account or another list ends it there, and
 // none opens. Whoever asks for a list may name it, and take that one down again by its name.
 //
-// Every load has a generation, counted here, and the account it began under. A command names its
-// generation and is dropped once another load took its place. What a receiver says of an earlier
-// load is dropped too, so a late answer can't move the clock of what plays now, save progress
-// under another account, or end an episode that is no longer the one playing.
+// Every load has a generation, counted here. A command names its generation and is dropped once
+// another load took its place. What a receiver says of an earlier load is dropped too, so a late
+// answer can't move the clock of what plays now, or end an episode that is no longer the one
+// playing. What plays names the subscription it is from, and so does the progress saved of it:
+// the viewing record keeps it for that subscription, or not at all once that one went.
 //
 // How far a title got on a receiver is saved here, from what the receiver confirmed: each minute
 // while it plays, and when it pauses, is skipped in, ends, stops or is lost. The UI saves that for
@@ -42,6 +43,7 @@ import type {
 import { randomUUID } from "node:crypto";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { StreamFailure } from "@mrstreamer/contracts/playback";
+import type { OwnedId } from "@mrstreamer/contracts/subscription";
 import { Failed } from "@mrstreamer/core/failure";
 import { ViewingRecord } from "@mrstreamer/core/viewing/service";
 import * as Context from "effect/Context";
@@ -61,7 +63,6 @@ import {
   type TransportStatus,
 } from "../receivers/adapter.ts";
 import { Playback, type ReceiverTarget } from "./playback.ts";
-import { Subscriptions } from "./subscription.ts";
 
 /**
  * How long a receiver gets to ask this computer for what it was sent. One that never does can't
@@ -112,8 +113,6 @@ interface Playing {
   readonly generation: number;
   readonly sessionId: string;
   readonly item: RemoteItem;
-  /** The account it began under: its progress is that account's alone. */
-  readonly account: string;
   /** Seconds to add to a position the receiver names to get seconds into the title. */
   readonly offset: number;
   /** Ends the wait for the receiver's first request. */
@@ -171,7 +170,7 @@ export class Output extends Context.Service<
      * here. `variants` are the channel's streams to try, as for `Playback.open`.
      */
     playChannel(
-      channelId: string,
+      channel: OwnedId,
       options: {
         readonly variants: readonly string[];
         readonly audio?: number | null;
@@ -221,7 +220,6 @@ export class Output extends Context.Service<
 function make(deps: OutputDeps) {
   return Effect.gen(function* () {
     const playback = yield* Playback;
-    const subscriptions = yield* Subscriptions;
     const viewing = yield* ViewingRecord;
     const updates = yield* PubSub.unbounded<OutputStatus>();
     /** Changes to what is connected and what plays run one at a time. */
@@ -282,8 +280,9 @@ function make(deps: OutputDeps) {
     };
 
     /**
-     * Saves how far the receiver got with the title it plays, under the account it began with:
-     * never under another that connected since. A channel has no progress.
+     * Saves how far the receiver got with the title it plays, for the subscription the title
+     * names. The record refuses it once that subscription went, so it never lands under another
+     * that connected since. A channel has no progress.
      */
     const checkpoint = (now: Playing | null) =>
       Effect.gen(function* () {
@@ -291,7 +290,7 @@ function make(deps: OutputDeps) {
         // Nothing confirmed yet says nothing of how far it got.
         if (!now || !title || now.media.state === "loading") return;
         const position = positionOf(now);
-        if (position <= 0 || (yield* subscriptions.key) !== now.account) return;
+        if (position <= 0) return;
         yield* viewing
           .recordProgress(
             randomUUID(),
@@ -481,8 +480,6 @@ function make(deps: OutputDeps) {
       shown: Shown,
     ) =>
       Effect.gen(function* () {
-        const account = yield* subscriptions.key;
-        if (!account) return yield* new Failed({ error: { kind: "no-subscription" } });
         const mine = ++generation;
         const watch = new AbortController();
         const offset = title?.offset ?? 0;
@@ -490,7 +487,6 @@ function make(deps: OutputDeps) {
           generation: mine,
           sessionId,
           item,
-          account,
           offset,
           watch,
           title,
@@ -779,7 +775,7 @@ function make(deps: OutputDeps) {
       ),
 
       playChannel: (
-        channelId: string,
+        channel: OwnedId,
         options: {
           readonly variants: readonly string[];
           readonly audio?: number | null;
@@ -793,7 +789,7 @@ function make(deps: OutputDeps) {
             // What it played closes without telling it to stop: the load takes its place.
             yield* drop(true);
             opened.clear();
-            const stream = yield* playback.openReceiver(channelId, yield* target(connection), {
+            const stream = yield* playback.openReceiver(channel, yield* target(connection), {
               variants: options.variants,
               audio: options.audio ?? null,
               audioLanguage: options.audioLanguage ?? null,
@@ -801,7 +797,7 @@ function make(deps: OutputDeps) {
             return yield* load(
               connection,
               stream.sessionId,
-              { kind: "channel", channelId },
+              { kind: "channel", channel },
               null,
               { audio: options.audio ?? null, subtitle: null },
               {

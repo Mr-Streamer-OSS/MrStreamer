@@ -5,7 +5,7 @@
 // asks for the picture at once: what was on screen at its position shows when the feed has it, the
 // player says the subtitles are loading until then, and that they can't be had when the feed says
 // so.
-import { ipc } from "./support.ts";
+import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
@@ -64,7 +64,7 @@ async function opened(from: number): Promise<void> {
   const answer = ipc.hold("playback.openTitle");
   void titlePlayer.open(
     {
-      title: { kind: "movie", id: "1" },
+      title: { kind: "movie", subscriptionId: SUBSCRIPTION, id: "1" },
       name: "Night Harbour",
       detail: null,
       artworkUrl: null,
@@ -74,7 +74,7 @@ async function opened(from: number): Promise<void> {
   );
   answer.resolve({
     sessionId: "s1",
-    title: { kind: "movie", id: "1" },
+    title: { kind: "movie", subscriptionId: SUBSCRIPTION, id: "1" },
     url: "http://127.0.0.1/title/s1.mp4",
     duration: 600,
     audio: [],

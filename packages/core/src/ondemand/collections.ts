@@ -7,6 +7,7 @@ import type {
   Title,
   TitleKind,
 } from "@mrstreamer/contracts/ondemand";
+import { ownedKey } from "@mrstreamer/contracts/subscription";
 import { GENRES, tmdbImage, type TitleMetadata } from "../metadata/tmdb.ts";
 import { suitability, suits } from "./languages.ts";
 
@@ -107,7 +108,7 @@ export function collections(source: CollectionSource): Collections {
           ? null
           : fourK.id === title.id
             ? shown
-            : { ...shown, id: fourK.id, tags: fourK.tags },
+            : { ...shown, subscriptionId: fourK.subscriptionId, id: fourK.id, tags: fourK.tags },
       };
     });
   const suiting = ranked.filter((entry) => entry.suits);
@@ -194,11 +195,13 @@ export function collections(source: CollectionSource): Collections {
     return { entries: [], order: "added" };
   }
 
+  /** The title one of whose versions `key` names, as `ownedKey` writes it. */
+  const seedOf = (key: string) =>
+    ranked.find((entry) => entry.title.versions.some((version) => ownedKey(version) === key));
+
   /** Titles sharing the most genres with one, more popular first; the title itself left out. */
-  function alike(titleId: string): Ranked[] {
-    const seed = ranked.find((entry) =>
-      entry.title.versions.some((version) => version.id === titleId),
-    );
+  function alike(key: string): Ranked[] {
+    const seed = seedOf(key);
     if (!seed || seed.genres.length === 0) return [];
     const scored = suiting.flatMap((entry) => {
       if (entry === seed) return [];
@@ -227,9 +230,7 @@ export function collections(source: CollectionSource): Collections {
         return source.services.find((service) => `service:${service.id}` === id)?.name ?? null;
       }
       if (id.startsWith("like:")) {
-        const seed = ranked.find((entry) =>
-          entry.title.versions.some((version) => version.id === id.slice(5)),
-        );
+        const seed = seedOf(id.slice("like:".length));
         return seed ? `More like ${seed.title.title}` : null;
       }
       return NAMES[id as keyof typeof NAMES] ?? null;

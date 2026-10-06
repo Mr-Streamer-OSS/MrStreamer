@@ -16,6 +16,7 @@ import { Slider as SliderPrimitive } from "@base-ui/react/slider";
 import { Maximize, Minimize, Pause, Play, RotateCcw, RotateCw, SkipForward } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { SeriesDetails } from "@mrstreamer/contracts/ondemand";
+import { ownedId, sameOwned } from "@mrstreamer/contracts/subscription";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import { miniPlayer, useMiniPlayer } from "../../app/mini-player.ts";
 import { hasModifier, isTyping } from "../../app/platform.ts";
@@ -75,9 +76,10 @@ function leave(): void {
 function toEpisodes(series: SeriesDetails): void {
   const { details } = useUi.getState();
   const underneath =
-    details?.kind === "series" && series.title.versions.some(({ id }) => id === details.id);
+    details?.kind === "series" &&
+    series.title.versions.some((version) => sameOwned(version, details));
   leave();
-  if (!underneath) openDetails({ kind: "series", id: series.title.id });
+  if (!underneath) openDetails({ kind: "series", ...ownedId(series.title) });
 }
 
 export function TitleWatch() {

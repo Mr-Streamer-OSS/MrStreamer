@@ -4,7 +4,7 @@
 // is open. One next episode opens, only once the countdown ends and the episode before has closed;
 // leaving, another title or a new account plays nothing. A next episode that fails says it didn't start, and the last
 // episode records that its series is finished.
-import { ipc } from "./support.ts";
+import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
@@ -56,6 +56,7 @@ vi.mock("../../src/renderer/src/player/title-engine.ts", () => ({
 
 function episode(id: string, season: number, number: number, title: string): Episode {
   return {
+    subscriptionId: SUBSCRIPTION,
     id,
     seriesId: "nl",
     season,
@@ -77,6 +78,7 @@ const series: SeriesDetails = {
   kind: "series",
   title: {
     kind: "series",
+    subscriptionId: SUBSCRIPTION,
     id: "nl",
     name: "Harbour Lights (NL)",
     title: "Harbour Lights",
@@ -92,8 +94,8 @@ const series: SeriesDetails = {
     tmdbId: "90000",
     genres: [],
     versions: [
-      { id: "nl", tags: ["NL"] },
-      { id: "en", tags: ["EN"] },
+      { subscriptionId: SUBSCRIPTION, id: "nl", tags: ["NL"] },
+      { subscriptionId: SUBSCRIPTION, id: "en", tags: ["EN"] },
     ],
   },
   originalTitle: null,
@@ -199,7 +201,14 @@ describe("the end of an episode", () => {
     await wait(1000);
     expect(opened()).toEqual(["e13", "e21"]);
     expect(ipc.argsOf("playback.openTitle").at(-1)).toMatchObject({
-      title: { kind: "episode", id: "e21", seriesId: "nl", season: 2, episode: 1 },
+      title: {
+        kind: "episode",
+        subscriptionId: SUBSCRIPTION,
+        id: "e21",
+        seriesId: "nl",
+        season: 2,
+        episode: 1,
+      },
     });
     const playback = ipc
       .methods()
@@ -234,7 +243,7 @@ describe("the end of an episode", () => {
     await press("Episodes");
     expect(useUi.getState()).toMatchObject({
       playingTitle: false,
-      details: { kind: "series", id: "nl" },
+      details: { kind: "series", subscriptionId: SUBSCRIPTION, id: "nl" },
     });
     expect(ipc.argsOf("playback.close")).toEqual([{ sessionId: "s1" }]);
   });
@@ -331,7 +340,14 @@ describe("the end of an episode", () => {
     await act(async () =>
       saved.resolve({ favourites: [], recent: [], continueWatching: [], sequence: 1 }),
     );
-    expect(ipc.argsOf("viewing.finishSeries")).toMatchObject([{ seriesIds: ["nl", "en"] }]);
+    expect(ipc.argsOf("viewing.finishSeries")).toMatchObject([
+      {
+        series: [
+          { subscriptionId: SUBSCRIPTION, id: "nl" },
+          { subscriptionId: SUBSCRIPTION, id: "en" },
+        ],
+      },
+    ]);
     await wait(15_000);
     expect(opened()).toEqual(["e22"]);
   });

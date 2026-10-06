@@ -32,8 +32,8 @@ import {
   type StreamSession,
   type TitleSession,
 } from "./playback.ts";
-import { Preferences } from "./preferences.ts";
-import type { SubscriptionSummary } from "./subscription.ts";
+import { Preferences, SubscriptionPreferences } from "./preferences.ts";
+import type { OwnedId, SubscriptionSummary } from "./subscription.ts";
 import type { UpdateStatus } from "./updates.ts";
 import type { TitleProgress, Viewing } from "./viewing.ts";
 
@@ -42,6 +42,10 @@ import type { TitleProgress, Viewing } from "./viewing.ts";
 const none = () => type("undefined");
 const titleKind = () => type.enumerated(...TITLE_KINDS);
 const decoders = () => type.enumerated(...CODECS).array();
+/** An `OwnedId`: what a provider lists, with the subscription that lists it. */
+const owned = () => type({ subscriptionId: "string > 0", id: "string" });
+/** Movies, and series whose every episode counts, by the ids of their versions: a `TitleFilter`. */
+const titleFilter = () => type({ "movies?": owned().array(), "series?": owned().array() });
 
 /** Login details as typed by the user. `server` may also hold a pasted M3U link. */
 const loginInput = () =>
@@ -63,22 +67,31 @@ export const ipcInputs = {
   "subscription.remove": () => type({ "eraseViewing?": "boolean" }),
   /** Asks the provider for the account's status now: expiry and connections in use. */
   "subscription.recheck": none,
+  /** What the viewer left a subscription at: where Live TV opens, and the picks made in it. */
+  "subscription.preferences": () => type({ subscriptionId: "string > 0" }),
+  "subscription.updatePreferences": () =>
+    type({ subscriptionId: "string > 0", patch: SubscriptionPreferences.partial() }),
   "library.status": none,
   "library.categories": none,
   "library.channels": () =>
-    type({ "categoryId?": "string", "query?": "string", "ids?": "string[]" }),
-  "library.channel": () => type({ channelId: "string" }),
+    type({ "category?": owned(), "query?": "string", "channels?": owned().array() }),
+  "library.channel": () => type({ channel: owned() }),
   "library.refresh": none,
-  "guide.listings": () => type({ channelIds: "string[]" }),
-  "guide.schedule": () => type({ channelId: "string" }),
+  "guide.listings": () => type({ channels: owned().array() }),
+  "guide.schedule": () => type({ channel: owned() }),
   "guide.search": () => type({ query: "string" }),
   /**
    * Searches the programmes of one list's channels, named as `library.channels` names a list: a
-   * category's channels, those with the given ids, or every channel. `until` ends the day
-   * searched, in epoch milliseconds.
+   * category's channels, the given channels, or every channel. `until` ends the day searched, in
+   * epoch milliseconds.
    */
   "guide.searchList": () =>
-    type({ query: "string", until: "number", "categoryId?": "string", "ids?": "string[]" }),
+    type({
+      query: "string",
+      until: "number",
+      "category?": owned(),
+      "channels?": owned().array(),
+    }),
   "guide.status": none,
   /**
    * Asks the subscription for its guide now and downloads it. Answers with the status, also when
@@ -90,8 +103,9 @@ export const ipcInputs = {
   "ondemand.search": () => type({ query: "string" }),
   /** Movies or series only, for the field in their tab bar. */
   "ondemand.searchKind": () => type({ kind: titleKind(), query: "string" }),
+  /** `like` names a title by one of its versions. */
   "ondemand.rows": () =>
-    type({ kind: titleKind(), tab: type.enumerated(...ROW_TABS), "like?": "string > 0" }),
+    type({ kind: titleKind(), tab: type.enumerated(...ROW_TABS), "like?": owned() }),
   "ondemand.tiles": () => type({ kind: titleKind(), of: "'genres' | 'services'" }),
   "ondemand.collection": () =>
     type({
@@ -101,13 +115,14 @@ export const ipcInputs = {
       offset: "number.integer >= 0",
       limit: "1 <= number.integer <= 500",
     }),
-  "ondemand.details": () => type({ kind: titleKind(), id: "string > 0" }),
+  /** The details of one version of a movie or series. */
+  "ondemand.details": () => type({ kind: titleKind(), version: owned() }),
   /** One season of a series version, by number, asked for when the viewer opens it. */
-  "ondemand.season": () => type({ id: "string > 0", season: "number.integer >= 0" }),
-  "ondemand.titles": () => type({ kind: titleKind(), ids: "string[]" }),
+  "ondemand.season": () => type({ series: owned(), season: "number.integer >= 0" }),
+  "ondemand.titles": () => type({ kind: titleKind(), versions: owned().array() }),
   "playback.open": () =>
     type({
-      channelId: "string",
+      channel: owned(),
       /**
        * The channel's stream to play, by id, instead of the one chosen before or Auto's. Only it
        * is tried.
@@ -156,7 +171,7 @@ export const ipcInputs = {
   "output.disconnect": none,
   "output.playChannel": () =>
     type({
-      channelId: "string",
+      channel: owned(),
       "variant?": "string",
       "audio?": "number.integer >= 0",
       "audioLanguage?": "string",
@@ -189,14 +204,19 @@ export const ipcInputs = {
   "viewing.get": none,
   // Each change carries an id the UI makes up, so sending it again changes nothing more.
   "viewing.setFavourite": () =>
-    type({ commandId: "string", channelId: "string", favourite: "boolean" }),
+    type({ commandId: "string", channel: owned(), favourite: "boolean" }),
   /**
-   * Puts the favourites of `subscription` in another order: `original` is the list the order was
-   * made from, whole, and `order` the channels arranged. See `FavouriteOrder`.
+   * Puts the favourites of the subscription in another order: `original` is the list the order
+   * was made from, whole, and `order` the channels arranged. See `FavouriteOrder`.
    */
   "viewing.reorderFavourites": () =>
-    type({ commandId: "string", subscription: "string", original: "string[]", order: "string[]" }),
-  "viewing.recordWatch": () => type({ commandId: "string", channelId: "string" }),
+    type({
+      commandId: "string",
+      subscriptionId: "string > 0",
+      original: owned().array(),
+      order: owned().array(),
+    }),
+  "viewing.recordWatch": () => type({ commandId: "string", channel: owned() }),
   "viewing.recordProgress": () =>
     type({
       commandId: "string",
@@ -206,12 +226,11 @@ export const ipcInputs = {
       /** When this play of the title began: epoch milliseconds. */
       since: "number",
     }),
-  /** Every version played of the movies and series with these ids. */
-  "viewing.removeFromContinue": () =>
-    type({ commandId: "string", "movieIds?": "string[]", "seriesIds?": "string[]" }),
-  /** Every version of the series, by id. */
-  "viewing.finishSeries": () => type({ commandId: "string", seriesIds: "string[]" }),
-  "viewing.progress": () => type({ "movieIds?": "string[]", "seriesIds?": "string[]" }),
+  /** Every version played of these movies and series. */
+  "viewing.removeFromContinue": () => type({ commandId: "string", titles: titleFilter() }),
+  /** Every version of the series. */
+  "viewing.finishSeries": () => type({ commandId: "string", series: owned().array() }),
+  "viewing.progress": titleFilter,
   "updates.status": none,
   "updates.setChannel": () => type({ channel: "'stable' | 'nightly'" }),
   "updates.check": none,
@@ -232,25 +251,27 @@ export interface IpcOutputs {
   "subscription.connect": SubscriptionSummary;
   "subscription.remove": null;
   "subscription.recheck": SubscriptionSummary | null;
+  "subscription.preferences": SubscriptionPreferences;
+  "subscription.updatePreferences": SubscriptionPreferences;
   "library.status": CatalogueStatus;
   "library.categories": readonly Category[];
   /**
-   * All channels in a category, the best matches for a query across the catalogue, or the
-   * channels with the given ids in that order.
+   * All channels in a category, the best matches for a query across the catalogue, or the given
+   * channels in that order.
    */
   "library.channels": readonly LiveChannel[];
   "library.channel": LiveChannel;
   "library.refresh": CatalogueStatus;
-  /** Now and next per channel id, for the channels the guide covers. */
+  /** Now and next per channel, by its `ownedKey`, for the channels the guide covers. */
   "guide.listings": Readonly<Record<string, Listing>>;
   /** The channel's programme on now and the rest the guide knows, in time order. */
   "guide.schedule": readonly Programme[];
   /** Programmes on now or later whose title matches, on now first. */
   "guide.search": readonly ProgrammeMatch[];
   /**
-   * Per channel id of the list, whether the programme on now matches and the first later one
-   * that does. Every channel of the list is searched, so none is cut off; those without a match
-   * are left out.
+   * Per channel of the list, by its `ownedKey`, whether the programme on now matches and the first
+   * later one that does. Every channel of the list is searched, so none is cut off; those without
+   * a match are left out.
    */
   "guide.searchList": Readonly<Record<string, ListingMatch>>;
   "guide.status": GuideStatus;
@@ -269,8 +290,8 @@ export interface IpcOutputs {
    */
   "ondemand.season": readonly EpisodeDetails[];
   /**
-   * Movies or series by the id of any of their versions, from the lists alone, in the order
-   * asked; ids the lists don't have are left out. Asks the provider nothing.
+   * Movies or series by any of their versions, from the lists alone, in the order asked; versions
+   * the lists don't have are left out. Asks the provider nothing.
    */
   "ondemand.titles": readonly Title[];
   /** A tab's rows; For you starts with titles like `like`, one watched lately. */
@@ -385,8 +406,8 @@ export interface IpcEvents {
   "guide.updated": null;
   /** The movie and series lists were fetched again, or the fetch failed and kept them. */
   "ondemand.updated": OnDemandStatus;
-  /** TMDB's details of a title arrived after its details were given without them. */
-  "ondemand.detailsChanged": { readonly kind: TitleKind; readonly id: string };
+  /** TMDB's details of a title version arrived after its details were given without them. */
+  "ondemand.detailsChanged": OwnedId & { readonly kind: TitleKind };
   /** Favourites or recently watched channels changed, up to `sequence`. */
   "viewing.changed": { readonly sequence: number };
   /** The update moved on, for example a download's progress. */

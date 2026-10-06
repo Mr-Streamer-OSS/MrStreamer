@@ -13,6 +13,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Play, Search, Volume2, VolumeX, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
+import { ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { hasModifier, isMac, isTyping } from "../../app/platform.ts";
 import { openView, openWatch, useUi } from "../../app/ui-store.ts";
 import { CatalogueNotice, catalogueState } from "../../components/CatalogueNotice.tsx";
@@ -23,7 +24,12 @@ import { WindowBar } from "../../components/WindowBar.tsx";
 import { useNow } from "../../lib/clock.ts";
 import { progressOf, timeLeft } from "../../lib/format.ts";
 import { showSelection, useKeyboardMode } from "../../lib/input-mode.ts";
-import { queries, useCategoryMap, useFavouriteIds, useToggleFavourite } from "../../lib/queries.ts";
+import {
+  queries,
+  useCategoryMap,
+  useFavouriteKeys,
+  useToggleFavourite,
+} from "../../lib/queries.ts";
 import { cn } from "../../lib/utils.ts";
 import { usePreviewWaits } from "../../player/output.ts";
 import { Picture } from "../../player/Picture.tsx";
@@ -34,10 +40,10 @@ import { ListPicker, listKey, useOpenGroups } from "./ListPicker.tsx";
 import {
   groupOf,
   listTitle,
-  showList,
   useListChannels,
   useListEntries,
   useListSearch,
+  useShowList,
 } from "./lists.ts";
 import { orderKey, useFavouriteOrder, waits } from "./reorder.ts";
 
@@ -56,23 +62,25 @@ export function GuidePage({ active }: { active: boolean }) {
   const categoryMap = useCategoryMap();
   const { channels: listed, error } = useListChannels(list);
   const channels = listed ?? NO_CHANNELS;
-  const playingId = usePlayer((state) => state.channel?.id ?? null);
-  const favourites = useFavouriteIds();
+  const playingKey = usePlayer((state) => (state.channel ? ownedKey(state.channel) : null));
+  const favourites = useFavouriteKeys();
   const toggleFavourite = useToggleFavourite();
+  const showList = useShowList();
   const keyboard = useKeyboardMode();
 
   const { open, toggle } = useOpenGroups(groupOf(list, categoryMap));
   const entries = useListEntries(open);
   const [focus, setFocus] = useState<"lists" | "channels">("channels");
   const [entry, setEntry] = useState(0);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  /** The channel whose schedule is open, by its `ownedKey`. */
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
   // A remembered category can disappear after a refresh or a new login.
   useEffect(() => {
-    if (list.kind === "category" && categories.data && !categoryMap.has(list.id)) {
+    if (list.kind === "category" && categories.data && !categoryMap.has(ownedKey(list.category))) {
       showList({ kind: "all" });
     }
-  }, [list, categories.data, categoryMap]);
+  }, [list, categories.data, categoryMap, showList]);
 
   // What the field holds belongs to the list it was typed in: another list starts without a
   // search, unless the search itself moved there.
@@ -96,17 +104,17 @@ export function GuidePage({ active }: { active: boolean }) {
 
   // The selection keeps to its channel when the rows change under it, as a search's do while
   // programmes begin and end, and stays among the rows once its channel has gone.
-  const [chosen, setChosen] = useState<{ index: number; id: string | null }>({
+  const [chosen, setChosen] = useState<{ index: number; channel: OwnedId | null }>({
     index: 0,
-    id: null,
+    channel: null,
   });
   const kept =
-    chosen.id === null || rows[chosen.index]?.id === chosen.id
+    chosen.channel === null || sameOwned(rows[chosen.index], chosen.channel)
       ? chosen.index
-      : rows.findIndex((channel) => channel.id === chosen.id);
+      : rows.findIndex((channel) => sameOwned(channel, chosen.channel));
   const selected = draft
     ? Math.max(
-        rows.findIndex((channel) => channel.id === draft.focus.id),
+        rows.findIndex((channel) => sameOwned(channel, draft.focus.channel)),
         0,
       )
     : Math.min(kept === -1 ? chosen.index : kept, Math.max(rows.length - 1, 0));
@@ -117,10 +125,10 @@ export function GuidePage({ active }: { active: boolean }) {
   const entered = useRef<"button" | "page" | null>(null);
   const begin = () => {
     numberEntry.cancel();
-    setExpandedId(null);
+    setExpandedKey(null);
     setFocus("channels");
     entered.current = document.activeElement === reorderButton.current ? "button" : "page";
-    order.start(rows[selected]?.id ?? null);
+    order.start(rows[selected] ?? null);
   };
   /** Starts ordering the favourites, or asks for a search to be cleared first. */
   const reorder = () => {
@@ -130,32 +138,33 @@ export function GuidePage({ active }: { active: boolean }) {
   };
   // Once the order is saved or cancelled, the selection is the channel that had the keys, and
   // the focus is back where it was before.
-  const focusId = draft?.focus.id ?? null;
-  const left = useRef(focusId);
+  const moved = draft?.focus.channel ?? null;
+  const movedKey = moved && ownedKey(moved);
+  const left = useRef(moved);
   useLayoutEffect(() => {
-    if (focusId !== null) {
-      left.current = focusId;
+    if (moved !== null) {
+      left.current = moved;
       return;
     }
     const from = entered.current;
     entered.current = null;
     if (from === null) return;
-    const id = left.current;
-    setChosen((current) => ({ ...current, id }));
+    const channel = left.current;
+    setChosen((current) => ({ ...current, channel }));
     const focused = document.activeElement;
     if (from === "button") reorderButton.current?.focus();
     else if (focused instanceof HTMLElement && page.current?.contains(focused)) focused.blur();
-  }, [focusId]);
+  }, [movedKey]);
 
   // A new list, or another search of it, selects its playing channel, or its first.
   const loaded = listed !== undefined;
   useEffect(() => {
     const index = Math.max(
-      rows.findIndex((channel) => channel.id === player.current()?.id),
+      rows.findIndex((channel) => sameOwned(channel, player.current())),
       0,
     );
-    setChosen({ index, id: rows[index]?.id ?? null });
-    setExpandedId(null);
+    setChosen({ index, channel: rows[index] ?? null });
+    setExpandedKey(null);
   }, [key, loaded, search.query]);
 
   // ⌘K and the search button search everything for what this list is searched for.
@@ -171,13 +180,14 @@ export function GuidePage({ active }: { active: boolean }) {
     focus,
     selected,
     entry,
-    expandedId,
+    expandedKey,
     rows,
     entries,
     text,
     setText,
     toggle,
     toggleFavourite,
+    showList,
     order,
     reorder,
   });
@@ -185,13 +195,14 @@ export function GuidePage({ active }: { active: boolean }) {
     focus,
     selected,
     entry,
-    expandedId,
+    expandedKey,
     rows,
     entries,
     text,
     setText,
     toggle,
     toggleFavourite,
+    showList,
     order,
     reorder,
   };
@@ -215,11 +226,11 @@ export function GuidePage({ active }: { active: boolean }) {
       const now = state.current;
       // An order being made has the keys to itself: nothing plays, stars or opens meanwhile.
       if (now.order.draft) return orderKey(event, now.order);
-      const { toggle, toggleFavourite } = now;
+      const { toggle, toggleFavourite, showList } = now;
       const channel = now.rows[now.selected];
       const step = (value: number, delta: number, length: number) =>
         Math.min(Math.max(value + delta, 0), Math.max(length - 1, 0));
-      const select = (index: number) => setChosen({ index, id: now.rows[index]?.id ?? null });
+      const select = (index: number) => setChosen({ index, channel: now.rows[index] ?? null });
 
       if (/^[0-9]$/.test(event.key)) {
         numberEntry.type(event.key);
@@ -262,11 +273,11 @@ export function GuidePage({ active }: { active: boolean }) {
         }
         case "ArrowRight":
           if (now.focus === "lists") setFocus("channels");
-          else if (channel) setExpandedId(channel.id);
+          else if (channel) setExpandedKey(ownedKey(channel));
           break;
         case "ArrowLeft":
-          if (now.focus === "channels" && now.expandedId === channel?.id && channel) {
-            setExpandedId(null);
+          if (now.focus === "channels" && channel && now.expandedKey === ownedKey(channel)) {
+            setExpandedKey(null);
           } else if (now.focus === "channels") setFocus("lists");
           break;
         case "Backspace":
@@ -285,7 +296,7 @@ export function GuidePage({ active }: { active: boolean }) {
           break;
         case "s":
         case "S":
-          if (channel) toggleFavourite(channel.id);
+          if (channel) toggleFavourite(channel);
           break;
         case "r":
         case "R":
@@ -433,8 +444,8 @@ export function GuidePage({ active }: { active: boolean }) {
                 key={`${key}\n${search.query}`}
                 channels={rows}
                 selected={draft || (keyboard && focus === "channels") ? selected : null}
-                playingId={playingId}
-                expandedId={expandedId}
+                playingKey={playingKey}
+                expandedKey={expandedKey}
                 favourites={favourites}
                 words={search.words}
                 matches={search.matches}
@@ -449,10 +460,12 @@ export function GuidePage({ active }: { active: boolean }) {
                   }
                 }
                 onWatch={(channel) => {
-                  setChosen({ index: rows.indexOf(channel), id: channel.id });
+                  setChosen({ index: rows.indexOf(channel), channel });
                   watchChannel(channel);
                 }}
-                onToggleSchedule={(id) => setExpandedId((current) => (current === id ? null : id))}
+                onToggleSchedule={(key) =>
+                  setExpandedKey((current) => (current === key ? null : key))
+                }
                 onToggleFavourite={toggleFavourite}
               />
             )}
@@ -568,9 +581,9 @@ function NowStrip({ active }: { active: boolean }) {
   const channel = usePlayer((state) => state.channel);
   const audible = usePlayer((state) => state.audible && !state.muted);
   const waits = usePreviewWaits();
-  const listing = useQuery({
-    ...queries.listings(channel ? [channel.id] : []),
-  }).data?.[channel?.id ?? ""];
+  const listing = useQuery(queries.listings(channel ? [channel] : [])).data?.[
+    channel ? ownedKey(channel) : ""
+  ];
   const now = useNow();
   if (!channel) return null;
   const current = listing?.now ?? null;

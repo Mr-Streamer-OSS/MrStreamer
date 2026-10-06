@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppFailure } from "@mrstreamer/contracts/errors";
+import { ownedKey } from "@mrstreamer/contracts/subscription";
 import { Failed } from "@mrstreamer/core/failure";
 import { Guide } from "@mrstreamer/core/guide/service";
 import { ViewingRecord } from "@mrstreamer/core/viewing/service";
@@ -137,16 +138,41 @@ function guideAround(now: number): string {
 
 /**
  * The app's services on `dataDir`; another call is the app started again, with `secrets` as the
- * keychain it finds then.
+ * keychain it finds then. `own` names a channel with the subscription saved at that moment;
+ * opening a channel and asking for listings take and answer the playlist's own ids.
  */
 async function app(dataDir: string, secrets: Secrets = testSecrets) {
   const runtime = runtimeFor(mainLayer({ ...testConfig(dataDir), secrets }));
+  const subscriptions = await promised(runtime, Subscriptions);
+  const playback = await promised(runtime, Playback);
+  const guide = await promised(runtime, Guide);
+  const own = async (id: string) => ({
+    subscriptionId: (await subscriptions.get())?.id ?? "no-subscription",
+    id,
+  });
   return {
-    subscriptions: await promised(runtime, Subscriptions),
+    own,
+    subscriptions,
     library: await promised(runtime, Library),
     onDemand: await promised(runtime, OnDemand),
-    playback: await promised(runtime, Playback),
-    guide: await promised(runtime, Guide),
+    playback: {
+      ...playback,
+      open: async (channelId: string, decoders: Parameters<typeof playback.open>[1]) =>
+        playback.open(await own(channelId), decoders),
+    },
+    guide: {
+      ...guide,
+      listings: async (channelIds: readonly string[]) => {
+        const channels = await Promise.all(channelIds.map(own));
+        const listings = await guide.listings(channels);
+        return Object.fromEntries(
+          channels.flatMap((channel) => {
+            const listing = listings[ownedKey(channel)];
+            return listing ? [[channel.id, listing] as const] : [];
+          }),
+        );
+      },
+    },
     viewing: await promised(runtime, ViewingRecord),
   };
 }
@@ -416,7 +442,8 @@ describe("playlist subscriptions", () => {
     const before = await app(dataDir);
     const connected = await before.subscriptions.connect(linkOnly(link));
     await before.library.channels({});
-    await before.viewing.setFavourite("first", "Beta.test", true);
+    const starred = await before.own("Beta.test");
+    await before.viewing.setFavourite("first", starred, true);
 
     // What a new app signature or a reset keychain looks like to the app.
     const locked = await app(dataDir, {
@@ -437,7 +464,7 @@ describe("playlist subscriptions", () => {
     // The same link is the same account: its favourites and channels are as they were.
     const read = host.requests("/list.m3u");
     expect(await locked.subscriptions.connect(linkOnly(link))).toEqual(connected);
-    expect((await locked.viewing.state()).favourites).toEqual(["Beta.test"]);
+    expect((await locked.viewing.state()).favourites).toEqual([starred]);
     expect(await locked.library.channels({})).toHaveLength(2);
     // Checking the link read its first line; the channels came from the copy on disk.
     expect(host.requests("/list.m3u")).toBe(read + 1);

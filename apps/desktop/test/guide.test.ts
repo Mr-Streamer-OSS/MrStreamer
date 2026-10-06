@@ -1,3 +1,4 @@
+import { ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { Guide } from "@mrstreamer/core/guide/service";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -24,37 +25,53 @@ const NOW = Date.parse("2026-10-02T20:10:00+02:00");
 /**
  * A connected library and guide on the fake provider. The guide runs on the app's runtime, with a
  * test clock the test moves; `create` starts another, as after a restart.
+ *
+ * Its lookups take and answer the provider's channel ids alone: `own` names one with the
+ * connected subscription, as the guide itself is asked and answers (`ask`).
  */
 async function connectedGuide(options: FakeProviderOptions = {}) {
   const provider = await fakeProvider(options);
   provider.serveGuide(fakeGuide(provider.catalogue, NOW));
   const dataDir = await tempDir();
-  let connected = false;
+  let subscriptionId: string | null = null;
   const create = async () => {
     // The clock reads NOW before the guide starts, so its checks count from there.
     const clock = Layer.effectDiscard(TestClock.setTime(NOW)).pipe(
       Layer.provideMerge(TestClock.layer({ warningDelay: "1 day" })),
     );
     const runtime = runtimeFor(mainLayer(testConfig(dataDir)).pipe(Layer.provideMerge(clock)));
-    if (!connected) {
-      const subscriptions = await runtime.runPromise(Subscriptions);
-      await runtime.runPromise(
-        subscriptions.connect({ server: provider.url, username: "demo", password: "demo" }),
-      );
-      connected = true;
-    }
+    const subscriptions = await runtime.runPromise(Subscriptions);
+    const connect = subscriptions.connect({
+      server: provider.url,
+      username: "demo",
+      password: "demo",
+    });
+    subscriptionId ??= (await runtime.runPromise(connect)).id;
+    const owner = subscriptionId;
     const guide = await runtime.runPromise(Guide);
     const run = <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect);
+    const own = (id: string) => ({ subscriptionId: owner, id });
+    /** An answer per channel, by the provider's id alone. */
+    const byId = <A>(answer: Record<string, A>) =>
+      Object.fromEntries(
+        Object.entries(answer).map(([key, value]) => [key.slice(owner.length + 1), value]),
+      );
     return {
+      own,
+      /** The guide's own answer, by each channel's `ownedKey`. */
+      ask: (channels: readonly OwnedId[]) => run(guide.listings(channels)),
       refresh: () => run(guide.refresh),
       refreshIfStale: () => run(guide.refreshIfStale),
-      listings: (channelIds: readonly string[]) => run(guide.listings(channelIds)),
-      schedule: (channelId: string) => run(guide.schedule(channelId)),
+      listings: async (channelIds: readonly string[]) =>
+        byId(await run(guide.listings(channelIds.map(own)))),
+      schedule: (channelId: string) => run(guide.schedule(own(channelId))),
       search: (query: string) => run(guide.search(query)),
-      searchChannels: (query: string, channelIds: readonly string[], until: number) =>
-        run(guide.searchChannels(query, channelIds, until)),
+      searchChannels: async (query: string, channelIds: readonly string[], until: number) =>
+        byId(await run(guide.searchChannels(query, channelIds.map(own), until))),
       status: () => run(guide.status),
       clear: () => run(guide.clear),
+      /** Enters the login again, as the viewer does to repair it: the subscription stays the same. */
+      reconnect: () => run(connect),
       library: await promised(runtime, Library),
       settings: await promised(runtime, Settings),
       /**
@@ -97,6 +114,20 @@ const programme = (id: string, from: string, to: string, title: string) =>
 const slot = (id: string, title: string) => programme(id, "2000", "2100", title);
 
 describe("programme guide", () => {
+  it("answers for each channel by its subscription, and has nothing for another's", async () => {
+    const { guide, guided } = await connectedGuide();
+    await guide.refresh();
+    const mine = guide.own(guided);
+    // The same provider id, as another subscription could list a channel under it.
+    const theirs = { subscriptionId: "another-subscription", id: guided };
+
+    const listings = await guide.ask([theirs, mine]);
+
+    expect(Object.keys(listings)).toEqual([ownedKey(mine)]);
+    expect(listings[ownedKey(mine)]?.now).toMatchObject({ start: at("20:00") });
+    expect(await guide.ask([theirs])).toEqual({});
+  });
+
   it("shows what's on now and next, and the rest of the day, for channels with a guide", async () => {
     const { guide, guided, unguided } = await connectedGuide();
     await guide.refresh();
@@ -361,7 +392,7 @@ describe("programme guide", () => {
 
     expect(await guide.listings([guided])).toEqual({});
     expect(await guide.searchChannels("news", [guided], at("23:00"))).toEqual({});
-    expect(await library.channel(guided)).toMatchObject({ id: guided });
+    expect(await library.channel(guide.own(guided))).toMatchObject({ id: guided });
     await provider.close();
     await download;
   });
@@ -380,6 +411,25 @@ describe("programme guide", () => {
     expect(await download).toBe("stopped");
     expect(await guide.listings([guided])).toEqual({});
     expect(await (await create()).listings([guided])).toEqual({});
+  });
+
+  it("keeps the guide it has, also after a restart, when a download begun before the login was entered again finishes", async () => {
+    const { provider, guide, create, guided, guideId } = await connectedGuide();
+    provider.serveGuide(`<tv>${slot(guideId, "Before")}</tv>`);
+    await guide.refresh();
+    provider.serveGuide(`<tv>${slot(guideId, "Late")}</tv>`);
+    const held = provider.hold("guide");
+    const download = guide.refresh();
+    await held.arrived;
+
+    const again = await guide.reconnect();
+    held.release();
+    await download;
+
+    expect(guide.own(guided)).toMatchObject({ subscriptionId: again.id });
+    const nowOn = async ({ listings }: typeof guide) => (await listings([guided]))[guided]?.now;
+    expect(await nowOn(guide)).toMatchObject({ title: "Before" });
+    expect(await nowOn(await create())).toMatchObject({ title: "Before" });
   });
 
   it("shows a guide id only on the channels it names", async () => {

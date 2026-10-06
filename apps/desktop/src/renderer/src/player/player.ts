@@ -41,6 +41,7 @@ import type {
   RemoteState,
 } from "@mrstreamer/contracts/output";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
+import { ownedId, sameOwned } from "@mrstreamer/contracts/subscription";
 import {
   DEFAULT_SUBTITLE_LOOK,
   ORIGINAL_SOUND,
@@ -379,7 +380,7 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
       audioLanguage: preferred && preferred !== ORIGINAL_SOUND ? preferred : null,
     };
     session = await call("playback.open", {
-      channelId: channel.id,
+      channel: ownedId(channel),
       decoders: [...decoders],
       repair,
       ...(sound.audio !== null ? { audio: sound.audio } : {}),
@@ -429,9 +430,10 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
     void loadTracks(mine, session.sessionId);
     setTimeout(() => void loadTracks(mine, session.sessionId), TRACKS_AGAIN_MS);
   }
-  void call("viewing.recordWatch", { commandId: crypto.randomUUID(), channelId: channel.id }).catch(
-    () => {},
-  );
+  void call("viewing.recordWatch", {
+    commandId: crypto.randomUUID(),
+    channel: ownedId(channel),
+  }).catch(() => {});
   playing.onWaiting((waiting) => {
     if (mine === selection) store.setState({ waiting });
   });
@@ -465,7 +467,7 @@ async function startOnReceiver(channel: LiveChannel): Promise<void> {
     const { audioId } = store.getState();
     const preferred = (await call("preferences.get").catch(() => null))?.audioLanguage;
     const media = await call("output.playChannel", {
-      channelId: channel.id,
+      channel: ownedId(channel),
       name: channel.title,
       ...(audioId !== null ? { audio: audioId } : {}),
       ...(preferred && preferred !== ORIGINAL_SOUND ? { audioLanguage: preferred } : {}),
@@ -514,9 +516,10 @@ function followReceiver(media: RemoteMedia): void {
   const mine = selection;
   void loadStream(mine, media.sessionId);
   void loadTracks(mine, media.sessionId);
-  void call("viewing.recordWatch", { commandId: crypto.randomUUID(), channelId: channel.id }).catch(
-    () => {},
-  );
+  void call("viewing.recordWatch", {
+    commandId: crypto.randomUUID(),
+    channel: ownedId(channel),
+  }).catch(() => {});
 }
 
 /** How long the receiver has said the channel plays, in milliseconds, up to now. */
@@ -679,7 +682,7 @@ function classify(upstream: StreamFailure | null, error: EngineError): PlaybackP
  * for the new channel.
  */
 function tune(channel: LiveChannel): void {
-  if (tuned?.id === channel.id) return;
+  if (sameOwned(tuned, channel)) return;
   if (tuned) store.setState({ previous: tuned });
   tuned = channel;
   store.setState({
@@ -859,7 +862,7 @@ export const player = {
     const { channel: current, phase } = store.getState();
     const open =
       phase.kind === "playing" || phase.kind === "tuning" || phase.kind === "reconnecting";
-    if (current?.id === channel.id && open && !zapTimer) {
+    if (sameOwned(current, channel) && open && !zapTimer) {
       liveStarts?.();
       quiet = false;
       store.setState({ stopped: false });
@@ -873,7 +876,7 @@ export const player = {
     const { channel: current, phase, stopped } = store.getState();
     // Nothing previews while a receiver has playback, or had it until its connection broke.
     if (outputs.receiver()) return;
-    if (stopped || (current?.id === channel.id && phase.kind !== "idle")) return;
+    if (stopped || (sameOwned(current, channel) && phase.kind !== "idle")) return;
     cancelZap();
     void begin(channel, true);
   },

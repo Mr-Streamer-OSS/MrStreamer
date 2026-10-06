@@ -33,8 +33,12 @@ const documentPath = values.file ?? join(dataDir, "generated.xml");
 if (!values.file) await writeFile(documentPath, generated());
 const guideIds = await guideChannelIds(documentPath);
 
+/** The one subscription measured, which every channel is asked for with. */
+const SUBSCRIPTION = "measure";
+
 // Catalogue channels: some share a guide channel, most have none, as on real subscriptions.
 const channels: LiveChannel[] = Array.from({ length: CHANNELS }, (_, index) => ({
+  subscriptionId: SUBSCRIPTION,
   id: String(index),
   name: `Channel ${index}`,
   title: `Channel ${index}`,
@@ -65,6 +69,8 @@ async function create() {
         Layer.mergeAll(
           Layer.succeed(GuideSource, {
             current: Effect.succeed({
+              id: SUBSCRIPTION,
+              revision: 1,
               key: "measure",
               download: async () => ({
                 kind: "document" as const,
@@ -74,7 +80,7 @@ async function create() {
               }),
             }),
           }),
-          Layer.succeed(GuideCatalogue, { channels: Effect.succeed(guideChannels) }),
+          Layer.succeed(GuideCatalogue, { channels: () => Effect.succeed(guideChannels) }),
           guideStoreLayer(dataDir),
         ),
       ),
@@ -87,10 +93,10 @@ async function create() {
   );
   return {
     refresh: () => runtime.runPromise(guide.refresh),
-    listings: (ids: readonly string[]) => runtime.runPromise(guide.listings(ids)),
+    listings: (asked: readonly LiveChannel[]) => runtime.runPromise(guide.listings(asked)),
     search: (query: string) => runtime.runPromise(guide.search(query)),
-    searchChannels: (query: string, ids: readonly string[], until: number) =>
-      runtime.runPromise(guide.searchChannels(query, ids, until)),
+    searchChannels: (query: string, asked: readonly LiveChannel[], until: number) =>
+      runtime.runPromise(guide.searchChannels(query, asked, until)),
     dispose: () => runtime.dispose(),
   };
 }
@@ -115,12 +121,12 @@ stalls.reset();
 stalls.enable();
 started = performance.now();
 const restarted = await create();
-await restarted.listings(["0"]);
+await restarted.listings(channels.slice(0, 1));
 const diskMs = performance.now() - started;
 stalls.disable();
 const diskStall = stalls.max / 1e6;
 
-const screen = channels.slice(0, 60).map((channel) => channel.id);
+const screen = channels.slice(0, 60);
 started = performance.now();
 for (let round = 0; round < 100; round++) await restarted.listings(screen);
 const listingsMs = (performance.now() - started) / 100;
@@ -130,14 +136,13 @@ const matches = await restarted.search("news");
 const searchMs = performance.now() - started;
 
 // Live TV's search of the list it shows: every channel, until the end of the day.
-const everyChannel = channels.map((channel) => channel.id);
 const endOfDay = new Date(now).setHours(24, 0, 0, 0);
 started = performance.now();
 for (let round = 0; round < 20; round++) {
-  await restarted.searchChannels("news", everyChannel, endOfDay);
+  await restarted.searchChannels("news", channels, endOfDay);
 }
 const listSearchMs = (performance.now() - started) / 20;
-const found = Object.keys(await restarted.searchChannels("news", everyChannel, endOfDay)).length;
+const found = Object.keys(await restarted.searchChannels("news", channels, endOfDay)).length;
 
 const size = ((await stat(documentPath)).size / 1e6).toFixed(1);
 const row = (label: string, value: string, budget: string) =>

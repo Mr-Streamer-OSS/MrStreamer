@@ -1,8 +1,9 @@
 // The viewing record's rules: which events a command produces, and what the events add up to.
 // Both are plain functions of their input. They never read the clock, fetch or make ids; the
 // service supplies time and ids, and the store keeps the events and the state they add up to.
-// How far movies and episodes got follows the rules in ./titles.ts, one row per title.
-import type { TitleRef } from "@mrstreamer/contracts/ondemand";
+// How far movies and episodes got follows the rules in ./titles.ts, one row per title. Everything
+// here is one account's, by the provider's own ids: the service says which subscription's.
+import type { RawTitleRef } from "@mrstreamer/contracts/ondemand";
 import { RECENT_LIMIT } from "@mrstreamer/contracts/viewing";
 
 /** The version events are written with. Readers skip events from a newer version. */
@@ -25,21 +26,21 @@ export type ViewingEvent =
    */
   | {
       readonly type: "title-progress";
-      readonly title: TitleRef;
+      readonly title: RawTitleRef;
       readonly position: number;
       readonly duration: number;
       readonly since: number;
     }
   /** Taken out of Continue watching: the movie, or the whole series of an episode. */
-  | { readonly type: "title-removed"; readonly title: TitleRef }
+  | { readonly type: "title-removed"; readonly title: RawTitleRef }
   /**
    * The series of `title`, its last episode, watched to the end of what the provider lists. It
    * leaves Continue watching as a removal does.
    */
-  | { readonly type: "series-finished"; readonly title: TitleRef };
+  | { readonly type: "series-finished"; readonly title: RawTitleRef };
 
 export type ChannelEvent = Extract<ViewingEvent, { readonly channelId: string }>;
-export type TitleEvent = Extract<ViewingEvent, { readonly title: TitleRef }>;
+export type TitleEvent = Extract<ViewingEvent, { readonly title: RawTitleRef }>;
 
 export type ViewingCommand =
   | {
@@ -56,15 +57,15 @@ export type ViewingCommand =
   | { readonly kind: "record-watch"; readonly channelId: string }
   | {
       readonly kind: "record-progress";
-      readonly title: TitleRef;
+      readonly title: RawTitleRef;
       readonly position: number;
       readonly duration: number;
       readonly since: number;
     }
   /** Movies, and episodes standing for their series, out of Continue watching at once. */
-  | { readonly kind: "remove-titles"; readonly titles: readonly TitleRef[] }
+  | { readonly kind: "remove-titles"; readonly titles: readonly RawTitleRef[] }
   /** An episode standing for each version of a series played, whose last episode was watched. */
-  | { readonly kind: "finish-series"; readonly titles: readonly TitleRef[] };
+  | { readonly kind: "finish-series"; readonly titles: readonly RawTitleRef[] };
 
 /**
  * One account's favourites and recently watched channels, by the provider's stream ids: one or

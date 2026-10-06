@@ -8,7 +8,7 @@
 // first line. CC says the chosen subtitles are loading until the stream's player has read them
 // where it plays, whether or not anything is said there. hls.js itself runs in the real app (see
 // test/e2e); here a stand-in plays the stream's part.
-import { ipc } from "./support.ts";
+import { ipc, SUBSCRIPTION } from "./support.ts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { player } from "../../src/renderer/src/player/player.ts";
@@ -22,6 +22,7 @@ vi.mock("hls.js", async (original) => {
 });
 
 const channel = (id: string): LiveChannel => ({
+  subscriptionId: SUBSCRIPTION,
   id,
   name: id,
   title: id,
@@ -49,7 +50,12 @@ async function open(id: string) {
   const answer = ipc.hold("playback.open");
   player.play(channel(id));
   await wait();
-  answer.resolve({ sessionId: id, channelId: id, url: `http://127.0.0.1/${id}`, format: "hls" });
+  answer.resolve({
+    sessionId: id,
+    channel: { subscriptionId: SUBSCRIPTION, id: id },
+    url: `http://127.0.0.1/${id}`,
+    format: "hls",
+  });
   await wait();
   return streams.latest();
 }
@@ -69,7 +75,7 @@ async function reopened(id: string) {
   await wait();
   answer.resolve({
     sessionId: `${id}2`,
-    channelId: id,
+    channel: { subscriptionId: SUBSCRIPTION, id: id },
     url: `http://127.0.0.1/${id}2`,
     format: "hls",
   });
@@ -378,8 +384,6 @@ describe("an HLS channel's tracks", () => {
     preferences.resolve({
       volume: 1,
       muted: false,
-      lastChannelId: null,
-      lastCategoryId: null,
       subtitleLanguage: "de",
     });
     first.variant({ audio: SOUND, subtitles: SUBTITLES });

@@ -12,6 +12,7 @@ import type {
   Title,
   TitleKind,
 } from "@mrstreamer/contracts/ondemand";
+import { ownedId } from "@mrstreamer/contracts/subscription";
 import { hasModifier, isTyping } from "../../app/platform.ts";
 import { openDetails, useUi } from "../../app/ui-store.ts";
 import { Artwork } from "../../components/TitleArt.tsx";
@@ -146,7 +147,7 @@ function Grid({
   /** Each poster is the version the grid asks for, as the 4K tab's are their 4K versions. */
   asked?: boolean;
 }) {
-  const open = (title: Title) => openDetails({ kind: title.kind, id: title.id, asked });
+  const open = (title: Title) => openDetails({ kind: title.kind, ...ownedId(title), asked });
   const box = useRef<HTMLDivElement>(null);
   const rem = useRem();
   const [width, setWidth] = useState(0);

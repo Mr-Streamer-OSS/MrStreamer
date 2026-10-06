@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { parseArgs } from "node:util";
+import type { OwnedId } from "@mrstreamer/contracts/subscription";
 import {
   LegacyViewing,
   ViewingAccount,
@@ -34,13 +35,19 @@ const events = Number(values.events);
 const dataDir = await mkdtemp(join(tmpdir(), "mr-streamer-viewing-"));
 const database = join(dataDir, "mrstreamer.db");
 
+/** The one subscription measured, which every channel is named with. */
+const SUBSCRIPTION = "measure";
+const own = (id: string): OwnedId => ({ subscriptionId: SUBSCRIPTION, id });
+
 /** The viewing record as the app runs it, for one account. Resolves once the database is open. */
 async function start() {
   const runtime = ManagedRuntime.make(
     ViewingRecord.layer.pipe(
       Layer.provide(
         Layer.mergeAll(
-          Layer.succeed(ViewingAccount, { current: Effect.succeed("measure") }),
+          Layer.succeed(ViewingAccount, {
+            current: Effect.succeed({ subscriptionId: SUBSCRIPTION, key: "measure" }),
+          }),
           Layer.succeed(ViewingChannels, { lookup: () => Effect.succeed(() => undefined) }),
           Layer.succeed(LegacyViewing, { take: Effect.succeed(null), drop: Effect.void }),
           viewingStoreLayer(dataDir),
@@ -71,8 +78,8 @@ try {
   for (let index = 0; index < events; index++) {
     const command =
       index % 20 === 0
-        ? viewing.setFavourite(`fill-${index}`, pick(FAVOURITES * 2), Math.random() < 0.5)
-        : viewing.recordWatch(`fill-${index}`, pick(CHANNELS));
+        ? viewing.setFavourite(`fill-${index}`, own(pick(FAVOURITES * 2)), Math.random() < 0.5)
+        : viewing.recordWatch(`fill-${index}`, own(pick(CHANNELS)));
     await runtime.runPromise(command);
   }
 
@@ -81,11 +88,11 @@ try {
   for (let index = 0; index < SAMPLES; index++) {
     const channelId = String(index);
     let started = performance.now();
-    await runtime.runPromise(viewing.recordWatch(`watch-${index}`, channelId));
+    await runtime.runPromise(viewing.recordWatch(`watch-${index}`, own(channelId)));
     watch.push(performance.now() - started);
     started = performance.now();
     await runtime.runPromise(
-      viewing.setFavourite(`star-${index}`, pick(FAVOURITES * 2), index % 2 === 0),
+      viewing.setFavourite(`star-${index}`, own(pick(FAVOURITES * 2)), index % 2 === 0),
     );
     favourite.push(performance.now() - started);
   }
@@ -121,15 +128,17 @@ try {
   // it turned around.
   ({ runtime, viewing } = await start());
   for (let index = 0; index < ORDERED; index++) {
-    await runtime.runPromise(viewing.setFavourite(`order-star-${index}`, `ordered-${index}`, true));
+    await runtime.runPromise(
+      viewing.setFavourite(`order-star-${index}`, own(`ordered-${index}`), true),
+    );
   }
   let ordered = await runtime.runPromise(viewing.state);
-  const reorder = async (commandId: string, order: readonly string[]) => {
+  const reorder = async (commandId: string, order: readonly OwnedId[]) => {
     const from = ordered;
     const began = performance.now();
     ordered = await runtime.runPromise(
       viewing.reorderFavourites(commandId, {
-        subscription: "measure",
+        subscriptionId: SUBSCRIPTION,
         original: from.favourites,
         order,
       }),
@@ -138,8 +147,8 @@ try {
   };
   const toEnd: { ms: number; events: number }[] = [];
   for (let index = 0; index < MOVES; index++) {
-    const [first = "", ...others] = ordered.favourites;
-    toEnd.push(await reorder(`order-end-${index}`, [...others, first]));
+    const [first, ...others] = ordered.favourites;
+    toEnd.push(await reorder(`order-end-${index}`, first ? [...others, first] : others));
   }
   const toFront = await reorder("order-front", [
     ...ordered.favourites.slice(-1),

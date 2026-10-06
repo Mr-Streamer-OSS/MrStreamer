@@ -16,6 +16,7 @@
 import { Play, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
+import { sameOwned } from "@mrstreamer/contracts/subscription";
 import { hasModifier, isTyping } from "../../app/platform.ts";
 import { miniPlayer, useMiniPlayer } from "../../app/mini-player.ts";
 import { closeWatch, useUi, type ChannelList } from "../../app/ui-store.ts";
@@ -33,9 +34,9 @@ import { useOpenGroups } from "../live/ListPicker.tsx";
 import {
   adjacentChannel,
   groupOf,
-  showList,
   useListChannels,
   useListEntries,
+  useShowList,
   type ListEntry,
 } from "../live/lists.ts";
 import { ChannelOverlay } from "./ChannelOverlay.tsx";
@@ -67,6 +68,7 @@ export function WatchScreen() {
   const phase = usePlayer((state) => state.phase);
   const categories = useCategoryMap();
   const toggleFavourite = useToggleFavourite();
+  const showList = useShowList();
   const keyboard = useKeyboardMode();
   const { open, toggle } = useOpenGroups(groupOf(list, categories));
   const entries = useListEntries(open);
@@ -98,7 +100,7 @@ export function WatchScreen() {
   }, [channel]);
 
   const switchBy = (direction: number) => {
-    const target = adjacentChannel(channels, channel?.id, direction);
+    const target = adjacentChannel(channels, channel, direction);
     if (!target) return;
     player.zap(target);
     wake();
@@ -110,7 +112,7 @@ export function WatchScreen() {
     setSelected(
       Math.max(
         0,
-        channels.findIndex((each) => each.id === channel?.id),
+        channels.findIndex((each) => sameOwned(each, channel)),
       ),
     );
     useUi.setState({ channelsOpen: true });
@@ -294,7 +296,7 @@ export function WatchScreen() {
           break;
         case "s":
         case "S":
-          if (now.channel) toggleFavourite(now.channel.id);
+          if (now.channel) toggleFavourite(now.channel);
           break;
         case "q":
           if ((now.channel?.variants.length ?? 0) < 2) return;
@@ -421,7 +423,7 @@ export function WatchScreen() {
         <ChannelOverlay
           list={list}
           channels={channels}
-          playingId={channel.id}
+          playing={channel}
           picking={picking}
           selected={keyboard && !picking ? selected : null}
           entries={entries}

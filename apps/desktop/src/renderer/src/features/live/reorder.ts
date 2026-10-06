@@ -13,6 +13,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
+import { ownedId, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type { Viewing } from "@mrstreamer/contracts/viewing";
 import { appError } from "../../lib/errors.ts";
 import { call } from "../../lib/ipc.ts";
@@ -23,9 +24,9 @@ export type RowPart = "row" | "up" | "down";
 
 interface Draft {
   /** The subscription the favourites were read from: the order is saved to it alone. */
-  readonly subscription: string;
+  readonly subscriptionId: string;
   /** Every favourite as read, with those the list doesn't show. */
-  readonly original: readonly string[];
+  readonly original: readonly OwnedId[];
   /**
    * The channels the list showed, as read: the array the lists' cache gave, which it keeps giving
    * until a read finds a channel changed.
@@ -37,7 +38,7 @@ interface Draft {
    * The channel the keys move, and the part of its row with the focus. `asked` counts the times
    * the viewer chose it, so a row chosen again takes the focus again.
    */
-  readonly focus: { readonly id: string; readonly part: RowPart; readonly asked: number };
+  readonly focus: { readonly channel: OwnedId; readonly part: RowPart; readonly asked: number };
   /**
    * `saving` until the main process answered and the list it names is read, and nothing moves
    * meanwhile. `failed` keeps the draft to send again. `changed` when the favourites are no
@@ -58,16 +59,16 @@ interface OrderEditor {
   readonly draft: Draft | null;
   /** Whether there is an order to make: two channels or more, of a subscription that is known. */
   readonly available: boolean;
-  /** Starts a draft from the list as it shows, with the keys on the channel `focusId`. */
-  start(focusId: string | null): void;
+  /** Starts a draft from the list as it shows, with the keys on `channel`. */
+  start(channel: OwnedId | null): void;
   /** Gives a row the keys, as a click on it or the arrows do. */
-  select(id: string, part?: RowPart): void;
+  select(channel: OwnedId, part?: RowPart): void;
   /** Notes where the focus went by itself, as with Tab, so a move keeps it there. */
-  focused(id: string, part: RowPart): void;
+  focused(channel: OwnedId, part: RowPart): void;
   /** Moves the selection `by` rows, within the list. */
   step(by: number): void;
   /** Moves a channel `by` places, within the list, and gives it the keys. */
-  move(id: string, by: number, part?: RowPart): void;
+  move(channel: OwnedId, by: number, part?: RowPart): void;
   /** Saves the draft, or sends it again after a failure; reads the favourites again once changed. */
   confirm(): void;
   /** Throws the draft away. Not while it waits for the main process. */
@@ -90,7 +91,7 @@ export function orderKey(event: KeyboardEvent, order: OrderEditor): void {
   if (!draft) return;
   const by = Object.hasOwn(STEPS, event.key) ? STEPS[event.key] : undefined;
   if (by !== undefined) {
-    if (event.altKey) order.move(draft.focus.id, by);
+    if (event.altKey) order.move(draft.focus.channel, by);
     else order.step(by);
   } else if (event.key === "Enter") {
     // A button with the focus takes Enter itself, as it takes Space.
@@ -101,34 +102,33 @@ export function orderKey(event: KeyboardEvent, order: OrderEditor): void {
   event.preventDefault();
 }
 
-const sameIds = (a: readonly string[], b: readonly string[]) =>
-  a === b || (a.length === b.length && a.every((id, at) => id === b[at]));
-
-const idsOf = (channels: readonly LiveChannel[]) => channels.map((channel) => channel.id);
+/** Whether two lists name the same channels, in the same order. */
+const sameChannels = (a: readonly OwnedId[], b: readonly OwnedId[]) =>
+  a === b || (a.length === b.length && a.every((channel, at) => sameOwned(channel, b[at])));
 
 /** Whether a draft waits for the main process: nothing moves meanwhile, and nothing leaves it. */
 export const waits = (draft: Draft | null): boolean =>
   draft?.status === "saving" || draft?.status === "reading";
 
 /**
- * A draft of `channels` as they stand, with the keys on `focusId` or else the first; null when
+ * A draft of `channels` as they stand, with the keys on `focus` or else the first; null when
  * there is nothing to order, one channel or none.
  */
 function drafted(
-  subscription: string,
-  favourites: readonly string[],
+  subscriptionId: string,
+  favourites: readonly OwnedId[],
   channels: readonly LiveChannel[],
-  focusId: string | null,
+  focus: OwnedId | null,
   asked: number,
 ): Draft | null {
-  const id = channels.find((channel) => channel.id === focusId)?.id ?? channels[0]?.id;
-  if (channels.length < 2 || id === undefined) return null;
+  const channel = channels.find((each) => sameOwned(each, focus)) ?? channels[0];
+  if (channels.length < 2 || !channel) return null;
   return {
-    subscription,
+    subscriptionId,
     original: favourites,
     listed: channels,
     order: channels,
-    focus: { id, part: "row", asked },
+    focus: { channel, part: "row", asked },
     status: "editing",
     commandId: null,
     said: "",
@@ -145,7 +145,7 @@ export function useFavouriteOrder(
   channels: readonly LiveChannel[] | undefined,
 ): OrderEditor {
   const client = useQueryClient();
-  const subscription = useQuery(queries.subscription()).data?.id ?? null;
+  const subscriptionId = useQuery(queries.subscription()).data?.id ?? null;
   const favourites = useQuery(queries.viewing()).data?.favourites;
   const [held, setDraft] = useState<Draft | null>(null);
 
@@ -158,9 +158,9 @@ export function useFavouriteOrder(
   const obsolete =
     held !== null &&
     (!open ||
-      held.subscription !== subscription ||
+      held.subscriptionId !== subscriptionId ||
       ((held.status === "editing" || held.status === "failed") &&
-        (!favourites || !sameIds(favourites, held.original) || channels !== held.listed)));
+        (!favourites || !sameChannels(favourites, held.original) || channels !== held.listed)));
   if (obsolete) setDraft(null);
   const draft = obsolete ? null : held;
 
@@ -178,7 +178,7 @@ export function useFavouriteOrder(
   }, [waiting]);
 
   const available =
-    subscription !== null && favourites !== undefined && (channels?.length ?? 0) > 1;
+    subscriptionId !== null && favourites !== undefined && (channels?.length ?? 0) > 1;
 
   /**
    * Changes the draft once an answer is in, if it still waits for that one: a draft cancelled or
@@ -193,12 +193,12 @@ export function useFavouriteOrder(
   const connected = (id: string) => client.getQueryData(queries.subscription().queryKey)?.id === id;
 
   /**
-   * Reads the channels of `ids` from the main process, as it lists them now, into the lists'
-   * cache, and gives the array the list gets for them from then on.
+   * Reads `channels` from the main process, as it lists them now, into the lists' cache, and
+   * gives the array the list gets for them from then on.
    */
-  const read = async (ids: readonly string[]) => {
-    if (ids.length === 0) return undefined;
-    const listed = queries.channelsById(ids);
+  const read = async (channels: readonly OwnedId[]) => {
+    if (channels.length === 0) return undefined;
+    const listed = queries.channelsOf(channels);
     await client.fetchQuery({ ...listed, staleTime: 0 });
     return client.getQueryData(listed.queryKey);
   };
@@ -218,24 +218,24 @@ export function useFavouriteOrder(
     if (connected(from)) keepViewing(client, viewing);
   };
 
-  const select = (id: string, part: RowPart = "row") => {
+  const select = (channel: OwnedId, part: RowPart = "row") => {
     if (!draft || waiting) return;
-    setDraft({ ...draft, focus: { id, part, asked: draft.focus.asked + 1 } });
+    setDraft({ ...draft, focus: { channel, part, asked: draft.focus.asked + 1 } });
   };
 
   const save = (from: Draft) => {
-    if (sameIds(idsOf(from.order), idsOf(from.listed))) return setDraft(null);
+    if (sameChannels(from.order, from.listed)) return setDraft(null);
     const commandId = from.commandId ?? crypto.randomUUID();
     setDraft({ ...from, status: "saving", commandId });
-    const { subscription, original, order } = from;
+    const { subscriptionId, original, order } = from;
     void call("viewing.reorderFavourites", {
       commandId,
-      subscription,
-      original: [...original],
-      order: idsOf(order),
+      subscriptionId,
+      original: original.map(ownedId),
+      order: order.map(ownedId),
     }).then(
       async (viewing) => {
-        await takeIn(subscription, viewing);
+        await takeIn(subscriptionId, viewing);
         answer(commandId, () => null);
       },
       (cause: unknown) => {
@@ -255,9 +255,9 @@ export function useFavouriteOrder(
     void (async () => {
       const viewing = await client.fetchQuery({ ...queries.viewing(), staleTime: 0 });
       const listed = await read(viewing.favourites);
-      if (!listed || !connected(from.subscription)) return null;
-      const { id, asked } = from.focus;
-      return drafted(from.subscription, viewing.favourites, listed, id, asked + 1);
+      if (!listed || !connected(from.subscriptionId)) return null;
+      const { channel, asked } = from.focus;
+      return drafted(from.subscriptionId, viewing.favourites, listed, channel, asked + 1);
     })().then(
       (fresh) => answer(token, () => fresh),
       () => answer(token, () => null),
@@ -267,24 +267,26 @@ export function useFavouriteOrder(
   return {
     draft,
     available,
-    start: (focusId) => {
-      if (available && channels) setDraft(drafted(subscription, favourites, channels, focusId, 1));
+    start: (channel) => {
+      if (available && channels) {
+        setDraft(drafted(subscriptionId, favourites, channels, channel, 1));
+      }
     },
     select,
-    focused: (id, part) => {
+    focused: (channel, part) => {
       if (!draft || waiting) return;
-      if (draft.focus.id === id && draft.focus.part === part) return;
-      setDraft({ ...draft, focus: { ...draft.focus, id, part } });
+      if (sameOwned(draft.focus.channel, channel) && draft.focus.part === part) return;
+      setDraft({ ...draft, focus: { ...draft.focus, channel, part } });
     },
     step: (by) => {
       if (!draft) return;
-      const at = draft.order.findIndex((channel) => channel.id === draft.focus.id);
+      const at = draft.order.findIndex((channel) => sameOwned(channel, draft.focus.channel));
       const next = draft.order[Math.min(Math.max(at + by, 0), draft.order.length - 1)];
-      if (next) select(next.id);
+      if (next) select(next);
     },
-    move: (id, by, part = "row") => {
+    move: (moved, by, part = "row") => {
       if (!draft || (draft.status !== "editing" && draft.status !== "failed")) return;
-      const from = draft.order.findIndex((channel) => channel.id === id);
+      const from = draft.order.findIndex((channel) => sameOwned(channel, moved));
       const channel = draft.order[from];
       if (!channel) return;
       const to = Math.min(Math.max(from + by, 0), draft.order.length - 1);
@@ -292,7 +294,7 @@ export function useFavouriteOrder(
       setDraft({
         ...draft,
         order,
-        focus: { id, part, asked: draft.focus.asked + 1 },
+        focus: { channel, part, asked: draft.focus.asked + 1 },
         // Another order than the one that failed is another save, under an id of its own.
         ...(to === from ? {} : { status: "editing", commandId: null }),
         said: `${channel.title}, ${to + 1} of ${order.length}`,

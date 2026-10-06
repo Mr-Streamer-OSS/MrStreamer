@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import type { ProgrammeMatch } from "@mrstreamer/contracts/guide";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { Title } from "@mrstreamer/contracts/ondemand";
+import { ownedId, ownedKey } from "@mrstreamer/contracts/subscription";
 import { openDetails, useUi } from "../../app/ui-store.ts";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Artwork } from "../../components/TitleArt.tsx";
@@ -93,7 +94,7 @@ function Palette() {
         titlePlayer.close();
         useUi.setState({ playingTitle: false });
       }
-      openDetails({ kind: result.title.kind, id: result.title.id });
+      openDetails({ kind: result.title.kind, ...ownedId(result.title) });
     } else if (result.match.programme.start <= Date.now()) watchChannel(result.match.channel);
     else setOpen((current) => (current === index ? null : index));
   };
@@ -127,7 +128,7 @@ function Palette() {
               const { title } = result;
               return (
                 <button
-                  key={`${title.kind}:${title.id}`}
+                  key={`${title.kind}:${ownedKey(title)}`}
                   data-index={index}
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => choose(index)}
@@ -159,7 +160,13 @@ function Palette() {
             }
             const channel = result.kind === "channel" ? result.channel : result.match.channel;
             const programme = result.kind === "programme" ? result.match.programme : null;
-            const category = categories.get(channel.categoryIds[0] ?? "");
+            const [categoryId] = channel.categoryIds;
+            const category =
+              categoryId === undefined
+                ? undefined
+                : categories.get(
+                    ownedKey({ subscriptionId: channel.subscriptionId, id: categoryId }),
+                  );
             const detail = programme
               ? programme.start <= now
                 ? `On now · ${channel.title} · ${timeLeft(programme, now)}`
@@ -169,7 +176,7 @@ function Palette() {
                   .join(" · ");
             return (
               <button
-                key={programme ? `${channel.id}:${programme.start}` : channel.id}
+                key={programme ? `${ownedKey(channel)}:${programme.start}` : ownedKey(channel)}
                 data-index={index}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => choose(index)}

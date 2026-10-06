@@ -24,7 +24,8 @@ const CLOCK_START = 10;
 
 /**
  * Playback for a receiver on a connected fake provider that allows one connection. The receiver
- * is this test, asking over loopback as a TV asks over the local network.
+ * is this test, asking over loopback as a TV asks over the local network. `own` names a channel
+ * or title of the connected subscription by the provider's id.
  */
 async function receiver(deps: Partial<PlaybackDeps> = {}, options: FakeProviderOptions = {}) {
   const provider = await fakeProvider({ maxConnections: 1, slotReleaseMs: 50, ...options });
@@ -42,6 +43,7 @@ async function receiver(deps: Partial<PlaybackDeps> = {}, options: FakeProviderO
   const subscriptions = await promised(runtime, Subscriptions);
   await subscriptions.connect({ server: provider.url, username: "demo", password: "demo" });
   const source = await subscriptions.source();
+  const own = (id: string) => ({ subscriptionId: source?.id ?? "no-subscription", id });
   const playback = await promised(runtime, Playback);
   const closed: string[] = [];
   /** What whoever opened a session was told went wrong with its stream. */
@@ -60,7 +62,7 @@ async function receiver(deps: Partial<PlaybackDeps> = {}, options: FakeProviderO
     const movie = provider.titles.movies.find((each) => each.name.startsWith(name));
     if (!movie || !source) throw new Error(`No movie ${name}`);
     if (file !== undefined) provider.replaceMovieFile(movie.id, file);
-    const ref: TitleRef = { kind: "movie", id: String(movie.id) };
+    const ref: TitleRef = { kind: "movie", ...own(String(movie.id)) };
     return playback.openReceiverTitle(
       ref,
       source.provider.titleFile("movie", ref.id, movie.container),
@@ -88,7 +90,7 @@ async function receiver(deps: Partial<PlaybackDeps> = {}, options: FakeProviderO
     if (!found) throw new Error(`No movie ${name}`);
     return found;
   };
-  return { provider, playback, open, load, movie, target, closed, failed, source };
+  return { provider, playback, open, load, movie, target, closed, failed, source, own };
 }
 
 interface Listed {
@@ -131,7 +133,14 @@ async function playlist(url: string) {
 
 /** What ffprobe reads of a segment: its tracks, and when each picture shows on the segments' clock. */
 async function segment(url: string, signal?: AbortSignal) {
-  const response = await fetch(url, signal ? { signal } : {});
+  return segmentOf(await fetch(url, signal ? { signal } : {}));
+}
+
+/**
+ * The same of an answer that came already. ffprobe holds this process up while it reads, and the
+ * proxy with it, so a test that sends requests together reads their answers only afterwards.
+ */
+async function segmentOf(response: Response) {
   const body = Buffer.from(await response.arrayBuffer());
   const probed = spawnSync(
     FFPROBE,
@@ -260,16 +269,22 @@ describe.skipIf(!hasTools)("a movie for a receiver", () => {
   });
 
   it("answers requests for segments far apart at once without a second reader", async () => {
-    const { provider, load } = await receiver();
-    const { video } = await load(MATROSKA, "title-receiver.mkv");
+    const { provider, playback, load } = await receiver();
+    const { opened, video } = await load(MATROSKA, "title-receiver.mkv");
+    const asked = () => playback.receiverRequests(opened.sessionId);
 
     // A receiver that skips twice before the first answer came, and asks for the next one too.
-    const answers = await Promise.all(
-      [1, 6, 4, 5].map((index) =>
-        segment(video.segments[index]!.url).then((made) => [index, made] as const),
-      ),
-    );
-    for (const [index, made] of answers) {
+    // The proxy takes where the receiver is from the request that reached it last, and requests
+    // sent together, each on a connection of its own, reach it in any order. So each is sent as
+    // soon as the proxy has counted the one before, and no answer is read until all four are in.
+    const answers = [];
+    for (const index of [1, 6, 4, 5]) {
+      const before = (await asked()) ?? 0;
+      answers.push(fetch(video.segments[index]!.url).then((answer) => [index, answer] as const));
+      await vi.waitFor(async () => expect(await asked()).toBe(before + 1), { interval: 1 });
+    }
+    for (const [index, answer] of await Promise.all(answers)) {
+      const made = await segmentOf(answer);
       // Where it went last, and the segment after, play. One it left may get nothing.
       if (index === 4 || index === 5) expect(made.status, `segment ${index}`).toBe(200);
       else expect([200, 503], `segment ${index}`).toContain(made.status);
@@ -631,11 +646,11 @@ describe.skipIf(!hasTools)("a movie for a receiver", () => {
   });
 
   it("is the one session: opening it closes what played here, and the other way round", async () => {
-    const { provider, playback, load, source } = await receiver();
+    const { provider, playback, load, source, own } = await receiver();
     const channel = String(
       provider.catalogue.channels.find((each) => !each.offline && !each.fixture)!.streamId,
     );
-    const local = await playback.open(channel, RECEIVER);
+    const local = await playback.open(own(channel), RECEIVER);
     const reading = new AbortController();
     void fetch(local.url, { signal: reading.signal }).catch(() => {});
     await vi.waitFor(() => expect(provider.activeStreams()).toBe(1));
@@ -647,7 +662,7 @@ describe.skipIf(!hasTools)("a movie for a receiver", () => {
     // A title opened for this computer takes the receiver's place.
     const movie = provider.titles.movies.find((each) => each.name.startsWith(MP4))!;
     await playback.openTitle(
-      { kind: "movie", id: String(movie.id) },
+      { kind: "movie", ...own(String(movie.id)) },
       source!.provider.titleFile("movie", String(movie.id), movie.container),
       RECEIVER,
     );
@@ -657,7 +672,7 @@ describe.skipIf(!hasTools)("a movie for a receiver", () => {
   });
 
   it("refuses a page's preview while a receiver has the session, one asked for before it opened too", async () => {
-    const { provider, playback, load, closed } = await receiver();
+    const { provider, playback, load, closed, own } = await receiver();
     const channel = String(
       provider.catalogue.channels.find((each) => !each.offline && !each.fixture)!.streamId,
     );
@@ -665,11 +680,11 @@ describe.skipIf(!hasTools)("a movie for a receiver", () => {
 
     // Asked for while the receiver's title is still being read: its turn comes after.
     const opening = load(MATROSKA, "title-receiver.mkv");
-    await expect(playback.open(channel, RECEIVER, { preview: true })).rejects.toMatchObject(
+    await expect(playback.open(own(channel), RECEIVER, { preview: true })).rejects.toMatchObject(
       refused,
     );
     const { video } = await opening;
-    await expect(playback.open(channel, RECEIVER, { preview: true })).rejects.toMatchObject(
+    await expect(playback.open(own(channel), RECEIVER, { preview: true })).rejects.toMatchObject(
       refused,
     );
 
@@ -686,9 +701,9 @@ describe.skipIf(!hasTools)("a channel for a receiver", () => {
   });
 
   it("is cut into segments from the one stream, the newest in its playlist", async () => {
-    const { provider, playback, target } = await receiver({}, recording());
+    const { provider, playback, target, own } = await receiver({}, recording());
     const channel = String(provider.catalogue.channels[0]!.streamId);
-    const opened = await playback.openReceiver(channel, target);
+    const opened = await playback.openReceiver(own(channel), target);
 
     expect(opened.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/r\/[\w-]+\/live\.m3u8$/);
     const live = await playlist(opened.url);
@@ -716,9 +731,9 @@ describe.skipIf(!hasTools)("a channel for a receiver", () => {
   });
 
   it("has only the sound the receiver can't decode converted", async () => {
-    const { provider, playback, target } = await receiver();
+    const { provider, playback, target, own } = await receiver();
     const channel = provider.catalogue.channels.find((each) => each.name === "TEST | H.264 + MP2")!;
-    const opened = await playback.openReceiver(String(channel.streamId), target);
+    const opened = await playback.openReceiver(own(String(channel.streamId)), target);
 
     const live = await playlist(opened.url);
     expect(live.segments.length).toBeGreaterThanOrEqual(1);
@@ -730,9 +745,9 @@ describe.skipIf(!hasTools)("a channel for a receiver", () => {
   });
 
   it("says why when the provider has no stream", async () => {
-    const { provider, playback, target } = await receiver();
+    const { provider, playback, target, own } = await receiver();
     const channel = provider.catalogue.channels.find((each) => each.offline)!;
-    const opened = await playback.openReceiver(String(channel.streamId), target);
+    const opened = await playback.openReceiver(own(String(channel.streamId)), target);
 
     expect((await playlist(opened.url)).status).toBe(404);
     expect(await playback.failure(opened.sessionId)).toMatchObject({ kind: "unavailable" });
@@ -784,15 +799,18 @@ describe("an HLS channel for a receiver", () => {
         ),
       ),
     );
-    await (
+    const { id: subscriptionId } = await (
       await promised(runtime, Subscriptions)
     ).connect({ server: `${origin}/list.m3u`, username: "", password: "" });
     const playback = await promised(runtime, Playback);
 
-    const opened = await playback.openReceiver("Alpha.test", {
-      address: "127.0.0.1",
-      decoders: RECEIVER,
-    });
+    const opened = await playback.openReceiver(
+      { subscriptionId, id: "Alpha.test" },
+      {
+        address: "127.0.0.1",
+        decoders: RECEIVER,
+      },
+    );
     const lan = new URL(opened.url).origin;
     const main = await playlist(opened.url);
     expect(main.text).not.toContain(origin);

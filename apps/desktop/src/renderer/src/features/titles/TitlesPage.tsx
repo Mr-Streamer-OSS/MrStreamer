@@ -9,14 +9,16 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ChevronRight, Play, Search } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 import { create } from "zustand";
-import type {
-  CollectionId,
-  CollectionRow,
-  CollectionSort,
-  CollectionTile,
-  Title,
-  TitleKind,
+import {
+  seriesOf,
+  type CollectionId,
+  type CollectionRow,
+  type CollectionSort,
+  type CollectionTile,
+  type Title,
+  type TitleKind,
 } from "@mrstreamer/contracts/ondemand";
+import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { isMac, isTyping } from "../../app/platform.ts";
 import { openDetails, openView, useUi } from "../../app/ui-store.ts";
 import { Artwork, PosterTile, StillTile } from "../../components/TitleArt.tsx";
@@ -371,7 +373,7 @@ function Rows({
   const mine = continuing.entries.filter((entry) => entry.title.kind === kind);
   // Titles like the one watched last, by the version that was watched.
   const last = mine[0]?.progress.title;
-  const like = !last ? null : last.kind === "movie" ? last.id : last.seriesId;
+  const like = !last ? null : last.kind === "movie" ? last : seriesOf(last);
   const rows = useQuery(queries.rows(kind, tab, tab === "for-you" ? like : null));
   if (rows.error) {
     return <p className="px-10 text-sm text-destructive">{describeError(appError(rows.error))}</p>;
@@ -380,7 +382,7 @@ function Rows({
   // A featured movie the viewer is part way through resumes.
   const resume =
     featured &&
-    mine.find((entry) => entry.title.versions.some((version) => version.id === featured.id));
+    mine.find((entry) => entry.title.versions.some((version) => sameOwned(version, featured)));
   return (
     <div ref={box} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-10 pb-16">
       {featured && <Featured title={featured} resume={resume ?? null} />}
@@ -417,9 +419,9 @@ function Rows({
           >
             {row.titles.slice(0, posters).map((title) => (
               <PosterTile
-                key={title.id}
+                key={ownedKey(title)}
                 title={title}
-                onOpen={() => openDetails({ kind: title.kind, id: title.id })}
+                onOpen={() => openDetails({ kind: title.kind, ...ownedId(title) })}
               />
             ))}
           </Section>
@@ -430,7 +432,7 @@ function Rows({
 }
 
 /** The featured title of each kind, kept for the day while it stays in the rows. */
-const featuredPicks = new Map<TitleKind, { readonly day: number; readonly id: string }>();
+const featuredPicks = new Map<TitleKind, { readonly day: number; readonly title: OwnedId }>();
 
 /**
  * The title For you leads with: one of the ten most popular with a picture, a different one each
@@ -442,13 +444,13 @@ function featuredOf(kind: TitleKind, rows: readonly CollectionRow[]): Title | nu
   if (picked?.day === day) {
     const kept = rows
       .flatMap((row) => row.titles)
-      .find((title) => title.id === picked.id && title.backdropUrl);
+      .find((title) => sameOwned(title, picked.title) && title.backdropUrl);
     if (kept) return kept;
   }
   const popular = rows.find((row) => row.id === "popular")?.titles ?? rows[0]?.titles ?? [];
   const pictured = popular.filter((title) => title.backdropUrl).slice(0, 10);
   const title = pictured[day % Math.max(pictured.length, 1)] ?? null;
-  if (title) featuredPicks.set(kind, { day, id: title.id });
+  if (title) featuredPicks.set(kind, { day, title: ownedId(title) });
   return title;
 }
 
@@ -461,7 +463,10 @@ function Featured({ title, resume }: { title: Title; resume: ContinueEntry | nul
     .filter(Boolean)
     .join(" · ");
   const resumeEntry = useResume();
-  const picked = pickedVersion(title, useQuery(queries.preferences()).data);
+  const picked = pickedVersion(
+    title,
+    useQuery(queries.subscriptionPreferences(title.subscriptionId)).data,
+  );
   return (
     <section className="relative mb-9 aspect-[21/8] max-h-[26rem] w-full overflow-hidden rounded-2xl">
       <Artwork url={title.backdropUrl} name={title.title} size="full" plain />
@@ -477,7 +482,7 @@ function Featured({ title, resume }: { title: Title; resume: ContinueEntry | nul
               onClick={() =>
                 resume
                   ? resumeEntry(resume)
-                  : playTitle(movieNow({ ...title, id: picked ?? title.id }, title.backdropUrl), 0)
+                  : playTitle(movieNow({ ...title, ...picked }, title.backdropUrl), 0)
               }
             >
               <Play className="fill-current" />
@@ -487,7 +492,7 @@ function Featured({ title, resume }: { title: Title; resume: ContinueEntry | nul
           <Button
             variant={title.kind === "movie" ? "secondary" : "primary"}
             size="lg"
-            onClick={() => openDetails({ kind: title.kind, id: title.id })}
+            onClick={() => openDetails({ kind: title.kind, ...ownedId(title) })}
           >
             {title.kind === "movie" ? "Details" : "Episodes"}
           </Button>

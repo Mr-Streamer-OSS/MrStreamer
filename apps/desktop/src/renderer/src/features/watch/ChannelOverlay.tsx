@@ -5,13 +5,14 @@ import { ChevronDown, Star, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import type { Listing } from "@mrstreamer/contracts/guide";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
+import { ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type { ChannelList } from "../../app/ui-store.ts";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Progress } from "../../components/Progress.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { useNow } from "../../lib/clock.ts";
 import { categoryOf, progressOf, timeLeft } from "../../lib/format.ts";
-import { useCategoryMap, useFavouriteIds, useToggleFavourite } from "../../lib/queries.ts";
+import { useCategoryMap, useFavouriteKeys, useToggleFavourite } from "../../lib/queries.ts";
 import { useRem } from "../../lib/use-rem.ts";
 import { cn } from "../../lib/utils.ts";
 import { ListPicker } from "../live/ListPicker.tsx";
@@ -22,7 +23,7 @@ const ROW_REM = 3.75;
 export function ChannelOverlay({
   list,
   channels,
-  playingId,
+  playing,
   picking,
   selected,
   entries,
@@ -35,7 +36,8 @@ export function ChannelOverlay({
 }: {
   list: ChannelList;
   channels: readonly LiveChannel[];
-  playingId: string | null;
+  /** The channel that plays. */
+  playing: OwnedId | null;
   /** The list picker shows instead of the channels. */
   picking: boolean;
   /** The keyboard selection among the channels, or null. */
@@ -79,7 +81,7 @@ export function ChannelOverlay({
         ) : (
           <Channels
             channels={channels}
-            playingId={playingId}
+            playingKey={playing && ownedKey(playing)}
             selected={selected}
             categories={categories}
             onPlay={onPlay}
@@ -93,13 +95,14 @@ export function ChannelOverlay({
 
 function Channels({
   channels,
-  playingId,
+  playingKey,
   selected,
   categories,
   onPlay,
 }: {
   channels: readonly LiveChannel[];
-  playingId: string | null;
+  /** The channel that plays, by its `ownedKey`. */
+  playingKey: string | null;
   selected: number | null;
   categories: ReturnType<typeof useCategoryMap>;
   onPlay: (channel: LiveChannel) => void;
@@ -107,7 +110,7 @@ function Channels({
   const scroller = useRef<HTMLDivElement>(null);
   const rem = useRem();
   const now = useNow();
-  const favourites = useFavouriteIds();
+  const favourites = useFavouriteKeys();
   const toggleFavourite = useToggleFavourite();
   const virtualizer = useVirtualizer({
     count: channels.length,
@@ -120,7 +123,7 @@ function Channels({
   }, [rem, virtualizer]);
   // Opens on the playing channel.
   useEffect(() => {
-    const index = channels.findIndex((channel) => channel.id === playingId);
+    const index = channels.findIndex((channel) => ownedKey(channel) === playingKey);
     if (index > 0) virtualizer.scrollToIndex(index, { align: "center" });
   }, [channels.length > 0]);
   // Only the keyboard scrolls the list.
@@ -139,20 +142,21 @@ function Channels({
         {items.map((item) => {
           const channel = channels[item.index];
           if (!channel) return null;
+          const key = ownedKey(channel);
           return (
             <Row
-              key={channel.id}
+              key={key}
               channel={channel}
-              listing={listings.get(channel.id) ?? null}
+              listing={listings.get(key) ?? null}
               category={categoryOf(channel, categories)}
               now={now}
-              playing={channel.id === playingId}
+              playing={key === playingKey}
               selected={item.index === selected}
-              favourite={favourites.has(channel.id)}
+              favourite={favourites.has(key)}
               top={item.start}
               height={item.size - 4}
               onPlay={() => onPlay(channel)}
-              onToggleFavourite={() => toggleFavourite(channel.id)}
+              onToggleFavourite={() => toggleFavourite(channel)}
             />
           );
         })}

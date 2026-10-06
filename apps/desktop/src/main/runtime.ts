@@ -60,13 +60,14 @@ export type MainServices =
 /** Every main-process service, with the app's adapters for their ports. */
 export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
   const { dataDir } = config;
-  const accounts = Layer.mergeAll(
-    Subscriptions.layer({
-      dataDir,
-      secrets: config.secrets,
-      providerOptions: { userAgent: config.userAgent },
-    }),
-    Settings.layer(dataDir),
+  const accounts = Settings.layer(dataDir).pipe(
+    Layer.provideMerge(
+      Subscriptions.layer({
+        dataDir,
+        secrets: config.secrets,
+        providerOptions: { userAgent: config.userAgent },
+      }),
+    ),
   );
   const services = Layer.mergeAll(
     Library.layer({ dataDir }),
@@ -96,6 +97,8 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
             current: Effect.map(subscriptions.source, (source) =>
               source
                 ? {
+                    id: source.id,
+                    revision: source.revision,
                     key: source.key,
                     download: (signal: AbortSignal) => source.provider.liveGuide(signal),
                   }
@@ -117,7 +120,9 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
         Layer.effect(
           ViewingAccount,
           Effect.map(Subscriptions, (subscriptions) => ({
-            current: Effect.map(subscriptions.source, (source) => source?.key ?? null),
+            current: Effect.map(subscriptions.source, (source) =>
+              source ? { subscriptionId: source.id, key: source.key } : null,
+            ),
           })),
         ),
         Layer.effect(

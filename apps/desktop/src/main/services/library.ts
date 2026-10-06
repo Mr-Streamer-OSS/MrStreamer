@@ -1,8 +1,12 @@
 // The live catalogue: fetched from the provider, cached on disk, queried by the UI over IPC.
+// Every channel and category says which subscription lists it, and a request names its channels
+// and categories the same way: one that names another subscription than the saved one finds
+// nothing. The cache keeps the provider's ids as they came, under the account's key.
 import { join } from "node:path";
 import { type } from "arktype";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import type { CatalogueStatus, Category, LiveChannel } from "@mrstreamer/contracts/library";
+import type { OwnedId } from "@mrstreamer/contracts/subscription";
 import { adultIn } from "@mrstreamer/core/adult";
 import { normalizeCatalogue } from "@mrstreamer/core/catalogue/normalize";
 import { liveChannels } from "@mrstreamer/core/catalogue/variants";
@@ -21,7 +25,7 @@ import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
 import { readJsonFile, removeFile, writeJsonFile } from "../platform/json-file.ts";
 import { Settings } from "./preferences.ts";
-import { Subscriptions, type Source } from "./subscription.ts";
+import { sameSource, Subscriptions, type Source } from "./subscription.ts";
 
 /** How many results a search returns. Enough to scroll, small enough to send per keystroke. */
 const SEARCH_LIMIT = 200;
@@ -67,7 +71,8 @@ interface CatalogueFile extends LiveCatalogue {
 }
 
 interface IndexedCatalogue {
-  readonly key: string;
+  /** The subscription whose channels and categories these are. */
+  readonly subscriptionId: string;
   readonly fetchedAt: number;
   /** Written by a version that didn't keep guide ids. */
   readonly outdated: boolean;
@@ -80,6 +85,13 @@ interface IndexedCatalogue {
   /** Normalised names of every stream, index-aligned with `channels`. */
   readonly searchNames: readonly string[];
   readonly guide: GuideChannels;
+}
+
+/** Which channels to list: a category's, those matching a query, the given ones, or all. */
+export interface ChannelFilter {
+  readonly category?: OwnedId;
+  readonly query?: string;
+  readonly channels?: readonly OwnedId[];
 }
 
 export interface LibraryOptions {
@@ -95,29 +107,27 @@ export class Library extends Context.Service<
     readonly refresh: Effect.Effect<CatalogueStatus, Failed>;
     /** Whether the catalogue should be fetched again: missing, older than `maxAge`, or outdated. */
     isStale(maxAge: Duration.Input): Effect.Effect<boolean>;
-    /** The channels of the current catalogue by guide id, for the programme guide. */
-    readonly guideChannels: Effect.Effect<GuideChannels, Failed>;
+    /** The channels of a subscription's catalogue by guide id, for the programme guide. */
+    guideChannels(subscriptionId: string): Effect.Effect<GuideChannels, Failed>;
     readonly status: Effect.Effect<CatalogueStatus>;
     readonly categories: Effect.Effect<readonly Category[], Failed>;
     /**
-     * All channels in a category, the best matches for a query across the catalogue, or the
-     * channels with the given ids in that order. An id may be any of a channel's streams'; a
-     * channel shows once.
+     * All channels in a category, the best matches for a query across the catalogue, or the given
+     * channels in that order. A channel's id may be any of its streams'; a channel shows once.
      */
-    channels(filter: {
-      readonly categoryId?: string;
-      readonly query?: string;
-      readonly ids?: readonly string[];
-    }): Effect.Effect<readonly LiveChannel[], Failed>;
-    /** The channel by its id or any of its streams'. */
-    channel(channelId: string): Effect.Effect<LiveChannel, Failed>;
+    channels(filter: ChannelFilter): Effect.Effect<readonly LiveChannel[], Failed>;
     /**
-     * Finds the channels of the subscription with `key` by their id or any of their streams', in
-     * the catalogue in memory or on disk. Never fetches one: before the first, and for any
-     * subscription but the one whose catalogue is kept, it finds none. It looks in the catalogue
-     * kept as each id is asked for, so a refresh or another subscription since shows at once.
+     * The channel by its id or any of its streams'. Fails with `no-subscription` when it names a
+     * subscription that isn't the saved one.
      */
-    lookup(key: string): Effect.Effect<(channelId: string) => LiveChannel | undefined>;
+    channel(channel: OwnedId): Effect.Effect<LiveChannel, Failed>;
+    /**
+     * Finds a subscription's channels by their id or any of their streams', in the catalogue in
+     * memory or on disk. Never fetches one: before the first, and for any subscription but the
+     * one whose catalogue is kept, it finds none. It looks in the catalogue kept as each id is
+     * asked for, so a refresh or another subscription since shows at once.
+     */
+    lookup(subscriptionId: string): Effect.Effect<(channelId: string) => LiveChannel | undefined>;
     /** Forgets the cached catalogue, for when the subscription changes or goes. */
     readonly clear: Effect.Effect<void>;
     /** The status after every refresh, successful or not. */
@@ -136,36 +146,37 @@ function make(options: LibraryOptions) {
     const cachePath = join(options.dataDir, "catalogue.json");
     let catalogue: IndexedCatalogue | null = null;
     let refreshing: {
-      readonly key: string;
+      readonly source: Source;
       readonly token: object;
       readonly fiber: Fiber.Fiber<CatalogueStatus, Failed>;
     } | null = null;
     /** Why the latest refresh of this subscription failed, until one succeeds. */
-    let failure: { readonly key: string; readonly error: AppError } | null = null;
+    let failure: { readonly subscriptionId: string; readonly error: AppError } | null = null;
+    const noSubscription = new Failed({ error: { kind: "no-subscription" } });
 
     const requireSource = Effect.flatMap(subscriptions.source, (source) =>
-      source
-        ? Effect.succeed(source)
-        : Effect.fail(new Failed({ error: { kind: "no-subscription" } })),
+      source ? Effect.succeed(source) : Effect.fail(noSubscription),
     );
 
-    /** The catalogue for the current subscription from memory or disk. Never hits the network. */
-    const cached = (key: string) =>
+    /** The catalogue of `source` from memory or disk. Never hits the network. */
+    const cached = (source: Source) =>
       Effect.gen(function* () {
-        if (catalogue?.key === key) return catalogue;
+        if (catalogue?.subscriptionId === source.id) return catalogue;
         const file = yield* Effect.promise(() => readJsonFile(cachePath, CachedCatalogue));
-        if (file?.key !== key) return null;
-        if (catalogue?.key !== key) catalogue = index(file, file.outdated);
+        if (file?.key !== source.key) return null;
+        if (catalogue?.subscriptionId !== source.id) {
+          catalogue = index(file, source.id, file.outdated);
+        }
         return catalogue;
       });
 
-    /** The catalogue for the current subscription, fetching it first if nothing is cached. */
+    /** The catalogue of the saved subscription, fetching it first if nothing is cached. */
     const current = Effect.gen(function* () {
       const source = yield* requireSource;
-      const existing = yield* cached(source.key);
+      const existing = yield* cached(source);
       if (existing) return existing;
       yield* refresh;
-      if (catalogue?.key !== source.key) return yield* switched;
+      if (catalogue?.subscriptionId !== source.id) return yield* switched;
       return catalogue;
     });
 
@@ -179,12 +190,19 @@ function make(options: LibraryOptions) {
         search: withoutAdults(found),
       }));
     const visible = Effect.flatMap(current, shown);
+    /** The same, when `subscriptionId` names the subscription it is the catalogue of. */
+    const visibleOf = (subscriptionId: string) =>
+      Effect.flatMap(visible, (found) =>
+        found.lists.subscriptionId === subscriptionId
+          ? Effect.succeed(found)
+          : Effect.fail(noSubscription),
+      );
 
     const fetchAndStore = (source: Source) =>
       Effect.gen(function* () {
-        const fetched = yield* complete(source, yield* cached(source.key));
-        // Drop the result if the user switched subscriptions while it downloaded.
-        if ((yield* subscriptions.source)?.key !== source.key) return yield* switched;
+        const fetched = yield* complete(source, yield* cached(source));
+        // Dropped when the subscription went, or its login changed, while it downloaded.
+        if (!sameSource(source, yield* subscriptions.source)) return yield* switched;
         const file: CatalogueFile = {
           version: 4,
           key: source.key,
@@ -194,7 +212,7 @@ function make(options: LibraryOptions) {
         };
         // Written before it is used: the next start must not find an older catalogue on disk.
         yield* Effect.promise(() => writeJsonFile(cachePath, file));
-        catalogue = index(file, false);
+        catalogue = index(file, source.id, false);
         failure = null;
         const status = statusOf(catalogue, null);
         yield* PubSub.publish(updates, status);
@@ -203,15 +221,17 @@ function make(options: LibraryOptions) {
         diagnosed("catalogue"),
         Effect.tapError((failed) =>
           Effect.gen(function* () {
-            failure = { key: source.key, error: failed.error };
-            yield* PubSub.publish(updates, statusOf(yield* cached(source.key), failed.error));
+            // How a fetch ended under a login that changed since says nothing of the one saved.
+            if (!sameSource(source, yield* subscriptions.source)) return;
+            failure = { subscriptionId: source.id, error: failed.error };
+            yield* PubSub.publish(updates, statusOf(yield* cached(source), failed.error));
           }),
         ),
       );
 
     const refresh: Effect.Effect<CatalogueStatus, Failed> = Effect.gen(function* () {
       const source = yield* requireSource;
-      let running = refreshing?.key === source.key ? refreshing : null;
+      let running = sameSource(source, refreshing?.source) ? refreshing : null;
       if (!running) {
         const token = {};
         const fiber = yield* Effect.forkIn(
@@ -224,7 +244,7 @@ function make(options: LibraryOptions) {
           ),
           scope,
         );
-        running = { key: source.key, token, fiber };
+        running = { source, token, fiber };
         refreshing = running;
       }
       return yield* Fiber.join(running.fiber);
@@ -263,53 +283,63 @@ function make(options: LibraryOptions) {
       isStale: (maxAge: Duration.Input) =>
         Effect.gen(function* () {
           const source = yield* subscriptions.source;
-          const existing = source ? yield* cached(source.key) : null;
+          const existing = source ? yield* cached(source) : null;
           const now = yield* Clock.currentTimeMillis;
           return (
             !existing || existing.outdated || now - existing.fetchedAt > Duration.toMillis(maxAge)
           );
         }),
 
-      guideChannels: Effect.map(visible, ({ lists }) => lists.guide),
+      guideChannels: (subscriptionId: string) =>
+        Effect.map(visibleOf(subscriptionId), ({ lists }) => lists.guide),
 
       status: Effect.gen(function* () {
         const source = yield* subscriptions.source;
         if (!source) return statusOf(null, null);
-        const found = yield* cached(source.key);
+        const found = yield* cached(source);
         return statusOf(
           found && (yield* shown(found)).lists,
-          failure?.key === source.key ? failure.error : null,
+          failure?.subscriptionId === source.id ? failure.error : null,
         );
       }),
 
       categories: Effect.map(visible, ({ lists }) => lists.categories),
 
-      channels: (filter: {
-        readonly categoryId?: string;
-        readonly query?: string;
-        readonly ids?: readonly string[];
-      }) =>
-        Effect.map(visible, ({ lists: { channels, byCategory, byId }, search: searched }) => {
-          if (filter.ids) return [...new Set(filter.ids.flatMap((id) => byId.get(id) ?? []))];
+      channels: (filter: ChannelFilter) =>
+        Effect.map(visible, ({ lists, search: searched }) => {
+          const { subscriptionId, channels, byCategory, byId } = lists;
+          if (filter.channels) {
+            // Those of another subscription aren't in this catalogue, whatever their ids.
+            const own = filter.channels.filter((each) => each.subscriptionId === subscriptionId);
+            return [...new Set(own.flatMap(({ id }) => byId.get(id) ?? []))];
+          }
           const query = normalize(filter.query ?? "");
           if (query) return search(searched.channels, searched.searchNames, query);
-          return filter.categoryId === undefined
-            ? channels
-            : (byCategory.get(filter.categoryId) ?? []);
+          if (!filter.category) return channels;
+          return filter.category.subscriptionId === subscriptionId
+            ? (byCategory.get(filter.category.id) ?? [])
+            : [];
         }),
 
-      channel: (channelId: string) =>
-        Effect.flatMap(visible, ({ lists: { byId } }) => {
-          const channel = byId.get(channelId);
-          return channel
-            ? Effect.succeed(channel)
-            : Effect.fail(new Failed({ error: { kind: "channel-not-found", channelId } }));
+      channel: (channel: OwnedId) =>
+        Effect.flatMap(visibleOf(channel.subscriptionId), ({ lists: { byId } }) => {
+          const found = byId.get(channel.id);
+          return found
+            ? Effect.succeed(found)
+            : Effect.fail(
+                new Failed({ error: { kind: "channel-not-found", channelId: channel.id } }),
+              );
         }),
 
-      lookup: (key: string) =>
-        Effect.as(cached(key), (channelId: string) =>
-          catalogue?.key === key ? catalogue.byId.get(channelId) : undefined,
-        ),
+      lookup: (subscriptionId: string) =>
+        Effect.gen(function* () {
+          const source = yield* subscriptions.source;
+          if (source?.id === subscriptionId) yield* cached(source);
+          return (channelId: string) =>
+            catalogue?.subscriptionId === subscriptionId
+              ? catalogue.byId.get(channelId)
+              : undefined;
+        }),
 
       clear: Effect.gen(function* () {
         catalogue = null;
@@ -336,7 +366,8 @@ function statusOf(catalogue: IndexedCatalogue | null, failure: AppError | null):
   };
 }
 
-function index(file: CatalogueFile, outdated: boolean): IndexedCatalogue {
+/** The catalogue in `file` as the app shows it, its channels and categories `subscriptionId`'s. */
+function index(file: CatalogueFile, subscriptionId: string, outdated: boolean): IndexedCatalogue {
   const { categories, streams } = normalizeCatalogue(file);
   const logical = liveChannels(streams);
   const { guideIds } = logical;
@@ -345,8 +376,8 @@ function index(file: CatalogueFile, outdated: boolean): IndexedCatalogue {
   const adultStreams = new Set(file.channels.filter(isAdult).map((channel) => channel.id));
   const channels = logical.channels.map((channel): LiveChannel =>
     channel.variants.some((variant) => adultStreams.has(variant.id))
-      ? { ...channel, adult: true }
-      : channel,
+      ? { subscriptionId, ...channel, adult: true }
+      : { subscriptionId, ...channel },
   );
   const byId = new Map<string, LiveChannel>();
   const byGuideId = new Map<string, LiveChannel[]>();
@@ -375,11 +406,15 @@ function index(file: CatalogueFile, outdated: boolean): IndexedCatalogue {
     }
   }
   return {
-    key: file.key,
+    subscriptionId,
     fetchedAt: file.fetchedAt,
     outdated,
     categories: categories
-      .map((category) => ({ ...category, channelCount: byCategory.get(category.id)?.length ?? 0 }))
+      .map((category) => ({
+        subscriptionId,
+        ...category,
+        channelCount: byCategory.get(category.id)?.length ?? 0,
+      }))
       .filter((category) => category.channelCount > 0),
     channels,
     byId,

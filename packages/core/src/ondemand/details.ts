@@ -47,6 +47,7 @@ export function seriesDetails(
   const bySeason = new Map<number, Episode[]>();
   for (const episode of files.values()) {
     const shown: Episode = {
+      subscriptionId: title.subscriptionId,
       id: episode.id,
       seriesId: title.id,
       season: episode.season,

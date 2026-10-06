@@ -2,14 +2,13 @@ import { type } from "arktype";
 import { QUALITIES, type Quality } from "./library.ts";
 
 /**
- * Basic viewing preferences that survive restarts. Favourites and recently watched channels live
- * in the viewing record instead; files from before it may still carry them until imported.
+ * Viewing preferences that survive restarts and hold whichever subscription plays. What the
+ * viewer left one subscription at is `SubscriptionPreferences`. Favourites and recently watched
+ * channels live in the viewing record; files from before it may still carry them until imported.
  */
 export const Preferences = type({
   volume: "0 <= number <= 1",
   muted: "boolean",
-  lastChannelId: "string | null",
-  lastCategoryId: "string | null",
   /**
    * The sound to play: "nl", or ORIGINAL_SOUND for the language a title was made in. Set in
    * Settings, and by the sound track picked last. Absent plays the language for movies and series.
@@ -32,11 +31,6 @@ export const Preferences = type({
   /** A series' next episode plays after a ten-second countdown at the end of one. On when absent. */
   "autoplayNext?": "boolean",
   /**
-   * The version the viewer picked for a movie or series, by kind and TMDB id: "movie:603" to the
-   * version's id. Titles without one play the version that suits them best.
-   */
-  "titleVersions?": "Record<string, string>",
-  /**
    * How subtitles look: their size, a box or a shadow behind text, and how high they sit. A new
    * choice needs a new key: a release that meets a value it doesn't know drops the whole file.
    */
@@ -50,14 +44,29 @@ export const Preferences = type({
    * new key, as for `subtitleLook`.
    */
   "liveQuality?": type.enumerated(...QUALITIES),
+});
+export type Preferences = typeof Preferences.infer;
+export type SubtitleLook = NonNullable<Preferences["subtitleLook"]>;
+
+/**
+ * What the viewer left one subscription at: where Live TV opens, and the versions and streams
+ * picked. Every id in it is the provider's own, so none of it holds for another subscription.
+ */
+export const SubscriptionPreferences = type({
+  lastChannelId: "string | null",
+  lastCategoryId: "string | null",
+  /**
+   * The version the viewer picked for a movie or series, by kind and TMDB id: "movie:603" to the
+   * version's id. Titles without one play the version that suits them best.
+   */
+  "titleVersions?": "Record<string, string>",
   /**
    * The stream the viewer chose for a live channel, by the channel's id: the stream's id. Channels
    * without one play `liveQuality` automatically.
    */
   "channelVariants?": "Record<string, string>",
 });
-export type Preferences = typeof Preferences.infer;
-export type SubtitleLook = NonNullable<Preferences["subtitleLook"]>;
+export type SubscriptionPreferences = typeof SubscriptionPreferences.infer;
 
 /** Subtitles as Chromium draws text cues: its own size, on a box, at the foot of the picture. */
 export const DEFAULT_SUBTITLE_LOOK: SubtitleLook = {
@@ -72,9 +81,9 @@ export const ORIGINAL_SOUND = "original";
 /** The quality live channels start in until the viewer picks another: Full HD. */
 export const DEFAULT_LIVE_QUALITY: Quality = "fhd";
 
-export const defaultPreferences: Preferences = {
-  volume: 1,
-  muted: false,
+export const defaultPreferences: Preferences = { volume: 1, muted: false };
+
+export const defaultSubscriptionPreferences: SubscriptionPreferences = {
   lastChannelId: null,
   lastCategoryId: null,
 };

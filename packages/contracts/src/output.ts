@@ -4,6 +4,7 @@
 // network, so it never sees a provider address.
 import type { TitleRef } from "./ondemand.ts";
 import type { AudioTrack, StreamFailure, SubtitleFormat, SubtitleTrack } from "./playback.ts";
+import type { OwnedId } from "./subscription.ts";
 
 /** The ways the app sends playback to a receiver. */
 export const RECEIVER_KINDS = ["cast", "airplay"] as const;
@@ -32,9 +33,9 @@ export type OutputFailure =
   /** The provider didn't deliver the stream. */
   | { readonly kind: "stream"; readonly failure: StreamFailure };
 
-/** What a receiver plays. */
+/** What a receiver plays, and from which subscription. */
 export type RemoteItem =
-  | { readonly kind: "channel"; readonly channelId: string }
+  | { readonly kind: "channel"; readonly channel: OwnedId }
   | { readonly kind: "title"; readonly title: TitleRef };
 
 /**

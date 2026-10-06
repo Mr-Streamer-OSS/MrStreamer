@@ -2,7 +2,7 @@
 // finding titles by id and searching them; collections.ts builds the lists the UI shows. Display
 // names are worked out here, on load, so naming rules improve without fetching again. The
 // language versions of one film, which share a TMDB id, become one title that shows the version
-// suiting the viewer's language.
+// suiting the viewer's language. Every title and version says which subscription lists it.
 import type { Title, TitleKind } from "@mrstreamer/contracts/ondemand";
 import { adultIn } from "../adult.ts";
 import type { OnDemandCatalogue, ProviderCategory, ProviderTitle } from "../provider.ts";
@@ -29,15 +29,20 @@ export interface IndexedCatalogue {
 }
 
 /**
- * The catalogue for a viewer whose language is `language`, an ISO 639-1 code. Each kind is indexed
- * when first read, so opening Movies doesn't wait for the series.
+ * The catalogue of the subscription `subscriptionId` for a viewer whose language is `language`,
+ * an ISO 639-1 code. Each kind is indexed when first read, so opening Movies doesn't wait for the
+ * series.
  */
-export function indexCatalogue(catalogue: OnDemandCatalogue, language: string): IndexedCatalogue {
+export function indexCatalogue(
+  catalogue: OnDemandCatalogue,
+  language: string,
+  subscriptionId: string,
+): IndexedCatalogue {
   const movies = once(() =>
-    indexKind("movie", catalogue.movieCategories, catalogue.movies, language),
+    indexKind("movie", catalogue.movieCategories, catalogue.movies, language, subscriptionId),
   );
   const series = once(() =>
-    indexKind("series", catalogue.seriesCategories, catalogue.series, language),
+    indexKind("series", catalogue.seriesCategories, catalogue.series, language, subscriptionId),
   );
   return {
     language,
@@ -55,6 +60,7 @@ function indexKind(
   rawCategories: readonly ProviderCategory[],
   raw: readonly ProviderTitle[],
   language: string,
+  subscriptionId: string,
 ): IndexedKind {
   // The adult flag is a standard field; a category named for adults also counts.
   const isAdult = adultIn(rawCategories);
@@ -109,6 +115,7 @@ function indexKind(
     }
     const title: Title = {
       kind,
+      subscriptionId,
       id: first.item.id,
       name: first.item.name,
       title: first.name.title,
@@ -123,7 +130,11 @@ function indexKind(
       adult: versions.length === 1 && isAdult(first.item),
       tmdbId: first.item.tmdbId ?? null,
       genres: [],
-      versions: versions.map(({ item, name }) => ({ id: item.id, tags: name.tags })),
+      versions: versions.map(({ item, name }) => ({
+        subscriptionId,
+        id: item.id,
+        tags: name.tags,
+      })),
     };
     titles.push(title);
     names.push(versions.length === 1 ? first.item.name : group.map((item) => item.name).join(" "));

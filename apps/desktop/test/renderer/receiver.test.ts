@@ -11,7 +11,7 @@
 // counts as watched, and only one it said plays for half a minute gets every reconnect again, as
 // on this computer. What the provider refused the receiver reads as it does here. The bar at the
 // foot of the pages says what plays where.
-import { ipc } from "./support.ts";
+import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement, type FunctionComponent } from "react";
 import { createRoot } from "react-dom/client";
@@ -120,6 +120,7 @@ function said(
 
 const movie: Title = {
   kind: "movie",
+  subscriptionId: SUBSCRIPTION,
   id: "m1",
   name: "Low Tide (EN)",
   title: "Low Tide",
@@ -134,13 +135,14 @@ const movie: Title = {
   adult: false,
   tmdbId: "1",
   genres: [],
-  versions: [{ id: "m1", tags: ["EN"] }],
+  versions: [{ subscriptionId: SUBSCRIPTION, id: "m1", tags: ["EN"] }],
 };
-const movieRef: TitleRef = { kind: "movie", id: "m1" };
+const movieRef: TitleRef = { kind: "movie", subscriptionId: SUBSCRIPTION, id: "m1" };
 const movieItem: RemoteItem = { kind: "title", title: movieRef };
 
 function episode(id: string, number: number, title: string): Episode {
   return {
+    subscriptionId: SUBSCRIPTION,
     id,
     seriesId: "s",
     season: 1,
@@ -170,6 +172,7 @@ const series: SeriesDetails = {
 };
 
 const channel = (id: string): LiveChannel => ({
+  subscriptionId: SUBSCRIPTION,
   id,
   name: `NL | ${id}`,
   title: id,
@@ -563,7 +566,7 @@ describe("an episode on a receiver", () => {
 
     await wait(10_000);
     expect(ipc.argsOf("output.openTitle").at(-1)).toMatchObject({
-      title: { kind: "episode", id: "e2", season: 1, episode: 2 },
+      title: { kind: "episode", subscriptionId: SUBSCRIPTION, id: "e2", season: 1, episode: 2 },
     });
     expect(ipc.methods()).not.toContain("playback.openTitle");
   });
@@ -582,7 +585,7 @@ describe("an episode on a receiver", () => {
 });
 
 describe("a channel with a receiver connected", () => {
-  const item: RemoteItem = { kind: "channel", channelId: "a" };
+  const item: RemoteItem = { kind: "channel", channel: { subscriptionId: SUBSCRIPTION, id: "a" } };
 
   /** Plays channel `a`, which `receiver` takes as load 1 and says it plays. */
   async function playing(receiver = tv): Promise<void> {
@@ -614,7 +617,9 @@ describe("a channel with a receiver connected", () => {
   it("plays there, and no page previews another meanwhile", async () => {
     await playing();
 
-    expect(ipc.argsOf("output.playChannel")).toMatchObject([{ channelId: "a", name: "a" }]);
+    expect(ipc.argsOf("output.playChannel")).toMatchObject([
+      { channel: { subscriptionId: SUBSCRIPTION, id: "a" }, name: "a" },
+    ]);
     expect(player.state().phase).toEqual({ kind: "playing", engine: "receiver", state: "playing" });
 
     player.preview(channel("b"));
@@ -642,7 +647,9 @@ describe("a channel with a receiver connected", () => {
 
     await emit(HERE);
     await wait(0);
-    expect(ipc.argsOf("playback.open")).toMatchObject([{ channelId: "a" }]);
+    expect(ipc.argsOf("playback.open")).toMatchObject([
+      { channel: { subscriptionId: SUBSCRIPTION, id: "a" } },
+    ]);
   });
 
   it("stays stopped when the receiver lets go by itself", async () => {
@@ -695,7 +702,9 @@ describe("a channel with a receiver connected", () => {
 
     await emit(connected(said(1, item, "playing")));
     expect(text()).toContain("Playing on Living Room TV");
-    expect(ipc.argsOf("viewing.recordWatch")).toMatchObject([{ channelId: "a" }]);
+    expect(ipc.argsOf("viewing.recordWatch")).toMatchObject([
+      { channel: { subscriptionId: SUBSCRIPTION, id: "a" } },
+    ]);
   });
 
   it("says it buffers before it ever played, and is watched once it plays", async () => {
@@ -714,7 +723,9 @@ describe("a channel with a receiver connected", () => {
     await emit(connected(said(1, item, "buffering")));
     await emit(connected(said(1, item, "playing")));
     expect(text()).toContain("Playing on Living Room TV");
-    expect(ipc.argsOf("viewing.recordWatch")).toMatchObject([{ channelId: "a" }]);
+    expect(ipc.argsOf("viewing.recordWatch")).toMatchObject([
+      { channel: { subscriptionId: SUBSCRIPTION, id: "a" } },
+    ]);
   });
 
   it("gives up after four more tries when the receiver buffers and never gets its stream", async () => {
@@ -800,7 +811,9 @@ describe("a channel with a receiver connected", () => {
     await wait(60_000);
     expect(ipc.argsOf("output.playChannel")).toHaveLength(1);
     await press("Retry");
-    expect(ipc.argsOf("output.playChannel").at(-1)).toMatchObject({ channelId: "a" });
+    expect(ipc.argsOf("output.playChannel").at(-1)).toMatchObject({
+      channel: { subscriptionId: SUBSCRIPTION, id: "a" },
+    });
   });
 
   it("keeps the lost TV's name while Try again reaches it, and loads there once it answers", async () => {
@@ -875,15 +888,18 @@ describe("a channel with a receiver connected", () => {
     await emit(connected(said(1, item, "paused")));
     expect(player.state()).toMatchObject({ channel: { id: "b" }, phase: { kind: "tuning" } });
 
-    const next: RemoteItem = { kind: "channel", channelId: "b" };
+    const next: RemoteItem = {
+      kind: "channel",
+      channel: { subscriptionId: SUBSCRIPTION, id: "b" },
+    };
     await act(async () => loaded.resolve(said(2, next, "loading")));
     await emit(connected(said(2, next, "playing")));
     await emit(connected(said(1, item, "paused")));
 
     expect(player.state().phase).toEqual({ kind: "playing", engine: "receiver", state: "playing" });
     expect(ipc.argsOf("viewing.recordWatch")).toMatchObject([
-      { channelId: "a" },
-      { channelId: "b" },
+      { channel: { subscriptionId: SUBSCRIPTION, id: "a" } },
+      { channel: { subscriptionId: SUBSCRIPTION, id: "b" } },
     ]);
   });
 });
@@ -897,7 +913,7 @@ describe("a channel that plays here", () => {
     await act(async () =>
       opened.resolve({
         sessionId: "here",
-        channelId: "a",
+        channel: { subscriptionId: SUBSCRIPTION, id: "a" },
         url: "http://127.0.0.1/stream/here",
         format: "hls",
       }),
@@ -909,7 +925,9 @@ describe("a channel that plays here", () => {
 
     expect(player.state().phase).toEqual({ kind: "playing", engine: "native" });
     expect(text()).not.toContain("Playing");
-    expect(ipc.argsOf("viewing.recordWatch")).toMatchObject([{ channelId: "a" }]);
+    expect(ipc.argsOf("viewing.recordWatch")).toMatchObject([
+      { channel: { subscriptionId: SUBSCRIPTION, id: "a" } },
+    ]);
     expect(ipc.methods()).not.toContain("output.playChannel");
   });
 });
@@ -924,7 +942,9 @@ describe("a preview", () => {
     await emit(connected());
     await act(async () => preferences.resolve(defaultPreferences));
 
-    expect(ipc.argsOf("playback.open")).toMatchObject([{ channelId: "a", preview: true }]);
+    expect(ipc.argsOf("playback.open")).toMatchObject([
+      { channel: { subscriptionId: SUBSCRIPTION, id: "a" }, preview: true },
+    ]);
 
     // The main process refuses it then, and nothing is said of that.
     await act(async () =>
@@ -939,7 +959,9 @@ describe("a preview", () => {
     player.play(channel("a"));
     await wait(0);
 
-    expect(ipc.argsOf("playback.open")).toMatchObject([{ channelId: "a" }]);
+    expect(ipc.argsOf("playback.open")).toMatchObject([
+      { channel: { subscriptionId: SUBSCRIPTION, id: "a" } },
+    ]);
     expect(ipc.argsOf("playback.open")[0]).not.toHaveProperty("preview");
   });
 });
@@ -954,7 +976,7 @@ describe("a channel that plays here when a receiver connects", () => {
     await act(async () =>
       opened.resolve({
         sessionId: "here",
-        channelId: "a",
+        channel: { subscriptionId: SUBSCRIPTION, id: "a" },
         url: "http://127.0.0.1/stream/here",
         format: "hls",
       }),
@@ -964,7 +986,9 @@ describe("a channel that plays here when a receiver connects", () => {
     await wait(0);
 
     expect(ipc.argsOf("playback.close")).toEqual([{ sessionId: "here" }]);
-    expect(ipc.argsOf("output.playChannel")).toMatchObject([{ channelId: "a" }]);
+    expect(ipc.argsOf("output.playChannel")).toMatchObject([
+      { channel: { subscriptionId: SUBSCRIPTION, id: "a" } },
+    ]);
   });
 });
 

@@ -1,7 +1,8 @@
 // What the viewer keeps per account: favourite channels, the channels watched recently, and how
 // far movies and episodes got. The main process records them as events (see
-// @mrstreamer/core/viewing); the UI reads this state.
+// @mrstreamer/core/viewing); the UI reads this state, in which everything names its subscription.
 import type { TitleRef } from "./ondemand.ts";
+import type { OwnedId } from "./subscription.ts";
 
 /** How many channels the recently watched list shows. */
 export const RECENT_LIMIT = 12;
@@ -16,16 +17,16 @@ export const CONTINUE_LIMIT = 20;
 export const CONTINUE_OFFERED = 100;
 
 export interface Viewing {
-  /** Channel ids in the order they were added, or the order the viewer gave them since. */
-  readonly favourites: readonly string[];
-  /** Channel ids, most recently watched first, at most `RECENT_LIMIT`. */
-  readonly recent: readonly string[];
+  /** Channels in the order they were added, or the order the viewer gave them since. */
+  readonly favourites: readonly OwnedId[];
+  /** Channels, most recently watched first, at most `RECENT_LIMIT`. */
+  readonly recent: readonly OwnedId[];
   /**
    * Movies started and not finished, and for each series the episode watched last, finished or
    * not, most recent first, at most `CONTINUE_OFFERED`. Removed ones stay out until played again.
    */
   readonly continueWatching: readonly TitleProgress[];
-  /** How far the record has come for this account: a later change has a higher number. */
+  /** How far the record has come: a later change has a higher number. */
   readonly sequence: number;
 }
 
@@ -36,14 +37,23 @@ export interface Viewing {
  */
 export interface FavouriteOrder {
   /** The subscription the favourites were read from, by `SubscriptionSummary.id`. */
-  readonly subscription: string;
+  readonly subscriptionId: string;
   /** Its favourites as `Viewing.favourites` gave them: every one, in order. */
-  readonly original: readonly string[];
+  readonly original: readonly OwnedId[];
   /**
    * Those of them the viewer arranged, in the order wanted. The rest, channels the lists don't
    * show or the provider no longer lists, keep their places.
    */
-  readonly order: readonly string[];
+  readonly order: readonly OwnedId[];
+}
+
+/**
+ * Which titles' progress to read or change: movies, and every episode of the series, by the ids
+ * of their versions. Each language version of a film or series has its own.
+ */
+export interface TitleFilter {
+  readonly movies?: readonly OwnedId[];
+  readonly series?: readonly OwnedId[];
 }
 
 /** How far a movie or an episode got. */

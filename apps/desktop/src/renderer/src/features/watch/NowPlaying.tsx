@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
+import { ownedKey, sameOwned } from "@mrstreamer/contracts/subscription";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Progress } from "../../components/Progress.tsx";
 import { Button } from "../../components/ui/button.tsx";
@@ -27,7 +28,7 @@ import { qualityName } from "../../lib/quality.ts";
 import {
   queries,
   useChooseQuality,
-  useFavouriteIds,
+  useFavouriteKeys,
   useToggleFavourite,
 } from "../../lib/queries.ts";
 import { cn } from "../../lib/utils.ts";
@@ -72,9 +73,9 @@ export function NowPlayingBar({ visible, ...props }: NowPlayingProps & { visible
  */
 function Details({ channel, categories }: NowPlayingProps) {
   const playing = usePlayer(
-    (state) => state.phase.kind === "playing" && state.channel?.id === channel.id,
+    (state) => state.phase.kind === "playing" && sameOwned(state.channel, channel),
   );
-  const listing = useQuery(queries.listings([channel.id])).data?.[channel.id];
+  const listing = useQuery(queries.listings([channel])).data?.[ownedKey(channel)];
   const now = useNow();
   const tech = techLine(useStreamInfo(playing));
   const quality = useChannelQuality(channel);
@@ -129,12 +130,12 @@ function Controls({
   const active = usePlayer((state) => state.phase.kind !== "idle" && state.phase.kind !== "failed");
   const previous = usePlayer((state) => state.previous);
   const playing = usePlayer(
-    (state) => state.phase.kind === "playing" && state.channel?.id === channel.id,
+    (state) => state.phase.kind === "playing" && sameOwned(state.channel, channel),
   );
   const height = useStreamInfo(playing)?.height ?? null;
   const quality = useChannelQuality(channel);
   const chooseQuality = useChooseQuality();
-  const favourite = useFavouriteIds().has(channel.id);
+  const favourite = useFavouriteKeys().has(ownedKey(channel));
   const toggleFavourite = useToggleFavourite();
   // A receiver shows none of a channel's subtitles, and takes none of their settings.
   const remote = useOutput((state) => state.status.output.kind !== "local") && player.onReceiver();
@@ -174,7 +175,7 @@ function Controls({
           size="icon"
           aria-label={favourite ? "Remove from favourites" : "Add to favourites"}
           aria-pressed={favourite}
-          onClick={() => toggleFavourite(channel.id)}
+          onClick={() => toggleFavourite(channel)}
         >
           <Star className={cn(favourite && "fill-current")} />
         </Button>

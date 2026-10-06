@@ -1,13 +1,14 @@
 // @vitest-environment happy-dom
 // When Automatic plays another of a channel's streams because the first didn't start, Watch says
 // so until the channel changes.
-import { ipc } from "./support.ts";
+import { ipc, SUBSCRIPTION } from "./support.ts";
 import { describe, expect, it } from "vitest";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { LivePlaying } from "@mrstreamer/contracts/playback";
 import { player } from "../../src/renderer/src/player/player.ts";
 
 const channel = (id: string): LiveChannel => ({
+  subscriptionId: SUBSCRIPTION,
   id,
   name: `NL | ${id} FHD`,
   title: id,
@@ -31,7 +32,7 @@ async function playing(id: string, stream: LivePlaying): Promise<void> {
   await wait(0);
   opened.resolve({
     sessionId: id,
-    channelId: id,
+    channel: { subscriptionId: SUBSCRIPTION, id: id },
     url: `http://127.0.0.1/stream/${id}`,
     format: "hls",
   });

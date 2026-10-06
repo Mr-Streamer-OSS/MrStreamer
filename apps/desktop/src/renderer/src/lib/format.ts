@@ -1,13 +1,28 @@
 import type { Programme } from "@mrstreamer/contracts/guide";
 import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
+import { ownedKey } from "@mrstreamer/contracts/subscription";
 import type { StreamInfo } from "../player/engine.ts";
+
+/**
+ * A channel's first category that `categories` has, which hold them by `ownedKey`: a channel's
+ * categories are its own subscription's.
+ */
+function firstCategory(
+  channel: LiveChannel,
+  categories: ReadonlyMap<string, Category>,
+): Category | undefined {
+  const { subscriptionId } = channel;
+  return channel.categoryIds
+    .map((id) => categories.get(ownedKey({ subscriptionId, id })))
+    .find(Boolean);
+}
 
 /** "818 · Vlaanderen": the channel number and its first category. */
 export function channelLine(
   channel: LiveChannel,
   categories: ReadonlyMap<string, Category>,
 ): string {
-  const category = channel.categoryIds.map((id) => categories.get(id)).find(Boolean);
+  const category = firstCategory(channel, categories);
   return [channel.number, category?.title].filter((part) => part != null).join(" · ");
 }
 
@@ -16,7 +31,7 @@ export function categoryOf(
   channel: LiveChannel,
   categories: ReadonlyMap<string, Category>,
 ): string {
-  return channel.categoryIds.map((id) => categories.get(id)?.title).find(Boolean) ?? "";
+  return firstCategory(channel, categories)?.title ?? "";
 }
 
 /** A server's host, without its scheme: "tv.example.net:8080". */

@@ -15,7 +15,11 @@ export interface AccountStatus {
 export interface SubscriptionSummary {
   /** An Xtream Codes login, or an M3U playlist link without one, which has live TV only. */
   readonly kind: "xtream" | "m3u";
-  /** Identifies the account: the same login or link gives the same id. Holds no secret. */
+  /**
+   * Identifies the saved subscription on this device: made up when it first connects, and kept
+   * while the same server and username, or the same playlist link, stay. Holds nothing of the
+   * login. Everything a provider lists is named with it (`OwnedId`).
+   */
   readonly id: string;
   /**
    * Normalised server origin, for example `http://line.example.tv:8080`. For a playlist, its
@@ -31,4 +35,34 @@ export interface SubscriptionSummary {
    * plays until the user enters it again. `kind` says which to ask for.
    */
   readonly needsSecret: boolean;
+}
+
+/**
+ * Something a provider lists, named in full: its id as the provider gives it, and the subscription
+ * it comes from. A provider's ids are unique only within its own lists, so a channel, category,
+ * movie, series or episode is never looked up by `id` alone.
+ */
+export interface OwnedId {
+  /** The `SubscriptionSummary.id` of the subscription that lists it. */
+  readonly subscriptionId: string;
+  /** The provider's own id, as it sent it. */
+  readonly id: string;
+}
+
+/** `owned`'s id alone, without whatever else it carries: what a request sends to name it. */
+export function ownedId({ subscriptionId, id }: OwnedId): OwnedId {
+  return { subscriptionId, id };
+}
+
+/**
+ * One string per owned id, for the keys of lists and maps. A subscription's id holds no colon, so
+ * two subscriptions never share a key. It is no id to send back: requests name an `OwnedId`.
+ */
+export function ownedKey(owned: OwnedId): string {
+  return `${owned.subscriptionId}:${owned.id}`;
+}
+
+/** Whether two owned ids name the same thing. Null and undefined name nothing. */
+export function sameOwned(a: OwnedId | null | undefined, b: OwnedId | null | undefined): boolean {
+  return !!a && !!b && a.subscriptionId === b.subscriptionId && a.id === b.id;
 }

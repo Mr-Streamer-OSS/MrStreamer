@@ -35,6 +35,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import type { OwnedId } from "@mrstreamer/contracts/subscription";
 import { QUALITY_STREAM_IDS, startFakeProvider } from "../fake-provider.ts";
 import { connect, delay, key, launch, login, MODIFIERS, press, waitFor, type Page } from "./app.ts";
 
@@ -50,7 +51,7 @@ let port = randomPort();
 let app = launch(executable, rest, { port, profile });
 
 /** A channel for adults, which the lists hide, and an id the provider doesn't list. */
-const HIDDEN = ["4000", "gone"];
+const HIDDEN = ["4000", "gone"] as const;
 const KEYS = { ArrowUp: 38, ArrowDown: 40, PageUp: 33, PageDown: 34, End: 35, Home: 36 } as const;
 
 let failed = false;
@@ -62,8 +63,7 @@ function report(name: string, problems: readonly string[]): void {
   failed ||= problems.length > 0;
 }
 
-interface Channel {
-  readonly id: string;
+interface Channel extends OwnedId {
   readonly title: string;
   readonly variants: readonly { readonly id: string }[];
 }
@@ -77,10 +77,13 @@ const invoke = async <T>(page: Page, method: string, input?: unknown): Promise<T
 };
 /** The favourites as the record holds them, hidden ones included. */
 const favourites = async (page: Page) =>
-  (await invoke<{ favourites: string[] }>(page, "viewing.get")).favourites;
+  (await invoke<{ favourites: OwnedId[] }>(page, "viewing.get")).favourites;
 /** The favourites the lists show, in their order. */
 const listed = async (page: Page) =>
-  invoke<Channel[]>(page, "library.channels", { ids: await favourites(page) });
+  invoke<Channel[]>(page, "library.channels", { channels: await favourites(page) });
+/** Where the one subscription's channel `id` stands among `channels`, from 0. */
+const placeOf = (channels: readonly OwnedId[], id: string) =>
+  channels.findIndex((channel) => channel.id === id);
 
 /** What the list draws: each row's place and channel, whether it is in view, and the focus. */
 const drawn = (page: Page) =>
@@ -184,6 +187,9 @@ try {
   let page = await connect(port);
   await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
   await login(page, provider);
+  // Every channel is the one subscription's, and is named with it.
+  const { id: subscriptionId } = await invoke<{ id: string }>(page, "subscription.get");
+  const own = (id: string): OwnedId => ({ subscriptionId, id });
 
   // Thirty-eight channels the lists show, the one in three qualities by its SD stream, with the
   // two hidden favourites among them: after the third channel and at the end.
@@ -201,7 +207,7 @@ try {
   for (const channelId of starred) {
     await invoke(page, "viewing.setFavourite", {
       commandId: crypto.randomUUID(),
-      channelId,
+      channel: own(channelId),
       favourite: true,
     });
   }
@@ -369,9 +375,9 @@ try {
     }
     // The hidden favourites stand where they stood, counted among every favourite.
     for (const id of HIDDEN) {
-      if (saved.indexOf(id) !== record.indexOf(id)) {
+      if (placeOf(saved, id) !== placeOf(record, id)) {
         problems.push(
-          `${id} moved from place ${record.indexOf(id) + 1} to ${saved.indexOf(id) + 1}`,
+          `${id} moved from place ${placeOf(record, id) + 1} to ${placeOf(saved, id) + 1}`,
         );
       }
     }
@@ -480,7 +486,7 @@ try {
     );
     await invoke(page, "viewing.setFavourite", {
       commandId: crypto.randomUUID(),
-      channelId: String(extra?.streamId),
+      channel: own(String(extra?.streamId)),
       favourite: true,
     });
     const problems: string[] = [];
@@ -540,7 +546,7 @@ try {
       `[...document.querySelectorAll('[data-view="watch"] [role=button] [title]')].map((name) => name.getAttribute("title"))`,
     );
     const names = await invoke<{ id: string; name: string }[]>(page, "library.channels", {
-      ids: order.map((c) => c.id),
+      channels: order.map(({ subscriptionId, id }) => ({ subscriptionId, id })),
     });
     rows.slice(0, 6).forEach((name, index) => {
       if (name !== names[index]?.name) problems.push(`Watch's list has ${name} at ${index + 1}`);

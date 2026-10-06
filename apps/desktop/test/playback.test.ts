@@ -18,7 +18,10 @@ const MAC: readonly Codec[] = ["h264", "hevc", "hevc-10bit", "aac", "mp3", "opus
 const FFMPEG = process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg";
 const hasFfmpeg = spawnSync(FFMPEG, ["-version"]).status === 0;
 
-/** Playback on a connected fake provider. `dispose` ends it, as quitting the app does. */
+/**
+ * Playback on a connected fake provider. `open` takes a channel of the connected subscription by
+ * the provider's id; `service` is playback itself. `dispose` ends it, as quitting the app does.
+ */
 async function connectedPlayback(options: { slotReleaseMs?: number; ffmpeg?: boolean } = {}) {
   const provider = await fakeProvider({
     maxConnections: 1,
@@ -36,9 +39,22 @@ async function connectedPlayback(options: { slotReleaseMs?: number; ffmpeg?: boo
     ),
   );
   const subscriptions = await promised(runtime, Subscriptions);
-  await subscriptions.connect({ server: provider.url, username: "demo", password: "demo" });
-  const playback = { ...(await promised(runtime, Playback)), dispose: () => runtime.dispose() };
-  return { provider, playback };
+  const { id: subscriptionId } = await subscriptions.connect({
+    server: provider.url,
+    username: "demo",
+    password: "demo",
+  });
+  const service = await promised(runtime, Playback);
+  const playback = {
+    ...service,
+    open: (
+      channelId: string,
+      decoders: Parameters<typeof service.open>[1],
+      options?: Parameters<typeof service.open>[2],
+    ) => service.open({ subscriptionId, id: channelId }, decoders, options),
+    dispose: () => runtime.dispose(),
+  };
+  return { provider, playback, service, subscriptionId };
 }
 
 /** Ids of channels that stream without end. */
@@ -130,6 +146,27 @@ describe("playback", () => {
     expect(session.url).not.toContain("demo");
     expect(stream).toMatchObject({ status: 200 });
     expect(stream.bytes).toBeGreaterThan(0);
+    stream.stop();
+    await playback.dispose();
+  });
+
+  it("opens a channel for the subscription it names, and closes nothing for another's", async () => {
+    const { provider, playback, service, subscriptionId } = await connectedPlayback();
+    const [one = "", two = ""] = liveChannels(provider);
+    const playing = await playback.open(one, LINUX);
+    const stream = await firstBytes(playing.url);
+    const requests = provider.streamRequests();
+
+    // The same provider id, as a subscription that went, or another's lists, could name it.
+    await expect(
+      service.open({ subscriptionId: "another-subscription", id: two }, LINUX),
+    ).rejects.toMatchObject({ error: { kind: "no-subscription" } });
+
+    // What plays is the subscription's own, and plays on: nothing reached the provider.
+    expect(playing.channel).toEqual({ subscriptionId, id: one });
+    expect(provider.activeStreams()).toBe(1);
+    expect(provider.streamRequests()).toBe(requests);
+    expect(await playback.failure(playing.sessionId)).toBeNull();
     stream.stop();
     await playback.dispose();
   });
