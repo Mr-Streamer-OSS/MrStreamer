@@ -13,6 +13,10 @@
 // title clips in test/fixtures; every other title streams the MP4 clip. One TEST movie and the
 // "TEST | Formats" series come in two versions sharing a TMDB id, as providers list a title once
 // per language.
+//
+// With `second`, it is another provider beside that one, whose panel numbers everything as the
+// first's does: the same ids, most of them for other titles, and some of the first's films and
+// series under ids of its own.
 import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { Readable, type Writable } from "node:stream";
@@ -85,6 +89,15 @@ export interface FakeProviderOptions {
    * story and the file facts panels send: 1 MB of details, near a long-running show's on a panel.
    */
   readonly longSeries?: boolean;
+  /**
+   * Another provider's movies and series, listed under the very ids the default lists use. The
+   * TEST movies are the same films under the same ids. Of the others, every second one is the
+   * default's next film in English, so under another id than it has there, with its TMDB id or,
+   * where the default sends none, without; the rest are films of its own, "Other Story". Its
+   * "TEST | Formats (DE)" is the default's series of that TMDB id with one season of two episodes,
+   * under the default's own series and episode ids; its other series are its own.
+   */
+  readonly second?: boolean;
 }
 
 interface FakeTitle {
@@ -232,7 +245,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
   const slotReleaseMs = options.slotReleaseMs ?? 300;
   const streams = options.streams ?? (options.live ? liveStreams : defaultStreams);
   const catalogue = buildCatalogue(options.channels ?? 300, options.adultChannels ?? false);
-  const listed = buildTitles(options.titles ?? 120);
+  const listed = buildTitles(options.titles ?? 120, options.second ?? false);
   const titles = options.longSeries
     ? { ...listed, series: [longSeries(), ...listed.series] }
     : listed;
@@ -915,7 +928,7 @@ const TEST_MOVIES: readonly {
 ];
 
 /** Builds roughly `size` movies and series. The same size always gives the same titles. */
-function buildTitles(size: number): FakeTitles {
+function buildTitles(size: number, second: boolean): FakeTitles {
   const random = mulberry32(size + 7);
   // A fixed moment, so "recently added" orders are the same in every run.
   const base = 1_790_000_000;
@@ -938,14 +951,23 @@ function buildTitles(size: number): FakeTitles {
     ...(test.versionOf === undefined ? {} : { tmdb: String(90_000 + test.versionOf + 10_000) }),
   }));
   for (let index = 0; movies.length < size; index++) {
-    const category = movieCategories[1 + (index % 4)] ?? movieCategories[1]!;
+    const id = 91_000 + index;
+    // The film a second provider lists under this id: the default's next one, or one of its own.
+    const of = second ? index + 1 : index;
+    const own = second && index % 2 === 1;
+    const category = own
+      ? movieCategories[1]!
+      : (movieCategories[1 + (of % 4)] ?? movieCategories[1]!);
     const adult = category.id === "505";
-    const word = WORDS[index % WORDS.length] ?? "Earth";
-    const name = adult
-      ? `Adult Film ${index} (EN)`
-      : `${word} Story ${index} (${category.id === "504" ? "MULTI" : "NL"})`;
+    const word = WORDS[of % WORDS.length] ?? "Earth";
+    const language = second ? "EN" : category.id === "504" ? "MULTI" : "NL";
+    const name = own
+      ? `Other Story ${index} (NL)`
+      : adult
+        ? `Adult Film ${of} (EN)`
+        : `${word} Story ${of} (${language})`;
     movies.push({
-      id: 91_000 + index,
+      id,
       name: index % 9 === 0 ? name.toUpperCase() : name,
       categoryId: category.id,
       adult,
@@ -953,6 +975,12 @@ function buildTitles(size: number): FakeTitles {
       added: base - 1000 - Math.floor(random() * 1_000_000),
       container: index % 3 === 0 ? "mkv" : "mp4",
       fixture: "title-h264-aac.mp4",
+      ...(!second
+        ? {}
+        : own
+          ? { tmdb: String(id + 20_000) }
+          : // What the default sends for that film: its TMDB id, and "0" for a few.
+            { tmdb: (91_000 + of) % 7 === 0 ? "0" : String(91_000 + of + 10_000) }),
     });
   }
   const seriesCategories = [
@@ -969,6 +997,37 @@ function buildTitles(size: number): FakeTitles {
     container,
     fixture,
   });
+  if (second) {
+    const series: FakeSeries[] = [
+      {
+        id: 80_000,
+        name: "TEST | Formats (DE)",
+        categoryId: "601",
+        adult: false,
+        added: base - 250,
+        seasons: [
+          [
+            episode(81_000, "title-h264-aac.mp4", "mp4"),
+            episode(81_001, "title-h264-aac.mp4", "mp4"),
+          ],
+        ],
+        tmdb: "90000",
+      },
+    ];
+    for (let index = 0; series.length < Math.max(2, Math.floor(size / 4)); index++) {
+      const id = 80_001 + index;
+      series.push({
+        id,
+        name: `Other Files ${index} (NL)`,
+        categoryId: "601",
+        adult: false,
+        added: base - 2000 - Math.floor(random() * 1_000_000),
+        seasons: [[episode(id * 10, "title-h264-aac.mp4", "mp4")]],
+        tmdb: String(id + 20_000),
+      });
+    }
+    return { movieCategories, movies, seriesCategories, series };
+  }
   const series: FakeSeries[] = [
     {
       id: 80_000,

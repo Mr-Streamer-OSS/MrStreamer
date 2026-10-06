@@ -92,7 +92,7 @@ describe("credential protection", () => {
     const { subscriptions } = await app(recording);
     const server = provider.url.replace("http:", "https:");
 
-    const error = await failure(subscriptions.connect({ server, ...LOGIN }));
+    const error = await failure(subscriptions.add({ server, ...LOGIN }));
 
     expect(error).toEqual({
       kind: "unreachable",
@@ -110,7 +110,7 @@ describe("credential protection", () => {
     );
     const { subscriptions } = await app(moved.fetch);
 
-    const error = await failure(subscriptions.connect({ server: "https://panel.test", ...LOGIN }));
+    const error = await failure(subscriptions.add({ server: "https://panel.test", ...LOGIN }));
 
     expect(error).toMatchObject({ kind: "unreachable", server: "https://panel.test" });
     expect(moved.asked.filter((address) => address.startsWith("http:"))).toEqual([]);
@@ -127,7 +127,7 @@ describe("credential protection", () => {
       return null;
     });
     const { subscriptions, playback } = await app(panel.fetch);
-    const { id: subscriptionId } = await subscriptions.connect({
+    const { id: subscriptionId } = await subscriptions.add({
       server: "https://panel.test",
       ...LOGIN,
     });
@@ -152,7 +152,7 @@ describe("credential protection", () => {
     const panel = httpsPanel(provider);
     const { subscriptions } = await app(panel.fetch);
 
-    const connected = await subscriptions.connect({ server: "panel.test", ...LOGIN });
+    const connected = await subscriptions.add({ server: "panel.test", ...LOGIN });
 
     expect(connected).toMatchObject({ server: "https://panel.test" });
     expect(panel.asked.every((address) => address.startsWith("https://panel.test/"))).toBe(true);
@@ -168,12 +168,12 @@ describe("credential protection", () => {
     const { subscriptions } = await app(recording);
     const address = provider.url.replace("http://", "");
 
-    const error = await failure(subscriptions.connect({ server: address, ...LOGIN }));
+    const error = await failure(subscriptions.add({ server: address, ...LOGIN }));
 
     expect(error).toEqual({ kind: "unencrypted-only", server: `https://${address}` });
     expect(asked.filter((each) => each.startsWith("http:"))).toEqual([]);
     // What "Connect without encryption" sends.
-    const connected = await subscriptions.connect({ server: `http://${address}`, ...LOGIN });
+    const connected = await subscriptions.add({ server: `http://${address}`, ...LOGIN });
     expect(connected).toMatchObject({ server: provider.url });
   });
 
@@ -198,7 +198,7 @@ describe("credential protection", () => {
       const { subscriptions } = await app(waiting, unanswered);
 
       const started = performance.now();
-      const error = await failure(subscriptions.connect({ server: "panel.test", ...LOGIN }));
+      const error = await failure(subscriptions.add({ server: "panel.test", ...LOGIN }));
       const waited = performance.now() - started;
 
       expect(error).toEqual({ kind: "unencrypted-only", server: "https://panel.test" });
@@ -206,7 +206,7 @@ describe("credential protection", () => {
       expect(waited).toBeGreaterThan(2_000);
       expect(waited).toBeLessThan(8_000);
       expect(asked.filter((each) => each.startsWith("http:"))).toEqual([]);
-      expect(await subscriptions.get()).toBeNull();
+      expect(await subscriptions.list()).toEqual([]);
     },
   );
 
@@ -223,7 +223,7 @@ describe("credential protection", () => {
       };
       const { subscriptions } = await app(slow);
 
-      const connected = await subscriptions.connect({ server: address, ...LOGIN });
+      const connected = await subscriptions.add({ server: address, ...LOGIN });
 
       expect(connected).toMatchObject({ server: `https://${address}` });
     },
@@ -234,9 +234,9 @@ describe("credential protection", () => {
     const { subscriptions } = await app(httpsPanel(provider).fetch);
 
     const refused = await failure(
-      subscriptions.connect({ server: "panel.test", username: LOGIN.username, password: "wrong" }),
+      subscriptions.add({ server: "panel.test", username: LOGIN.username, password: "wrong" }),
     );
-    const nowhere = await failure(subscriptions.connect({ server: "nowhere.invalid", ...LOGIN }));
+    const nowhere = await failure(subscriptions.add({ server: "nowhere.invalid", ...LOGIN }));
 
     expect(refused).toEqual({ kind: "invalid-login" });
     expect(nowhere).toMatchObject({ kind: "unreachable", server: "https://nowhere.invalid" });
@@ -254,9 +254,9 @@ describe("credential protection", () => {
     };
     const { dataDir, subscriptions, playback } = await app(quoting);
 
-    const connectError = await failure(subscriptions.connect({ server: provider.url, ...LOGIN }));
+    const connectError = await failure(subscriptions.add({ server: provider.url, ...LOGIN }));
     failing = "/live/";
-    const { id: subscriptionId } = await subscriptions.connect({ server: provider.url, ...LOGIN });
+    const { id: subscriptionId } = await subscriptions.add({ server: provider.url, ...LOGIN });
     const session = await playback.open(
       { subscriptionId, id: channel(provider, "TEST | H.264 + AAC") },
       ["h264", "aac"],

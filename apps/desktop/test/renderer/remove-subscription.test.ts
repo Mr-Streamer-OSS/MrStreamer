@@ -1,63 +1,295 @@
 // @vitest-environment happy-dom
-// Remove subscription in Settings keeps the account's favourites, history and progress, unless
-// the viewer ticks the box to delete them too.
+// Remove in Settings > Subscriptions names the subscription and says what stops and what stays.
+// It keeps the account's favourites, history and progress, unless the viewer ticks the box to
+// delete them too, and takes only that subscription out of what the app shows. A title that
+// plays from it has how far it got saved before the subscription goes.
 import { ipc } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
+import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { SubscriptionSummary } from "@mrstreamer/contracts/subscription";
+import { useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { SubscriptionSection } from "../../src/renderer/src/features/settings/SubscriptionSection.tsx";
+import { player } from "../../src/renderer/src/player/player.ts";
+import { titlePlayer } from "../../src/renderer/src/player/title-player.ts";
 
 let unmount = () => {};
-afterEach(() => unmount());
+afterEach(() => {
+  unmount();
+  titlePlayer.close();
+  player.reset();
+  useUi.setState({ details: null, settings: null, watching: false });
+});
 
-const subscription: SubscriptionSummary = {
+const subscription = (id: string, name: string): SubscriptionSummary => ({
   kind: "xtream",
-  id: "https://line.example.tv|demo",
-  server: "https://line.example.tv",
+  id,
+  name,
+  server: `https://${id}.example`,
   username: "demo",
   account: { state: "active", expiresAt: null, maxConnections: 1, activeConnections: 0 },
   needsSecret: false,
-};
+});
+const northline = subscription("northline", "Northline");
+const holiday = subscription("holiday", "Holiday house");
+const openlist = subscription("openlist", "Openlist playlist");
 
-async function section(): Promise<HTMLElement> {
+const channelOf = (owner: SubscriptionSummary): LiveChannel => ({
+  subscriptionId: owner.id,
+  id: "2014",
+  name: "BE | VRT 1",
+  title: "VRT 1",
+  tags: [],
+  number: 1,
+  logoUrl: null,
+  categoryIds: [],
+  variants: [{ id: "2014", name: "BE | VRT 1", tags: [], quality: null }],
+});
+
+/**
+ * Holds what the section reads of the saved subscriptions and their lists, as it opens and again
+ * once one of them went. What it returns answers that: `left` as the ones saved, with none of
+ * their lists loaded.
+ */
+function reads() {
+  const subscriptions = ipc.hold("subscription.list");
+  const channels = ipc.hold("library.status");
+  const guides = ipc.hold("guide.status");
+  const titles = ipc.hold("ondemand.status");
+  return async (left: readonly SubscriptionSummary[]) => {
+    await act(async () => {
+      subscriptions.resolve(left);
+      channels.resolve([]);
+      guides.resolve([]);
+      titles.resolve({ lists: [], metadata: null });
+    });
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+  };
+}
+
+/** The section with `saved` subscriptions, and the question Remove asks about `removed`. */
+async function removing(saved: readonly SubscriptionSummary[], removed: SubscriptionSummary) {
   ipc.reset();
+  const opened = reads();
   const client = new QueryClient();
-  client.setQueryData(["subscription"], subscription);
+  client.setQueryData(["subscriptions"], saved);
   const container = document.createElement("div");
   const root = createRoot(container);
   await act(async () =>
     root.render(createElement(QueryClientProvider, { client }, createElement(SubscriptionSection))),
   );
   unmount = () => act(() => root.unmount());
-  return container;
+  await opened(saved);
+  const button = (text: string) =>
+    [...container.querySelectorAll("button")].find((each) => each.textContent?.trim() === text);
+  const click = async (element: Element | undefined | null) => {
+    await act(async () => (element as HTMLElement | undefined | null)?.click());
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+  };
+  const row = [...container.querySelectorAll("li")].find((each) =>
+    each.textContent?.startsWith(removed.name ?? ""),
+  );
+  // Its details hold Remove, at their foot; one subscription alone shows them already.
+  if (saved.length > 1) await click(row?.querySelector("button"));
+  await click(button(`Remove ${removed.name}`));
+  return { container, client, button, click };
 }
 
-async function click(element: Element | undefined): Promise<void> {
-  await act(async () => (element as HTMLElement | undefined)?.click());
-}
-
-const button = (container: HTMLElement, text: string) =>
-  [...container.querySelectorAll("button")].find((each) => each.textContent?.trim() === text);
-
-describe("removing the subscription", () => {
+describe("removing a subscription", () => {
   it.each([
     { ticked: false, eraseViewing: false },
     { ticked: true, eraseViewing: true },
   ])(
     "asks to delete the viewing record only when ticked: $ticked",
     async ({ ticked, eraseViewing }) => {
-      const settings = await section();
-      await click(button(settings, "Remove subscription"));
-      const box = settings.querySelector('[role="checkbox"]') ?? undefined;
+      const { container, button, click } = await removing([northline, holiday], holiday);
+      expect(container.textContent).toContain(
+        "Remove Holiday house, and the lists loaded with it, from this device?",
+      );
+      const box = container.querySelector('[role="checkbox"]');
       expect(box?.getAttribute("aria-checked")).toBe("false");
       // The label, as the viewer clicks its text or the box inside it.
-      if (ticked) await click(box?.closest("label") ?? undefined);
+      if (ticked) await click(box?.closest("label"));
 
-      await click(button(settings, "Remove"));
+      await click(button("Remove"));
 
-      expect(ipc.argsOf("subscription.remove")).toEqual([{ eraseViewing }]);
+      expect(ipc.argsOf("subscription.remove")).toEqual([
+        { subscriptionId: holiday.id, eraseViewing },
+      ]);
     },
   );
+
+  it("says what stops and what stays when its stream plays, and stops that stream first", async () => {
+    await act(async () => player.watch(channelOf(northline)));
+    useUi.setState({ details: { kind: "movie", subscriptionId: holiday.id, id: "91001" } });
+    const { container, client, button, click } = await removing(
+      [northline, holiday, openlist],
+      northline,
+    );
+
+    expect(container.textContent).toContain(
+      "VRT 1 is playing from it and stops. Holiday house and Openlist playlist stay.",
+    );
+
+    const answer = ipc.hold("subscription.remove");
+    await click(button("Remove"));
+    expect(player.current()).toBeNull();
+    await act(async () => answer.resolve(null));
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+
+    // The others are still listed, and what was open of another subscription stays open.
+    expect(client.getQueryData(["subscriptions"])).toEqual([holiday, openlist]);
+    expect(container.textContent).not.toContain("Northline");
+    expect(useUi.getState().details).toMatchObject({ subscriptionId: holiday.id });
+  });
+
+  it("has how far its title got saved before it asks for the subscription to go", async () => {
+    const { container, button, click } = await removing([northline, holiday], holiday);
+    const film = { kind: "movie", subscriptionId: holiday.id, id: "91001" } as const;
+    const opened = ipc.hold("playback.openTitle");
+    await act(
+      async () =>
+        void titlePlayer.open(
+          { title: film, name: "Blow", detail: "2001", artworkUrl: null, originalLanguage: "en" },
+          600,
+        ),
+    );
+    await act(async () =>
+      opened.resolve({
+        sessionId: "s1",
+        title: film,
+        url: "http://127.0.0.1/title/s1.mp4",
+        duration: 6000,
+        audio: [],
+        subtitles: [],
+      }),
+    );
+    expect(container.textContent).toContain("Blow is playing from it and stops.");
+
+    const saved = ipc.hold("viewing.recordProgress");
+    await click(button("Remove"));
+
+    // The title closed, and the removal waits for the answer about where it stopped.
+    expect(titlePlayer.state().now).toBeNull();
+    expect(ipc.argsOf("viewing.recordProgress")).toMatchObject([
+      { title: film, position: 600, duration: 6000 },
+    ]);
+    expect(ipc.argsOf("subscription.remove")).toEqual([]);
+
+    await act(async () =>
+      saved.resolve({ favourites: [], recent: [], continueWatching: [], sequence: 1 }),
+    );
+
+    expect(ipc.argsOf("subscription.remove")).toEqual([
+      { subscriptionId: holiday.id, eraseViewing: false },
+    ]);
+  });
+
+  it("leaves what plays from another subscription, and says nothing of it", async () => {
+    const playing = channelOf(northline);
+    await act(async () => player.watch(playing));
+    const { container, button, click } = await removing([northline, holiday], holiday);
+
+    expect(container.textContent).not.toContain("is playing from it");
+
+    const answer = ipc.hold("subscription.remove");
+    await click(button("Remove"));
+    await act(async () => answer.resolve(null));
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+
+    expect(player.current()).toEqual(playing);
+    // The one left is alone now, and shows its details as a single subscription does.
+    expect(container.querySelector('[role="region"]')?.textContent).toContain("Remove Northline");
+  });
+
+  it("forgets a channel of it the page tried meanwhile, once what stays is read again", async () => {
+    const gone = channelOf(northline);
+    await act(async () => player.watch(gone));
+    const { button, click } = await removing([northline, holiday], northline);
+
+    const answer = ipc.hold("subscription.remove");
+    const again = reads();
+    await click(button("Remove"));
+    // The page under Settings previews the channel watched last, which its record still says is
+    // this one, and the main process refuses a channel of a subscription that went.
+    const refused = ipc.hold("playback.open");
+    await act(async () => player.preview(gone));
+    await act(async () => refused.reject({ kind: "no-subscription" }));
+    expect(player.state()).toMatchObject({ channel: gone, phase: { kind: "failed" } });
+
+    await act(async () => answer.resolve(null));
+    await again([holiday]);
+
+    // Nothing of it is left to stand failed where the page previews what was watched before it.
+    expect(player.current()).toBeNull();
+  });
+
+  it("leaves a channel of another subscription that started meanwhile", async () => {
+    await act(async () => player.watch(channelOf(northline)));
+    const { button, click } = await removing([northline, holiday], northline);
+
+    const answer = ipc.hold("subscription.remove");
+    const again = reads();
+    await click(button("Remove"));
+    const other = channelOf(holiday);
+    await act(async () => player.watch(other));
+    await act(async () => answer.resolve(null));
+    await again([holiday]);
+
+    expect(player.current()).toEqual(other);
+  });
+
+  it("leaves a channel of it the page started again when the removal failed", async () => {
+    const kept = channelOf(northline);
+    await act(async () => player.watch(kept));
+    const { container, button, click } = await removing([northline, holiday], northline);
+
+    const answer = ipc.hold("subscription.remove");
+    await click(button("Remove"));
+    await act(async () => player.preview(kept));
+    await act(async () => answer.reject({ kind: "unexpected", detail: "The disk is full." }));
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+
+    expect(container.textContent).toContain("Something went wrong: The disk is full.");
+    expect(player.current()).toEqual(kept);
+  });
+
+  it("says the only subscription's removal returns to Connect, and keeps it on Keep", async () => {
+    const { container, button, click } = await removing([northline], northline);
+
+    expect(container.textContent).toContain(
+      "It's your only subscription, so Mr. Streamer returns to Connect.",
+    );
+
+    await click(button("Keep"));
+
+    expect(container.textContent).not.toContain("from this device?");
+    expect(ipc.argsOf("subscription.remove")).toEqual([]);
+  });
+
+  it("offers neither Keep nor the box while a removal is on its way, and both when it failed", async () => {
+    const { container, button, click } = await removing([northline, holiday], holiday);
+    const box = () => container.querySelector('[role="checkbox"]');
+
+    const answer = ipc.hold("subscription.remove");
+    await click(button("Remove"));
+    await click(box()?.closest("label"));
+
+    expect(button("Keep")?.disabled).toBe(true);
+    expect(box()?.getAttribute("aria-checked")).toBe("false");
+
+    await act(async () => answer.reject({ kind: "unexpected", detail: "The disk is full." }));
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+
+    expect(container.textContent).toContain("Something went wrong: The disk is full.");
+    await click(box()?.closest("label"));
+    expect(box()?.getAttribute("aria-checked")).toBe("true");
+    await click(button("Keep"));
+    expect(container.textContent).not.toContain("from this device?");
+    expect(ipc.argsOf("subscription.remove")).toEqual([
+      { subscriptionId: holiday.id, eraseViewing: false },
+    ]);
+  });
 });

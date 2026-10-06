@@ -364,14 +364,22 @@ describe("a stream the provider refuses", () => {
   });
 
   it("names no other device for a playlist, which has no connection to hold", async () => {
-    ipc.hold("subscription.get").resolve({
-      kind: "m3u",
-      id: SUBSCRIPTION,
-      server: "https://lists.example",
-      username: "",
-      account: { state: "unknown", expiresAt: null, maxConnections: null, activeConnections: null },
-      needsSecret: false,
-    });
+    ipc.hold("subscription.list").resolve([
+      {
+        kind: "m3u",
+        id: SUBSCRIPTION,
+        name: null,
+        server: "https://lists.example",
+        username: "",
+        account: {
+          state: "unknown",
+          expiresAt: null,
+          maxConnections: null,
+          activeConnections: null,
+        },
+        needsSecret: false,
+      },
+    ]);
     const starts = nextStream();
     await watching();
     await starts();
@@ -451,7 +459,10 @@ describe("what a failure shows", () => {
     expect(text()).toContain("Login not accepted");
     expect(offered()).toEqual(["Update login", "Channels"]);
     await press("Update login");
-    expect(useUi.getState().editingLogin).toBe(true);
+    expect(useUi.getState()).toMatchObject({
+      settings: "subscriptions",
+      subscription: { id: SUBSCRIPTION, show: "edit" },
+    });
   });
 
   it("tells a screen reader the trouble once, without the attempts or their seconds", async () => {

@@ -30,7 +30,7 @@ import { Progress } from "../../components/Progress.tsx";
 import { useNow } from "../../lib/clock.ts";
 import { clockTime, endOfDay, progressOf, timeLeft } from "../../lib/format.ts";
 import { qualitiesLine } from "../../lib/quality.ts";
-import { queries } from "../../lib/queries.ts";
+import { queries, useSourceOf } from "../../lib/queries.ts";
 import { useRem } from "../../lib/use-rem.ts";
 import { cn } from "../../lib/utils.ts";
 import { useVisibleListings } from "./lists.ts";
@@ -99,6 +99,7 @@ export function ChannelTable({
   const scroller = useRef<HTMLDivElement>(null);
   const rem = useRem();
   const now = useNow();
+  const sourceOf = useSourceOf();
   // The row with the focus stays in the page when it scrolls out of view, so it keeps the focus.
   const kept = order ? selected : null;
   const rangeExtractor = useCallback(
@@ -173,6 +174,7 @@ export function ChannelTable({
             >
               <ChannelRow
                 channel={channel}
+                source={sourceOf(channel)}
                 listing={listings.get(key) ?? null}
                 now={now}
                 playing={key === playingKey}
@@ -206,6 +208,7 @@ export function ChannelTable({
 
 function ChannelRow({
   channel,
+  source,
   listing,
   now,
   playing,
@@ -220,6 +223,8 @@ function ChannelRow({
   onToggleFavourite,
 }: {
   channel: LiveChannel;
+  /** The subscription it is from, by name, where another's channel is called the same. */
+  source: string | null;
   listing: Listing | null;
   now: number;
   playing: boolean;
@@ -262,7 +267,7 @@ function ChannelRow({
         {...(order
           ? {
               role: "listitem",
-              "aria-label": channel.title,
+              "aria-label": source ? `${channel.title}, ${source}` : channel.title,
               "aria-posinset": order.position,
               "aria-setsize": order.count,
               // Tab stops at the row the keys move, and goes on to its two buttons.
@@ -290,6 +295,12 @@ function ChannelRow({
           </span>
           {playing && <span className="size-1.5 flex-none rounded-full bg-white" />}
           <span className="flex-none text-xs text-muted-foreground">{qualitiesLine(channel)}</span>
+          {/* Plain text in the name's cell, which gives way before the name does. */}
+          {source && (
+            <span className="min-w-0 flex-shrink-[3] truncate text-xs text-muted-foreground">
+              · {source}
+            </span>
+          )}
         </span>
         <span className="flex min-w-0 flex-1 items-center gap-4">
           {current && (

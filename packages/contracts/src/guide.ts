@@ -38,9 +38,11 @@ export interface ListingMatch {
  */
 export type GuideAvailability = "unknown" | "available" | "none";
 
-/** The guide as Settings shows it: how many channels it covers, and since when. */
+/** A subscription's guide as Settings shows it: how many channels it covers, and since when. */
 export interface GuideStatus {
-  /** Channels of the catalogue with programmes in the guide. */
+  /** The subscription whose guide this is. */
+  readonly subscriptionId: string;
+  /** Channels of its catalogue with programmes in the guide. */
   readonly channels: number;
   /** Epoch milliseconds of the download, or null before one, or without a guide. */
   readonly fetchedAt: number | null;

@@ -16,45 +16,69 @@ import {
   userAgent,
 } from "./support.ts";
 
+/** The library, settings and subscriptions on `dataDir`, as a start of the app reads them. */
+async function started(dataDir: string) {
+  const runtime = runtimeFor(
+    Library.layer({ confirmDelay: 0 }).pipe(
+      Layer.provideMerge(Settings.layer(dataDir)),
+      Layer.provideMerge(
+        Subscriptions.layer({ dataDir, secrets: testSecrets, providerOptions: { userAgent } }),
+      ),
+    ),
+  );
+  const library = await promised(runtime, Library);
+  return {
+    library,
+    settings: await promised(runtime, Settings),
+    subscriptions: await promised(runtime, Subscriptions),
+    updates: await collect(runtime, library.changes),
+  };
+}
+
+const login = (provider: { readonly url: string }) => ({
+  server: provider.url,
+  username: "demo",
+  password: "demo",
+});
+
 /**
  * A library on a connected fake provider, and the statuses it reports. `own` names a channel or
- * category of the connected subscription by the provider's id. `restart` starts another on the
- * same data folder.
+ * category of the connected subscription by the provider's id, and the library's calls about one
+ * subscription are about that one. `restart` starts another on the same data folder.
  */
 async function connectedLibrary(channels = 300, adultChannels = false) {
   const provider = await fakeProvider({ channels, adultChannels });
   const dataDir = await tempDir();
-  const start = async () => {
-    const runtime = runtimeFor(
-      Library.layer({ dataDir, confirmDelay: 0 }).pipe(
-        Layer.provideMerge(Settings.layer(dataDir)),
-        Layer.provideMerge(
-          Subscriptions.layer({ dataDir, secrets: testSecrets, providerOptions: { userAgent } }),
-        ),
-      ),
-    );
-    const library = await promised(runtime, Library);
-    return {
-      library,
-      settings: await promised(runtime, Settings),
-      subscriptions: await promised(runtime, Subscriptions),
-      updates: await collect(runtime, library.changes),
-    };
-  };
-  const { library, settings, subscriptions, updates } = await start();
-  const { id: subscriptionId } = await subscriptions.connect({
-    server: provider.url,
-    username: "demo",
-    password: "demo",
-  });
+  const { library: all, settings, subscriptions, updates } = await started(dataDir);
+  const { id: subscriptionId } = await subscriptions.add(login(provider));
   const own = (id: string) => ({ subscriptionId, id });
-  const restart = async () => (await start()).library;
-  return { provider, dataDir, library, settings, subscriptions, updates, restart, own };
+  const ofOwn = (library: typeof all) => ({
+    ...library,
+    refresh: () => library.refresh(subscriptionId),
+    isStale: (maxAge: number) => library.isStale(subscriptionId, maxAge),
+    status: async () => {
+      const [status] = await library.status();
+      if (!status) throw new Error("No subscription is saved");
+      return status;
+    },
+  });
+  const restart = async () => ofOwn((await started(dataDir)).library);
+  return {
+    provider,
+    dataDir,
+    library: ofOwn(all),
+    settings,
+    subscriptions,
+    subscriptionId,
+    updates,
+    restart,
+    own,
+  };
 }
 
 describe("live library", () => {
   it("loads categories and channels from the provider, without separator entries", async () => {
-    const { provider, library, updates, own } = await connectedLibrary();
+    const { provider, library, updates, own, subscriptionId } = await connectedLibrary();
 
     const categories = await library.categories();
     const all = await library.channels({});
@@ -73,12 +97,15 @@ describe("live library", () => {
       group: null,
       title: "TEST | Formats and failures",
       channelCount: 13,
+      members: [own("1")],
     });
     expect(categories[1]).toMatchObject({ group: "United Kingdom", title: "Entertainment" });
     expect(updates).toContainEqual({
+      subscriptionId,
       channelCount: all.length,
       fetchedAt: expect.any(Number),
       failure: null,
+      failedAt: null,
     });
   });
 
@@ -161,19 +188,16 @@ describe("live library", () => {
     ]);
   });
 
-  it("drops channels that arrive for a subscription another has replaced", async () => {
-    const { provider, library, subscriptions, own } = await connectedLibrary();
+  it("drops channels that arrive for a subscription that went meanwhile", async () => {
+    const { provider, library, subscriptions, subscriptionId, own } = await connectedLibrary();
     const other = await fakeProvider({ channels: 40 });
     const held = provider.hold("channels");
 
     const first = library.refresh();
     first.catch(() => {});
     await held.arrived;
-    const replaced = await subscriptions.connect({
-      server: other.url,
-      username: "demo",
-      password: "demo",
-    });
+    await subscriptions.remove(subscriptionId);
+    const replaced = await subscriptions.add(login(other));
     held.release();
 
     await expect(first).rejects.toMatchObject({ error: { kind: "unexpected" } });
@@ -198,7 +222,7 @@ describe("live library", () => {
     const late = library.refresh();
     late.catch(() => {});
     await held.arrived;
-    await subscriptions.connect({ server: provider.url, username: "demo", password: "demo" });
+    await subscriptions.add(login(provider));
     held.release();
 
     await expect(late).rejects.toMatchObject({ error: { kind: "unexpected" } });
@@ -237,7 +261,7 @@ describe("live library", () => {
   });
 
   it("keeps the last catalogue when a refresh fails", async () => {
-    const { provider, library, updates } = await connectedLibrary();
+    const { provider, library, updates, subscriptionId } = await connectedLibrary();
     const before = await library.channels({});
     const { fetchedAt } = await library.status();
 
@@ -248,15 +272,17 @@ describe("live library", () => {
 
     expect(await library.channels({})).toEqual(before);
     expect(await library.status()).toEqual({
+      subscriptionId,
       channelCount: before.length,
       fetchedAt,
       failure: { kind: "provider-error", status: 503 },
+      failedAt: expect.any(Number),
     });
     expect(updates.at(-1)).toEqual(await library.status());
 
     provider.failCatalogue(null);
     await library.refresh();
-    expect((await library.status()).failure).toBeNull();
+    expect(await library.status()).toMatchObject({ failure: null, failedAt: null });
   });
 
   it("does not let an empty channel list replace the catalogue", async () => {
@@ -361,6 +387,224 @@ describe("live library", () => {
 
     await expect(library.channel(own("does-not-exist"))).rejects.toMatchObject({
       error: { kind: "channel-not-found", channelId: "does-not-exist" },
+    });
+  });
+});
+
+describe("the channels of several subscriptions", () => {
+  /**
+   * A library on two providers that number their channels and categories alike, as two panels of
+   * one kind do, so every id is taken twice: 300 channels, then 200 others beside them. Both list
+   * the "TEST" channels and "Kwaliteit 1" under the same names.
+   */
+  async function two() {
+    const [first, second] = [
+      await fakeProvider({ channels: 300 }),
+      await fakeProvider({ channels: 200 }),
+    ];
+    const dataDir = await tempDir();
+    const services = await started(dataDir);
+    const a = (await services.subscriptions.add(login(first))).id;
+    const b = (await services.subscriptions.add(login(second))).id;
+    const statusOf = async (subscriptionId: string) =>
+      (await services.library.status()).find((each) => each.subscriptionId === subscriptionId);
+    return { ...services, dataDir, first, second, a, b, statusOf };
+  }
+  const of = (subscriptionId: string, id: string) => ({ subscriptionId, id });
+
+  it("shows them together, each subscription's in its own order and the subscriptions in theirs", async () => {
+    const { library, dataDir, first, second, a, b, statusOf } = await two();
+
+    const all = await library.channels({});
+
+    const [ofA, ofB] = [a, b].map((id) => all.filter((each) => each.subscriptionId === id));
+    expect(all).toEqual([...(ofA ?? []), ...(ofB ?? [])]);
+    expect(ofA?.length).toBe((await statusOf(a))?.channelCount);
+    expect(ofB?.length).toBe((await statusOf(b))?.channelCount);
+    // The same id names another channel in each, and finds the one of the subscription asked.
+    expect(await library.channel(of(a, "2014"))).toMatchObject({
+      ...of(a, "2014"),
+      name: "EARTH XTRA HD",
+    });
+    expect(await library.channel(of(b, "2014"))).toMatchObject({
+      ...of(b, "2014"),
+      name: "UK: OPEN PLUS HD",
+    });
+    expect(
+      (await library.channels({ channels: [of(b, "2014"), of(a, "2014")] })).map(
+        (each) => each.subscriptionId,
+      ),
+    ).toEqual([b, a]);
+
+    // Each keeps its own cache, and both show again without a provider.
+    await Promise.all([first.close(), second.close()]);
+    const restarted = (await started(dataDir)).library;
+    expect(await restarted.channels({})).toEqual(all);
+  });
+
+  it("shows categories of the same country and name as one, with whose each is underneath", async () => {
+    const { library, a, b } = await two();
+
+    const categories = await library.categories();
+    const entertainment = categories.find(
+      (each) => each.group === "United Kingdom" && each.title === "Entertainment",
+    );
+
+    // One list for both, named by the first subscription's category.
+    expect(entertainment).toMatchObject({ ...of(a, "2"), members: [of(a, "2"), of(b, "2")] });
+    const listed = await library.channels({ category: of(a, "2") });
+    expect(listed.map((each) => each.subscriptionId)).toEqual([a, a, a, a, a, b, b, b]);
+    expect(entertainment?.channelCount).toBe(listed.length);
+    // Either of its categories names the same list.
+    expect(await library.channels({ category: of(b, "2") })).toEqual(listed);
+    // A category only one of them has stays that one's.
+    const kids = categories.filter((each) => each.title === "Kids");
+    expect(kids.every((each) => each.members.length <= 2)).toBe(true);
+    expect(new Set(categories.map((each) => `${each.group}|${each.title}`)).size).toBe(
+      categories.length,
+    );
+  });
+
+  it("marks the channels another subscription lists under the same name, and no other", async () => {
+    const { library, subscriptions, a, b } = await two();
+    const named = async (name: string) =>
+      (await library.channels({})).filter((each) => each.name === name);
+
+    expect(await named("TEST | H.264 + AAC")).toMatchObject([
+      { subscriptionId: a, ambiguous: true },
+      { subscriptionId: b, ambiguous: true },
+    ]);
+    // Told apart wherever it shows: by id, in a category and in a search.
+    expect(await library.channel(of(b, "1000"))).toMatchObject({ ambiguous: true });
+    expect(
+      (await library.channels({ query: "h 264 aac" })).map((each) => [
+        each.subscriptionId,
+        each.ambiguous,
+      ]),
+    ).toEqual([
+      [a, true],
+      [b, true],
+    ]);
+    // Marked exactly where the other subscription has a channel that shows under that name.
+    const all = await library.channels({});
+    const titles = (subscriptionId: string) =>
+      new Set(
+        all.flatMap((each) =>
+          each.subscriptionId === subscriptionId ? [each.title.toLowerCase()] : [],
+        ),
+      );
+    const others = { [a]: titles(b), [b]: titles(a) };
+    expect(all.some((each) => !each.ambiguous)).toBe(true);
+    for (const each of all) {
+      expect([each.name, each.ambiguous ?? false]).toEqual([
+        each.name,
+        others[each.subscriptionId]?.has(each.title.toLowerCase()),
+      ]);
+    }
+
+    // Once the other one is gone, nothing is left to tell it from.
+    const gone = (await subscriptions.saved()).find((each) => each.id === b);
+    await subscriptions.remove(b);
+    await library.forget(gone!);
+
+    const left = await library.channels({});
+    expect(new Set(left.map((each) => each.subscriptionId))).toEqual(new Set([a]));
+    expect(left.some((each) => each.ambiguous)).toBe(false);
+    expect((await library.categories()).every((each) => each.members.length === 1)).toBe(true);
+    await expect(library.channel(of(b, "1000"))).rejects.toMatchObject({
+      error: { kind: "no-subscription" },
+    });
+  });
+
+  it("searches every subscription before it cuts the list", async () => {
+    const dataDir = await tempDir();
+    const { library, subscriptions } = await started(dataDir);
+    // The first has more matches than a search returns, none of them good: the word only sits
+    // inside its names. The second, added later, has three names that start with it.
+    const [many, few] = [await fakeProvider({ channels: 400 }), await fakeProvider()];
+    many.serveChannels((all) => all.map((each, at) => ({ ...each, name: `Bravo ${at}` })));
+    few.serveChannels((all) =>
+      all.map((each, at) => ({ ...each, name: at < 3 ? `Ravo ${at}` : `Other ${at}` })),
+    );
+    const a = (await subscriptions.add(login(many))).id;
+    const b = (await subscriptions.add(login(few))).id;
+    await library.refresh(a);
+    await library.refresh(b);
+
+    const results = await library.channels({ query: "ravo" });
+
+    expect(results).toHaveLength(200);
+    expect(results.slice(0, 3).map(({ subscriptionId, title }) => [subscriptionId, title])).toEqual(
+      [0, 1, 2].map((at) => [b, `Ravo ${at}`]),
+    );
+    expect(new Set(results.slice(3).map((each) => each.subscriptionId))).toEqual(new Set([a]));
+  });
+
+  it("keeps one subscription's channels when it can't be reached, and holds no other back", async () => {
+    const { library, first, a, b, statusOf, updates } = await two();
+    const before = await library.channels({});
+
+    first.failCatalogue(503);
+    await expect(library.refresh(a)).rejects.toMatchObject({
+      error: { kind: "provider-error", status: 503 },
+    });
+    await library.refresh(b);
+
+    expect(await library.channels({})).toEqual(before);
+    expect(await statusOf(a)).toMatchObject({
+      failure: { kind: "provider-error", status: 503 },
+      failedAt: expect.any(Number),
+    });
+    expect(await statusOf(b)).toMatchObject({ failure: null, failedAt: null });
+    expect(updates.filter((each) => each.failure).map((each) => each.subscriptionId)).toEqual([a]);
+    // Failing again doesn't move the moment it began to fail.
+    const since = (await statusOf(a))?.failedAt;
+    await library.refresh(a).catch(() => {});
+    expect((await statusOf(a))?.failedAt).toBe(since);
+  });
+
+  it("shows what is there while a new subscription's channels load, and then with them", async () => {
+    const provider = await fakeProvider({ channels: 300 });
+    const other = await fakeProvider({ channels: 200 });
+    const dataDir = await tempDir();
+    const { library, subscriptions, updates } = await started(dataDir);
+    const a = (await subscriptions.add(login(provider))).id;
+    const first = await library.channels({});
+    const held = other.hold("channels");
+
+    const b = (await subscriptions.add(login(other))).id;
+    // Asked for while the new one's list is still on its way: no wait, and nothing missing.
+    expect(await library.channels({})).toEqual(first);
+    await held.arrived;
+    held.release();
+    await expect.poll(() => updates.some((each) => each.subscriptionId === b)).toBe(true);
+
+    const both = await library.channels({});
+    expect(new Set(both.map((each) => each.subscriptionId))).toEqual(new Set([a, b]));
+  });
+
+  it("shows the others' channels when one never answered, and fails only with nothing to show", async () => {
+    const provider = await fakeProvider({ channels: 300 });
+    const down = await fakeProvider({ channels: 200 });
+    const dataDir = await tempDir();
+    const { library, subscriptions, updates } = await started(dataDir);
+    const b = (await subscriptions.add(login(down))).id;
+    down.failCatalogue(500);
+
+    // Alone, it has nothing to show but why.
+    await expect(library.channels({})).rejects.toMatchObject({
+      error: { kind: "provider-error", status: 500 },
+    });
+
+    const a = (await subscriptions.add(login(provider))).id;
+    await library.refresh(a);
+
+    const channels = await library.channels({});
+    expect(new Set(channels.map((each) => each.subscriptionId))).toEqual(new Set([a]));
+    expect(updates.findLast((each) => each.subscriptionId === b)).toMatchObject({
+      channelCount: 0,
+      fetchedAt: null,
+      failure: { kind: "provider-error", status: 500 },
     });
   });
 });

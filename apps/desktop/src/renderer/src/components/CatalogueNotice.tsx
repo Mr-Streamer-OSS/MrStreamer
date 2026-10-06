@@ -3,9 +3,10 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { RotateCw } from "lucide-react";
 import type { ReactNode } from "react";
-import { useUi } from "../app/ui-store.ts";
+import { openSubscription, useUi } from "../app/ui-store.ts";
 import { appError, describeError } from "../lib/errors.ts";
 import { call } from "../lib/ipc.ts";
+import { subscriptionName, useSubscriptions } from "../lib/queries.ts";
 import { Button } from "./ui/button.tsx";
 
 export type CatalogueState =
@@ -30,14 +31,34 @@ export function CatalogueNotice({ state }: { state: CatalogueState }) {
   return state.kind === "failed" ? <Failed cause={state.cause} /> : <Empty />;
 }
 
+/**
+ * No subscription has channels to show. With one that needs its password or link again, or whose
+ * login the provider refused, the way on is its row in Settings.
+ */
 function Failed({ cause }: { cause: unknown }) {
   const client = useQueryClient();
+  const subscriptions = useSubscriptions();
   const error = appError(cause);
+  const locked =
+    error.kind === "needs-secret"
+      ? subscriptions.find((each) => each.id === error.subscriptionId)
+      : undefined;
   const loginProblem = error.kind === "invalid-login" || error.kind === "account-inactive";
   return (
-    <Notice title="Channels unavailable" message={describeError(error)}>
-      {loginProblem ? (
-        <Button variant="primary" onClick={() => useUi.setState({ editingLogin: true })}>
+    <Notice
+      title="Channels unavailable"
+      message={
+        locked
+          ? `${subscriptionName(locked)} needs its ${locked.kind === "m3u" ? "link" : "password"} again.`
+          : describeError(error)
+      }
+    >
+      {locked ? (
+        <Button variant="primary" onClick={() => openSubscription(locked.id, "secret")}>
+          Enter {locked.kind === "m3u" ? "link" : "password"}
+        </Button>
+      ) : loginProblem ? (
+        <Button variant="primary" onClick={() => useUi.setState({ settings: "subscriptions" })}>
           Update login
         </Button>
       ) : (
@@ -54,8 +75,12 @@ function Failed({ cause }: { cause: unknown }) {
 }
 
 function Empty() {
-  // The empty list is cached, so checking again has to ask the provider.
-  const refresh = useMutation({ mutationFn: () => call("library.refresh") });
+  const subscriptions = useSubscriptions();
+  // The empty lists are cached, so checking again has to ask the providers.
+  const refresh = useMutation({
+    mutationFn: () =>
+      Promise.all(subscriptions.map(({ id }) => call("library.refresh", { subscriptionId: id }))),
+  });
   return (
     <Notice
       title="No live channels"

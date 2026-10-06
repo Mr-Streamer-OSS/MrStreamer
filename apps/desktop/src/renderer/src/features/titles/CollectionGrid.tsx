@@ -18,7 +18,7 @@ import { openDetails, useUi } from "../../app/ui-store.ts";
 import { Artwork } from "../../components/TitleArt.tsx";
 import { appError, describeError } from "../../lib/errors.ts";
 import { useKeyboardMode } from "../../lib/input-mode.ts";
-import { queries } from "../../lib/queries.ts";
+import { queries, useSourceOf } from "../../lib/queries.ts";
 import { useRem } from "../../lib/use-rem.ts";
 import { cn } from "../../lib/utils.ts";
 
@@ -289,6 +289,8 @@ function GridPoster({
   selected: boolean;
   onOpen: () => void;
 }) {
+  // Whose it is, where another subscription's title reads the same and isn't this one.
+  const source = useSourceOf()(title);
   return (
     <button
       onMouseDown={(event) => event.preventDefault()}
@@ -305,7 +307,9 @@ function GridPoster({
         <Artwork url={title.posterUrl} name={title.title} size="card" />
       </span>
       <span className="mt-2 block truncate text-[0.875rem] font-medium">{title.title}</span>
-      <span className="block truncate text-xs text-muted-foreground">{caption}</span>
+      <span className="block truncate text-xs text-muted-foreground">
+        {[caption, source].filter(Boolean).join(" · ")}
+      </span>
     </button>
   );
 }

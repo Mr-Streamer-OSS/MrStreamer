@@ -1,8 +1,9 @@
 // The viewing record's rules: which events a command produces, and what the events add up to.
 // Both are plain functions of their input. They never read the clock, fetch or make ids; the
 // service supplies time and ids, and the store keeps the events and the state they add up to.
-// How far movies and episodes got follows the rules in ./titles.ts, one row per title. Everything
-// here is one account's, by the provider's own ids: the service says which subscription's.
+// How far movies and episodes got follows the rules in ./titles.ts, one row per title. A state is
+// one account's, by the provider's own ids: the service says which subscription's. Several
+// accounts' lists read as one name each entry's account beside its id.
 import type { RawTitleRef } from "@mrstreamer/contracts/ondemand";
 import { RECENT_LIMIT } from "@mrstreamer/contracts/viewing";
 
@@ -52,8 +53,6 @@ export type ViewingCommand =
       readonly channelIds: readonly string[];
       readonly favourite: boolean;
     }
-  /** The favourites in another order: `favourites` holds the stored ids, each once, and no other. */
-  | { readonly kind: "reorder-favourites"; readonly favourites: readonly string[] }
   | { readonly kind: "record-watch"; readonly channelId: string }
   | {
       readonly kind: "record-progress";
@@ -80,6 +79,19 @@ export interface ViewingState {
 
 export const emptyState: ViewingState = { favourites: [], recent: [] };
 
+/** A channel in one account's record, by the provider's stream id. */
+export interface StoredChannel {
+  /** The account whose record holds it. */
+  readonly account: string;
+  readonly id: string;
+}
+
+/** An event, and the account whose record it joins. */
+export interface AccountEvent {
+  readonly account: string;
+  readonly event: ViewingEvent;
+}
+
 /** The events a command produces from `state`. Asking for what already holds produces none. */
 export function decide(state: ViewingState, command: ViewingCommand): ViewingEvent[] {
   switch (command.kind) {
@@ -90,18 +102,6 @@ export function decide(state: ViewingState, command: ViewingCommand): ViewingEve
       }
       if (listed.length > 0) return [];
       return command.channelIds.map((channelId) => ({ type: "favourite-added", channelId }));
-    }
-    case "reorder-favourites": {
-      // A favourite moves only by leaving and coming back, and comes back last. So the start of
-      // the new order that the stored one already holds, in that order, stays where it is, and
-      // the rest leaves and comes back in the order wanted.
-      let kept = 0;
-      for (const id of state.favourites) if (id === command.favourites[kept]) kept++;
-      const moved = command.favourites.slice(kept);
-      return [
-        ...moved.map((channelId): ViewingEvent => ({ type: "favourite-removed", channelId })),
-        ...moved.map((channelId): ViewingEvent => ({ type: "favourite-added", channelId })),
-      ];
     }
     case "record-watch":
       return [{ type: "watched", channelId: command.channelId }];
@@ -120,6 +120,29 @@ export function decide(state: ViewingState, command: ViewingCommand): ViewingEve
     case "finish-series":
       return command.titles.map((title) => ({ type: "series-finished", title }));
   }
+}
+
+/**
+ * The events that put the favourites `current`, of one account or several read as one, in the
+ * order `wanted`: the same favourites, each once, and no other. A favourite moves only by leaving
+ * and coming back, and comes back last, after every favourite of every account. So the start of
+ * the new order that the stored one already holds, in that order, stays where it is, and the rest
+ * leaves and comes back in the order wanted, each in its own account's record. An order that
+ * changes nothing makes none.
+ */
+export function reordered(
+  current: readonly StoredChannel[],
+  wanted: readonly StoredChannel[],
+): AccountEvent[] {
+  let kept = 0;
+  for (const { account, id } of current) {
+    const next = wanted[kept];
+    if (next?.account === account && next.id === id) kept++;
+  }
+  const moved = wanted.slice(kept);
+  const as = (type: "favourite-removed" | "favourite-added") =>
+    moved.map(({ account, id }): AccountEvent => ({ account, event: { type, channelId: id } }));
+  return [...as("favourite-removed"), ...as("favourite-added")];
 }
 
 /** Whether an event is about a movie or episode, rather than a channel. */

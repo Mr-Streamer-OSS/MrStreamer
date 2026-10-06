@@ -139,7 +139,7 @@ import {
   type UpstreamLimits,
   type UpstreamSlot,
 } from "../playback/upstream.ts";
-import { Subscriptions } from "./subscription.ts";
+import { Subscriptions, type Source } from "./subscription.ts";
 
 /** How long the provider gets to start answering before the stream counts as failed. */
 const CONNECT_TIMEOUT_MS = 15_000;
@@ -577,16 +577,39 @@ export interface PlaybackDeps {
   };
 }
 
+/**
+ * What an open is asked under, so that work begun before the viewer moved on opens nothing.
+ * `turn` is the one `Playback.begin` gave when the viewer asked: an open whose turn is no longer
+ * the latest fails with `superseded` when its own turn at the provider comes, before anything
+ * closes, and again once the provider answered it, when what it opened closes. `revision` is the
+ * login an address was made under (`SavedSubscription.revision`): one made under a login that
+ * changed since isn't opened, nor one whose login changed while its file was read.
+ */
+export interface Asked {
+  readonly turn?: number | undefined;
+  readonly revision?: number | undefined;
+}
+
 export class Playback extends Context.Service<
   Playback,
   {
     /**
+     * Begins what the viewer asked to play or stop next, whichever subscription it is of, and
+     * names it: a number later asks outgrow. One stream plays at a time across every
+     * subscription, so whatever was asked before and hasn't opened yet gives way.
+     */
+    readonly begin: Effect.Effect<number>;
+    /** Whether the viewer asked for something else since `turn` began. */
+    passed(turn: number): Effect.Effect<boolean>;
+    /**
      * Opens a stream for a channel, at the provider of the subscription it names. Closes any open
-     * stream first; a channel of a subscription that isn't saved fails with `no-subscription`
-     * before anything closes. `variants` are the channel's streams to try in turn, the channel's
-     * id alone when absent. `decoders` lists what the UI's player decodes; the proxy converts the
-     * rest. `repair` re-encodes the picture too, for a broadcast the player failed to decode:
-     * ffmpeg conceals damage that stops the player.
+     * stream first, of whichever subscription, so no provider ever sees a second connection; a
+     * channel of a subscription that isn't saved fails with `no-subscription` before anything
+     * closes, and so does one whose login changed while its stream was looked up. `variants` are
+     * the channel's streams to try in turn, the channel's id alone when absent. `decoders` lists
+     * what the UI's player decodes; the proxy converts the rest. `repair` re-encodes the picture
+     * too, for a broadcast the player failed to decode: ffmpeg conceals damage that stops the
+     * player.
      *
      * `preview` says nobody chose to watch it, as a page's muted preview. It closes nothing a
      * receiver plays: the open fails while a receiver's session is open, and that is looked at
@@ -602,6 +625,7 @@ export class Playback extends Context.Service<
         readonly audio?: number | null;
         readonly audioLanguage?: string | null;
         readonly preview?: boolean;
+        readonly turn?: number | undefined;
       },
     ): Effect.Effect<StreamSession, Failed>;
     /**
@@ -614,11 +638,17 @@ export class Playback extends Context.Service<
       title: TitleRef,
       upstreamUrl: string,
       decoders: readonly Codec[],
+      asked?: Asked,
     ): Effect.Effect<TitleSession, Failed>;
     /** Closes a stream and its provider connection. Unknown or already closed ids are ignored. */
     close(sessionId: string): Effect.Effect<void>;
     /** Closes every open stream, for example when the window closes. */
     readonly closeAll: Effect.Effect<void>;
+    /**
+     * Closes what plays from one subscription, for when it goes, once any open under way has had
+     * its turn. A stream of another subscription plays on.
+     */
+    closeOf(subscriptionId: string): Effect.Effect<void>;
     /** Why the session's last upstream request failed, or null. */
     failure(sessionId: string): Effect.Effect<StreamFailure | null>;
     /**
@@ -641,6 +671,7 @@ export class Playback extends Context.Service<
         readonly variants?: readonly string[];
         readonly audio?: number | null;
         readonly audioLanguage?: string | null;
+        readonly turn?: number | undefined;
       },
     ): Effect.Effect<ReceiverStream, Failed>;
     /**
@@ -652,6 +683,7 @@ export class Playback extends Context.Service<
       title: TitleRef,
       upstreamUrl: string,
       receiver: ReceiverTarget,
+      asked?: Asked,
     ): Effect.Effect<ReceiverTitle, Failed>;
     /**
      * The address a receiver plays an open title from with these tracks: a playlist of the whole
@@ -680,6 +712,28 @@ function make(deps: PlaybackDeps) {
     const failedAt = new Map<string, number>();
     /** Opens one at a time, so switching fast never leaves two sessions open. */
     const openOne = (yield* Semaphore.make(1)).withPermits(1);
+    /** Counts what the viewer asked to play or stop: `begin`. */
+    let turns = 0;
+    /** Fails once the viewer asked for something else since `turn` began. */
+    const whileAsked = (turn: number | undefined) =>
+      Effect.suspend(() =>
+        turn === undefined || turn === turns ? Effect.void : Effect.fail(superseded),
+      );
+    /**
+     * Runs an open in its turn at the provider, unless the viewer asked for something else since
+     * it was asked for: then nothing closes and nothing opens. The open looks again itself once
+     * the provider answered it (`whileAsked`), since its turn can pass while it waits.
+     */
+    const inTurn = <A>(turn: number | undefined, open: Effect.Effect<A, Failed>) =>
+      openOne(Effect.andThen(whileAsked(turn), open));
+    /**
+     * Fails unless `source` is still saved with the login it had: what was looked up under a
+     * login that changed, or for a subscription that went, plays nothing.
+     */
+    const whileSaved = (source: Source) =>
+      Effect.flatMap(subscriptions.stands(source), (stands) =>
+        stands ? Effect.void : Effect.fail(new Failed({ error: { kind: "no-subscription" } })),
+      );
     const { port } = yield* Effect.acquireRelease(
       Effect.promise(() => listen((request, response) => void serve(request, response))),
       ({ server }) =>
@@ -3160,7 +3214,10 @@ function make(deps: PlaybackDeps) {
         return { closed, scope: forked, lan };
       });
 
-    /** Opens a channel's session after closing any other, for the UI's player or `receiver`. */
+    /**
+     * Opens a channel's session after closing any other, for the UI's player or `receiver`,
+     * unless the viewer asked for something else while its streams were looked up.
+     */
     const liveSession = (
       channel: OwnedId,
       decoders: readonly Codec[],
@@ -3169,6 +3226,7 @@ function make(deps: PlaybackDeps) {
         readonly repair?: boolean;
         readonly audio?: number | null;
         readonly audioLanguage?: string | null;
+        readonly turn?: number | undefined;
       },
       receiver: ReceiverTarget | null,
     ) =>
@@ -3189,6 +3247,9 @@ function make(deps: PlaybackDeps) {
               catch: failedWith,
             }).pipe(Effect.map((stream) => ({ id, ...stream }))),
         );
+        // Looked up under the login it had: with another by now, they are no longer its streams.
+        yield* whileSaved(source);
+        yield* whileAsked(options.turn);
         const streams = listed.toSorted(
           (a, b) => Number(failedAt.has(a.url)) - Number(failedAt.has(b.url)),
         );
@@ -3244,16 +3305,23 @@ function make(deps: PlaybackDeps) {
 
     /**
      * Opens a title's session after closing any other and reads what its file holds, for the
-     * UI's player or `receiver`.
+     * UI's player or `receiver`. `standing` fails, and closes the session, once the viewer asked
+     * for something else or the subscription's login changed: the file was read meanwhile, and
+     * whatever else the open waits for goes the same way.
      */
     const titleSession = (
       title: TitleRef,
       upstreamUrl: string,
       decoders: readonly Codec[],
       receiver: ReceiverTarget | null,
+      asked: Asked,
     ) =>
       Effect.gen(function* () {
         const source = yield* subscriptions.sourceOf(title.subscriptionId);
+        // The address holds the login it was made under: under another, it is nobody's file.
+        if (asked.revision !== undefined && asked.revision !== source.revision) {
+          return yield* new Failed({ error: { kind: "no-subscription" } });
+        }
         yield* closeAll;
         const id = randomUUID();
         const { closed, scope: forked, lan } = yield* sessionScope(id, receiver);
@@ -3302,10 +3370,18 @@ function make(deps: PlaybackDeps) {
         }).pipe(Effect.tapError(() => Scope.close(forked, Exit.void)));
         session.probe = probe;
         session.probed = session.identity.generation;
-        return { session, probe };
+        const standing = Effect.andThen(whileAsked(asked.turn), whileSaved(source)).pipe(
+          Effect.tapError(() => Scope.close(forked, Exit.void)),
+        );
+        yield* standing;
+        return { session, probe, standing };
       });
 
     return {
+      begin: Effect.sync(() => ++turns),
+
+      passed: (turn: number) => Effect.sync(() => turn !== turns),
+
       open: (
         channel: OwnedId,
         decoders: readonly Codec[],
@@ -3315,9 +3391,11 @@ function make(deps: PlaybackDeps) {
           readonly audio?: number | null;
           readonly audioLanguage?: string | null;
           readonly preview?: boolean;
+          readonly turn?: number | undefined;
         } = {},
       ) =>
-        openOne(
+        inTurn(
+          options.turn,
           Effect.gen(function* () {
             // Looked at in the open's own turn, before anything closes: no receiver's open can
             // come between this and the session it would close.
@@ -3337,10 +3415,22 @@ function make(deps: PlaybackDeps) {
           }),
         ),
 
-      openTitle: (title: TitleRef, upstreamUrl: string, decoders: readonly Codec[]) =>
-        openOne(
+      openTitle: (
+        title: TitleRef,
+        upstreamUrl: string,
+        decoders: readonly Codec[],
+        asked: Asked = {},
+      ) =>
+        inTurn(
+          asked.turn,
           Effect.gen(function* () {
-            const { session, probe } = yield* titleSession(title, upstreamUrl, decoders, null);
+            const { session, probe } = yield* titleSession(
+              title,
+              upstreamUrl,
+              decoders,
+              null,
+              asked,
+            );
             return {
               sessionId: session.id,
               title,
@@ -3359,9 +3449,11 @@ function make(deps: PlaybackDeps) {
           readonly variants?: readonly string[];
           readonly audio?: number | null;
           readonly audioLanguage?: string | null;
+          readonly turn?: number | undefined;
         } = {},
       ) =>
-        openOne(
+        inTurn(
+          options.turn,
           Effect.gen(function* () {
             const session = yield* liveSession(channel, receiver.decoders, options, receiver);
             // The provider's stream starts now, so the receiver finds segments when it asks.
@@ -3374,18 +3466,27 @@ function make(deps: PlaybackDeps) {
           }),
         ),
 
-      openReceiverTitle: (title: TitleRef, upstreamUrl: string, receiver: ReceiverTarget) =>
-        openOne(
+      openReceiverTitle: (
+        title: TitleRef,
+        upstreamUrl: string,
+        receiver: ReceiverTarget,
+        asked: Asked = {},
+      ) =>
+        inTurn(
+          asked.turn,
           Effect.gen(function* () {
-            const { session, probe } = yield* titleSession(
+            const { session, probe, standing } = yield* titleSession(
               title,
               upstreamUrl,
               receiver.decoders,
               receiver,
+              asked,
             );
             const planned = deps.ffmpeg
               ? yield* Effect.promise(() => planSegments(session, probe).catch(() => null))
               : null;
+            // Where its picture has keyframes was read from the provider too.
+            yield* standing;
             const end = endOf(probe);
             if (!planned || end === null) {
               yield* Scope.close(session.scope, Exit.void);
@@ -3467,6 +3568,21 @@ function make(deps: PlaybackDeps) {
         }),
 
       closeAll,
+
+      closeOf: (subscriptionId: string) =>
+        openOne(
+          Effect.suspend(() =>
+            Effect.forEach(
+              [...sessions.values()].filter(
+                (session) =>
+                  (session.kind === "live" ? session.channel : session.title).subscriptionId ===
+                  subscriptionId,
+              ),
+              (session) => Scope.close(session.scope, Exit.void),
+              { discard: true },
+            ),
+          ),
+        ),
 
       failure: (sessionId: string) => Effect.sync(() => sessions.get(sessionId)?.failure ?? null),
 
@@ -3924,3 +4040,8 @@ async function readStart(answer: Response, address: string): Promise<Started | n
     playlist: startsPlaylist(Buffer.concat(parts)),
   };
 }
+
+/** Something else was asked for since: this open gave way before it began. */
+export const superseded = new Failed({
+  error: { kind: "unexpected", detail: "Something else played in the meantime." },
+});

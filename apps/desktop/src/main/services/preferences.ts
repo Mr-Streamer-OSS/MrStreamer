@@ -2,10 +2,12 @@
 // newest stable release reads and writes it too. Preferences hold whichever subscription plays:
 // volume, mute, languages, the quality live channels start in. What the viewer left a subscription
 // at is that subscription's alone, because every id in it is its provider's own: the last channel
-// and category, and the versions and streams picked. Those are read and changed by naming the
-// subscription, and one that isn't saved has none. Reads and changes take turns at the file, and
-// one that names a subscription checks that it is the saved one when its turn comes: the
-// subscription may have been replaced while it waited.
+// and category, and the versions and streams picked. The file keeps those of the original
+// subscription, the one older releases know; a subscription added beside it keeps its own in a
+// preferences.json in its folder, which holds nothing else. Those are read and changed by naming
+// the subscription, and one that isn't saved has none. Reads and changes take turns at the files,
+// and one that names a subscription checks that it is saved when its turn comes: the subscription
+// may have gone while it waited.
 import { join } from "node:path";
 import {
   defaultPreferences,
@@ -19,10 +21,10 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Semaphore from "effect/Semaphore";
 import { readJsonFile, writeJsonFile } from "../platform/json-file.ts";
-import { Subscriptions } from "./subscription.ts";
+import { Subscriptions, type SavedSubscription } from "./subscription.ts";
 
 /**
- * preferences.json as stored: the preferences, and what the viewer left the saved subscription
+ * preferences.json as stored: the preferences, and what the viewer left the original subscription
  * at. Files from before the viewing record also carry its two lists; they stay in the file until
  * the record has imported them. Keys of newer versions are kept.
  */
@@ -39,7 +41,7 @@ export class Settings extends Context.Service<
     update(patch: Partial<Preferences>): Effect.Effect<Preferences>;
     /**
      * What the viewer left the subscription at. Fails with `no-subscription`, as changing it
-     * does, when that subscription isn't the saved one.
+     * does, when that subscription isn't saved.
      */
     ofSubscription(subscriptionId: string): Effect.Effect<SubscriptionPreferences, Failed>;
     updateSubscription(
@@ -47,11 +49,11 @@ export class Settings extends Context.Service<
       patch: Partial<SubscriptionPreferences>,
     ): Effect.Effect<SubscriptionPreferences, Failed>;
     /**
-     * Forgets what the viewer left the subscription at, for when it changes or goes: what was
-     * watched last and the versions and channel streams picked. Lists not yet imported go too:
-     * they belong to the account before.
+     * Forgets what the viewer left `subscription` at, for when it goes: what was watched last and
+     * the versions and channel streams picked. For the original, lists not yet imported go too:
+     * they belong to its account.
      */
-    readonly forget: Effect.Effect<void>;
+    forget(subscription: SavedSubscription): Effect.Effect<void>;
     /** The favourites and recent channels of a file from before the viewing record, or null. */
     readonly legacyLists: Effect.Effect<{
       readonly favourites: readonly string[];
@@ -71,6 +73,8 @@ function make(dataDir: string) {
     const path = join(dataDir, "preferences.json");
     const one = yield* Semaphore.make(1);
     let current: Stored | null = null;
+    /** What the viewer left each added subscription at, by its id, as last read or written. */
+    const added = new Map<string, SubscriptionPreferences>();
 
     /** The file as last read or written. Only runs while holding `one`. */
     const stored = Effect.promise(async () => {
@@ -92,24 +96,38 @@ function make(dataDir: string) {
 
     const change = (apply: (previous: Stored) => Stored) => one.withPermits(1)(applied(apply));
 
-    /**
-     * Passes when `subscriptionId` is the saved subscription, whose the file's own are, also
-     * while its password or link can't be read.
-     */
+    /** The saved subscription `subscriptionId` names, also while its secret can't be read. */
     const saved = (subscriptionId: string) =>
-      Effect.flatMap(subscriptions.get, (subscription) =>
-        subscription?.id === subscriptionId
-          ? Effect.void
-          : Effect.fail(new Failed({ error: { kind: "no-subscription" } })),
-      );
+      Effect.flatMap(subscriptions.saved, (all) => {
+        const found = all.find((each) => each.id === subscriptionId);
+        return found
+          ? Effect.succeed(found)
+          : Effect.fail(new Failed({ error: { kind: "no-subscription" } }));
+      });
 
     /**
-     * Runs `effect` on the file's own while `subscriptionId` is the saved subscription. It is
-     * checked with the file in hand, not before: a call can wait behind others, and by its turn
-     * the file may be another subscription's.
+     * Runs `run` for the subscription `subscriptionId` names while it is saved. It is looked up
+     * with the files in hand, not before: a call can wait behind others, and by its turn the
+     * subscription may have gone.
      */
-    const whileSaved = <A>(subscriptionId: string, effect: Effect.Effect<A>) =>
-      one.withPermits(1)(Effect.andThen(saved(subscriptionId), effect));
+    const whileSaved = <A>(
+      subscriptionId: string,
+      run: (subscription: SavedSubscription) => Effect.Effect<A>,
+    ) => one.withPermits(1)(Effect.flatMap(saved(subscriptionId), run));
+
+    const addedPath = (subscription: SavedSubscription) =>
+      join(subscription.dir, "preferences.json");
+
+    /** What the viewer left an added subscription at. Only runs while holding `one`. */
+    const ofAdded = (subscription: SavedSubscription) =>
+      Effect.promise(async () => {
+        const kept =
+          added.get(subscription.id) ??
+          (await readJsonFile(addedPath(subscription), SubscriptionPreferences)) ??
+          defaultSubscriptionPreferences;
+        added.set(subscription.id, kept);
+        return kept;
+      });
 
     return {
       get: one.withPermits(1)(Effect.map(stored, general)),
@@ -119,18 +137,30 @@ function make(dataDir: string) {
           general,
         ),
       ofSubscription: (subscriptionId: string) =>
-        whileSaved(subscriptionId, Effect.map(stored, ofSaved)),
-      updateSubscription: (subscriptionId: string, patch: Partial<SubscriptionPreferences>) =>
-        whileSaved(
-          subscriptionId,
-          Effect.map(
-            applied((previous) => ({ ...previous, ...patch })),
-            ofSaved,
-          ),
+        whileSaved(subscriptionId, (subscription) =>
+          subscription.original ? Effect.map(stored, ofOriginal) : ofAdded(subscription),
         ),
-      forget: Effect.asVoid(
-        change((previous) => ({ ...general(previous), ...defaultSubscriptionPreferences })),
-      ),
+      updateSubscription: (subscriptionId: string, patch: Partial<SubscriptionPreferences>) =>
+        whileSaved(subscriptionId, (subscription) =>
+          subscription.original
+            ? Effect.map(
+                applied((previous) => ({ ...previous, ...patch })),
+                ofOriginal,
+              )
+            : Effect.gen(function* () {
+                const next = { ...(yield* ofAdded(subscription)), ...patch };
+                yield* Effect.promise(() => writeJsonFile(addedPath(subscription), next));
+                added.set(subscription.id, next);
+                return next;
+              }),
+        ),
+      forget: (subscription: SavedSubscription) =>
+        subscription.original
+          ? Effect.asVoid(
+              change((previous) => ({ ...general(previous), ...defaultSubscriptionPreferences })),
+            )
+          : // Its folder went with it: only what was read of it is left to forget.
+            one.withPermits(1)(Effect.sync(() => void added.delete(subscription.id))),
       legacyLists: one.withPermits(1)(
         Effect.map(stored, ({ favouriteChannelIds, recentChannelIds }) =>
           favouriteChannelIds || recentChannelIds
@@ -161,8 +191,8 @@ function general({
   return preferences;
 }
 
-/** What the file keeps for the saved subscription. */
-function ofSaved({
+/** What the file keeps for the original subscription. */
+function ofOriginal({
   lastChannelId,
   lastCategoryId,
   titleVersions,

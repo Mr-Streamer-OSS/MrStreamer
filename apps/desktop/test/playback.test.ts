@@ -6,8 +6,17 @@ import { Playback } from "../src/main/services/playback.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { captionDecoder } from "@mrstreamer/core/subtitles/captions";
 import { pesReader } from "@mrstreamer/core/subtitles/transport";
+import { PLAYLIST_CHANNELS, startFakePlaylist } from "./fake-playlist.ts";
 import { fixture, type FakeProvider } from "./fake-provider.ts";
-import { fakeProvider, promised, runtimeFor, tempDir, testSecrets, userAgent } from "./support.ts";
+import {
+  fakeProvider,
+  holdableFetch,
+  promised,
+  runtimeFor,
+  tempDir,
+  testSecrets,
+  userAgent,
+} from "./support.ts";
 
 /** What Chromium on Linux decodes: no HEVC, no AC-3, no MP2. */
 const LINUX: readonly Codec[] = ["h264", "aac", "mp3", "opus"];
@@ -39,7 +48,7 @@ async function connectedPlayback(options: { slotReleaseMs?: number; ffmpeg?: boo
     ),
   );
   const subscriptions = await promised(runtime, Subscriptions);
-  const { id: subscriptionId } = await subscriptions.connect({
+  const { id: subscriptionId } = await subscriptions.add({
     server: provider.url,
     username: "demo",
     password: "demo",
@@ -503,5 +512,194 @@ describe("playback", () => {
       expect(await playerReceives(session.url)).toEqual(expected);
       await playback.dispose();
     });
+  });
+});
+
+describe("one stream across several subscriptions", () => {
+  /**
+   * Playback on two subscriptions with one connection each, whose providers list other channels
+   * under the same ids. `a` and `b` name a channel of each by that id.
+   */
+  async function two() {
+    const [first, second] = [
+      await fakeProvider({ maxConnections: 1, slotReleaseMs: 0 }),
+      await fakeProvider({ maxConnections: 1, slotReleaseMs: 0, channels: 200 }),
+    ];
+    const runtime = runtimeFor(
+      Playback.layer({ userAgent, ffmpeg: null }).pipe(
+        Layer.provideMerge(
+          Subscriptions.layer({
+            dataDir: await tempDir(),
+            secrets: testSecrets,
+            providerOptions: { userAgent },
+          }),
+        ),
+      ),
+    );
+    const subscriptions = await promised(runtime, Subscriptions);
+    const login = (provider: FakeProvider) => ({
+      server: provider.url,
+      username: "demo",
+      password: "demo",
+    });
+    const [id = ""] = liveChannels(second);
+    const a = { subscriptionId: (await subscriptions.add(login(first))).id, id };
+    const b = { subscriptionId: (await subscriptions.add(login(second))).id, id };
+    return { first, second, subscriptions, playback: await promised(runtime, Playback), a, b };
+  }
+
+  it("closes what plays from one before the other's opens, so no provider sees a second connection", async () => {
+    const { first, second, playback, a, b } = await two();
+
+    const one = await playback.open(a, LINUX);
+    const playing = await firstBytes(one.url);
+    expect([first.activeStreams(), second.activeStreams()]).toEqual([1, 0]);
+
+    // The same id is another channel there, at another provider.
+    const other = await playback.open(b, LINUX);
+    await vi.waitFor(() => expect(first.activeStreams()).toBe(0));
+    const next = await firstBytes(other.url);
+
+    expect(other.channel).toEqual(b);
+    expect([first.activeStreams(), second.activeStreams()]).toEqual([0, 1]);
+    expect((await fetch(one.url)).status).toBe(410);
+    expect([first.streamRequests(), second.streamRequests()]).toEqual([1, 1]);
+    playing.stop();
+    next.stop();
+  });
+
+  it("opens nothing for what the viewer has moved on from, and leaves what plays", async () => {
+    const { first, second, playback, a, b } = await two();
+    const session = await playback.open(a, LINUX, { turn: await playback.begin() });
+    const playing = await firstBytes(session.url);
+    const asked = await playback.begin();
+    // Something else was asked for before this one got its turn.
+    const later = await playback.begin();
+
+    await expect(playback.open(b, LINUX, { turn: asked })).rejects.toMatchObject({
+      error: { kind: "unexpected", detail: "Something else played in the meantime." },
+    });
+
+    expect(await playback.passed(asked)).toBe(true);
+    expect([first.activeStreams(), second.streamRequests()]).toEqual([1, 0]);
+    const next = await playback.open(b, LINUX, { turn: later });
+    expect(next.channel).toEqual(b);
+    playing.stop();
+  });
+
+  it("opens no channel once the viewer asked for something else while its streams were looked up", async () => {
+    const host = await startFakePlaylist();
+    const holdable = holdableFetch();
+    const dataDir = await tempDir();
+    const start = async () => {
+      const runtime = runtimeFor(
+        Playback.layer({ userAgent, ffmpeg: null }).pipe(
+          Layer.provideMerge(
+            Subscriptions.layer({
+              dataDir,
+              secrets: testSecrets,
+              providerOptions: { userAgent, fetch: holdable.fetch },
+            }),
+          ),
+        ),
+      );
+      return {
+        subscriptions: await promised(runtime, Subscriptions),
+        playback: await promised(runtime, Playback),
+      };
+    };
+    const { id: subscriptionId } = await (
+      await start()
+    ).subscriptions.add({ server: host.link, username: "", password: "" });
+    // Started again, a playlist is read anew for the address of the channel asked for.
+    const { playback } = await start();
+    const channel = { subscriptionId, id: PLAYLIST_CHANNELS.plain.id };
+    const turn = await playback.begin();
+
+    const held = holdable.holdNext();
+    const opening = playback.open(channel, LINUX, { turn });
+    await held.arrived;
+    const later = await playback.begin();
+    held.release();
+
+    await expect(opening).rejects.toMatchObject({
+      error: { kind: "unexpected", detail: "Something else played in the meantime." },
+    });
+    expect((await playback.open(channel, LINUX, { turn: later })).channel).toEqual(channel);
+    await host.close();
+  });
+
+  it("closes the stream of a subscription that goes, and no other's", async () => {
+    const { first, playback, a, b } = await two();
+    const session = await playback.open(a, LINUX);
+    const playing = await firstBytes(session.url);
+
+    await playback.closeOf(b.subscriptionId);
+    expect(first.activeStreams()).toBe(1);
+    expect(await playback.playing(session.sessionId)).not.toBeNull();
+
+    await playback.closeOf(a.subscriptionId);
+    await vi.waitFor(() => expect(first.activeStreams()).toBe(0));
+    expect((await fetch(session.url)).status).toBe(410);
+    playing.stop();
+  });
+
+  it("opens no file from an address made under a login that changed since, and closes nothing for it", async () => {
+    const { first, second, subscriptions, playback, a, b } = await two();
+    const [source] = await subscriptions.sources();
+    const movie = first.titles.movies[0];
+    if (!source || !movie) throw new Error("The first subscription has a source and a movie");
+    const title = {
+      kind: "movie",
+      subscriptionId: a.subscriptionId,
+      id: String(movie.id),
+    } as const;
+    const address = source.provider.titleFile("movie", title.id, movie.container);
+    const session = await playback.open(b, LINUX);
+    const playing = await firstBytes(session.url);
+
+    // The password entered again while the title's address was being worked out.
+    await subscriptions.update(a.subscriptionId, { secret: "demo" });
+
+    await expect(
+      playback.openTitle(title, address, LINUX, { revision: source.revision }),
+    ).rejects.toMatchObject({ error: { kind: "no-subscription" } });
+    expect(first.fileRequests()).toBe(0);
+    expect(second.activeStreams()).toBe(1);
+    playing.stop();
+  });
+
+  it("plays nothing of a subscription whose secret the keychain lost, and says which", async () => {
+    const dataDir = await tempDir();
+    const provider = await fakeProvider();
+    const start = async (open: (sealed: string) => string) => {
+      const runtime = runtimeFor(
+        Playback.layer({ userAgent, ffmpeg: null }).pipe(
+          Layer.provideMerge(
+            Subscriptions.layer({
+              dataDir,
+              secrets: { seal: testSecrets.seal, open },
+              providerOptions: { userAgent },
+            }),
+          ),
+        ),
+      );
+      return {
+        subscriptions: await promised(runtime, Subscriptions),
+        playback: await promised(runtime, Playback),
+      };
+    };
+    const { id: subscriptionId } = await (
+      await start(testSecrets.open)
+    ).subscriptions.add({ server: provider.url, username: "demo", password: "demo" });
+
+    const locked = await start(() => {
+      throw new Error("The keychain opens nothing.");
+    });
+
+    await expect(
+      locked.playback.open({ subscriptionId, id: liveChannels(provider)[0] ?? "" }, LINUX),
+    ).rejects.toMatchObject({ error: { kind: "needs-secret", subscriptionId } });
+    expect(provider.streamRequests()).toBe(0);
   });
 });

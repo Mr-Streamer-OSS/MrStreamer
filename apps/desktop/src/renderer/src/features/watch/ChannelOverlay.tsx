@@ -12,7 +12,12 @@ import { Progress } from "../../components/Progress.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { useNow } from "../../lib/clock.ts";
 import { categoryOf, progressOf, timeLeft } from "../../lib/format.ts";
-import { useCategoryMap, useFavouriteKeys, useToggleFavourite } from "../../lib/queries.ts";
+import {
+  useCategoryMap,
+  useFavouriteKeys,
+  useSourceOf,
+  useToggleFavourite,
+} from "../../lib/queries.ts";
 import { useRem } from "../../lib/use-rem.ts";
 import { cn } from "../../lib/utils.ts";
 import { ListPicker } from "../live/ListPicker.tsx";
@@ -112,6 +117,7 @@ function Channels({
   const now = useNow();
   const favourites = useFavouriteKeys();
   const toggleFavourite = useToggleFavourite();
+  const sourceOf = useSourceOf();
   const virtualizer = useVirtualizer({
     count: channels.length,
     getScrollElement: () => scroller.current,
@@ -148,7 +154,11 @@ function Channels({
               key={key}
               channel={channel}
               listing={listings.get(key) ?? null}
-              category={categoryOf(channel, categories)}
+              // The channel's own line, with whose it is where another is called the same.
+              named={[channel.title, sourceOf(channel)].filter(Boolean).join(" · ")}
+              category={[categoryOf(channel, categories), sourceOf(channel)]
+                .filter(Boolean)
+                .join(" · ")}
               now={now}
               playing={key === playingKey}
               selected={item.index === selected}
@@ -168,6 +178,7 @@ function Channels({
 function Row({
   channel,
   listing,
+  named,
   category,
   now,
   playing,
@@ -180,6 +191,8 @@ function Row({
 }: {
   channel: LiveChannel;
   listing: Listing | null;
+  /** The channel's name, as the line under a programme says it. */
+  named: string;
   category: string;
   now: number;
   playing: boolean;
@@ -215,7 +228,7 @@ function Row({
           {current?.title ?? channel.title}
         </span>
         <span className="block truncate text-xs text-muted-foreground">
-          {current ? `${channel.title} · ${timeLeft(current, now)}` : category}
+          {current ? `${named} · ${timeLeft(current, now)}` : category}
         </span>
         {current && <Progress value={progressOf(current, now)} className="mt-1 w-28" />}
       </span>

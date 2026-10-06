@@ -22,9 +22,21 @@ import {
   defaultSubscriptionPreferences,
   type Preferences,
 } from "@mrstreamer/contracts/preferences";
+import type { SubscriptionSummary } from "@mrstreamer/contracts/subscription";
 
 /** The subscription the tests' channels, titles and episodes are listed by. */
 export const SUBSCRIPTION = "3f6c1b5e-2a47-4d0e-9c1f-7b8a5d2e4f10";
+
+/** That subscription as the main process lists it, for a test to give its page as the one saved. */
+export const SAVED: SubscriptionSummary = {
+  kind: "xtream",
+  id: SUBSCRIPTION,
+  name: null,
+  server: "https://line.example.tv",
+  username: "demo",
+  account: { state: "active", expiresAt: null, maxConnections: 1, activeConnections: 0 },
+  needsSecret: false,
+};
 
 const held = new Map<IpcMethod, Promise<Result<unknown>>[]>();
 const listeners = new Map<string, Set<(payload: unknown) => void>>();

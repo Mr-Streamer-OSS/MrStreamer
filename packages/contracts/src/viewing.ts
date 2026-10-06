@@ -1,6 +1,8 @@
 // What the viewer keeps per account: favourite channels, the channels watched recently, and how
 // far movies and episodes got. The main process records them as events (see
 // @mrstreamer/core/viewing); the UI reads this state, in which everything names its subscription.
+// It holds every saved subscription's at once: the favourites in the order starred, whichever
+// subscription each is from, and the rest by when it was watched.
 import type { TitleRef } from "./ondemand.ts";
 import type { OwnedId } from "./subscription.ts";
 
@@ -31,14 +33,13 @@ export interface Viewing {
 }
 
 /**
- * A new order for a subscription's favourites, from the list it was arranged in. The record
- * takes it only while that list still holds, so an order made from an older one never lands on
- * favourites changed since, nor on another subscription's.
+ * A new order for the favourites, from the list it was arranged in. The record takes it only
+ * while that list still holds, so an order made from an older one never lands on favourites
+ * changed since, nor on those of a subscription that went or took another's place: each favourite
+ * names its subscription, so the lists then differ.
  */
 export interface FavouriteOrder {
-  /** The subscription the favourites were read from, by `SubscriptionSummary.id`. */
-  readonly subscriptionId: string;
-  /** Its favourites as `Viewing.favourites` gave them: every one, in order. */
+  /** The favourites as `Viewing.favourites` gave them: every one, of every subscription, in order. */
   readonly original: readonly OwnedId[];
   /**
    * Those of them the viewer arranged, in the order wanted. The rest, channels the lists don't

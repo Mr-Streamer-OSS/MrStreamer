@@ -6,13 +6,22 @@ import { titlePlayer } from "../player/title-player.ts";
 /** The page under everything else. Watch, details and playing a title open over it. */
 export type View = "home" | "live" | "movies" | "series";
 
-/** Whether a page stays for a subscription with live TV only, as a playlist is: Home and Live TV. */
+/** Whether a page stays when every subscription has live TV only, as playlists do: Home and Live TV. */
 export function isLivePage(view: View): boolean {
   return view === "home" || view === "live";
 }
 
 /** The tabs of the Settings page, and the licences About opens. */
-export type SettingsTab = "general" | "subscription" | "about" | "licences";
+export type SettingsTab = "general" | "subscriptions" | "about" | "licences";
+
+/**
+ * A subscription Settings > Subscriptions opens on, and what of it shows: its details, the form
+ * that edits it, or the field that asks for its password or link again.
+ */
+export interface SubscriptionTarget {
+  readonly id: string;
+  readonly show: "details" | "edit" | "secret";
+}
 
 /** A list of channels the guide and Watch's channel list show. */
 export type ChannelList =
@@ -32,7 +41,10 @@ export interface DetailsTarget extends OwnedId {
 type UpdateDialog = "panel" | "restart";
 
 interface UiState {
-  /** Rises each time the account changes, so work started for the one before gives way. */
+  /**
+   * Rises when the subscriptions start over, with the first one saved or the last one removed,
+   * so work started before gives way.
+   */
   readonly account: number;
   readonly view: View;
   /** Watch covers the page with a live channel. Closing it returns to the page as it was. */
@@ -48,8 +60,8 @@ interface UiState {
   readonly searchFrom: string;
   /** The Settings tab on screen, over the current view; null while Settings is closed. */
   readonly settings: SettingsTab | null;
-  /** Set while the login form edits an existing subscription. */
-  readonly editingLogin: boolean;
+  /** What Settings > Subscriptions opens on, once; null leaves its list as it is. */
+  readonly subscription: SubscriptionTarget | null;
   /** The list the guide and Watch's channel list show. */
   readonly list: ChannelList;
   readonly updateDialog: UpdateDialog | null;
@@ -66,7 +78,7 @@ export const useUi = create<UiState>(() => ({
   searchOpen: false,
   searchFrom: "",
   settings: null,
-  editingLogin: false,
+  subscription: null,
   list: { kind: "all" },
   updateDialog: null,
 }));
@@ -80,9 +92,9 @@ export function openView(view: View): void {
 }
 
 /**
- * Home with nothing open over it, for a new account or none: a list, details or a title open
- * before belonged to the account that went. The title closes too, with what it had pending, such
- * as the countdown to its next episode.
+ * Home with nothing open over it, for the first subscription or none: a list, details or a title
+ * open before belonged to what went. The title closes too, with what it had pending, such as the
+ * countdown to its next episode.
  */
 export function resetForAccount(): void {
   titlePlayer.close();
@@ -96,6 +108,14 @@ export function resetForAccount(): void {
     searchOpen: false,
     list: { kind: "all" },
   }));
+}
+
+/**
+ * Opens Settings on one subscription's row, as from a message that it needs its password again:
+ * what plays underneath goes on, and every other subscription's content stays in the lists.
+ */
+export function openSubscription(id: string, show: SubscriptionTarget["show"]): void {
+  useUi.setState({ settings: "subscriptions", subscription: { id, show }, searchOpen: false });
 }
 
 /** Opens Watch over the current page. */

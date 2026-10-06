@@ -54,7 +54,7 @@ async function metadataApp(key: string | null = "test-key") {
   };
   const runtime = runtimeFor(mainLayer(testConfig(dataDir)));
   const subscriptions = await promised(runtime, Subscriptions);
-  const { id: subscriptionId } = await subscriptions.connect({
+  const { id: subscriptionId } = await subscriptions.add({
     server: provider.url,
     username: "demo",
     password: "demo",

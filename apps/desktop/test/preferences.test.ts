@@ -45,8 +45,18 @@ async function connected() {
   const dataDir = await tempDir();
   const { settings, subscriptions } = await start(dataDir);
   const login = { server: provider.url, username: "demo", password: "demo" };
-  const { id } = await subscriptions.connect(login);
+  const { id } = await subscriptions.add(login);
   return { dataDir, settings, subscriptions, id, login };
+}
+
+/** The saved subscription `id` names, as the services know it. */
+async function savedAs(
+  subscriptions: Awaited<ReturnType<typeof start>>["subscriptions"],
+  id: string,
+) {
+  const found = (await subscriptions.saved()).find((each) => each.id === id);
+  if (!found) throw new Error(`${id} isn't saved`);
+  return found;
 }
 
 const stored = async (dataDir: string): Promise<unknown> =>
@@ -134,7 +144,9 @@ describe("preferences", () => {
       channelVariants: { "818": "819" },
     });
 
-    await settings.forget();
+    const gone = await savedAs(subscriptions, id);
+    await subscriptions.remove(id);
+    await settings.forget(gone);
 
     expect(await stored(dataDir)).toEqual({
       volume: 0.4,
@@ -143,8 +155,7 @@ describe("preferences", () => {
       lastCategoryId: null,
     });
     // The subscription connected next starts where none was left.
-    await subscriptions.remove();
-    const next = await subscriptions.connect(login);
+    const next = await subscriptions.add(login);
     expect(await settings.ofSubscription(next.id)).toEqual({
       lastChannelId: null,
       lastCategoryId: null,
@@ -154,7 +165,59 @@ describe("preferences", () => {
     });
   });
 
-  it("doesn't write what was left at a subscription another replaced while the change waited its turn", async () => {
+  it("keeps what was left at an added subscription in its own folder, apart from every other's", async () => {
+    const { dataDir, settings, subscriptions, id } = await connected();
+    const other = await fakeProvider();
+    const added = await subscriptions.add({
+      server: other.url,
+      username: "demo",
+      password: "demo",
+    });
+    await settings.updateSubscription(id, { lastChannelId: "818" });
+
+    // The same ids as the first one's, which mean another channel and another film here.
+    await settings.updateSubscription(added.id, {
+      lastChannelId: "818",
+      lastCategoryId: "2",
+      titleVersions: { "movie:603": "9" },
+    });
+    await settings.updateSubscription(id, { lastCategoryId: "7" });
+
+    const left = { lastChannelId: "818", lastCategoryId: "2", titleVersions: { "movie:603": "9" } };
+    expect(await settings.ofSubscription(added.id)).toEqual(left);
+    expect(await settings.ofSubscription(id)).toEqual({
+      lastChannelId: "818",
+      lastCategoryId: "7",
+    });
+    // The file every release reads holds the first one's alone.
+    expect(await stored(dataDir)).toEqual({
+      volume: 1,
+      muted: false,
+      lastChannelId: "818",
+      lastCategoryId: "7",
+    });
+    expect(
+      JSON.parse(
+        await readFile(join(dataDir, "subscriptions", added.id, "preferences.json"), "utf8"),
+      ),
+    ).toEqual(left);
+    expect(await (await settingsIn(dataDir)).ofSubscription(added.id)).toEqual(left);
+
+    // It goes with its subscription, and the first one's stays.
+    const gone = await savedAs(subscriptions, added.id);
+    await subscriptions.remove(added.id);
+    await settings.forget(gone);
+
+    await expect(settings.ofSubscription(added.id)).rejects.toMatchObject({
+      error: { kind: "no-subscription" },
+    });
+    expect(await settings.ofSubscription(id)).toEqual({
+      lastChannelId: "818",
+      lastCategoryId: "7",
+    });
+  });
+
+  it("doesn't write what was left at a subscription that went while the change waited its turn", async () => {
     const { settings, subscriptions, id, login } = await connected();
     const ready = Promise.withResolvers<void>();
     disk.ready = ready.promise;
@@ -162,8 +225,8 @@ describe("preferences", () => {
     const late = settings.updateSubscription(id, { lastChannelId: "818" });
     late.catch(() => {});
 
-    await subscriptions.remove();
-    const next = await subscriptions.connect(login);
+    await subscriptions.remove(id);
+    const next = await subscriptions.add(login);
     ready.resolve();
     await writing;
 

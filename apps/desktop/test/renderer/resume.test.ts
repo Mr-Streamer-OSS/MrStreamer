@@ -13,6 +13,7 @@ import { useResume, type ContinueEntry } from "../../src/renderer/src/lib/titles
 function seriesOf(id: string): Title {
   return {
     kind: "series",
+    key: `series:${id}`,
     subscriptionId: SUBSCRIPTION,
     id,
     name: `${id} (NL)`,

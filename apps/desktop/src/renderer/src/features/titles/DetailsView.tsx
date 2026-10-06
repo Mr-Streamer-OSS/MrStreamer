@@ -3,7 +3,9 @@
 // episodes. Resume is the main action for anything partly watched, and From the beginning plays
 // at once, without asking. A title with several versions plays the one picked with the arrow
 // beside Play, else the one it was opened on, as from the 4K tab, else the one that suits best;
-// the sheet shows that version, so a series lists its episodes. A series opens on the season
+// the sheet shows that version, so a series lists its episodes. The versions can be of several
+// subscriptions: the menu then names each one's, and Resume goes by how far the version that
+// plays got in its own subscription, never by another's. A series opens on the season
 // being watched, and marks the episode. Each episode's row carries everything known about it,
 // TMDB's details once the season shown has its answer. The title from the lists heads the sheet
 // at once; the rest follows when the provider answers, and TMDB's details when they arrive.
@@ -11,7 +13,7 @@ import { Dialog } from "@base-ui/react/dialog";
 import { Menu } from "@base-ui/react/menu";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Check, ChevronDown, Play, RotateCcw, X } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useState, type ReactElement, type ReactNode } from "react";
 import type {
   Episode,
   EpisodeDetails,
@@ -26,12 +28,18 @@ import type { TitleProgress } from "@mrstreamer/contracts/viewing";
 import { nextEpisode } from "@mrstreamer/core/ondemand/details";
 import { versionLabels } from "@mrstreamer/core/ondemand/languages";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
-import { useUi, type DetailsTarget } from "../../app/ui-store.ts";
+import { openSubscription, useUi, type DetailsTarget } from "../../app/ui-store.ts";
 import { Progress } from "../../components/Progress.tsx";
 import { Artwork } from "../../components/TitleArt.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { appError, describeError } from "../../lib/errors.ts";
-import { queries } from "../../lib/queries.ts";
+import {
+  queries,
+  subscriptionName,
+  useSubscriptionNames,
+  useSubscriptionPreferences,
+  useSubscriptions,
+} from "../../lib/queries.ts";
 import { episodeNow } from "../../player/title-player.ts";
 import {
   automaticVersion,
@@ -69,14 +77,14 @@ export function DetailsView({ target }: { target: DetailsTarget }) {
     ...queries.progress(target.kind === "movie" ? { movies: versions } : { series: versions }),
     enabled: versions.length > 0,
   });
-  // The picks of the subscription the title was opened from.
-  const picks = useQuery(queries.subscriptionPreferences(target.subscriptionId));
-  const picked = title ? pickedVersion(title, picks.data) : null;
+  // A pick is kept by the subscription of the version picked.
+  const picks = useSubscriptionPreferences();
+  const picked = title ? pickedVersion(title, picks) : null;
   const automatic = title
     ? automaticVersion(title, progress.data ?? [], target, target.asked)
     : ownedId(target);
   const playing = picked ?? automatic;
-  const known = !listed.isPending && (!title || !progress.isPending) && !picks.isPending;
+  const known = !listed.isPending && (!title || !progress.isPending) && picks !== undefined;
   // Another version's details replace these once they arrive; nothing plays from them meanwhile.
   // A new target mounts a new sheet (see App), so these are only ever the same title's.
   const details = useQuery({
@@ -84,6 +92,14 @@ export function DetailsView({ target }: { target: DetailsTarget }) {
     enabled: known,
     placeholderData: keepPreviousData,
   });
+  const failure = details.error ? appError(details.error) : null;
+  // The version that plays is of a subscription whose password or link the keychain lost.
+  const subscriptions = useSubscriptions();
+  const locked =
+    failure?.kind === "needs-secret"
+      ? subscriptions.find((each) => each.id === failure.subscriptionId)
+      : undefined;
+  const secret = locked?.kind === "m3u" ? "link" : "password";
   return (
     <Dialog.Root open onOpenChange={(open) => !open && close()}>
       <Dialog.Portal>
@@ -98,13 +114,40 @@ export function DetailsView({ target }: { target: DetailsTarget }) {
           ) : title ? (
             <Header title={title} backdropUrl={title.backdropUrl} facts={factsOf(title)}>
               <p className="mt-6 text-[0.9375rem] text-muted-foreground">
-                {details.error ? describeError(appError(details.error)) : "Loading…"}
+                {locked
+                  ? `${subscriptionName(locked)} needs its ${secret} again.`
+                  : failure
+                    ? describeError(failure)
+                    : "Loading…"}
               </p>
+              {/* The version that plays couldn't be opened: its subscription's row in Settings is
+                  where its secret is entered again, and another version may play meanwhile, as
+                  one another subscription lists. */}
+              {failure && (locked || title.versions.length > 1) && (
+                <div className="mt-4 flex items-center gap-3">
+                  {locked && (
+                    <Button variant="primary" onClick={() => openSubscription(locked.id, "secret")}>
+                      Enter {secret}
+                    </Button>
+                  )}
+                  {title.versions.length > 1 && (
+                    <VersionMenu
+                      title={title}
+                      picked={picked}
+                      automatic={automatic}
+                      trigger={<Button variant="secondary" />}
+                    >
+                      Other versions
+                      <ChevronDown />
+                    </VersionMenu>
+                  )}
+                </div>
+              )}
             </Header>
           ) : (
             <div className="p-10 text-[0.9375rem] text-muted-foreground">
               <Dialog.Title className="sr-only">Details</Dialog.Title>
-              {details.error ? describeError(appError(details.error)) : "Loading…"}
+              {failure ? describeError(failure) : "Loading…"}
             </div>
           )}
           {/* After the content, so focus starts on its main action rather than on Close. */}
@@ -274,8 +317,9 @@ function MovieActions({
   switching: boolean;
 }) {
   const progress = useQuery(queries.progress({ movies: details.title.versions }));
-  // Progress counts across versions: Resume carries on from there in the version that plays.
-  const current = progress.data?.toSorted((a, b) => b.at - a.at)[0];
+  // Progress counts across a subscription's versions: Resume carries on from there in the
+  // version that plays.
+  const current = ownProgress(progress.data, versions.playing).toSorted((a, b) => b.at - a.at)[0];
   const partly = current && !current.finished && current.position > 0;
   const now = movieNow({ ...details.title, ...versions.playing }, details.backdropUrl);
   const removal = useRemoveFromContinue();
@@ -292,6 +336,21 @@ function MovieActions({
       removeError={removal.error}
     />
   );
+}
+
+const NO_PROGRESS: readonly TitleProgress[] = [];
+
+/**
+ * How far the versions of `version`'s own subscription got. Another subscription's file is
+ * another file, with its own length and its own episodes: where it stopped says nothing of where
+ * this one resumes.
+ */
+function ownProgress(
+  progress: readonly TitleProgress[] | undefined,
+  version: { readonly subscriptionId: string },
+): readonly TitleProgress[] {
+  if (!progress) return NO_PROGRESS;
+  return progress.filter((entry) => entry.title.subscriptionId === version.subscriptionId);
 }
 
 /**
@@ -338,7 +397,7 @@ function SeriesActions({
   const progress = useQuery(queries.progress({ series: details.title.versions }));
   const removal = useRemoveFromContinue();
   const listed = useInContinueWatching(details.title);
-  const target = resumeTarget(details, progress.data ?? []);
+  const target = resumeTarget(details, ownProgress(progress.data, details.title));
   if (!target) {
     return <p className="mt-6 text-[0.9375rem] text-muted-foreground">No episodes yet.</p>;
   }
@@ -384,9 +443,8 @@ function Actions({
 }) {
   const { title, playing, automatic } = versions;
   const all = title?.versions ?? [];
-  const labels = versionLabels(all, title?.originalLanguage ?? null);
-  const labelOf = (named: OwnedId) => labels[all.findIndex((version) => sameOwned(version, named))];
-  const label = labelOf(playing);
+  const named = useVersionNames(title);
+  const said = named(playing);
   const several = title !== null && all.length > 1;
   return (
     <div className="mt-6">
@@ -411,12 +469,7 @@ function Actions({
             {primaryLabel}
           </Button>
           {several && (
-            <VersionMenu
-              title={title}
-              picked={versions.picked}
-              labels={labels}
-              automatic={labelOf(automatic) ?? null}
-            >
+            <VersionMenu title={title} picked={versions.picked} automatic={automatic}>
               <ChevronDown />
             </VersionMenu>
           )}
@@ -433,9 +486,14 @@ function Actions({
           </Button>
         )}
       </div>
-      {/* What plays: "English sound · 4K". A version without marks says nothing. */}
-      {label && (several || label !== "Standard") && (
-        <div className="mt-3 text-[0.8125rem] text-muted-foreground">{label}</div>
+      {/* What plays: "English sound · 4K", and whose it is once several subscriptions list the
+          title. A version without marks says nothing more. */}
+      {said && (several || said.label !== "Standard" || said.source) && (
+        <div className="mt-3 text-[0.8125rem] text-muted-foreground">
+          {[several || said.label !== "Standard" ? said.label : null, said.source]
+            .filter(Boolean)
+            .join(" · ")}
+        </div>
       )}
       {removeError && (
         <p className="mt-3 text-sm text-destructive">{describeError(appError(removeError))}</p>
@@ -444,35 +502,68 @@ function Actions({
   );
 }
 
+/**
+ * What each version of `title` is called: what it sounds like and subtitles, and the name of its
+ * subscription once the versions are of more than one. Versions that read the same are numbered
+ * within their own subscription, whose name tells them apart from another's.
+ */
+function useVersionNames(
+  title: Title | null,
+): (version: OwnedId) => { readonly label: string; readonly source: string | null } | null {
+  const nameOf = useSubscriptionNames();
+  const all = title?.versions ?? [];
+  const owners = [...new Set(all.map((version) => version.subscriptionId))];
+  const labels = new Map(
+    owners.flatMap((subscriptionId) => {
+      const own = all.filter((version) => version.subscriptionId === subscriptionId);
+      const read = versionLabels(own, title?.originalLanguage ?? null);
+      return own.map((version, at) => [ownedKey(version), read[at] ?? "Standard"] as const);
+    }),
+  );
+  return (version) => {
+    const label = labels.get(ownedKey(version));
+    if (label === undefined) return null;
+    return { label, source: owners.length > 1 ? nameOf(version.subscriptionId) : null };
+  };
+}
+
 /** The menu's value for Automatic. A version's is its `ownedKey`, which always holds a colon. */
 const AUTOMATIC = "automatic";
 
-/** The arrow beside Play: Automatic, or one version, remembered for the title. */
+/**
+ * The arrow beside Play: Automatic, or one version, remembered for the title. Each version says
+ * what it sounds like, and at the right whose it is when they come from several subscriptions.
+ */
 function VersionMenu({
   title,
   picked,
-  labels,
   automatic,
+  trigger,
   children,
 }: {
   title: Title;
   picked: OwnedId | null;
-  labels: readonly string[];
-  /** What Automatic plays. */
-  automatic: string | null;
+  /** The version Automatic plays, which its line names. */
+  automatic: OwnedId;
+  /** The button that opens it, when not the arrow joined to Play. */
+  trigger?: ReactElement<Record<string, unknown>>;
   children: ReactNode;
 }) {
   const pick = usePickVersion();
+  const named = useVersionNames(title);
+  const plays = named(automatic);
   return (
     <Menu.Root>
       <Menu.Trigger
         render={
-          <Button
-            variant="primary"
-            size="lg"
-            aria-label="Versions"
-            className="rounded-l-none border-l border-black/20 px-3"
-          />
+          trigger ?? (
+            <Button
+              variant="primary"
+              size="lg"
+              aria-label="Versions"
+              className="rounded-l-none border-l border-black/20 px-3"
+            />
+          )
         }
       >
         {children}
@@ -488,13 +579,28 @@ function VersionMenu({
             >
               <VersionItem value={AUTOMATIC}>
                 Automatic
-                {automatic && <span className="text-muted-foreground"> · {automatic}</span>}
+                {plays && (
+                  <span className="text-muted-foreground">
+                    {" · "}
+                    {[plays.label, plays.source].filter(Boolean).join(", ")}
+                  </span>
+                )}
               </VersionItem>
-              {title.versions.map((version, index) => (
-                <VersionItem key={ownedKey(version)} value={ownedKey(version)}>
-                  {labels[index]}
-                </VersionItem>
-              ))}
+              {title.versions.map((version) => {
+                const said = named(version);
+                return (
+                  <VersionItem key={ownedKey(version)} value={ownedKey(version)}>
+                    <span className="flex items-baseline gap-4">
+                      <span className="min-w-0 flex-1">{said?.label}</span>
+                      {said?.source && (
+                        <span className="flex-none text-[0.8125rem] text-muted-foreground">
+                          {said.source}
+                        </span>
+                      )}
+                    </span>
+                  </VersionItem>
+                );
+              })}
             </Menu.RadioGroup>
           </Menu.Popup>
         </Menu.Positioner>
@@ -513,7 +619,7 @@ function VersionItem({ value, children }: { value: string; children: ReactNode }
       <span className="grid size-1.5 flex-none">
         <Menu.RadioItemIndicator className="size-1.5 rounded-full bg-white" />
       </span>
-      <span className="min-w-0">{children}</span>
+      <span className="min-w-0 flex-1">{children}</span>
     </Menu.RadioItem>
   );
 }
@@ -548,10 +654,12 @@ function creditsOf(episode: Partial<EpisodeDetails>): string {
 
 function Episodes({ details }: { details: SeriesDetails }) {
   const progress = useQuery(queries.progress({ series: details.title.versions }));
-  const byEpisode = new Map((progress.data ?? []).map((entry) => [ownedKey(entry.title), entry]));
+  // How far the episodes got in this version's own subscription: another's are other files.
+  const own = ownProgress(progress.data, details.title);
+  const byEpisode = new Map(own.map((entry) => [ownedKey(entry.title), entry]));
   // Another version's episodes count by season and number; the latest wins.
   const byNumber = new Map(
-    (progress.data ?? [])
+    own
       .toSorted((a, b) => a.at - b.at)
       .flatMap((entry) =>
         entry.title.kind === "episode"
@@ -559,7 +667,7 @@ function Episodes({ details }: { details: SeriesDetails }) {
           : [],
       ),
   );
-  const target = resumeTarget(details, progress.data ?? []);
+  const target = resumeTarget(details, own);
   // The season picked here, else the one being watched once progress has loaded.
   const [picked, setSeason] = useState<number | null>(null);
   const season = picked ?? target?.episode.season ?? details.seasons[0]?.number ?? 1;

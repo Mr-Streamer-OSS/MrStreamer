@@ -2,7 +2,7 @@
 // can't, because hls.js plays nothing without a real browser. It connects by an M3U link, then
 // checks, in order:
 //
-// - Settings > Subscription says the playlist names no guide, without an error, also after its
+// - Settings > Subscriptions says the playlist names no guide, without an error, also after its
 //   refresh button; finds the guide once the playlist names one; and drops it again.
 // - An HLS channel with two sound renditions and three subtitle renditions offers Sound and CC,
 //   plays its own sound, and shows no subtitles though the stream marks some as its default.
@@ -16,8 +16,9 @@
 //   once: a line left from the stream before would show beside it.
 // - Back on the first channel, the sound and subtitles in the languages picked come on by
 //   themselves; a stream with nothing to choose shows neither button.
-// - After the keychain loses the link, the app asks for the link again, naming only its host, and
-//   the same link brings back the same account with its favourite.
+// - After the keychain loses the link, the app opens on what it had loaded, Settings > Subscriptions
+//   says the playlist needs its link again and asks for it there, naming only its host, and the
+//   same link is taken for the same account with its favourite.
 //
 //   node test/e2e/playlist-app.ts <app executable> [-- extra app arguments]
 //
@@ -28,7 +29,18 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PLAYLIST_CHANNELS, startFakePlaylist } from "../fake-playlist.ts";
-import { connect, connectPlaylist, delay, key, launch, waitFor, type Page } from "./app.ts";
+import {
+  connect,
+  connectPlaylist,
+  delay,
+  fill,
+  key,
+  launch,
+  openSubscriptions,
+  subscriptionRow,
+  waitFor,
+  type Page,
+} from "./app.ts";
 
 const [executable, ...rest] = process.argv.slice(2).filter((arg) => arg !== "--");
 if (!executable) throw new Error("Usage: node test/e2e/playlist-app.ts <app executable> [-- args]");
@@ -91,10 +103,9 @@ async function click(page: Page, expression: string): Promise<void> {
   await page.evaluate(`(${expression}).click()`);
 }
 
-/** What the Guide row of Settings > Subscription says, and the line under it when one shows. */
+/** What the Guide row of Settings > Subscriptions says, and the line under it when one shows. */
 async function guideRow(page: Page): Promise<{ ok: boolean; detail: string }> {
-  await click(page, `document.querySelector('[aria-label="Settings"]')`);
-  await click(page, buttonNamed("Subscription", `document.querySelector("nav")`));
+  await openSubscriptions(page);
   const refresh = `document.querySelector('[aria-label="Refresh guide"]')`;
   const read = () =>
     page.evaluate<{ row: string; under: string | null; busy: boolean }>(`(() => {
@@ -433,9 +444,21 @@ function loseLink(): void {
 }
 
 async function asksForLink(page: Page): Promise<{ ok: boolean; detail: string }> {
-  await waitFor(() => page.evaluate<boolean>("!!document.querySelector('form h1')"), 30_000);
+  const { host: from } = new URL(host.origin);
+  // The app opens on the channels it had loaded, and says in Settings what it lacks.
+  await waitFor(() => page.evaluate<boolean>("!!document.querySelector('header')"), 30_000);
+  const kept = await favourites(page);
+  await openSubscriptions(page);
+  const row = subscriptionRow(from);
+  const line = () =>
+    page.evaluate<string>(`(${row})?.querySelector("button")?.textContent.trim() ?? ""`);
+  await waitFor(async () => (await line()).includes("needs its link again"), 30_000).catch(
+    () => {},
+  );
+  const listed = await line();
+  await click(page, buttonNamed("Enter link", `(${row})`));
+  await waitFor(() => page.evaluate<boolean>("!!document.querySelector('form input')"), 10_000);
   const asking = await page.evaluate<{
-    heading: string;
     line: string;
     fields: string[];
     focused: boolean;
@@ -443,26 +466,32 @@ async function asksForLink(page: Page): Promise<{ ok: boolean; detail: string }>
   }>(`(() => {
     const fields = [...document.querySelectorAll("form input")];
     return {
-      heading: document.querySelector("form h1").textContent,
-      line: document.querySelector("form h1 + p").textContent,
+      line: document.querySelector("form p")?.textContent ?? "",
       fields: fields.map((field) => field.value),
       focused: document.activeElement === fields[0],
       page: document.body.innerText,
     };
   })()`);
-  const { host: from } = new URL(host.origin);
-  await connectPlaylist(page, host.link);
-  const kept = await favourites(page);
+  await fill(page, [host.link]);
+  await waitFor(
+    async () => (await line()) !== "" && !(await line()).includes("needs"),
+    30_000,
+  ).catch(() => {});
+  const repaired = await line();
+  const after = await favourites(page);
   const ok =
-    asking.heading === "Enter your playlist link again" &&
+    listed.startsWith(`${from} · M3U · needs its link again`) &&
     asking.line === `Your keychain no longer gives Mr. Streamer the saved link from ${from}.` &&
     asking.fields.join("|") === "" &&
     asking.fields.length === 1 &&
     asking.focused &&
     !/t0k3n|playlist\.m3u|password/i.test(asking.page) &&
-    kept.length === 1;
+    repaired.startsWith(`${from} · M3U`) &&
+    !repaired.includes("needs") &&
+    kept.length === 1 &&
+    after.length === 1;
   return {
     ok,
-    detail: `"${asking.heading}", ${asking.fields.length} empty field${asking.focused ? " with the cursor" : ""}, the host named ${asking.line.includes(from) ? "alone" : "wrongly"}, ${kept.length} favourite after the same link`,
+    detail: `"${listed}", ${asking.fields.length} empty field${asking.focused ? " with the cursor" : ""}, the host named ${asking.line.includes(from) ? "alone" : "wrongly"}, then "${repaired}", ${kept.length} favourite before and ${after.length} after the same link`,
   };
 }

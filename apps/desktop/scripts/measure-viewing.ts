@@ -46,7 +46,9 @@ async function start() {
       Layer.provide(
         Layer.mergeAll(
           Layer.succeed(ViewingAccount, {
-            current: Effect.succeed({ subscriptionId: SUBSCRIPTION, key: "measure" }),
+            owners: Effect.succeed([
+              { subscriptionId: SUBSCRIPTION, key: "measure", original: true },
+            ]),
           }),
           Layer.succeed(ViewingChannels, { lookup: () => Effect.succeed(() => undefined) }),
           Layer.succeed(LegacyViewing, { take: Effect.succeed(null), drop: Effect.void }),
@@ -137,11 +139,7 @@ try {
     const from = ordered;
     const began = performance.now();
     ordered = await runtime.runPromise(
-      viewing.reorderFavourites(commandId, {
-        subscriptionId: SUBSCRIPTION,
-        original: from.favourites,
-        order,
-      }),
+      viewing.reorderFavourites(commandId, { original: from.favourites, order }),
     );
     return { ms: performance.now() - began, events: ordered.sequence - from.sequence };
   };

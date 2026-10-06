@@ -1,7 +1,13 @@
 // React Query bindings for the IPC contract. Components read data through these hooks only.
 // Whatever a provider lists is asked for with the subscription it belongs to, and cached under
 // both: a provider's ids mean nothing without their subscription.
-import { queryOptions, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import {
+  queryOptions,
+  useQueries,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import type { IpcInput, IpcOutput } from "@mrstreamer/contracts/ipc";
 import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
@@ -12,17 +18,27 @@ import type {
   TitleKind,
 } from "@mrstreamer/contracts/ondemand";
 import type { SubscriptionPreferences } from "@mrstreamer/contracts/preferences";
-import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
+import {
+  ownedId,
+  ownedKey,
+  sameOwned,
+  type OwnedId,
+  type SubscriptionSummary,
+} from "@mrstreamer/contracts/subscription";
 import type { TitleFilter, Viewing } from "@mrstreamer/contracts/viewing";
 import { player } from "../player/player.ts";
+import { hostOf } from "./format.ts";
 import { call, listen } from "./ipc.ts";
 
 /** Listings move on as programmes end; asking again each minute is enough for progress. */
 const LISTINGS_REFRESH_MS = 60_000;
 
+const NO_SUBSCRIPTIONS: readonly SubscriptionSummary[] = [];
+
 export const queries = {
-  subscription: () =>
-    queryOptions({ queryKey: ["subscription"], queryFn: () => call("subscription.get") }),
+  /** Every saved subscription, in the order added. Changed only by what Settings does to them. */
+  subscriptions: () =>
+    queryOptions({ queryKey: ["subscriptions"], queryFn: () => call("subscription.list") }),
   preferences: () =>
     queryOptions({
       queryKey: ["preferences"],
@@ -47,8 +63,8 @@ export const queries = {
       staleTime: Infinity,
     }),
   /**
-   * How many channels the guide covers and since when, or that the subscription has none. Read
-   * again on `guide.updated`.
+   * For each subscription, how many channels its guide covers and since when, or that it has
+   * none. Read again on `guide.updated`.
    */
   guideStatus: () =>
     queryOptions({ queryKey: ["guide", "status"], queryFn: () => call("guide.status") }),
@@ -319,36 +335,86 @@ export function keepViewing(client: QueryClient, viewing: Viewing): void {
   );
 }
 
+/** The saved subscriptions, in the order added; none until they are known. */
+export function useSubscriptions(): readonly SubscriptionSummary[] {
+  return useQuery(queries.subscriptions()).data ?? NO_SUBSCRIPTIONS;
+}
+
+/** What a subscription is listed as: the name the viewer gave it, else its server's host. */
+export function subscriptionName(subscription: SubscriptionSummary): string {
+  return subscription.name ?? hostOf(subscription.server);
+}
+
 /**
- * What the viewer left the saved subscription at, with that subscription's id; undefined until
- * both are known, and without a subscription. `refetchOnMount` reads it afresh as a view opens:
- * the main process notes the channel watched last without going through this cache.
+ * Names a subscription by its id, for telling apart two things that read the same but come from
+ * different ones. Null for one that isn't saved.
+ */
+export function useSubscriptionNames(): (subscriptionId: string) => string | null {
+  const subscriptions = useSubscriptions();
+  return useMemo(() => {
+    const names = new Map(subscriptions.map((each) => [each.id, subscriptionName(each)]));
+    return (subscriptionId) => names.get(subscriptionId) ?? null;
+  }, [subscriptions]);
+}
+
+/**
+ * Names the subscription a channel or title is from where another one reads the same, and
+ * nothing where none does: lists say whose something is only where that tells two apart.
+ */
+export function useSourceOf(): (of: {
+  readonly subscriptionId: string;
+  readonly ambiguous?: true;
+}) => string | null {
+  const nameOf = useSubscriptionNames();
+  return useCallback((of) => (of.ambiguous ? nameOf(of.subscriptionId) : null), [nameOf]);
+}
+
+/**
+ * What the viewer left each saved subscription at, by its id; undefined until every one is
+ * known. `refetchOnMount` reads them afresh as a view opens: the main process notes the channel
+ * watched last without going through this cache.
  */
 export function useSubscriptionPreferences(
   refetchOnMount?: "always",
-): (SubscriptionPreferences & { readonly subscriptionId: string }) | undefined {
-  const subscriptionId = useQuery(queries.subscription()).data?.id;
-  const { data } = useQuery({
-    ...queries.subscriptionPreferences(subscriptionId ?? ""),
-    enabled: subscriptionId !== undefined,
-    ...(refetchOnMount ? { refetchOnMount } : {}),
+): ReadonlyMap<string, SubscriptionPreferences> | undefined {
+  const subscriptions = useQuery(queries.subscriptions()).data;
+  return useQueries({
+    queries: (subscriptions ?? NO_SUBSCRIPTIONS).map(({ id }) => ({
+      ...queries.subscriptionPreferences(id),
+      ...(refetchOnMount ? { refetchOnMount } : {}),
+    })),
+    // The same function until the subscriptions change, so the same map until an answer does.
+    combine: useCallback(
+      (results: readonly { readonly data: SubscriptionPreferences | undefined }[]) => {
+        if (!subscriptions) return undefined;
+        const left = new Map<string, SubscriptionPreferences>();
+        for (const [at, { data }] of results.entries()) {
+          const id = subscriptions[at]?.id;
+          if (!data || id === undefined) return undefined;
+          left.set(id, data);
+        }
+        return left;
+      },
+      [subscriptions],
+    ),
   });
-  return useMemo(
-    () => (subscriptionId !== undefined && data ? { ...data, subscriptionId } : undefined),
-    [subscriptionId, data],
-  );
 }
 
-/** The last watched channel, or null before the first or once the catalogue no longer has it. */
+/**
+ * The channel watched last, whichever subscription it is of, or null before the first or once its
+ * catalogue no longer has it. The viewing record says which; where it has none, as when it can't
+ * be read, the channel a subscription was left at stands in.
+ */
 export function useLastChannel(): LiveChannel | null {
+  const [watched] = useQuery(queries.viewing()).data?.recent ?? [];
   const left = useSubscriptionPreferences();
-  const last = useMemo(
-    () =>
-      left && left.lastChannelId !== null
-        ? { subscriptionId: left.subscriptionId, id: left.lastChannelId }
-        : null,
-    [left],
-  );
+  const last = useMemo((): OwnedId | null => {
+    if (watched) return watched;
+    for (const [subscriptionId, { lastChannelId }] of left ?? []) {
+      if (lastChannelId !== null) return { subscriptionId, id: lastChannelId };
+    }
+    return null;
+  }, [watched, left]);
   const { data } = useQuery({
     ...queries.channel(last ?? { subscriptionId: "", id: "" }),
     enabled: last !== null,
@@ -366,10 +432,40 @@ function useCategories() {
   return useQuery(queries.categories());
 }
 
-/** Categories by `ownedKey`, for labelling channels. */
+/**
+ * Categories by the `ownedKey` of each provider category they show, for labelling channels and
+ * finding a list by any of them.
+ */
 export function useCategoryMap(): ReadonlyMap<string, Category> {
   const { data } = useCategories();
-  return useMemo(() => new Map(data?.map((category) => [ownedKey(category), category])), [data]);
+  return useMemo(
+    () =>
+      new Map(
+        data?.flatMap((category) =>
+          category.members.map((member) => [ownedKey(member), category] as const),
+        ),
+      ),
+    [data],
+  );
+}
+
+/**
+ * Remembers the category Live TV opens on next time, or every channel with null: kept for the
+ * category's own subscription, and taken from any other that had one.
+ */
+export async function rememberCategory(
+  client: QueryClient,
+  subscriptions: readonly SubscriptionSummary[],
+  category: OwnedId | null,
+): Promise<void> {
+  await Promise.all(
+    subscriptions.map(async ({ id }) => {
+      const lastCategoryId = category?.subscriptionId === id ? category.id : null;
+      const left = await client.ensureQueryData(queries.subscriptionPreferences(id));
+      if (left.lastCategoryId === lastCategoryId) return;
+      await updateSubscriptionPreferences(client, id, { lastCategoryId });
+    }),
+  );
 }
 
 /** Refetches library data whenever the main process reports a new catalogue. */

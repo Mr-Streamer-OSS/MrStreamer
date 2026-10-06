@@ -18,7 +18,7 @@ import type { LiveCatalogue } from "../provider.ts";
 import { leadingFlag, regionForCode, regionForName } from "./regions.ts";
 
 export interface NormalizedCatalogue {
-  readonly categories: readonly Omit<Category, "channelCount" | "subscriptionId">[];
+  readonly categories: readonly Omit<Category, "channelCount" | "subscriptionId" | "members">[];
   readonly streams: readonly NormalizedStream[];
 }
 
@@ -83,7 +83,7 @@ interface ParsedName {
   readonly language: string | null;
 }
 
-interface ShownCategory extends Omit<Category, "channelCount" | "subscriptionId"> {
+interface ShownCategory extends Omit<Category, "channelCount" | "subscriptionId" | "members"> {
   /** The region of the category's prefix, grouped or not, for matching its channels' prefixes. */
   readonly region: string | null;
   readonly language: string | null;

@@ -22,10 +22,9 @@ import { showReceiverPlayback } from "./receiver-playback.ts";
 import { isLivePage, useUi, type View } from "./ui-store.ts";
 
 export function App() {
-  const subscription = useQuery(queries.subscription());
+  const subscriptions = useQuery(queries.subscriptions());
   const preferences = useQuery(queries.preferences());
   const left = useSubscriptionPreferences();
-  const editingLogin = useUi((state) => state.editingLogin);
 
   // Restore the volume once, before anything plays.
   const hydrated = useRef(false);
@@ -35,42 +34,51 @@ export function App() {
     player.hydrate(preferences.data);
   }, [preferences.data]);
 
-  // Live TV opens on the category the viewer left the subscription at, once per subscription:
-  // reading its preferences again later changes no list.
-  const restored = useRef<string | null>(null);
+  // Live TV opens on the category the viewer left it at, once per start with subscriptions:
+  // reading their preferences again later changes no list. A category is kept by one of them.
+  const restored = useRef(false);
   useEffect(() => {
-    if (!left || restored.current === left.subscriptionId) return;
-    const { subscriptionId, lastCategoryId } = left;
-    restored.current = subscriptionId;
-    useUi.setState({
-      list: lastCategoryId
-        ? { kind: "category", category: { subscriptionId, id: lastCategoryId } }
-        : { kind: "all" },
-    });
+    if (!left) return;
+    if (left.size === 0) {
+      restored.current = false;
+      return;
+    }
+    if (restored.current) return;
+    restored.current = true;
+    for (const [subscriptionId, { lastCategoryId }] of left) {
+      if (lastCategoryId === null) continue;
+      useUi.setState({
+        list: { kind: "category", category: { subscriptionId, id: lastCategoryId } },
+      });
+      return;
+    }
   }, [left]);
 
-  const login =
-    subscription.isSuccess && (!subscription.data || subscription.data.needsSecret || editingLogin);
+  // Connect shows only with no subscription saved. One whose password or link can't be read
+  // stays in the lists with what it loaded, and Settings is where it is entered again.
+  const connect = subscriptions.isSuccess && subscriptions.data.length === 0;
   // The login form replaces everything, and a receiver's controls with it: what it plays ends.
   useEffect(() => {
-    if (login) outputs.stop();
-  }, [login]);
+    if (connect) outputs.stop();
+  }, [connect]);
 
-  if (subscription.isPending || preferences.isPending) return null;
-  if (subscription.isError) {
+  if (subscriptions.isPending || preferences.isPending) return null;
+  if (subscriptions.isError) {
     return (
-      <p className="p-10 text-sm text-destructive">{describeError(appError(subscription.error))}</p>
+      <p className="p-10 text-sm text-destructive">
+        {describeError(appError(subscriptions.error))}
+      </p>
     );
   }
-  if (login || !subscription.data) return <ConnectScreen existing={subscription.data} />;
-  return <Shell liveOnly={subscription.data.kind === "m3u"} />;
+  if (connect) return <ConnectScreen />;
+  return <Shell liveOnly={subscriptions.data.every((each) => each.kind === "m3u")} />;
 }
 
 /**
  * The page (Home, Live TV, Movies or Series), with details, Watch and a playing title opening over
  * it. The page stays laid out underneath, so leaving any of them finds it scrolled where it was,
- * and takes no input meanwhile. Search and settings are available everywhere. A subscription with
- * live TV only, a playlist, has no Movies or Series: Home stands in for them. While a receiver
+ * and takes no input meanwhile. Search and settings are available everywhere. Subscriptions with
+ * live TV only, playlists, have no Movies or Series: Home stands in for them. While a receiver
  * on the network is connected, its bar stands at the foot of every page, and the pages end above.
  */
 function Shell({ liveOnly }: { liveOnly: boolean }) {

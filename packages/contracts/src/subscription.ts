@@ -16,11 +16,13 @@ export interface SubscriptionSummary {
   /** An Xtream Codes login, or an M3U playlist link without one, which has live TV only. */
   readonly kind: "xtream" | "m3u";
   /**
-   * Identifies the saved subscription on this device: made up when it first connects, and kept
-   * while the same server and username, or the same playlist link, stay. Holds nothing of the
-   * login. Everything a provider lists is named with it (`OwnedId`).
+   * Identifies the saved subscription on this device: made up when it is added, and kept through
+   * a new name, password or link until it is removed. Holds nothing of the login. Everything a
+   * provider lists is named with it (`OwnedId`).
    */
   readonly id: string;
+  /** What the viewer calls it, or null without a name: lists then show its server's host. */
+  readonly name: string | null;
   /**
    * Normalised server origin, for example `http://line.example.tv:8080`. For a playlist, its
    * link's origin: the link itself stays in the main process.
@@ -31,8 +33,9 @@ export interface SubscriptionSummary {
   readonly account: AccountStatus;
   /**
    * True when the saved secret can no longer be read, for example after the keychain denied
-   * access: the password, or for a playlist its whole link. The subscription stays, but nothing
-   * plays until the user enters it again. `kind` says which to ask for.
+   * access: the password, or for a playlist its whole link. The subscription stays with the lists
+   * it loaded before, but nothing of it plays or refreshes until the user enters it again. `kind`
+   * says which to ask for.
    */
   readonly needsSecret: boolean;
 }

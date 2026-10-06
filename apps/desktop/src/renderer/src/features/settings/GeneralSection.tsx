@@ -59,9 +59,13 @@ export function GeneralSection() {
   const audio = preferences.data?.audioLanguage ?? titles;
   const subtitles = preferences.data?.subtitleLanguage ?? FORCED;
 
-  // The streams picked are the subscription's. Read afresh too: Watch picks them.
+  // The streams picked are each subscription's own. Read afresh too: Watch picks them.
   const left = useSubscriptionPreferences("always");
-  const ownQualities = Object.keys(left?.channelVariants ?? {}).length;
+  const picked = [...(left ?? [])].flatMap(([subscriptionId, { channelVariants }]) => {
+    const count = Object.keys(channelVariants ?? {}).length;
+    return count > 0 ? [{ subscriptionId, count }] : [];
+  });
+  const ownQualities = picked.reduce((sum, each) => sum + each.count, 0);
 
   return (
     <>
@@ -83,11 +87,11 @@ export function GeneralSection() {
               variant="secondary"
               size="sm"
               onClick={() => {
-                if (!left) return;
-                const { subscriptionId } = left;
-                void updateSubscriptionPreferences(client, subscriptionId, {
-                  channelVariants: {},
-                }).catch(() => {});
+                for (const { subscriptionId } of picked) {
+                  void updateSubscriptionPreferences(client, subscriptionId, {
+                    channelVariants: {},
+                  }).catch(() => {});
+                }
               }}
             >
               Reset

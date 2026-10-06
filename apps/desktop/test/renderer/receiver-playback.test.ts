@@ -25,6 +25,7 @@ import type { SubscriptionSummary } from "@mrstreamer/contracts/subscription";
 import { App } from "../../src/renderer/src/app/App.tsx";
 import { resetForAccount, useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { TooltipProvider } from "../../src/renderer/src/components/ui/tooltip.tsx";
+import { queries } from "../../src/renderer/src/lib/queries.ts";
 import { movieNow, playTitle } from "../../src/renderer/src/lib/titles.ts";
 import { player } from "../../src/renderer/src/player/player.ts";
 import { titlePlayer } from "../../src/renderer/src/player/title-player.ts";
@@ -78,6 +79,7 @@ function said(
 const subscription: SubscriptionSummary = {
   kind: "xtream",
   id: "https://line.example.tv|demo",
+  name: null,
   server: "https://line.example.tv",
   username: "demo",
   account: { state: "active", expiresAt: null, maxConnections: 1, activeConnections: 0 },
@@ -102,6 +104,7 @@ const channelItem: RemoteItem = {
 
 const movie: Title = {
   kind: "movie",
+  key: "movie:m1",
   subscriptionId: SUBSCRIPTION,
   id: "m1",
   name: "Low Tide (EN)",
@@ -184,6 +187,7 @@ function playingTitle(generation: number, title: TitleRef): RemotePlayingTitle {
 }
 
 let container: HTMLDivElement;
+let client: QueryClient;
 let unmount = () => {};
 
 const emit = (now: OutputStatus) => act(async () => ipc.emit("output.changed", now));
@@ -207,20 +211,20 @@ function press(label: string): Promise<void> {
 async function open(now: OutputStatus): Promise<void> {
   // What the window's status holds from its start, before any page shows.
   await emit(now);
-  const subscribed = ipc.hold("subscription.get");
+  const subscribed = ipc.hold("subscription.list");
   const asked = ipc.hold("output.status");
   const root = createRoot(container);
   await act(async () =>
     root.render(
       createElement(
         QueryClientProvider,
-        { client: new QueryClient() },
+        { client },
         createElement(TooltipProvider, null, createElement(App)),
       ),
     ),
   );
   unmount = () => act(() => root.unmount());
-  await act(async () => subscribed.resolve(subscription));
+  await act(async () => subscribed.resolve([subscription]));
   await wait();
   await act(async () => asked.resolve(now));
 }
@@ -228,6 +232,7 @@ async function open(now: OutputStatus): Promise<void> {
 beforeEach(() => {
   vi.useFakeTimers();
   ipc.reset();
+  client = new QueryClient();
   useUi.setState(useUi.getInitialState(), true);
   container = document.createElement("div");
 });
@@ -412,11 +417,13 @@ describe("an episode a receiver plays as the window opens", () => {
 describe("what a receiver plays as the window opens, once the viewer went on", () => {
   const playing = connected(said(1, channelItem, "playing"));
 
-  it("is left alone behind the login form, which ends it", async () => {
+  it("is left alone behind Connect, which ends it once no subscription is saved", async () => {
     const lists = ipc.hold("library.channels");
     await open(playing);
 
-    await act(async () => useUi.setState({ editingLogin: true }));
+    // The last subscription was removed, as Settings says once the main process did it.
+    await act(async () => client.setQueryData(queries.subscriptions().queryKey, []));
+    await wait();
     expect(commands()).toEqual([{ generation: 1, command: "stop" }]);
     await act(async () => lists.resolve([channel("a")]));
     await wait();

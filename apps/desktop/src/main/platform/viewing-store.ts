@@ -7,6 +7,12 @@
 // Everything in it is kept per account, by the provider's own ids: the service says which
 // subscription an account's channels and titles belong to, and nothing here names one.
 //
+// Several accounts read as one give their favourites in the order starred and their channels by
+// when they were watched, whichever account each is of. Nothing stored says so beyond the events:
+// their sequence runs through every account, so the event that gave an entry its place tells
+// where it stands among the others'. That is worked out from an account's channel events once
+// per run, and kept current as changes commit; a single account's lists never need it.
+//
 // Older builds read this file too, as when someone goes back to an earlier nightly: they skip
 // event types they don't know, leave the titles table alone, and insert events without a payload.
 // Builds with movies and series before `removed_at`, Stable 0.0.3 among them, write title rows
@@ -15,13 +21,16 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { RawTitleRef, titleKey } from "@mrstreamer/contracts/ondemand";
+import { CONTINUE_OFFERED } from "@mrstreamer/contracts/viewing";
 import {
   apply,
   emptyState,
   EVENT_VERSION,
   isTitleEvent,
   STATE_VERSION,
+  type AccountEvent,
   type ChannelEvent,
+  type StoredChannel,
   type TitleEvent,
   type ViewingEvent,
   type ViewingState,
@@ -102,6 +111,58 @@ const TitlePayload = type("string.json.parse").pipe(
   }),
 );
 const StateRow = type({ favourites: "string", recent: "string", sequence: "number" });
+const PlacedRow = type({ type: ChannelEventType, channel_id: "string", sequence: "number" });
+
+/** One account's lists and titles as stored, and how far its record has come. */
+interface AccountRecord {
+  readonly state: ViewingState;
+  readonly continueWatching: readonly RawProgress[];
+  readonly sequence: number;
+}
+
+/**
+ * Where an account's stored channels stand among every account's: for each, the sequence of the
+ * event that gave it its place, the star that made it a favourite or the watch that was its last.
+ */
+interface Placed {
+  readonly favourites: Map<string, number>;
+  readonly recent: Map<string, number>;
+}
+
+/** Notes what a channel event does to where its channel stands, as `apply` does to the lists. */
+function place(placed: Placed, type: ChannelEvent["type"], id: string, sequence: number): void {
+  if (type === "watched") placed.recent.set(id, sequence);
+  else if (type === "favourite-removed") placed.favourites.delete(id);
+  // A favourite starred again while it is one stays where it stands.
+  else if (!placed.favourites.has(id)) placed.favourites.set(id, sequence);
+}
+
+/**
+ * Lists of several accounts as one, by where each entry stands: ascending for the order starred,
+ * descending for the most recent first. Each account's own order holds whatever the events say,
+ * so an entry none of them places stays beside its neighbour.
+ */
+function merged(
+  lists: readonly {
+    readonly account: string;
+    readonly ids: readonly string[];
+    readonly placed: ReadonlyMap<string, number>;
+  }[],
+  direction: 1 | -1,
+): StoredChannel[] {
+  const entries: { channel: StoredChannel; at: number; rank: number }[] = [];
+  for (const [rank, { account, ids, placed }] of lists.entries()) {
+    let at = direction === 1 ? 0 : Infinity;
+    for (const id of ids) {
+      const found = placed.get(id);
+      if (found !== undefined) at = direction === 1 ? Math.max(at, found) : Math.min(at, found);
+      entries.push({ channel: { account, id }, at, rank });
+    }
+  }
+  return entries
+    .sort((a, b) => direction * (a.at - b.at) || a.rank - b.rank)
+    .map(({ channel }) => channel);
+}
 const TitleRowShape = type({
   title: type("string.json.parse").pipe(RawTitleRef),
   position: "number",
@@ -270,6 +331,25 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
     removedAt: db.prepare(
       "select max(removed_at) as removed_at from titles where account = ? and (key = ? or series_id = ?)",
     ),
+    // An account's channel events, as far as this version reads them, in order.
+    placed: db.prepare(
+      "select type, channel_id, sequence from events where account = ? and version <= ? and type in ('favourite-added', 'favourite-removed', 'watched') order by sequence",
+    ),
+  };
+  /** Where each account's channels stand, by account, once worked out in this run. */
+  const places = new Map<string, Placed>();
+
+  /** Where `account`'s channels stand: from its events the first time, then as kept since. */
+  const placedOf = (account: string): Placed => {
+    let placed = places.get(account);
+    if (placed) return placed;
+    placed = { favourites: new Map(), recent: new Map() };
+    for (const raw of statements.placed.all(account, EVENT_VERSION)) {
+      const row = PlacedRow(raw);
+      if (!(row instanceof type.errors)) place(placed, row.type, row.channel_id, row.sequence);
+    }
+    places.set(account, placed);
+    return placed;
   };
 
   const titleRows = (rows: readonly unknown[]): TitleRow[] =>
@@ -289,12 +369,10 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
       ];
     });
 
-  const read = (account: string): StoredViewing => {
+  /** An account's lists as stored, and how far its record has come. */
+  const listsOf = (account: string): Pick<AccountRecord, "state" | "sequence"> => {
     const row = StateRow(statements.state.get(account));
-    const recentTitles = titleRows(statements.recentTitles.all(account, CONTINUE_WINDOW));
-    if (row instanceof type.errors) {
-      return { state: emptyState, continueWatching: continueWatching(recentTitles), sequence: 0 };
-    }
+    if (row instanceof type.errors) return { state: emptyState, sequence: 0 };
     const favourites = Ids(row.favourites);
     const recent = Ids(row.recent);
     return {
@@ -302,22 +380,58 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
         favourites: favourites instanceof type.errors ? [] : favourites,
         recent: recent instanceof type.errors ? [] : recent,
       },
-      continueWatching: continueWatching(recentTitles),
       sequence: row.sequence,
     };
   };
 
-  /** Appends `events` to what `account` has stored, and stores what they add up to. */
+  const readOne = (account: string): AccountRecord => ({
+    ...listsOf(account),
+    continueWatching: continueWatching(
+      titleRows(statements.recentTitles.all(account, CONTINUE_WINDOW)),
+    ),
+  });
+
+  /** The records of `accounts` as one. One account's is its lists as they are stored. */
+  const read = (accounts: readonly string[]): StoredViewing => {
+    const records = accounts.map((account) => ({ account, ...readOne(account) }));
+    const several = records.length > 1;
+    const list = (of: "favourites" | "recent"): StoredChannel[] =>
+      several
+        ? merged(
+            records.map(({ account, state }) => ({
+              account,
+              ids: state[of],
+              placed: placedOf(account)[of],
+            })),
+            of === "favourites" ? 1 : -1,
+          )
+        : records.flatMap(({ account, state }) => state[of].map((id) => ({ account, id })));
+    const continuing = records.flatMap(({ account, continueWatching }) =>
+      continueWatching.map((progress) => ({ account, progress })),
+    );
+    return {
+      favourites: list("favourites"),
+      recent: list("recent"),
+      continueWatching: several
+        ? continuing.sort((a, b) => b.progress.at - a.progress.at).slice(0, CONTINUE_OFFERED)
+        : continuing,
+      sequence: Math.max(0, ...records.map((record) => record.sequence)),
+    };
+  };
+
+  /**
+   * Appends `events`, each to its account's record and in the order given, and stores the state
+   * each account's add up to. Answers the channel events written, with their sequences.
+   */
   const append = (
-    account: string,
-    stored: StoredViewing,
     commandId: string,
     at: number,
-    events: readonly ViewingEvent[],
-  ): StoredViewing => {
-    const channelEvents: ChannelEvent[] = [];
-    let sequence = stored.sequence;
-    for (const event of events) {
+    events: readonly AccountEvent[],
+  ): { account: string; event: ChannelEvent; sequence: number }[] => {
+    const written: { account: string; event: ChannelEvent; sequence: number }[] = [];
+    /** How far each account's record came, by account, in the order first written to. */
+    const last = new Map<string, number>();
+    for (const { account, event } of events) {
       const title = isTitleEvent(event);
       const result = statements.event.run(
         account,
@@ -328,9 +442,10 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
         commandId,
         title ? payloadOf(event) : null,
       );
-      sequence = Number(result.lastInsertRowid);
+      const sequence = Number(result.lastInsertRowid);
+      last.set(account, sequence);
       if (!title) {
-        channelEvents.push(event);
+        written.push({ account, event, sequence });
       } else if (event.type === "title-progress") {
         const seriesId = event.title.kind === "episode" ? event.title.seriesId : null;
         const removed = statements.removedAt.get(account, titleKey(event.title), seriesId);
@@ -345,13 +460,27 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
         for (const key of removedKeys(event.title, rows)) statements.hide.run(at, account, key);
       }
     }
-    if (events.length === 0) return stored;
-    save(db, account, apply(stored.state, channelEvents), sequence);
-    return read(account);
+    for (const [account, sequence] of last) {
+      const own = written.flatMap((each) => (each.account === account ? [each.event] : []));
+      save(db, account, apply(listsOf(account).state, own), sequence);
+    }
+    return written;
+  };
+
+  /**
+   * Runs a write in one transaction, then notes where the channels it wrote stand. Only once it
+   * has committed: one rolled back wrote nothing, and leaves what was worked out as it is.
+   */
+  const written = (write: () => ReturnType<typeof append>): void => {
+    for (const { account, event, sequence } of transaction(db, write)) {
+      const placed = places.get(account);
+      // An account not worked out yet reads these with the rest of its events.
+      if (placed) place(placed, event.type, event.channelId, sequence);
+    }
   };
 
   return {
-    read: (account) => attempt(() => read(account)),
+    read: (accounts) => attempt(() => read(accounts)),
     titles: (account, filter: RawTitleFilter) =>
       attempt((): RawProgress[] => {
         const rows = [
@@ -365,32 +494,41 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
           ({ hidden: _hidden, removedAt: _removedAt, ...progress }) => progress,
         );
       }),
-    commit: ({ account, commandId, at, decide }) =>
-      attempt(() =>
-        transaction(db, () => {
-          const stored = read(account);
-          if (statements.done.get(commandId)) return stored;
-          const events = decide(stored.state);
+    commit: ({ accounts, commandId, at, decide }) =>
+      attempt(() => {
+        written(() => {
+          if (statements.done.get(commandId)) return [];
+          const events = decide(read(accounts));
           // Thrown, so the transaction ends with nothing written.
           if (events instanceof Failed) throw events;
           statements.receipt.run(commandId);
-          return append(account, stored, commandId, at, events);
-        }),
-      ),
+          return append(commandId, at, events);
+        });
+        return read(accounts);
+      }),
     importOnce: ({ account, at, events }) =>
-      attempt(() =>
-        transaction(db, () => {
-          if (statements.imported.get()) return false;
-          if (account) append(account, read(account), "import", at, events);
+      attempt(() => {
+        let imported = false;
+        written(() => {
+          if (statements.imported.get()) return [];
+          imported = true;
           statements.markImported.run(String(at));
-          return true;
-        }),
-      ),
+          return account
+            ? append(
+                "import",
+                at,
+                events.map((event) => ({ account, event })),
+              )
+            : [];
+        });
+        return imported;
+      }),
     // The events go too, so no rebuild, here or in an older build, brings anything back. SQLite
     // zeroes what it deletes, and the checkpoint moves it out of the write-ahead log, so the
     // account's key and titles don't linger in the file either.
     erase: (account) =>
       attempt(() => {
+        places.delete(account);
         db.exec("pragma secure_delete = on");
         try {
           transaction(db, () => {

@@ -9,16 +9,15 @@
 // says what the receiver last confirmed of it and where, paused and buffering included, and always
 // offers Play here. A channel that failed there keeps saying so under that receiver's name while
 // it is reached again, or another in its place.
-import { useQuery } from "@tanstack/react-query";
 import { Play, RotateCw, SkipForward } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
-import { useUi } from "../../app/ui-store.ts";
+import { openSubscription } from "../../app/ui-store.ts";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { outputs, useOutput, where } from "../../player/output.ts";
 import { qualityName } from "../../lib/quality.ts";
-import { queries, useChooseQuality } from "../../lib/queries.ts";
+import { subscriptionName, useChooseQuality, useSubscriptions } from "../../lib/queries.ts";
 import { cn } from "../../lib/utils.ts";
 import { player, receiverState, usePlayer } from "../../player/player.ts";
 import { PlayHere, ReceiverLine } from "./Output.tsx";
@@ -30,6 +29,7 @@ import {
   reconnectingCopy,
   triedStreams,
   type FailedPhase,
+  type FailedSource,
   type ReconnectingPhase,
   type Tried,
 } from "./problems.ts";
@@ -52,12 +52,25 @@ interface Trouble {
   readonly tried: Tried | null;
 }
 
+/** The subscription `channel` is of, as a failure's words name it; null once it isn't saved. */
+function useFailedSource(channel: LiveChannel): FailedSource | null {
+  const subscriptions = useSubscriptions();
+  const owner = subscriptions.find((each) => each.id === channel.subscriptionId);
+  return owner
+    ? {
+        name: subscriptionName(owner),
+        playlist: owner.kind === "m3u",
+        several: subscriptions.length > 1,
+      }
+    : null;
+}
+
 /** What `channel` says while it reconnects or once it failed; null while it does neither. */
 function useTrouble(channel: LiveChannel): Trouble | null {
   const phase = usePlayer((state) => state.phase);
   const stream = usePlayer((state) => state.stream);
   const quality = useChannelQuality(channel);
-  const playlist = useQuery(queries.subscription()).data?.kind === "m3u";
+  const source = useFailedSource(channel);
   if (phase.kind === "reconnecting") {
     return { ...reconnectingCopy(channel), evidence: "", tried: null };
   }
@@ -65,7 +78,7 @@ function useTrouble(channel: LiveChannel): Trouble | null {
   const chosen = quality.chosen && isStreamsOwn(phase.problem) ? qualityName(quality.chosen) : null;
   const tried = triedStreams(channel, stream);
   return {
-    ...failureCopy(phase, channel, { chosen, playlist, tried }),
+    ...failureCopy(phase, channel, { chosen, source, tried }),
     evidence: failureEvidence(phase, channel, { chosen, tried }),
     tried,
   };
@@ -285,6 +298,7 @@ function FailureActions({
   const { problem } = failed;
   const quality = useChannelQuality(channel);
   const chooseQuality = useChooseQuality();
+  const source = useFailedSource(channel);
   const connecting = useOutput((state) => state.status.output.kind === "connecting");
   if (problem.kind === "receiver") {
     return (
@@ -297,11 +311,26 @@ function FailureActions({
       )
     );
   }
+  // Its subscription's row in Settings is where a login is corrected, or entered again: the
+  // other subscriptions' channels stay in the lists meanwhile.
   if (problem.kind === "app" && problem.error.kind === "invalid-login") {
     return (
       <>
-        <Button variant="primary" onClick={() => useUi.setState({ editingLogin: true })}>
+        <Button variant="primary" onClick={() => openSubscription(channel.subscriptionId, "edit")}>
           Update login
+        </Button>
+        {channels}
+      </>
+    );
+  }
+  if (problem.kind === "app" && problem.error.kind === "needs-secret") {
+    return (
+      <>
+        <Button
+          variant="primary"
+          onClick={() => openSubscription(channel.subscriptionId, "secret")}
+        >
+          Enter {source?.playlist ? "link" : "password"}
         </Button>
         {channels}
       </>

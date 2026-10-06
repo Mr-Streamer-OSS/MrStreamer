@@ -6,23 +6,31 @@
 // Every channel and title a call names says which subscription it belongs to, and so does every
 // one it answers with. The record keeps them per account by the provider's own ids, under the key
 // the app gives a saved subscription. A call that names a subscription that isn't saved reads and
-// changes nothing: what finishes after its subscription went, or after another took its place,
-// never lands in another account's record.
+// changes nothing: what finishes after its subscription went never lands in another account's
+// record.
 //
-// The app supplies four ports: which subscription is saved, the store, the lists kept in
-// preferences.json before the record, which the first start imports once, and the catalogue's
+// The lists it answers with are every saved subscription's at once: the favourites in the order
+// they were starred, whichever subscription each is from, the channels watched by when they were
+// watched, and Continue watching by when each title played. Each entry stays in its own account's
+// record, so removing a subscription takes its entries out of the lists and nothing else, and
+// what another build wrote for one account still reads as it wrote it.
+//
+// The app supplies four ports: which subscriptions are saved, the store, the lists kept in
+// preferences.json before the record, which the first start imports once, and the catalogues'
 // channels. The record keeps the provider's stream ids, as builds before channels with several
 // streams did, and shows them by channel: a list holding two streams of one channel shows it once,
 // by the channel's id. Nothing stored is rewritten, so those builds still read every list. A new
 // order of the favourites is no exception: it is the same favourites, removed and added again.
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
-import { ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
-import type {
-  FavouriteOrder,
-  TitleFilter,
-  TitleProgress,
-  Viewing,
+import { ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
+import {
+  CONTINUE_OFFERED,
+  RECENT_LIMIT,
+  type FavouriteOrder,
+  type TitleFilter,
+  type TitleProgress,
+  type Viewing,
 } from "@mrstreamer/contracts/viewing";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -35,6 +43,9 @@ import { removalScope, type RawProgress } from "./titles.ts";
 import {
   decide,
   importEvents,
+  reordered,
+  type AccountEvent,
+  type StoredChannel,
   type ViewingCommand,
   type ViewingEvent,
   type ViewingState,
@@ -46,12 +57,14 @@ export interface ViewingOwner {
   readonly subscriptionId: string;
   /** The account its record is kept under. Other builds read the same record by it. */
   readonly key: string;
+  /** The subscription older releases know: the lists preferences.json kept were its account's. */
+  readonly original: boolean;
 }
 
-/** Which subscription is saved, with its password or link at hand; null without one. */
+/** Which subscriptions are saved, in their order, also while a secret can't be read. */
 export class ViewingAccount extends Context.Service<
   ViewingAccount,
-  { readonly current: Effect.Effect<ViewingOwner | null> }
+  { readonly owners: Effect.Effect<readonly ViewingOwner[]> }
 >()("mrstreamer/ViewingAccount") {}
 
 /** A subscription's channels, to show its lists by channel. */
@@ -68,11 +81,18 @@ export class ViewingChannels extends Context.Service<
   }
 >()("mrstreamer/ViewingChannels") {}
 
-/** An account's state and how far its record has come. */
+/** The records of some accounts read as one, and how far they have come. */
 export interface StoredViewing {
-  readonly state: ViewingState;
-  /** Worked out from the account's title rows; see ./titles.ts. */
-  readonly continueWatching: readonly RawProgress[];
+  /** Stream ids in the order they were starred, or the order the viewer gave them since. */
+  readonly favourites: readonly StoredChannel[];
+  /** Stream ids, most recently watched first: each account's own most recent ones. */
+  readonly recent: readonly StoredChannel[];
+  /** Worked out from each account's title rows, most recent first; see ./titles.ts. */
+  readonly continueWatching: readonly {
+    readonly account: string;
+    readonly progress: RawProgress;
+  }[];
+  /** A later change to any of the accounts has a higher number. */
   readonly sequence: number;
 }
 
@@ -89,7 +109,11 @@ export interface RawTitleFilter {
 export class ViewingStore extends Context.Service<
   ViewingStore,
   {
-    readonly read: (account: string) => Effect.Effect<StoredViewing, Failed>;
+    /**
+     * The records of `accounts` as one: an entry of an account named earlier comes first where
+     * two got their places at once.
+     */
+    readonly read: (accounts: readonly string[]) => Effect.Effect<StoredViewing, Failed>;
     /** How far the titles matching `filter` got for `account`. */
     readonly titles: (
       account: string,
@@ -97,15 +121,15 @@ export class ViewingStore extends Context.Service<
     ) => Effect.Effect<readonly RawProgress[], Failed>;
     /**
      * In one transaction: unless `commandId` ran before, appends the events `decide` makes from
-     * the account's state and stores the state they add up to. Returns the state after. A
-     * `Failed` from `decide` refuses the command: the call fails with it and stores nothing, the
-     * id neither.
+     * the records of `accounts` as they stand, each to its own account's and in the order given,
+     * and stores the states they add up to. Returns the records after. A `Failed` from `decide`
+     * refuses the command: the call fails with it and stores nothing, the id neither.
      */
     readonly commit: (input: {
-      readonly account: string;
+      readonly accounts: readonly string[];
       readonly commandId: string;
       readonly at: number;
-      readonly decide: (state: ViewingState) => readonly ViewingEvent[] | Failed;
+      readonly decide: (stored: StoredViewing) => readonly AccountEvent[] | Failed;
     }) => Effect.Effect<StoredViewing, Failed>;
     /**
      * In one transaction with the import marker: appends `events` for `account`. Does nothing,
@@ -137,7 +161,7 @@ export class LegacyViewing extends Context.Service<
 export class ViewingRecord extends Context.Service<
   ViewingRecord,
   {
-    /** The saved subscription's favourites and recent channels; empty without one. */
+    /** Every saved subscription's favourites, recent channels and titles; empty without one. */
     readonly state: Effect.Effect<Viewing, Failed>;
     /**
      * Stars or unstars a channel, by its id or any of its streams', with all its streams. Fails
@@ -150,11 +174,12 @@ export class ViewingRecord extends Context.Service<
       favourite: boolean,
     ): Effect.Effect<Viewing, Failed>;
     /**
-     * Puts the favourites of the subscription they were read from in another order. Each channel
+     * Puts the favourites in another order, whichever subscriptions they are of. Each channel
      * moves with every stream of it that is stored, and the favourites the order leaves out keep
-     * their places. Fails with `favourites-changed` when the subscription is no longer the one
-     * saved as the change commits, or when its favourites no longer show as `order.original` by
-     * what is stored then. Adds and removes none.
+     * their places. Fails with `favourites-changed` when the favourites no longer show as
+     * `order.original` by what is stored and saved as the change commits: a favourite starred or
+     * unstarred since, a channel's streams joined or split, or a subscription with favourites
+     * gone. Adds and removes none.
      */
     reorderFavourites(commandId: string, order: FavouriteOrder): Effect.Effect<Viewing, Failed>;
     /** Puts a channel first among those watched recently, by its own id. */
@@ -172,7 +197,8 @@ export class ViewingRecord extends Context.Service<
     ): Effect.Effect<Viewing, Failed>;
     /**
      * Takes movies and series out of Continue watching by their versions, every version played at
-     * once, until a play begun afterwards. How far they got stays.
+     * once, each in the record of the subscription that lists it, until a play begun afterwards.
+     * How far they got stays.
      */
     removeFromContinue(commandId: string, titles: TitleFilter): Effect.Effect<Viewing, Failed>;
     /**
@@ -181,13 +207,13 @@ export class ViewingRecord extends Context.Service<
      */
     finishSeries(commandId: string, series: readonly OwnedId[]): Effect.Effect<Viewing, Failed>;
     /**
-     * How far the matching titles got. Titles of a subscription that isn't saved have none, and
-     * so has any without a subscription.
+     * How far the matching titles got, each in its own subscription's record. Titles of a
+     * subscription that isn't saved have none.
      */
     progress(titles: TitleFilter): Effect.Effect<readonly TitleProgress[], Failed>;
     /**
-     * Deletes everything `account` recorded, connected or not: favourites, watched channels, how
-     * far titles got and what left Continue watching. Other accounts keep theirs.
+     * Deletes everything `account` recorded, saved or not: favourites, watched channels, how far
+     * titles got and what left Continue watching. Other accounts keep theirs.
      */
     erase(account: string): Effect.Effect<void, Failed>;
     /** The sequence after each committed change. */
@@ -201,48 +227,83 @@ const none: Viewing = { favourites: [], recent: [], continueWatching: [], sequen
 
 type ChannelOf = (channelId: string) => LiveChannel | undefined;
 
+/** The saved subscriptions and their channels, as a change or a read finds them. */
+interface Saved {
+  readonly owners: readonly ViewingOwner[];
+  /** The owner of a record, by its account. */
+  readonly ofAccount: ReadonlyMap<string, ViewingOwner>;
+  /** A subscription's channels, by its id. */
+  readonly channelsOf: ReadonlyMap<string, ChannelOf>;
+}
+
+/** The records as a change finds them when it commits, with whose they are. */
+interface Found extends Saved {
+  readonly stored: StoredViewing;
+}
+
 const changed = new Failed({ error: { kind: "favourites-changed" } });
+const noSubscription = new Failed({ error: { kind: "no-subscription" } });
 
 /** Every title a filter names. */
 function namedIn(filter: TitleFilter): readonly OwnedId[] {
   return [...(filter.movies ?? []), ...(filter.series ?? [])];
 }
 
+/** A stored channel as the lists show it: its channel's id, in its subscription. */
+function shownAs({ ofAccount, channelsOf }: Saved, { account, id }: StoredChannel): OwnedId | null {
+  const owner = ofAccount.get(account);
+  if (!owner) return null;
+  const { subscriptionId } = owner;
+  return { subscriptionId, id: channelsOf.get(subscriptionId)?.(id)?.id ?? id };
+}
+
+/** One account's lists, out of the records read as one. */
+function stateOf(stored: StoredViewing, { key }: ViewingOwner): ViewingState {
+  const own = (list: readonly StoredChannel[]) =>
+    list.flatMap(({ account, id }) => (account === key ? [id] : []));
+  return { favourites: own(stored.favourites), recent: own(stored.recent) };
+}
+
+/** A command's events for `owner`, from its record as stored. */
+function eventsOf(found: Found, owner: ViewingOwner, command: ViewingCommand): AccountEvent[] {
+  return decide(stateOf(found.stored, owner), command).map((event) => ({
+    account: owner.key,
+    event,
+  }));
+}
+
 /**
- * The stored favourites of the subscription `order` names in the order asked for, or null when
- * they no longer show as the list the order was made from. Ids the catalogue doesn't know are
- * each their own channel, as they show.
+ * The events that put the stored favourites in the order asked for, or `changed` when they no
+ * longer show as the list the order was made from. Ids a catalogue doesn't know are each their
+ * own channel, as they show.
  */
-function rearranged(
-  stored: readonly string[],
-  channelOf: ChannelOf,
-  { subscriptionId, original, order }: FavouriteOrder,
-): readonly string[] | null {
-  const streams = new Map<string, string[]>();
-  for (const id of stored) {
-    const channelId = channelOf(id)?.id ?? id;
-    const ids = streams.get(channelId);
-    if (ids) ids.push(id);
-    else streams.set(channelId, [id]);
+function rearranged(found: Found, { original, order }: FavouriteOrder): AccountEvent[] | Failed {
+  const streams = new Map<string, StoredChannel[]>();
+  for (const stream of found.stored.favourites) {
+    const channel = shownAs(found, stream);
+    if (!channel) continue;
+    const key = ownedKey(channel);
+    const stored = streams.get(key);
+    if (stored) stored.push(stream);
+    else streams.set(key, [stream]);
   }
   const shown = [...streams.keys()];
-  if (
-    shown.length !== original.length ||
-    shown.some((id, at) => !sameOwned(original[at], { subscriptionId, id }))
-  ) {
-    return null;
+  const listed = original.map(ownedKey);
+  if (shown.length !== listed.length || shown.some((key, at) => key !== listed[at])) {
+    return changed;
   }
-  // The list is the subscription's own, and the order names channels of that list alone, so
-  // the provider's ids tell them apart from here.
-  const wanted = order.map(({ id }) => id);
+  const wanted = order.map(ownedKey);
   // The channels arranged take one another's places; every other favourite stays in its own.
   const arranged = new Set(wanted);
   let next = 0;
-  const placed = shown.map((id) => (arranged.has(id) ? (wanted[next++] ?? id) : id));
+  const placed = shown.map((key) => (arranged.has(key) ? (wanted[next++] ?? key) : key));
   // An order that changes nothing leaves the stored ids as they are, a channel's streams apart
   // from one another included.
-  if (placed.every((id, at) => id === shown[at])) return stored;
-  return placed.flatMap((id) => streams.get(id) ?? []);
+  if (placed.every((key, at) => key === shown[at])) return [];
+  return reordered(
+    found.stored.favourites,
+    placed.flatMap((key) => streams.get(key) ?? []),
+  );
 }
 
 function make() {
@@ -253,13 +314,12 @@ function make() {
     const legacy = yield* LegacyViewing;
     const changes = yield* PubSub.unbounded<number>();
 
-    // The first start with the record brings in the lists preferences.json kept. The file loses
-    // them only after the import commits; a retry after a crash finds the marker and imports
-    // nothing twice. Lists wait for an account to import into, such as after a denied keychain
-    // prompt.
+    // The first start with the record brings in the lists preferences.json kept, which were the
+    // original subscription's. The file loses them only after the import commits; a retry after a
+    // crash finds the marker and imports nothing twice. Lists wait for an account to import into.
     yield* Effect.gen(function* () {
       const lists = yield* legacy.take;
-      const key = (yield* account.current)?.key ?? null;
+      const key = (yield* account.owners).find((owner) => owner.original)?.key ?? null;
       if (lists && !key) return;
       yield* store.importOnce({
         account: key,
@@ -276,18 +336,31 @@ function make() {
       ),
     );
 
-    const noSubscription = new Failed({ error: { kind: "no-subscription" } });
+    /** The saved subscriptions with their channels. Finding those can take a read from disk. */
+    const saved = Effect.gen(function* () {
+      const owners = yield* account.owners;
+      const lookups = yield* Effect.forEach(owners, ({ subscriptionId }) =>
+        Effect.map(
+          channels.lookup(subscriptionId),
+          (channelOf) => [subscriptionId, channelOf] as const,
+        ),
+      );
+      return {
+        owners,
+        ofAccount: new Map(owners.map((owner) => [owner.key, owner])),
+        channelsOf: new Map(lookups),
+      } satisfies Saved;
+    });
 
     /**
-     * The saved subscription, when every one of `named` is its own. A change for another, as one
-     * that went meanwhile, fails here before it reaches the store.
+     * The same, with nothing left to wait for: read again while a subscription came or went as
+     * the channels were found, so what follows at once goes by the subscriptions saved then.
      */
-    const ownerOf = (named: readonly { readonly subscriptionId: string }[]) =>
-      Effect.flatMap(account.current, (owner) =>
-        owner && named.every((each) => each.subscriptionId === owner.subscriptionId)
-          ? Effect.succeed(owner)
-          : Effect.fail(noSubscription),
-      );
+    const settled = Effect.gen(function* () {
+      let found = yield* saved;
+      while (!sameOwners(yield* account.owners, found.owners)) found = yield* saved;
+      return found;
+    });
 
     /** A title as the account's record keeps it: by the provider's ids alone. */
     const rawTitle = ({ subscriptionId: _owner, ...raw }: TitleRef) => raw;
@@ -306,81 +379,107 @@ function make() {
       title: { ...progress.title, subscriptionId: owner.subscriptionId },
     });
 
-    const shown = (stored: StoredViewing, owner: ViewingOwner, channelOf: ChannelOf): Viewing => {
-      const byChannel = (ids: readonly string[]) =>
-        [...new Set(ids.map((id) => channelOf(id)?.id ?? id))].map((id): OwnedId => ({
-          subscriptionId: owner.subscriptionId,
-          id,
-        }));
+    const shown = (found: Found): Viewing => {
+      const byChannel = (list: readonly StoredChannel[]) => [
+        ...new Map(
+          list.flatMap((stream) => {
+            const channel = shownAs(found, stream);
+            return channel ? [[ownedKey(channel), channel] as const] : [];
+          }),
+        ).values(),
+      ];
+      const { stored } = found;
       return {
-        favourites: byChannel(stored.state.favourites),
-        recent: byChannel(stored.state.recent),
-        continueWatching: stored.continueWatching.map((progress) => progressOf(owner, progress)),
+        favourites: byChannel(stored.favourites),
+        recent: byChannel(stored.recent).slice(0, RECENT_LIMIT),
+        continueWatching: stored.continueWatching
+          .flatMap(({ account, progress }) => {
+            const owner = found.ofAccount.get(account);
+            return owner ? [progressOf(owner, progress)] : [];
+          })
+          .slice(0, CONTINUE_OFFERED),
         sequence: stored.sequence,
       };
     };
 
+    /** The owners of `named`, each once, when every one of them is saved now. */
+    const ownersOf = (
+      owners: readonly ViewingOwner[],
+      named: readonly { readonly subscriptionId: string }[],
+    ) => {
+      const wanted = new Set(named.map((each) => each.subscriptionId));
+      const found = owners.filter((owner) => wanted.has(owner.subscriptionId));
+      return found.length === wanted.size ? found : null;
+    };
+
     /**
-     * Commits the command `command` makes to the record of the subscription `named` are of, from
-     * its channels and from its state as stored when the change commits, or refuses with the
-     * `Failed` it gives instead. `madeFor` names the subscription an order was made for: it is
-     * refused unless that one is saved, when it arrives and again once its channels are found.
-     * Nothing waits between that second answer and the commit, so a subscription that went or
-     * changed meanwhile gets no order.
+     * Commits the events `events` makes to the records of the saved subscriptions, from their
+     * channels and from the records as stored when the change commits, or refuses with the
+     * `Failed` it gives instead. `named` are what the change is about: it is refused with `gone`
+     * unless the subscription of each is saved, when it arrives and again once the channels are
+     * found. Nothing waits between that second answer and the commit, so a subscription that went
+     * meanwhile gets no change, none lands in a record erased with it, and the records read as
+     * one are those of the subscriptions saved as it commits.
      */
     const run = (
       commandId: string,
       named: readonly { readonly subscriptionId: string }[],
-      command: (channelOf: ChannelOf, state: ViewingState) => ViewingCommand | Failed,
-      madeFor?: string,
+      events: (found: Found, owners: readonly ViewingOwner[]) => readonly AccountEvent[] | Failed,
+      gone: Failed = noSubscription,
     ) =>
       Effect.gen(function* () {
-        const owner = yield* ownerOf(named);
-        if (madeFor !== undefined && owner.subscriptionId !== madeFor) return yield* changed;
-        const channelOf = yield* channels.lookup(owner.subscriptionId);
-        // Finding the channels can take a read of the catalogue from disk.
-        if (madeFor !== undefined && (yield* account.current)?.subscriptionId !== madeFor) {
-          return yield* changed;
-        }
+        if (!ownersOf(yield* account.owners, named)) return yield* gone;
+        const found = yield* settled;
+        const owners = ownersOf(found.owners, named);
+        if (!owners) return yield* gone;
         const stored = yield* store.commit({
-          account: owner.key,
+          accounts: found.owners.map((owner) => owner.key),
           commandId,
           at: yield* Clock.currentTimeMillis,
-          decide: (state) => {
-            const made = command(channelOf, state);
-            return made instanceof Failed ? made : decide(state, made);
-          },
+          decide: (stored) => events({ ...found, stored }, owners),
         });
         yield* PubSub.publish(changes, stored.sequence);
-        return shown(stored, owner, channelOf);
+        return shown({ ...found, stored });
       });
 
     /**
-     * The titles `filter` matches that their subscription played: each movie, and one episode of
-     * each version of a series, which stands for the series.
+     * The titles `filter` matches that their subscriptions played, by the account of each: each
+     * movie, and one episode of each version of a series, which stands for the series.
      */
     const playedIn = (filter: TitleFilter) =>
       Effect.gen(function* () {
-        const owner = yield* ownerOf(namedIn(filter));
-        const played = yield* store.titles(owner.key, rawFilter(filter, owner));
-        return [...new Map(played.map(({ title }) => [removalScope(title), title])).values()];
+        const owners = ownersOf(yield* account.owners, namedIn(filter));
+        if (!owners) return yield* noSubscription;
+        const played = yield* Effect.forEach(owners, (owner) =>
+          Effect.map(
+            store.titles(owner.key, rawFilter(filter, owner)),
+            (titles) =>
+              [
+                owner.key,
+                [...new Map(titles.map(({ title }) => [removalScope(title), title])).values()],
+              ] as const,
+          ),
+        );
+        return new Map(played);
       });
 
     return {
       state: Effect.gen(function* () {
-        const owner = yield* account.current;
-        if (!owner) return none;
-        return shown(
-          yield* store.read(owner.key),
-          owner,
-          yield* channels.lookup(owner.subscriptionId),
-        );
+        const found = yield* saved;
+        if (found.owners.length === 0) return none;
+        const stored = yield* store.read(found.owners.map((owner) => owner.key));
+        return shown({ ...found, stored });
       }),
       setFavourite: (commandId: string, channel: OwnedId, favourite: boolean) =>
-        run(commandId, [channel], (channelOf) => {
-          const found = channelOf(channel.id);
-          const ids = found ? [found.id, ...found.variants.map(({ id }) => id)] : [channel.id];
-          return { kind: "set-favourite", channelIds: [...new Set(ids)], favourite };
+        run(commandId, [channel], (found, [owner]) => {
+          if (!owner) return noSubscription;
+          const listed = found.channelsOf.get(owner.subscriptionId)?.(channel.id);
+          const ids = listed ? [listed.id, ...listed.variants.map(({ id }) => id)] : [channel.id];
+          return eventsOf(found, owner, {
+            kind: "set-favourite",
+            channelIds: [...new Set(ids)],
+            favourite,
+          });
         }),
       reorderFavourites: (commandId: string, order: FavouriteOrder) => {
         const listed = new Set(order.original.map(ownedKey));
@@ -398,21 +497,19 @@ function make() {
             }),
           );
         }
-        return run(
-          commandId,
-          [],
-          (channelOf, state) => {
-            const favourites = rearranged(state.favourites, channelOf, order);
-            return favourites ? { kind: "reorder-favourites", favourites } : changed;
-          },
-          order.subscriptionId,
-        );
+        // An order for favourites of a subscription that went is one for a list that changed.
+        return run(commandId, order.original, (found) => rearranged(found, order), changed);
       },
       recordWatch: (commandId: string, channel: OwnedId) =>
-        run(commandId, [channel], (channelOf) => ({
-          kind: "record-watch",
-          channelId: channelOf(channel.id)?.id ?? channel.id,
-        })),
+        run(commandId, [channel], (found, [owner]) =>
+          owner
+            ? eventsOf(found, owner, {
+                kind: "record-watch",
+                channelId:
+                  found.channelsOf.get(owner.subscriptionId)?.(channel.id)?.id ?? channel.id,
+              })
+            : noSubscription,
+        ),
       recordProgress: (
         commandId: string,
         title: TitleRef,
@@ -420,30 +517,62 @@ function make() {
         duration: number,
         since: number,
       ) =>
-        run(commandId, [title], () => ({
-          kind: "record-progress",
-          title: rawTitle(title),
-          position,
-          duration,
-          since,
-        })),
+        run(commandId, [title], (found, [owner]) =>
+          owner
+            ? eventsOf(found, owner, {
+                kind: "record-progress",
+                title: rawTitle(title),
+                position,
+                duration,
+                since,
+              })
+            : noSubscription,
+        ),
       removeFromContinue: (commandId: string, titles: TitleFilter) =>
         Effect.flatMap(playedIn(titles), (played) =>
-          run(commandId, namedIn(titles), () => ({ kind: "remove-titles", titles: played })),
+          run(commandId, namedIn(titles), (found, owners) =>
+            owners.flatMap((owner) =>
+              eventsOf(found, owner, {
+                kind: "remove-titles",
+                titles: played.get(owner.key) ?? [],
+              }),
+            ),
+          ),
         ),
       finishSeries: (commandId: string, series: readonly OwnedId[]) =>
         Effect.flatMap(playedIn({ series }), (played) =>
-          run(commandId, series, () => ({ kind: "finish-series", titles: played })),
+          run(commandId, series, (found, owners) =>
+            owners.flatMap((owner) =>
+              eventsOf(found, owner, {
+                kind: "finish-series",
+                titles: played.get(owner.key) ?? [],
+              }),
+            ),
+          ),
         ),
       progress: (titles: TitleFilter) =>
         Effect.gen(function* () {
-          const owner = yield* account.current;
-          if (!owner) return [];
-          const played = yield* store.titles(owner.key, rawFilter(titles, owner));
-          return played.map((progress) => progressOf(owner, progress));
+          const named = new Set(namedIn(titles).map((each) => each.subscriptionId));
+          const owners = (yield* account.owners).filter((owner) => named.has(owner.subscriptionId));
+          const played = yield* Effect.forEach(owners, (owner) =>
+            Effect.map(store.titles(owner.key, rawFilter(titles, owner)), (rows) =>
+              rows.map((progress) => progressOf(owner, progress)),
+            ),
+          );
+          return played.flat();
         }),
       erase: (key: string) => store.erase(key),
       changes: Stream.fromPubSub(changes),
     };
   });
+}
+
+/** Whether the same subscriptions are saved, under the same accounts, in the same order. */
+function sameOwners(a: readonly ViewingOwner[], b: readonly ViewingOwner[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every(
+      (owner, at) => owner.subscriptionId === b[at]?.subscriptionId && owner.key === b[at]?.key,
+    )
+  );
 }

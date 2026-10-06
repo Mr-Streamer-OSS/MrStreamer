@@ -6,7 +6,7 @@ import { normalize, searchWords } from "../text.ts";
 import { xmltvReader, type XmltvProgramme } from "./xmltv.ts";
 
 /** How many programmes a search returns. */
-const SEARCH_LIMIT = 50;
+export const SEARCH_LIMIT = 50;
 /** Indexing pauses for other work after this many guide channels. */
 const YIELD_EVERY_CHANNELS = 50;
 

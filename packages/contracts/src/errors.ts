@@ -23,6 +23,11 @@ export type AppError =
   /** The provider answered with an HTTP status the app does not expect. */
   | { readonly kind: "provider-error"; readonly status: number }
   | { readonly kind: "no-subscription" }
+  /**
+   * The subscription is saved, but its password or playlist link can no longer be read, so
+   * nothing of it plays or refreshes until the viewer enters it again.
+   */
+  | { readonly kind: "needs-secret"; readonly subscriptionId: string }
   /** The system keychain would not store the password, or no longer gives it back. */
   | { readonly kind: "keychain-refused" }
   | { readonly kind: "channel-not-found"; readonly channelId: string }
@@ -43,8 +48,9 @@ export type AppError =
     }
   /**
    * A new order for the favourites was made from a list that no longer holds: a favourite was
-   * added or removed since, the catalogue joined or split a channel's streams, or another
-   * subscription is connected. Nothing was saved; the UI reads the favourites again.
+   * added or removed since, the catalogue joined or split a channel's streams, or a subscription
+   * with favourites went or took another's place. Nothing was saved; the UI reads the favourites
+   * again.
    */
   | { readonly kind: "favourites-changed" }
   /** A receiver on the network didn't take what it was sent, or can't be reached. */
