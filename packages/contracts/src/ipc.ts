@@ -4,7 +4,7 @@
 // The main process refuses to start unless every method has a handler (see src/main/ipc.ts).
 import { type } from "arktype";
 import type { Result } from "./errors.ts";
-import type { GuideStatus, Listing, Programme, ProgrammeMatch } from "./guide.ts";
+import type { GuideStatus, Listing, ListingMatch, Programme, ProgrammeMatch } from "./guide.ts";
 import type { CatalogueStatus, Category, LiveChannel } from "./library.ts";
 import type { ThirdPartyNotice } from "./licences.ts";
 import {
@@ -72,6 +72,13 @@ export const ipcInputs = {
   "guide.listings": () => type({ channelIds: "string[]" }),
   "guide.schedule": () => type({ channelId: "string" }),
   "guide.search": () => type({ query: "string" }),
+  /**
+   * Searches the programmes of one list's channels, named as `library.channels` names a list: a
+   * category's channels, those with the given ids, or every channel. `until` ends the day
+   * searched, in epoch milliseconds.
+   */
+  "guide.searchList": () =>
+    type({ query: "string", until: "number", "categoryId?": "string", "ids?": "string[]" }),
   "guide.status": none,
   /**
    * Asks the subscription for its guide now and downloads it. Answers with the status, also when
@@ -234,6 +241,12 @@ export interface IpcOutputs {
   "guide.schedule": readonly Programme[];
   /** Programmes on now or later whose title matches, on now first. */
   "guide.search": readonly ProgrammeMatch[];
+  /**
+   * Per channel id of the list, whether the programme on now matches and the first later one
+   * that does. Every channel of the list is searched, so none is cut off; those without a match
+   * are left out.
+   */
+  "guide.searchList": Readonly<Record<string, ListingMatch>>;
   "guide.status": GuideStatus;
   "guide.refresh": GuideStatus;
   "ondemand.status": OnDemandStatus;

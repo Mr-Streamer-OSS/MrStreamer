@@ -51,6 +51,8 @@ async function connectedGuide(options: FakeProviderOptions = {}) {
       listings: (channelIds: readonly string[]) => run(guide.listings(channelIds)),
       schedule: (channelId: string) => run(guide.schedule(channelId)),
       search: (query: string) => run(guide.search(query)),
+      searchChannels: (query: string, channelIds: readonly string[], until: number) =>
+        run(guide.searchChannels(query, channelIds, until)),
       status: () => run(guide.status),
       clear: () => run(guide.clear),
       library: await promised(runtime, Library),
@@ -87,9 +89,12 @@ function channelsOf(provider: FakeProvider) {
 
 const at = (time: string) => Date.parse(`2026-10-02T${time}:00+02:00`);
 
+/** A programme on a guide channel that day, from "2000" to "2100". */
+const programme = (id: string, from: string, to: string, title: string) =>
+  `<programme start="20261002${from}00 +0200" stop="20261002${to}00 +0200" channel="${id}"><title>${title}</title></programme>`;
+
 /** An hour's programme on a guide channel, on at NOW. */
-const slot = (id: string, title: string) =>
-  `<programme start="20261002200000 +0200" stop="20261002210000 +0200" channel="${id}"><title>${title}</title></programme>`;
+const slot = (id: string, title: string) => programme(id, "2000", "2100", title);
 
 describe("programme guide", () => {
   it("shows what's on now and next, and the rest of the day, for channels with a guide", async () => {
@@ -210,18 +215,98 @@ describe("programme guide", () => {
     expect(await guide.search("  ")).toEqual([]);
   });
 
-  it("lists a channel for adults' programmes only while Settings shows it, and never finds them", async () => {
+  it("lists a channel for adults' programmes only while Settings shows it, where a search of its list finds them and a search of everything never does", async () => {
     const { guide } = await connectedGuide({ adultChannels: true });
     await guide.refresh();
     // "AFTER HOURS", for adults, with guide id afterhours.adult.
     const nowOn = async () => (await guide.listings(["4000"]))["4000"]?.now?.title;
+    const inList = () => guide.searchChannels("news", ["4000"], at("23:00"));
     expect(await nowOn()).toBeUndefined();
+    expect(await inList()).toEqual({});
 
     await guide.settings.update({ adultTitles: true });
     const title = (await nowOn()) ?? "";
 
     expect(title).not.toBe("");
     expect((await guide.search(title)).some((match) => match.channel.id === "4000")).toBe(false);
+    expect(await inList()).toMatchObject({ "4000": { now: true } });
+  });
+
+  it("searches every channel of a list, where the search of everything stops at fifty programmes", async () => {
+    const { guide } = await connectedGuide();
+    await guide.refresh();
+    // Every programme of the fake guide is some "News", so every channel with a guide matches.
+    const all = (await guide.library.channels({})).map((channel) => channel.id);
+    const covered = Object.keys(await guide.listings(all));
+    const last = covered.at(-1) ?? "";
+
+    const everything = await guide.search("news");
+    const found = await guide.searchChannels("news", all, at("23:00"));
+
+    expect(everything).toHaveLength(50);
+    expect(everything.some((match) => match.channel.id === last)).toBe(false);
+    expect(Object.keys(found).toSorted()).toEqual(covered.toSorted());
+    expect(await guide.searchChannels("news", [last], at("23:00"))).toEqual({
+      [last]: found[last],
+    });
+  });
+
+  it("finds a channel by its programme on now and by its first later one before the day ends", async () => {
+    const { provider, guide, guided, guideId } = await connectedGuide();
+    provider.serveGuide(
+      `<tv>${[
+        programme(guideId, "2000", "2100", "Het Journaal"),
+        programme(guideId, "2100", "2200", "Sport"),
+        programme(guideId, "2200", "2230", "Het Journaal Laat"),
+        programme(guideId, "2230", "2300", "Één Nacht"),
+      ].join("")}</tv>`,
+    );
+    await guide.refresh();
+    const search = async (query: string, until: string) =>
+      (await guide.searchChannels(query, [guided], at(until)))[guided];
+
+    expect(await search("journaal", "23:00")).toEqual({
+      now: true,
+      later: { start: at("22:00"), title: "Het Journaal Laat" },
+    });
+    // The day ends where the list says: a programme that starts then isn't today's.
+    expect(await search("journaal", "22:00")).toEqual({ now: true, later: null });
+    expect(await search("SPORT", "23:00")).toEqual({
+      now: false,
+      later: { start: at("21:00"), title: "Sport" },
+    });
+    // Every word, in any order, whatever the case and the accents.
+    expect(await search("nacht EEN", "23:00")).toEqual({
+      now: false,
+      later: { start: at("22:30"), title: "Één Nacht" },
+    });
+    expect(await search("journaal nacht", "23:00")).toBeUndefined();
+    expect(await search("  ", "23:00")).toBeUndefined();
+  });
+
+  it("finds each channel that shows a guide id, where the search of everything names the first", async () => {
+    // Two channels of one name in different countries, which stay two channels, send one guide id.
+    let sharing: ReadonlySet<string> = new Set();
+    const { provider, guide } = await connectedGuide({
+      guideIdOf: (channel) =>
+        sharing.has(String(channel.streamId)) ? "shared.test" : channel.guideId,
+    });
+    const byTitle = Map.groupBy(await guide.library.channels({}), (channel) => channel.title);
+    const pair = [...byTitle.values()].find((channels) => channels.length > 1)?.slice(0, 2) ?? [];
+    const [first, second] = pair.map((channel) => channel.id);
+    if (!first || !second) throw new Error("The fake catalogue has no two channels of one name.");
+    sharing = new Set(pair.flatMap((channel) => channel.variants.map((variant) => variant.id)));
+    await guide.library.refresh();
+    provider.serveGuide(`<tv>${slot("shared.test", "Journaal")}</tv>`);
+    await guide.refresh();
+
+    expect(await guide.search("journaal")).toMatchObject([{ channel: { id: first } }]);
+    expect(await guide.searchChannels("journaal", [second], at("23:00"))).toEqual({
+      [second]: { now: true, later: null },
+    });
+    expect(
+      Object.keys(await guide.searchChannels("journaal", [first, second], at("23:00"))),
+    ).toEqual([first, second]);
   });
 
   it("keeps the guide across a restart without downloading it again", async () => {
@@ -275,6 +360,7 @@ describe("programme guide", () => {
     const download = guide.refresh().catch(() => {});
 
     expect(await guide.listings([guided])).toEqual({});
+    expect(await guide.searchChannels("news", [guided], at("23:00"))).toEqual({});
     expect(await library.channel(guided)).toMatchObject({ id: guided });
     await provider.close();
     await download;

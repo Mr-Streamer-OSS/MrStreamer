@@ -50,6 +50,11 @@ export function clockTime(at: number, now: number): string {
   return `${dayOf(at) > dayOf(now) ? "Tomorrow " : ""}${time.format(at)}`;
 }
 
+/** The midnight that ends the day of `at`. */
+export function endOfDay(at: number): number {
+  return new Date(at).setHours(24, 0, 0, 0);
+}
+
 /** "34 min left", "1 h 20 min left". */
 export function timeLeft(programme: Programme, now: number): string {
   const minutes = Math.max(1, Math.ceil((programme.stop - now) / 60_000));

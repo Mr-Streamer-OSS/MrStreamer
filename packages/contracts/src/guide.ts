@@ -21,6 +21,17 @@ export interface ProgrammeMatch {
 }
 
 /**
+ * What a search within a list of channels found in one channel's programmes today. Without
+ * descriptions: the channel's schedule has them.
+ */
+export interface ListingMatch {
+  /** Whether the programme on now matches. */
+  readonly now: boolean;
+  /** The first later one that matches, or null. */
+  readonly later: Pick<Programme, "start" | "title"> | null;
+}
+
+/**
  * Whether the subscription has a programme guide. `unknown`: it hasn't answered yet, as before
  * the first download or when asking failed. `available`: a guide of it is loaded. `none`: it
  * answered that it has none, as a playlist does whose first line names no guide.
