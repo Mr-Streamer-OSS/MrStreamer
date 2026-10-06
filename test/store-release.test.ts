@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
@@ -13,6 +14,7 @@ import {
   type TaggedRelease,
   type WorkflowRun,
 } from "../scripts/store-release.ts";
+import { storedZip } from "../scripts/zip.ts";
 import { removeArtifacts, writeArtifact, type Built } from "./fake-store.ts";
 
 const COMMIT = "5f3a9c".padEnd(40, "0");
@@ -93,6 +95,39 @@ const RELEASE: StoreRelease = {
 
 /** The artifact of a build of RELEASE whose manifest or record says `wrong` instead. */
 const built = (wrong: Partial<Built> = {}) => writeArtifact({ ...RELEASE, ...wrong });
+
+/**
+ * A manifest as electron-builder writes it, up to the identity, copied from the 0.0.7 package:
+ * each attribute on a line of its own, and the publisher alone in single quotes.
+ */
+const builderManifest = (
+  publisher: string = STORE_APP.publisher,
+) => `<?xml version="1.0" encoding="utf-8"?>
+<!--suppress XmlUnusedNamespaceDeclaration -->
+<Package
+   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+   xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities">
+  <!-- use single quotes to avoid double quotes escaping in the publisher value  -->
+  <Identity Name="${STORE_APP.identityName}"
+    ProcessorArchitecture="${STORE_APP.architecture}"
+    Publisher='${publisher}'
+    Version="${RELEASE.packageVersion}" />
+</Package>
+`;
+
+/** The artifact of a build of RELEASE whose package holds `manifest` as it is. */
+function builtWith(manifest: string): { dir: string; sha256: string } {
+  const { dir } = built();
+  const path = join(dir, "Mr-Streamer-0.0.5-win-x64.msix");
+  const file = storedZip("AppxManifest.xml", Buffer.from(manifest));
+  const sha256 = createHash("sha256").update(file).digest("hex");
+  const described: Record<string, string> = JSON.parse(readFileSync(`${path}.json`, "utf8"));
+  writeFileSync(path, file);
+  writeFileSync(`${path}.json`, JSON.stringify({ ...described, sha256 }));
+  return { dir, sha256 };
+}
 
 afterAll(removeArtifacts);
 
@@ -252,6 +287,15 @@ describe("the package a run kept", () => {
       fileName: `Mr-Streamer-0.0.5-win-x64.5f3a9c000000.${sha256.slice(0, 16)}.msix`,
       sha256,
     });
+  });
+
+  it("is the release's with the manifest electron-builder writes, its publisher in single quotes", () => {
+    const { dir, sha256 } = builtWith(builderManifest());
+
+    expect(verifyPackage(RELEASE, dir, sha256)).toMatchObject({ sha256 });
+    expect(() => verifyPackage(RELEASE, builtWith(builderManifest("CN=Someone Else")).dir)).toThrow(
+      `The package's publisher is "CN=Someone Else"`,
+    );
   });
 
   it.each([
