@@ -26,7 +26,7 @@ The field beside the list's name searches the list you're looking at: Favourites
 
 A search hides favourites, so Reorder asks you to clear it first and clears nothing by itself. If the order can't be saved, Mr. Streamer says so and keeps what you arranged: **Retry** saves it again. If your favourites changed in the meantime, **Reload** starts over from them.
 
-Home, the guide and the channel list while watching show your favourites in that order, and channel up and down follow it. The channel numbers stay your provider's, and so does the quality each channel plays in. A favourite that isn't showing, a channel for adults while those are hidden or one your provider stopped listing, keeps its place and comes back to it.
+Home, the guide and the channel list while watching show your favourites in that order, and channel up and down follow it. The channel numbers stay your provider's, and so does the quality each channel plays in. A favourite that isn't showing, a channel for adults while those are hidden or one your provider stopped listing, keeps its place and comes back to it. One quality of a channel that your provider stops listing keeps its place too: if you moved the channel further down meanwhile, it goes back up to that place when the quality returns.
 
 Each subscription keeps its own favourites, in their own order, and its own watch history. Connecting another one hides them, and they come back when you connect the first one again.
 

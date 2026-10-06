@@ -2,15 +2,18 @@
 // shown there, which the viewer arranges with each row's buttons or the keys. Save sends it once;
 // Cancel, and leaving the list, throw it away. Until it is saved, nothing but this draft knows it.
 //   The draft belongs to the subscription and the favourites it was read from. It closes when
-// they, or the channels the list shows, change under it, as a new catalogue or the setting for
-// adults does. The main process checks the same as it saves, so an order from an older list
-// never lands: it answers that the favourites changed, and the draft asks to be read again.
+// another subscription connects, and when the favourites or the channels the list shows change
+// under it, as a new catalogue or the setting for adults does. The main process checks the same
+// as it saves, so an order from an older list never lands: it answers that the favourites
+// changed, and the draft asks to be read again. Once saved, the list shows the channels the main
+// process names for the record it answered with, and nothing of the draft.
 //   Up and Down move the selection; PageUp, PageDown, Home and End jump. With Alt, or Option on a
 // Mac, the same keys move the selected channel: one place, ten, or to the top or bottom. Enter
 // saves and Escape cancels.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
+import type { Viewing } from "@mrstreamer/contracts/viewing";
 import { appError } from "../../lib/errors.ts";
 import { call } from "../../lib/ipc.ts";
 import { keepViewing, queries } from "../../lib/queries.ts";
@@ -23,7 +26,10 @@ interface Draft {
   readonly subscription: string;
   /** Every favourite as read, with those the list doesn't show. */
   readonly original: readonly string[];
-  /** The channels the list showed, as read. */
+  /**
+   * The channels the list showed, as read: the array the lists' cache gave, which it keeps giving
+   * until a read finds a channel changed.
+   */
   readonly listed: readonly LiveChannel[];
   /** The same channels as arranged. */
   readonly order: readonly LiveChannel[];
@@ -33,9 +39,9 @@ interface Draft {
    */
   readonly focus: { readonly id: string; readonly part: RowPart; readonly asked: number };
   /**
-   * `saving` until the main process answers, and nothing moves meanwhile. `failed` keeps the
-   * draft to send again. `changed` when the favourites are no longer the ones read: the draft
-   * can't be saved, only read again, which `reading` waits for.
+   * `saving` until the main process answered and the list it names is read, and nothing moves
+   * meanwhile. `failed` keeps the draft to send again. `changed` when the favourites are no
+   * longer the ones read: the draft can't be saved, only read again, which `reading` waits for.
    */
   readonly status: "editing" | "saving" | "failed" | "changed" | "reading";
   /**
@@ -96,7 +102,7 @@ export function orderKey(event: KeyboardEvent, order: OrderEditor): void {
 }
 
 const sameIds = (a: readonly string[], b: readonly string[]) =>
-  a.length === b.length && a.every((id, at) => id === b[at]);
+  a === b || (a.length === b.length && a.every((id, at) => id === b[at]));
 
 const idsOf = (channels: readonly LiveChannel[]) => channels.map((channel) => channel.id);
 
@@ -141,22 +147,22 @@ export function useFavouriteOrder(
   const client = useQueryClient();
   const subscription = useQuery(queries.subscription()).data?.id ?? null;
   const favourites = useQuery(queries.viewing()).data?.favourites;
-  const [draft, setDraft] = useState<Draft | null>(null);
+  const [held, setDraft] = useState<Draft | null>(null);
 
-  // A draft ends when the list is left, and when the favourites or the channels shown are no
-  // longer the ones it was made from: an order of an older list is no order of this one. One
-  // that waits for the main process stays for its answer, and one it refused to be read again.
+  // A draft ends when the list is left and when another subscription connects, whatever it waits
+  // for: an answer that comes later finds no draft to change. One being arranged ends too when
+  // the favourites or the channels shown are no longer the ones it was made from. The channels
+  // are the same for as long as the lists' cache gives the same array, which it does through
+  // every read that finds them unchanged: another name, logo or stream makes another array, as
+  // another channel does, and programmes or a watch in between make none.
   const obsolete =
-    draft !== null &&
+    held !== null &&
     (!open ||
-      ((draft.status === "editing" || draft.status === "failed") &&
-        (!favourites ||
-          !channels ||
-          !sameIds(favourites, draft.original) ||
-          !sameIds(idsOf(channels), idsOf(draft.listed)))));
-  useEffect(() => {
-    if (obsolete) setDraft(null);
-  }, [obsolete]);
+      held.subscription !== subscription ||
+      ((held.status === "editing" || held.status === "failed") &&
+        (!favourites || !sameIds(favourites, held.original) || channels !== held.listed)));
+  if (obsolete) setDraft(null);
+  const draft = obsolete ? null : held;
 
   // While a draft waits for the main process nothing else happens to it, and nothing takes the
   // viewer away from it before the answer: the keys rest, for every listener of the window.
@@ -176,12 +182,41 @@ export function useFavouriteOrder(
 
   /**
    * Changes the draft once an answer is in, if it still waits for that one: a draft cancelled or
-   * started since stays as it is.
+   * started since stays as it is, and one that ended stays ended.
    */
   const answer = (token: string, next: (waiting: Draft) => Draft | null) =>
     setDraft((current) =>
       current && waits(current) && current.commandId === token ? next(current) : current,
     );
+
+  /** Whether the subscription an answer is for is still the one connected. */
+  const connected = (id: string) => client.getQueryData(queries.subscription().queryKey)?.id === id;
+
+  /**
+   * Reads the channels of `ids` from the main process, as it lists them now, into the lists'
+   * cache, and gives the array the list gets for them from then on.
+   */
+  const read = async (ids: readonly string[]) => {
+    if (ids.length === 0) return undefined;
+    const listed = queries.channelsById(ids);
+    await client.fetchQuery({ ...listed, staleTime: 0 });
+    return client.getQueryData(listed.queryKey);
+  };
+
+  /**
+   * Takes in the record the main process answered an order with: the record as it stands, which
+   * for an order sent again can be further on than that order. So the list shows the channels
+   * the main process names for the record's favourites, read before it shows them, and never
+   * the draft's. An answer for a subscription gone since tells the lists of the next nothing,
+   * and neither does one older than the record they hold.
+   */
+  const takeIn = async (from: string, viewing: Viewing) => {
+    const later = client.getQueryData(queries.viewing().queryKey)?.sequence ?? 0;
+    if (!connected(from) || later > viewing.sequence) return;
+    // A list that can't be read says so itself, once it shows.
+    await read(viewing.favourites).catch(() => {});
+    if (connected(from)) keepViewing(client, viewing);
+  };
 
   const select = (id: string, part: RowPart = "row") => {
     if (!draft || waiting) return;
@@ -199,13 +234,8 @@ export function useFavouriteOrder(
       original: [...original],
       order: idsOf(order),
     }).then(
-      (viewing) => {
-        // An answer for a subscription that has gone since tells the lists of the next nothing.
-        if (client.getQueryData(queries.subscription().queryKey)?.id === subscription) {
-          // The list in its new order, at hand before it shows: it never stands empty between.
-          client.setQueryData(queries.channelsById(viewing.favourites).queryKey, order);
-          keepViewing(client, viewing);
-        }
+      async (viewing) => {
+        await takeIn(subscription, viewing);
         answer(commandId, () => null);
       },
       (cause: unknown) => {
@@ -224,13 +254,8 @@ export function useFavouriteOrder(
     setDraft({ ...from, status: "reading", commandId: token });
     void (async () => {
       const viewing = await client.fetchQuery({ ...queries.viewing(), staleTime: 0 });
-      const listed =
-        viewing.favourites.length > 0
-          ? await client.fetchQuery({ ...queries.channelsById(viewing.favourites), staleTime: 0 })
-          : [];
-      if (client.getQueryData(queries.subscription().queryKey)?.id !== from.subscription) {
-        return null;
-      }
+      const listed = await read(viewing.favourites);
+      if (!listed || !connected(from.subscription)) return null;
       const { id, asked } = from.focus;
       return drafted(from.subscription, viewing.favourites, listed, id, asked + 1);
     })().then(

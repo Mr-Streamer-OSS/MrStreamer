@@ -127,8 +127,8 @@ export class ViewingRecord extends Context.Service<
      * Puts the favourites of the subscription they were read from in another order. Each channel
      * moves with every stream of it that is stored, and the favourites the order leaves out keep
      * their places. Fails with `favourites-changed` when the subscription is no longer the one
-     * connected, or when its favourites no longer show as `order.original`, by what is stored
-     * as the change commits. Adds and removes none.
+     * connected as the change commits, or when its favourites no longer show as
+     * `order.original` by what is stored then. Adds and removes none.
      */
     reorderFavourites(commandId: string, order: FavouriteOrder): Effect.Effect<Viewing, Failed>;
     /** Puts a channel first among those watched recently, by its own id. */
@@ -245,8 +245,9 @@ function make() {
     /**
      * Commits the command `command` makes, from the account's channels and from its state as
      * stored when the change commits, or refuses with the `Failed` it gives instead. `owner`
-     * names the account a command was made for: with another one connected it is refused, and
-     * what it then reads and changes is that account's alone, whichever connects meanwhile.
+     * names the account a command was made for: it is refused unless that account is connected,
+     * when it arrives and again once its channels are found. Nothing waits between that second
+     * answer and the commit, so an account that went or changed meanwhile gets no order.
      */
     const run = (
       commandId: string,
@@ -258,6 +259,8 @@ function make() {
         if (!key) return yield* new Failed({ error: { kind: "no-subscription" } });
         if (owner !== undefined && key !== owner) return yield* changed;
         const channelOf = yield* channels.lookup(key);
+        // Finding the channels can take a read of the catalogue from disk.
+        if (owner !== undefined && (yield* account.current) !== owner) return yield* changed;
         const stored = yield* store.commit({
           account: key,
           commandId,

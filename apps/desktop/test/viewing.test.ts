@@ -421,6 +421,30 @@ describe("the order of the favourites", () => {
     expect(await (await app.start()).listed()).toEqual([one, fhd, two]);
   });
 
+  it("leaves a stream the provider dropped in its own place, where its channel shows again once it is back", async () => {
+    const { app, viewing } = await withFavourites([sd, one, two]);
+    const account = await viewing.account();
+    const [provider] = app.providers;
+    provider.serveChannels((all) => all.filter(({ streamId }) => String(streamId) !== fhd));
+    await viewing.library.refresh();
+    // While it is gone, the stream is a favourite of its own that no list shows.
+    const without = (await viewing.state()).favourites;
+    expect(without).toEqual([fhd, hd, one, two]);
+    expect(await viewing.listed()).toEqual([hd, one, two]);
+
+    // The channel goes last with the streams it has left, and the one gone stays first.
+    await viewing.reorder(without, [one, two, hd]);
+    expect(stored(app, account)).toEqual([fhd, one, two, hd, sd]);
+    expect(await viewing.listed()).toEqual([one, two, hd]);
+
+    // Listed again, the stream is the channel's once more. A channel shows at the first of its
+    // streams stored, so it is back where that stream stood: the order made without it is lost
+    // for this channel alone.
+    provider.serveChannels((all) => all);
+    await viewing.library.refresh();
+    expect(await viewing.listed()).toEqual([fhd, one, two]);
+  });
+
   it("leaves the favourites the lists don't show where they are, and adds or removes none", async () => {
     const { viewing, original } = await withFavourites([one, adult, two, "gone", three], {
       adultChannels: true,
@@ -491,6 +515,21 @@ describe("the order of the favourites", () => {
     expect(stored(app, second)).toEqual([two, three, one]);
     await app.connect(0);
     expect((await viewing.state()).favourites).toEqual([one, two, three]);
+  });
+
+  it("refuses an order whose subscription went while its channels were read", async () => {
+    const { app, viewing, original } = await withFavourites([one, two, three]);
+    const first = await viewing.account();
+    // After a start the catalogue is read from disk for the first command that needs it, and
+    // the subscription is removed in that time.
+    const restarted = await app.start();
+    const refused = expect(
+      restarted.reorder(original, [three, two, one], { from: first }),
+    ).rejects.toMatchObject({ error: { kind: "favourites-changed" } });
+    await app.disconnect();
+
+    await refused;
+    expect(stored(app, first)).toEqual([one, two, three]);
   });
 
   it("saves an order once however often it is sent, and writes nothing for one that changes nothing", async () => {
