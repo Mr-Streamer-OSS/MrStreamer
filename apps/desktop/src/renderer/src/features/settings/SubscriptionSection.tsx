@@ -20,7 +20,7 @@ import { resetForAccount, useUi } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { Input } from "../../components/ui/input.tsx";
 import { appError, describeError, formatDate } from "../../lib/errors.ts";
-import { clockTime, hostOf } from "../../lib/format.ts";
+import { clockTime, hostOf, namesList } from "../../lib/format.ts";
 import { call } from "../../lib/ipc.ts";
 import { queries, subscriptionName, useSubscriptions } from "../../lib/queries.ts";
 import { cn } from "../../lib/utils.ts";
@@ -653,11 +653,12 @@ function Secret({
 /**
  * Remove, confirmed in the list. It says what stops and what stays: a stream that plays from the
  * subscription ends, the others' content stays in every list, and removing the only one returns
- * to Connect. Favourites, history and progress stay for when the account is added again, unless
- * the viewer ticks the box to delete them too. Once Remove is pressed its stream has stopped and
- * the box's answer is sent, so the box and Keep wait for the removal to be answered. With it gone
- * and the others' lists read again, the player holds no channel of it, so the page underneath
- * previews the channel watched last among those that stay.
+ * to Connect. Favourites, the watchlist, history and progress stay for when the account is added
+ * again, unless the viewer ticks the box to delete them too. Once Remove is pressed its stream
+ * has stopped and the box's answer is sent, so the box and Keep wait for the removal to be
+ * answered. With it gone and the others' lists read again, the player holds no channel of it, so
+ * the page underneath previews the channel watched last among those that stay. A sheet left open
+ * under Settings for a title it had saved closes too.
  */
 function Remove({
   subscription,
@@ -698,6 +699,7 @@ function Remove({
       // The others stay as they are: only what named this one goes.
       useUi.setState((state) => ({
         details: state.details?.subscriptionId === id ? null : state.details,
+        savedEntry: state.savedEntry?.sources.includes(id) ? null : state.savedEntry,
       }));
       client.setQueryData(queries.subscriptions().queryKey, others);
       onKeep();
@@ -719,7 +721,7 @@ function Remove({
             playing && `${playing} is playing from it and stops.`,
             stays.length === 0
               ? "It's your only subscription, so Mr. Streamer returns to Connect."
-              : playing && `${listed(stays)} ${stays.length === 1 ? "stays" : "stay"}.`,
+              : playing && `${namesList(stays)} ${stays.length === 1 ? "stays" : "stay"}.`,
           ]
             .filter(Boolean)
             .join(" ")}
@@ -736,7 +738,7 @@ function Remove({
             <Check className="size-3 text-black" strokeWidth={3} />
           </Checkbox.Indicator>
         </Checkbox.Root>
-        Also delete favourites, history and progress
+        Also delete favourites, watchlist, history and progress
       </label>
       <div className="flex gap-3">
         <Button variant="destructive" disabled={remove.isPending} onClick={() => remove.mutate()}>
@@ -751,12 +753,6 @@ function Remove({
       )}
     </div>
   );
-}
-
-/** "Holiday house and Openlist playlist", "A, B and C". */
-function listed(names: readonly string[]): string {
-  const last = names.at(-1) ?? "";
-  return names.length < 2 ? last : `${names.slice(0, -1).join(", ")} and ${last}`;
 }
 
 function stateName(state: SubscriptionSummary["account"]["state"]): string {

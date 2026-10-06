@@ -277,6 +277,7 @@ function stillThere(from: ReturnType<typeof useUi.getState>): boolean {
     now.watching === from.watching &&
     now.playingTitle === from.playingTitle &&
     now.details === from.details &&
+    now.savedEntry === from.savedEntry &&
     now.settings === from.settings &&
     now.searchOpen === from.searchOpen
   );

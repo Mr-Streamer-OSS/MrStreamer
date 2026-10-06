@@ -44,8 +44,10 @@ export class Roster extends Context.Service<
     /**
      * Removes a subscription with what was loaded from it. What plays from it stops first, here
      * and on a receiver, with how far it got saved under its own account; what plays from another
-     * goes on. `eraseViewing` also deletes its account's favourites, history and progress, before
-     * the login goes: a record that can't be erased leaves the subscription to try again.
+     * goes on. `eraseViewing` also deletes its account's favourites, watchlist, history and
+     * progress, once the subscription is saved no more and before its login goes. Whatever was
+     * starred, saved or played for it while the removal took its time is deleted with the rest
+     * or never stored. A record that can't be erased leaves the subscription to try again.
      */
     remove(subscriptionId: string, eraseViewing: boolean): Effect.Effect<void, Failed>;
     /**
@@ -122,8 +124,12 @@ function make() {
           if (!subscription) return;
           yield* output.subscriptionGone(subscriptionId);
           yield* playback.closeOf(subscriptionId);
-          if (eraseViewing) yield* viewing.erase(subscription.key);
-          yield* subscriptions.remove(subscriptionId);
+          // Erased as it goes, and not before: while the removal waits its turn the subscription
+          // is saved still, and what is starred or saved for it then has to go with the rest.
+          yield* subscriptions.remove(
+            subscriptionId,
+            eraseViewing ? viewing.erase(subscription.key) : undefined,
+          );
           // An open asked for as it went has had its turn by now, and found it saved still.
           yield* playback.closeOf(subscriptionId);
           yield* Effect.all(

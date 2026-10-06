@@ -214,10 +214,16 @@ async function openLongSeries(page: Page): Promise<void> {
   await key(page, "Escape", 27);
 }
 
+/**
+ * Clicks the button that reads `text`, or else the first that starts with it: Home's Watch, not
+ * the top bar's Watchlist.
+ */
 function clickText(page: Page, text: string): Promise<unknown> {
   return page.evaluate(`(() => {
-    const target = [...document.querySelectorAll("button, [role=button]")]
-      .find((element) => element.textContent.trim().startsWith(${JSON.stringify(text)}));
+    const reads = (element) => element.textContent.trim();
+    const buttons = [...document.querySelectorAll("button, [role=button]")];
+    const target = buttons.find((element) => reads(element) === ${JSON.stringify(text)})
+      ?? buttons.find((element) => reads(element).startsWith(${JSON.stringify(text)}));
     if (!target) throw new Error("No button " + ${JSON.stringify(text)});
     target.click();
   })()`);

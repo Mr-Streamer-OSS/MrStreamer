@@ -9,6 +9,8 @@ import { SettingsPage } from "../features/settings/SettingsPage.tsx";
 import { TitlesPage } from "../features/titles/TitlesPage.tsx";
 import { DetailsView } from "../features/titles/DetailsView.tsx";
 import { TitleWatch } from "../features/titles/TitleWatch.tsx";
+import { SavedSheet } from "../features/watchlist/SavedSheet.tsx";
+import { WatchlistPage } from "../features/watchlist/WatchlistPage.tsx";
 import { ReceiverBar, useReceiverBar } from "../features/watch/ReceiverBar.tsx";
 import { WatchScreen } from "../features/watch/WatchScreen.tsx";
 import { appError, describeError } from "../lib/errors.ts";
@@ -75,17 +77,19 @@ export function App() {
 }
 
 /**
- * The page (Home, Live TV, Movies or Series), with details, Watch and a playing title opening over
- * it. The page stays laid out underneath, so leaving any of them finds it scrolled where it was,
- * and takes no input meanwhile. Search and settings are available everywhere. Subscriptions with
- * live TV only, playlists, have no Movies or Series: Home stands in for them. While a receiver
- * on the network is connected, its bar stands at the foot of every page, and the pages end above.
+ * The page (Home, Live TV, Movies, Series or Watchlist), with details, Watch and a playing title
+ * opening over it. The page stays laid out underneath, so leaving any of them finds it scrolled
+ * where it was, and takes no input meanwhile. Search and settings are available everywhere.
+ * Subscriptions with live TV only, playlists, have no Movies, Series or Watchlist: Home stands in
+ * for them. While a receiver on the network is connected, its bar stands at the foot of every
+ * page, and the pages end above.
  */
 function Shell({ liveOnly }: { liveOnly: boolean }) {
   const view = useUi((state) => (liveOnly && !isLivePage(state.view) ? "home" : state.view));
   const watching = useUi((state) => state.watching);
   const playingTitle = useUi((state) => state.playingTitle);
   const details = useUi((state) => state.details);
+  const savedEntry = useUi((state) => state.savedEntry);
   const settingsOpen = useUi((state) => state.settings !== null);
   const covered = watching || playingTitle;
   useReceiverBar();
@@ -124,7 +128,7 @@ function Shell({ liveOnly }: { liveOnly: boolean }) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const pageActive = !covered && !details;
+  const pageActive = !covered && !details && !savedEntry;
   return (
     <>
       <div
@@ -135,6 +139,8 @@ function Shell({ liveOnly }: { liveOnly: boolean }) {
           <HomeScreen active={pageActive} />
         ) : view === "live" ? (
           <GuidePage active={pageActive} />
+        ) : view === "watchlist" ? (
+          <WatchlistPage active={pageActive} />
         ) : (
           // Its own page per kind, so one never shows the other's lists while its own load.
           <TitlesPage
@@ -147,6 +153,9 @@ function Shell({ liveOnly }: { liveOnly: boolean }) {
       {/* Closed under Settings, whose Escape would otherwise reach the sheet's focus first. */}
       {details && !covered && !settingsOpen && (
         <DetailsView key={`${details.kind}:${ownedKey(details)}`} target={details} />
+      )}
+      {savedEntry && !covered && !settingsOpen && (
+        <SavedSheet key={ownedKey(savedEntry)} entry={savedEntry} />
       )}
       {!covered && <ReceiverBar />}
       {watching && <WatchScreen />}
@@ -162,15 +171,25 @@ function subscribeVisibility(onChange: () => void): () => void {
   return () => document.removeEventListener("visibilitychange", onChange);
 }
 
-/** Pages that show the last channel's muted preview. Movies and Series show artwork instead. */
-const PREVIEWS: Record<View, boolean> = { home: true, live: true, movies: false, series: false };
+/**
+ * Pages that show the last channel's muted preview. Movies, Series and the Watchlist show artwork
+ * instead.
+ */
+const PREVIEWS: Record<View, boolean> = {
+  home: true,
+  live: true,
+  movies: false,
+  series: false,
+  watchlist: false,
+};
 
 /**
- * Keeps the last channel playing, muted, behind Home and the guide. Movies and Series stop it, and
- * coming back starts it again, muted. A minimised or hidden window stops a muted preview too, and
- * showing it again starts the preview again. A preview that failed, as when another device holds
- * the connection, stays failed. Watch and a playing title are left alone. Nothing previews while
- * a receiver is connected, which the provider's one connection is for; back here, it starts again.
+ * Keeps the last channel playing, muted, behind Home and the guide. Movies, Series and the
+ * Watchlist stop it, and coming back starts it again, muted. A minimised or hidden window stops
+ * a muted preview too, and showing it again starts the preview again. A preview that failed, as
+ * when another device holds the connection, stays failed. Watch and a playing title are left
+ * alone. Nothing previews while a receiver is connected, which the provider's one connection is
+ * for; back here, it starts again.
  */
 function usePreview(covered: boolean, view: View): void {
   const visible = useSyncExternalStore(

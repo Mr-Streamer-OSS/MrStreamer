@@ -14,6 +14,7 @@ const VIEWS: readonly { readonly view: View; readonly label: string }[] = [
   { view: "live", label: "Live TV" },
   { view: "movies", label: "Movies" },
   { view: "series", label: "Series" },
+  { view: "watchlist", label: "Watchlist" },
 ];
 
 /**
@@ -21,16 +22,16 @@ const VIEWS: readonly { readonly view: View; readonly label: string }[] = [
  * the window's drag area; macOS draws its traffic lights on the left and Windows its controls on
  * the right, except in full screen, where the bar takes their room. Over Settings, Watch or a
  * title's details, Back takes the pages' place and returns to the page underneath. `onBack`
- * overrides where it goes, as a playing title or an open collection does.
+ * overrides where it goes, as a playing title or an open collection does. Subscriptions with
+ * live TV only have no Movies, Series or Watchlist.
  */
 export function WindowBar({ className, onBack }: { className?: string; onBack?: () => void }) {
   const view = useUi((state) => state.view);
-  // A playlist has live TV only.
-  // Playlists have live TV only: Movies and Series show once a subscription has them.
+  // Playlists have live TV only: Movies, Series and Watchlist show once a subscription has them.
   const liveOnly = useSubscriptions().every((each) => each.kind === "m3u");
   const watching = useUi((state) => state.watching);
   const settingsOpen = useUi((state) => state.settings !== null);
-  const detailsOpen = useUi((state) => state.details !== null);
+  const detailsOpen = useUi((state) => state.details !== null || state.savedEntry !== null);
   // In full screen the system's window controls are hidden, and their room goes with them.
   const controls = !useWindowFullScreen();
   const back =
@@ -40,7 +41,7 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
       : watching
         ? closeWatch
         : detailsOpen
-          ? () => useUi.setState({ details: null })
+          ? () => useUi.setState({ details: null, savedEntry: null })
           : null);
   return (
     <header

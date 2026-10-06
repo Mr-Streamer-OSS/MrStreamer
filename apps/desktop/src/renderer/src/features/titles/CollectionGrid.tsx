@@ -1,11 +1,11 @@
 // A collection as a grid of posters, in rows that fit the width, fetched a page at a time and
-// drawn only where in view; search results use the same grid. A poster opens its details over
-// the grid, which stays where it was.
+// drawn only where in view; search results and the watchlist use the same grid. A poster opens
+// its details over the grid, which stays where it was.
 //   The arrow keys move the selection through the grid, Page Up and Down by a screen, Home and End
 //   to the ends; Enter opens the title. The pointer only hovers.
 import { useQueries } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type {
   CollectionId,
   CollectionSort,
@@ -23,26 +23,25 @@ import { useRem } from "../../lib/use-rem.ts";
 import { cn } from "../../lib/utils.ts";
 
 /** Titles asked for together as rows come into view. */
-const PAGE = 120;
+export const PAGE = 120;
 const FIRST_PAGE: ReadonlySet<number> = new Set([0]);
 const POSTER_REM = 9;
 const GAP_REM = 1.25;
 
 /**
- * A collection's titles, fetched a page at a time as the grid asks. `titleAt` answers for loaded
- * positions; `load` asks for the pages around the positions in view.
+ * Which pages of the list `listKey` names to fetch: the first, and those the grid asked for
+ * since. Another list starts again from its first. `load` asks for the pages around the positions
+ * in view.
  */
-export function useCollection(kind: TitleKind, id: CollectionId, sort?: CollectionSort) {
-  const listKey = `${kind}:${id}:${sort ?? ""}`;
-  // The pages asked for, of this list only: another list starts again from the first.
+export function usePages(listKey: string): {
+  readonly pages: readonly number[];
+  readonly load: (first: number, last: number) => void;
+} {
   const [asked, setAsked] = useState<{ key: string; pages: ReadonlySet<number> }>(() => ({
     key: listKey,
     pages: FIRST_PAGE,
   }));
   const pages = asked.key === listKey ? asked.pages : FIRST_PAGE;
-  const loaded = useQueries({
-    queries: [...pages].map((page) => queries.collection(kind, id, sort, page * PAGE, PAGE)),
-  });
   const load = useCallback(
     (first: number, last: number) => {
       // Nothing in view yet, before the grid has measured its rows.
@@ -58,7 +57,19 @@ export function useCollection(kind: TitleKind, id: CollectionId, sort?: Collecti
     },
     [listKey],
   );
-  const byPage = new Map([...pages].map((page, index) => [page, loaded[index]?.data]));
+  return { pages: [...pages], load };
+}
+
+/**
+ * A collection's titles, fetched a page at a time as the grid asks. `titleAt` answers for loaded
+ * positions; `load` asks for the pages around the positions in view.
+ */
+export function useCollection(kind: TitleKind, id: CollectionId, sort?: CollectionSort) {
+  const { pages, load } = usePages(`${kind}:${id}:${sort ?? ""}`);
+  const loaded = useQueries({
+    queries: pages.map((page) => queries.collection(kind, id, sort, page * PAGE, PAGE)),
+  });
+  const byPage = new Map(pages.map((page, index) => [page, loaded[index]?.data]));
   const first = byPage.get(0);
   return {
     name: first?.name ?? null,
@@ -88,14 +99,25 @@ export function CollectionGrid({
   if (listed.total === 0) {
     return <p className="text-[0.9375rem] text-muted-foreground">Nothing here yet.</p>;
   }
+  // Each poster is the version the grid lists, as the 4K tab's are their 4K versions.
+  const open = (title: Title) =>
+    openDetails({ kind: title.kind, ...ownedId(title), asked: id === "4k" });
   return (
     <Grid
       key={`${kind}:${id}:${sort ?? ""}`}
       total={listed.total ?? 0}
-      titleAt={listed.titleAt}
+      itemAt={listed.titleAt}
       onVisible={listed.load}
       active={active}
-      asked={id === "4k"}
+      onOpen={open}
+      tile={(title, selected) => (
+        <GridPoster
+          title={title}
+          caption={describe(title)}
+          selected={selected}
+          onOpen={() => open(title)}
+        />
+      )}
     />
   );
 }
@@ -113,41 +135,54 @@ const nothing = () => {};
 export function TitleGrid({
   titles,
   active,
-  caption,
+  caption = describe,
 }: {
   titles: readonly Title[];
   active: boolean;
   caption?: (title: Title) => string;
 }) {
+  const open = (title: Title) => openDetails({ kind: title.kind, ...ownedId(title) });
   return (
     <Grid
       total={titles.length}
-      titleAt={(index) => titles[index]}
+      itemAt={(index) => titles[index]}
       onVisible={nothing}
       active={active}
-      {...(caption ? { caption } : {})}
+      onOpen={open}
+      tile={(title, selected) => (
+        <GridPoster
+          title={title}
+          caption={caption(title)}
+          selected={selected}
+          onOpen={() => open(title)}
+        />
+      )}
     />
   );
 }
 
-/** The posters in rows that fit the width, drawing only the rows in view. */
-function Grid({
+/**
+ * Tiles in rows that fit the width, drawing only the rows in view: a collection's posters, or
+ * whatever `tile` draws for an item, 2:3 with a name and one line under it.
+ */
+export function Grid<T>({
   total,
-  titleAt,
+  itemAt,
   onVisible,
   active,
-  caption = describe,
-  asked = false,
+  onOpen,
+  tile,
 }: {
   total: number;
-  titleAt: (index: number) => Title | undefined;
+  /** The item at a position, or undefined while its page loads. */
+  itemAt: (index: number) => T | undefined;
   onVisible: (first: number, last: number) => void;
   active: boolean;
-  caption?: (title: Title) => string;
-  /** Each poster is the version the grid asks for, as the 4K tab's are their 4K versions. */
-  asked?: boolean;
+  /** What Enter does with the item the keyboard selected. */
+  onOpen: (item: T) => void;
+  /** Draws an item; `selected` while the keyboard is on it. */
+  tile: (item: T, selected: boolean) => ReactNode;
 }) {
-  const open = (title: Title) => openDetails({ kind: title.kind, ...ownedId(title), asked });
   const box = useRef<HTMLDivElement>(null);
   const rem = useRem();
   const [width, setWidth] = useState(0);
@@ -184,8 +219,8 @@ function Grid({
   const [chosen, setSelected] = useState(0);
   // Within the list, when it shrank since.
   const selected = Math.min(chosen, Math.max(total - 1, 0));
-  const state = useRef({ selected, columns, total, titleAt, rowsInView: items.length });
-  state.current = { selected, columns, total, titleAt, rowsInView: items.length };
+  const state = useRef({ selected, columns, total, itemAt, onOpen, rowsInView: items.length });
+  state.current = { selected, columns, total, itemAt, onOpen, rowsInView: items.length };
   useEffect(() => {
     if (!active) return;
     function onKey(event: KeyboardEvent) {
@@ -227,8 +262,8 @@ function Grid({
           move(now.total);
           break;
         case "Enter": {
-          const title = now.titleAt(now.selected);
-          if (title) open(title);
+          const item = now.itemAt(now.selected);
+          if (item) now.onOpen(item);
           break;
         }
         default:
@@ -256,15 +291,11 @@ function Grid({
             {Array.from({ length: columns }, (_, column) => {
               const index = row.index * columns + column;
               if (index >= total) return null;
-              const title = titleAt(index);
-              return title ? (
-                <GridPoster
-                  key={index}
-                  title={title}
-                  caption={caption(title)}
-                  selected={keyboard && active && index === selected}
-                  onOpen={() => open(title)}
-                />
+              const item = itemAt(index);
+              return item ? (
+                <Fragment key={index}>
+                  {tile(item, keyboard && active && index === selected)}
+                </Fragment>
               ) : (
                 <div key={index}>
                   <div className="aspect-[2/3] rounded-xl bg-white/4" />

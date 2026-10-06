@@ -16,6 +16,7 @@ import {
 } from "@mrstreamer/contracts/preferences";
 import { DEFAULT_TITLE_LANGUAGE, TITLE_LANGUAGES } from "@mrstreamer/core/ondemand/languages";
 import { languageName } from "@mrstreamer/core/ondemand/tracks";
+import { useUi } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { Input } from "../../components/ui/input.tsx";
 import { appError, describeError } from "../../lib/errors.ts";
@@ -42,13 +43,24 @@ export function GeneralSection() {
   const preferences = useQuery({ ...queries.preferences(), refetchOnMount: "always" });
   const update = useMutation({
     mutationFn: (patch: Partial<Preferences>) => call("preferences.update", patch),
+    // The sheet of a saved title the provider dropped stays open under Settings, and holds the
+    // entry as it was read while titles for adults showed. It closes as the viewer hides them,
+    // before anything is waited for, so leaving Settings never shows it again.
+    onMutate: (patch) => {
+      if (patch.adultTitles === false) useUi.setState({ savedEntry: null });
+    },
     onSuccess: async (saved, patch) => {
       client.setQueryData(queries.preferences().queryKey, saved);
+      // Saved titles for adults follow the setting first, with nothing waited for before. Reset
+      // rather than read again, so one now hidden doesn't stay on from before.
+      if ("adultTitles" in patch) await client.resetQueries({ queryKey: ["watchlist"] });
       if (LIST_CHANGES.some((key) => key in patch)) {
         await client.invalidateQueries({ queryKey: ["ondemand"] });
+        // The watchlist shows the same titles, under the same names.
+        await client.invalidateQueries({ queryKey: ["watchlist"] });
       }
-      // Live TV's channels for adults, and their programmes, follow the same setting. Reset rather
-      // than read again, so a channel now hidden doesn't stay on from before.
+      // Live TV's channels for adults, and their programmes, follow the same setting. Reset
+      // rather than read again, for the same reason.
       if ("adultTitles" in patch) {
         await client.resetQueries({ queryKey: ["library"] });
         await client.resetQueries({ queryKey: ["guide"] });

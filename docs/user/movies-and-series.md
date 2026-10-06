@@ -47,7 +47,26 @@ A poster opens its details over the list, which stays where it was: the artwork,
 - **Play** starts something new. For a series it plays the episode you're on: the one you stopped in, the next one after one you finished, or the first.
 - The arrow beside **Play** shows when there are several versions, each named for what you hear and read, such as "English sound, Nederlands subtitles" or "Deutsch sound · 4K", from the marks in your provider's list and the language the title was made in; the line under the buttons says which one plays, and **Automatic** shows which it picks. **Automatic** plays the 4K version of a title opened from the 4K tab, carries on in the version you were watching, or else plays the one that suits your language. Pick another and that title plays it from then on, from Home and the lists too, and a series lists its episodes. How far you got carries over within one subscription. When several subscriptions offer the title, each version also says which subscription it is from, and one from another subscription starts from the beginning: see [picking which subscription plays a title](subscriptions.md#picking-which-subscription-plays-a-title). A pick goes when you remove its subscription.
 - A series opens on the season you're watching. Each episode shows its name, air date, length and story, and once TMDB answers for that season, its rating, director and guest stars where TMDB has them. Other seasons ask TMDB nothing until you open their tab. Watched episodes have a check mark, and one you stopped in shows how far you got. Click an episode to play it.
+- **Save** puts the movie, or the whole series, on your [watchlist](#watchlist). The button then reads **Saved**, and pressing it again takes the title off.
 - **Remove from Continue watching** takes the title off Home's row, every version of it, and the button goes. How far you got stays, so **Resume** carries on. The title comes back to the row when you play it again.
+
+## Watchlist
+
+**Save** in a title's details keeps a movie or a whole series for later. It works as soon as the details open, before the story and the cast arrive. Episodes can't be saved on their own.
+
+**Watchlist** in the top bar shows everything you saved, movies and series together, the title saved last first. **A to Z** sorts them by name. Home has a **Watchlist** row after Continue watching, and its **All** opens the page. A poster opens the title's details, and it plays from there as from anywhere else. On the page the arrow keys move through the posters, Enter opens one, and Tab reaches the × on each poster.
+
+Only you take a title off: with the × on its poster, or with **Saved** in its details. Starting a title, finishing it or removing it from Continue watching leaves it saved, and saving changes nothing about how far you got. The same title can be in both rows.
+
+A title is saved once, whichever language or quality you opened it in, and it stays the same entry when your provider renames it or lists other versions of it. Mr. Streamer follows it by its TMDB id. A title your provider lists without one is followed by your provider's own number for it, never by its name, so it can't turn into another title that happens to be called the same.
+
+With [several subscriptions](subscriptions.md), a film or series that two of them offer under the same TMDB id is one poster on the watchlist, as it is in Movies and Series. **Save** saves it for every subscription that offers it at that moment and asks nothing. The arrow beside **Play** picks which one plays, and the × takes the title off for all of them. Two titles that only share a name, or a provider's number, stay two entries. A subscription you add later plays a saved title it offers too. The title stays saved for the subscriptions you saved it from, and for no other.
+
+When no provider lists a saved title any more, it stays on the watchlist, dimmed and marked **Unavailable**. Open it to remove it, or leave it: it plays again once a provider lists it again. With several subscriptions, it says which ones it was saved from. If a subscription's movie and series lists couldn't be refreshed, the page says so and shows what you saved from the lists it has.
+
+Saved titles for adults show, and count, only while **For adults** is on in Settings > General. They stay saved while it is off.
+
+The watchlist is kept on your computer, with the subscription each title was saved from, like favourites. **Remove**, on a subscription in Settings > Subscriptions, keeps what it saved for when you add the same account again, unless you tick the box that deletes it. A title you saved from another subscription as well stays on the list.
 
 ## Watching
 

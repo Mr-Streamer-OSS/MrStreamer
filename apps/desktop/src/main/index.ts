@@ -47,6 +47,7 @@ import { Settings } from "./services/preferences.ts";
 import { Roster } from "./services/roster.ts";
 import { Subscriptions } from "./services/subscription.ts";
 import { DEFAULT_SCHEDULE, Updates } from "./services/updates.ts";
+import { Watchlist } from "./services/watchlist.ts";
 
 // Matches `appId` in electron-builder.yml: Windows groups taskbar entries and notifications by it.
 const APP_ID = "app.mrstreamer.player";
@@ -381,6 +382,7 @@ async function start(): Promise<void> {
     updates,
     guide,
     viewing,
+    watchlist,
     diagnostics,
     licences,
   } = await runtime.runPromise(
@@ -395,6 +397,7 @@ async function start(): Promise<void> {
       updates: Updates,
       guide: Guide,
       viewing: ViewingRecord,
+      watchlist: Watchlist,
       diagnostics: Diagnostics,
       licences: Licences,
     }),
@@ -418,6 +421,7 @@ async function start(): Promise<void> {
   forward(onDemand.detailsChanged, "ondemand.detailsChanged", (title) => title);
   forward(guide.changes, "guide.updated", () => null);
   forward(viewing.changes, "viewing.changed", (sequence) => ({ sequence }));
+  forward(watchlist.changes, "watchlist.changed", () => null);
   forward(updates.changes, "updates.changed", (status) => status);
   // A receiver plays from this computer, so it stays awake while one does. The display may sleep.
   let awake: number | null = null;
@@ -647,6 +651,10 @@ async function start(): Promise<void> {
         viewing.removeFromContinue(commandId, titles),
       "viewing.finishSeries": ({ commandId, series }) => viewing.finishSeries(commandId, series),
       "viewing.progress": (titles) => viewing.progress(titles),
+      "watchlist.list": (query) => watchlist.list(query),
+      "watchlist.saved": ({ kind, version }) => watchlist.saved(kind, version),
+      "watchlist.save": ({ kind, version }) => watchlist.save(kind, version),
+      "watchlist.remove": ({ entry }) => Effect.as(watchlist.remove(entry), null),
       "updates.status": () => updates.status,
       "updates.setChannel": ({ channel }) => updates.setChannel(channel),
       "updates.check": () => updates.check,

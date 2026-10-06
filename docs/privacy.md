@@ -9,7 +9,7 @@ Data controller: Wout Stiens, Belgium, publishing as Mr Streamer OSS. Contact: p
 ## Summary
 
 - Mr. Streamer sends us nothing. It has no account, no analytics, no telemetry and no crash reporting.
-- Your login, settings, favourites and viewing history are stored only on your computer.
+- Your login, settings, favourites, watchlist and viewing history are stored only on your computer.
 - To play anything, the app connects to the provider or playlist you add, and the servers it points to. They can see what you watch, and a provider receives your login. Images and film information come from other services, and update checks go to GitHub.
 - If your provider has no encrypted address, your login is sent unencrypted. The app tells you before it does this.
 - When you play on a TV, the TV fetches the stream from your computer over your local network. It never receives your login or your provider's address.
@@ -30,6 +30,7 @@ The folder contains:
 - your subscriptions, each with its server address, your username, and your password, or the link of a playlist you added, which has no password. The password and the playlist link are encrypted with a key held by your system: the macOS Keychain, your Windows account, or GNOME Keyring or KWallet on Linux. On Linux without a keyring, a fixed key is used, so other programs running under your account can read them. The server address and username are not encrypted, and neither is the address of the server a playlist comes from. Beside them the app keeps a random id it gives each subscription on this computer, with the server address and username it belongs to and the name you gave it. The id is used only inside the app, where it also names the folder of a subscription you added beside your first, and is never sent anywhere.
 - your preferences, including your own TMDB key if you entered one. This key is not encrypted.
 - your favourites, the channels you watched, and your progress in movies and episodes
+- your watchlist: for each movie or series you saved, and each subscription you saved it from, its name, year and kind, whether the provider marks it for adults, when you saved it, its TMDB id, and the numbers that provider lists its versions under
 - copies of each provider's channel list, programme guide, and movie and series lists
 - information from TMDB about your providers' movies and series
 - your update channel
@@ -108,7 +109,7 @@ Our email and hosting providers process these messages and visits to our website
 
 ## Deleting your data
 
-- **Remove**, on a subscription in Settings > Subscriptions, deletes that subscription's login or playlist link, the id and the name the app kept for it, and the copies of its provider's lists and guide. Your other subscriptions keep theirs. Tick **Also delete favourites, history and progress** to delete that account's favourites, watched channels and progress in movies and episodes as well. Otherwise they remain, and reappear if you add the same account again.
+- **Remove**, on a subscription in Settings > Subscriptions, deletes that subscription's login or playlist link, the id and the name the app kept for it, and the copies of its provider's lists and guide. Your other subscriptions keep theirs. Tick **Also delete favourites, watchlist, history and progress** to delete that account's favourites, watchlist, watched channels and progress in movies and episodes as well. Otherwise they remain, and reappear if you add the same account again.
 - **Deleting the folder** listed above removes everything Mr. Streamer stores there. To also remove the password key, delete "Mr. Streamer Safe Storage" in Keychain Access on macOS, or the matching entry in your Linux keyring. The update folder can be deleted as well: `~/Library/Caches/mrstreamer-updater` on macOS, `%LOCALAPPDATA%\mrstreamer-updater` on Windows, or `~/.cache/mrstreamer-updater` on Linux.
 - **Uninstalling the app does not delete your data**, so a reinstall continues where you left off. The copy from the Microsoft Store is the exception: uninstalling it deletes its folder.
 - To ask us to delete messages or other data we hold about you, email privacy@mrstreamer.app.

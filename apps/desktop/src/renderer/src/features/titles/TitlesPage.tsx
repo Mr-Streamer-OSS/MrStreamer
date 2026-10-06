@@ -21,6 +21,7 @@ import {
 import { ownedId, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { isMac, isTyping } from "../../app/platform.ts";
 import { openDetails, openView, useUi } from "../../app/ui-store.ts";
+import { Sorts } from "../../components/Sorts.tsx";
 import { Artwork, PosterTile, StillTile } from "../../components/TitleArt.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { WindowBar } from "../../components/WindowBar.tsx";
@@ -192,7 +193,9 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
             <Tiles kind={kind} of={tab} onOpen={open} />
           ) : (
             <div className="flex min-h-0 flex-1 flex-col pl-10">
-              {tab === "all" && <Sorts value={place.sort} onChange={(sort) => go({ sort })} />}
+              {tab === "all" && (
+                <Sorts options={SORTS} value={place.sort} onChange={(sort) => go({ sort })} />
+              )}
               <CollectionGrid
                 kind={kind}
                 id={tab}
@@ -303,35 +306,6 @@ const SORTS: readonly { value: CollectionSort; label: string }[] = [
   { value: "title", label: "A–Z" },
 ];
 
-/** The sorts to pick from; none pressed while a collection shows in its own order. */
-function Sorts({
-  value,
-  onChange,
-}: {
-  value: CollectionSort | null;
-  onChange: (sort: CollectionSort) => void;
-}) {
-  return (
-    <div className="mb-4 flex gap-5 text-[0.8125rem]">
-      {SORTS.map((entry) => (
-        <button
-          key={entry.value}
-          aria-pressed={entry.value === value}
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => onChange(entry.value)}
-          className={
-            entry.value === value
-              ? "font-semibold text-white"
-              : "text-muted-foreground hover:text-white"
-          }
-        >
-          {entry.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 /** A collection opened from a row, a genre or a service: its name, its order, its grid. */
 function Collection({
   kind,
@@ -355,7 +329,7 @@ function Collection({
           {listed.total?.toLocaleString()}
         </span>
       </div>
-      <Sorts value={sort} onChange={onSort} />
+      <Sorts options={SORTS} value={sort} onChange={onSort} />
       <CollectionGrid kind={kind} id={id} {...(sort ? { sort } : {})} active={active} />
     </div>
   );

@@ -15,6 +15,8 @@ import type {
   TitleMatches,
 } from "@mrstreamer/contracts/ondemand";
 import type { OwnedId } from "@mrstreamer/contracts/subscription";
+import type { WatchlistPage, WatchlistSort } from "@mrstreamer/contracts/watchlist";
+import type { SavedMember, SavedTitle, TitleFacts } from "@mrstreamer/core/ondemand/watchlist";
 import type { ProviderAccount } from "../providers/account.ts";
 import type { MetadataStatus } from "./metadata.ts";
 
@@ -46,6 +48,15 @@ export interface WorkerStatus {
   readonly movies: number;
   readonly series: number;
   readonly fetchedAt: number | null;
+}
+
+/** Which page of the watchlist, in which order. */
+export interface SavedQuery {
+  /** Everything the subscriptions saved: the lists say which to show, and in what order. */
+  readonly members: readonly SavedMember[];
+  readonly sort: WatchlistSort;
+  readonly offset: number;
+  readonly limit: number;
 }
 
 /** Each call and what it answers. */
@@ -108,6 +119,24 @@ export interface WorkerCalls {
       limit: number;
     };
     result: CollectionPage;
+  };
+  /**
+   * A page of the watchlist: what the subscriptions saved as the entries it makes, each with the
+   * title it is in the lists now, found by the indexes the catalogue keeps. Titles for adults
+   * show only with `adults`, and count only then.
+   */
+  saved: {
+    args: Owners & SavedQuery & { language: string; adults: boolean };
+    result: WatchlistPage;
+  };
+  /**
+   * What the lists say now about the titles `entries`, saved by `subscriptionId`, are: each once,
+   * as that subscription lists it, for its record to take over. Titles it lists no more are left
+   * out. Null when none of its lists are loaded.
+   */
+  savedFacts: {
+    args: Owners & { language: string; subscriptionId: string; entries: readonly SavedTitle[] };
+    result: readonly TitleFacts[] | null;
   };
   /** The file type a movie streams as, or null when its subscription's lists don't have it. */
   container: { args: CatalogueOwner & { id: string }; result: string | null };

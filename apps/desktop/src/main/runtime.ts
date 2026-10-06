@@ -11,10 +11,12 @@ import {
 } from "@mrstreamer/core/viewing/service";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import { databaseLayer } from "./platform/database.ts";
 import { diagnosticsLogLayer } from "./platform/diagnostics-log.ts";
 import { guideStoreLayer } from "./platform/guide-store.ts";
 import type { Secrets } from "./platform/secrets.ts";
 import { viewingStoreLayer } from "./platform/viewing-store.ts";
+import { watchlistStoreLayer } from "./platform/watchlist-store.ts";
 import { Library } from "./services/library.ts";
 import { OnDemand, type OnDemandDeps } from "./services/ondemand.ts";
 import { Output, type OutputDeps } from "./services/output.ts";
@@ -24,6 +26,7 @@ import { Settings } from "./services/preferences.ts";
 import { Roster } from "./services/roster.ts";
 import { Subscriptions } from "./services/subscription.ts";
 import { Updates, type UpdatesConfig } from "./services/updates.ts";
+import { Watchlist } from "./services/watchlist.ts";
 
 export interface MainConfig {
   readonly dataDir: string;
@@ -57,6 +60,7 @@ export type MainServices =
   | Updates
   | Guide
   | ViewingRecord
+  | Watchlist
   | Licences;
 
 /** Every main-process service, with the app's adapters for their ports. */
@@ -121,6 +125,10 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
       ),
     ),
   );
+  // One connection to the database, for the viewing record and the watchlist alike.
+  const stores = Layer.mergeAll(viewingStoreLayer, watchlistStoreLayer).pipe(
+    Layer.provide(databaseLayer(dataDir)),
+  );
   const viewing = ViewingRecord.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -143,13 +151,14 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
             drop: settings.dropLegacyLists,
           })),
         ),
-        viewingStoreLayer(dataDir),
+        stores,
       ),
     ),
   );
+  const watchlist = Watchlist.layer.pipe(Layer.provide(stores));
   const output = Output.layer(config.output ?? { adapters: [] }).pipe(Layer.provide(viewing));
   return Roster.layer.pipe(
-    Layer.provideMerge(Layer.mergeAll(guide, viewing, output)),
+    Layer.provideMerge(Layer.mergeAll(guide, viewing, watchlist, output)),
     Layer.provideMerge(services),
     Layer.provideMerge(diagnosticsLogLayer(dataDir)),
   );

@@ -1,18 +1,20 @@
 // A movie's or series' details, in a sheet over the page it was opened from, which stays in view
 // behind it: the facts, the actions, the story, the cast with their photos, and a series'
 // episodes. Resume is the main action for anything partly watched, and From the beginning plays
-// at once, without asking. A title with several versions plays the one picked with the arrow
-// beside Play, else the one it was opened on, as from the 4K tab, else the one that suits best;
-// the sheet shows that version, so a series lists its episodes. The versions can be of several
-// subscriptions: the menu then names each one's, and Resume goes by how far the version that
-// plays got in its own subscription, never by another's. A series opens on the season
-// being watched, and marks the episode. Each episode's row carries everything known about it,
-// TMDB's details once the season shown has its answer. The title from the lists heads the sheet
-// at once; the rest follows when the provider answers, and TMDB's details when they arrive.
+// at once, without asking. Save puts the movie or the whole series on the watchlist and takes it
+// off again; it goes by the title in the lists, so it works before the details arrive. A title
+// with several versions plays the one picked with the arrow beside Play, else the one it was
+// opened on, as from the 4K tab, else the one that suits best; the sheet shows that version, so a
+// series lists its episodes. The versions can be of several subscriptions: the menu then names
+// each one's, and Resume goes by how far the version that plays got in its own subscription,
+// never by another's. A series opens on the season being watched, and marks the episode. Each
+// episode's row carries everything known about it, TMDB's details once the season shown has its
+// answer. The title from the lists heads the sheet at once; the rest follows when the provider
+// answers, and TMDB's details when they arrive.
 import { Dialog } from "@base-ui/react/dialog";
 import { Menu } from "@base-ui/react/menu";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Check, ChevronDown, Play, RotateCcw, X } from "lucide-react";
+import { Check, ChevronDown, Play, RotateCcw } from "lucide-react";
 import { useState, type ReactElement, type ReactNode } from "react";
 import type {
   Episode,
@@ -30,6 +32,7 @@ import { versionLabels } from "@mrstreamer/core/ondemand/languages";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import { openSubscription, useUi, type DetailsTarget } from "../../app/ui-store.ts";
 import { Progress } from "../../components/Progress.tsx";
+import { Sheet } from "../../components/Sheet.tsx";
 import { Artwork } from "../../components/TitleArt.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { appError, describeError } from "../../lib/errors.ts";
@@ -54,6 +57,8 @@ import {
   useRemoveFromContinue,
 } from "../../lib/titles.ts";
 import { cn } from "../../lib/utils.ts";
+import { useSaveToggle, type SaveToggle } from "../../lib/watchlist.ts";
+import { SaveButton, SaveError } from "../watchlist/SaveButton.tsx";
 
 const close = () => useUi.setState({ details: null });
 
@@ -100,66 +105,61 @@ export function DetailsView({ target }: { target: DetailsTarget }) {
       ? subscriptions.find((each) => each.id === failure.subscriptionId)
       : undefined;
   const secret = locked?.kind === "m3u" ? "link" : "password";
+  // Saving needs the title from the lists alone, so it works while the details are on their way.
+  const saving = useSaveToggle(target.kind, target, title !== null);
   return (
-    <Dialog.Root open onOpenChange={(open) => !open && close()}>
-      <Dialog.Portal>
-        <Dialog.Backdrop className="fixed inset-0 z-20 bg-black/65 transition-opacity duration-200 data-ending-style:opacity-0 data-starting-style:opacity-0" />
-        <Dialog.Popup className="fixed inset-x-[max(1.5rem,calc((100vw-68rem)/2))] top-[3.75rem] bottom-[var(--receiver-bar,0px)] z-20 overflow-y-auto overscroll-contain rounded-t-3xl bg-[#0b0b0c] shadow-2xl ring-1 ring-white/10 outline-none transition-[opacity,translate] duration-200 data-ending-style:translate-y-4 data-ending-style:opacity-0 data-starting-style:translate-y-4 data-starting-style:opacity-0">
-          {details.data ? (
-            <Content
-              details={details.data}
-              versions={{ title, playing, picked, automatic }}
-              switching={details.isPlaceholderData}
-            />
-          ) : title ? (
-            <Header title={title} backdropUrl={title.backdropUrl} facts={factsOf(title)}>
-              <p className="mt-6 text-[0.9375rem] text-muted-foreground">
-                {locked
-                  ? `${subscriptionName(locked)} needs its ${secret} again.`
-                  : failure
-                    ? describeError(failure)
-                    : "Loading…"}
-              </p>
-              {/* The version that plays couldn't be opened: its subscription's row in Settings is
-                  where its secret is entered again, and another version may play meanwhile, as
-                  one another subscription lists. */}
-              {failure && (locked || title.versions.length > 1) && (
-                <div className="mt-4 flex items-center gap-3">
-                  {locked && (
-                    <Button variant="primary" onClick={() => openSubscription(locked.id, "secret")}>
-                      Enter {secret}
-                    </Button>
-                  )}
-                  {title.versions.length > 1 && (
-                    <VersionMenu
-                      title={title}
-                      picked={picked}
-                      automatic={automatic}
-                      trigger={<Button variant="secondary" />}
-                    >
-                      Other versions
-                      <ChevronDown />
-                    </VersionMenu>
-                  )}
-                </div>
+    <Sheet onClose={close}>
+      {details.data ? (
+        <Content
+          details={details.data}
+          versions={{ title, playing, picked, automatic }}
+          switching={details.isPlaceholderData}
+          saving={saving}
+        />
+      ) : title ? (
+        <Header title={title} backdropUrl={title.backdropUrl} facts={factsOf(title)}>
+          <div className="mt-6">
+            <SaveButton state={saving} />
+            <SaveError state={saving} />
+          </div>
+          <p className="mt-6 text-[0.9375rem] text-muted-foreground">
+            {locked
+              ? `${subscriptionName(locked)} needs its ${secret} again.`
+              : failure
+                ? describeError(failure)
+                : "Loading…"}
+          </p>
+          {/* The version that plays couldn't be opened: its subscription's row in Settings is
+              where its secret is entered again, and another version may play meanwhile, as one
+              another subscription lists. */}
+          {failure && (locked || title.versions.length > 1) && (
+            <div className="mt-4 flex items-center gap-3">
+              {locked && (
+                <Button variant="primary" onClick={() => openSubscription(locked.id, "secret")}>
+                  Enter {secret}
+                </Button>
               )}
-            </Header>
-          ) : (
-            <div className="p-10 text-[0.9375rem] text-muted-foreground">
-              <Dialog.Title className="sr-only">Details</Dialog.Title>
-              {failure ? describeError(failure) : "Loading…"}
+              {title.versions.length > 1 && (
+                <VersionMenu
+                  title={title}
+                  picked={picked}
+                  automatic={automatic}
+                  trigger={<Button variant="secondary" />}
+                >
+                  Other versions
+                  <ChevronDown />
+                </VersionMenu>
+              )}
             </div>
           )}
-          {/* After the content, so focus starts on its main action rather than on Close. */}
-          <Dialog.Close
-            aria-label="Close"
-            className="absolute top-4 right-4 z-10 grid size-9 place-items-center rounded-full bg-black/60 text-white ring-1 ring-white/20 hover:bg-black/80"
-          >
-            <X className="size-4" />
-          </Dialog.Close>
-        </Dialog.Popup>
-      </Dialog.Portal>
-    </Dialog.Root>
+        </Header>
+      ) : (
+        <div className="p-10 text-[0.9375rem] text-muted-foreground">
+          <Dialog.Title className="sr-only">Details</Dialog.Title>
+          {failure ? describeError(failure) : "Loading…"}
+        </div>
+      )}
+    </Sheet>
   );
 }
 
@@ -167,11 +167,13 @@ function Content({
   details,
   versions,
   switching,
+  saving,
 }: {
   details: TitleDetails;
   versions: Versions;
   /** Another version's details are on their way. */
   switching: boolean;
+  saving: SaveToggle;
 }) {
   return (
     <Header
@@ -180,9 +182,14 @@ function Content({
       facts={factsOf(details.title, details)}
     >
       {details.kind === "movie" ? (
-        <MovieActions details={details} versions={versions} switching={switching} />
+        <MovieActions details={details} versions={versions} switching={switching} saving={saving} />
       ) : (
-        <SeriesActions details={details} versions={versions} switching={switching} />
+        <SeriesActions
+          details={details}
+          versions={versions}
+          switching={switching}
+          saving={saving}
+        />
       )}
       {details.plot && (
         <p className="mt-6 max-w-[48rem] text-[0.9375rem] leading-relaxed text-foreground/85">
@@ -311,10 +318,12 @@ function MovieActions({
   details,
   versions,
   switching,
+  saving,
 }: {
   details: MovieDetails;
   versions: Versions;
   switching: boolean;
+  saving: SaveToggle;
 }) {
   const progress = useQuery(queries.progress({ movies: details.title.versions }));
   // Progress counts across a subscription's versions: Resume carries on from there in the
@@ -328,6 +337,7 @@ function MovieActions({
     <Actions
       versions={versions}
       switching={switching}
+      saving={saving}
       progress={partly ? current : undefined}
       primaryLabel={partly ? "Resume" : "Play"}
       onPrimary={() => playTitle(now, resumePoint(partly ? current : undefined))}
@@ -389,17 +399,26 @@ function SeriesActions({
   details,
   versions,
   switching,
+  saving,
 }: {
   details: SeriesDetails;
   versions: Versions;
   switching: boolean;
+  saving: SaveToggle;
 }) {
   const progress = useQuery(queries.progress({ series: details.title.versions }));
   const removal = useRemoveFromContinue();
   const listed = useInContinueWatching(details.title);
   const target = resumeTarget(details, ownProgress(progress.data, details.title));
   if (!target) {
-    return <p className="mt-6 text-[0.9375rem] text-muted-foreground">No episodes yet.</p>;
+    // Nothing to play yet, and still a series to save for when there is.
+    return (
+      <div className="mt-6">
+        <SaveButton state={saving} />
+        <SaveError state={saving} />
+        <p className="mt-6 text-[0.9375rem] text-muted-foreground">No episodes yet.</p>
+      </div>
+    );
   }
   const { episode } = target;
   const partly = target.progress && target.progress.position > 0 ? target.progress : undefined;
@@ -409,6 +428,7 @@ function SeriesActions({
     <Actions
       versions={versions}
       switching={switching}
+      saving={saving}
       progress={partly}
       primaryLabel={label}
       onPrimary={() => playTitle(now, resumePoint(partly))}
@@ -422,6 +442,7 @@ function SeriesActions({
 function Actions({
   versions,
   switching,
+  saving,
   progress,
   primaryLabel,
   onPrimary,
@@ -432,6 +453,7 @@ function Actions({
   versions: Versions;
   /** Another version's details are on their way: nothing plays until they're here. */
   switching: boolean;
+  saving: SaveToggle;
   progress: TitleProgress | undefined;
   primaryLabel: string;
   onPrimary: () => void;
@@ -480,6 +502,7 @@ function Actions({
             From the beginning
           </Button>
         )}
+        <SaveButton state={saving} />
         {onRemove && (
           <Button variant="ghost" onClick={onRemove}>
             Remove from Continue watching
@@ -495,6 +518,7 @@ function Actions({
             .join(" · ")}
         </div>
       )}
+      <SaveError state={saving} />
       {removeError && (
         <p className="mt-3 text-sm text-destructive">{describeError(appError(removeError))}</p>
       )}

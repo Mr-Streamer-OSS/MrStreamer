@@ -26,6 +26,7 @@ import {
   type SubscriptionSummary,
 } from "@mrstreamer/contracts/subscription";
 import type { TitleFilter, Viewing } from "@mrstreamer/contracts/viewing";
+import type { WatchlistSort } from "@mrstreamer/contracts/watchlist";
 import { player } from "../player/player.ts";
 import { hostOf } from "./format.ts";
 import { call, listen } from "./ipc.ts";
@@ -254,6 +255,27 @@ export const queries = {
           ...(titles.movies ? { movies: titles.movies.map(ownedId) } : {}),
           ...(titles.series ? { series: titles.series.map(ownedId) } : {}),
         }),
+      staleTime: Infinity,
+    }),
+  /**
+   * A page of the watchlist: saved titles with what the lists have of each now. Kept current by
+   * `syncWatchlist`.
+   */
+  watchlist: (sort: WatchlistSort, offset: number, limit: number) =>
+    queryOptions({
+      queryKey: ["watchlist", "list", sort, offset, limit],
+      queryFn: () => call("watchlist.list", { sort, offset, limit }),
+      staleTime: Infinity,
+      placeholderData: (previous) => previous,
+    }),
+  /**
+   * The entry a movie or series is saved as, named by one of its versions, or null. Kept current
+   * by `syncWatchlist`.
+   */
+  saved: (kind: TitleKind, version: OwnedId) =>
+    queryOptions({
+      queryKey: ["watchlist", "saved", kind, ownedKey(version)],
+      queryFn: () => call("watchlist.saved", { kind, version: ownedId(version) }),
       staleTime: Infinity,
     }),
   licences: () =>
@@ -520,6 +542,20 @@ export function syncViewing(client: QueryClient): () => void {
     // The prefix covers the progress queries too.
     void client.invalidateQueries({ queryKey: queries.viewing().queryKey });
   });
+}
+
+/**
+ * Reads the watchlist again once a title was saved or removed, and once the lists changed: they
+ * say which title each entry is.
+ */
+export function syncWatchlist(client: QueryClient): () => void {
+  const read = () => void client.invalidateQueries({ queryKey: ["watchlist"] });
+  const stopChanges = listen("watchlist.changed", read);
+  const stopLists = listen("ondemand.updated", read);
+  return () => {
+    stopChanges();
+    stopLists();
+  };
 }
 
 /** Keeps the update status current: download progress and outcomes arrive as events. */

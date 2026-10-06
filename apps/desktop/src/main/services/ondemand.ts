@@ -29,6 +29,7 @@ import type {
   TitleRef,
 } from "@mrstreamer/contracts/ondemand";
 import type { OwnedId } from "@mrstreamer/contracts/subscription";
+import type { WatchlistPage } from "@mrstreamer/contracts/watchlist";
 import { diagnosed } from "@mrstreamer/core/diagnostics";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
 import {
@@ -40,6 +41,7 @@ import {
 } from "@mrstreamer/core/metadata/tmdb";
 import { movieDetails, seasonEpisodes, seriesDetails } from "@mrstreamer/core/ondemand/details";
 import { DEFAULT_TITLE_LANGUAGE } from "@mrstreamer/core/ondemand/languages";
+import type { SavedTitle, TitleFacts } from "@mrstreamer/core/ondemand/watchlist";
 import type { ProviderDetails } from "@mrstreamer/core/provider";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -52,6 +54,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import type {
   CatalogueOwner,
+  SavedQuery,
   WorkerCalls,
   WorkerEvent,
   WorkerMethod,
@@ -162,6 +165,25 @@ export class OnDemand extends Context.Service<
     ): Effect.Effect<readonly CollectionTile[], Failed>;
     /** One page of a collection. */
     collection(query: CollectionQuery): Effect.Effect<CollectionPage, Failed>;
+    /**
+     * A page of the watchlist that what `subscriptions` saved makes together: each entry with
+     * the title it is in their lists now, without titles for adults unless the viewer shows them.
+     * From the lists as they are: nothing is fetched, and a subscription without lists gives its
+     * entries no title.
+     */
+    saved(
+      subscriptions: readonly SavedSubscription[],
+      query: SavedQuery,
+    ): Effect.Effect<WatchlistPage, Failed>;
+    /**
+     * What the lists say now about the titles `entries`, saved by `of`, are: each once, as `of`
+     * lists it; null while none of its lists are loaded. Asks the provider nothing.
+     */
+    savedFacts(
+      subscriptions: readonly SavedSubscription[],
+      of: SavedSubscription,
+      entries: readonly SavedTitle[],
+    ): Effect.Effect<readonly TitleFacts[] | null, Failed>;
     /** The file a movie or episode streams from, at the provider of the subscription it names. */
     file(title: TitleRef): Effect.Effect<TitleFile, Failed>;
     /** Forgets a subscription's lists and details, for when it goes. */
@@ -662,6 +684,30 @@ function make(deps: OnDemandDeps) {
           ? Effect.succeed([])
           : // Versions of a subscription that isn't saved are in no lists, whatever their ids.
             loaded((owners, language) => call("byIds", { owners, language, kind, versions })),
+
+      saved: (saved: readonly SavedSubscription[], query: SavedQuery) =>
+        Effect.gen(function* () {
+          return yield* call("saved", {
+            ...query,
+            owners: saved.map(ownerOf),
+            language: yield* language,
+            adults: (yield* settings.get).adultTitles ?? false,
+          });
+        }),
+
+      savedFacts: (
+        saved: readonly SavedSubscription[],
+        of: SavedSubscription,
+        entries: readonly SavedTitle[],
+      ) =>
+        Effect.gen(function* () {
+          return yield* call("savedFacts", {
+            owners: saved.map(ownerOf),
+            language: yield* language,
+            subscriptionId: of.id,
+            entries,
+          });
+        }),
 
       file: (title: TitleRef) =>
         Effect.gen(function* () {

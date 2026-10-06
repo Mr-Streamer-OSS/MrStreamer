@@ -17,6 +17,7 @@ Its channels join the lists first, then its guide, movies and series. What you'r
 - **Live TV** lists the channels of every subscription, in the order you added the subscriptions. Categories that are named the same, in the same country, are one category.
 - **Movies** and **Series** show a film or series that two subscriptions offer once, when both give the same [TMDB](https://www.themoviedb.org) id for it. Mr. Streamer never joins two titles because their names match.
 - **Favourites**, recently watched channels and Continue watching are one list each. [Reorder](live-tv.md#the-guide) arranges favourites from different subscriptions among each other.
+- **Watchlist** is one list too. A film or series two subscriptions offer is one entry, saved for both when you press **Save**; see [Watchlist](movies-and-series.md#watchlist).
 - **Search** finds channels, programmes, movies and series in all of them.
 
 Where two things read the same but come from different subscriptions, each says which one it is from: a channel both list, or two different films with the same name and year. Everything else shows without a name beside it.
@@ -54,9 +55,9 @@ Open its row and choose **Remove**. Mr. Streamer asks first, and says what happe
 
 - What plays from it stops. What plays from another subscription carries on.
 - Its login, its lists and its guide are deleted from this computer. The other subscriptions keep theirs.
-- Its favourites, history and progress stay, and come back when you add the same account again. Tick **Also delete favourites, history and progress** to delete them too.
+- Its favourites, watchlist, history and progress stay, and come back when you add the same account again. Tick **Also delete favourites, watchlist, history and progress** to delete them too. A title on the watchlist that another subscription saved as well stays there either way.
 - Removing your only subscription returns to the Connect screen.
 
 ## Going back to an older version
 
-Versions before several subscriptions know one: the first you added. Going back to one of them shows that subscription alone and leaves the others on your computer untouched, so they are there again after updating. If you removed that first one since, the older version asks you to connect. An account you connect there that you had added here shows once after updating, with its favourites, history and progress.
+Versions before several subscriptions know one: the first you added. Going back to one of them shows that subscription alone and leaves the others on your computer untouched, so they are there again after updating. If you removed that first one since, the older version asks you to connect. An account you connect there that you had added here shows once after updating, with its favourites, watchlist, history and progress.
