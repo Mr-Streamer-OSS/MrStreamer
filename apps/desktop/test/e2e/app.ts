@@ -175,7 +175,12 @@ export async function addSubscription(
 }
 
 /** The DevTools protocol's bits for the keys held with another, or with a click. */
-export const MODIFIERS = { alt: 1, shift: 8 } as const;
+/** `main` is the one the app's shortcuts take: ⌘ on macOS, Ctrl elsewhere. */
+export const MODIFIERS = {
+  alt: 1,
+  shift: 8,
+  main: process.platform === "darwin" ? 4 : 2,
+} as const;
 
 /** Presses a key in the window, with `modifiers` held: a sum of `MODIFIERS`. */
 export async function key(page: Page, name: string, code: number, modifiers = 0): Promise<void> {

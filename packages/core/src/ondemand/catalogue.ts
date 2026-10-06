@@ -29,6 +29,12 @@ interface IndexedKind {
   readonly titles: readonly Title[];
   /** Every version, by its `ownedKey`, to the title it belongs to. */
   readonly byId: ReadonlyMap<string, Title>;
+  /**
+   * The titles whose versions were gathered by a TMDB id, by that id, whichever subscriptions
+   * list them: every title with one but those for adults, which stand on their own. Worked out
+   * when first asked for.
+   */
+  readonly byTmdbId: () => ReadonlyMap<string, Title>;
   /** Folded names, index-aligned with `titles`, worked out on the first search. */
   readonly searchNames: () => readonly string[];
 }
@@ -189,6 +195,14 @@ function indexKind(
   return {
     titles: shown,
     byId,
+    byTmdbId: once(
+      () =>
+        new Map(
+          shown.flatMap((title) =>
+            title.tmdbId && !title.adult ? [[title.tmdbId, title] as const] : [],
+          ),
+        ),
+    ),
     searchNames: once(() =>
       shown.map((title, index) => normalize(`${title.title} ${names[index] ?? ""}`)),
     ),

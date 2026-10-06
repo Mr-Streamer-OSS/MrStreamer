@@ -34,6 +34,12 @@ export function categoryOf(
   return firstCategory(channel, categories)?.title ?? "";
 }
 
+/** "Holiday house and Openlist playlist", "A, B and C". */
+export function namesList(names: readonly string[]): string {
+  const last = names.at(-1) ?? "";
+  return names.length < 2 ? last : `${names.slice(0, -1).join(", ")} and ${last}`;
+}
+
 /** A server's host, without its scheme: "tv.example.net:8080". */
 export function hostOf(server: string): string {
   return URL.parse(server)?.host || server;

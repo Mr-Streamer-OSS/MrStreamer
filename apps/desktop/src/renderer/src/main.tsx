@@ -9,6 +9,7 @@ import {
   syncOnDemand,
   syncUpdates,
   syncViewing,
+  syncWatchlist,
 } from "./lib/queries.ts";
 import "./styles.css";
 
@@ -19,6 +20,7 @@ syncLibraryUpdates(client);
 syncOnDemand(client);
 syncGuideUpdates(client);
 syncViewing(client);
+syncWatchlist(client);
 syncUpdates(client);
 
 const root = document.getElementById("root");

@@ -1,7 +1,8 @@
 // The start page: the channel you watched last, playing muted in the backdrop with what's on, then
-// one row each of what you were watching, favourite and recent channels, new movies, new series
-// and your category. Rows show only what exists. Everything scrolls one way, down; each row's All
-// opens the whole list in Live TV, Movies or Series.
+// one row each of what you were watching, what you saved to watch later, favourite and recent
+// channels, new movies, new series and your category. Rows show only what exists. Everything
+// scrolls one way, down; each row's All opens the whole list in Live TV, Movies, Series or the
+// Watchlist.
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, Play, Volume2, VolumeX } from "lucide-react";
 import { useMemo, type ReactNode } from "react";
@@ -25,6 +26,7 @@ import {
   useLastChannel,
   useSourceOf,
   useSubscriptionPreferences,
+  useSubscriptions,
 } from "../../lib/queries.ts";
 import { useContinueWatching, useRemoveFromContinue, useResume } from "../../lib/titles.ts";
 import { useFit } from "../../lib/use-fit.ts";
@@ -34,7 +36,9 @@ import { player, usePlayer } from "../../player/player.ts";
 import { WINDOW_BAR } from "../../../../shared/window-bar.ts";
 import { watchChannel } from "../live/GuidePage.tsx";
 import { useShowList } from "../live/lists.ts";
+import { PAGE } from "../titles/CollectionGrid.tsx";
 import { openCollection } from "../titles/TitlesPage.tsx";
+import { SavedTile } from "../watchlist/SavedTile.tsx";
 
 const NO_IDS: readonly OwnedId[] = [];
 const NO_CHANNELS: readonly LiveChannel[] = [];
@@ -99,6 +103,10 @@ export function HomeScreen({ active }: { active: boolean }) {
   };
   const newMovies = useNewest("movie", posters);
   const newSeries = useNewest("series", posters);
+  // The Watchlist's own first page, so the row and the page read it once. Playlists have no
+  // movies or series to save.
+  const onDemand = useSubscriptions().some((each) => each.kind === "xtream");
+  const saved = useQuery({ ...queries.watchlist("saved", 0, PAGE), enabled: onDemand }).data;
   const continuing = useContinueWatching();
   const resume = useResume();
   const removal = useRemoveFromContinue();
@@ -190,6 +198,18 @@ export function HomeScreen({ active }: { active: boolean }) {
               </p>
             )}
           </div>
+        )}
+        {saved && saved.total > 0 && (
+          <Section
+            title="Watchlist"
+            count={saved.total}
+            onAll={() => openView("watchlist")}
+            tileRem={POSTER_REM}
+          >
+            {saved.entries.slice(0, posters).map((entry) => (
+              <SavedTile key={ownedKey(entry)} entry={entry} brief />
+            ))}
+          </Section>
         )}
         {shown.favourites.length > 0 && (
           <Section

@@ -36,6 +36,7 @@ import { Preferences, SubscriptionPreferences } from "./preferences.ts";
 import type { OwnedId, SubscriptionSummary } from "./subscription.ts";
 import type { UpdateStatus } from "./updates.ts";
 import type { TitleProgress, Viewing } from "./viewing.ts";
+import { WATCHLIST_SORTS, type WatchlistPage } from "./watchlist.ts";
 
 // Every schema is built on its method's first call: defining them all would add to every start,
 // and most methods aren't called while the app starts.
@@ -73,8 +74,8 @@ export const ipcInputs = {
     type({ subscriptionId: "string > 0", "name?": "string | null", "secret?": "string > 0" }),
   /**
    * Forgets the subscription's login and what was loaded with it. `eraseViewing` also deletes
-   * the account's favourites, watch history and progress, which otherwise stay for when it is
-   * added again.
+   * the account's favourites, watchlist, watch history and progress, which otherwise stay for
+   * when it is added again.
    */
   "subscription.remove": () => type({ subscriptionId: "string > 0", "eraseViewing?": "boolean" }),
   /** Asks the provider for the account's status now: expiry and connections in use. */
@@ -239,6 +240,18 @@ export const ipcInputs = {
   /** Every version of the series. */
   "viewing.finishSeries": () => type({ commandId: "string", series: owned().array() }),
   "viewing.progress": titleFilter,
+  /** A page of the watchlist every saved subscription's entries make together, in `sort`. */
+  "watchlist.list": () =>
+    type({
+      sort: type.enumerated(...WATCHLIST_SORTS),
+      offset: "number.integer >= 0",
+      limit: "1 <= number.integer <= 500",
+    }),
+  /** A movie or series by one of its versions: the lists say which title that is. */
+  "watchlist.saved": () => type({ kind: titleKind(), version: owned() }),
+  "watchlist.save": () => type({ kind: titleKind(), version: owned() }),
+  /** A saved entry by its own id, as `WatchlistEntry` names it. */
+  "watchlist.remove": () => type({ entry: owned() }),
   "updates.status": none,
   "updates.setChannel": () => type({ channel: "'stable' | 'nightly'" }),
   "updates.check": none,
@@ -383,6 +396,21 @@ export interface IpcOutputs {
   "viewing.finishSeries": Viewing;
   /** How far the given movies, or every episode of a series, got. */
   "viewing.progress": readonly TitleProgress[];
+  /** The saved titles, with what the lists have of each now. Empty without a subscription. */
+  "watchlist.list": WatchlistPage;
+  /** The entry the movie or series is saved as, whichever of its versions is named, or null. */
+  "watchlist.saved": OwnedId | null;
+  /**
+   * Saves a movie or a whole series for every subscription that lists it now, all at once or
+   * not at all, and answers its entry once it is stored. One already saved stays as it was, with
+   * the time it was saved then.
+   */
+  "watchlist.save": OwnedId;
+  /**
+   * Takes an entry out, with what every subscription saved of it, also one no provider lists
+   * any more. One already gone changes nothing.
+   */
+  "watchlist.remove": null;
   "updates.status": UpdateStatus;
   /** Chooses Stable or Nightly and checks what it offers; installs and removes nothing. */
   "updates.setChannel": UpdateStatus;
@@ -430,6 +458,8 @@ export interface IpcEvents {
   "ondemand.detailsChanged": OwnedId & { readonly kind: TitleKind };
   /** Favourites or recently watched channels changed, up to `sequence`. */
   "viewing.changed": { readonly sequence: number };
+  /** A title was saved to the watchlist or taken out of it. */
+  "watchlist.changed": null;
   /** The update moved on, for example a download's progress. */
   "updates.changed": UpdateStatus;
   /** Where playback goes changed, or what the receiver plays did, or the receivers found. */

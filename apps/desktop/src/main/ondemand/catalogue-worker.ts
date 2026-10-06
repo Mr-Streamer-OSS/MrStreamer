@@ -28,6 +28,13 @@ import { adultIn } from "@mrstreamer/core/adult";
 import type { OnDemandCatalogue } from "@mrstreamer/core/provider";
 import { tmdb, tmdbImage } from "@mrstreamer/core/metadata/tmdb";
 import { collections, type Collections } from "@mrstreamer/core/ondemand/collections";
+import {
+  entriesOf,
+  factsOf,
+  savedFirst,
+  titleOf,
+  type SavedMember,
+} from "@mrstreamer/core/ondemand/watchlist";
 import { readJsonFile, removeFile, writeJsonFile } from "../platform/json-file.ts";
 import { providerFor } from "../providers/account.ts";
 import { metadataStore, type Wanted } from "./metadata.ts";
@@ -449,6 +456,28 @@ function aliases(title: Title): string {
     : "";
 }
 
+/** TMDB's picture of a saved title the lists hold no more, when TMDB told of one. */
+function artworkOf(saved: SavedMember): string | null {
+  if (!saved.tmdbId) return null;
+  const backdrop = metadata.get(saved.kind === "movie" ? "movie" : "tv", saved.tmdbId)?.backdrop;
+  return backdrop ? tmdbImage(backdrop, 780) : null;
+}
+
+/**
+ * The title an entry is in the lists now, by what any of its subscriptions saved of it, or null
+ * when the lists hold none that is surely it.
+ */
+function listedAs(index: IndexedCatalogue, entry: readonly SavedMember[]): Title | null {
+  for (const member of entry) {
+    const title = titleOf(index, member);
+    if (title) return title;
+  }
+  return null;
+}
+
+/** Names in the order a list of them reads, whatever their case and accents. */
+const byName = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
+
 const handlers: {
   [M in keyof WorkerCalls]: (args: WorkerCalls[M]["args"]) => Promise<WorkerCalls[M]["result"]>;
 } = {
@@ -528,6 +557,62 @@ const handlers: {
       total: titles.length,
       titles: titles.slice(offset, offset + limit),
     };
+  },
+  saved: async ({ language, adults: shown, members, sort, offset, limit, owners }) => {
+    speaking(language);
+    const found = await catalogueOf(owners, language);
+    /** The subscriptions whose lists were there to look in. */
+    const held = new Set(found.members.map((each) => each.subscriptionId));
+    const saved = entriesOf(members).flatMap((entry) => {
+      const [first] = entry;
+      if (!first) return [];
+      const listed = listedAs(found.index, entry);
+      const title = listed ? named(listed, language) : null;
+      // For adults as the lists say now, or as they last said of a title they hold no more.
+      if (!shown && (title?.adult ?? first.adult)) return [];
+      return [{ first, entry, title, name: title?.title ?? first.name }];
+    });
+    const newest = (a: (typeof saved)[number], b: (typeof saved)[number]) =>
+      savedFirst(b.first, a.first);
+    saved.sort(
+      sort === "title" ? (a, b) => byName.compare(a.name, b.name) || newest(a, b) : newest,
+    );
+    return {
+      total: saved.length,
+      entries: saved.slice(offset, offset + limit).map(({ first, entry, title }) => {
+        const { subscriptionId, id, kind, name, year, savedAt } = first;
+        const saving = new Set(entry.map((member) => member.subscriptionId));
+        const sources = owners.flatMap((owner) =>
+          saving.has(owner.subscriptionId) ? [owner.subscriptionId] : [],
+        );
+        return {
+          subscriptionId,
+          id,
+          kind,
+          name,
+          year,
+          savedAt,
+          title,
+          artworkUrl: title ? null : artworkOf(first),
+          sources,
+          listed: sources.every((source) => held.has(source)),
+        };
+      }),
+    };
+  },
+  savedFacts: async ({ language, subscriptionId, entries, owners }) => {
+    speaking(language);
+    const { index, members } = await catalogueOf(owners, language);
+    if (!members.some((each) => each.subscriptionId === subscriptionId)) return null;
+    // Each title once, however many entries turn out to be it.
+    const titles = new Set(
+      entries.flatMap((entry) => titleOf(index, { ...entry, subscriptionId }) ?? []),
+    );
+    return [...titles].flatMap((title) => {
+      const facts = factsOf(named(title, language), subscriptionId);
+      // A title only another subscription lists now leaves what this one saved as it was.
+      return facts.versionIds.length > 0 ? [facts] : [];
+    });
   },
   container: async ({ id, ...owner }) => {
     const found = await current(owner);

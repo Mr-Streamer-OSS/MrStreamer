@@ -19,6 +19,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
+import { databaseLayer } from "../src/main/platform/database.ts";
 import { viewingStoreLayer } from "../src/main/platform/viewing-store.ts";
 
 const CHANNELS = 13_000;
@@ -52,7 +53,7 @@ async function start() {
           }),
           Layer.succeed(ViewingChannels, { lookup: () => Effect.succeed(() => undefined) }),
           Layer.succeed(LegacyViewing, { take: Effect.succeed(null), drop: Effect.void }),
-          viewingStoreLayer(dataDir),
+          viewingStoreLayer.pipe(Layer.provide(databaseLayer(dataDir))),
         ),
       ),
     ),

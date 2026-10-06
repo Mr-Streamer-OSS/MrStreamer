@@ -5,6 +5,9 @@ import { DatabaseSync } from "node:sqlite";
 import type { Codec } from "@mrstreamer/contracts/playback";
 import { Guide } from "@mrstreamer/core/guide/service";
 import { ViewingRecord } from "@mrstreamer/core/viewing/service";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import { describe, expect, it, vi } from "vitest";
 import { mainLayer } from "../src/main/runtime.ts";
 import { Library } from "../src/main/services/library.ts";
@@ -13,6 +16,7 @@ import { Playback } from "../src/main/services/playback.ts";
 import { Settings } from "../src/main/services/preferences.ts";
 import { Roster } from "../src/main/services/roster.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
+import { Watchlist } from "../src/main/services/watchlist.ts";
 import type { FakeProvider } from "./fake-provider.ts";
 import { fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 
@@ -22,6 +26,40 @@ const DECODERS: readonly Codec[] = ["h264", "aac"];
 async function started(dataDir: string) {
   const runtime = runtimeFor(mainLayer(testConfig(dataDir)));
   return {
+    /**
+     * Removes a subscription with its record, as Settings does with the box ticked, on these
+     * services, and has the removal wait until `release`. `queued` waits before its turn among
+     * the storage changes, as behind a login being stored. `erased` waits once the record is
+     * deleted, as while the login and the lists go. Answers once it waits there.
+     */
+    removing: async (subscriptionId: string, held: "queued" | "erased") => {
+      const services = await runtime.context();
+      const subscriptions = Context.get(services, Subscriptions);
+      const viewing = Context.get(services, ViewingRecord);
+      const arrived = Promise.withResolvers<void>();
+      const released = Promise.withResolvers<void>();
+      const wait = Effect.promise(() => {
+        arrived.resolve();
+        return released.promise;
+      });
+      const slowed =
+        held === "queued"
+          ? Context.add(services, Subscriptions, {
+              ...subscriptions,
+              remove: (id, erase) => Effect.andThen(wait, subscriptions.remove(id, erase)),
+            })
+          : Context.add(services, ViewingRecord, {
+              ...viewing,
+              erase: (account) => Effect.andThen(viewing.erase(account), wait),
+            });
+      const roster = await promised(
+        runtimeFor(Roster.layer.pipe(Layer.provide(Layer.succeedContext(slowed)))),
+        Roster,
+      );
+      const done = roster.remove(subscriptionId, true);
+      await arrived.promise;
+      return { done, release: () => released.resolve() };
+    },
     roster: await promised(runtime, Roster),
     subscriptions: await promised(runtime, Subscriptions),
     library: await promised(runtime, Library),
@@ -29,6 +67,7 @@ async function started(dataDir: string) {
     guide: await promised(runtime, Guide),
     playback: await promised(runtime, Playback),
     viewing: await promised(runtime, ViewingRecord),
+    watchlist: await promised(runtime, Watchlist),
     settings: await promised(runtime, Settings),
   };
 }
@@ -173,6 +212,67 @@ describe("the saved subscriptions", { timeout: 30_000 }, () => {
     const back = await roster.add(login(second));
     expect((await viewing.state()).favourites).toEqual([{ subscriptionId: a, id: "2014" }]);
     expect(back.id).not.toBe(b);
+  });
+
+  it.each(["queued", "erased"] as const)(
+    "deletes with a record what was starred and saved for its subscription while it was removed (%s), and nothing of another's",
+    async (held) => {
+      const app = await withTwo();
+      const { roster, removing, viewing, watchlist, second, a, b } = app;
+      const saved = () => watchlist.list({ sort: "saved", offset: 0, limit: 10 });
+      // Films each lists alone: the second's 91001 and 91020, and the first's 91000.
+      await viewing.setFavourite(randomUUID(), { subscriptionId: b, id: "2014" }, true);
+      await watchlist.save("movie", { subscriptionId: b, id: "91001" });
+
+      const removal = await removing(b, held);
+      // What the viewer does meanwhile, for the one that goes and for the one that stays.
+      await Promise.allSettled([
+        viewing.setFavourite(randomUUID(), { subscriptionId: b, id: "2015" }, true),
+        watchlist.save("movie", { subscriptionId: b, id: "91020" }),
+      ]);
+      await viewing.setFavourite(randomUUID(), { subscriptionId: a, id: "2014" }, true);
+      const kept = await watchlist.save("movie", { subscriptionId: a, id: "91000" });
+      removal.release();
+      await removal.done;
+
+      // Added again, its account finds nothing of either, and the other's is whole.
+      await roster.add(login(second));
+      expect((await viewing.state()).favourites).toEqual([{ subscriptionId: a, id: "2014" }]);
+      expect((await saved()).entries).toMatchObject([kept]);
+    },
+  );
+
+  it("keeps a subscription whose record can't be deleted, with all of the record, to try again", async () => {
+    const app = await withTwo();
+    const { roster, subscriptions, viewing, watchlist, dataDir, second, a, b } = app;
+    const saved = () => watchlist.list({ sort: "saved", offset: 0, limit: 10 });
+    const database = (sql: string) => {
+      const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+      db.exec(sql);
+      db.close();
+    };
+    await viewing.setFavourite(randomUUID(), { subscriptionId: b, id: "2014" }, true);
+    const entry = await watchlist.save("movie", { subscriptionId: b, id: "91001" });
+    // The database gives out at the watchlist, after the favourites went.
+    database(`create trigger held before delete on watchlist
+              begin select raise(abort, 'database is locked'); end`);
+
+    await expect(roster.remove(b, true)).rejects.toMatchObject({ error: { kind: "unexpected" } });
+
+    // Saved as it was, with everything it kept, and what is saved for it now is stored.
+    expect((await subscriptions.list()).map((each) => each.id)).toEqual([a, b]);
+    expect(await readdir(join(dataDir, "subscriptions"))).toEqual([b]);
+    expect((await viewing.state()).favourites).toEqual([{ subscriptionId: b, id: "2014" }]);
+    const other = await watchlist.save("movie", { subscriptionId: b, id: "91020" });
+    expect((await saved()).entries).toMatchObject([other, entry]);
+
+    database("drop trigger held");
+    await roster.remove(b, true);
+
+    expect((await subscriptions.list()).map((each) => each.id)).toEqual([a]);
+    await roster.add(login(second));
+    expect((await viewing.state()).favourites).toEqual([]);
+    expect(await saved()).toEqual({ total: 0, entries: [] });
   });
 
   it("brings each subscription up to date on its own, whatever becomes of another", async () => {

@@ -1,8 +1,8 @@
-// The viewing record on disk: one SQLite database (mrstreamer.db) holding the events in order, the
-// state they add up to per account, one row per movie or episode played, the ids of commands
-// already done and a few markers. Every command is one transaction. When the rules change
-// (STATE_VERSION), the state is rebuilt from the events at start. If the database can't open, the
-// record reports failures and the rest of the app carries on.
+// The viewing record on disk, in the SQLite database it shares with the watchlist (database.ts):
+// the events in order, the state they add up to per account, one row per movie or episode played,
+// the ids of commands already done and a few markers. Every command is one transaction. When the
+// rules change (STATE_VERSION), the state is rebuilt from the events at start. If the database
+// can't open, the record reports failures and the rest of the app carries on.
 //
 // Everything in it is kept per account, by the provider's own ids: the service says which
 // subscription an account's channels and titles belong to, and nothing here names one.
@@ -17,9 +17,7 @@
 // event types they don't know, leave the titles table alone, and insert events without a payload.
 // Builds with movies and series before `removed_at`, Stable 0.0.3 among them, write title rows
 // without it, and read `hidden` as this one writes it.
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 import { RawTitleRef, titleKey } from "@mrstreamer/contracts/ondemand";
 import { CONTINUE_OFFERED } from "@mrstreamer/contracts/viewing";
 import {
@@ -52,6 +50,8 @@ import {
 import { type } from "arktype";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import { attempt, Database, transaction, unavailable } from "./database.ts";
+import { WATCHLIST_TABLES } from "./watchlist-store.ts";
 
 const SCHEMA = `
   create table if not exists events (
@@ -173,55 +173,43 @@ const TitleRowShape = type({
   "removed_at?": "number | null",
 });
 
-/** The viewing store in `dataDir`, open until the runtime closes. */
-export function viewingStoreLayer(dataDir: string): Layer.Layer<ViewingStore> {
-  return Layer.effect(
-    ViewingStore,
-    Effect.acquireRelease(
-      Effect.try(() => open(join(dataDir, "mrstreamer.db"))),
-      (db) => Effect.sync(() => db.close()),
-    ).pipe(
-      Effect.map(storeOn),
+/** The viewing store, on the database the runtime keeps open. */
+export const viewingStoreLayer: Layer.Layer<ViewingStore, never, Database> = Layer.effect(
+  ViewingStore,
+  Effect.gen(function* () {
+    const opened = yield* Database;
+    if ("failure" in opened) return closed(opened.failure);
+    const { db } = opened;
+    return yield* Effect.try(() => {
+      prepare(db);
+      return storeOn(db);
+    }).pipe(
       Effect.catchTag("UnknownError", (failure) =>
-        Effect.logWarning("[viewing] the database can't open", failure.cause).pipe(
-          Effect.as(unavailable(String(failure.cause))),
+        Effect.logWarning("[viewing] the record can't be read", failure.cause).pipe(
+          Effect.as(closed(String(failure.cause))),
         ),
       ),
-    ),
-  );
-}
+    );
+  }),
+);
 
-function open(path: string): DatabaseSync {
-  mkdirSync(join(path, ".."), { recursive: true });
-  // A second copy of the app may hold the write lock for a moment.
-  const db = new DatabaseSync(path, { timeout: 1000 });
-  try {
-    db.exec("pragma journal_mode = wal; pragma synchronous = normal;");
-    db.exec(SCHEMA);
-    // Records from before movies and series lack the payload column, and later ones the time a
-    // title left Continue watching. Checked and added under the write lock, since two copies of the
-    // app can start at once.
-    db.exec("begin immediate");
-    try {
-      const has = (table: string, name: string) =>
-        db
-          .prepare(`pragma table_info(${table})`)
-          .all()
-          .some((column) => column["name"] === name);
-      if (!has("events", "payload")) db.exec("alter table events add column payload text");
-      if (!has("titles", "removed_at")) db.exec("alter table titles add column removed_at integer");
-      db.exec("commit");
-    } catch (cause) {
-      db.exec("rollback");
-      throw cause;
-    }
-    const stored = db.prepare("select value from meta where key = 'state-version'").get();
-    if (stored?.["value"] !== String(STATE_VERSION)) rebuild(db);
-    return db;
-  } catch (cause) {
-    db.close();
-    throw cause;
-  }
+/** Makes the record's tables, brings older ones up to date, and rebuilds the state when due. */
+function prepare(db: DatabaseSync): void {
+  db.exec(SCHEMA);
+  // Records from before movies and series lack the payload column, and later ones the time a
+  // title left Continue watching. Checked and added under the write lock, since two copies of the
+  // app can start at once.
+  transaction(db, () => {
+    const has = (table: string, name: string) =>
+      db
+        .prepare(`pragma table_info(${table})`)
+        .all()
+        .some((column) => column["name"] === name);
+    if (!has("events", "payload")) db.exec("alter table events add column payload text");
+    if (!has("titles", "removed_at")) db.exec("alter table titles add column removed_at integer");
+  });
+  const stored = db.prepare("select value from meta where key = 'state-version'").get();
+  if (stored?.["value"] !== String(STATE_VERSION)) rebuild(db);
 }
 
 /** An event as stored, or null when this version can't read it: newer, or of an unknown type. */
@@ -523,16 +511,17 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
         });
         return imported;
       }),
-    // The events go too, so no rebuild, here or in an older build, brings anything back. SQLite
-    // zeroes what it deletes, and the checkpoint moves it out of the write-ahead log, so the
-    // account's key and titles don't linger in the file either.
+    // The events go too, so no rebuild, here or in an older build, brings anything back, and so
+    // does what the account saved to its watchlist, which the same file keeps. SQLite zeroes what
+    // it deletes, and the checkpoint moves it out of the write-ahead log, so the account's key
+    // and titles don't linger in the file either.
     erase: (account) =>
       attempt(() => {
         places.delete(account);
         db.exec("pragma secure_delete = on");
         try {
           transaction(db, () => {
-            for (const table of ["events", "state", "titles"]) {
+            for (const table of ["events", "state", "titles", ...WATCHLIST_TABLES]) {
               db.prepare(`delete from ${table} where account = ?`).run(account);
             }
           });
@@ -580,31 +569,9 @@ function saveTitle(db: DatabaseSync, account: string, row: TitleRow): void {
   );
 }
 
-function transaction<A>(db: DatabaseSync, run: () => A): A {
-  db.exec("begin immediate");
-  try {
-    const result = run();
-    db.exec("commit");
-    return result;
-  } catch (cause) {
-    db.exec("rollback");
-    throw cause;
-  }
-}
-
-function attempt<A>(run: () => A): Effect.Effect<A, Failed> {
-  return Effect.try({
-    try: run,
-    catch: (cause) =>
-      cause instanceof Failed
-        ? cause
-        : new Failed({ error: { kind: "unexpected", detail: String(cause) } }),
-  });
-}
-
 /** A store for when the database can't open: every call reports why. */
-function unavailable(detail: string): ViewingStore["Service"] {
-  const fail = Effect.fail(new Failed({ error: { kind: "unexpected", detail } }));
+function closed(detail: string): ViewingStore["Service"] {
+  const fail = unavailable(detail);
   return {
     read: () => fail,
     titles: () => fail,

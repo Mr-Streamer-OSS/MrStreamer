@@ -185,6 +185,11 @@ export interface FakeProvider {
   failTitles(status: number | "login" | null): void;
   /** Makes the movie and series categories answer an empty list, as a busy panel does, or not. */
   emptyTitleCategories(empty: boolean): void;
+  /**
+   * Picks the movies, series and categories each later list request returns, as a panel's
+   * updates would: titles dropped, listed again, renamed, or given another TMDB id.
+   */
+  serveTitles(select: (all: FakeTitles) => FakeTitles): void;
   /** Streams currently holding a connection slot. */
   activeStreams(): number;
   /** Picks the channel list each later request returns, as panel updates would. */
@@ -257,6 +262,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
   );
   let titleFailure: number | "login" | null = null;
   let titleCategoriesEmpty = false;
+  let selectTitles = (all: FakeTitles): FakeTitles => all;
   let fileCount = 0;
   /** The bytes put behind a title's address in place of its clip, and how many times. */
   const replaced = new Map<FakeTitle, { readonly bytes: Buffer; readonly times: number }>();
@@ -353,15 +359,16 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
         category_name: category.name,
         parent_id: 0,
       }));
+    const listedNow = selectTitles(titles);
     if (action === "get_vod_categories")
-      return json(response, categoryRows(titles.movieCategories));
+      return json(response, categoryRows(listedNow.movieCategories));
     if (action === "get_series_categories") {
-      return json(response, categoryRows(titles.seriesCategories));
+      return json(response, categoryRows(listedNow.seriesCategories));
     }
     if (action === "get_vod_streams") {
       return json(
         response,
-        titles.movies.map((movie) => ({
+        listedNow.movies.map((movie) => ({
           num: movie.id,
           name: movie.name,
           stream_type: "movie",
@@ -385,7 +392,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     if (action === "get_series") {
       return json(
         response,
-        titles.series.map((series) => ({
+        listedNow.series.map((series) => ({
           num: series.id,
           name: series.name,
           series_id: series.id,
@@ -653,6 +660,9 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     },
     emptyTitleCategories(empty) {
       titleCategoriesEmpty = empty;
+    },
+    serveTitles(select) {
+      selectTitles = select;
     },
     activeStreams: () => slots,
     serveChannels(next) {

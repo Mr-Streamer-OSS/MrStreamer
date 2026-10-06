@@ -1,10 +1,11 @@
 import { create } from "zustand";
 import type { TitleKind } from "@mrstreamer/contracts/ondemand";
 import { sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
+import type { WatchlistEntry } from "@mrstreamer/contracts/watchlist";
 import { titlePlayer } from "../player/title-player.ts";
 
 /** The page under everything else. Watch, details and playing a title open over it. */
-export type View = "home" | "live" | "movies" | "series";
+export type View = "home" | "live" | "movies" | "series" | "watchlist";
 
 /** Whether a page stays when every subscription has live TV only, as playlists do: Home and Live TV. */
 export function isLivePage(view: View): boolean {
@@ -53,6 +54,8 @@ interface UiState {
   readonly playingTitle: boolean;
   /** A movie's or series' details, over the page they were opened from. */
   readonly details: DetailsTarget | null;
+  /** A saved title the lists don't have, in its own short sheet over the page. */
+  readonly savedEntry: WatchlistEntry | null;
   /** Watch's channel list is open over the picture. */
   readonly channelsOpen: boolean;
   readonly searchOpen: boolean;
@@ -74,6 +77,7 @@ export const useUi = create<UiState>(() => ({
   watching: false,
   playingTitle: false,
   details: null,
+  savedEntry: null,
   channelsOpen: false,
   searchOpen: false,
   searchFrom: "",
@@ -88,7 +92,14 @@ useUi.subscribe((state) => titlePlayer.holdNext(state.settings !== null));
 
 /** Shows a page, closing Watch, details and Settings over it. */
 export function openView(view: View): void {
-  useUi.setState({ view, watching: false, channelsOpen: false, settings: null, details: null });
+  useUi.setState({
+    view,
+    watching: false,
+    channelsOpen: false,
+    settings: null,
+    details: null,
+    savedEntry: null,
+  });
 }
 
 /**
@@ -104,6 +115,7 @@ export function resetForAccount(): void {
     watching: false,
     playingTitle: false,
     details: null,
+    savedEntry: null,
     channelsOpen: false,
     searchOpen: false,
     list: { kind: "all" },
@@ -130,7 +142,18 @@ export function closeWatch(): void {
 
 /** Shows a movie's or series' details over the page. */
 export function openDetails(target: DetailsTarget): void {
-  useUi.setState({ details: target, searchOpen: false, settings: null, watching: false });
+  useUi.setState({
+    details: target,
+    savedEntry: null,
+    searchOpen: false,
+    settings: null,
+    watching: false,
+  });
+}
+
+/** Shows a saved title the lists don't have, over the page: what was kept of it, and Remove. */
+export function openSavedEntry(entry: WatchlistEntry): void {
+  useUi.setState({ savedEntry: entry, details: null, searchOpen: false, settings: null });
 }
 
 /** Whether two lists are the same. */

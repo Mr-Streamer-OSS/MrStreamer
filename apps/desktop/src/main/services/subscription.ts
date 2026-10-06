@@ -205,8 +205,15 @@ export class Subscriptions extends Context.Service<
     /**
      * Forgets a subscription's login, and for one added beside the original, its folder. A folder
      * that kept the same account without showing it goes too.
+     *
+     * `erase` deletes what else the app kept for its account. It runs once the subscription is
+     * saved no more and before its login goes, so nothing is kept for the account while it runs
+     * or after. When it fails the removal fails with it, and the subscription is saved as it was.
      */
-    remove(subscriptionId: string): Effect.Effect<void>;
+    remove(
+      subscriptionId: string,
+      erase?: Effect.Effect<void, Failed>,
+    ): Effect.Effect<void, Failed>;
     /** Every saved subscription as services know it, in the order added. */
     readonly saved: Effect.Effect<readonly SavedSubscription[]>;
     /** Those of them whose password or link is at hand, with the provider behind each. */
@@ -584,15 +591,26 @@ function make(deps: SubscriptionDeps) {
           );
         }),
 
-      remove: (subscriptionId: string) =>
+      remove: (subscriptionId: string, erase?: Effect.Effect<void, Failed>) =>
         writeOne(
           Effect.gen(function* () {
             // Settled first, so nothing a start still writes comes after the removal.
             const roster = yield* load;
             const subscription = roster.find((each) => each.id === subscriptionId);
             if (!subscription) return;
+            // Saved no more before anything of it is deleted: what is asked for it from here on
+            // finds no subscription, and keeps nothing for its account.
+            current = Promise.resolve(roster.filter((each) => each !== subscription));
+            if (erase) {
+              // Nothing of it went yet, so it is saved again as it was. No other change had
+              // its turn meanwhile.
+              yield* Effect.onError(erase, () =>
+                Effect.sync(() => {
+                  current = Promise.resolve(roster);
+                }),
+              );
+            }
             yield* Effect.promise(async () => {
-              current = Promise.resolve(roster.filter((each) => each !== subscription));
               // The sealed password or link first, then the id that named its subscription.
               if (subscription.original) await removeFile(path);
               else await rm(folderOf(subscription.id), { recursive: true, force: true });
