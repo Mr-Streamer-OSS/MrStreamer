@@ -1,8 +1,10 @@
-// A movie's or series' details as the UI shows them: TMDB's overview, artwork, genres and credits
-// where it has them, the provider's otherwise, and the provider's seasons, episodes and length,
-// which are what plays. Seasons come from the episodes themselves: panels list seasons
-// incompletely, or not at all, and some episodes twice. An episode gets TMDB's details once the
-// viewer opens its season. The provider's numbers also say which episode comes next.
+// A movie's or series' details as the UI shows them: TMDB's overview, artwork, genres, credits and
+// runtime where it has them, the provider's otherwise, and the provider's seasons and episodes,
+// which are what plays. A provider's length is only what its panel says of the file and can be far
+// off, so it fills in where TMDB has no runtime; playback measures the file itself. Seasons come
+// from the episodes themselves: panels list seasons incompletely, or not at all, and some episodes
+// twice. An episode gets TMDB's details once the viewer opens its season. The provider's numbers
+// also say which episode comes next.
 import type {
   Episode,
   EpisodeDetails,
@@ -117,6 +119,7 @@ export function nextEpisode(
  * provider's. `answers` are TMDB's season in the viewer's language, then in the languages an
  * episode's name falls back to, as titles' names do: English, then the series' own. Without a
  * name in any, the provider's stands. The provider's story comes before one in another language.
+ * An episode's length is TMDB's runtime, from the first answer that has one, else the provider's.
  */
 export function seasonEpisodes(
   season: Season,
@@ -129,12 +132,13 @@ export function seasonEpisodes(
     const own = viewer?.get(episode.number);
     const fallbacks = others.flatMap((answer) => answer.get(episode.number) ?? []);
     const known = own ?? fallbacks[0];
+    const [runtime] = [own, ...fallbacks].flatMap((each) => runtimeSeconds(each?.runtime) ?? []);
     return {
       ...episode,
       title: own?.name ?? fallbacks.find((each) => each.name)?.name ?? episode.title,
       plot:
         own?.overview ?? episode.plot ?? fallbacks.find((each) => each.overview)?.overview ?? null,
-      duration: episode.duration ?? (known?.runtime ? known.runtime * 60 : null),
+      duration: runtime ?? episode.duration,
       stillUrl: known?.still ? tmdbImage(known.still, 780) : episode.stillUrl,
       airDate: known?.airDate ?? episode.airDate,
       rating: known?.rating ?? null,
@@ -176,10 +180,15 @@ function shared(title: Title, details: ProviderDetails, about: TitleAbout | null
       : details.cast.map((name) => ({ name, role: null, photoUrl: null })),
     directors: about?.directors.length ? about.directors : details.directors,
     releaseDate: details.releaseDate,
-    // The file's own length, else TMDB's.
-    duration: details.duration ?? (about?.runtime ? about.runtime * 60 : null),
+    // TMDB's runtime, else what the provider says of the file.
+    duration: runtimeSeconds(about?.runtime) ?? details.duration,
     backdropUrl: backdrop ?? details.backdropUrl ?? title.backdropUrl,
   };
+}
+
+/** TMDB's runtime, in minutes, as seconds. Null unless it is a length: positive and finite. */
+function runtimeSeconds(minutes: number | null | undefined): number | null {
+  return minutes && Number.isFinite(minutes) && minutes > 0 ? minutes * 60 : null;
 }
 
 /** `name`, unless it is the shown one. */

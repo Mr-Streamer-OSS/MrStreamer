@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { byIds, indexCatalogue, search } from "../src/ondemand/catalogue.ts";
 import { collections } from "../src/ondemand/collections.ts";
-import { movieDetails, nextEpisode, seriesDetails } from "../src/ondemand/details.ts";
+import {
+  movieDetails,
+  nextEpisode,
+  seasonEpisodes,
+  seriesDetails,
+} from "../src/ondemand/details.ts";
 import { suitability, versionLabels } from "../src/ondemand/languages.ts";
 import { episodeName, titleName } from "../src/ondemand/names.ts";
 import {
@@ -382,6 +387,81 @@ describe("version labels", () => {
 });
 
 describe("details", () => {
+  const title = {
+    kind: "movie" as const,
+    id: "1",
+    name: "Blow 1080p (NL AUDIO)",
+    title: "Blow",
+    originalTitle: null,
+    originalLanguage: null,
+    tags: ["NL AUDIO", "1080p"],
+    year: 2001,
+    posterUrl: null,
+    backdropUrl: null,
+    rating: null,
+    addedAt: null,
+    adult: false,
+    tmdbId: null,
+    genres: [],
+    versions: [{ id: "1", tags: ["NL AUDIO", "1080p"] }],
+  };
+  const provider = {
+    originalName: null,
+    plot: null,
+    genres: [],
+    cast: [],
+    directors: [],
+    releaseDate: null,
+    duration: null,
+    posterUrl: null,
+    backdropUrl: null,
+    seasons: [],
+    episodes: [],
+    container: null,
+  };
+  const about = {
+    original: null,
+    language: null,
+    overview: null,
+    poster: null,
+    backdrop: null,
+    genres: [],
+    runtime: null,
+    cast: [],
+    directors: [],
+  };
+  /** A season of one episode, which the provider says lasts `duration` seconds. */
+  const season = (duration: number | null) => ({
+    number: 1,
+    name: "Season 1",
+    posterUrl: null,
+    episodes: [
+      {
+        id: "10",
+        seriesId: "s1",
+        season: 1,
+        number: 1,
+        title: "Pilot",
+        plot: null,
+        duration,
+        stillUrl: null,
+        airDate: null,
+      },
+    ],
+  });
+  /** What TMDB says of that episode in one language, lasting `runtime` minutes. */
+  const episodeAbout = (runtime: number | null) => ({
+    number: 1,
+    name: null,
+    overview: null,
+    still: null,
+    airDate: null,
+    runtime,
+    rating: null,
+    cast: [],
+    directors: [],
+  });
+
   it.each([
     [
       "not the provider's, when it is the version's name with marks",
@@ -399,54 +479,46 @@ describe("details", () => {
     ["TMDB's, when TMDB answered", "Blow: Het Verhaal", "Blow Up", "Blow Up"],
     ["none, when TMDB answered with the shown name", "Blow: Het Verhaal", "Blow", null],
   ])("show as the original title %s", (_, originalName, tmdbOriginal, shown) => {
-    const title = {
-      kind: "movie" as const,
-      id: "1",
-      name: "Blow 1080p (NL AUDIO)",
-      title: "Blow",
-      originalTitle: null,
-      originalLanguage: null,
-      tags: ["NL AUDIO", "1080p"],
-      year: 2001,
-      posterUrl: null,
-      backdropUrl: null,
-      rating: null,
-      addedAt: null,
-      adult: false,
-      tmdbId: null,
-      genres: [],
-      versions: [{ id: "1", tags: ["NL AUDIO", "1080p"] }],
-    };
-    const provider = {
-      originalName,
-      plot: null,
-      genres: [],
-      cast: [],
-      directors: [],
-      releaseDate: null,
-      duration: null,
-      posterUrl: null,
-      backdropUrl: null,
-      seasons: [],
-      episodes: [],
-      container: null,
-    };
-    const about =
-      tmdbOriginal === undefined
-        ? null
-        : {
-            original: tmdbOriginal,
-            language: null,
-            overview: null,
-            poster: null,
-            backdrop: null,
-            genres: [],
-            runtime: null,
-            cast: [],
-            directors: [],
-          };
+    const details = movieDetails(
+      title,
+      { ...provider, originalName },
+      tmdbOriginal === undefined ? null : { ...about, original: tmdbOriginal },
+    );
 
-    expect(movieDetails(title, provider, about).originalTitle).toBe(shown);
+    expect(details.originalTitle).toBe(shown);
+  });
+
+  it.each([
+    // A panel that says three minutes of a two-hour film.
+    ["TMDB's runtime, whatever the provider says", 180, 120, 7200],
+    ["TMDB's runtime, when the provider says none", null, 120, 7200],
+    ["the provider's, when TMDB has none", 180, null, 180],
+    ["the provider's, when TMDB says zero", 180, 0, 180],
+    ["the provider's, when TMDB says less than nothing", 180, -120, 180],
+    ["the provider's, when TMDB's is no number", 180, Number.NaN, 180],
+    ["the provider's, when TMDB's has no end", 180, Number.POSITIVE_INFINITY, 180],
+    ["none, when neither says", null, null, null],
+  ])("show as a film's and an episode's length %s", (_, duration, runtime, shown) => {
+    const film = movieDetails(title, { ...provider, duration }, { ...about, runtime });
+    const [episode] = seasonEpisodes(season(duration), [[episodeAbout(runtime)]]);
+
+    expect(film.duration).toBe(shown);
+    expect(episode?.duration).toBe(shown);
+  });
+
+  it("show the provider's length while TMDB hasn't answered", () => {
+    expect(movieDetails(title, { ...provider, duration: 180 }).duration).toBe(180);
+    expect(seasonEpisodes(season(180), [])[0]?.duration).toBe(180);
+  });
+
+  it("take an episode's runtime from the first language TMDB answered with one", () => {
+    const [episode] = seasonEpisodes(season(180), [
+      [episodeAbout(null)],
+      [episodeAbout(0)],
+      [episodeAbout(50)],
+    ]);
+
+    expect(episode?.duration).toBe(3000);
   });
 });
 
