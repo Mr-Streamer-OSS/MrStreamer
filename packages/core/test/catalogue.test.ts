@@ -274,7 +274,7 @@ describe("channels with several streams", () => {
     });
     expect(channels[1]).toMatchObject({ tags: ["HD"] });
     // Streams without a guide id share the channel's.
-    expect(guideIds.get("100")).toBe("VRT1.be");
+    expect(guideIds.get("100")).toEqual(["VRT1.be"]);
   });
 
   it("keeps apart streams that may be another channel", () => {
@@ -311,11 +311,57 @@ describe("channels with several streams", () => {
         // Guide ids that disagree.
         ["NL: RTL 4 HD", 5, "RTL4.nl"],
         ["NL: RTL 4 FHD", 5, "RTL4Gooi.nl"],
+        // Also when little but their spelling differs: another country, a symbol.
+        ["NL: KADE HD", 5, "kade.nl"],
+        ["NL: KADE FHD", 5, "Kade BE"],
+        ["NL: BRABO HD", 5, "brabo.nl"],
+        ["NL: BRABO FHD", 5, "Brabo+ NL"],
+        // One guide id spelt two ways joins nothing by itself.
+        ["NL: ZENDER1 HD", 5, "zender1.nl"],
+        ["NL: ZENDER 1 FHD", 5, "Zender 1 NL"],
       ],
     );
 
     expect(joined(raw).every(([, names]) => names.length === 1)).toBe(true);
     expect(joined(raw).map(([title]) => title)).toContain("Bloomberg TV +");
+  });
+
+  // Invented names, spelt as one panel does: it lists a channel's Full HD stream first, with the
+  // higher id, and writes the channel's guide id another way on each.
+  it("joins streams whose guide ids are one id spelt differently, and keeps each spelling", () => {
+    const raw = guided(
+      ["BE | VLAANDEREN", "IT | BAMBINI", "TR | SINEMA"],
+      [
+        ["BE | BRABO HD", 0, "brabo BE"],
+        ["BE | BRABO FHD", 0, "brabo.be"],
+        ["IT | KADE GULP HD", 1, "kadegulp.it"],
+        ["IT | KADE GULP FHD", 1, "Kade Gulp IT"],
+        ["TR | DAILYMAX HD", 2, "DailyMax.tr"],
+        ["TR | DAILYMAX FHD", 2, "dailymax.tr"],
+        ["TR | DAILYMAX SD", 2],
+      ],
+    );
+    const [hd, fhd, ...rest] = raw.channels;
+    const listed = { ...raw, channels: [fhd!, hd!, ...rest] };
+
+    const { channels, guideIds } = liveChannels(normalizeCatalogue(listed).streams);
+
+    expect(joined(listed)).toEqual([
+      ["Brabo", ["BE | BRABO FHD", "BE | BRABO HD"]],
+      ["Kade Gulp", ["IT | KADE GULP HD", "IT | KADE GULP FHD"]],
+      ["Dailymax", ["TR | DAILYMAX HD", "TR | DAILYMAX FHD", "TR | DAILYMAX SD"]],
+    ]);
+    // The channel's id stays the lowest of its streams', and the guide may know either spelling.
+    expect(channels[0]).toMatchObject({
+      id: "100",
+      number: 2,
+      variants: [{ id: "101" }, { id: "100" }],
+    });
+    expect(channels.map(({ id }) => guideIds.get(id))).toEqual([
+      ["brabo.be", "brabo BE"],
+      ["kadegulp.it", "Kade Gulp IT"],
+      ["DailyMax.tr", "dailymax.tr"],
+    ]);
   });
 
   // Invented names in the style of a public playlist: the country and the feed in the guide id,

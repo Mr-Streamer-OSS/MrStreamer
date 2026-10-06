@@ -44,16 +44,16 @@ const channels: LiveChannel[] = Array.from({ length: CHANNELS }, (_, index) => (
   categoryIds: [],
   variants: [{ id: String(index), name: `Channel ${index}`, tags: [], quality: null }],
 }));
-const guideIdOf = new Map<string, string>();
+const guideIdsOf = new Map<string, readonly string[]>();
 const byGuideId = new Map<string, LiveChannel[]>();
 for (const [index, channel] of channels.entries()) {
   const guideId = index % 6 === 0 ? guideIds[(index / 6) % guideIds.length] : undefined;
   if (!guideId) continue;
-  guideIdOf.set(channel.id, guideId);
+  guideIdsOf.set(channel.id, [guideId]);
   byGuideId.set(guideId, [...(byGuideId.get(guideId) ?? []), channel]);
 }
 const guideChannels: GuideChannels = {
-  guideIdOf: (id) => guideIdOf.get(id) ?? null,
+  guideIdsOf: (id) => guideIdsOf.get(id) ?? [],
   channelsOf: (id) => byGuideId.get(id) ?? [],
 };
 
