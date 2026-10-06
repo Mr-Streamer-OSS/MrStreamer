@@ -12,8 +12,12 @@ const YIELD_EVERY_CHANNELS = 50;
 
 /** How catalogue channels map to the guide. */
 export interface GuideChannels {
-  guideIdOf(channelId: string): string | null;
-  /** The channels showing a guide channel, in catalogue order. */
+  /**
+   * The channel's guide ids: none, one, or each spelling its streams give of one, "vtm.be" and
+   * "vtm BE". The channel shows the programmes of the first the guide has any for.
+   */
+  guideIdsOf(channelId: string): readonly string[];
+  /** The channels a guide id is one of, in catalogue order. */
   channelsOf(guideId: string): readonly LiveChannel[];
 }
 
@@ -102,7 +106,11 @@ export function listingsAt(
 /** How many of the catalogue's channels the guide has programmes for. */
 export function channelsCovered(index: ProgrammeIndex, channels: GuideChannels): number {
   let count = 0;
-  for (const guideId of index.byChannel.keys()) count += channels.channelsOf(guideId).length;
+  for (const guideId of index.byChannel.keys()) {
+    for (const channel of channels.channelsOf(guideId)) {
+      if (shownGuideId(index, channels, channel.id) === guideId) count++;
+    }
+  }
   return count;
 }
 
@@ -133,7 +141,9 @@ export function searchAt(
   for (const { guideId, folded, programme } of index.titles) {
     if (programme.stop <= at || !words.every((word) => folded.includes(word))) continue;
     // Channels for adults show only in Live TV's lists, never in search.
-    const channel = channels.channelsOf(guideId).find((each) => !each.adult);
+    const channel = channels
+      .channelsOf(guideId)
+      .find((each) => !each.adult && shownGuideId(index, channels, each.id) === guideId);
     if (channel) matches.push({ channel, programme });
   }
   const onNow = (match: ProgrammeMatch) => (match.programme.start <= at ? 0 : 1);
@@ -146,8 +156,21 @@ function programmesOf(
   channels: GuideChannels,
   channelId: string,
 ): readonly Programme[] {
-  const guideId = channels.guideIdOf(channelId);
+  const guideId = shownGuideId(index, channels, channelId);
   return (guideId && index.byChannel.get(guideId)) || [];
+}
+
+/**
+ * The guide id whose programmes a channel shows: the first of its ids the guide has programmes
+ * for. So a spelling the guide doesn't know never hides one it does, wherever the provider lists
+ * it, and a channel shows, counts and is found once when the guide knows several.
+ */
+function shownGuideId(
+  index: ProgrammeIndex,
+  channels: GuideChannels,
+  channelId: string,
+): string | undefined {
+  return channels.guideIdsOf(channelId).find((guideId) => index.byChannel.has(guideId));
 }
 
 /** The position of the first programme that hasn't ended at `at`. */

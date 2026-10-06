@@ -9,6 +9,7 @@ import { Settings } from "../src/main/services/preferences.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import {
   fakeGuide,
+  QUALITY_STREAM_IDS,
   type FakeChannel,
   type FakeProvider,
   type FakeProviderOptions,
@@ -85,6 +86,10 @@ function channelsOf(provider: FakeProvider) {
 }
 
 const at = (time: string) => Date.parse(`2026-10-02T${time}:00+02:00`);
+
+/** An hour's programme on a guide channel, on at NOW. */
+const slot = (id: string, title: string) =>
+  `<programme start="20261002200000 +0200" stop="20261002210000 +0200" channel="${id}"><title>${title}</title></programme>`;
 
 describe("programme guide", () => {
   it("shows what's on now and next, and the rest of the day, for channels with a guide", async () => {
@@ -318,8 +323,6 @@ describe("programme guide", () => {
       [stranger!.streamId, named],
       ...crime.map((channel): [number, string] => [channel.streamId, "PlayCrime.be"]),
     ]);
-    const slot = (id: string, title: string) =>
-      `<programme start="20261002200000 +0200" stop="20261002210000 +0200" channel="${id}"><title>${title}</title></programme>`;
     provider.serveGuide(`<tv>${slot(named, "Theirs")}${slot("PlayCrime.be", "Crime")}</tv>`);
     await guide.refresh();
 
@@ -329,6 +332,45 @@ describe("programme guide", () => {
     expect(Object.keys(listings).toSorted()).toEqual(
       same.map((channel) => String(channel.streamId)).toSorted(),
     );
+  });
+
+  it("shows one channel with its programmes when its streams spell its guide id differently", async () => {
+    // A panel writes one channel's guide id as "kwaliteit1.be" on the Full HD stream and as
+    // "kwaliteit1 BE" on the HD one, and its guide lists programmes under the first only.
+    const fhd = String(QUALITY_STREAM_IDS);
+    const hd = String(QUALITY_STREAM_IDS + 1);
+    const { provider, guide, create } = await connectedGuide({
+      guideIdOf: (channel) => (String(channel.streamId) === hd ? "kwaliteit1 BE" : channel.guideId),
+    });
+    provider.serveGuide(`<tv>${slot("kwaliteit1.be", "Journaal")}</tv>`);
+    await guide.refresh();
+    const shown = async ({ library, listings }: typeof guide) => {
+      const channels = await library.channels({ query: "kwaliteit" });
+      const now = await listings(channels.map((channel) => channel.id));
+      return channels.map((channel) => [
+        channel.id,
+        channel.variants.map((variant) => variant.id).toSorted(),
+        now[channel.id]?.now?.title,
+      ]);
+    };
+    const one = (title: string) => [[fhd, [fhd, hd, String(QUALITY_STREAM_IDS + 2)], title]];
+
+    expect(await shown(guide)).toEqual(one("Journaal"));
+
+    // The provider lists the stream whose spelling the guide doesn't know first.
+    provider.serveChannels((all) => all.toReversed());
+    await guide.library.refresh();
+    expect(await shown(guide)).toEqual(one("Journaal"));
+    expect(await shown(await create())).toEqual(one("Journaal"));
+
+    // A guide that knows both spellings shows, counts and finds the channel once.
+    provider.serveGuide(
+      `<tv>${slot("kwaliteit1 BE", "Nieuws")}${slot("kwaliteit1.be", "Nieuws")}</tv>`,
+    );
+    await guide.refresh();
+    expect(await shown(guide)).toEqual(one("Nieuws"));
+    expect(await guide.status()).toMatchObject({ channels: 1 });
+    expect(await guide.search("nieuws")).toMatchObject([{ channel: { id: fhd } }]);
   });
 
   it("forgets the guide when the subscription goes", async () => {

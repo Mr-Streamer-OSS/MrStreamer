@@ -352,11 +352,11 @@ function index(file: CatalogueFile, outdated: boolean): IndexedCatalogue {
   for (const channel of channels) {
     byId.set(channel.id, channel);
     for (const variant of channel.variants) byId.set(variant.id, channel);
-    const guideId = guideIds.get(channel.id);
-    if (!guideId) continue;
-    const list = byGuideId.get(guideId);
-    if (list) list.push(channel);
-    else byGuideId.set(guideId, [channel]);
+    for (const guideId of guideIds.get(channel.id) ?? []) {
+      const list = byGuideId.get(guideId);
+      if (list) list.push(channel);
+      else byGuideId.set(guideId, [channel]);
+    }
   }
   // A channel shows in each of its streams' categories, once, where its first stream there is.
   const byCategory = new Map<string, LiveChannel[]>();
@@ -387,7 +387,7 @@ function index(file: CatalogueFile, outdated: boolean): IndexedCatalogue {
       normalize(channel.variants.map((variant) => variant.name).join(" ")),
     ),
     guide: {
-      guideIdOf: (channelId) => guideIds.get(byId.get(channelId)?.id ?? channelId) ?? null,
+      guideIdsOf: (channelId) => guideIds.get(byId.get(channelId)?.id ?? channelId) ?? [],
       channelsOf: (guideId) => byGuideId.get(guideId) ?? [],
     },
   };
@@ -416,8 +416,8 @@ function withoutAdults(found: IndexedCatalogue): IndexedCatalogue {
     byCategory,
     searchNames: keep.map((at) => found.searchNames[at] ?? ""),
     guide: {
-      guideIdOf: (channelId) =>
-        kept(found.byId.get(channelId)) ? found.guide.guideIdOf(channelId) : null,
+      guideIdsOf: (channelId) =>
+        kept(found.byId.get(channelId)) ? found.guide.guideIdsOf(channelId) : [],
       channelsOf: (guideId) => found.guide.channelsOf(guideId).filter(kept),
     },
   };

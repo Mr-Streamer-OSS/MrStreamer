@@ -8,8 +8,9 @@
 //   - Their categories hold the same, quality words aside: "BE | VLAANDEREN" and "BE | VLAANDEREN
 //     HD" do, "CA | FRENCH" and "CA | ENGLISH" don't. A stream in a category named only for a
 //     quality joins the title's streams when they form one group, and stays with its kind otherwise.
-//   - Their trusted guide ids don't disagree. A shared guide id joins nothing by itself: panels file
-//     unrelated channels under one (see ./guide-ids.ts).
+//   - Their trusted guide ids don't disagree, however each is spelt: "vtm.be" is "vtm BE". A shared
+//     guide id joins nothing by itself: panels file unrelated channels under one (see
+//     ./guide-ids.ts).
 // Anything less certain stays apart, as the provider lists it.
 import {
   QUALITIES,
@@ -34,8 +35,11 @@ const RESOLUTIONS: Readonly<Record<string, Quality>> = {
 export interface LiveChannels {
   /** In the provider's order, each where its first stream is. */
   readonly channels: readonly LiveChannel[];
-  /** The guide id of each channel that has one to trust, by channel id. */
-  readonly guideIds: ReadonlyMap<string, string>;
+  /**
+   * The guide ids of each channel that has one to trust, by channel id: each spelling its streams
+   * give, in their order. The guide lists programmes under one of them, not always the first.
+   */
+  readonly guideIds: ReadonlyMap<string, readonly string[]>;
 }
 
 /** The catalogue's channels, each with its streams. */
@@ -73,14 +77,14 @@ export function liveChannels(streams: readonly NormalizedStream[]): LiveChannels
   }
 
   const channels: LiveChannel[] = [];
-  const guideIds = new Map<string, string>();
+  const guideIds = new Map<string, readonly string[]>();
   for (const stream of streams) {
     const group = together.get(stream) ?? [stream];
     if (group[0] !== stream) continue;
     const channel = joined(stream, group);
     channels.push(channel);
-    const guideId = group.map((each) => trusted.get(each.id)).find(Boolean);
-    if (guideId) guideIds.set(channel.id, guideId);
+    const spellings = new Set(group.flatMap((each) => trusted.get(each.id) ?? []));
+    if (spellings.size > 0) guideIds.set(channel.id, [...spellings]);
   }
   return { channels, guideIds };
 }
@@ -201,14 +205,20 @@ function partition(
 }
 
 /**
- * The guide channel an id names, its feed's quality aside. Playlists name feeds after "@", and
- * one channel's SD and HD feeds are one channel: "BBCOne.uk@ScotlandHD" is "BBCOne.uk@Scotland",
- * "Arirang.kr@HD" is "Arirang.kr". "@East" and "@West" stay apart.
+ * The guide channel an id names, its feed's quality and its spelling aside. Playlists name feeds
+ * after "@", and one channel's SD and HD feeds are one channel: "BBCOne.uk@ScotlandHD" is
+ * "BBCOne.uk@Scotland", "Arirang.kr@HD" is "Arirang.kr". "@East" and "@West" stay apart. Panels
+ * spell one id several ways, so case, spaces and punctuation don't count: "vtm.be" is "vtm BE",
+ * and "NPO1.nl" "NPO 1 NL". Every letter and digit does, the country's too, and the symbols that
+ * tell channels apart, as in titles: "RTL.de" is not "RTL.lu", nor "Canal.fr" "Canal+.fr".
  */
 function guideChannel(guideId: string | undefined): string[] {
   if (!guideId) return [];
   return [
-    guideId.replace(/@(.*?)(?:SD|HD|FHD|UHD|4K)?$/i, (_, feed: string) => feed && `@${feed}`),
+    guideId
+      .replace(/@(.*?)(?:SD|HD|FHD|UHD|4K)?$/i, (_, feed: string) => feed && `@${feed}`)
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}@+!&]+/gu, ""),
   ];
 }
 
