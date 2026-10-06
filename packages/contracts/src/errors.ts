@@ -41,6 +41,12 @@ export type AppError =
       /** Which list, when it isn't the channels. */
       readonly list?: "movies" | "series";
     }
+  /**
+   * A new order for the favourites was made from a list that no longer holds: a favourite was
+   * added or removed since, the catalogue joined or split a channel's streams, or another
+   * subscription is connected. Nothing was saved; the UI reads the favourites again.
+   */
+  | { readonly kind: "favourites-changed" }
   /** A receiver on the network didn't take what it was sent, or can't be reached. */
   | { readonly kind: "output"; readonly failure: OutputFailure }
   /** An IPC call carried input that failed validation. Indicates a UI bug. */

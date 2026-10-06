@@ -190,6 +190,12 @@ export const ipcInputs = {
   // Each change carries an id the UI makes up, so sending it again changes nothing more.
   "viewing.setFavourite": () =>
     type({ commandId: "string", channelId: "string", favourite: "boolean" }),
+  /**
+   * Puts the favourites of `subscription` in another order: `original` is the list the order was
+   * made from, whole, and `order` the channels arranged. See `FavouriteOrder`.
+   */
+  "viewing.reorderFavourites": () =>
+    type({ commandId: "string", subscription: "string", original: "string[]", order: "string[]" }),
   "viewing.recordWatch": () => type({ commandId: "string", channelId: "string" }),
   "viewing.recordProgress": () =>
     type({
@@ -317,6 +323,12 @@ export interface IpcOutputs {
   "viewing.get": Viewing;
   /** Adds a channel to the favourites, or takes it out. */
   "viewing.setFavourite": Viewing;
+  /**
+   * Saves the favourites in a new order, which Home, Live TV and Watch then show. Fails with
+   * `favourites-changed`, saving nothing, when they are no longer the list the order was made
+   * from. Adds and removes no favourite.
+   */
+  "viewing.reorderFavourites": Viewing;
   /** Remembers a channel as watched, and as the last one. */
   "viewing.recordWatch": Viewing;
   /** Remembers how far a movie or episode played. */

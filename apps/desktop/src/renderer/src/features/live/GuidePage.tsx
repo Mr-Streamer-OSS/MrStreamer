@@ -7,9 +7,11 @@
 // programmes on now and later today, and shows the channels it finds in the list's order. / goes
 // to it; Down or Enter there hands the keys to the channels found. Escape clears a search before
 // it goes Home, and so does another list. ⌘K searches everything for the same.
+//   Reorder, beside the field of Favourites, or R, puts the favourites in another order: see
+// ./reorder.ts for its keys, which replace these until the order is saved or cancelled.
 import { useQuery } from "@tanstack/react-query";
 import { Play, Search, Volume2, VolumeX, X } from "lucide-react";
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { hasModifier, isMac, isTyping } from "../../app/platform.ts";
 import { openView, openWatch, useUi } from "../../app/ui-store.ts";
@@ -22,6 +24,7 @@ import { useNow } from "../../lib/clock.ts";
 import { progressOf, timeLeft } from "../../lib/format.ts";
 import { showSelection, useKeyboardMode } from "../../lib/input-mode.ts";
 import { queries, useCategoryMap, useFavouriteIds, useToggleFavourite } from "../../lib/queries.ts";
+import { cn } from "../../lib/utils.ts";
 import { usePreviewWaits } from "../../player/output.ts";
 import { Picture } from "../../player/Picture.tsx";
 import { player, usePlayer } from "../../player/player.ts";
@@ -36,6 +39,7 @@ import {
   useListEntries,
   useListSearch,
 } from "./lists.ts";
+import { orderKey, useFavouriteOrder, waits } from "./reorder.ts";
 
 const PAGE_ROWS = 10;
 const NO_CHANNELS: readonly LiveChannel[] = [];
@@ -78,9 +82,17 @@ export function GuidePage({ active }: { active: boolean }) {
   const text = typed.key === key ? typed.text : "";
   const setText = (text: string) => setTyped({ key, text });
   const search = useListSearch(list, channels, text);
-  const rows = search.channels;
   const searching = search.query !== "";
   const field = useRef<HTMLInputElement>(null);
+
+  const ordered = list.kind === "favourites";
+  const order = useFavouriteOrder(active && ordered, ordered ? listed : undefined);
+  const { draft } = order;
+  // The rows are the list's, or what a search found of them, or the favourites as arranged.
+  const rows = draft?.order ?? search.channels;
+  // Reorder was asked for while a search hides favourites, which it never clears by itself.
+  const [refused, setRefused] = useState(false);
+  if (refused && (text.trim() === "" || !ordered)) setRefused(false);
 
   // The selection keeps to its channel when the rows change under it, as a search's do while
   // programmes begin and end, and stays among the rows once its channel has gone.
@@ -92,7 +104,48 @@ export function GuidePage({ active }: { active: boolean }) {
     chosen.id === null || rows[chosen.index]?.id === chosen.id
       ? chosen.index
       : rows.findIndex((channel) => channel.id === chosen.id);
-  const selected = Math.min(kept === -1 ? chosen.index : kept, Math.max(rows.length - 1, 0));
+  const selected = draft
+    ? Math.max(
+        rows.findIndex((channel) => channel.id === draft.focus.id),
+        0,
+      )
+    : Math.min(kept === -1 ? chosen.index : kept, Math.max(rows.length - 1, 0));
+
+  const page = useRef<HTMLDivElement>(null);
+  const reorderButton = useRef<HTMLButtonElement>(null);
+  /** Where the focus was when ordering began, to put it back: on Reorder, or nowhere in the page. */
+  const entered = useRef<"button" | "page" | null>(null);
+  const begin = () => {
+    numberEntry.cancel();
+    setExpandedId(null);
+    setFocus("channels");
+    entered.current = document.activeElement === reorderButton.current ? "button" : "page";
+    order.start(rows[selected]?.id ?? null);
+  };
+  /** Starts ordering the favourites, or asks for a search to be cleared first. */
+  const reorder = () => {
+    if (!order.available || draft) return;
+    if (text.trim() !== "") setRefused(true);
+    else begin();
+  };
+  // Once the order is saved or cancelled, the selection is the channel that had the keys, and
+  // the focus is back where it was before.
+  const focusId = draft?.focus.id ?? null;
+  const left = useRef(focusId);
+  useLayoutEffect(() => {
+    if (focusId !== null) {
+      left.current = focusId;
+      return;
+    }
+    const from = entered.current;
+    entered.current = null;
+    if (from === null) return;
+    const id = left.current;
+    setChosen((current) => ({ ...current, id }));
+    const focused = document.activeElement;
+    if (from === "button") reorderButton.current?.focus();
+    else if (focused instanceof HTMLElement && page.current?.contains(focused)) focused.blur();
+  }, [focusId]);
 
   // A new list, or another search of it, selects its playing channel, or its first.
   const loaded = listed !== undefined;
@@ -125,6 +178,8 @@ export function GuidePage({ active }: { active: boolean }) {
     setText,
     toggle,
     toggleFavourite,
+    order,
+    reorder,
   });
   state.current = {
     focus,
@@ -137,6 +192,8 @@ export function GuidePage({ active }: { active: boolean }) {
     setText,
     toggle,
     toggleFavourite,
+    order,
+    reorder,
   };
 
   useEffect(() => {
@@ -156,6 +213,8 @@ export function GuidePage({ active }: { active: boolean }) {
       )
         return;
       const now = state.current;
+      // An order being made has the keys to itself: nothing plays, stars or opens meanwhile.
+      if (now.order.draft) return orderKey(event, now.order);
       const { toggle, toggleFavourite } = now;
       const channel = now.rows[now.selected];
       const step = (value: number, delta: number, length: number) =>
@@ -228,6 +287,10 @@ export function GuidePage({ active }: { active: boolean }) {
         case "S":
           if (channel) toggleFavourite(channel.id);
           break;
+        case "r":
+        case "R":
+          now.reorder();
+          break;
         default:
           return;
       }
@@ -239,8 +302,12 @@ export function GuidePage({ active }: { active: boolean }) {
 
   const notice = catalogueState({ data: categories.data, error: categories.error ?? error });
   const title = listTitle(list, categoryMap);
+  const waiting = waits(draft);
+  /** The order was refused: its favourites changed, and are read again when the viewer says so. */
+  const changed = draft?.status === "changed" || draft?.status === "reading";
   return (
-    <div className="flex h-full flex-col">
+    // Until an order being saved is answered, the page takes no input: nothing leaves it.
+    <div ref={page} className="flex h-full flex-col" inert={waiting ? true : undefined}>
       <WindowBar className="bg-black" />
       {notice ? (
         <div className="flex flex-1 items-center justify-center pb-14">
@@ -263,24 +330,86 @@ export function GuidePage({ active }: { active: boolean }) {
             <NowStrip active={active} />
             <div className="flex h-14 flex-none items-center gap-3 px-9 pt-2 pb-3">
               <h1 className="min-w-0 truncate text-xl font-semibold tracking-tight">{title}</h1>
-              {searching && listed && (
-                <span className="flex-none text-sm text-muted-foreground tabular-nums">
-                  {rows.length.toLocaleString()} of {listed.length.toLocaleString()}
-                </span>
-              )}
-              {channels.length > 0 && (
-                <SearchField
-                  field={field}
-                  list={title}
-                  value={text}
-                  onChange={setText}
-                  onLeave={() => {
-                    setFocus("channels");
-                    showSelection();
-                  }}
-                />
+              {draft ? (
+                <>
+                  <span
+                    className={cn(
+                      "min-w-0 truncate text-[0.8125rem]",
+                      draft.status === "failed" || changed
+                        ? "text-foreground"
+                        : "text-muted-foreground",
+                    )}
+                  >
+                    {draft.status === "failed"
+                      ? "Couldn't save the order."
+                      : changed
+                        ? "Your favourites changed."
+                        : `${isMac ? "Option" : "Alt"} with Up or Down moves the selected row`}
+                  </span>
+                  <div className="ml-auto flex flex-none items-center gap-2">
+                    <Button onClick={order.cancel} disabled={waiting}>
+                      Cancel
+                    </Button>
+                    <Button variant="primary" onClick={order.confirm} disabled={waiting}>
+                      {draft.status === "failed" ? "Retry" : changed ? "Reload" : "Save"}
+                    </Button>
+                  </div>
+                  <span role="status" className="sr-only">
+                    {draft.said}
+                  </span>
+                </>
+              ) : (
+                <>
+                  {searching && listed && (
+                    <span className="flex-none text-sm text-muted-foreground tabular-nums">
+                      {rows.length.toLocaleString()} of {listed.length.toLocaleString()}
+                    </span>
+                  )}
+                  <div className="ml-auto flex flex-none items-center gap-2">
+                    {order.available && (
+                      <Button
+                        ref={reorderButton}
+                        variant="ghost"
+                        size="sm"
+                        title="Reorder (R)"
+                        onClick={reorder}
+                      >
+                        Reorder
+                      </Button>
+                    )}
+                    {channels.length > 0 && (
+                      <SearchField
+                        field={field}
+                        list={title}
+                        value={text}
+                        onChange={setText}
+                        onLeave={() => {
+                          setFocus("channels");
+                          showSelection();
+                        }}
+                      />
+                    )}
+                  </div>
+                </>
               )}
             </div>
+            {refused && (
+              <p className="px-9 pb-2.5 text-sm text-muted-foreground">
+                Clear the search to reorder.
+                {/* The field's own button clears a search too, and leaves it at that. */}
+                <button
+                  aria-label="Clear search and reorder"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    setText("");
+                    begin();
+                  }}
+                  className="ml-3 text-white underline underline-offset-4"
+                >
+                  Clear search
+                </button>
+              </p>
+            )}
             {listed && listed.length === 0 ? (
               <p className="px-9 text-sm text-muted-foreground">
                 {list.kind === "favourites" ? "No favourites yet." : "No channels."}
@@ -303,12 +432,22 @@ export function GuidePage({ active }: { active: boolean }) {
               <ChannelTable
                 key={`${key}\n${search.query}`}
                 channels={rows}
-                selected={keyboard && focus === "channels" ? selected : null}
+                selected={draft || (keyboard && focus === "channels") ? selected : null}
                 playingId={playingId}
                 expandedId={expandedId}
                 favourites={favourites}
                 words={search.words}
                 matches={search.matches}
+                order={
+                  draft && {
+                    saved: draft.listed,
+                    focus: draft.focus,
+                    locked: waiting || changed,
+                    onSelect: order.select,
+                    onFocused: order.focused,
+                    onMove: order.move,
+                  }
+                }
                 onWatch={(channel) => {
                   setChosen({ index: rows.indexOf(channel), id: channel.id });
                   watchChannel(channel);
@@ -344,7 +483,7 @@ function SearchField({
   onLeave: () => void;
 }) {
   return (
-    <label className="group ml-auto flex h-9 w-[17rem] flex-none items-center gap-2 rounded-full bg-white/8 px-3.5 focus-within:bg-white/12">
+    <label className="group flex h-9 w-[17rem] flex-none items-center gap-2 rounded-full bg-white/8 px-3.5 focus-within:bg-white/12">
       <Search className="size-4 flex-none text-muted-foreground" />
       <input
         ref={field}

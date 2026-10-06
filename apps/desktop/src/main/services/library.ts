@@ -112,10 +112,12 @@ export class Library extends Context.Service<
     /** The channel by its id or any of its streams'. */
     channel(channelId: string): Effect.Effect<LiveChannel, Failed>;
     /**
-     * Finds channels by their id or any of their streams', in the catalogue in memory or on disk.
-     * Never fetches one: before the first, it finds none.
+     * Finds the channels of the subscription with `key` by their id or any of their streams', in
+     * the catalogue in memory or on disk. Never fetches one: before the first, and for any
+     * subscription but the one whose catalogue is kept, it finds none. It looks in the catalogue
+     * kept as each id is asked for, so a refresh or another subscription since shows at once.
      */
-    readonly lookup: Effect.Effect<(channelId: string) => LiveChannel | undefined>;
+    lookup(key: string): Effect.Effect<(channelId: string) => LiveChannel | undefined>;
     /** Forgets the cached catalogue, for when the subscription changes or goes. */
     readonly clear: Effect.Effect<void>;
     /** The status after every refresh, successful or not. */
@@ -304,11 +306,10 @@ function make(options: LibraryOptions) {
             : Effect.fail(new Failed({ error: { kind: "channel-not-found", channelId } }));
         }),
 
-      lookup: Effect.gen(function* () {
-        const source = yield* subscriptions.source;
-        const found = source ? yield* cached(source.key) : null;
-        return (channelId: string) => found?.byId.get(channelId);
-      }),
+      lookup: (key: string) =>
+        Effect.as(cached(key), (channelId: string) =>
+          catalogue?.key === key ? catalogue.byId.get(channelId) : undefined,
+        ),
 
       clear: Effect.gen(function* () {
         catalogue = null;

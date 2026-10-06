@@ -134,14 +134,18 @@ async function submit(page: Page, fields: readonly string[]): Promise<void> {
   );
 }
 
-/** Presses a key in the window. */
-export async function key(page: Page, name: string, code: number): Promise<void> {
+/** The DevTools protocol's bits for the keys held with another, or with a click. */
+export const MODIFIERS = { alt: 1, shift: 8 } as const;
+
+/** Presses a key in the window, with `modifiers` held: a sum of `MODIFIERS`. */
+export async function key(page: Page, name: string, code: number, modifiers = 0): Promise<void> {
   for (const type of ["rawKeyDown", "keyUp"]) {
     await page.send("Input.dispatchKeyEvent", {
       type,
       key: name,
       code: name,
       windowsVirtualKeyCode: code,
+      modifiers,
     });
   }
 }

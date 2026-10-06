@@ -40,6 +40,8 @@ export function describeError(error: AppError): string {
       return describeStreamFailure(error.failure);
     case "output":
       return describeOutputFailure(error.failure);
+    case "favourites-changed":
+      return "Your favourites changed.";
     case "incomplete-catalogue":
       if (error.list) return `The provider sent no ${error.list}, so the previous list stays.`;
       return error.received === 0

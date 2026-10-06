@@ -279,7 +279,7 @@ export function useChooseQuality(): (channel: LiveChannel, variantId: string | n
 }
 
 /** Keeps the latest viewing state: an answer can arrive after a later change's event. */
-function keepViewing(client: QueryClient, viewing: Viewing): void {
+export function keepViewing(client: QueryClient, viewing: Viewing): void {
   client.setQueryData(queries.viewing().queryKey, (cached) =>
     cached && cached.sequence > viewing.sequence ? cached : viewing,
   );
@@ -293,7 +293,7 @@ export function useLastChannel(): LiveChannel | null {
   return (channelId !== null && data) || null;
 }
 
-/** The ids of the favourite channels, in the order they were added. */
+/** The ids of the favourite channels, in their saved order. */
 export function useFavouriteIds(): ReadonlySet<string> {
   const { data } = useQuery(queries.viewing());
   return useMemo(() => new Set(data?.favourites), [data]);

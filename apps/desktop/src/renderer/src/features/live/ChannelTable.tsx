@@ -4,10 +4,23 @@
 //   A search shows the same rows for the channels it found, with what matched underlined: the
 // name, the programme on now, or a later one, which then stands where what's next does, in white
 // and at every width. The rest of the day opens on that programme.
+//   While the favourites are being put in another order, the same rows stand in the order being
+// made. Each has an Up and a Down button where its star and its arrow were, and plays nothing.
+// One row holds the focus, the one the keys move, and keeps it wherever it goes: its row stays
+// in the page while the list draws only the rows in view.
 import { useQuery } from "@tanstack/react-query";
-import { useVirtualizer } from "@tanstack/react-virtual";
-import { ChevronDown, Star } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
+import { ArrowDown, ArrowUp, ChevronDown, Star } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FocusEvent,
+  type ReactNode,
+} from "react";
 import type { Listing, ListingMatch, Programme } from "@mrstreamer/contracts/guide";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { matchRanges } from "@mrstreamer/core/text";
@@ -20,11 +33,28 @@ import { queries } from "../../lib/queries.ts";
 import { useRem } from "../../lib/use-rem.ts";
 import { cn } from "../../lib/utils.ts";
 import { useVisibleListings } from "./lists.ts";
+import type { RowPart } from "./reorder.ts";
 
 const ROW_REM = 3.75;
 /** Later programmes the schedule shows even when today has fewer left. */
 const MIN_LATER = 6;
 const NONE: readonly string[] = [];
+
+/** The list while its channels are being put in another order. */
+export interface TableOrder {
+  /** The channels in their saved order, which programmes are asked for by: moving a row asks none. */
+  readonly saved: readonly LiveChannel[];
+  /** The part of the selected row that holds the focus, and how often the viewer chose it. */
+  readonly focus: { readonly part: RowPart; readonly asked: number };
+  /** Nothing moves: the order is being saved, or can't be. */
+  readonly locked: boolean;
+  /** A click on a row, which gives it the keys. */
+  onSelect(channelId: string): void;
+  /** The focus went to a row's part by itself, as with Tab. */
+  onFocused(channelId: string, part: RowPart): void;
+  /** Moves a channel `by` places, keeping the focus on `part` of its row. */
+  onMove(channelId: string, by: number, part: RowPart): void;
+}
 
 /**
  * One list's channels, or what a search found of them. Give each its own, by key: the list
@@ -39,12 +69,16 @@ export function ChannelTable({
   favourites,
   words,
   matches,
+  order = null,
   onWatch,
   onToggleSchedule,
   onToggleFavourite,
 }: {
   channels: readonly LiveChannel[];
-  /** The keyboard selection, or null while the pointer is in use. */
+  /**
+   * The keyboard selection, or null while the pointer is in use. While `order` is set, the row
+   * that holds the focus, whichever is in use.
+   */
   selected: number | null;
   playingId: string | null;
   expandedId: string | null;
@@ -53,6 +87,8 @@ export function ChannelTable({
   words: readonly string[];
   /** What that search found in each channel's programmes, by channel id. */
   matches: Readonly<Record<string, ListingMatch>>;
+  /** Set while `channels` are the favourites in an order being made. */
+  order?: TableOrder | null;
   onWatch: (channel: LiveChannel) => void;
   onToggleSchedule: (channelId: string) => void;
   onToggleFavourite: (channelId: string) => void;
@@ -60,12 +96,23 @@ export function ChannelTable({
   const scroller = useRef<HTMLDivElement>(null);
   const rem = useRem();
   const now = useNow();
+  // The row with the focus stays in the page when it scrolls out of view, so it keeps the focus.
+  const kept = order ? selected : null;
+  const rangeExtractor = useCallback(
+    (range: Range) => {
+      const drawn = defaultRangeExtractor(range);
+      if (kept === null || kept >= range.count || drawn.includes(kept)) return drawn;
+      return [...drawn, kept].sort((a, b) => a - b);
+    },
+    [kept],
+  );
   const virtualizer = useVirtualizer({
     count: channels.length,
     getScrollElement: () => scroller.current,
     estimateSize: () => ROW_REM * rem,
     getItemKey: (index) => channels[index]?.id ?? index,
     overscan: 8,
+    rangeExtractor,
   });
 
   useEffect(() => {
@@ -79,20 +126,31 @@ export function ChannelTable({
     // Only once its channels are in, not when another channel starts.
   }, [channels.length > 0]);
 
-  // Only the keyboard scrolls the list.
+  // Only the keyboard scrolls the list, and a channel moved in it by either.
   useEffect(() => {
     if (selected !== null) virtualizer.scrollToIndex(selected, { align: "auto" });
   }, [selected, virtualizer]);
 
   const items = virtualizer.getVirtualItems();
+  const saved = order?.saved;
+  const savedAt = useMemo(
+    () => new Map(saved?.map((channel, index) => [channel.id, index])),
+    [saved],
+  );
   const listings = useVisibleListings(
-    channels,
-    items.map((item) => item.index),
+    saved ?? channels,
+    items.flatMap((item) =>
+      saved ? (savedAt.get(channels[item.index]?.id ?? "") ?? []) : item.index,
+    ),
   );
 
   return (
     <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 pb-8">
-      <div className="relative" style={{ height: virtualizer.getTotalSize() }}>
+      <div
+        className="relative"
+        style={{ height: virtualizer.getTotalSize() }}
+        {...(order ? { role: "list", "aria-label": "Favourites, in the order to save" } : {})}
+      >
         {items.map((item) => {
           const channel = channels[item.index];
           if (!channel) return null;
@@ -114,6 +172,17 @@ export function ChannelTable({
                 favourite={favourites.has(channel.id)}
                 words={words}
                 match={matches[channel.id] ?? null}
+                order={
+                  order && {
+                    position: item.index + 1,
+                    count: channels.length,
+                    focus: item.index === selected ? order.focus : null,
+                    locked: order.locked,
+                    onSelect: () => order.onSelect(channel.id),
+                    onFocused: (part) => order.onFocused(channel.id, part),
+                    onMove: (by, part) => order.onMove(channel.id, by, part),
+                  }
+                }
                 onWatch={() => onWatch(channel)}
                 onToggleSchedule={() => onToggleSchedule(channel.id)}
                 onToggleFavourite={() => onToggleFavourite(channel.id)}
@@ -136,6 +205,7 @@ function ChannelRow({
   favourite,
   words,
   match,
+  order,
   onWatch,
   onToggleSchedule,
   onToggleFavourite,
@@ -149,6 +219,8 @@ function ChannelRow({
   favourite: boolean;
   words: readonly string[];
   match: ListingMatch | null;
+  /** Set while the list is being put in another order: the row moves, and plays nothing. */
+  order: RowOrder | null;
   onWatch: () => void;
   onToggleSchedule: () => void;
   onToggleFavourite: () => void;
@@ -158,15 +230,42 @@ function ChannelRow({
   const next = listing?.next ?? null;
   // A match that began since it was found is the programme on now.
   const later = match?.later && match.later.start > now ? match.later : null;
+  const row = useRef<HTMLDivElement>(null);
+  // The row the keys move takes the focus when the viewer chooses it, and again after each move,
+  // which counts as choosing it: the page puts a moved row's node elsewhere, and that drops the
+  // focus it had. So does a page that took no input while the order was saved.
+  const part = order?.focus?.part;
+  const asked = order?.focus?.asked;
+  const locked = order?.locked;
+  useLayoutEffect(() => {
+    if (!part) return;
+    const target =
+      part === "row"
+        ? row.current
+        : row.current?.querySelector<HTMLElement>(`[data-move="${part}"]`);
+    if (target && document.activeElement !== target) target.focus({ preventScroll: true });
+  }, [part, asked, locked]);
   return (
     <div className="pb-1">
       <div
-        role="button"
-        tabIndex={-1}
+        ref={row}
         onMouseDown={(event) => event.preventDefault()}
-        onClick={onWatch}
+        {...(order
+          ? {
+              role: "listitem",
+              "aria-label": channel.title,
+              "aria-posinset": order.position,
+              "aria-setsize": order.count,
+              // Tab stops at the row the keys move, and goes on to its two buttons.
+              tabIndex: order.focus ? 0 : -1,
+              onClick: order.onSelect,
+              onFocus: (event: FocusEvent) => {
+                if (event.target === event.currentTarget) order.onFocused("row");
+              },
+            }
+          : { role: "button", tabIndex: -1, onClick: onWatch })}
         className={cn(
-          "group flex h-[3.5rem] items-center gap-4 rounded-xl px-3 hover:bg-white/8",
+          "group flex h-[3.5rem] items-center gap-4 rounded-xl px-3 outline-none hover:bg-white/8",
           expanded && "rounded-b-none bg-white/8",
           playing && !expanded && "bg-white/5",
           selected && "ring-2 ring-white/70 ring-inset",
@@ -225,21 +324,30 @@ function ChannelRow({
           )}
         </span>
         <span className="flex w-[4.5rem] flex-none items-center justify-end gap-1">
-          <IconButton
-            label={favourite ? "Remove from favourites" : "Add to favourites"}
-            onClick={onToggleFavourite}
-            className={cn(!favourite && !selected && "opacity-0 group-hover:opacity-100")}
-          >
-            <Star className={cn("size-4", favourite && "fill-current")} />
-          </IconButton>
-          {listing && (
-            <IconButton
-              label={expanded ? "Hide later programmes" : "Later programmes"}
-              onClick={onToggleSchedule}
-              className={cn(!expanded && !selected && "opacity-0 group-hover:opacity-100")}
-            >
-              <ChevronDown className={cn("size-4", expanded && "rotate-180")} />
-            </IconButton>
+          {order ? (
+            <>
+              <MoveButton by={-1} channel={channel} order={order} />
+              <MoveButton by={1} channel={channel} order={order} />
+            </>
+          ) : (
+            <>
+              <IconButton
+                label={favourite ? "Remove from favourites" : "Add to favourites"}
+                onClick={onToggleFavourite}
+                className={cn(!favourite && !selected && "opacity-0 group-hover:opacity-100")}
+              >
+                <Star className={cn("size-4", favourite && "fill-current")} />
+              </IconButton>
+              {listing && (
+                <IconButton
+                  label={expanded ? "Hide later programmes" : "Later programmes"}
+                  onClick={onToggleSchedule}
+                  className={cn(!expanded && !selected && "opacity-0 group-hover:opacity-100")}
+                >
+                  <ChevronDown className={cn("size-4", expanded && "rotate-180")} />
+                </IconButton>
+              )}
+            </>
           )}
         </span>
       </div>
@@ -247,6 +355,56 @@ function ChannelRow({
         <Schedule channelId={channel.id} now={now} words={words} match={match} onWatch={onWatch} />
       )}
     </div>
+  );
+}
+
+/** A row of the list while its channels are being put in another order. */
+interface RowOrder {
+  /** Where the row stands, from 1, among `count`. */
+  readonly position: number;
+  readonly count: number;
+  /** The part of this row that holds the focus; null on every other row. */
+  readonly focus: TableOrder["focus"] | null;
+  readonly locked: boolean;
+  onSelect(): void;
+  onFocused(part: RowPart): void;
+  onMove(by: number, part: RowPart): void;
+}
+
+/**
+ * Moves a row one place up or down, or to the top or bottom with Shift. At the end it can't pass
+ * it stays in reach of Tab and the focus, dimmed, and does nothing.
+ */
+function MoveButton({ by, channel, order }: { by: -1 | 1; channel: LiveChannel; order: RowOrder }) {
+  const part = by < 0 ? "up" : "down";
+  const ended = by < 0 ? order.position === 1 : order.position === order.count;
+  const off = ended || order.locked;
+  const Icon = by < 0 ? ArrowUp : ArrowDown;
+  return (
+    <button
+      data-move={part}
+      aria-label={`Move ${channel.title} ${part}`}
+      title={
+        by < 0 ? "Move up, or to the top with Shift" : "Move down, or to the bottom with Shift"
+      }
+      aria-disabled={off}
+      tabIndex={order.focus ? 0 : -1}
+      onMouseDown={(event) => event.preventDefault()}
+      onFocus={() => order.onFocused(part)}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (off) return;
+        // Pressed with a key, the button has the focus and keeps it; a click leaves it on the row.
+        const held = document.activeElement === event.currentTarget ? part : "row";
+        order.onMove(event.shiftKey ? by * Infinity : by, held);
+      }}
+      className={cn(
+        "grid size-8 place-items-center rounded-full text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        off ? "opacity-35" : "hover:bg-white/10 hover:text-white",
+      )}
+    >
+      <Icon className="size-4" />
+    </button>
   );
 }
 

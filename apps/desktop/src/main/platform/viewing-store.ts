@@ -19,6 +19,7 @@ import {
   EVENT_VERSION,
   isTitleEvent,
   STATE_VERSION,
+  type ChannelEvent,
   type TitleEvent,
   type ViewingEvent,
   type ViewingState,
@@ -193,27 +194,30 @@ function eventOf(
 /** Folds every event into the state and title rows again, per account, in order. */
 function rebuild(db: DatabaseSync): void {
   transaction(db, () => {
-    const states = new Map<string, { state: ViewingState; sequence: number }>();
+    const records = new Map<string, { channelEvents: ChannelEvent[]; sequence: number }>();
     const titles = new Map<string, Map<string, TitleRow>>();
     const removals = new Map<string, Map<string, number>>();
     for (const raw of db.prepare("select * from events order by sequence").all()) {
       const read = eventOf(raw);
       if (!read) continue;
       const { account, sequence, at, event } = read;
-      const before = states.get(account) ?? { state: emptyState, sequence: 0 };
+      let record = records.get(account);
+      if (!record) records.set(account, (record = { channelEvents: [], sequence: 0 }));
+      record.sequence = sequence;
       if (isTitleEvent(event)) {
         let rows = titles.get(account);
         if (!rows) titles.set(account, (rows = new Map()));
         let removed = removals.get(account);
         if (!removed) removals.set(account, (removed = new Map()));
         foldTitle(rows, removed, event, at);
-        states.set(account, { state: before.state, sequence });
       } else {
-        states.set(account, { state: apply(before.state, event), sequence });
+        record.channelEvents.push(event);
       }
     }
     db.exec("delete from state; delete from titles;");
-    for (const [account, stored] of states) save(db, account, stored.state, stored.sequence);
+    for (const [account, { channelEvents, sequence }] of records) {
+      save(db, account, apply(emptyState, channelEvents), sequence);
+    }
     for (const [account, rows] of titles) {
       for (const row of rows.values()) saveTitle(db, account, row);
     }
@@ -308,7 +312,7 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
     at: number,
     events: readonly ViewingEvent[],
   ): StoredViewing => {
-    let state = stored.state;
+    const channelEvents: ChannelEvent[] = [];
     let sequence = stored.sequence;
     for (const event of events) {
       const title = isTitleEvent(event);
@@ -323,7 +327,7 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
       );
       sequence = Number(result.lastInsertRowid);
       if (!title) {
-        state = apply(state, event);
+        channelEvents.push(event);
       } else if (event.type === "title-progress") {
         const seriesId = event.title.kind === "episode" ? event.title.seriesId : null;
         const removed = statements.removedAt.get(account, titleKey(event.title), seriesId);
@@ -339,7 +343,7 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
       }
     }
     if (events.length === 0) return stored;
-    save(db, account, state, sequence);
+    save(db, account, apply(stored.state, channelEvents), sequence);
     return read(account);
   };
 
@@ -363,8 +367,11 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
         transaction(db, () => {
           const stored = read(account);
           if (statements.done.get(commandId)) return stored;
+          const events = decide(stored.state);
+          // Thrown, so the transaction ends with nothing written.
+          if (events instanceof Failed) throw events;
           statements.receipt.run(commandId);
-          return append(account, stored, commandId, at, decide(stored.state));
+          return append(account, stored, commandId, at, events);
         }),
       ),
     importOnce: ({ account, at, events }) =>
@@ -447,7 +454,10 @@ function transaction<A>(db: DatabaseSync, run: () => A): A {
 function attempt<A>(run: () => A): Effect.Effect<A, Failed> {
   return Effect.try({
     try: run,
-    catch: (cause) => new Failed({ error: { kind: "unexpected", detail: String(cause) } }),
+    catch: (cause) =>
+      cause instanceof Failed
+        ? cause
+        : new Failed({ error: { kind: "unexpected", detail: String(cause) } }),
   });
 }
 

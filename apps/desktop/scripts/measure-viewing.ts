@@ -1,6 +1,7 @@
 // Measures the viewing record with a long history: how long a change takes to commit, how long a
 // start takes to open the database, and how long rebuilding the lists from every event takes, as
-// after a change to the rules. Uses a temporary database the size of years of heavy use.
+// after a change to the rules. Then how long a long list of favourites takes to put in another
+// order, and to rebuild afterwards. Uses a temporary database the size of years of heavy use.
 //
 //   node scripts/measure-viewing.ts [--events 100000]
 import { mkdtemp, rm, stat } from "node:fs/promises";
@@ -23,6 +24,10 @@ const CHANNELS = 13_000;
 /** About this many favourites at a time. */
 const FAVOURITES = 50;
 const SAMPLES = 1_000;
+/** How many favourites the list put in another order holds: far more than anyone stars. */
+const ORDERED = 1_000;
+/** How often one favourite is sent to the end, for a median. */
+const MOVES = 200;
 
 const { values } = parseArgs({ options: { events: { type: "string", default: "100000" } } });
 const events = Number(values.events);
@@ -36,7 +41,7 @@ async function start() {
       Layer.provide(
         Layer.mergeAll(
           Layer.succeed(ViewingAccount, { current: Effect.succeed("measure") }),
-          Layer.succeed(ViewingChannels, { lookup: Effect.succeed(() => undefined) }),
+          Layer.succeed(ViewingChannels, { lookup: () => Effect.succeed(() => undefined) }),
           Layer.succeed(LegacyViewing, { take: Effect.succeed(null), drop: Effect.void }),
           viewingStoreLayer(dataDir),
         ),
@@ -93,7 +98,7 @@ try {
   await runtime.dispose();
 
   // What a change to the rules does: the stored lists no longer count.
-  const db = new DatabaseSync(database);
+  let db = new DatabaseSync(database);
   db.exec("delete from meta where key = 'state-version'");
   db.close();
   started = performance.now();
@@ -111,6 +116,56 @@ try {
   console.log(`start with rebuild: ${rebuild.toFixed(1)} ms`);
   console.log(`rebuilt lists match: ${JSON.stringify(rebuilt) === JSON.stringify(state)}`);
   console.log(`database: ${(size / 1024 / 1024).toFixed(1)} MB`);
+
+  // A long list of favourites in another order: the least an order writes, the most, and all of
+  // it turned around.
+  ({ runtime, viewing } = await start());
+  for (let index = 0; index < ORDERED; index++) {
+    await runtime.runPromise(viewing.setFavourite(`order-star-${index}`, `ordered-${index}`, true));
+  }
+  let ordered = await runtime.runPromise(viewing.state);
+  const reorder = async (commandId: string, order: readonly string[]) => {
+    const from = ordered;
+    const began = performance.now();
+    ordered = await runtime.runPromise(
+      viewing.reorderFavourites(commandId, {
+        subscription: "measure",
+        original: from.favourites,
+        order,
+      }),
+    );
+    return { ms: performance.now() - began, events: ordered.sequence - from.sequence };
+  };
+  const toEnd: { ms: number; events: number }[] = [];
+  for (let index = 0; index < MOVES; index++) {
+    const [first = "", ...others] = ordered.favourites;
+    toEnd.push(await reorder(`order-end-${index}`, [...others, first]));
+  }
+  const toFront = await reorder("order-front", [
+    ...ordered.favourites.slice(-1),
+    ...ordered.favourites.slice(0, -1),
+  ]);
+  const reversed = await reorder("order-reversed", ordered.favourites.toReversed());
+  await runtime.dispose();
+  db = new DatabaseSync(database);
+  db.exec("delete from meta where key = 'state-version'");
+  db.close();
+  started = performance.now();
+  ({ runtime, viewing } = await start());
+  const rebuildOrdered = performance.now() - started;
+  const reordered = await runtime.runPromise(viewing.state);
+  await runtime.dispose();
+  const count = ordered.favourites.length.toLocaleString("en");
+  const written = (order: { ms: number; events: number }) =>
+    `${order.ms.toFixed(1)} ms, ${order.events.toLocaleString("en")} events`;
+  const most = Math.max(...toEnd.map((order) => order.events));
+  console.log(
+    `order of ${count} favourites, one to the end: ${spread(toEnd.map((order) => order.ms))}, ${most} events at most`,
+  );
+  console.log(`order of ${count} favourites, the last to the front: ${written(toFront)}`);
+  console.log(`order of ${count} favourites, reversed: ${written(reversed)}`);
+  console.log(`start with rebuild after the orders: ${rebuildOrdered.toFixed(1)} ms`);
+  console.log(`rebuilt order matches: ${JSON.stringify(reordered) === JSON.stringify(ordered)}`);
 } finally {
   await rm(dataDir, { recursive: true, force: true });
 }

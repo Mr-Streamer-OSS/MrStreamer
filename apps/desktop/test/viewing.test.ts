@@ -7,8 +7,9 @@ import { ViewingRecord, type TitleFilter } from "@mrstreamer/core/viewing/servic
 import { describe, expect, it } from "vitest";
 import { mainLayer } from "../src/main/runtime.ts";
 import { Library } from "../src/main/services/library.ts";
+import { Settings } from "../src/main/services/preferences.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
-import { QUALITY_STREAM_IDS } from "./fake-provider.ts";
+import { QUALITY_STREAM_IDS, type FakeProviderOptions } from "./fake-provider.ts";
 import {
   collect,
   fakeProvider,
@@ -22,12 +23,13 @@ import {
 } from "./support.ts";
 
 /**
- * The viewing record as the app runs it, on two fake providers to switch accounts between. `start`
- * ends the app running before, if any, and starts it again on the same data folder.
+ * The viewing record as the app runs it, on two fake providers to switch accounts between, which
+ * list the same channels under the same ids. `start` ends the app running before, if any, and
+ * starts it again on the same data folder.
  */
-async function viewingApp() {
+async function viewingApp(options: FakeProviderOptions = {}) {
   const dataDir = await tempDir();
-  const providers = [await fakeProvider(), await fakeProvider()] as const;
+  const providers = [await fakeProvider(options), await fakeProvider(options)] as const;
   let running: {
     readonly dispose: () => Promise<void>;
     readonly subscriptions: Promised<Subscriptions["Service"]>;
@@ -51,11 +53,34 @@ async function viewingApp() {
       subscriptions: await promised(runtime, Subscriptions),
     };
     const viewing = await promised(runtime, ViewingRecord);
+    const library = await promised(runtime, Library);
+    const settings = await promised(runtime, Settings);
+    const { subscriptions } = running;
     return {
-      library: await promised(runtime, Library),
+      library,
       state: viewing.state,
       setFavourite: (channelId: string, favourite: boolean, commandId: string = randomUUID()) =>
         viewing.setFavourite(commandId, channelId, favourite),
+      /**
+       * Saves `order` as an editor would that read the favourites as `original`: from the
+       * connected account, unless `from` names the one it read them from.
+       */
+      reorder: async (
+        original: readonly string[],
+        order: readonly string[],
+        { commandId = randomUUID(), from }: { commandId?: string; from?: string } = {},
+      ) =>
+        viewing.reorderFavourites(commandId, {
+          subscription: from ?? (await subscriptions.key()) ?? "",
+          original,
+          order,
+        }),
+      /** The favourites Home, Live TV and Watch list, in their order: those the lists show. */
+      listed: async () =>
+        (await library.channels({ ids: (await viewing.state()).favourites })).map(({ id }) => id),
+      /** What Settings does when the viewer turns titles for adults on. */
+      showAdults: () => settings.update({ adultTitles: true }),
+      account: async () => (await subscriptions.key()) ?? "",
       recordWatch: (channelId: string, commandId: string = randomUUID()) =>
         viewing.recordWatch(commandId, channelId),
       /** A checkpoint of a play that began at `since`, by default now. */
@@ -92,6 +117,15 @@ async function viewingApp() {
     },
     readPreferences: async (): Promise<unknown> =>
       JSON.parse(await readFile(join(dataDir, "preferences.json"), "utf8")),
+    /** Runs `use` on the database through a connection of its own, as another build's would be. */
+    database: <A>(use: (db: DatabaseSync) => A): A => {
+      const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+      try {
+        return use(db);
+      } finally {
+        db.close();
+      }
+    },
   };
 }
 
@@ -313,6 +347,223 @@ describe("channels with several streams", () => {
     provider.serveChannels((all) => all.toReversed());
     await viewing.library.refresh();
     expect((await viewing.state()).favourites).toEqual([fhd]);
+  });
+});
+
+describe("the order of the favourites", () => {
+  // Five of the fake provider's channels with one stream each, and its channel in three qualities.
+  const [one, two, three, four, five] = ["1000", "1001", "1002", "1003", "1004"] as const;
+  const fhd = String(QUALITY_STREAM_IDS);
+  const hd = String(QUALITY_STREAM_IDS + 1);
+  const sd = String(QUALITY_STREAM_IDS + 2);
+  /** A channel the fake provider flags for adults, which the lists leave out by default. */
+  const adult = "4000";
+
+  /** The app on account 0 with its catalogue loaded and `ids` starred in that order. */
+  async function withFavourites(ids: readonly string[], options: FakeProviderOptions = {}) {
+    const app = await viewingApp(options);
+    await app.connect(0);
+    const viewing = await app.start();
+    await viewing.library.refresh();
+    for (const id of ids) await viewing.setFavourite(id, true);
+    return { app, viewing, original: (await viewing.state()).favourites };
+  }
+
+  /** The stored favourites of an account: the provider's stream ids, as every build reads them. */
+  const stored = (app: Awaited<ReturnType<typeof viewingApp>>, account: string): string[] =>
+    app.database((db) => {
+      const row = db.prepare("select favourites from state where account = ?").get(account);
+      return JSON.parse(String(row?.["favourites"]));
+    });
+
+  it("lists the favourites in the order saved, across restarts, and puts a new one last", async () => {
+    const { app, viewing, original } = await withFavourites([one, two, sd, three]);
+    await viewing.recordWatch(two);
+    await viewing.played(movie("m1"), 600, 6000);
+    const before = await viewing.state();
+    expect(original).toEqual([one, two, fhd, three]);
+
+    const saved = await viewing.reorder(original, [three, fhd, one, two]);
+
+    expect(saved.favourites).toEqual([three, fhd, one, two]);
+    // History and progress are as they were, and so is what the provider says of each channel.
+    expect(saved.recent).toEqual(before.recent);
+    expect(saved.continueWatching).toEqual(before.continueWatching);
+    const channels = await viewing.library.channels({ ids: saved.favourites });
+    expect(channels.map(({ id, number }) => [id, number])).toEqual(
+      [three, fhd, one, two].map((id) => [id, expect.any(Number)]),
+    );
+    expect(channels[1]?.variants.map(({ id }) => id)).toEqual([fhd, hd, sd]);
+
+    const restarted = await app.start();
+    expect(await restarted.listed()).toEqual([three, fhd, one, two]);
+    // A channel starred now goes last, and so does one unstarred and starred again.
+    await restarted.setFavourite(four, true);
+    await restarted.setFavourite(three, false);
+    await restarted.setFavourite(three, true);
+    expect(await restarted.listed()).toEqual([fhd, one, two, four, three]);
+  });
+
+  it("moves a channel with every stream stored of it, and keeps its place when the provider drops or reorders them", async () => {
+    const { app, viewing, original } = await withFavourites([sd, one, two]);
+
+    await viewing.reorder(original, [one, fhd, two]);
+
+    expect(stored(app, await viewing.account())).toEqual([one, fhd, hd, sd, two]);
+    const [provider] = app.providers;
+    provider.serveChannels((all) => all.filter(({ streamId }) => String(streamId) !== fhd));
+    await viewing.library.refresh();
+    expect(await viewing.listed()).toEqual([one, hd, two]);
+
+    provider.serveChannels((all) => all.toReversed());
+    await viewing.library.refresh();
+    expect(await viewing.listed()).toEqual([one, fhd, two]);
+    expect(await (await app.start()).listed()).toEqual([one, fhd, two]);
+  });
+
+  it("leaves the favourites the lists don't show where they are, and adds or removes none", async () => {
+    const { viewing, original } = await withFavourites([one, adult, two, "gone", three], {
+      adultChannels: true,
+    });
+    expect(original).toEqual([one, adult, two, "gone", three]);
+    expect(await viewing.listed()).toEqual([one, two, three]);
+
+    const saved = await viewing.reorder(original, [three, one, two]);
+
+    expect(saved.favourites).toEqual([three, adult, one, "gone", two]);
+    // Shown again, the channel for adults is where it was among the others.
+    await viewing.showAdults();
+    expect(await viewing.listed()).toEqual([three, adult, one, two]);
+
+    // An order can only arrange favourites: none twice, and no channel that isn't one.
+    for (const order of [
+      [one, one, two],
+      [one, two, four],
+    ]) {
+      await expect(viewing.reorder(saved.favourites, order)).rejects.toMatchObject({
+        error: { kind: "invalid-input" },
+      });
+    }
+    expect((await viewing.state()).favourites).toEqual(saved.favourites);
+  });
+
+  it("refuses an order made from favourites that changed since, and takes one whatever was watched meanwhile", async () => {
+    const { app, viewing, original } = await withFavourites([one, two, sd]);
+    const refused = { error: { kind: "favourites-changed" } };
+
+    // Watching a channel and a movie moves the record on, and leaves the favourites alone.
+    await viewing.recordWatch(one);
+    await viewing.played(movie("m1"), 600, 6000);
+    expect((await viewing.reorder(original, [two, one, fhd])).favourites).toEqual([two, one, fhd]);
+
+    // A favourite starred since.
+    const reordered = (await viewing.state()).favourites;
+    await viewing.setFavourite(three, true);
+    await expect(viewing.reorder(reordered, [fhd, one, two])).rejects.toMatchObject(refused);
+
+    // The provider dropped a stream since, so the channel shows by another of them.
+    const starred = (await viewing.state()).favourites;
+    const [provider] = app.providers;
+    provider.serveChannels((all) => all.filter(({ streamId }) => String(streamId) !== fhd));
+    await viewing.library.refresh();
+    await expect(viewing.reorder(starred, [three, fhd, one, two])).rejects.toMatchObject(refused);
+
+    expect(await viewing.listed()).toEqual([two, one, hd, three]);
+  });
+
+  it("keeps each subscription's order to itself, though they list the same channels", async () => {
+    const { app, viewing, original } = await withFavourites([one, two, three]);
+    const first = await viewing.account();
+    await app.connect(1);
+    await viewing.library.refresh();
+    for (const id of [one, two, three]) await viewing.setFavourite(id, true);
+    const second = await viewing.account();
+
+    // An order made on the first account arrives once the second is connected: it lands on
+    // neither, though the second's favourites look the same.
+    await expect(
+      viewing.reorder(original, [three, two, one], { from: first }),
+    ).rejects.toMatchObject({ error: { kind: "favourites-changed" } });
+    expect(stored(app, first)).toEqual([one, two, three]);
+    expect(stored(app, second)).toEqual([one, two, three]);
+
+    await viewing.reorder(original, [two, three, one]);
+    expect(stored(app, second)).toEqual([two, three, one]);
+    await app.connect(0);
+    expect((await viewing.state()).favourites).toEqual([one, two, three]);
+  });
+
+  it("saves an order once however often it is sent, and writes nothing for one that changes nothing", async () => {
+    const { viewing, original } = await withFavourites([one, two, three, four]);
+
+    const saved = await viewing.reorder(original, [four, one, two, three], { commandId: "first" });
+    // Sent again, as when its answer never arrived: the list it was made from is no longer the
+    // one stored, and it is still done.
+    expect(
+      await viewing.reorder(original, [four, one, two, three], { commandId: "first" }),
+    ).toEqual(saved);
+
+    const later = await viewing.reorder(saved.favourites, [three, four, one, two]);
+    expect(later.sequence).toBeGreaterThan(saved.sequence);
+    // The first one late, after a newer order: the newer stands.
+    expect(
+      await viewing.reorder(original, [four, one, two, three], { commandId: "first" }),
+    ).toEqual(later);
+    expect(await viewing.reorder(later.favourites, [three, four, one, two])).toEqual(later);
+  });
+
+  it("keeps the order and the favourites when the database fails while saving, and saves on the retry", async () => {
+    const { app, viewing, original } = await withFavourites([one, two, sd, three]);
+    const before = await viewing.state();
+    // The disk gives out part of the way through what a new order writes.
+    app.database((db) =>
+      db.exec(`create trigger full before insert on events when new.type = 'favourite-added'
+               begin select raise(abort, 'disk full'); end`),
+    );
+
+    await expect(
+      viewing.reorder(original, [three, fhd, two, one], { commandId: "save" }),
+    ).rejects.toMatchObject({ error: { kind: "unexpected" } });
+    expect(await viewing.state()).toEqual(before);
+    expect(stored(app, await viewing.account())).toEqual([one, two, fhd, hd, sd, three]);
+
+    app.database((db) => db.exec("drop trigger full"));
+    const saved = await viewing.reorder(original, [three, fhd, two, one], { commandId: "save" });
+    expect(saved.favourites).toEqual([three, fhd, two, one]);
+  });
+
+  it("writes an order as favourites removed and added, which older builds and a rebuild read the same", async () => {
+    const { app, viewing, original } = await withFavourites([one, two, sd, three, four]);
+    const first = await viewing.reorder(original, [four, three, fhd, two, one]);
+    await viewing.setFavourite(five, true);
+    const second = await viewing.reorder(
+      [...first.favourites, five],
+      [five, fhd, four, one, three, two],
+    );
+    const account = await viewing.account();
+
+    // A build from before favourites could be ordered knows these events alone, and works the
+    // list out from them as it always did.
+    const events = app.database((db) =>
+      db
+        .prepare("select type, channel_id from events where account = ? order by sequence")
+        .all(account),
+    );
+    const replayed = new Set<string>();
+    for (const event of events) {
+      const id = String(event["channel_id"]);
+      if (event["type"] === "favourite-added") replayed.add(id);
+      else if (event["type"] === "favourite-removed") replayed.delete(id);
+      else throw new Error(`An older build skips ${String(event["type"])}.`);
+    }
+    expect([...replayed]).toEqual([five, fhd, hd, sd, four, one, three, two]);
+    expect(stored(app, account)).toEqual([...replayed]);
+
+    // What a change to the rules does: the lists are worked out from every event again.
+    app.database((db) =>
+      db.exec("delete from state; delete from meta where key = 'state-version';"),
+    );
+    expect(await (await app.start()).state()).toEqual(second);
   });
 });
 

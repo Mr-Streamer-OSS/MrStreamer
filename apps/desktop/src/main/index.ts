@@ -653,6 +653,8 @@ async function start(): Promise<void> {
       "viewing.get": () => viewing.state,
       "viewing.setFavourite": ({ commandId, channelId, favourite }) =>
         viewing.setFavourite(commandId, channelId, favourite),
+      "viewing.reorderFavourites": ({ commandId, ...order }) =>
+        viewing.reorderFavourites(commandId, order),
       "viewing.recordWatch": ({ commandId, channelId }) =>
         Effect.andThen(
           settings.update({ lastChannelId: channelId }),
