@@ -18,11 +18,15 @@ Your subscription may allow a single connection. Home then uses it as soon as it
 - The arrow at the end of a row lists the rest of the day. Click a later programme to read about it.
 - The star adds a channel to your favourites, which keep the order you add them in.
 
+The field beside the list's name searches the list you're looking at: Favourites, Recently watched, All channels or one category. It finds a channel by its name, also the full name your provider gives it, and by the programmes on now and later today, whatever the capitals and accents. The channels it finds stay in the list's order, with what matched underlined. A later programme that matched stands at the end of its row with its time, and the arrow opens the rest of the day on it. Clicking the row still watches the channel as it is now.
+
+/ puts the cursor in the field. Down or Enter there moves to the channels found, and Escape clears the search, as picking another list does. When nothing in the list matches, **Search all channels** looks for the same in every channel. Searching uses what Mr. Streamer already has, so typing asks your provider nothing.
+
 Each subscription keeps its own favourites and watch history. Connecting another one hides them, and they come back when you connect the first one again.
 
 Providers often list a channel once per quality: "VRT 1 FHD", "VRT 1 HD", "VRT 1 SD". Mr. Streamer shows those as one channel, with its qualities after the name, when they are surely the same channel: same name, same region and language, and the same category or one named only for a quality, such as "BE | 4K". Anything less certain stays a row of its own. A channel you starred, or watched, under one of its qualities is the same favourite and the same history entry.
 
-Channels your provider marks for adults, or files in a category named for adults, stay hidden until you turn on **For adults** in Settings > General. Then they show in Live TV's lists and the guide, but never on Home or in search.
+Channels your provider marks for adults, or files in a category named for adults, stay hidden until you turn on **For adults** in Settings > General. Then they show in Live TV's lists and the guide, where the field beside a list's name finds them, but never on Home or in ⌘K's search.
 
 Programme information comes from your provider. Many providers only cover some channels, and some cover none; those channels show their name and category instead. Some providers file unrelated channels under one channel's guide; Mr. Streamer leaves those channels without programmes rather than show the wrong ones. The guide updates every six hours.
 
@@ -49,7 +53,7 @@ The quality is the word your provider puts in the channel's name. The resolution
 
 ## Search
 
-⌘K (Ctrl K on Windows and Linux) searches every channel, movies and series, and the programmes on now and later today. Pick a channel, or a programme that's on, to watch it. Pick a later programme to read about it, or a movie or series to see its details. Movies and Series also search their own titles from a field in their tabs; see [Movies and series](movies-and-series.md#finding-something).
+⌘K (Ctrl K on Windows and Linux) searches every channel, movies and series, and the programmes on now and later today. Pick a channel, or a programme that's on, to watch it. Pick a later programme to read about it, or a movie or series to see its details. Opened from Live TV, it starts with what the list's field searched for. Live TV searches the list it shows from [that field](#the-guide), and Movies and Series their own titles from a field in their tabs; see [Movies and series](movies-and-series.md#finding-something).
 
 ## Keys
 
@@ -62,7 +66,8 @@ The quality is the word your provider puts in the channel's name. The resolution
 | Left               | Close the rest of the day, then go to the categories           | Open the list, then its categories          |
 | Digits             | Jump to a channel number                                       | Jump to a channel number                    |
 | S                  | Add to or remove from favourites                               | The same, for the channel you're watching   |
-| Escape             | Home                                                           | Close the list, leave full screen, go back  |
+| /                  | Search the list                                                |                                             |
+| Escape             | Clear the search, then Home                                    | Close the list, leave full screen, go back  |
 | Backspace          |                                                                | The previous channel                        |
 | C                  |                                                                | Subtitles on and off                        |
 | G, H               |                                                                | Subtitles 0.1 s earlier or later            |

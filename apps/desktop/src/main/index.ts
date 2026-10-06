@@ -491,6 +491,14 @@ async function start(): Promise<void> {
       "guide.listings": ({ channelIds }) => guide.listings(channelIds),
       "guide.schedule": ({ channelId }) => guide.schedule(channelId),
       "guide.search": ({ query }) => guide.search(query),
+      "guide.searchList": ({ query, until, ...list }) =>
+        Effect.flatMap(library.channels(list), (channels) =>
+          guide.searchChannels(
+            query,
+            channels.map((channel) => channel.id),
+            until,
+          ),
+        ),
       "guide.status": () => guide.status,
       "guide.refresh": () => Effect.andThen(guide.refresh, guide.status),
       "ondemand.status": () => onDemand.status,

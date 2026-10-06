@@ -1,6 +1,7 @@
 // React Query bindings for the IPC contract. Components read data through these hooks only.
 import { queryOptions, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
+import type { IpcInput, IpcOutput } from "@mrstreamer/contracts/ipc";
 import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
 import type {
   CollectionId,
@@ -102,6 +103,29 @@ export const queries = {
       queryFn: () => call("guide.search", { query }),
       staleTime: LISTINGS_REFRESH_MS,
       enabled: query.trim().length > 0,
+    }),
+  /**
+   * What a search finds in the programmes of one list's channels, on now and later until
+   * `until`: a category's, those with `ids`, or every channel. The answer names the search it is
+   * for, so rows can keep to one answer while the next is asked for.
+   */
+  listSearch: (
+    list: Omit<IpcInput<"guide.searchList">, "query" | "until">,
+    query: string,
+    until: number,
+  ) =>
+    queryOptions({
+      queryKey: ["guide", "searchList", list, query, until],
+      queryFn: async () => ({
+        query,
+        // A search the main process can't answer still finds channels by name.
+        matches: await call("guide.searchList", { ...list, query, until }).catch(
+          (): IpcOutput<"guide.searchList"> => ({}),
+        ),
+      }),
+      enabled: query !== "",
+      staleTime: LISTINGS_REFRESH_MS / 2,
+      refetchInterval: LISTINGS_REFRESH_MS,
     }),
   /** How many movies and series there are, and when they were fetched. */
   onDemandStatus: () =>

@@ -26,6 +26,11 @@ window.addEventListener("mousemove", (event) => {
   }
 });
 
+/** Shows lists their selection, for a key that hands them the keyboard without moving it. */
+export function showSelection(): void {
+  useMode.setState({ keyboard: true });
+}
+
 /** True while the keyboard was used last, so lists show their selection. */
 export function useKeyboardMode(): boolean {
   return useMode((state) => state.keyboard);

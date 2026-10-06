@@ -11,7 +11,13 @@
 // The app supplies three ports: the subscription and its download, the catalogue's guide ids, and
 // a store for the document as it arrived. Downloads run in the service's scope, so `clear` and
 // shutdown stop them, and a load or download that finishes after a `clear` changes nothing.
-import type { GuideStatus, Listing, Programme, ProgrammeMatch } from "@mrstreamer/contracts/guide";
+import type {
+  GuideStatus,
+  Listing,
+  ListingMatch,
+  Programme,
+  ProgrammeMatch,
+} from "@mrstreamer/contracts/guide";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -30,6 +36,7 @@ import {
   listingsAt,
   scheduleAt,
   searchAt,
+  searchChannelsAt,
   type GuideChannels,
   type ProgrammeIndex,
 } from "./programmes.ts";
@@ -93,6 +100,15 @@ export class Guide extends Context.Service<
     schedule(channelId: string): Effect.Effect<readonly Programme[]>;
     /** Programmes on now or later whose title matches, on now first. */
     search(query: string): Effect.Effect<readonly ProgrammeMatch[]>;
+    /**
+     * What a search finds in the programmes of the given channels, by channel id: on now, and
+     * the first later one that starts before `until`. Every channel given is searched.
+     */
+    searchChannels(
+      query: string,
+      channelIds: readonly string[],
+      until: number,
+    ): Effect.Effect<Record<string, ListingMatch>>;
     /**
      * How many channels the loaded guide covers and when it was downloaded, or that the
      * subscription has none.
@@ -300,6 +316,14 @@ function make() {
         context.pipe(
           Effect.map((found): readonly ProgrammeMatch[] =>
             found ? searchAt(found.guide, found.channels, query, found.at) : [],
+          ),
+        ),
+      searchChannels: (query: string, channelIds: readonly string[], until: number) =>
+        context.pipe(
+          Effect.map((found): Record<string, ListingMatch> =>
+            found
+              ? searchChannelsAt(found.guide, found.channels, channelIds, query, found.at, until)
+              : {},
           ),
         ),
       status: Effect.gen(function* () {

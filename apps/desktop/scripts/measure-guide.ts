@@ -89,6 +89,8 @@ async function create() {
     refresh: () => runtime.runPromise(guide.refresh),
     listings: (ids: readonly string[]) => runtime.runPromise(guide.listings(ids)),
     search: (query: string) => runtime.runPromise(guide.search(query)),
+    searchChannels: (query: string, ids: readonly string[], until: number) =>
+      runtime.runPromise(guide.searchChannels(query, ids, until)),
     dispose: () => runtime.dispose(),
   };
 }
@@ -127,6 +129,16 @@ started = performance.now();
 const matches = await restarted.search("news");
 const searchMs = performance.now() - started;
 
+// Live TV's search of the list it shows: every channel, until the end of the day.
+const everyChannel = channels.map((channel) => channel.id);
+const endOfDay = new Date(now).setHours(24, 0, 0, 0);
+started = performance.now();
+for (let round = 0; round < 20; round++) {
+  await restarted.searchChannels("news", everyChannel, endOfDay);
+}
+const listSearchMs = (performance.now() - started) / 20;
+const found = Object.keys(await restarted.searchChannels("news", everyChannel, endOfDay)).length;
+
 const size = ((await stat(documentPath)).size / 1e6).toFixed(1);
 const row = (label: string, value: string, budget: string) =>
   console.log(`${label.padEnd(34)} ${value.padStart(10)}   ${budget}`);
@@ -137,6 +149,7 @@ row("read from disk after a restart", `${diskMs.toFixed(0)} ms`, "");
 row("longest stall while reading", `${diskStall.toFixed(1)} ms`, "under 50 ms");
 row("now and next for 60 channels", `${listingsMs.toFixed(2)} ms`, "under 5 ms");
 row(`search "news" (${matches.length} results)`, `${searchMs.toFixed(1)} ms`, "");
+row(`list search "news" (${found} found)`, `${listSearchMs.toFixed(1)} ms`, "");
 row(
   "memory held by the guide",
   gc ? `${heapMb.toFixed(0)} MB` : "run with --expose-gc",

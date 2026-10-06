@@ -1,8 +1,8 @@
 // The programme guide in memory: programmes per guide channel, and the lookups the UI asks for.
 // Built from an XMLTV document as it streams in, dropping programmes that already ended.
-import type { Listing, Programme, ProgrammeMatch } from "@mrstreamer/contracts/guide";
+import type { Listing, ListingMatch, Programme, ProgrammeMatch } from "@mrstreamer/contracts/guide";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
-import { normalize } from "../text.ts";
+import { normalize, searchWords } from "../text.ts";
 import { xmltvReader, type XmltvProgramme } from "./xmltv.ts";
 
 /** How many programmes a search returns. */
@@ -31,6 +31,7 @@ interface Titled {
 export interface ProgrammeIndex {
   /** Programmes per guide channel, in time order and without overlaps. */
   readonly byChannel: ReadonlyMap<string, readonly Programme[]>;
+  /** Every programme with its title as search compares it, each guide channel's in time order. */
   readonly titles: readonly Titled[];
 }
 
@@ -135,7 +136,7 @@ export function searchAt(
   query: string,
   at: number,
 ): readonly ProgrammeMatch[] {
-  const words = normalize(query).split(" ").filter(Boolean);
+  const words = searchWords(query);
   if (words.length === 0) return [];
   const matches: ProgrammeMatch[] = [];
   for (const { guideId, folded, programme } of index.titles) {
@@ -149,6 +150,53 @@ export function searchAt(
   const onNow = (match: ProgrammeMatch) => (match.programme.start <= at ? 0 : 1);
   matches.sort((a, b) => onNow(a) - onNow(b) || a.programme.start - b.programme.start);
   return matches.slice(0, SEARCH_LIMIT);
+}
+
+/**
+ * What a search for `query` finds in the programmes of `channelIds`, by channel id: whether the
+ * one on now has every word in its title, and the first later one starting before `until` that
+ * does. Channels without a match are left out. Every channel given is searched, on the guide id
+ * it shows, so channels that share one are each found and nothing is cut off; those for adults
+ * count like any other, as a list holds them only while the catalogue shows them.
+ */
+export function searchChannelsAt(
+  index: ProgrammeIndex,
+  channels: GuideChannels,
+  channelIds: readonly string[],
+  query: string,
+  at: number,
+  until: number,
+): Record<string, ListingMatch> {
+  const words = searchWords(query);
+  if (words.length === 0) return {};
+  const showing = new Map<string, string[]>();
+  for (const channelId of channelIds) {
+    const guideId = shownGuideId(index, channels, channelId);
+    if (guideId === undefined) continue;
+    const ids = showing.get(guideId);
+    if (ids) ids.push(channelId);
+    else showing.set(guideId, [channelId]);
+  }
+  const found = new Map<string, ListingMatch>();
+  for (const { guideId, folded, programme } of index.titles) {
+    if (programme.stop <= at || programme.start >= until || !showing.has(guideId)) continue;
+    const match = found.get(guideId);
+    const onNow = programme.start <= at;
+    // A guide channel's titles come in time order, so its first later match is the earliest.
+    if (onNow ? match?.now : match?.later) continue;
+    if (!words.every((word) => folded.includes(word))) continue;
+    found.set(
+      guideId,
+      onNow
+        ? { now: true, later: match?.later ?? null }
+        : { now: match?.now ?? false, later: { start: programme.start, title: programme.title } },
+    );
+  }
+  const result: Record<string, ListingMatch> = {};
+  for (const [guideId, match] of found) {
+    for (const channelId of showing.get(guideId) ?? []) result[channelId] = match;
+  }
+  return result;
 }
 
 function programmesOf(
