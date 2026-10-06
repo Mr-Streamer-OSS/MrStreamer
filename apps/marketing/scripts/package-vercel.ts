@@ -16,6 +16,9 @@
 // - a page names a file the package lacks, or has no script or styles
 // - the home or privacy page lacks its address, description or social picture, or the sitemap
 //   doesn't list it
+// - the home page lacks the script that picks its one download button, links an installer
+//   anywhere but this repository's releases, or describes the app to search engines in data
+//   that doesn't read or shows a picture the package lacks
 // - the privacy page doesn't hold the whole policy
 // - search engines could list 404.html
 // - robots.txt doesn't name the sitemap, or a route answers with a missing page
@@ -88,6 +91,37 @@ for (const [address, name] of Object.entries(LISTED)) {
 check("404.html", {
   "the tag that keeps it out of search results": '<meta name="robots" content="noindex"',
 });
+
+// The home page's download button, installer links and structured data.
+const home = read(LISTED["/"]);
+if (!home.includes("document.documentElement.dataset.os=")) {
+  problems.push(`${LISTED["/"]} lacks the script that names the visitor's system.`);
+}
+const RELEASES = "https://github.com/Mr-Streamer-OSS/MrStreamer/releases";
+const installer = new RegExp(
+  `^${RELEASES}/(latest|download/v(\\d+\\.\\d+\\.\\d+)/Mr-Streamer-\\2-[\\w.-]+)$`,
+);
+const links = [...home.matchAll(/<a\s[^>]*\bdata-installer="\w+"[^>]*>/g)].map(
+  ([tag]) => /\shref="([^"]*)"/.exec(tag)?.[1] ?? "",
+);
+if (links.length === 0) problems.push(`${LISTED["/"]} links no installer.`);
+for (const link of new Set(links.filter((link) => !installer.test(link)))) {
+  problems.push(`${LISTED["/"]} links an installer at "${link}", outside the project's releases.`);
+}
+try {
+  const [, json = ""] = /<script type="application\/ld\+json">(.*?)<\/script>/s.exec(home) ?? [];
+  const { "@type": type, screenshot }: Record<string, unknown> = JSON.parse(json);
+  const picture = typeof screenshot === "string" ? screenshot.replace(SITE, "") : "";
+  if (
+    type !== "SoftwareApplication" ||
+    !picture.startsWith("/") ||
+    !existsSync(join(files, picture))
+  ) {
+    problems.push(`${LISTED["/"]} describes no app, or shows a picture that is missing.`);
+  }
+} catch {
+  problems.push(`${LISTED["/"]} holds structured data that doesn't read.`);
+}
 
 // The privacy page is docs/privacy.md, rendered: each heading there is a heading here.
 const headings = readFileSync(join(root, "../../docs/privacy.md"), "utf8").match(/^#+ /gm) ?? [];

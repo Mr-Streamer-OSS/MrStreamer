@@ -4,10 +4,11 @@
  * - Up to 1120 px wide everything stacks, and each picture runs off the right edge.
  * - From 1120 px the hero's window sits whole and the feature windows run off alternate edges.
  * - From 1600 px the page stops growing and stays centred.
- * Nothing moves by itself. The hero rises in once, each feature's name and window rise in once as
- * they scroll into view (src/main.ts), and the hero's window tips upright as the page scrolls.
- * With reduced motion nothing moves. Without JavaScript the hero still rises in, and the rest is
- * in place with the window upright.
+ * The hero shows one download button, for the visitor's system (src/system.ts). Every installer is
+ * in Downloads, above the footer.
+ * Nothing moves by itself, and every animation runs once and ends. The home page's motion is at
+ * the end of its rules. With reduced motion nothing moves. Without JavaScript the hero still comes
+ * in, and the rest is in place with the window upright.
  * The privacy and 404 pages share the bar, the buttons and the footer. Their own rules come last.
  */
 :root {
@@ -17,6 +18,8 @@
   --line: #262626;
   /* How far the pictures and text stand in from the window's edge while stacked. */
   --inset: 1.2em;
+  /* Fast out of the start, slow into place. */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
 *,
@@ -69,7 +72,9 @@ picture {
 }
 
 h1,
-p {
+p,
+dl,
+dd {
   margin: 0;
 }
 
@@ -103,11 +108,16 @@ p {
 .bar nav {
   display: flex;
   align-items: center;
-  gap: 1em;
+  gap: 1.2em;
 }
 
-.bar nav a:not(.button):hover,
-.lead a:hover,
+/* Downloads stands out by weight alone: the hero holds the page's one button. */
+.bar nav .heavy {
+  color: #fff;
+  font-weight: 650;
+}
+
+.bar nav a:hover,
 footer a:hover {
   color: #fff;
 }
@@ -132,11 +142,12 @@ footer a:hover {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0.62em 1.15em;
+  gap: 0.55em;
+  padding: 0.8em 1.4em;
   border-radius: 9em;
   background: #1c1c1c;
   color: #fff;
-  font-size: 0.9em;
+  font-size: 0.95em;
   font-weight: 600;
   white-space: nowrap;
 }
@@ -154,6 +165,13 @@ footer a:hover {
   background: #dcdcdc;
 }
 
+/* A system's mark, or the arrow on Downloads. */
+.button img,
+.button svg {
+  width: 1.15em;
+  height: 1.15em;
+}
+
 .hero {
   padding: 2em var(--inset) 0;
   text-align: center;
@@ -168,32 +186,64 @@ h1 {
 }
 
 .lead {
-  margin: 0.8em 0 1.3em;
+  max-width: 34em;
+  margin: 0.8em auto 1.3em;
   color: var(--soft);
   font-size: 1.05em;
   line-height: 1.4;
+  text-wrap: balance;
 }
 
-.lead a {
+.actions {
+  display: flex;
+  justify-content: center;
+}
+
+/* Microsoft's badge as Microsoft draws it, as tall as the button it stands in for. */
+.badge {
+  display: inline-flex;
+  border-radius: 0.3em;
+}
+
+.badge img {
+  width: auto;
+  height: 2.75em;
+}
+
+/* The small print under a button, and under the list of downloads. */
+.note {
+  color: var(--soft);
+  font-size: 0.86em;
+  line-height: 1.45;
+}
+
+.hero .note {
+  margin-top: 1em;
+}
+
+.note a,
+.questions a {
+  color: #fff;
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 0.2em;
 }
 
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 0.7em;
-}
-
-.actions .button {
-  padding: 0.8em 1.4em;
-  font-size: 0.95em;
+/*
+ * The hero holds a button and a line for each system and shows one pair. The script in the head
+ * names the visitor's system in data-os on <html>. Without it, as on a phone, on a system with no
+ * installer or with scripts off, the pair for any system shows: Downloads, which scrolls down.
+ */
+:root:not([data-os="windows"]) .hero [data-for="windows"],
+:root:not([data-os="mac"]) .hero [data-for="mac"],
+:root:not([data-os="linux"]) .hero [data-for="linux"],
+:root[data-os] .hero [data-for="any"] {
+  display: none;
 }
 
 /* The app's windows: a thin frame, rounded where the window's own corners show. */
 .frame {
+  position: relative;
   overflow: hidden;
   border: 1px solid var(--line);
   border-right: 0;
@@ -211,21 +261,120 @@ h1 {
   margin: 2.2em 0 0 var(--inset);
 }
 
-.feature {
+.feature,
+.column {
   margin-top: 3.5em;
 }
 
-.text {
+.text,
+.column {
   margin-inline: var(--inset);
 }
 
-.feature h2 {
+.home h2 {
   margin: 0;
   font-size: 1.8em;
   font-weight: 650;
   line-height: 1.05;
   letter-spacing: -0.03em;
   text-wrap: balance;
+}
+
+.text p {
+  max-width: 28em;
+  margin-top: 0.6em;
+  line-height: 1.45;
+}
+
+/* What you need, Questions and Downloads: a heading over one reading column. */
+.column > p,
+.questions dd {
+  max-width: 36em;
+  line-height: 1.5;
+}
+
+.column > h2 + p,
+.column > .note {
+  margin-top: 1.1em;
+}
+
+.column > p + p {
+  margin-top: 0.7em;
+}
+
+.questions dt,
+.rows dt {
+  font-weight: 650;
+}
+
+.questions dt {
+  margin-top: 1.2em;
+}
+
+.questions dd {
+  margin-top: 0.2em;
+}
+
+/* Downloads: a row for each system, its installers and what to know before running one. */
+.rows {
+  margin-top: 1.3em;
+  border-top: 1px solid var(--line);
+}
+
+.row {
+  display: grid;
+  gap: 0.3em 1.5em;
+  padding: 0.85em 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.rows a {
+  margin-right: 1.2em;
+  font-weight: 650;
+}
+
+/* A link to a file points down. One to a page, the Store's or the Releases page, points out. */
+.rows a::after {
+  content: " \2197";
+  content: " \2197" / "";
+}
+
+.rows a[href*="/releases/download/"]::after {
+  content: " \2193";
+  content: " \2193" / "";
+}
+
+/* Only a link that isn't its file yet says where it goes instead. */
+.rows a[href*="/releases/download/"] .where {
+  display: none;
+}
+
+.rows small {
+  display: block;
+  max-width: 36em;
+  margin-top: 0.25em;
+  color: var(--soft);
+  font-size: 0.9em;
+  line-height: 1.45;
+}
+
+/* Questions and rows that scroll in together follow each other. */
+.questions div:nth-child(2),
+.row:nth-child(2) {
+  --nth: 1;
+}
+
+.questions div:nth-child(3),
+.row:nth-child(3) {
+  --nth: 2;
+}
+
+.questions div:nth-child(4) {
+  --nth: 3;
+}
+
+.questions div:nth-child(5) {
+  --nth: 4;
 }
 
 footer {
@@ -248,10 +397,14 @@ footer p {
   flex-basis: 100%;
 }
 
-/* A narrow phone: the hero's buttons take the width, one above the other. */
+/* A narrow phone: the bar keeps Downloads alone, and the hero's button takes the width. */
 @media (max-width: 30em) {
+  .bar nav a:not(.heavy) {
+    display: none;
+  }
+
   .actions .button {
-    flex: 1 1 100%;
+    flex: 1;
   }
 }
 
@@ -259,6 +412,10 @@ footer p {
 @media (min-width: 43.75em) {
   .frame {
     width: 125%;
+  }
+
+  .row {
+    grid-template-columns: 1fr 2fr;
   }
 }
 
@@ -286,7 +443,7 @@ footer p {
   }
 
   .lead {
-    margin: 1.1em 0 1.8em;
+    margin: 1.1em auto 1.8em;
     font-size: 1.25em;
   }
 
@@ -324,8 +481,12 @@ footer p {
     margin-inline: 0;
   }
 
-  .feature h2 {
+  .home h2 {
     font-size: 2.6em;
+  }
+
+  .column {
+    margin: 7em 5em 0;
   }
 
   /* A window runs off the page's edge and fades out at the bottom. */
@@ -384,50 +545,149 @@ footer p {
 }
 
 /*
- * Motion, only for those who haven't asked for less. Each animation runs once and ends. The hero's
- * keyframes run without JavaScript. main.ts adds `revealed` as a feature's name or window scrolls
- * into view, takes it off when the animation ends, and sets --tilt from the scroll position: 0
- * tips the hero's window back 20 degrees, 1 stands it upright, which is also where it stays
- * without the script.
+ * Motion, only for those who haven't asked for less, and only on the home page. Every animation
+ * moves and fades from where its keyframes start to where the element already is, once, and
+ * holds nothing afterwards.
+ * - As the page opens, without JavaScript: the bar drops in, the headline and lead rise, the one
+ *   button pops, its line rises and the hero's window stands up, or rises while stacked.
+ * - As a part scrolls into view, main.ts adds `revealed` to it and takes it off when its
+ *   animation ends: a feature's text slides in from the page's edge while a black panel wipes
+ *   off its window, and What you need, each question and each download row come in after it.
+ * - As the page scrolls, main.ts sets --tilt on the hero's window and marks it `tipped`: 0 tips
+ *   it back 20 degrees, and at 1 it loses both and stands upright with no transform, which is
+ *   also how it stands without the script. The stand-up ends on that tilt, so the two never jump.
  */
-@keyframes rise {
+@keyframes drop {
   from {
     opacity: 0;
-    transform: translateY(1.2em);
+    transform: translateY(-0.6em);
   }
 }
 
-@keyframes appear {
+@keyframes rise {
   from {
     opacity: 0;
+    transform: translateY(1.5em);
+  }
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+}
+
+@keyframes stand {
+  from {
+    opacity: 0;
+    transform: perspective(90em) translateY(5em) rotateX(22deg) scale(0.9);
+  }
+}
+
+@keyframes slide {
+  from {
+    opacity: 0;
+    transform: translateX(var(--from, -1.8em));
+  }
+}
+
+@keyframes wipe {
+  from {
+    transform: scaleX(1);
   }
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .rise,
-  .revealed {
-    animation: rise 0.7s ease-out both;
+  .home .bar {
+    animation: drop 0.5s var(--ease) backwards;
+  }
+
+  .hero h1 {
+    animation: rise 0.7s var(--ease) 0.05s backwards;
   }
 
   .hero .lead {
-    animation-delay: 0.1s;
+    animation: rise 0.7s var(--ease) 0.15s backwards;
   }
 
-  .hero .actions {
-    animation-delay: 0.2s;
+  /* A little past its size and back. Under the pointer or the keyboard's focus it lifts. */
+  .hero .cta {
+    animation: pop 0.5s cubic-bezier(0.3, 1.4, 0.4, 1) 0.25s backwards;
+    transition: transform 0.15s;
   }
 
-  /* Out of sight for a moment, so the script has set the tilt before the window shows. */
+  .hero .cta:hover,
+  .hero .cta:focus-visible {
+    transform: translateY(-2px);
+  }
+
+  .hero .cta:active {
+    transform: none;
+  }
+
+  .hero .note {
+    animation: rise 0.6s var(--ease) 0.35s backwards;
+  }
+
+  /*
+   * Out of sight until it starts, so the script has set the tilt before the window shows. Stacked,
+   * the window runs off the right edge and only rises. The full layout stands it up, below.
+   */
   .window {
-    animation: appear 0.7s ease-out 0.3s both;
+    animation: rise 1.2s cubic-bezier(0.2, 0.7, 0.15, 1) 0.45s backwards;
+  }
+
+  [data-reveal].revealed {
+    animation: rise 0.5s var(--ease) calc(var(--nth, 0) * 0.08s) backwards;
+  }
+
+  .text.revealed {
+    animation: slide 0.6s var(--ease) backwards;
+  }
+
+  .row.revealed {
+    --from: -1.3em;
+    animation: slide 0.55s var(--ease) calc(var(--nth, 0) * 0.1s) backwards;
+  }
+
+  /*
+   * The window itself stays put. A black panel over it shrinks toward the page's edge, and goes
+   * with the class. Its own width is none, so a panel that never animates covers nothing.
+   */
+  .shot.revealed {
+    animation: none;
+  }
+
+  .shot.revealed .frame::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: #000;
+    transform: scaleX(0);
+    transform-origin: right;
+    animation: wipe 0.9s cubic-bezier(0.75, 0, 0.2, 1) 0.1s backwards;
   }
 }
 
 @media (min-width: 70em) and (prefers-reduced-motion: no-preference) {
   .window {
-    transform: perspective(90em) rotateX(calc((1 - var(--tilt, 1)) * 20deg))
-      scale(calc(0.88 + var(--tilt, 1) * 0.12));
-    will-change: transform;
+    animation-name: stand;
+  }
+
+  /* The same steps as the stand-up's first frame, so one runs into the other step by step. */
+  .window.tipped {
+    transform: perspective(90em) translateY(0) rotateX(calc((1 - var(--tilt)) * 20deg))
+      scale(calc(0.88 + var(--tilt) * 0.12));
+  }
+
+  /* The text on the right comes from the right, and its window's panel leaves to the left. */
+  .reverse .text {
+    --from: 1.8em;
+  }
+
+  .reverse .shot.revealed .frame::after {
+    transform-origin: left;
   }
 }
 
@@ -563,8 +823,6 @@ footer p {
 
 .not-found .button {
   margin-top: 0.5em;
-  padding: 0.8em 1.4em;
-  font-size: 0.95em;
 }
 
 @media (max-width: 43.74em) {

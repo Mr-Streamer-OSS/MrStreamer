@@ -4,12 +4,18 @@
 // - index.html, privacy/index.html and 404.html are built into dist/. The privacy page's text is
 //   docs/privacy.md, rendered into the page here, so the policy has one source and reads without
 //   scripts.
+// - The home page gets the script that names the visitor's system in its head (src/system.ts),
+//   and its download links point at the current stable release's installers, once GitHub has
+//   answered for each (src/downloads.ts). The build never fails over them: unanswered, the links
+//   stay on the Releases page.
 // - `vite` and `vite preview` answer / and /privacy with their pages, and any address with no
 //   page or file with 404.html and status 404.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Marked } from "marked";
 import { defineConfig, type Connect } from "vite";
+import { installers, verifiedDownloads, writeDownloads, type Downloads } from "./src/downloads.ts";
+import { systemOf } from "./src/system.ts";
 
 const root = import.meta.dirname;
 
@@ -23,6 +29,10 @@ const PAGES = new Map([
 const MISSING = "404.html";
 /** Where privacy/index.html takes the policy. */
 const POLICY = "<!-- privacy-policy -->";
+/** Where index.html takes the script that names the visitor's system. */
+const SYSTEM = "<!-- system -->";
+/** What marks index.html's installer links. */
+const INSTALLER = "data-installer=";
 
 const markdown = new Marked({
   renderer: {
@@ -37,6 +47,30 @@ const markdown = new Marked({
     },
   },
 });
+
+/**
+ * `systemOf` as the page runs it: its own text, called before the page paints. A system it can't
+ * name leaves <html> without data-os, and the hero on Downloads.
+ */
+const systemScript = `<script>{const os=(${systemOf})(navigator);if(os)document.documentElement.dataset.os=os}</script>`;
+
+/** Asked once a run: the development server builds the page on every request. */
+let downloads: Promise<Downloads | null> | undefined;
+
+/**
+ * The current stable release's installers, with a line saying what the page links. When some are
+ * unknown the line is a warning, which GitHub Actions shows on the run, and the page still builds.
+ */
+async function resolveDownloads(): Promise<Downloads | null> {
+  const found = await verifiedDownloads();
+  const missing = installers.filter((installer) => !found?.installers.includes(installer));
+  console.log(
+    found && missing.length === 0
+      ? `Download links: ${found.version}, every installer.`
+      : `::warning::Download links: ${found ? `GitHub didn't answer for ${found.version}'s ${missing.join(", ")}` : "the update feed gave no stable release"}. The Releases page is linked instead.`,
+  );
+  return found;
+}
 
 /**
  * Answers a request the server's own files left: a page at its address, 404.html with status 404
@@ -68,12 +102,18 @@ export default defineConfig({
   plugins: [
     {
       name: "marketing-pages",
-      transformIndexHtml: (html) =>
-        html.replace(POLICY, () =>
-          markdown.parse(readFileSync(join(root, "../../docs/privacy.md"), "utf8"), {
-            async: false,
-          }),
-        ),
+      async transformIndexHtml(html) {
+        const page = html
+          .replace(POLICY, () =>
+            markdown.parse(readFileSync(join(root, "../../docs/privacy.md"), "utf8"), {
+              async: false,
+            }),
+          )
+          .replace(SYSTEM, () => systemScript);
+        if (!page.includes(INSTALLER)) return page;
+        const found = await (downloads ??= resolveDownloads());
+        return found ? writeDownloads(page, found) : page;
+      },
       configureServer: (server) => () =>
         server.middlewares.use(
           pages((file) =>

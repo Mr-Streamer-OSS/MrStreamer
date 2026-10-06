@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Mr. Streamer: IPTV without the junk</title>
+    <title>Mr. Streamer: free IPTV player for Mac, Windows and Linux</title>
     <meta
       name="description"
-      content="A free, open-source IPTV player for macOS, Windows and Linux. No channels included."
+      content="Free, open source IPTV player for Mac, Windows and Linux. Live TV from an M3U playlist or Xtream Codes login. Movies and series with Xtream Codes."
     />
     <link rel="canonical" href="https://mrstreamer.app/" />
     <meta name="theme-color" content="#000000" />
@@ -17,20 +17,36 @@
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Mr. Streamer" />
     <meta property="og:url" content="https://mrstreamer.app/" />
-    <meta property="og:title" content="Mr. Streamer: IPTV without the junk" />
+    <meta property="og:title" content="Mr. Streamer: free IPTV player for Mac, Windows and Linux" />
     <meta
       property="og:description"
-      content="A free, open-source IPTV player for macOS, Windows and Linux. No channels included."
+      content="Free, open source IPTV player for Mac, Windows and Linux. Live TV from an M3U playlist or Xtream Codes login. Movies and series with Xtream Codes."
     />
     <meta property="og:image" content="https://mrstreamer.app/generated/social.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="Mr. Streamer's Home page, with a channel playing" />
     <meta name="twitter:card" content="summary_large_image" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Mr. Streamer",
+        "url": "https://mrstreamer.app/",
+        "description": "Free, open source IPTV player for Mac, Windows and Linux. Live TV from an M3U playlist or Xtream Codes login. Movies and series with Xtream Codes.",
+        "applicationCategory": "MultimediaApplication",
+        "operatingSystem": "macOS 13 or later (Apple silicon), Windows 11 (64-bit), Linux (64-bit)",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "license": "https://www.gnu.org/licenses/gpl-3.0.html",
+        "downloadUrl": "https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest",
+        "screenshot": "https://mrstreamer.app/generated/home-1920.webp"
+      }
+    </script>
+    <!-- system -->
     <link rel="stylesheet" href="/src/styles.css" />
     <script type="module" src="/src/main.ts"></script>
   </head>
-  <body>
+  <body class="home">
     <a class="skip" href="#main">Skip to content</a>
     <div class="page">
       <header class="bar">
@@ -38,34 +54,95 @@
           <img src="/generated/mark.svg" alt="" width="100" height="100" />mr. streamer
         </a>
         <nav aria-label="Site">
+          <a href="#live-tv">Live TV</a>
           <a href="https://github.com/Mr-Streamer-OSS/MrStreamer/blob/main/docs/README.md">Help</a>
-          <a href="https://github.com/Mr-Streamer-OSS/MrStreamer">Source</a>
-          <a
-            class="button primary"
-            href="https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest"
-            >Download</a
-          >
+          <a class="heavy" href="#downloads">Downloads</a>
         </nav>
       </header>
 
       <main id="main">
         <section class="hero">
-          <h1 class="rise">IPTV without the junk.</h1>
-          <p class="lead rise">
-            <a href="https://github.com/Mr-Streamer-OSS/MrStreamer">Don't like it? Fork it.</a>
+          <h1>IPTV without the junk.</h1>
+          <p class="lead">
+            Mr. Streamer is a free, open source IPTV player for Mac, Windows and Linux. No ads, no
+            account. Bring the subscription you already have.
           </p>
-          <div class="actions rise">
+          <!-- One button shows. src/system.ts picks the visitor's system, and the first stays when it can't. -->
+          <div class="actions">
+            <a class="cta button primary" data-for="any" href="#downloads">
+              <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+                <path
+                  d="M8 2v11M3.5 8.5 8 13l4.5-4.5"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              Downloads
+            </a>
             <a
-              class="button primary"
-              href="https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest"
-              >Download</a
-            >
-            <a
-              class="button"
+              class="cta badge"
+              data-for="windows"
               href="https://apps.microsoft.com/detail/9N45GG76ZP4T?referrer=appbadge"
-              >Get it from Microsoft</a
             >
+              <img
+                src="/icons/microsoft-store.svg"
+                alt="Get it from Microsoft"
+                width="161"
+                height="44"
+                loading="lazy"
+              />
+            </a>
+            <a
+              class="cta button primary"
+              data-for="mac"
+              data-installer="dmg"
+              href="https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest"
+            >
+              <img
+                src="/icons/apple.svg"
+                alt=""
+                width="24"
+                height="24"
+                aria-hidden="true"
+                loading="lazy"
+              />
+              Download for Mac
+            </a>
+            <a
+              class="cta button primary"
+              data-for="linux"
+              data-installer="appImage"
+              href="https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest"
+            >
+              <img
+                src="/icons/linux.svg"
+                alt=""
+                width="24"
+                height="24"
+                aria-hidden="true"
+                loading="lazy"
+              />
+              Download for Linux
+            </a>
           </div>
+          <p class="note" data-for="any">
+            macOS 13 or later on Apple silicon, Windows 11, 64-bit Linux.
+          </p>
+          <p class="note" data-for="windows">
+            Windows 11, 64-bit. The Store keeps it updated.
+            <a href="#downloads">Setup .exe and other systems</a>.
+          </p>
+          <p class="note" data-for="mac">
+            <span data-version="dmg"></span> macOS 13 or later, Apple silicon only.
+            <a href="#downloads">Other systems</a>.
+          </p>
+          <p class="note" data-for="linux">
+            <span data-version="appImage"></span> 64-bit Linux. The AppImage needs FUSE 2.
+            <a href="#downloads">.deb and other systems</a>.
+          </p>
         </section>
 
         <div class="window" data-tilt>
@@ -94,9 +171,10 @@
           </picture>
         </div>
 
-        <section class="feature">
+        <section class="feature" id="live-tv">
           <div class="text" data-reveal>
             <h2>Live TV</h2>
+            <p>What's on now and next, your favourites, and the channels you watched last.</p>
           </div>
           <div class="shot" data-reveal>
             <picture class="frame">
@@ -129,9 +207,10 @@
           </div>
         </section>
 
-        <section class="feature reverse">
+        <section class="feature reverse" id="movies-and-series">
           <div class="text" data-reveal>
-            <h2>Series</h2>
+            <h2>Movies and series</h2>
+            <p>Story, cast and artwork. Pick up where you stopped, with the next episode ready.</p>
           </div>
           <div class="shot" data-reveal>
             <picture class="frame">
@@ -164,9 +243,10 @@
           </div>
         </section>
 
-        <section class="feature">
+        <section class="feature" id="sound-and-subtitles">
           <div class="text" data-reveal>
-            <h2>Player</h2>
+            <h2>Sound and subtitles</h2>
+            <p>Every track your provider sends, on live channels and on demand.</p>
           </div>
           <div class="shot whole" data-reveal>
             <picture class="frame">
@@ -197,6 +277,124 @@
               />
             </picture>
           </div>
+        </section>
+
+        <section class="column" id="what-you-need" data-reveal>
+          <h2>What you need</h2>
+          <p>
+            An IPTV subscription. Mr. Streamer includes no channels and sells none. It plays what
+            your provider gives you.
+          </p>
+          <p>
+            Xtream Codes access gets you live TV, movies and series. That's a server address,
+            username and password, or an M3U link that carries them. A playlist link without a login
+            gets live TV only.
+          </p>
+          <p>
+            The guide comes from your provider. Channels it doesn't cover show their name and
+            category instead.
+          </p>
+          <p>
+            Your login goes to your provider, in every request the app makes to it. Favourites,
+            history and settings stay on your computer. No account, and the app sends us nothing.
+          </p>
+        </section>
+
+        <section class="column" id="questions">
+          <h2 data-reveal>Questions</h2>
+          <dl class="questions">
+            <div data-reveal>
+              <dt>Does it come with channels?</dt>
+              <dd>No. You connect the subscription you already have.</dd>
+            </div>
+            <div data-reveal>
+              <dt>Will my M3U playlist work?</dt>
+              <dd>For live TV, yes. Movies and series need Xtream Codes access.</dd>
+            </div>
+            <div data-reveal>
+              <dt>Is it really free?</dt>
+              <dd>
+                Yes. GPL-3.0, no ads, no account.
+                <a href="https://github.com/Mr-Streamer-OSS/MrStreamer">Don't like it? Fork it.</a>
+              </dd>
+            </div>
+            <div data-reveal>
+              <dt>Store or .exe on Windows?</dt>
+              <dd>
+                The Store copy is signed and the Store updates it. The .exe does the same job
+                without the Store and updates itself.
+              </dd>
+            </div>
+            <div data-reveal>
+              <dt>Can it record or download?</dt>
+              <dd>No. It plays what your provider streams.</dd>
+            </div>
+          </dl>
+        </section>
+
+        <!--
+          Every installer, for every visitor. A link with data-installer starts on the Releases
+          page; the build and the page's script point it at its file (src/downloads.ts).
+        -->
+        <section class="column" id="downloads">
+          <h2 data-reveal>Downloads</h2>
+          <p data-reveal>
+            On Windows, the Microsoft Store installs Mr. Streamer and keeps it updated. Every other
+            installer comes from GitHub Releases, and the app then checks for updates on its own.
+          </p>
+          <dl class="rows">
+            <div class="row" data-reveal>
+              <dt>macOS 13 or later, Apple silicon</dt>
+              <dd>
+                <a
+                  data-installer="dmg"
+                  href="https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest"
+                  >Download the DMG<span class="where"> on GitHub Releases</span></a
+                >
+                <small>Open it and drag Mr. Streamer to Applications.</small>
+              </dd>
+            </div>
+            <div class="row" data-reveal>
+              <dt>Windows 11, 64-bit</dt>
+              <dd>
+                <a href="https://apps.microsoft.com/detail/9N45GG76ZP4T?referrer=appbadge"
+                  >Microsoft Store</a
+                >
+                <a
+                  data-installer="exe"
+                  href="https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest"
+                  >Download the setup .exe<span class="where"> on GitHub Releases</span></a
+                >
+                <small>
+                  The .exe installs for your user without administrator rights. It isn't signed yet,
+                  so SmartScreen may warn. Choose More info, then Run anyway.
+                </small>
+              </dd>
+            </div>
+            <div class="row" data-reveal>
+              <dt>Linux, 64-bit</dt>
+              <dd>
+                <a
+                  data-installer="appImage"
+                  href="https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest"
+                  >Download the AppImage<span class="where"> on GitHub Releases</span></a
+                >
+                <a
+                  data-installer="deb"
+                  href="https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest"
+                  >Download the .deb<span class="where"> on GitHub Releases</span></a
+                >
+                <small>
+                  The AppImage needs FUSE 2, which is libfuse2t64 on Ubuntu. The .deb is for Ubuntu
+                  and Debian.
+                </small>
+              </dd>
+            </div>
+          </dl>
+          <p class="note" data-reveal>
+            Checksums and older versions are on the
+            <a href="https://github.com/Mr-Streamer-OSS/MrStreamer/releases">Releases page</a>.
+          </p>
         </section>
       </main>
 
