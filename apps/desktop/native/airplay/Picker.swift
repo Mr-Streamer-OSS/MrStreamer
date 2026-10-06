@@ -259,7 +259,7 @@ final class RoutePicker: NSObject, AVRoutePickerViewDelegate {
   private func watch() {
     outsideClicks = NSEvent.addGlobalMonitorForEvents(
       matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-    ) { [weak self] _ in self?.wentElsewhere("A press in another app") }
+    ) { [weak self] _ in self?.sawPress() }
     otherApps = NSWorkspace.shared.notificationCenter.addObserver(
       forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
     ) { [weak self] notice in
@@ -280,6 +280,20 @@ final class RoutePicker: NSObject, AVRoutePickerViewDelegate {
     if let otherApps { NSWorkspace.shared.notificationCenter.removeObserver(otherApps) }
     outsideClicks = nil
     otherApps = nil
+  }
+
+  /// A press the system gave to another process. That need not be another app: the list's rows
+  /// are drawn by another process inside a window of this helper's, so a press on a row may come
+  /// here too. That one is the viewer choosing, and the list stays up. A window out of sight
+  /// keeps its place, so only one that shows counts. The picker's own window never does: a press
+  /// over it comes here only where it is see-through, and that one went to the app beneath.
+  private func sawPress() {
+    let pointer = NSEvent.mouseLocation
+    let atList = NSApp.windows.contains {
+      $0 !== window && $0.isVisible && $0.frame.contains(pointer)
+    }
+    if atList { return note("A press at the list, which stays up.") }
+    wentElsewhere("A press in another app")
   }
 
   private func wentElsewhere(_ how: String) {
