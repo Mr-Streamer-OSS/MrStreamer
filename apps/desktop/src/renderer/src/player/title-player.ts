@@ -217,6 +217,8 @@ let generation = 0;
 /** The sound was converted after a copy failed to start; later runs keep converting. */
 let convertSound = false;
 let checkpoint: ReturnType<typeof setInterval> | null = null;
+/** Settles once the main process answered the last save of how far a title got. */
+let saving: Promise<void> = Promise.resolve();
 let releaseTimer: ReturnType<typeof setTimeout> | null = null;
 /** Where a run stopped for a long pause resumes from. */
 let released: number | null = null;
@@ -284,7 +286,7 @@ function save(): void {
   if (receiver) return;
   const { now, position, duration, next } = store.getState();
   if (!now || !duration || position <= 0) return;
-  const saved = call("viewing.recordProgress", {
+  let saved: Promise<unknown> = call("viewing.recordProgress", {
     commandId: crypto.randomUUID(),
     title: now.title,
     position: Math.min(position, duration),
@@ -294,11 +296,14 @@ function save(): void {
   if (next === null && now.series && !seriesFinished && isFinished(position, duration)) {
     seriesFinished = true;
     const series = now.series.title.versions.map(ownedId);
-    void saved
-      .then(() => call("viewing.finishSeries", { commandId: crypto.randomUUID(), series }))
-      .catch(() => {});
+    saved = saved.then(() =>
+      call("viewing.finishSeries", { commandId: crypto.randomUUID(), series }),
+    );
   }
-  void saved.catch(() => {});
+  saving = saved.then(
+    () => {},
+    () => {},
+  );
 }
 
 /** Stops the countdown to the next episode. */
@@ -1119,6 +1124,15 @@ export const titlePlayer = {
   /** The title player's state now, for key handlers that read it once. */
   state(): TitlePlayerState {
     return store.getState();
+  },
+
+  /**
+   * Settles once the main process answered the last save of how far a title got, saved or not.
+   * Removing the title's subscription waits for it: a save that arrives as its subscription
+   * goes is refused.
+   */
+  saved(): Promise<void> {
+    return saving;
   },
 
   /**

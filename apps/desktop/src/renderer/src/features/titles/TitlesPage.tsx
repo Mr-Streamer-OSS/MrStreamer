@@ -18,14 +18,14 @@ import {
   type Title,
   type TitleKind,
 } from "@mrstreamer/contracts/ondemand";
-import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
+import { ownedId, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { isMac, isTyping } from "../../app/platform.ts";
 import { openDetails, openView, useUi } from "../../app/ui-store.ts";
 import { Artwork, PosterTile, StillTile } from "../../components/TitleArt.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { WindowBar } from "../../components/WindowBar.tsx";
 import { appError, describeError } from "../../lib/errors.ts";
-import { queries } from "../../lib/queries.ts";
+import { queries, useSubscriptionPreferences } from "../../lib/queries.ts";
 import { call } from "../../lib/ipc.ts";
 import {
   movieNow,
@@ -121,9 +121,12 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
   }, [active, place.query]);
 
   const open = (collection: CollectionId) => go({ collection, collectionSort: null });
-  const loading = status.data && status.data.fetchedAt === null;
-  // The first fetch failed: nothing to show but why.
-  const failure = loading ? status.data?.failure : null;
+  // Lists show as soon as one subscription's are in; the others join them as they arrive.
+  const lists = status.data?.lists ?? [];
+  const loading = lists.length > 0 && lists.every((each) => each.fetchedAt === null);
+  // No first fetch worked: nothing to show but why.
+  const failed = loading ? lists.filter((each) => each.failure !== null) : [];
+  const failure = failed[0]?.failure ?? null;
   return (
     <div className="flex h-full flex-col">
       <WindowBar
@@ -168,7 +171,11 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
               <Button
                 variant="secondary"
                 className="mt-4"
-                onClick={() => void call("ondemand.refresh").catch(() => {})}
+                onClick={() => {
+                  for (const { subscriptionId } of failed) {
+                    void call("ondemand.refresh", { subscriptionId }).catch(() => {});
+                  }
+                }}
               >
                 Try again
               </Button>
@@ -419,7 +426,7 @@ function Rows({
           >
             {row.titles.slice(0, posters).map((title) => (
               <PosterTile
-                key={ownedKey(title)}
+                key={title.key}
                 title={title}
                 onOpen={() => openDetails({ kind: title.kind, ...ownedId(title) })}
               />
@@ -463,10 +470,7 @@ function Featured({ title, resume }: { title: Title; resume: ContinueEntry | nul
     .filter(Boolean)
     .join(" · ");
   const resumeEntry = useResume();
-  const picked = pickedVersion(
-    title,
-    useQuery(queries.subscriptionPreferences(title.subscriptionId)).data,
-  );
+  const picked = pickedVersion(title, useSubscriptionPreferences());
   return (
     <section className="relative mb-9 aspect-[21/8] max-h-[26rem] w-full overflow-hidden rounded-2xl">
       <Artwork url={title.backdropUrl} name={title.title} size="full" plain />

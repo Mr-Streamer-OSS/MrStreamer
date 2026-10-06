@@ -1,7 +1,14 @@
 // Movies and episodes as the views talk about them: how long, how far, what's next, which version
 // plays, and playing one. The player itself is in ../player/title-player.ts. A version is named
-// with its subscription throughout, and so is what plays.
-import { isCancelledError, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+// with its subscription throughout, and so is what plays. A title can gather versions of several
+// subscriptions: one of them plays, and how far it got is that version's subscription's alone.
+import {
+  isCancelledError,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { seriesOf, type Title } from "@mrstreamer/contracts/ondemand";
 import type { SubscriptionPreferences } from "@mrstreamer/contracts/preferences";
 import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
@@ -57,19 +64,31 @@ export function movieNow(title: Title, backdropUrl: string | null): NowPlaying {
   };
 }
 
+/** What the viewer left each saved subscription at, by its id: where picks are kept. */
+export type Picks = ReadonlyMap<string, SubscriptionPreferences>;
+
 /**
- * The version the viewer picked for `title`, while the provider still lists it; null plays the
- * one that suits best. `picks` are those of the title's own subscription, which remembers them by
- * kind and TMDB id: only titles with an id gather several versions.
+ * The version the viewer picked for `title`, while its provider still lists it; null plays the
+ * one that suits best. A pick is kept by the subscription of the version picked, by kind and TMDB
+ * id: only titles with an id gather several versions.
  */
-export function pickedVersion(
-  title: Title,
-  picks: SubscriptionPreferences | undefined,
-): OwnedId | null {
-  const id = title.tmdbId && picks?.titleVersions?.[`${title.kind}:${title.tmdbId}`];
-  if (!id) return null;
-  const picked = { subscriptionId: title.subscriptionId, id };
-  return title.versions.some((version) => sameOwned(version, picked)) ? picked : null;
+export function pickedVersion(title: Title, picks: Picks | undefined): OwnedId | null {
+  if (!title.tmdbId || !picks) return null;
+  const key = `${title.kind}:${title.tmdbId}`;
+  const picked = title.versions.find(
+    ({ subscriptionId, id }) => picks.get(subscriptionId)?.titleVersions?.[key] === id,
+  );
+  return picked ? ownedId(picked) : null;
+}
+
+/** The picks the page holds for the subscriptions that list `title`, without asking for any. */
+function heldPicks(client: QueryClient, title: Title): Picks {
+  const held = new Map<string, SubscriptionPreferences>();
+  for (const { subscriptionId } of title.versions) {
+    const left = client.getQueryData(queries.subscriptionPreferences(subscriptionId).queryKey);
+    if (left) held.set(subscriptionId, left);
+  }
+  return held;
 }
 
 /**
@@ -96,25 +115,30 @@ export function automaticVersion(
 }
 
 /**
- * Remembers the version to play for `title`, or forgets the pick for null, among the picks of the
- * title's subscription.
+ * Remembers the version to play for `title`, or forgets the pick for null. The pick goes among
+ * those of the version's own subscription, and out of every other that lists the title, so one
+ * version is picked at most.
  */
 export function usePickVersion(): (title: Title, version: OwnedId | null) => void {
   const client = useQueryClient();
   return (title, version) => {
     if (!title.tmdbId) return;
     const key = `${title.kind}:${title.tmdbId}`;
-    const picks = queries.subscriptionPreferences(title.subscriptionId);
-    // The picks as saved, so one never replaces the others.
-    void client
-      .ensureQueryData(picks)
-      .then(async (previous) => {
-        const { [key]: _old, ...others } = previous.titleVersions ?? {};
-        const titleVersions = version === null ? others : { ...others, [key]: version.id };
-        client.setQueryData(picks.queryKey, { ...previous, titleVersions });
-        await updateSubscriptionPreferences(client, title.subscriptionId, { titleVersions });
-      })
-      .catch(() => client.invalidateQueries({ queryKey: picks.queryKey }));
+    for (const subscriptionId of new Set(title.versions.map((each) => each.subscriptionId))) {
+      const picks = queries.subscriptionPreferences(subscriptionId);
+      // The picks as saved, so one never replaces the others.
+      void client
+        .ensureQueryData(picks)
+        .then(async (previous) => {
+          const { [key]: old, ...others } = previous.titleVersions ?? {};
+          const mine = version?.subscriptionId === subscriptionId ? version.id : undefined;
+          if (old === mine) return;
+          const titleVersions = mine === undefined ? others : { ...others, [key]: mine };
+          client.setQueryData(picks.queryKey, { ...previous, titleVersions });
+          await updateSubscriptionPreferences(client, subscriptionId, { titleVersions });
+        })
+        .catch(() => client.invalidateQueries({ queryKey: picks.queryKey }));
+    }
   };
 }
 
@@ -201,9 +225,9 @@ export function useContinueWatching(limit = CONTINUE_LIMIT): {
       `${ref.kind === "movie" ? "movie" : "series"}:${ownedKey(played(progress))}`,
     );
     if (!title || title.adult) return [];
-    // One entry per film or series of a subscription, whichever of its versions was played.
-    const { subscriptionId } = title;
-    const key = `${title.kind}:${ownedKey({ subscriptionId, id: title.tmdbId ?? title.id })}`;
+    // One entry per film or series, whichever of its versions was played, of whichever
+    // subscription: the one played last stands for the rest, and is the one that resumes.
+    const { key } = title;
     const artworkUrl = title.backdropUrl ?? title.posterUrl;
     if (ref.kind === "movie") {
       return [
@@ -261,17 +285,18 @@ function stillThere(from: ReturnType<typeof useUi.getState>): boolean {
 /**
  * Plays a Continue watching entry: a movie at once, where it stopped; an episode, or the one after
  * a finished one, once the series' details arrive, since only they list the episodes. A series
- * with nothing after the finished episode opens its details instead. Both play the version picked
- * for the title, when there is one. A series that answers after the viewer moved on, or after the
- * account changed, does nothing.
+ * with nothing after the finished episode opens its details instead. Both resume in the
+ * subscription the entry was played in: a version picked since plays instead when it is that
+ * subscription's too, and never another's, whose file and episodes are its own. A series that
+ * answers after the viewer moved on, or after the account changed, does nothing.
  */
 export function useResume(): (entry: ContinueEntry) => void {
   const client = useQueryClient();
   return ({ title, progress }) => {
     const ref = progress.title;
-    // A version picked since, among its subscription's picks, plays instead, from the same point.
-    const picks = queries.subscriptionPreferences(title.subscriptionId);
-    const picked = pickedVersion(title, client.getQueryData(picks.queryKey));
+    // A version picked since in the same subscription plays instead, from the same point.
+    const pick = pickedVersion(title, heldPicks(client, title));
+    const picked = pick?.subscriptionId === ref.subscriptionId ? pick : null;
     if (ref.kind === "movie") {
       const version = picked ?? ownedId(ref);
       playTitle(movieNow({ ...title, ...version }, title.backdropUrl), resumePoint(progress));

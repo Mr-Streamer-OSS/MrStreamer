@@ -70,6 +70,7 @@ async function guidePage(list: ChannelList = { kind: "all" }) {
   client.setQueryData(queries.categories().queryKey, [
     {
       ...own("uk"),
+      members: [own("uk")],
       name: "UK | NEWS",
       group: null,
       title: "News",
@@ -82,11 +83,18 @@ async function guidePage(list: ChannelList = { kind: "all" }) {
     queries.channelsOf(FAVOURITES).queryKey,
     FAVOURITES.flatMap(({ id }) => byId.get(id) ?? []),
   );
-  client.setQueryData(["library", "status"], {
-    channelCount: CHANNELS.length,
-    fetchedAt: 1,
-    failure: null,
-  });
+  client.setQueryData(
+    ["library", "status"],
+    [
+      {
+        subscriptionId: own("uk").subscriptionId,
+        channelCount: CHANNELS.length,
+        fetchedAt: 1,
+        failure: null,
+        failedAt: null,
+      },
+    ],
+  );
   client.setQueryData(queries.viewing().queryKey, {
     favourites: FAVOURITES,
     recent: [],

@@ -3,8 +3,10 @@
 // their season opens, and playback asks here which file to stream. A title's details don't wait
 // for TMDB: what it says joins them once it arrives, and `detailsChanged` says so.
 // A title, version or episode a call names says which subscription lists it, and one of a
-// subscription that isn't saved finds nothing. The lists are the saved subscription's; switching
-// accounts clears what the last one had.
+// subscription that isn't saved finds nothing. The lists are those of every saved subscription
+// that has movies and series, shown as one catalogue: a playlist has live TV only and adds none.
+// Each subscription's lists are fetched, kept and reported on their own, so one that can't be
+// reached keeps what it loaded and holds no other back.
 import { join } from "node:path";
 import type { Worker } from "node:worker_threads";
 import type { AppError } from "@mrstreamer/contracts/errors";
@@ -22,6 +24,7 @@ import type {
   Title,
   TitleDetails,
   TitleKind,
+  TitleListsStatus,
   TitleMatches,
   TitleRef,
 } from "@mrstreamer/contracts/ondemand";
@@ -45,8 +48,10 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
+import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import type {
+  CatalogueOwner,
   WorkerCalls,
   WorkerEvent,
   WorkerMethod,
@@ -55,7 +60,7 @@ import type {
   WorkerStatus,
 } from "../ondemand/protocol.ts";
 import { Settings } from "./preferences.ts";
-import { sameSource, Subscriptions, type Source } from "./subscription.ts";
+import { Subscriptions, type SavedSubscription, type Source } from "./subscription.ts";
 
 /** How many titles' details stay in memory. Opening one again then asks no one. */
 const DETAILS_KEPT = 200;
@@ -71,6 +76,12 @@ const SEARCH_PAGE = 300;
  * Every list the UI shows asks again when the status changes, and the failure changes it.
  */
 const RETRY_AFTER_MS = 60_000;
+/** How many subscriptions' lists are fetched at a time. */
+const FETCHES_AT_ONCE = 2;
+/** How long a worker that is stopping gets to write what it still holds. */
+const STOP_WITHIN_MS = 2000;
+/** A subscription whose lists aren't loaded. */
+const NOTHING: WorkerStatus = { movies: 0, series: 0, fetchedAt: null };
 
 export interface OnDemandDeps {
   readonly dataDir: string;
@@ -98,6 +109,8 @@ export interface CollectionQuery {
 export interface TitleFile {
   readonly url: string;
   readonly container: string;
+  /** The login the address was made under: `SavedSubscription.revision`. */
+  readonly revision: number;
 }
 
 export class OnDemand extends Context.Service<
@@ -105,12 +118,16 @@ export class OnDemand extends Context.Service<
   {
     readonly status: Effect.Effect<OnDemandStatus>;
     /**
-     * Fetches both lists. Concurrent calls for one subscription share a fetch. Lists that arrive
-     * after the subscription's login changed are dropped: it fails, and those from before stay.
+     * Fetches a subscription's two lists. Concurrent calls for one subscription share a fetch,
+     * and a few subscriptions fetch at a time. Lists that arrive after the subscription's login
+     * changed are dropped: it fails, and those from before stay.
      */
-    readonly refresh: Effect.Effect<OnDemandStatus, Failed>;
-    /** Whether the lists should be fetched again: missing, or older than `maxAge`. */
-    isStale(maxAge: Duration.Input): Effect.Effect<boolean>;
+    refresh(subscriptionId: string): Effect.Effect<OnDemandStatus, Failed>;
+    /**
+     * Whether a subscription's lists should be fetched again: missing, or older than `maxAge`.
+     * Never for one without movies and series, as a playlist is.
+     */
+    isStale(subscriptionId: string, maxAge: Duration.Input): Effect.Effect<boolean>;
     search(
       query: string,
     ): Effect.Effect<
@@ -147,8 +164,8 @@ export class OnDemand extends Context.Service<
     collection(query: CollectionQuery): Effect.Effect<CollectionPage, Failed>;
     /** The file a movie or episode streams from, at the provider of the subscription it names. */
     file(title: TitleRef): Effect.Effect<TitleFile, Failed>;
-    /** Forgets the lists and details, for when the subscription changes or goes. */
-    readonly clear: Effect.Effect<void>;
+    /** Forgets a subscription's lists and details, for when it goes. */
+    forget(subscription: SavedSubscription): Effect.Effect<void>;
     /** Applies a changed TMDB key from the settings: the worker starts again with it. */
     readonly reconfigure: Effect.Effect<void>;
     /** The status after every refresh, successful or not. */
@@ -202,7 +219,6 @@ function make(deps: OnDemandDeps) {
         workerClient(
           () =>
             deps.worker({
-              cachePath: join(deps.dataDir, "ondemand.json.gz"),
               metadataPath: join(deps.dataDir, "metadata.json.gz"),
               userAgent: deps.userAgent,
               tmdb: tmdbKey
@@ -222,19 +238,16 @@ function make(deps: OnDemandDeps) {
       ),
       (client) => Effect.promise(() => client.stop()),
     );
-    /** Why the latest refresh of this subscription failed, until one succeeds. */
-    let failure: {
-      readonly subscriptionId: string;
-      readonly error: AppError;
-      readonly at: number;
-    } | null = null;
+    /** Why each subscription's latest refresh failed, by its id, until one succeeds. */
+    const failures = new Map<string, { readonly error: AppError; readonly at: number }>();
     /** Counts restarts of the worker. */
     let generation = 0;
     /**
-     * Rises with each refresh of the lists. Details downloaded before ask the provider again, as
-     * it may list new episodes.
+     * Rises, per subscription, with each refresh of its lists. Details downloaded before ask the
+     * provider again, as it may list new episodes.
      */
-    let listsVersion = 0;
+    const listsVersions = new Map<string, number>();
+    const listsOf = (subscriptionId: string) => listsVersions.get(subscriptionId) ?? 0;
     /** What opening a title downloaded, by subscription, language, kind and id, oldest first. */
     const details = new Map<string, Downloaded>();
     /**
@@ -251,12 +264,8 @@ function make(deps: OnDemandDeps) {
      * null where TMDB doesn't have the season.
      */
     const seasons = new Map<string, readonly EpisodeAbout[] | null>();
-
-    const requireSource = Effect.flatMap(subscriptions.source, (source) =>
-      source
-        ? Effect.succeed(source)
-        : Effect.fail(new Failed({ error: { kind: "no-subscription" } })),
-    );
+    const fetchOne = (yield* Semaphore.make(FETCHES_AT_ONCE)).withPermits(1);
+    const noSubscription = new Failed({ error: { kind: "no-subscription" } });
 
     const call = <M extends WorkerMethod>(method: M, args: WorkerCalls[M]["args"]) =>
       Effect.tryPromise({
@@ -264,82 +273,144 @@ function make(deps: OnDemandDeps) {
         catch: (cause) => (cause instanceof Failed ? cause : failedWith(cause)),
       });
 
-    /** Whose catalogue a call to the worker is about. */
-    const ownerOf = ({ id, key }: Source) => ({ subscriptionId: id, key });
-
-    /** The worker's status for `source`, telling it whether the viewer shows titles for adults. */
-    const askStatus = (source: Source) =>
-      Effect.flatMap(settings.get, (preferences) =>
-        call("status", { ...ownerOf(source), adults: preferences.adultTitles ?? false }),
-      );
-
-    const statusOf = (worked: WorkerStatus, source: Source): OnDemandStatus => ({
-      ...worked,
-      failure: failure?.subscriptionId === source.id ? failure.error : null,
-      metadata: tmdbKey ? metadataProgress : null,
+    /** Whose lists a call to the worker is about. */
+    const ownerOf = ({ id, key, dir }: SavedSubscription): CatalogueOwner => ({
+      subscriptionId: id,
+      key,
+      dir,
     });
 
-    const refresh = Effect.gen(function* () {
-      const source = yield* requireSource;
-      // A refresh cut short by restarting the worker, as for a new key, isn't a failure to show.
-      const started = generation;
-      const { revision, account } = source;
-      const owner = { ...ownerOf(source), revision };
-      /**
-       * Whether the login the lists were asked under is still the saved one. What the provider
-       * answered under one that isn't, lists or a refusal, is neither kept nor told.
-       */
-      const stands = Effect.map(subscriptions.source, (now) => sameSource(source, now));
-      // The worker fetches the lists and sets them aside; it keeps them only once told to.
-      const fetched = Effect.gen(function* () {
-        yield* call("refresh", { ...owner, account });
-        const keep = yield* stands;
-        const worked = yield* call("finishRefresh", { ...owner, keep });
-        return keep ? worked : yield* switched;
-      });
-      return yield* fetched.pipe(
-        diagnosed("titles"),
-        Effect.tap((worked) =>
-          Effect.gen(function* () {
-            failure = null;
-            listsVersion++;
-            yield* PubSub.publish(updates, statusOf(worked, source));
-          }),
-        ),
-        Effect.map((worked) => statusOf(worked, source)),
-        Effect.tapError((failed) =>
-          Effect.gen(function* () {
-            if (started !== generation || !(yield* stands)) return;
-            failure = { subscriptionId: source.id, error: failed.error, at: Date.now() };
-            const worked = yield* askStatus(source).pipe(
-              Effect.orElseSucceed(() => ({ movies: 0, series: 0, fetchedAt: null })),
-            );
-            yield* PubSub.publish(updates, statusOf(worked, source));
-          }),
-        ),
-      );
-    });
+    /** The saved subscriptions with movies and series, in their order: every one but a playlist. */
+    const listed = Effect.map(subscriptions.saved, (saved) =>
+      saved.filter((each) => each.kind === "xtream"),
+    );
 
     /**
-     * Runs a call for `source`, the saved subscription, in the viewer's language, fetching the
-     * lists first when there are none.
+     * Each of those with what the worker holds of its lists, telling the worker whether the
+     * viewer shows titles for adults.
      */
-    const loadedFor = <A>(source: Source, run: (language: string) => Effect.Effect<A, Failed>) =>
-      Effect.gen(function* () {
-        const worked = yield* askStatus(source);
-        if (worked.fetchedAt === null) {
-          // Refresh asks the provider again whenever the viewer does.
-          if (failure?.subscriptionId === source.id && Date.now() - failure.at < RETRY_AFTER_MS) {
-            return yield* new Failed({ error: failure.error });
-          }
-          yield* refresh;
-        }
-        return yield* run(yield* language);
-      });
-    const loaded = <A>(run: (source: Source, language: string) => Effect.Effect<A, Failed>) =>
-      Effect.flatMap(requireSource, (source) =>
-        loadedFor(source, (language) => run(source, language)),
+    const held = Effect.gen(function* () {
+      const saved = yield* listed;
+      if (saved.length === 0) return [];
+      const adults = (yield* settings.get).adultTitles ?? false;
+      const worked = yield* call("status", { owners: saved.map(ownerOf), adults });
+      return saved.map((subscription, at) => ({ subscription, worked: worked[at] ?? NOTHING }));
+    });
+
+    const statusOf = (subscriptionId: string, worked: WorkerStatus): TitleListsStatus => ({
+      subscriptionId,
+      ...worked,
+      failure: failures.get(subscriptionId)?.error ?? null,
+    });
+
+    const status = Effect.gen(function* () {
+      const found = yield* held.pipe(
+        // A worker that doesn't answer says nothing of the lists: they count as not loaded.
+        Effect.catchTag("Failed", () =>
+          Effect.map(listed, (saved) =>
+            saved.map((subscription) => ({ subscription, worked: NOTHING })),
+          ),
+        ),
       );
+      return {
+        lists: found.map(({ subscription, worked }) => statusOf(subscription.id, worked)),
+        metadata: tmdbKey ? metadataProgress : null,
+      } satisfies OnDemandStatus;
+    });
+    const publishStatus = Effect.flatMap(status, (current) => PubSub.publish(updates, current));
+
+    /** Fetches `source`'s lists, and tells the UI how it ended. */
+    const refreshOf = (source: Source) =>
+      Effect.gen(function* () {
+        // A refresh cut short by restarting the worker, as for a new key, isn't a failure to show.
+        const started = generation;
+        const { revision, account } = source;
+        const owner = { ...ownerOf(source), revision };
+        /**
+         * Whether the login the lists were asked under is still the saved one. What the provider
+         * answered under one that isn't, lists or a refusal, is neither kept nor told.
+         */
+        const stands = subscriptions.stands(source);
+        // The worker fetches the lists and sets them aside; it keeps them only once told to.
+        const fetched = Effect.gen(function* () {
+          yield* call("refresh", { ...owner, account });
+          const keep = yield* stands;
+          yield* call("finishRefresh", { ...owner, keep });
+          if (!keep) return yield* switched;
+        });
+        yield* fetched.pipe(
+          fetchOne,
+          diagnosed("titles"),
+          Effect.tap(() =>
+            Effect.gen(function* () {
+              failures.delete(source.id);
+              listsVersions.set(source.id, listsOf(source.id) + 1);
+              yield* publishStatus;
+            }),
+          ),
+          Effect.tapError((failed) =>
+            Effect.gen(function* () {
+              if (started !== generation || !(yield* stands)) return;
+              failures.set(source.id, { error: failed.error, at: Date.now() });
+              yield* publishStatus;
+            }),
+          ),
+        );
+      });
+
+    /**
+     * The subscriptions whose lists make the catalogue, once there is something of it to show. A
+     * subscription without lists yet fetches its own beside what shows, and the lists say when
+     * it is in. With nothing to show at all, this waits for the first fetches and fails as they
+     * did when none came; one that failed a moment ago fails with that rather than asking again.
+     */
+    const owners = Effect.gen(function* () {
+      if ((yield* subscriptions.saved).length === 0) return yield* noSubscription;
+      const found = yield* held;
+      const all = found.map(({ subscription }) => ownerOf(subscription));
+      const sources = new Map((yield* subscriptions.sources).map((each) => [each.id, each]));
+      const missing = found.flatMap(({ subscription, worked }) =>
+        worked.fetchedAt === null ? [subscription] : [],
+      );
+      // Refresh asks the provider again whenever the viewer does.
+      const due = missing.flatMap((subscription) => {
+        const failed = failures.get(subscription.id);
+        const source = sources.get(subscription.id);
+        return source && !(failed && Date.now() - failed.at < RETRY_AFTER_MS) ? [source] : [];
+      });
+      if (missing.length < found.length) {
+        for (const source of due) {
+          // One that failed waits for its own refresh, or the next start.
+          if (!failures.has(source.id))
+            yield* Effect.forkIn(Effect.ignore(refreshOf(source)), scope);
+        }
+        return all;
+      }
+      const failed = yield* Effect.forEach(
+        due,
+        (source) =>
+          Effect.match(refreshOf(source), { onFailure: (cause) => cause, onSuccess: () => null }),
+        { concurrency: "unbounded" },
+      );
+      if (failed.length === 0 ? missing.length === 0 : failed.includes(null)) return all;
+      const [first] = missing;
+      return yield* failed.find((each) => each !== null) ??
+        new Failed({
+          error: (first && failures.get(first.id)?.error) ?? {
+            kind: "needs-secret",
+            subscriptionId: first?.id ?? "",
+          },
+        });
+    });
+
+    /** Runs a call on the catalogue in the viewer's language, once it has something to show. */
+    const loaded = <A>(
+      run: (owners: readonly CatalogueOwner[], language: string) => Effect.Effect<A, Failed>,
+    ) =>
+      Effect.gen(function* () {
+        const made = yield* owners;
+        return yield* run(made, yield* language);
+      });
 
     /**
      * A version's details: downloaded when it first opens, then kept, and put together each time
@@ -352,8 +423,8 @@ function make(deps: OnDemandDeps) {
         const source = yield* subscriptions.sourceOf(subscriptionId);
         const viewer = yield* language;
         const cacheKey = `${source.id}|${viewer}|${kind}|${id}`;
-        const [listed] = yield* loadedFor(source, (language) =>
-          call("byIds", { ...ownerOf(source), language, kind, ids: [id] }),
+        const [listed] = yield* loaded((owners, language) =>
+          call("byIds", { owners, language, kind, versions: [{ subscriptionId, id }] }),
         );
         const kept = details.get(cacheKey);
         const title = listed ?? kept?.title;
@@ -364,17 +435,18 @@ function make(deps: OnDemandDeps) {
           : yield* download(source, kind, id, title);
         details.delete(cacheKey);
         // Kept again only for the subscription it was asked for, with the login it had.
-        if (sameSource(source, yield* subscriptions.source)) {
-          keep(details, cacheKey, downloaded, DETAILS_KEPT);
-        }
+        if (yield* subscriptions.stands(source)) keep(details, cacheKey, downloaded, DETAILS_KEPT);
         if (asking.has(cacheKey)) late.add(cacheKey);
         const about = abouts.get(cacheKey) ?? null;
         const { raw } = downloaded;
-        // The title as this version: its episodes and its file belong to `id`.
+        // The title as this version: its episodes and its file belong to `id`, in its subscription.
         const version = {
           ...title,
+          subscriptionId,
           id,
-          tags: title.versions.find((each) => each.id === id)?.tags ?? title.tags,
+          tags:
+            title.versions.find((each) => each.subscriptionId === subscriptionId && each.id === id)
+              ?.tags ?? title.tags,
         };
         return {
           raw,
@@ -418,7 +490,7 @@ function make(deps: OnDemandDeps) {
           Effect.gen(function* () {
             asking.delete(cacheKey);
             const given = late.delete(cacheKey);
-            if (about === undefined || (yield* subscriptions.source)?.id !== source.id) return;
+            if (about === undefined || !(yield* subscriptions.stands(source))) return;
             keep(abouts, cacheKey, about, DETAILS_KEPT);
             if (given && about) yield* PubSub.publish(detailed, ref);
           });
@@ -447,7 +519,7 @@ function make(deps: OnDemandDeps) {
 
     /** Asks the provider about a title the lists show. */
     const download = (source: Source, kind: TitleKind, id: string, title: Title) => {
-      const lists = listsVersion;
+      const lists = listsOf(source.id);
       return Effect.map(providerDetails(source, kind, id), (raw) => ({ raw, lists, title }));
     };
 
@@ -456,7 +528,7 @@ function make(deps: OnDemandDeps) {
      * provider may list new episodes; if that fails, the old ones stand.
      */
     const renewed = (source: Source, kind: TitleKind, id: string, kept: Downloaded) => {
-      const lists = listsVersion;
+      const lists = listsOf(source.id);
       return kept.lists === lists
         ? Effect.succeed(kept)
         : providerDetails(source, kind, id).pipe(
@@ -496,47 +568,42 @@ function make(deps: OnDemandDeps) {
         return answer;
       });
 
-    const status = Effect.gen(function* () {
-      const source = yield* subscriptions.source;
-      if (!source) return { movies: 0, series: 0, fetchedAt: null, failure: null, metadata: null };
-      const worked = yield* askStatus(source).pipe(
-        Effect.orElseSucceed(() => ({ movies: 0, series: 0, fetchedAt: null })),
-      );
-      return statusOf(worked, source);
-    });
-    const publishStatus = Effect.flatMap(status, (current) => PubSub.publish(updates, current));
-
     return {
       status,
 
-      refresh,
-
-      isStale: (maxAge: Duration.Input) =>
+      refresh: (subscriptionId: string) =>
         Effect.gen(function* () {
-          const source = yield* subscriptions.source;
-          if (!source) return false;
-          const worked = yield* askStatus(source).pipe(
-            Effect.orElseSucceed(() => ({ fetchedAt: null })),
-          );
+          const source = yield* subscriptions.sourceOf(subscriptionId);
+          // A playlist has live TV only: nothing is asked of it.
+          if (source.kind === "xtream") yield* refreshOf(source);
+          return yield* status;
+        }),
+
+      isStale: (subscriptionId: string, maxAge: Duration.Input) =>
+        Effect.gen(function* () {
+          const found = yield* held.pipe(Effect.orElseSucceed(() => []));
+          const worked = found.find(({ subscription }) => subscription.id === subscriptionId);
+          if (!worked) return false;
+          const { fetchedAt } = worked.worked;
           const now = yield* Clock.currentTimeMillis;
-          return worked.fetchedAt === null || now - worked.fetchedAt > Duration.toMillis(maxAge);
+          return fetchedAt === null || now - fetchedAt > Duration.toMillis(maxAge);
         }),
 
       rows: (kind: TitleKind, tab: RowTab, like?: OwnedId) =>
-        loaded((source, language) =>
-          call("rows", { ...ownerOf(source), language, kind, tab, ...(like ? { like } : {}) }),
+        loaded((owners, language) =>
+          call("rows", { owners, language, kind, tab, ...(like ? { like } : {}) }),
         ),
       tiles: (kind: TitleKind, of: "genres" | "services") =>
-        loaded((source, language) => call("tiles", { ...ownerOf(source), language, kind, of })),
+        loaded((owners, language) => call("tiles", { owners, language, kind, of })),
       collection: ({ kind, id, sort, offset, limit }: CollectionQuery) =>
-        loaded((source, language) =>
+        loaded((owners, language) =>
           Effect.gen(function* () {
             // Titles for adults only once the viewer asked for them.
             if (id === "adult" && !(yield* settings.get).adultTitles) {
               return { name: "For adults", total: 0, titles: [] };
             }
             return yield* call("collection", {
-              ...ownerOf(source),
+              owners,
               language,
               kind,
               id,
@@ -547,10 +614,10 @@ function make(deps: OnDemandDeps) {
           }),
         ),
       search: (query: string) =>
-        loaded((source, language) => call("search", { ...ownerOf(source), language, query })),
+        loaded((owners, language) => call("search", { owners, language, query })),
       searchKind: (kind: TitleKind, query: string) =>
-        loaded((source, language) =>
-          call("searchKind", { ...ownerOf(source), language, kind, query, limit: SEARCH_PAGE }),
+        loaded((owners, language) =>
+          call("searchKind", { owners, language, kind, query, limit: SEARCH_PAGE }),
         ),
 
       details: (kind: TitleKind, version: OwnedId) =>
@@ -593,24 +660,21 @@ function make(deps: OnDemandDeps) {
       titles: (kind: TitleKind, versions: readonly OwnedId[]) =>
         versions.length === 0
           ? Effect.succeed([])
-          : loaded((source, language) => {
-              // Versions of another subscription aren't in these lists, whatever their ids.
-              const ids = versions.flatMap((version) =>
-                version.subscriptionId === source.id ? [version.id] : [],
-              );
-              return call("byIds", { ...ownerOf(source), language, kind, ids });
-            }),
+          : // Versions of a subscription that isn't saved are in no lists, whatever their ids.
+            loaded((owners, language) => call("byIds", { owners, language, kind, versions })),
 
       file: (title: TitleRef) =>
         Effect.gen(function* () {
           const source = yield* subscriptions.sourceOf(title.subscriptionId);
           const missing = new Failed({ error: { kind: "title-not-found", titleId: title.id } });
           if (title.kind === "movie") {
-            const container = yield* loadedFor(source, () =>
-              call("container", { ...ownerOf(source), id: title.id }),
-            );
+            const container = yield* call("container", { ...ownerOf(source), id: title.id });
             if (!container) return yield* missing;
-            return { url: source.provider.titleFile("movie", title.id, container), container };
+            return {
+              url: source.provider.titleFile("movie", title.id, container),
+              container,
+              revision: source.revision,
+            };
           }
           const series = yield* detailsOf("series", {
             subscriptionId: title.subscriptionId,
@@ -621,25 +685,32 @@ function make(deps: OnDemandDeps) {
           return {
             url: source.provider.titleFile("episode", title.id, episode.container),
             container: episode.container,
+            revision: source.revision,
           };
         }),
 
-      clear: Effect.gen(function* () {
-        failure = null;
-        details.clear();
-        abouts.clear();
-        asking.clear();
-        late.clear();
-        seasons.clear();
-        yield* call("clear", {}).pipe(Effect.ignore);
-      }),
+      forget: (subscription: SavedSubscription) =>
+        Effect.gen(function* () {
+          const { id } = subscription;
+          failures.delete(id);
+          listsVersions.delete(id);
+          // What was kept of its titles goes; what TMDB said of a season is no subscription's.
+          for (const kept of [details, abouts, asking]) {
+            for (const key of kept.keys()) if (key.startsWith(`${id}|`)) kept.delete(key);
+          }
+          for (const key of late) if (key.startsWith(`${id}|`)) late.delete(key);
+          // A playlist has no lists to forget.
+          if (subscription.kind !== "xtream") return;
+          yield* call("forget", ownerOf(subscription)).pipe(Effect.ignore);
+          yield* publishStatus;
+        }),
 
       reconfigure: Effect.gen(function* () {
         const next = keyOf(yield* settings.get);
         if (next === tmdbKey) return;
         tmdbKey = next;
         generation++;
-        failure = null;
+        failures.clear();
         metadataProgress = { known: 0, wanted: 0, refused: false, fetching: false };
         // The next call starts the worker again, with the new key.
         yield* Effect.promise(() => worker.stop());
@@ -736,9 +807,11 @@ function workerClient(start: () => Worker, onEvent: (event: WorkerEvent) => void
     async stop(): Promise<void> {
       const current = worker;
       if (!current) return;
-      // A cache write in progress gets a moment to finish, so the next start reads it.
+      // The worker writes what it still holds, each subscription's lists and TMDB's metadata, so
+      // the next start reads them. It gets a moment for that and no longer: a quit never waits
+      // on a worker that doesn't answer, and what isn't written by then stays as the disk had it.
       const flushed = call("flush", {}).catch(() => null);
-      await Promise.race([flushed, new Promise((done) => setTimeout(done, 2000))]);
+      await Promise.race([flushed, new Promise((done) => setTimeout(done, STOP_WITHIN_MS))]);
       if (worker === current) worker = null;
       await current.terminate();
     },

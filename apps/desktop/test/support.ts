@@ -86,6 +86,28 @@ export async function collect<A, R>(
   return seen;
 }
 
+/** A fetch that can hold the provider's answer to the next request until the test releases it. */
+export function holdableFetch() {
+  let next: { arrived: () => void; answer: Promise<void> } | null = null;
+  const holdable: typeof fetch = async (input, init) => {
+    const held = next;
+    next = null;
+    held?.arrived();
+    const response = await fetch(input, init);
+    await held?.answer;
+    return response;
+  };
+  return {
+    fetch: holdable,
+    holdNext() {
+      const arrived = Promise.withResolvers<void>();
+      const answer = Promise.withResolvers<void>();
+      next = { arrived: arrived.resolve, answer: answer.promise };
+      return { arrived: arrived.promise, release: answer.resolve };
+    },
+  };
+}
+
 /** Reversible stand-in for the Keychain. Sealed values never contain the plain text. */
 export const testSecrets: Secrets = {
   seal: (plain) => Buffer.from(plain, "utf8").toString("base64").split("").reverse().join(""),

@@ -6,7 +6,7 @@ import type { RawTitleRef, TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { OwnedId } from "@mrstreamer/contracts/subscription";
 import type { TitleProgress, Viewing } from "@mrstreamer/contracts/viewing";
 import { ViewingRecord, type RawTitleFilter } from "@mrstreamer/core/viewing/service";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { mainLayer } from "../src/main/runtime.ts";
 import { Library } from "../src/main/services/library.ts";
 import { Settings } from "../src/main/services/preferences.ts";
@@ -47,7 +47,8 @@ function plainProgress(progress: TitleProgress) {
 /**
  * The viewing record as the app runs it, on two fake providers to switch accounts between, which
  * list the same channels under the same ids. `start` ends the app running before, if any, and
- * starts it again on the same data folder.
+ * starts it again on the same data folder. `connect` saves one account in place of whichever was
+ * saved, as a viewer does who removes a subscription and adds another: one is saved at a time.
  *
  * Its calls take and answer the provider's ids alone, named with the subscription saved at that
  * moment on their way in and stripped of it on their way out; `record` is the service itself.
@@ -81,7 +82,7 @@ async function viewingApp(options: FakeProviderOptions = {}) {
     const library = await promised(runtime, Library);
     const settings = await promised(runtime, Settings);
     /** The id of the subscription saved now. Without one, an id that names none that is. */
-    const saved = async () => (await running?.subscriptions.get())?.id ?? "no-subscription";
+    const saved = async () => (await running?.subscriptions.list())?.[0]?.id ?? "no-subscription";
     /** `id` as the subscription saved now lists it. */
     const own = async (id: string): Promise<OwnedId> => ({ subscriptionId: await saved(), id });
     const owned = async ({ movieIds = [], seriesIds = [] }: RawTitleFilter) => ({
@@ -91,7 +92,8 @@ async function viewingApp(options: FakeProviderOptions = {}) {
     return {
       record: viewing,
       own,
-      library,
+      /** The library, whose refresh is the saved subscription's. */
+      library: { ...library, refresh: async () => library.refresh(await saved()) },
       state: async () => plain(await viewing.state()),
       setFavourite: async (
         channelId: string,
@@ -112,7 +114,6 @@ async function viewingApp(options: FakeProviderOptions = {}) {
           ids.map((id): OwnedId => ({ subscriptionId, id }));
         return plain(
           await viewing.reorderFavourites(commandId, {
-            subscriptionId,
             original: named(original),
             order: named(order),
           }),
@@ -128,7 +129,7 @@ async function viewingApp(options: FakeProviderOptions = {}) {
       /** The subscription saved now, as an order names it. */
       subscription: saved,
       /** The account its record is stored under. */
-      account: async () => (await running?.subscriptions.key()) ?? "",
+      account: async () => (await running?.subscriptions.saved())?.[0]?.key ?? "",
       recordWatch: async (channelId: string, commandId: string = randomUUID()) =>
         plain(await viewing.recordWatch(commandId, await own(channelId))),
       /** A checkpoint of a play that began at `since`, by default now. */
@@ -152,7 +153,7 @@ async function viewingApp(options: FakeProviderOptions = {}) {
       changes: () => collect(runtime, viewing.changes),
       /** What Remove subscription does with its box ticked. Returns the account's key. */
       erase: async () => {
-        const key = (await running?.subscriptions.key()) ?? "";
+        const key = (await running?.subscriptions.saved())?.[0]?.key ?? "";
         await viewing.erase(key);
         return key;
       },
@@ -163,13 +164,18 @@ async function viewingApp(options: FakeProviderOptions = {}) {
     dataDir,
     providers,
     start,
-    connect: async (account: 0 | 1) =>
-      (await subscriptions()).connect({
-        server: providers[account].url,
-        username: "demo",
-        password: "demo",
-      }),
-    disconnect: async () => (await subscriptions()).remove(),
+    connect: async (account: 0 | 1) => {
+      const service = await subscriptions();
+      const server = providers[account].url;
+      for (const other of await service.list()) {
+        if (other.server !== server) await service.remove(other.id);
+      }
+      return service.add({ server, username: "demo", password: "demo" });
+    },
+    disconnect: async () => {
+      const service = await subscriptions();
+      for (const each of await service.list()) await service.remove(each.id);
+    },
     writePreferences: async (file: object) => {
       await mkdir(dataDir, { recursive: true });
       await writeFile(join(dataDir, "preferences.json"), JSON.stringify(file));
@@ -570,14 +576,15 @@ describe("the order of the favourites", () => {
     await expect(
       viewing.reorder(original, [three, two, one], { from: first.id }),
     ).rejects.toMatchObject(refused);
-    // Nor does one sent for the second whose list names the first's channels.
-    const ofFirst = (ids: readonly string[]) =>
-      ids.map((id): OwnedId => ({ subscriptionId: first.id, id }));
+    // Nor does one that names a channel of the first among the second's own.
+    const mixed = original.map((id, at): OwnedId => ({
+      subscriptionId: at === 0 ? first.id : second.id,
+      id,
+    }));
     await expect(
       viewing.record.reorderFavourites(randomUUID(), {
-        subscriptionId: second.id,
-        original: ofFirst(original),
-        order: ofFirst([three, two, one]),
+        original: mixed,
+        order: mixed.toReversed(),
       }),
     ).rejects.toMatchObject(refused);
     expect(stored(app, first.account)).toEqual([one, two, three]);
@@ -981,5 +988,248 @@ describe("erasing an account's record", () => {
     expect(await restarted.state()).toMatchObject(empty);
     await app.connect(1);
     expect(await restarted.state()).toEqual(other);
+  });
+});
+
+describe("the viewing record of several subscriptions", () => {
+  /**
+   * The app with two subscriptions saved, whose providers list other channels under the same
+   * ids. `start` begins it again on the same data folder, also with a keychain that opens nothing.
+   */
+  async function two() {
+    const dataDir = await tempDir();
+    const [first, second] = [await fakeProvider(), await fakeProvider({ channels: 200 })];
+    const start = async (secrets = testSecrets) => {
+      const runtime = runtimeFor(mainLayer({ ...testConfig(dataDir), secrets }));
+      return {
+        runtime,
+        viewing: await promised(runtime, ViewingRecord),
+        library: await promised(runtime, Library),
+        subscriptions: await promised(runtime, Subscriptions),
+      };
+    };
+    const app = await start();
+    const login = (server: string) => ({ server, username: "demo", password: "demo" });
+    const a = (await app.subscriptions.add(login(first.url))).id;
+    const b = (await app.subscriptions.add(login(second.url))).id;
+    await app.library.channels({});
+    /** Each account's own stored favourites, by the provider's ids, as any build reads them. */
+    const stored = () => {
+      const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+      try {
+        const rows = db.prepare("select account, favourites from state").all();
+        return Object.fromEntries(
+          rows.map((row) => [
+            String(row["account"]) === `${first.url}|demo` ? "a" : "b",
+            JSON.parse(String(row["favourites"])) as string[],
+          ]),
+        );
+      } finally {
+        db.close();
+      }
+    };
+    return { ...app, dataDir, start, first, second, a, b, stored, login };
+  }
+  const of = (subscriptionId: string, id: string): OwnedId => ({ subscriptionId, id });
+  const star = async (
+    viewing: Promised<ViewingRecord["Service"]>,
+    channels: readonly OwnedId[],
+  ) => {
+    let last: Viewing | null = null;
+    for (const channel of channels) last = await viewing.setFavourite(randomUUID(), channel, true);
+    return last;
+  };
+
+  it("lists every subscription's favourites in the order starred, and recent channels by when watched", async () => {
+    const { viewing, start, a, b, stored } = await two();
+    const starred = [of(a, "2014"), of(b, "2014"), of(a, "2015"), of(b, "2016")];
+
+    await star(viewing, starred);
+    for (const channel of [of(a, "2018"), of(b, "2018"), of(a, "2014")]) {
+      await viewing.recordWatch(randomUUID(), channel);
+    }
+
+    const state = await viewing.state();
+    expect(state.favourites).toEqual(starred);
+    expect(state.recent).toEqual([of(a, "2014"), of(b, "2018"), of(a, "2018")]);
+    // Each account keeps its own, by the provider's ids alone, as every build reads it.
+    expect(stored()).toEqual({ a: ["2014", "2015"], b: ["2014", "2016"] });
+    // The same after a restart, which reads where each stands from what is stored.
+    expect(await (await start()).viewing.state()).toEqual(state);
+
+    // One unstarred goes, and starred again comes back last, after the other's too.
+    await viewing.setFavourite(randomUUID(), of(a, "2014"), false);
+    const again = await viewing.setFavourite(randomUUID(), of(a, "2014"), true);
+    expect(again.favourites).toEqual([...starred.slice(1), of(a, "2014")]);
+  });
+
+  it("keeps the twelve channels watched last, whichever subscription they are of", async () => {
+    const { viewing, a, b } = await two();
+    const watched = Array.from({ length: 16 }, (_, at) => of(at % 2 ? b : a, String(2014 + at)));
+
+    for (const channel of watched) await viewing.recordWatch(randomUUID(), channel);
+
+    expect((await viewing.state()).recent).toEqual(watched.toReversed().slice(0, 12));
+  });
+
+  it("puts the favourites of several subscriptions in one order, each moving in its own record", async () => {
+    const { viewing, start, a, b, stored } = await two();
+    const [a1, b1, a2, b2] = [of(a, "2014"), of(b, "2014"), of(a, "2015"), of(b, "2016")];
+    const original = [a1, b1, a2, b2];
+    await star(viewing, original);
+    const order = [b2, a1, b1, a2];
+    const commandId = randomUUID();
+
+    const saved = await viewing.reorderFavourites(commandId, { original, order });
+
+    expect(saved.favourites).toEqual(order);
+    expect(stored()).toEqual({ a: ["2014", "2015"], b: ["2016", "2014"] });
+    expect((await (await start()).viewing.state()).favourites).toEqual(order);
+    // Sent again, it changes nothing more.
+    const { sequence } = saved;
+    expect((await viewing.reorderFavourites(commandId, { original, order })).sequence).toBe(
+      sequence,
+    );
+    // One sent to the end moves alone: the rest stay where they stand.
+    const moved = await viewing.reorderFavourites(randomUUID(), {
+      original: order,
+      order: [a1, b1, a2, b2],
+    });
+    expect(moved.favourites).toEqual([a1, b1, a2, b2]);
+    expect(stored()).toEqual({ a: ["2014", "2015"], b: ["2014", "2016"] });
+    // A new favourite of either goes last.
+    const added = await viewing.setFavourite(randomUUID(), of(a, "2018"), true);
+    expect(added.favourites).toEqual([a1, b1, a2, b2, of(a, "2018")]);
+  });
+
+  it("refuses an order made from other favourites, or for a subscription that went", async () => {
+    const { viewing, subscriptions, a, b, stored, second, login } = await two();
+    const [a1, b1, a2] = [of(a, "2014"), of(b, "2014"), of(a, "2015")];
+    const original = [a1, b1, a2];
+    await star(viewing, original);
+    const refused = { error: { kind: "favourites-changed" } };
+
+    // Starred since in the other subscription: the list the order was made from is gone.
+    await viewing.setFavourite(randomUUID(), of(b, "2016"), true);
+    await expect(
+      viewing.reorderFavourites(randomUUID(), { original, order: [a2, b1, a1] }),
+    ).rejects.toMatchObject(refused);
+    await viewing.setFavourite(randomUUID(), of(b, "2016"), false);
+
+    await subscriptions.remove(b);
+    // The other's favourites went from the lists with it, and an order that names them lands nowhere.
+    expect((await viewing.state()).favourites).toEqual([a1, a2]);
+    await expect(
+      viewing.reorderFavourites(randomUUID(), { original, order: [a2, b1, a1] }),
+    ).rejects.toMatchObject(refused);
+    expect(stored()).toEqual({ a: ["2014", "2015"], b: ["2014"] });
+
+    // Its record was kept: added again, its favourite is back where it was starred.
+    const back = (await subscriptions.add(login(second.url))).id;
+    expect(back).not.toBe(b);
+    expect((await viewing.state()).favourites).toEqual([a1, of(back, "2014"), a2]);
+  });
+
+  it("reads an order another build gave one account's favourites, among the others'", async () => {
+    const { viewing, runtime, start, dataDir, first, a, b } = await two();
+    const [a1, b1, a2] = [of(a, "2014"), of(b, "2014"), of(a, "2015")];
+    await star(viewing, [a1, b1, a2]);
+    await runtime.dispose();
+
+    // A build that knows one subscription moves its first favourite to the end: the favourite
+    // removed and added again in that account's record, and the list they add up to.
+    const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+    const account = `${first.url}|demo`;
+    const event = db.prepare(
+      "insert into events (account, type, version, channel_id, at, command_id) values (?, ?, 1, '2014', ?, 'another-build')",
+    );
+    event.run(account, "favourite-removed", Date.now());
+    const { lastInsertRowid } = event.run(account, "favourite-added", Date.now());
+    db.prepare("update state set favourites = ?, sequence = ? where account = ?").run(
+      JSON.stringify(["2015", "2014"]),
+      Number(lastInsertRowid),
+      account,
+    );
+    db.close();
+
+    expect((await (await start()).viewing.state()).favourites).toEqual([b1, a2, a1]);
+  });
+
+  it("keeps each subscription's titles and progress its own, under ids both use", async () => {
+    const { viewing, a, b } = await two();
+    const movie = (subscriptionId: string): TitleRef => ({
+      kind: "movie",
+      subscriptionId,
+      id: "91001",
+    });
+
+    // The clock stands still until moved on, so each step comes later than the one before: two
+    // of them fit in one millisecond, which names neither as the later.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    onTestFinished(() => void vi.useRealTimers());
+    const moveOn = () => vi.setSystemTime(Date.now() + 60_000);
+
+    await viewing.recordProgress(randomUUID(), movie(a), 600, 6000, Date.now());
+    moveOn();
+    await viewing.recordProgress(randomUUID(), movie(b), 1200, 5400, Date.now());
+
+    const state = await viewing.state();
+    // The one played last first, each with where its own file stopped.
+    expect(
+      state.continueWatching.map(({ title, position }) => [title.subscriptionId, position]),
+    ).toEqual([
+      [b, 1200],
+      [a, 600],
+    ]);
+    expect(await viewing.progress({ movies: [of(a, "91001")] })).toMatchObject([
+      { title: movie(a), position: 600, duration: 6000 },
+    ]);
+    expect(
+      (await viewing.progress({ movies: [of(b, "91001"), of(a, "91001")] })).map(
+        ({ title, position }) => [title.subscriptionId, position],
+      ),
+    ).toEqual([
+      [a, 600],
+      [b, 1200],
+    ]);
+
+    // Taken out of Continue watching by its versions, each in the record of its own subscription.
+    moveOn();
+    const removed = await viewing.removeFromContinue(randomUUID(), {
+      movies: [of(a, "91001"), of(b, "91001")],
+    });
+    expect(removed.continueWatching).toEqual([]);
+    // A version of a subscription that isn't saved takes nothing out, of anyone's.
+    moveOn();
+    await viewing.recordProgress(randomUUID(), movie(a), 900, 6000, Date.now());
+    await expect(
+      viewing.removeFromContinue(randomUUID(), {
+        movies: [of(a, "91001"), of("another-subscription", "91001")],
+      }),
+    ).rejects.toMatchObject({ error: { kind: "no-subscription" } });
+    expect((await viewing.state()).continueWatching).toHaveLength(1);
+  });
+
+  it("keeps the lists of a subscription whose secret the keychain lost", async () => {
+    const { viewing, runtime, start, a, b } = await two();
+    const starred = [of(a, "2014"), of(b, "2014")];
+    await star(viewing, starred);
+    await runtime.dispose();
+
+    const locked = await start({
+      seal: testSecrets.seal,
+      open: () => {
+        throw new Error("The keychain opens nothing.");
+      },
+    });
+
+    expect((await locked.subscriptions.list()).map((each) => each.needsSecret)).toEqual([
+      true,
+      true,
+    ]);
+    expect((await locked.viewing.state()).favourites).toEqual(starred);
+    // A star is the viewer's own, whatever the provider can be asked.
+    const without = await locked.viewing.setFavourite(randomUUID(), of(b, "2014"), false);
+    expect(without.favourites).toEqual([of(a, "2014")]);
   });
 });

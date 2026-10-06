@@ -27,11 +27,11 @@ Mr. Streamer keeps its data in one folder:
 
 The folder contains:
 
-- your subscription: the server address, your username, and your password, or the link of a playlist you added, which has no password. The password and the playlist link are encrypted with a key held by your system: the macOS Keychain, your Windows account, or GNOME Keyring or KWallet on Linux. On Linux without a keyring, a fixed key is used, so other programs running under your account can read them. The server address and username are not encrypted, and neither is the address of the server a playlist comes from. Beside it the app keeps a random id it gives your subscription on this computer, with the server address and username it belongs to. The id is used only inside the app and is never sent anywhere.
+- your subscriptions, each with its server address, your username, and your password, or the link of a playlist you added, which has no password. The password and the playlist link are encrypted with a key held by your system: the macOS Keychain, your Windows account, or GNOME Keyring or KWallet on Linux. On Linux without a keyring, a fixed key is used, so other programs running under your account can read them. The server address and username are not encrypted, and neither is the address of the server a playlist comes from. Beside them the app keeps a random id it gives each subscription on this computer, with the server address and username it belongs to and the name you gave it. The id is used only inside the app, where it also names the folder of a subscription you added beside your first, and is never sent anywhere.
 - your preferences, including your own TMDB key if you entered one. This key is not encrypted.
 - your favourites, the channels you watched, and your progress in movies and episodes
-- copies of your provider's channel list, programme guide, and movie and series lists
-- information from TMDB about your provider's movies and series
+- copies of each provider's channel list, programme guide, and movie and series lists
+- information from TMDB about your providers' movies and series
 - your update channel
 - a diagnostics log of what the app did and how long it took. It contains no server addresses, logins or channel names, and it leaves your computer only if you attach it to an issue or an email.
 - a cache of images, at most 64 MB, and other files the app's browser engine keeps for itself
@@ -42,17 +42,19 @@ Two items are stored outside this folder: the key that encrypts your password or
 
 ### Your provider
 
-Mr. Streamer connects to the server address you enter. It does so to check your login (when you connect, each time the app starts, and when you open Settings > Subscription), to load the channel, movie and series lists and the programme guide, to show a title's details, and to play. Every request includes your username and password, because these providers require it. Your provider can see your IP address, the app version, and what you open and watch, and when. Your provider's privacy policy applies to that data.
+Mr. Streamer connects to the server address you enter, for each subscription you add. It does so to check your login (when you add it, each time the app starts, and when you open Settings > Subscriptions), to load the channel, movie and series lists and the programme guide, to show a title's details, and to play. Every request includes your username and password for that provider, because these providers require it. Your provider can see your IP address, the app version, and what you open and watch from it, and when. Your provider's privacy policy applies to that data.
+
+With several subscriptions, each provider receives only its own login and the requests for its own channels and titles. Mr. Streamer puts their lists together on your computer, and tells no provider about another, or what you watch from it.
 
 ### Unencrypted connections
 
 An address starting with `https://` is encrypted, and Mr. Streamer never falls back from it to unencrypted http, including through redirects. An address entered without `https://` or `http://` is tried with https first. If that fails, the app stops before sending your login and asks you. Your login is sent over http only if you choose **Connect without encryption**. An address entered with `http://` connects over http, and the login form says so.
 
-Over http, your username and password are sent as plain text, and anyone on your network or between you and your provider can read them. Settings > Subscription marks such a login "not encrypted". If your provider offers an https address, we recommend using it.
+Over http, your username and password are sent as plain text, and anyone on your network or between you and your provider can read them. Settings > Subscriptions marks such a login "not encrypted". If your provider offers an https address, we recommend using it.
 
 ### A playlist
 
-When you add a playlist link, Mr. Streamer downloads the playlist from that address when you connect, each time the app starts, when you open Settings > Subscription, and when it refreshes the channel list or the guide. To play a channel, it connects to the address the playlist lists for that channel, often on another server, and follows that server's redirects, often to further servers. If the playlist names a programme guide, the app downloads it from the server named. Each of these servers receives your IP address and the app version, or the browser identification and referring address the playlist names for that channel. The servers that play a channel can see what you watch, and when. A playlist link without a login sends no username or password. A channel listed with an `http://` address plays unencrypted.
+When you add a playlist link, Mr. Streamer downloads the playlist from that address when you add it, each time the app starts, when you open Settings > Subscriptions, and when it refreshes the channel list or the guide. To play a channel, it connects to the address the playlist lists for that channel, often on another server, and follows that server's redirects, often to further servers. If the playlist names a programme guide, the app downloads it from the server named. Each of these servers receives your IP address and the app version, or the browser identification and referring address the playlist names for that channel. The servers that play a channel can see what you watch, and when. A playlist link without a login sends no username or password. A channel listed with an `http://` address plays unencrypted.
 
 ### Images
 
@@ -60,7 +62,7 @@ Channel logos, posters and backdrops load from the servers your provider or play
 
 ### The Movie Database (TMDB)
 
-When TMDB is enabled, Mr. Streamer asks TMDB about the movies and series your provider lists, in the language you chose, and which streaming services offer them in your country. When you open a title or a season, it requests that title's or season's details. TMDB receives your IP address, those titles, your language and country, and an API key: Mr. Streamer's, or your own if you entered one. TMDB never receives your provider's address or your login. [TMDB's privacy policy](https://www.themoviedb.org/privacy-policy) applies.
+When TMDB is enabled, Mr. Streamer asks TMDB about the movies and series your providers list, in the language you chose, and which streaming services offer them in your country. When you open a title or a season, it requests that title's or season's details. TMDB receives your IP address, those titles, your language and country, and an API key: Mr. Streamer's, or your own if you entered one. TMDB never receives your provider's address or your login. [TMDB's privacy policy](https://www.themoviedb.org/privacy-policy) applies.
 
 ### Update checks
 
@@ -106,7 +108,7 @@ Our email and hosting providers process these messages and visits to our website
 
 ## Deleting your data
 
-- **Remove subscription**, in Settings > Subscription, deletes your login or playlist link, the id the app gave your subscription, and the copies of your provider's lists and guide. Tick **Also delete favourites, history and progress** to delete that account's favourites, watched channels and progress in movies and episodes as well. Otherwise they remain, and reappear if you connect the same account again.
+- **Remove**, on a subscription in Settings > Subscriptions, deletes that subscription's login or playlist link, the id and the name the app kept for it, and the copies of its provider's lists and guide. Your other subscriptions keep theirs. Tick **Also delete favourites, history and progress** to delete that account's favourites, watched channels and progress in movies and episodes as well. Otherwise they remain, and reappear if you add the same account again.
 - **Deleting the folder** listed above removes everything Mr. Streamer stores there. To also remove the password key, delete "Mr. Streamer Safe Storage" in Keychain Access on macOS, or the matching entry in your Linux keyring. The update folder can be deleted as well: `~/Library/Caches/mrstreamer-updater` on macOS, `%LOCALAPPDATA%\mrstreamer-updater` on Windows, or `~/.cache/mrstreamer-updater` on Linux.
 - **Uninstalling the app does not delete your data**, so a reinstall continues where you left off. The copy from the Microsoft Store is the exception: uninstalling it deletes its folder.
 - To ask us to delete messages or other data we hold about you, email privacy@mrstreamer.app.

@@ -43,6 +43,7 @@ const HIDDEN = ["adult", "gone"] as const;
 const subscription = (id: string): SubscriptionSummary => ({
   kind: "xtream",
   id,
+  name: null,
   server: "http://line.example.tv",
   username: id,
   account: { state: "active", expiresAt: null, maxConnections: 1, activeConnections: 0 },
@@ -77,13 +78,23 @@ async function favouritesPage(count: number, list: ChannelList = { kind: "favour
   const shown = Array.from({ length: count }, (_, index) => String(index + 1));
   const favourites = [...shown.slice(0, 1), HIDDEN[0], ...shown.slice(1), HIDDEN[1]].map(own);
   const channels = shown.map(channel);
-  client.setQueryData(["subscription"], subscription("one"));
+  client.setQueryData(["subscriptions"], [subscription("one")]);
   client.setQueryData(queries.categories().queryKey, [
-    { ...own("uk"), name: "UK | NEWS", group: null, title: "News", channelCount: count },
+    {
+      ...own("uk"),
+      members: [own("uk")],
+      name: "UK | NEWS",
+      group: null,
+      title: "News",
+      channelCount: count,
+    },
   ]);
   client.setQueryData(queries.channels(null).queryKey, channels);
   client.setQueryData(queries.channelsOf(favourites).queryKey, channels);
-  client.setQueryData(["library", "status"], { channelCount: count, fetchedAt: 1, failure: null });
+  client.setQueryData(
+    ["library", "status"],
+    [{ subscriptionId: "one", channelCount: count, fetchedAt: 1, failure: null, failedAt: null }],
+  );
   const viewing: Viewing = { favourites, recent: [], continueWatching: [], sequence: 1 };
   client.setQueryData(["viewing"], viewing);
   const container = document.createElement("div");
@@ -301,7 +312,6 @@ describe("putting the favourites in another order", () => {
     expect(ipc.argsOf("viewing.reorderFavourites")).toEqual([
       {
         commandId: expect.any(String),
-        subscriptionId: "one",
         original: page.favourites,
         order: ["4", "1", "2", "3"].map(own),
       },
@@ -450,7 +460,13 @@ describe("putting the favourites in another order", () => {
       syncGuideUpdates(page.client),
       syncViewing(page.client),
     ];
-    const status = { channelCount: 4, fetchedAt: 2, failure: null };
+    const status = {
+      subscriptionId: "one",
+      channelCount: 4,
+      fetchedAt: 2,
+      failure: null,
+      failedAt: null,
+    };
     await page.click("Reorder");
     await page.click("Move Channel 3 up", { shift: true });
     const arranged = titles(["3", "1", "2", "4"]);
@@ -506,12 +522,13 @@ describe("putting the favourites in another order", () => {
     for (const each of stop) each();
   });
 
-  it("ends the draft when another subscription connects with the same favourites, and no late answer brings it back", async () => {
+  it("ends the draft when a subscription is added beside it, and no late answer brings it back", async () => {
     const page = await favouritesPage(4);
     const inOrder = titles(["1", "2", "3", "4"]);
-    // The other subscription lists the same channels under the same ids, and starred the same.
-    const connect = async (id: string) => {
-      await act(async () => page.client.setQueryData(["subscription"], subscription(id)));
+    // The subscriptions saved: the one the favourites are of, alone or with another beside it.
+    const saved = { one: [subscription("one")], two: [subscription("one"), subscription("two")] };
+    const connect = async (roster: keyof typeof saved) => {
+      await act(async () => page.client.setQueryData(["subscriptions"], saved[roster]));
       await settled();
     };
     const arranging = async () => {
@@ -536,8 +553,8 @@ describe("putting the favourites in another order", () => {
     ended();
     expect(ipc.argsOf("viewing.reorderFavourites")).toEqual([]);
 
-    // Being saved: the answer for the first subscription is no news for the second, neither
-    // for its lists nor of a draft.
+    // Being saved: the answer is of the favourites as they were with one subscription, and no
+    // news for the lists, or of a draft, once there are two.
     await arranging();
     let late = ipc.hold("viewing.reorderFavourites");
     await page.click("Save");
@@ -562,7 +579,7 @@ describe("putting the favourites in another order", () => {
       ended();
     }
 
-    // Refused, and the favourites being read again as the other connects.
+    // Refused, and the favourites being read again as the other is added.
     await arranging();
     late = ipc.hold("viewing.reorderFavourites");
     await page.click("Save");

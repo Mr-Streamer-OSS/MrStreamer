@@ -28,6 +28,8 @@ export function describeError(error: AppError): string {
       return `The provider answered with an error (HTTP ${error.status}).`;
     case "no-subscription":
       return "No subscription is connected.";
+    case "needs-secret":
+      return "This subscription needs its password or link again, in Settings.";
     case "keychain-refused":
       return isMac
         ? 'The macOS Keychain would not store your password. Open Keychain Access, delete "Mr. Streamer Safe Storage", then quit and reopen Mr. Streamer.'

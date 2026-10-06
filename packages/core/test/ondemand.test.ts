@@ -15,6 +15,7 @@ import {
   renditionSubtitles,
   type RenditionFacts,
 } from "../src/ondemand/tracks.ts";
+import type { OnDemandCatalogue } from "../src/provider.ts";
 import { continueWatching, isFinished, type TitleRow } from "../src/viewing/titles.ts";
 
 /** The subscription every title of these tests is listed by. */
@@ -78,6 +79,10 @@ describe("Continue watching", () => {
   });
 });
 
+/** The catalogue one subscription's lists make. */
+const indexOf = (catalogue: OnDemandCatalogue, language: string) =>
+  indexCatalogue([{ subscriptionId: SUBSCRIPTION, catalogue }], language);
+
 describe("one title per film", () => {
   const movie = (id: string, name: string, tmdbId: string | null, addedAt: number) => ({
     id,
@@ -104,7 +109,7 @@ describe("one title per film", () => {
     series: [],
   };
   const listed = (language: string) =>
-    indexCatalogue(catalogue, language, SUBSCRIPTION).movies.titles.map((title) => [
+    indexOf(catalogue, language).movies.titles.map((title) => [
       title.id,
       title.versions.map((version) => version.id),
     ]);
@@ -135,7 +140,7 @@ describe("one title per film", () => {
     const shown = (language: string) =>
       collections({
         kind: "movie",
-        titles: indexCatalogue(films, language, SUBSCRIPTION).movies.titles,
+        titles: indexOf(films, language).movies.titles,
         language,
         names: () => null,
         metadata: (tmdbId) => ({
@@ -164,7 +169,7 @@ describe("one title per film", () => {
         { ...movie("21", "Wicked", "300", 2), adult: true },
       ],
     };
-    const titles = indexCatalogue(films, "en", SUBSCRIPTION).movies.titles;
+    const titles = indexOf(films, "en").movies.titles;
     expect(titles.map((title) => [title.id, title.adult])).toEqual([
       ["20", false],
       ["21", true],
@@ -196,7 +201,7 @@ describe("one title per film", () => {
         movie("42", "A Quiet Place (NL AUDIO)", "400", 10),
       ],
     };
-    const [title] = indexCatalogue(films, language, SUBSCRIPTION).movies.titles;
+    const [title] = indexOf(films, language).movies.titles;
     expect(title?.versions.map((version) => version.id)).toEqual(order);
   });
 
@@ -214,7 +219,7 @@ describe("one title per film", () => {
     };
     const made = collections({
       kind: "movie",
-      titles: indexCatalogue(films, "en", SUBSCRIPTION).movies.titles,
+      titles: indexOf(films, "en").movies.titles,
       language: "en",
       metadata: () => null,
       names: () => null,
@@ -227,9 +232,109 @@ describe("one title per film", () => {
   });
 
   it("finds the title by any of its versions, and by any version's name", () => {
-    const index = indexCatalogue(catalogue, "en", SUBSCRIPTION);
-    expect(byIds(index, "movie", ["3"]).map((title) => title.id)).toEqual(["2"]);
+    const index = indexOf(catalogue, "en");
+    const third = { subscriptionId: SUBSCRIPTION, id: "3" };
+    expect(byIds(index, "movie", [third]).map((title) => title.id)).toEqual(["2"]);
+    // The same id in another subscription's lists is another film, or none.
+    expect(byIds(index, "movie", [{ ...third, subscriptionId: "another" }])).toEqual([]);
     expect(search(index, "movie", "speak").map((title) => title.id)).toEqual(["2"]);
+  });
+});
+
+describe("one title per film across subscriptions", () => {
+  const row = (id: string, name: string, tmdbId: string | null, addedAt = 1, adult = false) => ({
+    id,
+    name,
+    posterUrl: null,
+    backdropUrl: null,
+    rating: null,
+    addedAt,
+    releaseDate: null,
+    categoryIds: ["films"],
+    adult,
+    container: "mkv",
+    tmdbId,
+  });
+  const lists = (movies: readonly ReturnType<typeof row>[]): OnDemandCatalogue => ({
+    movieCategories: [{ id: "films", name: "Films" }],
+    movies,
+    seriesCategories: [],
+    series: movies,
+  });
+  // Two providers that number their films alike: every id is taken twice.
+  const sources = [
+    {
+      subscriptionId: "a",
+      catalogue: lists([
+        row("1", "Blow (EN)", "100", 5),
+        row("2", "Heat 1995", "200"),
+        row("3", "Casino (EN)", null),
+        row("4", "Wicked", "300", 1, true),
+      ]),
+    },
+    {
+      subscriptionId: "b",
+      catalogue: lists([
+        row("1", "Heat 1995 (NL)", null),
+        row("2", "Blow 4K (EN)", "100", 9),
+        row("3", "Casino (EN)", null),
+        row("4", "Wicked", "300"),
+      ]),
+    },
+  ];
+  const shown = (language = "en", kind: "movies" | "series" = "movies") =>
+    indexCatalogue(sources, language)[kind].titles.map((title) => [
+      title.key,
+      `${title.subscriptionId}:${title.id}`,
+      title.versions.map((version) => `${version.subscriptionId}:${version.id}`),
+      title.ambiguous ?? false,
+    ]);
+
+  it("gathers a film's versions by its TMDB id, whichever subscription lists them and under whatever id", () => {
+    expect(shown()).toEqual([
+      // Listed by both, under other ids: one title, the newer version of equals first.
+      ["movie:tmdb:100", "b:2", ["b:2", "a:1"], false],
+      // The same name and year, and no TMDB id to say it is the same film: two titles.
+      ["movie:tmdb:200", "a:2", ["a:2"], true],
+      ["movie:a:3", "a:3", ["a:3"], true],
+      // For adults in one of them: it stays apart, and the other's stays what it was.
+      ["movie:a:4", "a:4", ["a:4"], false],
+      ["movie:b:1", "b:1", ["b:1"], true],
+      ["movie:b:3", "b:3", ["b:3"], true],
+      ["movie:tmdb:300", "b:4", ["b:4"], false],
+    ]);
+  });
+
+  it("never joins a movie and a series that share a TMDB id", () => {
+    expect(shown("en", "series").map(([key]) => key)).toContain("series:tmdb:100");
+    expect(shown().map(([key]) => key)).toContain("movie:tmdb:100");
+  });
+
+  it("names a title the same whichever version shows first, and whoever else lists it", () => {
+    const keysOf = (from: typeof sources, language: string) =>
+      indexCatalogue(from, language).movies.titles.map((title) => title.key);
+    const alone = keysOf(sources.slice(0, 1), "en");
+
+    // Another subscription's lists arriving changes no title's name, only which version shows.
+    expect(keysOf(sources, "nl").filter((key) => alone.includes(key))).toEqual(alone);
+    expect(keysOf(sources.toReversed(), "en").toSorted()).toEqual(keysOf(sources, "en").toSorted());
+  });
+
+  it("finds a title by a version of either subscription, and marks nothing with one alone", () => {
+    const index = indexCatalogue(sources, "en");
+    const found = (subscriptionId: string, id: string) =>
+      byIds(index, "movie", [{ subscriptionId, id }]).map((title) => title.key);
+
+    expect(found("a", "1")).toEqual(["movie:tmdb:100"]);
+    expect(found("b", "2")).toEqual(["movie:tmdb:100"]);
+    // The same id in the other one's lists is another film.
+    expect(found("b", "1")).toEqual(["movie:b:1"]);
+    // One subscription alone lists nothing a name could be mistaken for.
+    const [alone] = sources;
+    expect(
+      indexCatalogue(alone ? [alone] : [], "en").movies.titles.some((title) => title.ambiguous),
+    ).toBe(false);
+    expect(search(index, "movie", "blow").map((title) => title.versions.length)).toEqual([2]);
   });
 });
 
@@ -392,6 +497,7 @@ describe("version labels", () => {
 describe("details", () => {
   const title = {
     kind: "movie" as const,
+    key: `movie:${SUBSCRIPTION}:1`,
     subscriptionId: SUBSCRIPTION,
     id: "1",
     name: "Blow 1080p (NL AUDIO)",
@@ -541,6 +647,7 @@ function seriesOf(
   return seriesDetails(
     {
       kind: "series",
+      key: `series:${SUBSCRIPTION}:s1`,
       subscriptionId: SUBSCRIPTION,
       id: "s1",
       name: "Harbour Lights (NL)",

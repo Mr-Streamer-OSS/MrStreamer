@@ -47,26 +47,38 @@ const owned = () => type({ subscriptionId: "string > 0", id: "string" });
 /** Movies, and series whose every episode counts, by the ids of their versions: a `TitleFilter`. */
 const titleFilter = () => type({ "movies?": owned().array(), "series?": owned().array() });
 
-/** Login details as typed by the user. `server` may also hold a pasted M3U link. */
+/**
+ * Login details as typed by the user, with the name to list the subscription under, if any.
+ * `server` may also hold a pasted M3U link.
+ */
 const loginInput = () =>
   type({
     server: "string > 0",
     username: "string",
     password: "string",
+    "name?": "string",
   });
-export type LoginInput = IpcInput<"subscription.connect">;
+export type LoginInput = IpcInput<"subscription.add">;
 
 /** Input schema for every IPC method. The main process validates each call before handling it. */
 export const ipcInputs = {
-  "subscription.get": none,
-  "subscription.connect": loginInput,
+  "subscription.list": none,
+  "subscription.add": loginInput,
   /**
-   * Forgets the login and what was loaded with it. `eraseViewing` also deletes the account's
-   * favourites, watch history and progress, which otherwise stay for when it connects again.
+   * Changes what a saved subscription is called, and its password or playlist link when `secret`
+   * is given: the one entered again after the keychain lost it, or a new one. `name` null or
+   * empty takes the name away.
    */
-  "subscription.remove": () => type({ "eraseViewing?": "boolean" }),
+  "subscription.update": () =>
+    type({ subscriptionId: "string > 0", "name?": "string | null", "secret?": "string > 0" }),
+  /**
+   * Forgets the subscription's login and what was loaded with it. `eraseViewing` also deletes
+   * the account's favourites, watch history and progress, which otherwise stay for when it is
+   * added again.
+   */
+  "subscription.remove": () => type({ subscriptionId: "string > 0", "eraseViewing?": "boolean" }),
   /** Asks the provider for the account's status now: expiry and connections in use. */
-  "subscription.recheck": none,
+  "subscription.recheck": () => type({ subscriptionId: "string > 0" }),
   /** What the viewer left a subscription at: where Live TV opens, and the picks made in it. */
   "subscription.preferences": () => type({ subscriptionId: "string > 0" }),
   "subscription.updatePreferences": () =>
@@ -76,7 +88,8 @@ export const ipcInputs = {
   "library.channels": () =>
     type({ "category?": owned(), "query?": "string", "channels?": owned().array() }),
   "library.channel": () => type({ channel: owned() }),
-  "library.refresh": none,
+  /** Fetches one subscription's channels again. */
+  "library.refresh": () => type({ subscriptionId: "string > 0" }),
   "guide.listings": () => type({ channels: owned().array() }),
   "guide.schedule": () => type({ channel: owned() }),
   "guide.search": () => type({ query: "string" }),
@@ -94,12 +107,12 @@ export const ipcInputs = {
     }),
   "guide.status": none,
   /**
-   * Asks the subscription for its guide now and downloads it. Answers with the status, also when
+   * Asks a subscription for its guide now and downloads it. Answers with its status, also when
    * the subscription has no guide, which is no failure.
    */
-  "guide.refresh": none,
+  "guide.refresh": () => type({ subscriptionId: "string > 0" }),
   "ondemand.status": none,
-  "ondemand.refresh": none,
+  "ondemand.refresh": () => type({ subscriptionId: "string > 0" }),
   "ondemand.search": () => type({ query: "string" }),
   /** Movies or series only, for the field in their tab bar. */
   "ondemand.searchKind": () => type({ kind: titleKind(), query: "string" }),
@@ -206,16 +219,11 @@ export const ipcInputs = {
   "viewing.setFavourite": () =>
     type({ commandId: "string", channel: owned(), favourite: "boolean" }),
   /**
-   * Puts the favourites of the subscription in another order: `original` is the list the order
-   * was made from, whole, and `order` the channels arranged. See `FavouriteOrder`.
+   * Puts the favourites in another order: `original` is the list the order was made from, whole,
+   * and `order` the channels arranged. See `FavouriteOrder`.
    */
   "viewing.reorderFavourites": () =>
-    type({
-      commandId: "string",
-      subscriptionId: "string > 0",
-      original: owned().array(),
-      order: owned().array(),
-    }),
+    type({ commandId: "string", original: owned().array(), order: owned().array() }),
   "viewing.recordWatch": () => type({ commandId: "string", channel: owned() }),
   "viewing.recordProgress": () =>
     type({
@@ -247,17 +255,28 @@ export const ipcInputs = {
 
 /** What each IPC method resolves to when it succeeds. */
 export interface IpcOutputs {
-  "subscription.get": SubscriptionSummary | null;
-  "subscription.connect": SubscriptionSummary;
+  /** Every saved subscription, in the order they were added. */
+  "subscription.list": readonly SubscriptionSummary[];
+  /**
+   * Checks the login with the provider and saves it beside the others. What plays goes on. A
+   * login of an account that is saved already gives that subscription its password or link anew.
+   */
+  "subscription.add": SubscriptionSummary;
+  /** A new password or link is checked with the provider before it is saved. */
+  "subscription.update": SubscriptionSummary;
+  /** What plays from the subscription stops first; the others are left as they are. */
   "subscription.remove": null;
-  "subscription.recheck": SubscriptionSummary | null;
+  "subscription.recheck": SubscriptionSummary;
   "subscription.preferences": SubscriptionPreferences;
   "subscription.updatePreferences": SubscriptionPreferences;
-  "library.status": CatalogueStatus;
+  /** Each saved subscription's catalogue, in the subscriptions' order. */
+  "library.status": readonly CatalogueStatus[];
+  /** The categories of every subscription, those that show as one joined. */
   "library.categories": readonly Category[];
   /**
-   * All channels in a category, the best matches for a query across the catalogue, or the given
-   * channels in that order.
+   * All channels in a category, the best matches for a query across every catalogue, or the given
+   * channels in that order. Without any of them, every channel: each subscription's in its own
+   * order, the subscriptions in theirs.
    */
   "library.channels": readonly LiveChannel[];
   "library.channel": LiveChannel;
@@ -274,10 +293,11 @@ export interface IpcOutputs {
    * a match are left out.
    */
   "guide.searchList": Readonly<Record<string, ListingMatch>>;
-  "guide.status": GuideStatus;
+  /** Each saved subscription's guide, in the subscriptions' order. */
+  "guide.status": readonly GuideStatus[];
   "guide.refresh": GuideStatus;
   "ondemand.status": OnDemandStatus;
-  /** Fetches the movie and series lists again. */
+  /** Fetches one subscription's movie and series lists again. */
   "ondemand.refresh": OnDemandStatus;
   /** Movies and series whose name matches, best first, without titles for adults. */
   "ondemand.search": { readonly movies: readonly Title[]; readonly series: readonly Title[] };
@@ -340,7 +360,7 @@ export interface IpcOutputs {
   "output.playingTitle": RemotePlayingTitle | null;
   "preferences.get": Preferences;
   "preferences.update": Preferences;
-  /** Favourites and recently watched channels of the connected account. */
+  /** Favourites, recently watched channels and Continue watching of every saved subscription. */
   "viewing.get": Viewing;
   /** Adds a channel to the favourites, or takes it out. */
   "viewing.setFavourite": Viewing;
@@ -400,7 +420,7 @@ export type IpcArgs<M extends IpcMethod> =
 
 /** Events the main process pushes to the UI. */
 export interface IpcEvents {
-  /** A catalogue refresh finished, or failed and kept the previous channels. */
+  /** A subscription's catalogue refresh finished, or failed and kept the previous channels. */
   "library.updated": CatalogueStatus;
   /** A new programme guide is loaded, or the one loaded was dropped. */
   "guide.updated": null;

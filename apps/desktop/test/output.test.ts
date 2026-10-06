@@ -89,8 +89,8 @@ async function casting(options: { fetchMs?: number; checkpointMs?: number } = {}
     }),
   );
   const subscriptions = await promised(runtime, Subscriptions);
-  await subscriptions.connect({ server: provider.url, username: "demo", password: "demo" });
-  const source = await subscriptions.source();
+  await subscriptions.add({ server: provider.url, username: "demo", password: "demo" });
+  const [source] = await subscriptions.sources();
   const playback = await promised(runtime, Playback);
   const output = await promised(runtime, Output);
   const viewing = await promised(runtime, ViewingRecord);
@@ -369,35 +369,41 @@ describe.skipIf(!hasTools)("playback on a receiver", () => {
     expect(await saved()).toBeCloseTo(61, 0);
   });
 
-  it("saves a receiver's progress under the account it began with, and ends it when another connects", async () => {
-    const { tv, output, subscriptions, connect, play, state, saved } = await casting();
+  it("saves a receiver's progress under the account it began with, and ends it when that subscription goes", async () => {
+    const { tv, output, subscriptions, connect, play, state, saved, own } = await casting();
     const other = await fakeProvider({ maxConnections: 1 });
+    const next = await subscriptions.add({
+      server: other.url,
+      username: "demo",
+      password: "demo",
+    });
     await connect();
     const { media } = await play(10);
     tv.status({ playerState: "PLAYING", currentTime: 80 });
     await eventually(async () => expect(await state()).toMatchObject({ media: { position: 80 } }));
     const stops = tv.requests("STOP").length;
 
-    // As the app does when another login is entered: the receiver's title ends first.
-    await output.accountChanged();
+    // Another subscription going is nothing to what the receiver plays.
+    await output.subscriptionGone(next.id);
+    expect(await state()).toMatchObject({ media: { generation: media.generation } });
+    expect(tv.requests("STOP")).toHaveLength(stops);
+
+    // As the app does when the subscription is removed: the receiver's title ends first.
+    await output.subscriptionGone(own("").subscriptionId);
     expect(await saved()).toBeGreaterThanOrEqual(80);
     expect(await state()).toMatchObject({ kind: "receiver", media: null, failure: null });
     expect(tv.requests("STOP").length).toBeGreaterThan(stops);
-    const next = await subscriptions.connect({
-      server: other.url,
-      username: "demo",
-      password: "demo",
-    });
+    await subscriptions.remove(own("").subscriptionId);
 
-    // What the TV says after that is of a load that is gone: the new account's record stays empty.
+    // What the TV says after that is of a load that is gone: the other's record stays empty.
     tv.status({ playerState: "PAUSED", currentTime: 120 });
     await output.command(media.generation, { command: "seek", position: 140 });
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(await saved(next.id)).toBeNull();
   });
 
-  it("never files a receiver's progress under a subscription that took the other's place", async () => {
-    const { tv, subscriptions, connect, play, state, saved } = await casting();
+  it("never files a receiver's progress under a subscription saved after the other went", async () => {
+    const { tv, subscriptions, connect, play, state, saved, own } = await casting();
     // It lists a movie under the same id as the one that plays.
     const other = await fakeProvider({ maxConnections: 1 });
     await connect();
@@ -405,8 +411,10 @@ describe.skipIf(!hasTools)("playback on a receiver", () => {
     tv.status({ playerState: "PLAYING", currentTime: 80 });
     await eventually(async () => expect(await state()).toMatchObject({ media: { position: 80 } }));
 
-    // Another login is stored while the receiver still plays the first one's movie.
-    const next = await subscriptions.connect({
+    // The subscription goes, and another is saved, while the receiver still plays the first
+    // one's movie.
+    await subscriptions.remove(own("").subscriptionId);
+    const next = await subscriptions.add({
       server: other.url,
       username: "demo",
       password: "demo",
@@ -755,12 +763,6 @@ describe.skipIf(!hasTools)("playback through the system's list of receivers", ()
       next: "disconnect",
       arrives: ANCHOR,
       leaves: { kind: "local" },
-    },
-    {
-      how: "the account changed",
-      next: "accountChanged",
-      arrives: ANCHOR,
-      leaves: { kind: "receiver", media: null },
     },
     {
       how: "its window moved",

@@ -1,5 +1,7 @@
-// Messages between the main process and the catalogue worker. Every call names the subscription
-// it is for, so an answer can never mix two, and every title in an answer names it too.
+// Messages between the main process and the catalogue worker. A call about one subscription's
+// lists names that subscription; a call for what the lists show names every subscription whose
+// lists count, in their order, so an answer never holds what a subscription that went left
+// behind. Every title and version in an answer says which subscription lists it.
 import type { AppError } from "@mrstreamer/contracts/errors";
 import type {
   CollectionId,
@@ -16,24 +18,30 @@ import type { OwnedId } from "@mrstreamer/contracts/subscription";
 import type { ProviderAccount } from "../providers/account.ts";
 import type { MetadataStatus } from "./metadata.ts";
 
-/** What the worker needs once: where the caches live and how to introduce itself. */
+/** What the worker needs once: where TMDB's metadata lives and how to introduce itself. */
 export interface WorkerSetup {
-  readonly cachePath: string;
   readonly metadataPath: string;
   readonly userAgent: string;
   /** TMDB's key, the region for streaming services and, in tests, another API; null fetches none. */
   readonly tmdb: { readonly key: string; readonly region: string; readonly api?: string } | null;
 }
 
-/** Whose catalogue a call is about. */
+/** Whose lists a call is about. */
 export interface CatalogueOwner {
   /** The subscription's id: what its titles and versions carry. */
   readonly subscriptionId: string;
   /** The account its lists are kept on disk for. */
   readonly key: string;
+  /** The subscription's folder, where its lists are kept. */
+  readonly dir: string;
 }
 
-/** The loaded catalogue's size and age; null counts when nothing is loaded for the account. */
+/** The subscriptions whose lists make the catalogue a call asks about, in their order. */
+interface Owners {
+  readonly owners: readonly CatalogueOwner[];
+}
+
+/** A subscription's loaded lists: their size and age; null counts when nothing is loaded for it. */
 export interface WorkerStatus {
   readonly movies: number;
   readonly series: number;
@@ -42,12 +50,15 @@ export interface WorkerStatus {
 
 /** Each call and what it answers. */
 export interface WorkerCalls {
-  /** Also says whether the viewer shows titles for adults, which TMDB is asked about only then. */
-  status: { args: CatalogueOwner & { adults: boolean }; result: WorkerStatus };
   /**
-   * Fetches both lists from the provider and, when they look complete, sets them aside for
-   * `finishRefresh`: nothing shows or is saved yet. `revision` is the login's: a fetch under
-   * another one is given up for this one.
+   * Each owner's lists, in the order asked. Also says whether the viewer shows titles for adults,
+   * which TMDB is asked about only then.
+   */
+  status: { args: Owners & { adults: boolean }; result: readonly WorkerStatus[] };
+  /**
+   * Fetches a subscription's two lists from its provider and, when they look complete, sets them
+   * aside for `finishRefresh`: nothing shows or is saved yet. `revision` is the login's: a fetch
+   * under another one is given up for this one.
    */
   refresh: {
     args: CatalogueOwner & { revision: number; account: ProviderAccount };
@@ -62,33 +73,33 @@ export interface WorkerCalls {
     args: CatalogueOwner & { revision: number; keep: boolean };
     result: WorkerStatus;
   };
-  /** Titles by the ids of their versions, as the subscription's provider gives them. */
+  /** Titles by any of their versions, each named with the subscription that lists it. */
   byIds: {
-    args: CatalogueOwner & { language: string; kind: TitleKind; ids: readonly string[] };
+    args: Owners & { language: string; kind: TitleKind; versions: readonly OwnedId[] };
     result: readonly Title[];
   };
   search: {
-    args: CatalogueOwner & { language: string; query: string };
+    args: Owners & { language: string; query: string };
     result: { readonly movies: readonly Title[]; readonly series: readonly Title[] };
   };
   /** Movies or series matching `query`, the best `limit` of them, and how many match. */
   searchKind: {
-    args: CatalogueOwner & { language: string; kind: TitleKind; query: string; limit: number };
+    args: Owners & { language: string; kind: TitleKind; query: string; limit: number };
     result: TitleMatches;
   };
   /** A tab's rows; For you starts with titles like `like`, a version of one watched lately. */
   rows: {
-    args: CatalogueOwner & { language: string; kind: TitleKind; tab: RowTab; like?: OwnedId };
+    args: Owners & { language: string; kind: TitleKind; tab: RowTab; like?: OwnedId };
     result: readonly CollectionRow[];
   };
   /** Genres or streaming services as tiles. */
   tiles: {
-    args: CatalogueOwner & { language: string; kind: TitleKind; of: "genres" | "services" };
+    args: Owners & { language: string; kind: TitleKind; of: "genres" | "services" };
     result: readonly CollectionTile[];
   };
   /** One page of a collection. */
   collection: {
-    args: CatalogueOwner & {
+    args: Owners & {
       language: string;
       kind: TitleKind;
       id: CollectionId;
@@ -98,11 +109,11 @@ export interface WorkerCalls {
     };
     result: CollectionPage;
   };
-  /** The file type a movie streams as, or null when the catalogue doesn't have the movie. */
+  /** The file type a movie streams as, or null when its subscription's lists don't have it. */
   container: { args: CatalogueOwner & { id: string }; result: string | null };
-  /** Forgets the catalogue and removes the cache, for when the subscription changes or goes. */
-  clear: { args: Record<string, never>; result: null };
-  /** Answers once the cache write in progress is done, so stopping the worker keeps it. */
+  /** Forgets a subscription's lists and removes their cache, for when the subscription goes. */
+  forget: { args: CatalogueOwner; result: null };
+  /** Writes pending lists and answers once all cache writes finish, for a clean shutdown. */
   flush: { args: Record<string, never>; result: null };
 }
 

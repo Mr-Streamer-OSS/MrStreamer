@@ -11,6 +11,7 @@ const details: MovieDetails = {
   kind: "movie",
   title: {
     kind: "movie",
+    key: "movie:1",
     subscriptionId: SUBSCRIPTION,
     id: "1",
     name: "Night Harbour (NL)",
@@ -51,10 +52,7 @@ describe("a title's details", () => {
     await opening;
 
     ipc.emit("ondemand.updated", {
-      movies: 1,
-      series: 0,
-      fetchedAt: 1,
-      failure: null,
+      lists: [{ subscriptionId: SUBSCRIPTION, movies: 1, series: 0, fetchedAt: 1, failure: null }],
       metadata: null,
     });
     void client.fetchQuery(queries.details("movie", { subscriptionId: SUBSCRIPTION, id: "1" }));

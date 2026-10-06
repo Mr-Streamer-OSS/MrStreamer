@@ -2,7 +2,7 @@
 // A series' details list the provider's episodes at once, and TMDB's details for the season
 // shown once they come: the other seasons ask for nothing until their tab opens. The sheet shows
 // the title from the lists while the provider answers, and TMDB's details once they arrive.
-import { ipc, SUBSCRIPTION } from "./support.ts";
+import { ipc, SAVED, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
@@ -16,6 +16,7 @@ const HARBOUR = { subscriptionId: SUBSCRIPTION, id: "harbour" };
 
 const series: Title = {
   kind: "series",
+  key: "series:harbour",
   subscriptionId: SUBSCRIPTION,
   id: "harbour",
   name: "Night Harbour (NL)",
@@ -90,6 +91,7 @@ describe("a series' episodes", () => {
     const opened = ipc.hold("ondemand.details");
     const season = ipc.hold("ondemand.season");
     const client = new QueryClient();
+    client.setQueryData(["subscriptions"], [SAVED]);
     const root = createRoot(document.createElement("div"));
     await act(async () =>
       root.render(
@@ -164,6 +166,7 @@ describe("a series' details", () => {
     const provider = ipc.hold("ondemand.details");
     const withTmdb = ipc.hold("ondemand.details");
     const client = new QueryClient();
+    client.setQueryData(["subscriptions"], [SAVED]);
     const stopSync = syncOnDemand(client);
     const root = createRoot(document.createElement("div"));
     await act(async () =>

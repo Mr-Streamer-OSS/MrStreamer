@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { mainLayer } from "../src/main/runtime.ts";
 import { Library } from "../src/main/services/library.ts";
 import { Settings } from "../src/main/services/preferences.ts";
+import { Roster } from "../src/main/services/roster.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import {
   fakeGuide,
@@ -29,26 +30,34 @@ const NOW = Date.parse("2026-10-02T20:10:00+02:00");
  * Its lookups take and answer the provider's channel ids alone: `own` names one with the
  * connected subscription, as the guide itself is asked and answers (`ask`).
  */
+/** The app's services on `dataDir`, with a test clock at NOW that the test moves. */
+function started(dataDir: string) {
+  // The clock reads NOW before the guide starts, so its checks count from there.
+  const clock = Layer.effectDiscard(TestClock.setTime(NOW)).pipe(
+    Layer.provideMerge(TestClock.layer({ warningDelay: "1 day" })),
+  );
+  return runtimeFor(mainLayer(testConfig(dataDir)).pipe(Layer.provideMerge(clock)));
+}
+
+const login = (provider: { readonly url: string }) => ({
+  server: provider.url,
+  username: "demo",
+  password: "demo",
+});
+
 async function connectedGuide(options: FakeProviderOptions = {}) {
   const provider = await fakeProvider(options);
   provider.serveGuide(fakeGuide(provider.catalogue, NOW));
   const dataDir = await tempDir();
   let subscriptionId: string | null = null;
   const create = async () => {
-    // The clock reads NOW before the guide starts, so its checks count from there.
-    const clock = Layer.effectDiscard(TestClock.setTime(NOW)).pipe(
-      Layer.provideMerge(TestClock.layer({ warningDelay: "1 day" })),
-    );
-    const runtime = runtimeFor(mainLayer(testConfig(dataDir)).pipe(Layer.provideMerge(clock)));
+    const runtime = started(dataDir);
     const subscriptions = await runtime.runPromise(Subscriptions);
-    const connect = subscriptions.connect({
-      server: provider.url,
-      username: "demo",
-      password: "demo",
-    });
-    subscriptionId ??= (await runtime.runPromise(connect)).id;
-    const owner = subscriptionId;
+    const connect = subscriptions.add(login(provider));
+    const owner = (subscriptionId ??= (await runtime.runPromise(connect)).id);
     const guide = await runtime.runPromise(Guide);
+    const roster = await runtime.runPromise(Roster);
+    const library = await promised(runtime, Library);
     const run = <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect);
     const own = (id: string) => ({ subscriptionId: owner, id });
     /** An answer per channel, by the provider's id alone. */
@@ -60,19 +69,27 @@ async function connectedGuide(options: FakeProviderOptions = {}) {
       own,
       /** The guide's own answer, by each channel's `ownedKey`. */
       ask: (channels: readonly OwnedId[]) => run(guide.listings(channels)),
-      refresh: () => run(guide.refresh),
-      refreshIfStale: () => run(guide.refreshIfStale),
+      refresh: () => run(guide.refresh(owner)),
+      refreshIfStale: () => run(guide.refreshIfStale(owner)),
       listings: async (channelIds: readonly string[]) =>
         byId(await run(guide.listings(channelIds.map(own)))),
       schedule: (channelId: string) => run(guide.schedule(own(channelId))),
       search: (query: string) => run(guide.search(query)),
       searchChannels: async (query: string, channelIds: readonly string[], until: number) =>
         byId(await run(guide.searchChannels(query, channelIds.map(own), until))),
-      status: () => run(guide.status),
-      clear: () => run(guide.clear),
+      /** The connected subscription's guide, as Settings shows it. */
+      status: async () => {
+        const [{ subscriptionId: of, ...status } = { subscriptionId: null }] = await run(
+          guide.status,
+        );
+        expect(of).toBe(owner);
+        return status;
+      },
+      /** Removes the subscription, with what was loaded from it. */
+      clear: () => run(roster.remove(owner, false)),
       /** Enters the login again, as the viewer does to repair it: the subscription stays the same. */
       reconnect: () => run(connect),
-      library: await promised(runtime, Library),
+      library: { ...library, refresh: () => library.refresh(owner) },
       settings: await promised(runtime, Settings),
       /**
        * Moves the clock on a quarter of an hour at a time, letting each check the guide runs on
@@ -517,5 +534,116 @@ describe("programme guide", () => {
 
     expect(await guide.listings([guided])).toEqual({});
     expect(await (await create()).listings([guided])).toEqual({});
+  });
+});
+
+describe("the guides of several subscriptions", () => {
+  /**
+   * Two subscriptions whose providers number their channels alike and use the same guide ids, as
+   * two panels of one kind do. Their first channel, "1000", is "aac.test" in both guides.
+   */
+  async function two() {
+    const [first, second] = [await fakeProvider(), await fakeProvider({ channels: 200 })];
+    const dataDir = await tempDir();
+    const create = async () => {
+      const runtime = started(dataDir);
+      const run = <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect);
+      return {
+        run,
+        guide: await runtime.runPromise(Guide),
+        roster: await runtime.runPromise(Roster),
+        subscriptions: await runtime.runPromise(Subscriptions),
+      };
+    };
+    const services = await create();
+    const { run, subscriptions } = services;
+    const a = (await run(subscriptions.add(login(first)))).id;
+    const b = (await run(subscriptions.add(login(second)))).id;
+    return { ...services, create, first, second, a, b };
+  }
+  const channel = (subscriptionId: string) => ({ subscriptionId, id: "1000" });
+
+  it("shows each subscription's channels its own guide, though both use the same guide ids", async () => {
+    const { run, guide, create, first, second, a, b } = await two();
+    first.serveGuide(`<tv>${slot("aac.test", "Journaal")}</tv>`);
+    second.serveGuide(`<tv>${slot("aac.test", "Journal")}</tv>`);
+
+    await run(guide.refresh(a));
+    // Until its own guide is in, the other's channel shows nothing of this one's.
+    expect(await run(guide.listings([channel(a), channel(b)]))).toEqual({
+      [ownedKey(channel(a))]: expect.objectContaining({ now: expect.anything() }),
+    });
+    await run(guide.refresh(b));
+
+    const shows = async (asked: typeof guide) => {
+      const listings = await run(asked.listings([channel(b), channel(a)]));
+      return [channel(a), channel(b)].map((each) => listings[ownedKey(each)]?.now?.title);
+    };
+    expect(await shows(guide)).toEqual(["Journaal", "Journal"]);
+    expect(await run(guide.schedule(channel(b)))).toMatchObject([{ title: "Journal" }]);
+    expect(await run(guide.searchChannels("jour", [channel(a), channel(b)], at("23:00")))).toEqual({
+      [ownedKey(channel(a))]: { now: true, later: null },
+      [ownedKey(channel(b))]: { now: true, later: null },
+    });
+    // A search names each programme with the channel of the subscription that shows it.
+    expect(await run(guide.search("jour"))).toMatchObject([
+      { channel: channel(a), programme: { title: "Journaal" } },
+      { channel: channel(b), programme: { title: "Journal" } },
+    ]);
+    expect(await run(guide.status)).toMatchObject([
+      { subscriptionId: a, channels: 1, availability: "available" },
+      { subscriptionId: b, channels: 1, availability: "available" },
+    ]);
+    // Each is kept in its own place, and read from there after a restart.
+    expect(await shows((await create()).guide)).toEqual(["Journaal", "Journal"]);
+  });
+
+  it("cuts a search of every guide only once all of them are in", async () => {
+    const { run, guide, first, second, a, b } = await two();
+    // More later programmes in the first than a search returns, and one on now in the second.
+    const guided = [...new Set(first.catalogue.channels.flatMap((each) => each.guideId ?? []))];
+    expect(guided.length).toBeGreaterThan(60);
+    first.serveGuide(
+      `<tv>${guided
+        .slice(0, 60)
+        .map((id, index) => programme(id, "2100", "2200", `Late Show ${index}`))
+        .join("")}</tv>`,
+    );
+    second.serveGuide(`<tv>${slot("aac.test", "Late Show tonight")}</tv>`);
+    await run(guide.refresh(a));
+    await run(guide.refresh(b));
+
+    const found = await run(guide.search("late show"));
+
+    expect(found).toHaveLength(50);
+    expect(found[0]).toMatchObject({
+      channel: channel(b),
+      programme: { title: "Late Show tonight" },
+    });
+    expect(new Set(found.slice(1).map((each) => each.channel.subscriptionId))).toEqual(
+      new Set([a]),
+    );
+  });
+
+  it("keeps the others' guides when one can't be fetched, and when one subscription goes", async () => {
+    const { run, guide, roster, create, first, second, a, b } = await two();
+    first.serveGuide(`<tv>${slot("aac.test", "Journaal")}</tv>`);
+    second.serveGuide(`<tv>${slot("aac.test", "Journal")}</tv>`);
+    await run(guide.refresh(a));
+    await run(guide.refresh(b));
+
+    second.serveGuide(500);
+    await expect(run(guide.refresh(b))).rejects.toBeDefined();
+
+    const now = async (asked: typeof guide, of: string) =>
+      (await run(asked.listings([channel(of)])))[ownedKey(channel(of))]?.now?.title;
+    // The one that failed keeps the guide it had; the other never noticed.
+    expect([await now(guide, a), await now(guide, b)]).toEqual(["Journaal", "Journal"]);
+
+    await run(roster.remove(b, false));
+
+    expect([await now(guide, a), await now(guide, b)]).toEqual(["Journaal", undefined]);
+    expect(await run(guide.status)).toMatchObject([{ subscriptionId: a, channels: 1 }]);
+    expect(await now((await create()).guide, a)).toBe("Journaal");
   });
 });

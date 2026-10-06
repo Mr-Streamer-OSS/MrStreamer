@@ -8,11 +8,11 @@ Below come one row each of what you were watching (see [Movies and series](movie
 
 Until you've watched something, the backdrop shows a channel without playing it.
 
-Your subscription may allow a single connection. Home then uses it as soon as it opens, so if another device is already watching, the backdrop stays still instead of taking the connection over. Minimising Mr. Streamer, hiding it behind other windows, or going to Movies or Series stops the muted backdrop; it starts again when you come back.
+Your subscription may allow a single connection. Home then uses it as soon as it opens, so if another device is already watching, the backdrop stays still instead of taking the connection over. With [several subscriptions](subscriptions.md), Home plays the channel you watched last, whichever it is from. Minimising Mr. Streamer, hiding it behind other windows, or going to Movies or Series stops the muted backdrop; it starts again when you come back.
 
 ## The guide
 
-**Live TV** lists your favourites, recently watched channels, all channels and every category on the left. The channels on the right show what's on now, with how long it has left, and what's next. The channel you're watching plays muted at the top.
+**Live TV** lists your favourites, recently watched channels, all channels and every category on the left, from [every subscription you added](subscriptions.md#everything-together). A channel that reads like one of another subscription says which one it is from. When a subscription's channels couldn't be fetched, a line above the list says so, with **Retry**, and the others show as usual. The channels on the right show what's on now, with how long it has left, and what's next. The channel you're watching plays muted at the top.
 
 - Click a channel to watch it. **Back**, or Escape, returns to the same place in the list.
 - The arrow at the end of a row lists the rest of the day. Click a later programme to read about it.
@@ -28,7 +28,7 @@ A search hides favourites, so Reorder asks you to clear it first and clears noth
 
 Home, the guide and the channel list while watching show your favourites in that order, and channel up and down follow it. The channel numbers stay your provider's, and so does the quality each channel plays in. A favourite that isn't showing, a channel for adults while those are hidden or one your provider stopped listing, keeps its place and comes back to it. One quality of a channel that your provider stops listing keeps its place too: if you moved the channel further down meanwhile, it goes back up to that place when the quality returns.
 
-Each subscription keeps its own favourites, in their own order, and its own watch history. Connecting another one hides them, and they come back when you connect the first one again.
+Favourites and watch history from all your subscriptions show as one list each. Each entry still belongs to its own subscription: removing a subscription takes its favourites and history out of the lists, and they come back when you add the same account again, unless you chose to delete them.
 
 Providers often list a channel once per quality: "VRT 1 FHD", "VRT 1 HD", "VRT 1 SD". Mr. Streamer shows those as one channel, with its qualities after the name, when they are surely the same channel: same name, same region and language, and the same category or one named only for a quality, such as "BE | 4K". Anything less certain stays a row of its own. A channel you starred, or watched, under one of its qualities is the same favourite and the same history entry.
 
@@ -72,7 +72,7 @@ When the picture stands still for three seconds, "Waiting for data" shows at the
 
 ## Search
 
-⌘K (Ctrl K on Windows and Linux) searches every channel, movies and series, and the programmes on now and later today. Pick a channel, or a programme that's on, to watch it. Pick a later programme to read about it, or a movie or series to see its details. Opened from Live TV, it starts with what the list's field searched for. Live TV searches the list it shows from [that field](#the-guide), and Movies and Series their own titles from a field in their tabs; see [Movies and series](movies-and-series.md#finding-something).
+⌘K (Ctrl K on Windows and Linux) searches every channel, movies and series, and the programmes on now and later today, in every subscription. Pick a channel, or a programme that's on, to watch it. Pick a later programme to read about it, or a movie or series to see its details. Opened from Live TV, it starts with what the list's field searched for. Live TV searches the list it shows from [that field](#the-guide), and Movies and Series their own titles from a field in their tabs; see [Movies and series](movies-and-series.md#finding-something).
 
 ## Keys
 

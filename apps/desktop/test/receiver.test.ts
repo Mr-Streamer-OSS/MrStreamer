@@ -9,7 +9,15 @@ import { Playback, type PlaybackDeps, type ReceiverTarget } from "../src/main/se
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { fixture, type FakeProviderOptions } from "./fake-provider.ts";
 import { withIndexEntries, withIndexEntryAt } from "./matroska-index.ts";
-import { fakeProvider, promised, runtimeFor, tempDir, testSecrets, userAgent } from "./support.ts";
+import {
+  fakeProvider,
+  holdableFetch,
+  promised,
+  runtimeFor,
+  tempDir,
+  testSecrets,
+  userAgent,
+} from "./support.ts";
 
 // CI points this at the bundled build, with ffprobe beside it; locally the ones on PATH do.
 const FFMPEG = process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg";
@@ -25,9 +33,14 @@ const CLOCK_START = 10;
 /**
  * Playback for a receiver on a connected fake provider that allows one connection. The receiver
  * is this test, asking over loopback as a TV asks over the local network. `own` names a channel
- * or title of the connected subscription by the provider's id.
+ * or title of the connected subscription by the provider's id, and `fetchImpl` is what the
+ * subscription asks its provider with.
  */
-async function receiver(deps: Partial<PlaybackDeps> = {}, options: FakeProviderOptions = {}) {
+async function receiver(
+  deps: Partial<PlaybackDeps> = {},
+  options: FakeProviderOptions = {},
+  fetchImpl: typeof fetch = fetch,
+) {
   const provider = await fakeProvider({ maxConnections: 1, slotReleaseMs: 50, ...options });
   const runtime = runtimeFor(
     Playback.layer({ userAgent, ffmpeg: FFMPEG, ffprobe: FFPROBE, ...deps }).pipe(
@@ -35,14 +48,14 @@ async function receiver(deps: Partial<PlaybackDeps> = {}, options: FakeProviderO
         Subscriptions.layer({
           dataDir: await tempDir(),
           secrets: testSecrets,
-          providerOptions: { userAgent },
+          providerOptions: { userAgent, fetch: fetchImpl },
         }),
       ),
     ),
   );
   const subscriptions = await promised(runtime, Subscriptions);
-  await subscriptions.connect({ server: provider.url, username: "demo", password: "demo" });
-  const source = await subscriptions.source();
+  await subscriptions.add({ server: provider.url, username: "demo", password: "demo" });
+  const [source] = await subscriptions.sources();
   const own = (id: string) => ({ subscriptionId: source?.id ?? "no-subscription", id });
   const playback = await promised(runtime, Playback);
   const closed: string[] = [];
@@ -56,9 +69,15 @@ async function receiver(deps: Partial<PlaybackDeps> = {}, options: FakeProviderO
   };
   /**
    * Opens a test movie by name for the receiver, the way the app opens it from the catalogue.
-   * `file` puts another clip behind its address first: a fixture by name, or its bytes.
+   * `file` puts another clip behind its address first: a fixture by name, or its bytes. `asked`
+   * gives the turn it is asked under.
    */
-  const open = (name: string, file?: string | Buffer, decoders: readonly Codec[] = RECEIVER) => {
+  const open = (
+    name: string,
+    file?: string | Buffer,
+    decoders: readonly Codec[] = RECEIVER,
+    asked?: { turn: number },
+  ) => {
     const movie = provider.titles.movies.find((each) => each.name.startsWith(name));
     if (!movie || !source) throw new Error(`No movie ${name}`);
     if (file !== undefined) provider.replaceMovieFile(movie.id, file);
@@ -67,6 +86,7 @@ async function receiver(deps: Partial<PlaybackDeps> = {}, options: FakeProviderO
       ref,
       source.provider.titleFile("movie", ref.id, movie.container),
       { ...target, decoders },
+      asked,
     );
   };
   /** Opens a movie and loads it with these tracks: the video playlist a receiver ends up with. */
@@ -692,6 +712,28 @@ describe.skipIf(!hasTools)("a movie for a receiver", () => {
     expect(closed).toEqual([]);
     expect((await segment(video.segments[0]!.url)).status).toBe(200);
   });
+
+  it("opens nothing once the viewer asked for something else while its index was read", async () => {
+    const holdable = holdableFetch();
+    const { provider, playback, open, closed } = await receiver({}, {}, holdable.fetch);
+    // What the file holds is known from when it was open before: its index is what is read now.
+    const before = await open(MATROSKA, "title-receiver.mkv");
+    await playback.close(before.sessionId);
+    const turn = await playback.begin();
+
+    const held = holdable.holdNext();
+    const opening = open(MATROSKA, undefined, RECEIVER, { turn });
+    await held.arrived;
+    await playback.begin();
+    held.release();
+
+    await expect(opening).rejects.toMatchObject({
+      error: { kind: "unexpected", detail: "Something else played in the meantime." },
+    });
+    // Its session closed, as whoever opened it for the receiver hears, and nothing is left open.
+    expect(closed).toEqual(["closed", "closed"]);
+    await vi.waitFor(() => expect(provider.activeStreams()).toBe(0));
+  });
 });
 
 describe.skipIf(!hasTools)("a channel for a receiver", () => {
@@ -801,7 +843,7 @@ describe("an HLS channel for a receiver", () => {
     );
     const { id: subscriptionId } = await (
       await promised(runtime, Subscriptions)
-    ).connect({ server: `${origin}/list.m3u`, username: "", password: "" });
+    ).add({ server: `${origin}/list.m3u`, username: "", password: "" });
     const playback = await promised(runtime, Playback);
 
     const opened = await playback.openReceiver(

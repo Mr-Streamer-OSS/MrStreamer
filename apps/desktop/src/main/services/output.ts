@@ -62,7 +62,7 @@ import {
   type ScreenRect,
   type TransportStatus,
 } from "../receivers/adapter.ts";
-import { Playback, type ReceiverTarget } from "./playback.ts";
+import { Playback, superseded, type Asked, type ReceiverTarget } from "./playback.ts";
 
 /**
  * How long a receiver gets to ask this computer for what it was sent. One that never does can't
@@ -176,13 +176,20 @@ export class Output extends Context.Service<
         readonly audio?: number | null;
         readonly audioLanguage?: string | null;
         readonly shown: Shown;
+        /** The turn it was asked under (`Playback.begin`): it plays nothing once another began. */
+        readonly turn?: number | undefined;
       },
     ): Effect.Effect<RemoteMedia, Failed>;
     /**
      * Opens a movie or episode for the connected receiver from its provider file, in place of
-     * what was open here, and says what it holds. Nothing plays until `playTitle`.
+     * what was open here, and says what it holds. Nothing plays until `playTitle`. Asked under
+     * `asked`, as `Playback.openTitle` is: what gave way meanwhile leaves the receiver as it is.
      */
-    openTitle(title: TitleRef, upstreamUrl: string): Effect.Effect<RemoteTitle, Failed>;
+    openTitle(
+      title: TitleRef,
+      upstreamUrl: string,
+      asked?: Asked,
+    ): Effect.Effect<RemoteTitle, Failed>;
     /** Plays an opened title on the receiver from `position` seconds with these tracks. */
     playTitle(
       sessionId: string,
@@ -208,10 +215,10 @@ export class Output extends Context.Service<
      */
     readonly playingTitle: Effect.Effect<RemotePlayingTitle | null>;
     /**
-     * Another account is about to connect, or the one there to go: saves how far the receiver
-     * got with the title of the one before, then ends it.
+     * A subscription is about to go: when the receiver plays something of it, saves how far its
+     * title got, then ends it. What it plays of another subscription goes on.
      */
-    readonly accountChanged: Effect.Effect<void>;
+    subscriptionGone(subscriptionId: string): Effect.Effect<void>;
   }
 >()("mrstreamer/Output") {
   static readonly layer = (deps: OutputDeps) => Layer.effect(Output, make(deps));
@@ -268,6 +275,14 @@ function make(deps: OutputDeps) {
     /** An adapter's call as an Effect that fails with why the receiver didn't take it. */
     const told = <A>(call: (signal: AbortSignal) => Promise<A>) =>
       Effect.tryPromise({ try: call, catch: (cause) => failed(failureOf(cause)) });
+
+    /** Fails, before anything of the receiver's changes, once the viewer asked for something else. */
+    const inTurn = (turn: number | undefined) =>
+      turn === undefined
+        ? Effect.void
+        : Effect.flatMap(playback.passed(turn), (passed) =>
+            passed ? Effect.fail(superseded) : Effect.void,
+          );
 
     /** Runs what an adapter's or the playback service's callback sets off, outside any call. */
     const later = (effect: Effect.Effect<void>) => void Effect.runFork(effect);
@@ -781,11 +796,13 @@ function make(deps: OutputDeps) {
           readonly audio?: number | null;
           readonly audioLanguage?: string | null;
           readonly shown: Shown;
+          readonly turn?: number | undefined;
         },
       ) =>
         one(
           Effect.gen(function* () {
             const connection = yield* receiver;
+            yield* inTurn(options.turn);
             // What it played closes without telling it to stop: the load takes its place.
             yield* drop(true);
             opened.clear();
@@ -793,6 +810,7 @@ function make(deps: OutputDeps) {
               variants: options.variants,
               audio: options.audio ?? null,
               audioLanguage: options.audioLanguage ?? null,
+              turn: options.turn,
             });
             return yield* load(
               connection,
@@ -813,16 +831,18 @@ function make(deps: OutputDeps) {
           }),
         ),
 
-      openTitle: (title: TitleRef, upstreamUrl: string) =>
+      openTitle: (title: TitleRef, upstreamUrl: string, asked: Asked = {}) =>
         one(
           Effect.gen(function* () {
             const connection = yield* receiver;
+            yield* inTurn(asked.turn);
             yield* drop(true);
             opened.clear();
             const session = yield* playback.openReceiverTitle(
               title,
               upstreamUrl,
               yield* target(connection),
+              asked,
             );
             const info: RemoteTitle = {
               sessionId: session.sessionId,
@@ -937,16 +957,19 @@ function make(deps: OutputDeps) {
         playing?.title ? { title: playing.title.info, ...playing.tracks } : null,
       ),
 
-      // A list asked for under the account before goes with it, as one the viewer closed: the
-      // receiver stays.
-      accountChanged: Effect.andThen(
-        Effect.sync(() => listing?.wait.abort(CLOSED)),
+      // The receiver stays, and so does a list of receivers the viewer is at.
+      subscriptionGone: (subscriptionId: string) =>
         one(
           Effect.gen(function* () {
+            for (const [sessionId, title] of opened) {
+              if (title.info.title.subscriptionId === subscriptionId) opened.delete(sessionId);
+            }
             const was = playing;
-            opened.clear();
+            const { item } = was ?? {};
+            const owner = item?.kind === "channel" ? item.channel : item?.title;
+            if (!was || owner?.subscriptionId !== subscriptionId) return;
             yield* drop(true);
-            if (was && connected) {
+            if (connected) {
               yield* Effect.promise(() =>
                 connected!.connection.stop(was.generation).catch(() => {}),
               );
@@ -955,7 +978,6 @@ function make(deps: OutputDeps) {
             publish();
           }),
         ),
-      ),
     };
   });
 }

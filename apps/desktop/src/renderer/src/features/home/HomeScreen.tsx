@@ -23,6 +23,7 @@ import {
   queries,
   useCategoryMap,
   useLastChannel,
+  useSourceOf,
   useSubscriptionPreferences,
 } from "../../lib/queries.ts";
 import { useContinueWatching, useRemoveFromContinue, useResume } from "../../lib/titles.ts";
@@ -62,8 +63,7 @@ function useBrowse(): (list: ChannelList) => void {
 
 export function HomeScreen({ active }: { active: boolean }) {
   const browse = useBrowse();
-  // Read afresh each time Home opens: watching a channel changes the last one.
-  const left = useSubscriptionPreferences("always");
+  const left = useSubscriptionPreferences();
   const categories = useQuery(queries.categories());
   const categoryMap = useCategoryMap();
   const list = useUi((state) => state.list);
@@ -72,13 +72,13 @@ export function HomeScreen({ active }: { active: boolean }) {
   const recentIds = viewing.data?.recent ?? NO_IDS;
   const favourites = ordinary(useQuery(queries.channelsOf(favouriteIds)).data);
   const recent = ordinary(useQuery(queries.channelsOf(recentIds)).data);
-  // The category Live TV shows, or the one the viewer left the subscription at.
+  // The category Live TV shows, or the one the viewer left it at, which one subscription keeps.
   const lastCategory: OwnedId | null =
     list.kind === "category"
       ? list.category
-      : left && left.lastCategoryId !== null
-        ? { subscriptionId: left.subscriptionId, id: left.lastCategoryId }
-        : null;
+      : ([...(left ?? [])].flatMap(([subscriptionId, { lastCategoryId }]) =>
+          lastCategoryId === null ? [] : [{ subscriptionId, id: lastCategoryId }],
+        )[0] ?? null);
   const category = lastCategory ? categoryMap.get(ownedKey(lastCategory)) : undefined;
   // Your category, or every channel before you have one.
   const categoryList: ChannelList = category
@@ -151,7 +151,7 @@ export function HomeScreen({ active }: { active: boolean }) {
   const titles = (list: readonly Title[]) =>
     list.map((title) => (
       <PosterTile
-        key={ownedKey(title)}
+        key={title.key}
         title={title}
         onOpen={() => openDetails({ kind: title.kind, ...ownedId(title) })}
       />
@@ -232,7 +232,11 @@ export function HomeScreen({ active }: { active: boolean }) {
         {shown.category.length > 0 && (
           <Section
             title={category?.title ?? "All channels"}
-            count={category?.channelCount ?? status.data?.channelCount ?? inCategory.length}
+            count={
+              category?.channelCount ??
+              status.data?.reduce((sum, each) => sum + each.channelCount, 0) ??
+              inCategory.length
+            }
             onAll={() => browse(categoryList)}
             tileRem={TILE_REM}
           >
@@ -398,6 +402,8 @@ function Tile({
   const now = useNow();
   const hue = hueOf(channel.title);
   const current = listing?.now ?? null;
+  // Whose channel it is, where another subscription has one of its name.
+  const source = useSourceOf()(channel);
   return (
     <button
       onMouseDown={(event) => event.preventDefault()}
@@ -417,9 +423,12 @@ function Tile({
         {current?.title ?? channel.title}
       </div>
       <div className="truncate text-xs text-muted-foreground">
-        {current
-          ? `${channel.title} · ${timeLeft(current, now)}`
-          : categoryOf(channel, categories) || channel.tags.join(" · ")}
+        {(current
+          ? [channel.title, source, timeLeft(current, now)]
+          : [categoryOf(channel, categories) || channel.tags.join(" · "), source]
+        )
+          .filter(Boolean)
+          .join(" · ")}
       </div>
     </button>
   );

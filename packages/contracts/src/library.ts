@@ -1,10 +1,12 @@
 // The library model: how the app sees content, independent of the provider that supplied it.
 import type { AppError } from "./errors.ts";
+import type { OwnedId } from "./subscription.ts";
 
 /**
  * A live TV channel: the provider's streams of one channel, one per quality or backup. Most have
  * one; streams join only when their names, regions, languages and categories agree (see
- * @mrstreamer/core/catalogue/variants).
+ * @mrstreamer/core/catalogue/variants). Streams of different subscriptions never join: the same
+ * channel from two providers is two channels.
  */
 export interface LiveChannel {
   /** The subscription that lists it. With `id`, it names the channel (`OwnedId`). */
@@ -32,6 +34,11 @@ export interface LiveChannel {
    * only in Live TV, and only while Settings shows titles for adults.
    */
   readonly adult?: true;
+  /**
+   * Another subscription lists a channel that shows under the same name, so lists say which
+   * subscription each is from. Worked out over every channel there is, whatever list it shows in.
+   */
+  readonly ambiguous?: true;
 }
 
 /** How sharp a stream's picture is, best first: 4K, Full HD, HD and SD. */
@@ -50,8 +57,16 @@ export interface ChannelVariant {
   readonly quality: Quality | null;
 }
 
+/**
+ * A list of channels as Live TV names it: one provider category, or those of several
+ * subscriptions that show as one. They do when their country, the name they show under and
+ * whether they are for adults all agree, and never by a name that only looks alike.
+ */
 export interface Category {
-  /** The subscription that lists it. With `id`, it names the category (`OwnedId`). */
+  /**
+   * The first of its `members`: with `id`, it names the category (`OwnedId`). Any other member
+   * names the same list.
+   */
   readonly subscriptionId: string;
   readonly id: string;
   /** The provider's name: "BE | VLAANDEREN". */
@@ -60,14 +75,27 @@ export interface Category {
   readonly group: string | null;
   /** The name to show, within its group if it has one: "Vlaanderen". */
   readonly title: string;
+  /** How many channels it lists, of every member. */
   readonly channelCount: number;
+  /**
+   * Each provider category it shows, in the order of the subscriptions. A channel's
+   * `categoryIds` name these, within the channel's own subscription.
+   */
+  readonly members: readonly OwnedId[];
 }
 
-/** When the live catalogue was last fetched, and how big it is. */
+/** When a subscription's live catalogue was last fetched, and how big it is. */
 export interface CatalogueStatus {
+  /** The subscription whose catalogue this is. */
+  readonly subscriptionId: string;
   readonly channelCount: number;
   /** Epoch milliseconds, or null before the first successful fetch. */
   readonly fetchedAt: number | null;
   /** Why the latest refresh failed, when it did. The catalogue from `fetchedAt` stays in use. */
   readonly failure: AppError | null;
+  /**
+   * Since when refreshes have failed, in epoch milliseconds: the first failure after the last
+   * refresh that worked. Null while `failure` is.
+   */
+  readonly failedAt: number | null;
 }

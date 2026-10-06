@@ -9,7 +9,7 @@ import { normalize, searchWords } from "@mrstreamer/core/text";
 import { useUi, type ChannelList } from "../../app/ui-store.ts";
 import { useNow } from "../../lib/clock.ts";
 import { endOfDay } from "../../lib/format.ts";
-import { queries, updateSubscriptionPreferences } from "../../lib/queries.ts";
+import { queries, rememberCategory, useSubscriptions } from "../../lib/queries.ts";
 
 const NO_IDS: readonly OwnedId[] = [];
 /** Channels whose listings are asked for together. */
@@ -147,22 +147,20 @@ export function listTitle(list: ChannelList, categories: ReadonlyMap<string, Cat
 }
 
 /**
- * Shows a list in the guide. A category, or all channels, is where Live TV opens next time: kept
- * for the category's subscription, or for the saved one when every channel shows.
+ * Shows a list in the guide. A category, or all channels, is where Live TV opens next time: a
+ * category is kept for its own subscription, and all channels by none of them keeping one.
  */
 export function useShowList(): (list: ChannelList) => void {
   const client = useQueryClient();
-  const subscriptionId = useQuery(queries.subscription()).data?.id;
+  const subscriptions = useSubscriptions();
   return useCallback(
     (list) => {
       useUi.setState({ list });
       if (list.kind !== "category" && list.kind !== "all") return;
-      const owner = list.kind === "category" ? list.category.subscriptionId : subscriptionId;
-      if (owner === undefined) return;
-      const lastCategoryId = list.kind === "category" ? list.category.id : null;
-      void updateSubscriptionPreferences(client, owner, { lastCategoryId }).catch(() => {});
+      const category = list.kind === "category" ? list.category : null;
+      void rememberCategory(client, subscriptions, category).catch(() => {});
     },
-    [client, subscriptionId],
+    [client, subscriptions],
   );
 }
 
@@ -210,7 +208,8 @@ export function useListEntries(open: ReadonlySet<string>): readonly ListEntry[] 
         kind: "list",
         list: { kind: "all" },
         title: "All channels",
-        count: status.data?.channelCount ?? 0,
+        // Every subscription's channels, as the list shows them.
+        count: (status.data ?? []).reduce((sum, each) => sum + each.channelCount, 0),
         nested: false,
       },
     ];

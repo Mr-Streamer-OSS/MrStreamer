@@ -44,6 +44,7 @@ import { Output } from "./services/output.ts";
 import { Licences } from "./services/licences.ts";
 import { Playback } from "./services/playback.ts";
 import { Settings } from "./services/preferences.ts";
+import { Roster } from "./services/roster.ts";
 import { Subscriptions } from "./services/subscription.ts";
 import { DEFAULT_SCHEDULE, Updates } from "./services/updates.ts";
 
@@ -83,9 +84,6 @@ const STORE_PAGE = "ms-windows-store://pdp/?ProductId=9N45GG76ZP4T";
  */
 const DISK_CACHE_BYTES = 64 * 1024 * 1024;
 app.commandLine.appendSwitch("disk-cache-size", String(DISK_CACHE_BYTES));
-
-/** Refresh the channel list in the background when the cached copy is older than this. */
-const CATALOGUE_MAX_AGE = "12 hours";
 
 let mainWindow: BrowserWindow | null = null;
 /**
@@ -374,6 +372,7 @@ async function start(): Promise<void> {
   );
   const {
     subscriptions,
+    roster,
     settings,
     library,
     onDemand,
@@ -387,6 +386,7 @@ async function start(): Promise<void> {
   } = await runtime.runPromise(
     Effect.all({
       subscriptions: Subscriptions,
+      roster: Roster,
       settings: Settings,
       library: Library,
       onDemand: OnDemand,
@@ -439,22 +439,6 @@ async function start(): Promise<void> {
     ),
   );
 
-  /** Downloads the guide when it is due. A failure keeps the guide in use until the next check. */
-  const refreshGuide = guide.refreshIfStale.pipe(warned("[guide] refresh failed"));
-
-  /** Another account, or none: its channels, titles, guide and what the viewer left it at go. */
-  const forgetAccount = Effect.gen(function* () {
-    yield* Effect.all([library.clear, onDemand.clear, guide.clear], { concurrency: "unbounded" });
-    yield* settings.forget;
-  });
-
-  /**
-   * Counts what the viewer asked to play or stop. A title waits for the provider before it
-   * opens, so one the viewer left or replaced meanwhile doesn't open after all.
-   */
-  let playbackTurn = 0;
-  const nextTurn = Effect.sync(() => ++playbackTurn);
-
   /**
    * The channel's streams to try, by id: the one asked for, the one picked for it in its
    * subscription before, or Automatic's. Fails when the channel has none of them.
@@ -475,33 +459,13 @@ async function start(): Promise<void> {
   registerIpc(
     (effect) => runtime.runPromiseExit(effect),
     {
-      "subscription.get": () => subscriptions.get,
-      "subscription.connect": (login) =>
-        Effect.gen(function* () {
-          const previous = yield* subscriptions.get;
-          // What a receiver plays is the account's that is there now: it ends before another
-          // takes its place, with how far it got saved under its own.
-          yield* output.accountChanged;
-          const connected = yield* subscriptions.connect(login);
-          if (previous?.id !== connected.id) {
-            yield* playback.closeAll;
-            yield* forgetAccount;
-          }
-          yield* Effect.forkDetach(refreshGuide);
-          return connected;
-        }),
-      "subscription.remove": ({ eraseViewing }) =>
-        Effect.gen(function* () {
-          yield* output.accountChanged;
-          yield* playback.closeAll;
-          // First, so a record that can't be erased leaves the subscription to try again.
-          const key = yield* subscriptions.key;
-          if (eraseViewing && key) yield* viewing.erase(key);
-          yield* subscriptions.remove;
-          yield* forgetAccount;
-          return null;
-        }),
-      "subscription.recheck": () => subscriptions.recheck,
+      "subscription.list": () => subscriptions.list,
+      "subscription.add": (login) => roster.add(login),
+      "subscription.update": ({ subscriptionId, ...change }) =>
+        roster.update(subscriptionId, change),
+      "subscription.remove": ({ subscriptionId, eraseViewing }) =>
+        Effect.as(roster.remove(subscriptionId, eraseViewing ?? false), null),
+      "subscription.recheck": ({ subscriptionId }) => subscriptions.recheck(subscriptionId),
       "subscription.preferences": ({ subscriptionId }) => settings.ofSubscription(subscriptionId),
       "subscription.updatePreferences": ({ subscriptionId, patch }) =>
         settings.updateSubscription(subscriptionId, patch),
@@ -509,7 +473,7 @@ async function start(): Promise<void> {
       "library.categories": () => library.categories,
       "library.channels": (filter) => library.channels(filter),
       "library.channel": ({ channel }) => library.channel(channel),
-      "library.refresh": () => library.refresh,
+      "library.refresh": ({ subscriptionId }) => library.refresh(subscriptionId),
       "guide.listings": ({ channels }) => guide.listings(channels),
       "guide.schedule": ({ channel }) => guide.schedule(channel),
       "guide.search": ({ query }) => guide.search(query),
@@ -518,9 +482,17 @@ async function start(): Promise<void> {
           guide.searchChannels(query, channels, until),
         ),
       "guide.status": () => guide.status,
-      "guide.refresh": () => Effect.andThen(guide.refresh, guide.status),
+      "guide.refresh": ({ subscriptionId }) =>
+        Effect.gen(function* () {
+          yield* guide.refresh(subscriptionId);
+          const status = (yield* guide.status).find(
+            (each) => each.subscriptionId === subscriptionId,
+          );
+          // Removed while its guide downloaded.
+          return status ?? (yield* new Failed({ error: { kind: "no-subscription" } }));
+        }),
       "ondemand.status": () => onDemand.status,
-      "ondemand.refresh": () => onDemand.refresh,
+      "ondemand.refresh": ({ subscriptionId }) => onDemand.refresh(subscriptionId),
       "ondemand.search": ({ query }) => onDemand.search(query),
       "ondemand.searchKind": ({ kind, query }) => onDemand.searchKind(kind, query),
       "ondemand.details": ({ kind, version }) => onDemand.details(kind, version),
@@ -547,7 +519,7 @@ async function start(): Promise<void> {
               error: { kind: "unexpected", detail: "A receiver has playback." },
             });
           }
-          yield* nextTurn;
+          const turn = yield* playback.begin;
           const channel = yield* library.channel(named);
           const variants = yield* streamsOf(channel, variant);
           return yield* playback.open(ownedId(channel), decoders, {
@@ -556,23 +528,20 @@ async function start(): Promise<void> {
             audio: audio ?? null,
             audioLanguage: audioLanguage ?? null,
             preview: preview ?? false,
+            turn,
           });
         }),
       "playback.openTitle": ({ title, decoders }) =>
         Effect.gen(function* () {
-          const turn = yield* nextTurn;
-          // The live preview's connection goes first, so the provider sees one at a time.
+          const turn = yield* playback.begin;
+          // What plays goes first, whichever subscription it is of, so no provider sees a
+          // connection beside the one about to open.
           yield* playback.closeAll;
-          const file = yield* onDemand.file(title);
-          if (turn !== playbackTurn) {
-            return yield* new Failed({
-              error: { kind: "unexpected", detail: "Something else played in the meantime." },
-            });
-          }
-          return yield* playback.openTitle(title, file.url, decoders);
+          const { url, revision } = yield* onDemand.file(title);
+          return yield* playback.openTitle(title, url, decoders, { turn, revision });
         }),
       "playback.close": ({ sessionId }) => Effect.as(playback.close(sessionId), null),
-      "playback.closeAll": () => Effect.andThen(nextTurn, Effect.as(playback.closeAll, null)),
+      "playback.closeAll": () => Effect.andThen(playback.begin, Effect.as(playback.closeAll, null)),
       "playback.failure": ({ sessionId }) => playback.failure(sessionId),
       "playback.tracks": ({ sessionId }) => playback.tracks(sessionId),
       "playback.playing": ({ sessionId }) => playback.playing(sessionId),
@@ -617,7 +586,7 @@ async function start(): Promise<void> {
       "output.disconnect": () => Effect.as(output.disconnect, null),
       "output.playChannel": ({ channel: named, variant, audio, audioLanguage, name }) =>
         Effect.gen(function* () {
-          yield* nextTurn;
+          const turn = yield* playback.begin;
           const channel = yield* library.channel(named);
           const variants = yield* streamsOf(channel, variant);
           return yield* output.playChannel(ownedId(channel), {
@@ -625,18 +594,14 @@ async function start(): Promise<void> {
             audio: audio ?? null,
             audioLanguage: audioLanguage ?? null,
             shown: { name },
+            turn,
           });
         }),
       "output.openTitle": ({ title }) =>
         Effect.gen(function* () {
-          const turn = yield* nextTurn;
-          const file = yield* onDemand.file(title);
-          if (turn !== playbackTurn) {
-            return yield* new Failed({
-              error: { kind: "unexpected", detail: "Something else played in the meantime." },
-            });
-          }
-          return yield* output.openTitle(title, file.url);
+          const turn = yield* playback.begin;
+          const { url, revision } = yield* onDemand.file(title);
+          return yield* output.openTitle(title, url, { turn, revision });
         }),
       "output.playTitle": ({
         sessionId,
@@ -669,8 +634,8 @@ async function start(): Promise<void> {
       "viewing.get": () => viewing.state,
       "viewing.setFavourite": ({ commandId, channel, favourite }) =>
         viewing.setFavourite(commandId, channel, favourite),
-      "viewing.reorderFavourites": ({ commandId, ...order }) =>
-        viewing.reorderFavourites(commandId, order),
+      "viewing.reorderFavourites": ({ commandId, original, order }) =>
+        viewing.reorderFavourites(commandId, { original, order }),
       "viewing.recordWatch": ({ commandId, channel }) =>
         Effect.andThen(
           settings.updateSubscription(channel.subscriptionId, { lastChannelId: channel.id }),
@@ -776,22 +741,8 @@ async function start(): Promise<void> {
     void runtime.dispose().then(exit, exit);
   });
 
-  // Keeps account status, the channel list and the guide current without making the UI wait.
-  runtime.runFork(
-    Effect.gen(function* () {
-      const connected = yield* Effect.gen(function* () {
-        if (!(yield* subscriptions.recheck)) return false;
-        if (yield* library.isStale(CATALOGUE_MAX_AGE)) yield* library.refresh;
-        return true;
-      }).pipe(warned("[startup] background refresh failed"));
-      if (connected === false) return;
-      yield* refreshGuide;
-      // Movies and series last: their lists are the largest and nothing waits for them.
-      if (yield* onDemand.isStale(CATALOGUE_MAX_AGE)) {
-        yield* onDemand.refresh.pipe(warned("[startup] movie and series refresh failed"));
-      }
-    }),
-  );
+  // Keeps account status, the channel lists and the guides current without making the UI wait.
+  runtime.runFork(roster.refreshDue);
 }
 
 /**
@@ -834,15 +785,6 @@ function receiverAdapters(): ReceiverAdapter[] {
   }
   if (isWindows || process.env["MR_STREAMER_CAST"] === "on") adapters.push(castAdapter());
   return adapters;
-}
-
-/** Logs a failure as a warning instead of failing. */
-function warned(label: string) {
-  return <A>(effect: Effect.Effect<A, Failed>) =>
-    effect.pipe(
-      Effect.catchTag("Failed", (failed) => Effect.logWarning(label, failed.error)),
-      Effect.catchDefect((defect) => Effect.logWarning(label, defect)),
-    );
 }
 
 app.on("window-all-closed", () => {

@@ -50,7 +50,7 @@ While the TV plays:
 - **Back** and **Escape** leave the player and the TV plays on. A bar at the foot of every page says what plays where, with Stop and **Play here**; clicking what plays opens its controls again.
 - **Stop** ends the stream and keeps the TV, so the next thing you play goes there too. **Disconnect** in the bar then lets the TV go.
 - **Play here** ends playback on the TV and carries on in Mr. Streamer from where the TV was, with the same sound and subtitles.
-- Home and Live TV show no preview, since your subscription's one connection is the TV's.
+- Home and Live TV show no preview, since one thing plays at a time and the TV has it.
 - Closing the window on macOS leaves the TV playing. The next episode still starts by itself and the media keys still work the TV, and the Dock icon brings the window back. Quitting Mr. Streamer ends it. On Windows, closing the window quits.
 - How far you got in a movie or episode is saved as it is on your computer.
 
@@ -92,7 +92,8 @@ For a channel, a small line under the message adds what Mr. Streamer observed: t
 - **Lost the stream**: the channel played, stopped arriving, and four reconnects didn't bring it back. Often a network problem.
 - **Keeps dropping**: the channel came back and broke off again within 30 seconds each time, until its four reconnects were used. Another quality may hold better.
 - **Can't play this stream**: the stream arrived and Mr. Streamer couldn't play or convert it, also after one try with the picture re-encoded. Please [report it](https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose) with the channel's name.
-- **Login not accepted**: the provider rejected your username or password when the channel opened. **Update login** opens the login form.
+- **Login not accepted**: the provider rejected your username or password when the channel opened. **Update login** opens that subscription in Settings > Subscriptions, where you enter the password again.
+- **… needs its password again**, or its link for a playlist: your system no longer gives Mr. Streamer the saved password or link of the subscription this plays from. **Enter password**, or **Enter link**, opens it in Settings > Subscriptions. The lists still show what it loaded before.
 - **Can't play this title**: the file uses a format Mr. Streamer can't play or convert. Please [report it](https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose) with its name and the details shown.
 - **Not available**: the provider has no file for that movie or episode right now; some providers list titles whose files are gone.
 - **… didn't answer**, **… connection lost**, **… got no stream** or **… can't play this**, with your TV's name: see [Playing on a TV](troubleshooting.md#playing-on-a-tv).

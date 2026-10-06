@@ -3,6 +3,7 @@
 import { X } from "lucide-react";
 import { useState } from "react";
 import type { Title } from "@mrstreamer/contracts/ondemand";
+import { useSourceOf } from "../lib/queries.ts";
 import { cn } from "../lib/utils.ts";
 import { hueOf } from "./ChannelLogo.tsx";
 import { Progress } from "./Progress.tsx";
@@ -65,7 +66,10 @@ export function Artwork({
   );
 }
 
-/** A movie or series as a poster, with its name and a short line under it. */
+/**
+ * A movie or series as a poster, with its name and a short line under it. The line ends with the
+ * subscription the title is from where another's reads the same and isn't it.
+ */
 export function PosterTile({
   title,
   line,
@@ -75,6 +79,7 @@ export function PosterTile({
   line?: string;
   onOpen: () => void;
 }) {
+  const source = useSourceOf()(title);
   return (
     <button
       onMouseDown={(event) => event.preventDefault()}
@@ -86,7 +91,9 @@ export function PosterTile({
       </span>
       <span className="mt-2 block truncate text-[0.875rem] font-medium">{title.title}</span>
       <span className="block truncate text-xs text-muted-foreground">
-        {line ?? [title.year, ...title.tags].filter(Boolean).join(" · ")}
+        {[line ?? [title.year, ...title.tags].filter(Boolean).join(" · "), source]
+          .filter(Boolean)
+          .join(" · ")}
       </span>
     </button>
   );

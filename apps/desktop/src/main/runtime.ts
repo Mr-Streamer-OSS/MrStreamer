@@ -21,6 +21,7 @@ import { Output, type OutputDeps } from "./services/output.ts";
 import { appNotices, Licences } from "./services/licences.ts";
 import { Playback } from "./services/playback.ts";
 import { Settings } from "./services/preferences.ts";
+import { Roster } from "./services/roster.ts";
 import { Subscriptions } from "./services/subscription.ts";
 import { Updates, type UpdatesConfig } from "./services/updates.ts";
 
@@ -47,6 +48,7 @@ export interface MainConfig {
 
 export type MainServices =
   | Subscriptions
+  | Roster
   | Settings
   | Library
   | OnDemand
@@ -70,7 +72,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
     ),
   );
   const services = Layer.mergeAll(
-    Library.layer({ dataDir }),
+    Library.layer(),
     OnDemand.layer({
       dataDir,
       userAgent: config.userAgent,
@@ -94,23 +96,28 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
         Layer.effect(
           GuideSource,
           Effect.map(Subscriptions, (subscriptions) => ({
-            current: Effect.map(subscriptions.source, (source) =>
-              source
-                ? {
-                    id: source.id,
-                    revision: source.revision,
-                    key: source.key,
-                    download: (signal: AbortSignal) => source.provider.liveGuide(signal),
-                  }
-                : null,
-            ),
+            saved: Effect.gen(function* () {
+              const sources = new Map(
+                (yield* subscriptions.sources).map((each) => [each.id, each]),
+              );
+              return (yield* subscriptions.saved).map(({ id, revision, key, dir }) => {
+                const provider = sources.get(id)?.provider;
+                return {
+                  id,
+                  revision,
+                  key,
+                  store: dir,
+                  download: provider ? (signal: AbortSignal) => provider.liveGuide(signal) : null,
+                };
+              });
+            }),
           })),
         ),
         Layer.effect(
           GuideCatalogue,
           Effect.map(Library, (library) => ({ channels: library.guideChannels })),
         ),
-        guideStoreLayer(dataDir),
+        guideStoreLayer,
       ),
     ),
   );
@@ -120,8 +127,8 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
         Layer.effect(
           ViewingAccount,
           Effect.map(Subscriptions, (subscriptions) => ({
-            current: Effect.map(subscriptions.source, (source) =>
-              source ? { subscriptionId: source.id, key: source.key } : null,
+            owners: Effect.map(subscriptions.saved, (saved) =>
+              saved.map(({ id, key, original }) => ({ subscriptionId: id, key, original })),
             ),
           })),
         ),
@@ -141,7 +148,8 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
     ),
   );
   const output = Output.layer(config.output ?? { adapters: [] }).pipe(Layer.provide(viewing));
-  return Layer.mergeAll(guide, viewing, output).pipe(
+  return Roster.layer.pipe(
+    Layer.provideMerge(Layer.mergeAll(guide, viewing, output)),
     Layer.provideMerge(services),
     Layer.provideMerge(diagnosticsLogLayer(dataDir)),
   );

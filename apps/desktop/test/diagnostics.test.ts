@@ -34,8 +34,8 @@ describe("diagnostics", () => {
     const guide = await promised(runtime, Guide);
     const playback = await promised(runtime, Playback);
     const login = { server: provider.url, username: "demo", password: "wrong" };
-    await expect(subscriptions.connect(login)).rejects.toThrow();
-    const { id: subscriptionId } = await subscriptions.connect({
+    await expect(subscriptions.add(login)).rejects.toThrow();
+    const { id: subscriptionId } = await subscriptions.add({
       ...login,
       password: "s3cret-pass",
     });
@@ -43,8 +43,8 @@ describe("diagnostics", () => {
       subscriptionId,
       id: String(provider.catalogue.channels.find((entry) => entry.name === name)?.streamId),
     });
-    await library.refresh();
-    await guide.refresh();
+    await library.refresh(subscriptionId);
+    await guide.refresh(subscriptionId);
     const direct = await playback.open(channel("TEST | H.264 + AAC"), ["h264", "aac"]);
     await (await fetch(direct.url)).arrayBuffer();
     // No ffmpeg in this app, so a stream that needs converting has nowhere to go.

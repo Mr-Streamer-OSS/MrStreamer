@@ -29,6 +29,7 @@ import {
   queries,
   useChooseQuality,
   useFavouriteKeys,
+  useSourceOf,
   useToggleFavourite,
 } from "../../lib/queries.ts";
 import { cn } from "../../lib/utils.ts";
@@ -81,9 +82,11 @@ function Details({ channel, categories }: NowPlayingProps) {
   const quality = useChannelQuality(channel);
   const current = listing?.now ?? null;
   const next = listing?.next ?? null;
+  // Whose channel it is, where another subscription has one of its name.
+  const source = useSourceOf()(channel);
   const line = current
-    ? [channel.title, `Until ${clockTime(current.stop, now)}`, timeLeft(current, now)]
-    : [channelLine(channel, categories)];
+    ? [channel.title, source, `Until ${clockTime(current.stop, now)}`, timeLeft(current, now)]
+    : [channelLine(channel, categories), source];
   const fellBack = quality.fellBack;
   return (
     <div className="flex min-w-0 items-center gap-5">

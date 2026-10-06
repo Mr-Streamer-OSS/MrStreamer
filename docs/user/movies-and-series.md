@@ -1,6 +1,6 @@
 # Movies and series
 
-**Movies** and **Series** in the top bar list what your provider offers on demand. Mr. Streamer loads both lists after connecting and keeps them on your computer, refreshing them twice a day; the first load can take a few seconds on a large subscription.
+**Movies** and **Series** in the top bar list what your providers offer on demand, from [every subscription you added](subscriptions.md) together. Mr. Streamer loads both lists after connecting and keeps them on your computer, refreshing them twice a day; the first load can take a few seconds on a large subscription.
 
 Each film shows once, even when your provider lists it once per language or quality. Mr. Streamer picks the version in your language, then one with several languages, then one without a language mark. The arrow beside **Play** lets you pick another, as below.
 
@@ -45,7 +45,7 @@ A poster opens its details over the list, which stays where it was: the artwork,
 
 - **Resume** plays a movie or episode from where you stopped. **From the beginning** starts it again, without asking.
 - **Play** starts something new. For a series it plays the episode you're on: the one you stopped in, the next one after one you finished, or the first.
-- The arrow beside **Play** shows when there are several versions, each named for what you hear and read, such as "English sound, Nederlands subtitles" or "Deutsch sound · 4K", from the marks in your provider's list and the language the title was made in; the line under the buttons says which one plays, and **Automatic** shows which it picks. **Automatic** plays the 4K version of a title opened from the 4K tab, carries on in the version you were watching, or else plays the one that suits your language. Pick another and that title plays it from then on, from Home and the lists too, and a series lists its episodes. How far you got carries over. Picks belong to your subscription and go when you connect another.
+- The arrow beside **Play** shows when there are several versions, each named for what you hear and read, such as "English sound, Nederlands subtitles" or "Deutsch sound · 4K", from the marks in your provider's list and the language the title was made in; the line under the buttons says which one plays, and **Automatic** shows which it picks. **Automatic** plays the 4K version of a title opened from the 4K tab, carries on in the version you were watching, or else plays the one that suits your language. Pick another and that title plays it from then on, from Home and the lists too, and a series lists its episodes. How far you got carries over within one subscription. When several subscriptions offer the title, each version also says which subscription it is from, and one from another subscription starts from the beginning: see [picking which subscription plays a title](subscriptions.md#picking-which-subscription-plays-a-title). A pick goes when you remove its subscription.
 - A series opens on the season you're watching. Each episode shows its name, air date, length and story, and once TMDB answers for that season, its rating, director and guest stars where TMDB has them. Other seasons ask TMDB nothing until you open their tab. Watched episodes have a check mark, and one you stopped in shows how far you got. Click an episode to play it.
 - **Remove from Continue watching** takes the title off Home's row, every version of it, and the button goes. How far you got stays, so **Resume** carries on. The title comes back to the row when you play it again.
 
@@ -63,7 +63,7 @@ The picture fills the window below the top bar, with the title, a timeline and t
 - The keyboard's media keys and the system's own controls, Now Playing on a Mac and the media overlay on Windows, show the episode's name, its series and "S1 E3", or the film's name, with TMDB's picture. They play, pause, skip 10 seconds, move along the timeline, and play the next episode when there is one.
 - **Back**, or Escape, returns to the details or the page you came from.
 
-How far you got is saved as you go: every minute, and whenever you pause, skip, change tracks, finish or leave. It's kept per subscription, like favourites.
+How far you got is saved as you go: every minute, and whenever you pause, skip, change tracks, finish or leave. It's kept with the subscription you watched in, like favourites.
 
 ## The next episode
 
@@ -94,6 +94,6 @@ Home's first row shows what you were watching: movies you started, and for each 
 
 ## One connection
 
-Many subscriptions allow one connection at a time. Opening a movie or episode stops the live channel first, and Movies and Series don't play the muted live preview Home shows; it starts again when you go back to Home. A pause of more than five minutes lets go of the connection, and playing again picks up where you were.
+Many subscriptions allow one connection at a time, and Mr. Streamer plays one thing at a time across all of them. Opening a movie or episode stops the live channel first, whichever subscription each is from, and Movies and Series don't play the muted live preview Home shows; it starts again when you go back to Home. A pause of more than five minutes lets go of the connection, and playing again picks up where you were.
 
 [What plays](playback.md) lists the formats and what gets converted.

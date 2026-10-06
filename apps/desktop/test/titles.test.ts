@@ -13,7 +13,15 @@ import { readFeedLine, type SubtitlesUnavailable } from "@mrstreamer/core/subtit
 import type { SubtitleChange } from "@mrstreamer/core/subtitles/screen";
 import { readMp4Start } from "../src/renderer/src/player/mp4.ts";
 import { fixture, type FakeProviderOptions } from "./fake-provider.ts";
-import { fakeProvider, promised, runtimeFor, tempDir, testSecrets, userAgent } from "./support.ts";
+import {
+  fakeProvider,
+  holdableFetch,
+  promised,
+  runtimeFor,
+  tempDir,
+  testSecrets,
+  userAgent,
+} from "./support.ts";
 
 /** What Chromium on Linux decodes: no HEVC, no AC-3 or E-AC-3. */
 const LINUX: readonly Codec[] = ["h264", "aac", "mp3", "opus", "flac"];
@@ -24,8 +32,15 @@ const FFPROBE = FFMPEG === "ffmpeg" ? "ffprobe" : FFMPEG.replace(/ffmpeg(\.exe)?
 const hasTools =
   spawnSync(FFMPEG, ["-version"]).status === 0 && spawnSync(FFPROBE, ["-version"]).status === 0;
 
-/** Title playback on a connected fake provider that allows one connection. */
-async function titles(deps: Partial<PlaybackDeps> = {}, options: FakeProviderOptions = {}) {
+/**
+ * Title playback on a connected fake provider that allows one connection. `fetchImpl` is what
+ * the subscription asks its provider with.
+ */
+async function titles(
+  deps: Partial<PlaybackDeps> = {},
+  options: FakeProviderOptions = {},
+  fetchImpl: typeof fetch = fetch,
+) {
   const provider = await fakeProvider({ maxConnections: 1, slotReleaseMs: 50, ...options });
   const runtime = runtimeFor(
     Playback.layer({ userAgent, ffmpeg: FFMPEG, ffprobe: FFPROBE, ...deps }).pipe(
@@ -33,17 +48,20 @@ async function titles(deps: Partial<PlaybackDeps> = {}, options: FakeProviderOpt
         Subscriptions.layer({
           dataDir: await tempDir(),
           secrets: testSecrets,
-          providerOptions: { userAgent },
+          providerOptions: { userAgent, fetch: fetchImpl },
         }),
       ),
     ),
   );
   const subscriptions = await promised(runtime, Subscriptions);
-  await subscriptions.connect({ server: provider.url, username: "demo", password: "demo" });
-  const source = await subscriptions.source();
+  await subscriptions.add({ server: provider.url, username: "demo", password: "demo" });
+  const [source] = await subscriptions.sources();
   const playback = await promised(runtime, Playback);
-  /** Opens a test movie by name, the way the app opens it from the catalogue. */
-  const open = (name: string, decoders: readonly Codec[] = LINUX) => {
+  /**
+   * Opens a test movie by name, the way the app opens it from the catalogue. `asked` gives the
+   * turn it is asked under, and has its address count as made under the login saved by then.
+   */
+  const open = (name: string, decoders: readonly Codec[] = LINUX, asked?: { turn: number }) => {
     const movie = provider.titles.movies.find((each) => each.name.startsWith(name));
     if (!movie || !source) throw new Error(`No movie ${name}`);
     const ref: TitleRef = { kind: "movie", subscriptionId: source.id, id: String(movie.id) };
@@ -51,9 +69,12 @@ async function titles(deps: Partial<PlaybackDeps> = {}, options: FakeProviderOpt
       ref,
       source.provider.titleFile("movie", ref.id, movie.container),
       decoders,
+      asked && { ...asked, revision: source.revision },
     );
   };
-  return { provider, playback, open, dispose: () => runtime.dispose() };
+  /** Has the subscription's password entered again, as on its row in Settings. */
+  const repair = () => subscriptions.update(source?.id ?? "", { secret: "demo" });
+  return { provider, playback, open, repair, dispose: () => runtime.dispose() };
 }
 
 /** Plays a run to its end and reads what the player would get. */
@@ -1039,6 +1060,32 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
     await playback.close(session.sessionId);
     await vi.waitFor(() => expect(provider.activeStreams()).toBe(0));
     expect((await fetch(`${session.url}?start=0`)).status).toBe(410);
+    await dispose();
+  });
+
+  it.each([
+    {
+      change: "the viewer asked for something else",
+      error: { kind: "unexpected", detail: "Something else played in the meantime." },
+    },
+    { change: "its password was entered again", error: { kind: "no-subscription" } },
+  ])("opens nothing when $change while its file was read", async ({ change, error }) => {
+    const holdable = holdableFetch();
+    const { provider, playback, open, repair, dispose } = await titles({}, {}, holdable.fetch);
+    const turn = await playback.begin();
+
+    const held = holdable.holdNext();
+    const opening = open("TEST | Long subtitles", LINUX, { turn });
+    await held.arrived;
+    if (change === "the viewer asked for something else") await playback.begin();
+    else await repair();
+    held.release();
+
+    await expect(opening).rejects.toMatchObject({ error });
+    // Nothing of it is left open: the provider's one connection is free for what is asked next.
+    await vi.waitFor(() => expect(provider.activeStreams()).toBe(0));
+    const next = await open("TEST | Long subtitles");
+    expect((await fetch(`${next.url}?start=0`)).status).toBe(200);
     await dispose();
   });
 });

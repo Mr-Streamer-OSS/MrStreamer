@@ -2,7 +2,7 @@
 // A film's details play the version they were opened on when the opener named one, as the 4K tab
 // names a film's 4K version, even when it is the version the film shows first and another has
 // progress, unless the viewer picked a version for the film.
-import { ipc, SUBSCRIPTION } from "./support.ts";
+import { ipc, SAVED, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
@@ -16,6 +16,7 @@ import { queries } from "../../src/renderer/src/lib/queries.ts";
 /** A film in two versions: HD, shown first, and 4K, added earlier. */
 const film: Title = {
   kind: "movie",
+  key: "movie:hd",
   subscriptionId: SUBSCRIPTION,
   id: "hd",
   name: "Night Harbour 1080p (EN)",
@@ -53,6 +54,7 @@ async function opened(
   const listed = ipc.hold("ondemand.titles");
   const progress = ipc.hold("viewing.progress");
   const client = new QueryClient();
+  client.setQueryData(["subscriptions"], [SAVED]);
   client.setQueryData(queries.subscriptionPreferences(SUBSCRIPTION).queryKey, picks);
   const root = createRoot(document.createElement("div"));
   await act(async () =>

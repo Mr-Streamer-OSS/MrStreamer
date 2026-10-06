@@ -52,25 +52,43 @@ export function canRetry(problem: PlaybackProblem): boolean {
   if (problem.kind === "receiver") {
     return receiverProblem(problem.failure, problem.lost, outputs.failedOn(), null).retry;
   }
-  if (problem.kind === "app") return problem.error.kind !== "invalid-login";
+  if (problem.kind === "app") {
+    return problem.error.kind !== "invalid-login" && problem.error.kind !== "needs-secret";
+  }
   return problem.kind !== "unsupported";
 }
 
 /**
+ * The subscription a failed channel is of, as its words need it. `name` stands where "the
+ * provider" does once `several` are saved: the same channel may then play from another, so the
+ * sentence says whose stream this was. `playlist` is a playlist subscription, which has no
+ * connection of its own for another device to hold.
+ */
+export interface FailedSource {
+  readonly name: string;
+  readonly playlist: boolean;
+  readonly several: boolean;
+}
+
+/**
  * A failed channel's title and the sentence under it. `chosen` names the quality picked for the
- * channel when the failure is that stream's own: the pick stays, and the words say so. `playlist`
- * is a playlist subscription, which has no connection of its own for another device to hold.
+ * channel when the failure is that stream's own: the pick stays, and the words say so. `source`
+ * is the channel's subscription, or null where its words aren't needed.
  */
 export function failureCopy(
   { problem, recovery }: FailedPhase,
   channel: LiveChannel,
   context: {
     readonly chosen: string | null;
-    readonly playlist: boolean;
+    readonly source: FailedSource | null;
     readonly tried: Tried | null;
   },
 ): { readonly title: string; readonly body: string } {
-  const { chosen, playlist, tried } = context;
+  const { chosen, source, tried } = context;
+  const playlist = source?.playlist ?? false;
+  /** Who didn't deliver, in the middle and at the start of a sentence. */
+  const provider = source?.several ? source.name : "the provider";
+  const Provider = source?.several ? source.name : "The provider";
   const name = channel.title;
   const stays = chosen ? ` Your choice stays ${chosen}.` : "";
   const its = chosen ? `${name}'s ${chosen} stream` : `${name}'s stream`;
@@ -79,31 +97,31 @@ export function failureCopy(
       if (chosen) {
         return {
           title: `No ${chosen} stream`,
-          body: `The provider sent no ${chosen} stream for ${name}.${stays}`,
+          body: `${Provider} sent no ${chosen} stream for ${name}.${stays}`,
         };
       }
       return {
         title: "No stream right now",
         body:
           tried && tried.names.length > 1 && tried.untried === 0
-            ? `The provider lists ${name} but sent no stream for any of its qualities.`
-            : `The provider lists ${name} but sent no stream for it.`,
+            ? `${Provider} lists ${name} but sent no stream for any of its qualities.`
+            : `${Provider} lists ${name} but sent no stream for it.`,
       };
     case "refused":
       if (problem.status === 429) {
         return {
           title: "Provider is limiting requests",
-          body: "The provider answered that it gets too many requests. Wait a moment before trying again.",
+          body: `${Provider} answered that it gets too many requests. Wait a moment before trying again.`,
         };
       }
       return {
-        title: "Refused by the provider",
+        title: `Refused by ${provider}`,
         body: `${name}'s stream was turned down.${refusalCheck(problem.status, playlist)}`,
       };
     case "provider-error":
       return {
         title: "Provider error",
-        body: `The provider answered with an error instead of the stream.${stays}`,
+        body: `${Provider} answered with an error instead of the stream.${stays}`,
       };
     case "unsupported":
       return {
@@ -114,7 +132,7 @@ export function failureCopy(
       if (!recovery.played) {
         return problem.unanswered
           ? {
-              title: "No answer from the provider",
+              title: `No answer from ${provider}`,
               body: `${its} never started sending.${stays}`,
             }
           : { title: "No picture arrived", body: `${its} sent no picture or sound.${stays}` };
@@ -134,6 +152,13 @@ export function failureCopy(
             : `${name} stopped arriving.${stays}`,
       };
     case "app":
+      if (problem.error.kind === "needs-secret") {
+        const secret = playlist ? "link" : "password";
+        return {
+          title: `${source?.name ?? "This subscription"} needs its ${secret} again`,
+          body: `Its channels play once you enter it. The lists show what it loaded before.`,
+        };
+      }
       return problem.error.kind === "invalid-login"
         ? { title: "Login not accepted", body: describeError(problem.error) }
         : { title: "Can't open this channel", body: describeOpening(problem.error) };
@@ -157,6 +182,7 @@ const QUOTES_NOTHING = new Set<AppError["kind"]>([
   "account-inactive",
   "provider-error",
   "no-subscription",
+  "needs-secret",
   "keychain-refused",
   "channel-not-found",
 ]);
@@ -206,7 +232,7 @@ export function failureEvidence(
 
 /** A failed channel in a few words, as the mini player says it. */
 export function failureTitle(failed: FailedPhase, channel: LiveChannel): string {
-  return failureCopy(failed, channel, { chosen: null, playlist: false, tried: null }).title;
+  return failureCopy(failed, channel, { chosen: null, source: null, tried: null }).title;
 }
 
 /**

@@ -9,11 +9,13 @@
 // it goes Home, and so does another list. ⌘K searches everything for the same.
 //   Reorder, beside the field of Favourites, or R, puts the favourites in another order: see
 // ./reorder.ts for its keys, which replace these until the order is saved or cancelled.
+//   The lists hold every saved subscription's channels. One that can't be reached keeps the
+// channels it loaded, and a line under the title says so, with Retry.
 import { useQuery } from "@tanstack/react-query";
 import { Play, Search, Volume2, VolumeX, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
-import { ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
+import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { hasModifier, isMac, isTyping } from "../../app/platform.ts";
 import { openView, openWatch, useUi } from "../../app/ui-store.ts";
 import { CatalogueNotice, catalogueState } from "../../components/CatalogueNotice.tsx";
@@ -22,12 +24,16 @@ import { Progress } from "../../components/Progress.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { WindowBar } from "../../components/WindowBar.tsx";
 import { useNow } from "../../lib/clock.ts";
-import { progressOf, timeLeft } from "../../lib/format.ts";
+import { describeError } from "../../lib/errors.ts";
+import { clockTime, progressOf, timeLeft } from "../../lib/format.ts";
+import { call } from "../../lib/ipc.ts";
 import { showSelection, useKeyboardMode } from "../../lib/input-mode.ts";
 import {
   queries,
+  subscriptionName,
   useCategoryMap,
   useFavouriteKeys,
+  useSubscriptions,
   useToggleFavourite,
 } from "../../lib/queries.ts";
 import { cn } from "../../lib/utils.ts";
@@ -75,10 +81,14 @@ export function GuidePage({ active }: { active: boolean }) {
   /** The channel whose schedule is open, by its `ownedKey`. */
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
-  // A remembered category can disappear after a refresh or a new login.
+  // A remembered category can disappear after a refresh or with its subscription. One that
+  // shows with another subscription's under one name is the list that holds them both.
   useEffect(() => {
-    if (list.kind === "category" && categories.data && !categoryMap.has(ownedKey(list.category))) {
-      showList({ kind: "all" });
+    if (list.kind !== "category" || !categories.data) return;
+    const shown = categoryMap.get(ownedKey(list.category));
+    if (!shown) showList({ kind: "all" });
+    else if (!sameOwned(shown, list.category)) {
+      useUi.setState({ list: { kind: "category", category: ownedId(shown) } });
     }
   }, [list, categories.data, categoryMap, showList]);
 
@@ -404,6 +414,7 @@ export function GuidePage({ active }: { active: boolean }) {
                 </>
               )}
             </div>
+            <SourceNotices />
             {refused && (
               <p className="px-9 pb-2.5 text-sm text-muted-foreground">
                 Clear the search to reorder.
@@ -473,6 +484,47 @@ export function GuidePage({ active }: { active: boolean }) {
         </div>
       )}
       {active && <NumberEntry onChannel={watchChannel} />}
+    </div>
+  );
+}
+
+/**
+ * One line for each subscription whose channels couldn't be fetched, with Retry: its channels
+ * show as it listed them last, among the others'. Only beside other subscriptions: a single one
+ * says so in Settings, as it always did. A subscription that needs its password or link again
+ * says that where it is played, and in Settings.
+ */
+function SourceNotices() {
+  const subscriptions = useSubscriptions();
+  const statuses = useQuery(queries.libraryStatus()).data;
+  const now = useNow();
+  const failing = (subscriptions.length > 1 ? (statuses ?? []) : []).flatMap((status) => {
+    const subscription = subscriptions.find((each) => each.id === status.subscriptionId);
+    const { failure } = status;
+    return subscription && failure && !subscription.needsSecret
+      ? [{ ...status, failure, name: subscriptionName(subscription) }]
+      : [];
+  });
+  return (
+    <div aria-live="polite">
+      {failing.map(({ subscriptionId, name, failure, failedAt, fetchedAt }) => (
+        <p key={subscriptionId} className="flex items-baseline gap-4 px-9 pb-2.5 text-sm">
+          <span className="min-w-0 text-foreground/85">
+            {failure.kind === "unreachable" && failedAt !== null
+              ? `${name} hasn't answered since ${clockTime(failedAt, now)}.`
+              : `${name}: ${describeError(failure)}`}
+            {fetchedAt !== null && " Its channels show as they were then."}
+          </span>
+          <button
+            aria-label={`Retry ${name}`}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => void call("library.refresh", { subscriptionId }).catch(() => {})}
+            className="flex-none text-white underline underline-offset-4"
+          >
+            Retry
+          </button>
+        </p>
+      ))}
     </div>
   );
 }

@@ -8,16 +8,24 @@ export type TitleKind = (typeof TITLE_KINDS)[number];
 
 /**
  * A movie or a series in a catalogue list. Series and movies share it, so lists show both alike.
- * Providers list each language version on its own; a title gathers them, and shows and plays the
- * one that suits the viewer's language.
+ * Providers list each language version on its own; a title gathers them, those of every saved
+ * subscription that lists the film or series, and shows and plays the one that suits the viewer's
+ * language.
  */
 export interface Title {
   readonly kind: TitleKind;
+  /**
+   * Names the film or series among the lists, whichever version shows first: its kind and TMDB id
+   * where versions gather under one, else its only version. So a tile stays the same tile when
+   * another subscription's lists arrive, are fetched again or go. Not an id to send back.
+   */
+  readonly key: string;
   /** The subscription that lists `id`. With `id`, it names that version (`OwnedId`). */
   readonly subscriptionId: string;
   /**
-   * The version shown and played first. It can change with the language or when the provider adds
-   * a better suited version, so what is kept refers to versions by their own ids.
+   * The version shown and played first. It can change with the language, when a provider adds a
+   * better suited version or when another subscription is added, so what is kept refers to
+   * versions by their own ids.
    */
   readonly id: string;
   /** The provider's name of that version, for search: "Blow 2001 (NL)". */
@@ -48,8 +56,14 @@ export interface Title {
   readonly tmdbId: string | null;
   /** From TMDB, once its metadata arrived: "Comedy", "Drama". */
   readonly genres: readonly string[];
-  /** Every version, the one shown first in front. */
+  /** Every version, the one shown first in front. They can be of several subscriptions. */
   readonly versions: readonly TitleVersion[];
+  /**
+   * A title of another subscription shows under the same name and year without being this one,
+   * as when one of them has no TMDB id: tiles then say which subscription each is from. Only a
+   * title whose versions are all of one subscription has it.
+   */
+  readonly ambiguous?: true;
 }
 
 /** Search results in Movies or Series: the best matches, and how many match in all. */
@@ -140,14 +154,23 @@ export interface EpisodeDetails extends Episode {
   readonly directors: readonly string[];
 }
 
-/** When the movie and series lists were last fetched, and how big they are. */
-export interface OnDemandStatus {
+/** When a subscription's movie and series lists were last fetched, and how big they are. */
+export interface TitleListsStatus {
+  /** The subscription whose lists these are. */
+  readonly subscriptionId: string;
+  /** How many it lists, each version on its own. */
   readonly movies: number;
   readonly series: number;
   /** Epoch milliseconds, or null before the first successful fetch. */
   readonly fetchedAt: number | null;
   /** Why the latest refresh failed, when it did. The lists from `fetchedAt` stay in use. */
   readonly failure: AppError | null;
+}
+
+/** The movie and series lists of every subscription that has any, and TMDB's metadata for them. */
+export interface OnDemandStatus {
+  /** One per subscription with movies and series, in the subscriptions' order: none of a playlist. */
+  readonly lists: readonly TitleListsStatus[];
   /** How far TMDB's metadata has come; null without a key. */
   readonly metadata: MetadataProgress | null;
 }

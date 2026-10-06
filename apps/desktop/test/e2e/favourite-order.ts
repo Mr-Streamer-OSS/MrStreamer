@@ -188,7 +188,9 @@ try {
   await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
   await login(page, provider);
   // Every channel is the one subscription's, and is named with it.
-  const { id: subscriptionId } = await invoke<{ id: string }>(page, "subscription.get");
+  const [saved] = await invoke<{ id: string }[]>(page, "subscription.list");
+  if (!saved) throw new Error("The login saved no subscription.");
+  const subscriptionId = saved.id;
   const own = (id: string): OwnedId => ({ subscriptionId, id });
 
   // Thirty-eight channels the lists show, the one in three qualities by its SD stream, with the
@@ -558,7 +560,7 @@ try {
   }
 
   {
-    await invoke(page, "library.refresh");
+    await invoke(page, "library.refresh", { subscriptionId });
     await delay(1000);
     const problems: string[] = [];
     if (

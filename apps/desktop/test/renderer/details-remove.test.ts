@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // Remove from Continue watching in a film's details takes every version of it out, and the button
 // goes once the record has it, while Resume stays; a removal that fails says why.
-import { ipc, SUBSCRIPTION } from "./support.ts";
+import { ipc, SAVED, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
@@ -14,6 +14,7 @@ import { syncViewing } from "../../src/renderer/src/lib/queries.ts";
 /** A film in two versions: HD, shown first, and 4K, watched halfway. */
 const film: Title = {
   kind: "movie",
+  key: "movie:hd",
   subscriptionId: SUBSCRIPTION,
   id: "hd",
   name: "Night Harbour 1080p (EN)",
@@ -81,6 +82,7 @@ async function openDetails(): Promise<HTMLElement> {
   const record = ipc.hold("viewing.get");
   const opened = ipc.hold("ondemand.details");
   const client = new QueryClient();
+  client.setQueryData(["subscriptions"], [SAVED]);
   const stopSync = syncViewing(client);
   const container = document.createElement("div");
   document.body.append(container);

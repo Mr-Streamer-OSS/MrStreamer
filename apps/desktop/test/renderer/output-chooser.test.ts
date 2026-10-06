@@ -43,6 +43,7 @@ const channel: LiveChannel = {
 
 const movie: Title = {
   kind: "movie",
+  key: "movie:m1",
   subscriptionId: SUBSCRIPTION,
   id: "m1",
   name: "Low Tide (EN)",

@@ -12,7 +12,7 @@ import { useUpdates } from "../updates/use-updates.ts";
 
 const TABS: readonly { value: SettingsTab; label: string }[] = [
   { value: "general", label: "General" },
-  { value: "subscription", label: "Subscription" },
+  { value: "subscriptions", label: "Subscriptions" },
   { value: "about", label: "About" },
 ];
 
@@ -74,7 +74,7 @@ export function SettingsPage() {
           <main className="min-w-0 flex-1 overflow-y-auto px-10 pt-6 pb-10">
             <div className="max-w-[40rem]">
               {tab === "general" && <GeneralSection />}
-              {tab === "subscription" && <SubscriptionSection />}
+              {tab === "subscriptions" && <SubscriptionSection />}
               {tab === "about" && <About />}
             </div>
           </main>

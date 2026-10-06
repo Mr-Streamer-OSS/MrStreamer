@@ -1,5 +1,5 @@
 // Drives a built app over the DevTools protocol, against the fake provider or the fake playlist
-// host. Shared by the packaged-app test, the playlist test and the measuring script.
+// host. Shared by the tests of a built app and the measuring script.
 import { spawn, type ChildProcess } from "node:child_process";
 import type { FakeProvider } from "../fake-provider.ts";
 
@@ -118,20 +118,60 @@ export async function connectPlaylist(page: Page, link: string): Promise<void> {
 
 /** Types `fields` into the Connect screen's fields, in order, connects, and waits for the app. */
 async function submit(page: Page, fields: readonly string[]): Promise<void> {
-  await page.evaluate(`(() => {
-    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
-    const fields = ${JSON.stringify(fields)};
-    document.querySelectorAll("form input").forEach((input, index) => {
-      setValue.call(input, fields[index]);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    document.querySelector('form button[type="submit"]').click();
-  })()`);
+  await fill(page, fields);
   await waitFor(() =>
     page.evaluate<boolean>(
       "!!document.querySelector('header') && !document.body.innerText.includes('Loading channels')",
     ),
   );
+}
+
+/**
+ * Types `fields` into the fields of the form the window shows, in order, and sends it. A field
+ * past the last of them is left as it is.
+ */
+export async function fill(page: Page, fields: readonly string[]): Promise<void> {
+  await page.evaluate(`(() => {
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    const fields = ${JSON.stringify(fields)};
+    document.querySelectorAll("form input").forEach((input, index) => {
+      if (fields[index] === undefined) return;
+      setValue.call(input, fields[index]);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    document.querySelector('form button[type="submit"]').click();
+  })()`);
+}
+
+/** Opens Settings > Subscriptions, where the saved subscriptions are listed. */
+export async function openSubscriptions(page: Page): Promise<void> {
+  await press(page, "Settings");
+  const tab = `[...document.querySelectorAll("nav button")].find((b) => b.textContent.trim() === "Subscriptions")`;
+  await waitFor(() => page.evaluate<boolean>(`!!${tab}`), 20_000);
+  await page.evaluate(`${tab}.click()`);
+}
+
+/** The row of the subscription listed as `name` in Settings > Subscriptions, for the page. */
+export const subscriptionRow = (name: string): string =>
+  `[...document.querySelectorAll("li")].find((row) => row.querySelector("button")?.textContent.trim().startsWith(${JSON.stringify(`${name} · `)}))`;
+
+/**
+ * Adds the fake provider beside the saved subscriptions, through Settings > Subscriptions and
+ * under `name`, and waits for its row. Settings stays open on the list.
+ */
+export async function addSubscription(
+  page: Page,
+  provider: FakeProvider,
+  name: string,
+): Promise<void> {
+  await openSubscriptions(page);
+  await press(page, "Add subscription");
+  await waitFor(
+    () => page.evaluate<boolean>("document.querySelectorAll('form input').length >= 4"),
+    20_000,
+  );
+  await fill(page, [name, provider.url, "demo", "demo"]);
+  await waitFor(() => page.evaluate<boolean>(`!!${subscriptionRow(name)}`), 30_000);
 }
 
 /** The DevTools protocol's bits for the keys held with another, or with a click. */

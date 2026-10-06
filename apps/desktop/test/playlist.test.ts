@@ -14,6 +14,7 @@ import { mainLayer } from "../src/main/runtime.ts";
 import { Library } from "../src/main/services/library.ts";
 import { OnDemand } from "../src/main/services/ondemand.ts";
 import { Playback } from "../src/main/services/playback.ts";
+import { Roster } from "../src/main/services/roster.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { PLAYLIST_CHANNELS, startFakePlaylist } from "./fake-playlist.ts";
 import { fixture } from "./fake-provider.ts";
@@ -138,22 +139,24 @@ function guideAround(now: number): string {
 
 /**
  * The app's services on `dataDir`; another call is the app started again, with `secrets` as the
- * keychain it finds then. `own` names a channel with the subscription saved at that moment;
- * opening a channel and asking for listings take and answer the playlist's own ids.
+ * keychain it finds then. `own` names a channel with the subscription saved first at that moment,
+ * and the calls about one subscription's lists and guide are about that one; opening a channel
+ * and asking for listings take and answer the playlist's own ids.
  */
 async function app(dataDir: string, secrets: Secrets = testSecrets) {
   const runtime = runtimeFor(mainLayer({ ...testConfig(dataDir), secrets }));
   const subscriptions = await promised(runtime, Subscriptions);
   const playback = await promised(runtime, Playback);
   const guide = await promised(runtime, Guide);
-  const own = async (id: string) => ({
-    subscriptionId: (await subscriptions.get())?.id ?? "no-subscription",
-    id,
-  });
+  const library = await promised(runtime, Library);
+  const roster = await promised(runtime, Roster);
+  /** The subscription saved first. Without one, an id that names none that is. */
+  const saved = async () => (await subscriptions.list())[0]?.id ?? "no-subscription";
+  const own = async (id: string) => ({ subscriptionId: await saved(), id });
   return {
     own,
     subscriptions,
-    library: await promised(runtime, Library),
+    library: { ...library, refresh: async () => library.refresh(await saved()) },
     onDemand: await promised(runtime, OnDemand),
     playback: {
       ...playback,
@@ -162,6 +165,17 @@ async function app(dataDir: string, secrets: Secrets = testSecrets) {
     },
     guide: {
       ...guide,
+      refresh: async () => guide.refresh(await saved()),
+      refreshIfStale: async () => guide.refreshIfStale(await saved()),
+      /** The first subscription's guide, as Settings shows it. */
+      status: async () => {
+        const [first] = await guide.status();
+        if (!first) throw new Error("No subscription is saved");
+        const { subscriptionId: _of, ...status } = first;
+        return status;
+      },
+      /** Removes the subscription, with what was loaded from it. */
+      clear: async () => roster.remove(await saved(), false),
       listings: async (channelIds: readonly string[]) => {
         const channels = await Promise.all(channelIds.map(own));
         const listings = await guide.listings(channels);
@@ -197,7 +211,7 @@ describe("playlist subscriptions", () => {
     const dataDir = await tempDir();
     const { subscriptions, library, onDemand } = await app(dataDir);
 
-    const connected = await subscriptions.connect(linkOnly(`${host.origin}/list.m3u?token=t0k3n`));
+    const connected = await subscriptions.add(linkOnly(`${host.origin}/list.m3u?token=t0k3n`));
 
     expect(connected).toMatchObject({ kind: "m3u", server: host.origin, username: "" });
     const stored = await readFile(join(dataDir, "subscription.json"), "utf8");
@@ -212,29 +226,30 @@ describe("playlist subscriptions", () => {
       ["Alpha.test@HD", "Alpha News (720p)"],
       ["Beta.test", "Beta Movies [Not 24/7]"],
     ]);
-    expect(await onDemand.refresh()).toMatchObject({ movies: 0, series: 0, failure: null });
+    // No movies or series, and none asked for.
+    expect(await onDemand.refresh(connected.id)).toEqual({ lists: [], metadata: null });
     // Another playlist from the same host is another account.
-    const other = await subscriptions.connect(linkOnly(`${host.origin}/other.m3u`));
+    const other = await subscriptions.add(linkOnly(`${host.origin}/other.m3u`));
     expect(other.id).not.toBe(connected.id);
   });
 
   it("refuse a page that isn't a playlist, and a server address without a login", async () => {
     const host = await playlistHost();
     const { subscriptions } = await app(await tempDir());
-    const failure = (server: string) => failureOf(subscriptions.connect(linkOnly(server)));
+    const failure = (server: string) => failureOf(subscriptions.add(linkOnly(server)));
 
     expect(await failure(`${host.origin}/panel`)).toMatchObject({ kind: "incomplete-login" });
     const asked = host.asked.length;
     // Asks for the login without asking the server.
     expect(await failure(host.origin)).toMatchObject({ kind: "incomplete-login" });
     expect(host.asked).toHaveLength(asked);
-    expect(await subscriptions.get()).toBeNull();
+    expect(await subscriptions.list()).toEqual([]);
   });
 
   it("play HLS through the proxy, with the headers the playlist asks for", async () => {
     const host = await playlistHost();
     const { subscriptions, playback } = await app(await tempDir());
-    await subscriptions.connect(linkOnly(`${host.origin}/list.m3u`));
+    await subscriptions.add(linkOnly(`${host.origin}/list.m3u`));
 
     const session = await playback.open("Alpha.test@HD", ["h264", "aac"]);
     const master = await (await fetch(session.url)).text();
@@ -261,7 +276,7 @@ describe("playlist subscriptions", () => {
     const host = await startFakePlaylist();
     hosts.push(host);
     const { subscriptions, playback } = await app(await tempDir());
-    await subscriptions.connect(linkOnly(host.link));
+    await subscriptions.add(linkOnly(host.link));
 
     const session = await playback.open(PLAYLIST_CHANNELS.tracks.id, ["h264", "aac"]);
     const master = await (await fetch(session.url)).text();
@@ -292,7 +307,7 @@ describe("playlist subscriptions", () => {
     const host = await playlistHost();
     const dataDir = await tempDir();
     const before = await app(dataDir);
-    await before.subscriptions.connect(linkOnly(`${host.origin}/list.m3u`));
+    await before.subscriptions.add(linkOnly(`${host.origin}/list.m3u`));
     await before.library.channels({});
 
     const after = await app(dataDir);
@@ -312,7 +327,7 @@ describe("playlist subscriptions", () => {
   it("take the programme guide the playlist names, packed", async () => {
     const host = await playlistHost();
     const { subscriptions, library, guide } = await app(await tempDir());
-    await subscriptions.connect(linkOnly(`${host.origin}/list.m3u`));
+    await subscriptions.add(linkOnly(`${host.origin}/list.m3u`));
     await library.channels({});
 
     await guide.refresh();
@@ -329,7 +344,7 @@ describe("playlist subscriptions", () => {
   it("say a playlist names no guide, without failing, and ask again only when told to", async () => {
     const host = await playlistHost();
     const { subscriptions, library, guide } = await app(await tempDir());
-    await subscriptions.connect(linkOnly(`${host.origin}/other.m3u`));
+    await subscriptions.add(linkOnly(`${host.origin}/other.m3u`));
     await library.channels({});
     // Not read for a guide yet: nothing says it has none.
     expect(await guide.status()).toEqual({ channels: 0, fetchedAt: null, availability: "unknown" });
@@ -354,7 +369,7 @@ describe("playlist subscriptions", () => {
     const host = await playlistHost();
     const dataDir = await tempDir();
     const { subscriptions, library, guide } = await app(dataDir);
-    await subscriptions.connect(linkOnly(`${host.origin}/other.m3u`));
+    await subscriptions.add(linkOnly(`${host.origin}/other.m3u`));
     host.serve("/other.m3u", namingNone(host.origin));
     await library.refresh();
     await guide.refresh();
@@ -384,7 +399,7 @@ describe("playlist subscriptions", () => {
     const host = await playlistHost();
     const dataDir = await tempDir();
     const { subscriptions, library, guide } = await app(dataDir);
-    await subscriptions.connect(linkOnly(`${host.origin}/list.m3u`));
+    await subscriptions.add(linkOnly(`${host.origin}/list.m3u`));
     await library.channels({});
     await guide.refresh();
     const playlist = await (await fetch(`${host.origin}/list.m3u`)).text();
@@ -419,7 +434,7 @@ describe("playlist subscriptions", () => {
   it("keep what was known when the subscription goes while the playlist is being read", async () => {
     const host = await playlistHost();
     const { subscriptions, library, guide } = await app(await tempDir());
-    await subscriptions.connect(linkOnly(`${host.origin}/other.m3u`));
+    await subscriptions.add(linkOnly(`${host.origin}/other.m3u`));
     await library.channels({});
     host.serve("/other.m3u", "hold");
     const read = host.requests("/other.m3u");
@@ -432,7 +447,7 @@ describe("playlist subscriptions", () => {
     await guide.clear();
 
     expect(await refresh).toBe("stopped");
-    expect(await guide.status()).toMatchObject({ availability: "unknown" });
+    expect(await guide.listings(["Alpha.test@HD"])).toEqual({});
   });
 
   it("ask for the link again when the keychain no longer opens it, and keep the account", async () => {
@@ -440,7 +455,7 @@ describe("playlist subscriptions", () => {
     const dataDir = await tempDir();
     const link = `${host.origin}/list.m3u?token=t0k3n`;
     const before = await app(dataDir);
-    const connected = await before.subscriptions.connect(linkOnly(link));
+    const connected = await before.subscriptions.add(linkOnly(link));
     await before.library.channels({});
     const starred = await before.own("Beta.test");
     await before.viewing.setFavourite("first", starred, true);
@@ -452,24 +467,46 @@ describe("playlist subscriptions", () => {
         throw new AppFailure({ kind: "keychain-refused" });
       },
     });
-    const asking = await locked.subscriptions.get();
+    const [asking] = await locked.subscriptions.list();
 
     // Only the host is left to say which link: none of the link itself reaches the window.
     expect(asking).toEqual({ ...connected, needsSecret: true });
     expect(asking).toMatchObject({ kind: "m3u", server: host.origin, username: "" });
     expect(JSON.stringify(asking)).not.toMatch(/t0k3n|list\.m3u/);
-    expect(await locked.subscriptions.source()).toBeNull();
-    expect((await locked.viewing.state()).favourites).toEqual([]);
+    expect(await locked.subscriptions.sources()).toEqual([]);
+    // What it loaded and what the viewer kept still show; nothing of it plays.
+    expect((await locked.viewing.state()).favourites).toEqual([starred]);
+    expect(await locked.library.channels({})).toHaveLength(2);
+    expect(await failureOf(locked.playback.open("Beta.test", ["h264", "aac"]))).toEqual({
+      kind: "needs-secret",
+      subscriptionId: connected.id,
+    });
 
     // The same link is the same account: its favourites and channels are as they were.
     const read = host.requests("/list.m3u");
-    expect(await locked.subscriptions.connect(linkOnly(link))).toEqual(connected);
+    expect(await locked.subscriptions.add(linkOnly(link))).toEqual(connected);
     expect((await locked.viewing.state()).favourites).toEqual([starred]);
     expect(await locked.library.channels({})).toHaveLength(2);
     // Checking the link read its first line; the channels came from the copy on disk.
     expect(host.requests("/list.m3u")).toBe(read + 1);
-    // Another link is another account, as on the Connect screen.
-    const other = await locked.subscriptions.connect(linkOnly(`${host.origin}/other.m3u`));
+    // A new link entered for it, as after its token changed, is the same subscription still.
+    const relinked = await locked.subscriptions.update(connected.id, {
+      secret: `${host.origin}/list.m3u?token=n3w`,
+    });
+    expect(relinked).toEqual(connected);
+    expect((await locked.viewing.state()).favourites).toEqual([starred]);
+    expect(await readFile(join(dataDir, "subscription.json"), "utf8")).not.toMatch(/n3w|list\.m3u/);
+    // A link that carries a login is a panel's, which is another kind of subscription.
+    expect(
+      await failureOf(
+        locked.subscriptions.update(connected.id, {
+          secret: `${host.origin}/get.php?username=u&password=p`,
+        }),
+      ),
+    ).toMatchObject({ kind: "incomplete-login" });
+    // Another link added is another account, beside this one.
+    const other = await locked.subscriptions.add(linkOnly(`${host.origin}/other.m3u`));
     expect(other.id).not.toBe(connected.id);
+    expect(await locked.subscriptions.list()).toHaveLength(2);
   });
 });

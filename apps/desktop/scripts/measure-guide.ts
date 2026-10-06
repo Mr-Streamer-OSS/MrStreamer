@@ -68,20 +68,23 @@ async function create() {
       Layer.provide(
         Layer.mergeAll(
           Layer.succeed(GuideSource, {
-            current: Effect.succeed({
-              id: SUBSCRIPTION,
-              revision: 1,
-              key: "measure",
-              download: async () => ({
-                kind: "document" as const,
-                body: Readable.toWeb(
-                  createReadStream(documentPath, { highWaterMark: CHUNK_BYTES }),
-                ) as ReadableStream<Uint8Array>,
-              }),
-            }),
+            saved: Effect.succeed([
+              {
+                id: SUBSCRIPTION,
+                revision: 1,
+                key: "measure",
+                store: dataDir,
+                download: async () => ({
+                  kind: "document" as const,
+                  body: Readable.toWeb(
+                    createReadStream(documentPath, { highWaterMark: CHUNK_BYTES }),
+                  ) as ReadableStream<Uint8Array>,
+                }),
+              },
+            ]),
           }),
           Layer.succeed(GuideCatalogue, { channels: () => Effect.succeed(guideChannels) }),
-          guideStoreLayer(dataDir),
+          guideStoreLayer,
         ),
       ),
     ),
@@ -92,7 +95,7 @@ async function create() {
     }),
   );
   return {
-    refresh: () => runtime.runPromise(guide.refresh),
+    refresh: () => runtime.runPromise(guide.refresh(SUBSCRIPTION)),
     listings: (asked: readonly LiveChannel[]) => runtime.runPromise(guide.listings(asked)),
     search: (query: string) => runtime.runPromise(guide.search(query)),
     searchChannels: (query: string, asked: readonly LiveChannel[], until: number) =>

@@ -78,6 +78,7 @@ const series: SeriesDetails = {
   kind: "series",
   title: {
     kind: "series",
+    key: "series:nl",
     subscriptionId: SUBSCRIPTION,
     id: "nl",
     name: "Harbour Lights (NL)",

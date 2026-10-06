@@ -11,7 +11,7 @@ import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Artwork } from "../../components/TitleArt.tsx";
 import { useNow } from "../../lib/clock.ts";
 import { clockTime, timeLeft } from "../../lib/format.ts";
-import { queries, useCategoryMap } from "../../lib/queries.ts";
+import { queries, useCategoryMap, useSourceOf } from "../../lib/queries.ts";
 import { useDebounced } from "../../lib/use-debounced.ts";
 import { cn } from "../../lib/utils.ts";
 import { titlePlayer } from "../../player/title-player.ts";
@@ -55,6 +55,8 @@ function Palette() {
   const programmes = useQuery(queries.programmes(debounced));
   const titles = useQuery(queries.titleSearch(debounced));
   const categories = useCategoryMap();
+  // Results come from every subscription: one says whose it is where another reads the same.
+  const sourceOf = useSourceOf();
   const now = useNow();
   const [active, setActive] = useState(0);
   const [open, setOpen] = useState<number | null>(null);
@@ -128,7 +130,7 @@ function Palette() {
               const { title } = result;
               return (
                 <button
-                  key={`${title.kind}:${ownedKey(title)}`}
+                  key={title.key}
                   data-index={index}
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => choose(index)}
@@ -150,7 +152,12 @@ function Palette() {
                       {title.title}
                     </span>
                     <span className="block truncate text-xs text-muted-foreground">
-                      {[title.kind === "movie" ? "Movie" : "Series", title.year, ...title.tags]
+                      {[
+                        title.kind === "movie" ? "Movie" : "Series",
+                        title.year,
+                        ...title.tags,
+                        sourceOf(title),
+                      ]
                         .filter(Boolean)
                         .join(" · ")}
                     </span>
@@ -167,11 +174,14 @@ function Palette() {
                 : categories.get(
                     ownedKey({ subscriptionId: channel.subscriptionId, id: categoryId }),
                   );
+            const source = sourceOf(channel);
+            // A programme names its channel, and whose that is where two are called the same.
+            const shows = source ? `${channel.title} · ${source}` : channel.title;
             const detail = programme
               ? programme.start <= now
-                ? `On now · ${channel.title} · ${timeLeft(programme, now)}`
-                : `${clockTime(programme.start, now)} · ${channel.title}`
-              : [channel.number, category?.group, category?.title, ...channel.tags]
+                ? `On now · ${shows} · ${timeLeft(programme, now)}`
+                : `${clockTime(programme.start, now)} · ${shows}`
+              : [channel.number, category?.group, category?.title, ...channel.tags, source]
                   .filter((part) => part != null)
                   .join(" · ");
             return (
