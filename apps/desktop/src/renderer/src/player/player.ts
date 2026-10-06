@@ -26,6 +26,12 @@
 // paused or buffering, as after Pause on the TV's remote, says so here. What the receiver says is
 // shown as it says it, and only its word that the channel plays makes it one that started: a
 // receiver can hold a channel paused or buffering before it ever got its stream.
+//
+// A stream that breaks is tried again a few times, here and on a receiver alike, and those tries
+// are the channel's until it has played for a while: one that comes back for a moment and breaks
+// off again uses them up and fails, rather than reconnecting for ever. Choosing the channel
+// again, or Retry, starts afresh. What a failure says is the kind of thing that went wrong and
+// the provider's status, never the words an engine or the provider used for it.
 import { createStore, useStore } from "zustand";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import type {
@@ -76,6 +82,11 @@ import {
 /** Waits before each reconnect attempt after a stream breaks. Its length is the attempt limit. */
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000];
 /**
+ * How long a channel has to play before a break gets every reconnect again. A channel that breaks
+ * off sooner keeps the reconnects it has left. Time paused or waiting for data isn't time played.
+ */
+export const STABLE_PLAYBACK_MS = 30_000;
+/**
  * How long zapping waits for the next key press before it opens a stream. Flicking through
  * channels shows each one at once but only tunes the one the viewer stops on, which matters on
  * subscriptions that allow a single connection.
@@ -86,14 +97,22 @@ const VOLUME_SAVE_DELAY_MS = 400;
 const TRACKS_AGAIN_MS = 5000;
 
 export type PlaybackProblem =
-  /** The provider has no stream for the channel right now. */
-  | { readonly kind: "unavailable" }
-  /** The provider refused: another device on the connection, or the login stopped working. */
-  | { readonly kind: "refused" }
-  /** The stream uses a format or codec no engine here can play. */
-  | { readonly kind: "unsupported"; readonly detail: string }
-  /** Data stopped arriving and reconnecting did not help. */
-  | { readonly kind: "network"; readonly detail: string }
+  /** The provider has no stream for the channel right now: it answered 404 or 410. */
+  | { readonly kind: "unavailable"; readonly status: number }
+  /**
+   * The provider refused, with 401, 403, 429 or the like. The status is all that is known: it
+   * doesn't say whether another device has the connection, the login stopped working or the
+   * channel isn't offered here.
+   */
+  | { readonly kind: "refused"; readonly status: number }
+  /** The stream arrived and couldn't be played or converted. Nothing reliable says why. */
+  | { readonly kind: "unsupported" }
+  /**
+   * No data arrived, or it stopped arriving. `unanswered` when the main process saw that itself:
+   * the provider didn't answer, sent nothing or broke off. Otherwise only the player noticed that
+   * nothing plays, which data without a picture in it looks like too.
+   */
+  | { readonly kind: "network"; readonly unanswered: boolean }
   | { readonly kind: "provider-error"; readonly status: number }
   /** The session could not be opened at all. */
   | { readonly kind: "app"; readonly error: AppError }
@@ -106,6 +125,16 @@ export type PlaybackProblem =
 /** What a receiver says of a channel it started. A channel has no end. */
 type ReceiverState = Exclude<RemoteState, "ended">;
 
+/** What the selected channel went through since the viewer chose it. */
+interface Recovery {
+  /** It played, for however short a time. */
+  readonly played: boolean;
+  /** The reconnects made since it was chosen, or since it last played for `STABLE_PLAYBACK_MS`. */
+  readonly reconnects: number;
+  /** How often one of those brought it back only for it to break off again. */
+  readonly relapses: number;
+}
+
 type PlayerPhase =
   | { readonly kind: "idle" }
   | { readonly kind: "tuning"; readonly since: number }
@@ -115,8 +144,23 @@ type PlayerPhase =
    * as from the TV's remote, or waits for the stream, which it may do before it ever played.
    */
   | { readonly kind: "playing"; readonly engine: "receiver"; readonly state: ReceiverState }
-  | { readonly kind: "reconnecting"; readonly attempt: number; readonly of: number }
-  | { readonly kind: "failed"; readonly problem: PlaybackProblem };
+  /**
+   * The stream broke and reconnect `attempt` of `of` is next: `until` is when it starts, in epoch
+   * ms, and null once it is under way.
+   */
+  | {
+      readonly kind: "reconnecting";
+      readonly attempt: number;
+      readonly of: number;
+      readonly until: number | null;
+    }
+  /** `recovery` is what the channel went through before it failed, `at` when it did, in epoch ms. */
+  | {
+      readonly kind: "failed";
+      readonly problem: PlaybackProblem;
+      readonly recovery: Recovery;
+      readonly at: number;
+    };
 
 export interface PlayerState {
   readonly channel: LiveChannel | null;
@@ -141,8 +185,14 @@ export interface PlayerState {
    * had stay loading.
    */
   readonly subtitleLoading: boolean;
-  /** Which of the channel's streams plays, once it started, and those that failed first. */
+  /**
+   * Which of the channel's streams plays, once it started, and those that failed first. A channel
+   * that failed here keeps what its last try got to: the streams the provider didn't deliver, and
+   * the one that arrived and didn't play.
+   */
   readonly stream: LivePlaying | null;
+  /** The picture has stood still for a few seconds though the channel should play. */
+  readonly waiting: boolean;
   /**
    * Automatic played another of the channel's streams because the first didn't start. Kept until
    * the channel changes or another quality is chosen.
@@ -163,6 +213,7 @@ const store = createStore<PlayerState>(() => ({
   subtitle: null,
   subtitleLoading: false,
   stream: null,
+  waiting: false,
   fellBack: null,
 }));
 
@@ -202,10 +253,19 @@ let shown: {
 /** The subtitles chosen last on this channel, which C turns on again. */
 let lastSubtitle: SubtitleTrack | null = null;
 /**
- * The selected channel is the receiver's: the load that plays there, null until it was taken, how
- * often it was tried again, and whether the receiver said it plays.
+ * The selected channel is the receiver's: the load that plays there, null until it was taken,
+ * whether the receiver said it plays, for how long it has said so in all, in milliseconds, and
+ * since when it says so now, null while it says anything else.
  */
-let onReceiver: { load: number | null; attempt: number; started: boolean } | null = null;
+let onReceiver: {
+  load: number | null;
+  started: boolean;
+  played: number;
+  since: number | null;
+} | null = null;
+const UNTRIED: Recovery = { played: false, reconnects: 0, relapses: 0 };
+/** What the selected channel went through since the viewer chose it, here or on a receiver. */
+let recovery = UNTRIED;
 /** The viewer asked for this computer, so the channel goes on here when the receiver is let go of. */
 let returning = false;
 
@@ -234,37 +294,78 @@ function release(): void {
   clearSubtitles(video);
   void call("playback.close", { sessionId: current.sessionId }).catch(() => {});
   current = null;
-  // Nothing loads the chosen subtitles any more.
-  if (store.getState().subtitleLoading) store.setState({ subtitleLoading: false });
+  // Nothing loads the chosen subtitles any more, and no picture is left to stand still.
+  const { subtitleLoading, waiting } = store.getState();
+  if (subtitleLoading || waiting) store.setState({ subtitleLoading: false, waiting: false });
+}
+
+/** The phase of a channel that failed with `problem`, after what it went through. */
+function failed(problem: PlaybackProblem): PlayerPhase {
+  return { kind: "failed", problem, recovery, at: Date.now() };
 }
 
 /**
- * Opens and plays a stream. `repair` has the main process re-encode the picture, which conceals
- * a damaged broadcast the way standalone players do; it costs CPU, so it is the second try.
+ * Starts `channel` as chosen afresh, by the viewer or by a page for its preview: nothing it went
+ * through before counts, and it has every reconnect.
  */
-async function start(
-  channel: LiveChannel,
-  attempt: number,
-  repair = false,
-  preview = false,
-): Promise<void> {
+function begin(channel: LiveChannel, preview = false): Promise<void> {
+  recovery = UNTRIED;
+  return start(channel, false, preview);
+}
+
+/**
+ * Notes that the channel broke off after `played` ms of picture. Long enough and the break gets
+ * every reconnect, as a channel that worked. Any sooner and the reconnects it used stay used, so
+ * coming back for a moment never earns more of them.
+ */
+function brokeOff(played: number): void {
+  if (played >= STABLE_PLAYBACK_MS) recovery = { ...recovery, reconnects: 0, relapses: 0 };
+  else if (recovery.reconnects > 0) recovery = { ...recovery, relapses: recovery.relapses + 1 };
+}
+
+/**
+ * Takes the channel's next reconnect and says so: which attempt it is and when it starts. Returns
+ * how long to wait for it, or null when none is left.
+ */
+function nextReconnect(): number | null {
+  const delay = RECONNECT_DELAYS_MS[recovery.reconnects];
+  if (delay === undefined) return null;
+  recovery = { ...recovery, reconnects: recovery.reconnects + 1 };
+  store.setState({ phase: reconnecting(Date.now() + delay) });
+  return delay;
+}
+
+/** The phase of the reconnect the channel is at, which starts at `until` or is under way. */
+function reconnecting(until: number | null): PlayerPhase {
+  return {
+    kind: "reconnecting",
+    attempt: recovery.reconnects,
+    of: RECONNECT_DELAYS_MS.length,
+    until,
+  };
+}
+
+/**
+ * Opens and plays a stream: the channel's first, or the reconnect it is at. `repair` has the main
+ * process re-encode the picture, which conceals a damaged broadcast the way standalone players do;
+ * it costs CPU, so it is the second try.
+ */
+async function start(channel: LiveChannel, repair = false, preview = false): Promise<void> {
   if (outputs.remote()) {
     // Nothing previews while a receiver has playback: it would take the provider's connection.
-    if (!preview) await startOnReceiver(channel, attempt);
+    if (!preview) await startOnReceiver(channel);
     return;
   }
   const mine = ++selection;
+  const first = recovery.reconnects === 0;
   // A stream nobody listens to, such as one a channel switch opens just after leaving Watch, is
   // a preview: it doesn't reconnect against another device.
-  if (attempt === 0) quiet = preview || !store.getState().audible;
-  if (attempt === 0) tune(channel);
+  if (first) quiet = preview || !store.getState().audible;
+  if (first) tune(channel);
   release();
   store.setState({
     channel,
-    phase:
-      attempt === 0
-        ? { kind: "tuning", since: Date.now() }
-        : { kind: "reconnecting", attempt, of: RECONNECT_DELAYS_MS.length },
+    phase: first ? { kind: "tuning", since: Date.now() } : reconnecting(null),
     stream: null,
   });
 
@@ -287,10 +388,9 @@ async function start(
       ...(preview ? { preview } : {}),
     });
   } catch (cause) {
-    if (mine === selection)
-      store.setState({
-        phase: { kind: "failed", problem: { kind: "app", error: appError(cause) } },
-      });
+    if (mine === selection) {
+      store.setState({ phase: failed({ kind: "app", error: appError(cause) }) });
+    }
     return;
   }
   if (mine !== selection) {
@@ -316,10 +416,12 @@ async function start(
   }
   if (mine !== selection) return;
   if (failure) {
-    await recover(mine, channel, session, failure, attempt, repair);
+    await recover(mine, channel, session, failure, repair);
     return;
   }
 
+  const playing = engine;
+  recovery = { ...recovery, played: true };
   store.setState({ phase: { kind: "playing", engine: engine.name } });
   void loadStream(mine, session.sessionId);
   // An engine that reads the stream's tracks tells them itself; the main process reads the rest.
@@ -330,26 +432,33 @@ async function start(
   void call("viewing.recordWatch", { commandId: crypto.randomUUID(), channelId: channel.id }).catch(
     () => {},
   );
-  // A stream that played fine gets the full set of reconnect attempts when it breaks later.
-  engine.onFailure((error) => {
-    if (mine === selection) void recover(mine, channel, session, error, 0, repair);
+  playing.onWaiting((waiting) => {
+    if (mine === selection) store.setState({ waiting });
+  });
+  // A stream that breaks is tried again with the reconnects the channel has left: all of them
+  // once it played long enough.
+  playing.onFailure((error) => {
+    if (mine !== selection) return;
+    brokeOff(playing.played());
+    void recover(mine, channel, session, error, repair);
   });
 }
 
-/** Plays a channel on the connected receiver, in place of what it had. */
-async function startOnReceiver(channel: LiveChannel, attempt: number): Promise<void> {
+/**
+ * Plays a channel on the connected receiver, in place of what it had: the channel's first try
+ * there, or the reconnect it is at.
+ */
+async function startOnReceiver(channel: LiveChannel): Promise<void> {
   const mine = ++selection;
+  const first = recovery.reconnects === 0;
   quiet = false;
-  if (attempt === 0) tune(channel);
+  if (first) tune(channel);
   release();
-  onReceiver = { load: null, attempt, started: false };
+  onReceiver = { load: null, started: false, played: 0, since: null };
   store.setState({
     channel,
     stopped: false,
-    phase:
-      attempt === 0
-        ? { kind: "tuning", since: Date.now() }
-        : { kind: "reconnecting", attempt, of: RECONNECT_DELAYS_MS.length },
+    phase: first ? { kind: "tuning", since: Date.now() } : reconnecting(null),
     stream: null,
   });
   try {
@@ -378,10 +487,7 @@ async function startOnReceiver(channel: LiveChannel, attempt: number): Promise<v
     const failure = error.kind === "output" ? error.failure : null;
     if (failure?.kind === "stream") return void recoverOnReceiver(channel, failure.failure);
     store.setState({
-      phase: {
-        kind: "failed",
-        problem: failure ? { kind: "receiver", failure, lost: false } : { kind: "app", error },
-      },
+      phase: failed(failure ? { kind: "receiver", failure, lost: false } : { kind: "app", error }),
     });
   }
 }
@@ -395,14 +501,16 @@ function followReceiver(media: RemoteMedia): void {
   const { channel, phase } = store.getState();
   // A channel has no end: the main process says its stream stopped instead.
   if (!channel || !onReceiver || media.state === "ended") return;
+  // Only the time it says it plays is time played: none it holds the channel paused or buffering.
+  onReceiver.played = playedOnReceiver();
+  onReceiver.since = media.state === "playing" ? Date.now() : null;
   if (phase.kind !== "playing" && media.state === "loading") return;
   if (receiverState(phase) !== media.state) {
     store.setState({ phase: { kind: "playing", engine: "receiver", state: media.state } });
   }
   if (onReceiver.started || media.state !== "playing") return;
   onReceiver.started = true;
-  // A stream that played gets every reconnect attempt when it breaks later.
-  onReceiver.attempt = 0;
+  recovery = { ...recovery, played: true };
   const mine = selection;
   void loadStream(mine, media.sessionId);
   void loadTracks(mine, media.sessionId);
@@ -411,24 +519,32 @@ function followReceiver(media: RemoteMedia): void {
   );
 }
 
+/** How long the receiver has said the channel plays, in milliseconds, up to now. */
+function playedOnReceiver(): number {
+  if (!onReceiver) return 0;
+  return onReceiver.played + (onReceiver.since === null ? 0 : Date.now() - onReceiver.since);
+}
+
 /**
  * What to do about a channel whose stream the provider didn't deliver for the receiver: try
- * again after a delay when the network failed, as for this computer, or give up and say why.
+ * again after a delay when the network failed, with the reconnects the channel has left as for
+ * this computer, or give up and say why.
  */
 async function recoverOnReceiver(channel: LiveChannel, failure: StreamFailure): Promise<void> {
   const mine = selection;
-  const attempt = onReceiver?.attempt ?? 0;
   const problem = classify(failure, { kind: "network", detail: "" });
-  const delay = RECONNECT_DELAYS_MS[attempt];
-  if ((problem.kind !== "network" && problem.kind !== "provider-error") || delay === undefined) {
-    store.setState({ phase: { kind: "failed", problem } });
+  if (onReceiver?.started) {
+    brokeOff(playedOnReceiver());
+    onReceiver.started = false;
+  }
+  const delay = retries(problem) ? nextReconnect() : null;
+  if (delay === null) {
+    store.setState({ phase: failed(problem) });
     return;
   }
-  store.setState({
-    phase: { kind: "reconnecting", attempt: attempt + 1, of: RECONNECT_DELAYS_MS.length },
-  });
   await new Promise((resolve) => setTimeout(resolve, delay));
-  if (mine === selection && outputs.remote()) await startOnReceiver(channel, attempt + 1);
+  // Not once the viewer asked for this computer: the receiver is being let go of.
+  if (mine === selection && outputs.remote() && !returning) await startOnReceiver(channel);
 }
 
 /** Follows where playback goes: to a receiver that connected, back from one, and its word meanwhile. */
@@ -437,7 +553,7 @@ function outputChanged(status: OutputStatus, before: OutputStatus): void {
   const { channel, phase } = store.getState();
   if (output.kind === "receiver" && before.output.kind !== "receiver") {
     // The channel being watched moves to the receiver. A preview only makes way.
-    if (channel && !quiet && phase.kind !== "idle") void startOnReceiver(channel, 0);
+    if (channel && !quiet && phase.kind !== "idle") void begin(channel);
     else if (!onReceiver) player.suspend();
     return;
   }
@@ -457,10 +573,7 @@ function outputChanged(status: OutputStatus, before: OutputStatus): void {
     selection++;
     onReceiver.load = null;
     store.setState({
-      phase: {
-        kind: "failed",
-        problem: { kind: "receiver", failure: output.failure, lost: true },
-      },
+      phase: failed({ kind: "receiver", failure: output.failure, lost: true }),
     });
     return;
   }
@@ -472,9 +585,7 @@ function outputChanged(status: OutputStatus, before: OutputStatus): void {
   const { failure } = output;
   if (failure?.kind === "stream") void recoverOnReceiver(channel, failure.failure);
   else if (failure) {
-    store.setState({
-      phase: { kind: "failed", problem: { kind: "receiver", failure, lost: false } },
-    });
+    store.setState({ phase: failed({ kind: "receiver", failure, lost: false }) });
   } else {
     selection++;
     store.setState({ phase: { kind: "idle" }, stopped: true });
@@ -495,63 +606,70 @@ async function startFailure(engine: Engine): Promise<EngineError | null> {
 
 /**
  * Decides what to do about a failed or broken stream: reconnect after a delay when the network
- * failed, try once more with the picture repaired when the player could not decode it, or give up.
+ * failed, while the channel has reconnects left, try once more with the picture repaired when the
+ * player could not decode it, or give up. A channel that gives up keeps what its session says of
+ * the streams tried, which is asked for before the session closes.
  */
 async function recover(
   mine: number,
   channel: LiveChannel,
   session: StreamSession,
   error: EngineError,
-  attempt: number,
   repaired: boolean,
 ): Promise<void> {
-  const upstream = await call("playback.failure", { sessionId: session.sessionId }).catch(
-    () => null,
-  );
+  const [upstream, stream] = await Promise.all([
+    call("playback.failure", { sessionId: session.sessionId }).catch(() => null),
+    call("playback.playing", { sessionId: session.sessionId }).catch(() => null),
+  ]);
   if (mine !== selection) return;
   const problem = classify(upstream, error);
   if (quiet) {
     release();
-    store.setState({ phase: { kind: "failed", problem } });
+    store.setState({ phase: failed(problem), stream });
     return;
   }
   if (problem.kind === "unsupported" && upstream === null && !repaired) {
     release();
-    await start(channel, attempt, true);
+    await start(channel, true);
     return;
   }
-  const delay = RECONNECT_DELAYS_MS[attempt];
-  const retryable = problem.kind === "network" || problem.kind === "provider-error";
-
-  if (!retryable || delay === undefined) {
-    release();
-    store.setState({ phase: { kind: "failed", problem } });
-    return;
-  }
+  const delay = retries(problem) ? nextReconnect() : null;
   release();
-  store.setState({
-    phase: { kind: "reconnecting", attempt: attempt + 1, of: RECONNECT_DELAYS_MS.length },
-  });
+  if (delay === null) {
+    store.setState({ phase: failed(problem), stream });
+    return;
+  }
   await new Promise((resolve) => setTimeout(resolve, delay));
-  if (mine === selection) await start(channel, attempt + 1, repaired);
+  if (mine !== selection) return;
+  // Nobody listens any more, as after leaving Watch: what is left is a preview, which stays
+  // failed instead of opening the stream again.
+  if (quiet) store.setState({ phase: failed(problem), stream });
+  else await start(channel, repaired);
 }
 
+/** Whether trying again by itself can help: the network failed, or the provider did. */
+function retries(problem: PlaybackProblem): boolean {
+  return problem.kind === "network" || problem.kind === "provider-error";
+}
+
+/**
+ * The kind of thing that went wrong, from what the provider answered or else from how the engine
+ * failed. What either said of it in words stays behind: those can name an address.
+ */
 function classify(upstream: StreamFailure | null, error: EngineError): PlaybackProblem {
   switch (upstream?.kind) {
     case "unavailable":
-      return { kind: "unavailable" };
     case "refused":
-      return { kind: "refused" };
     case "provider-error":
-      return { kind: "provider-error", status: upstream.status };
+      return { kind: upstream.kind, status: upstream.status };
     case "network":
-      return { kind: "network", detail: upstream.detail };
+      return { kind: "network", unanswered: true };
     case "unsupported":
-      return { kind: "unsupported", detail: upstream.detail };
+      return { kind: "unsupported" };
     case undefined:
       return error.kind === "network"
-        ? { kind: "network", detail: error.detail }
-        : { kind: "unsupported", detail: error.detail };
+        ? { kind: "network", unanswered: false }
+        : { kind: "unsupported" };
   }
 }
 
@@ -730,7 +848,7 @@ export const player = {
     liveStarts?.();
     cancelZap();
     store.setState({ stopped: false });
-    void start(channel, 0);
+    void begin(channel);
   },
 
   /**
@@ -757,7 +875,7 @@ export const player = {
     if (outputs.receiver()) return;
     if (stopped || (current?.id === channel.id && phase.kind !== "idle")) return;
     cancelZap();
-    void start(channel, 0, false, true);
+    void begin(channel, true);
   },
 
   /**
@@ -799,7 +917,7 @@ export const player = {
     store.setState({ channel, phase: { kind: "tuning", since: Date.now() }, stopped: false });
     zapTimer = setTimeout(() => {
       zapTimer = null;
-      void start(channel, 0);
+      void begin(channel);
     }, ZAP_SETTLE_MS);
   },
 
@@ -809,10 +927,10 @@ export const player = {
     if (previous) player.play(previous);
   },
 
-  /** Tries the current channel again from scratch. */
+  /** Tries the current channel again from scratch, in the quality it had, with every reconnect. */
   retry(): void {
     const { channel } = store.getState();
-    if (channel) void start(channel, 0);
+    if (channel) void begin(channel);
   },
 
   /** Opens the current channel again after its quality was chosen, forgetting a fallback. */
@@ -876,7 +994,8 @@ export const player = {
     if (onReceiver) return;
     selection++;
     tune(channel);
-    onReceiver = { load: media.generation, attempt: 0, started: false };
+    recovery = UNTRIED;
+    onReceiver = { load: media.generation, started: false, played: 0, since: null };
     store.setState({ channel, stopped: false, phase: { kind: "tuning", since: media.at } });
     followReceiver(media);
   },
@@ -947,7 +1066,7 @@ export const player = {
     }
     const own = current?.engine.tracks;
     if (own) own.setAudio(id);
-    else void start(channel, 0);
+    else void begin(channel);
   },
 
   /** Shows a subtitle track, or none, and remembers the choice. A receiver shows none of a channel's. */

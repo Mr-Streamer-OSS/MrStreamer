@@ -13,6 +13,8 @@ const LIVE_KEEP_BUFFER_S = 3;
 const START_TIMEOUT_MS = 20_000;
 /** A clock that stands still this long after playback started counts as a broken stream. */
 const STALL_TIMEOUT_MS = 15_000;
+/** A clock that stands still this long while it should move is worth a word to the viewer. */
+const WAITING_MS = 3000;
 /** This much buffered media without the clock starting means the stream cannot be decoded. */
 const UNPLAYABLE_BUFFER_S = 4;
 /**
@@ -53,6 +55,16 @@ export interface Engine {
   readonly started: Promise<void>;
   /** Called at most once, when playback breaks after it started. */
   onFailure(listener: (error: EngineError) => void): void;
+  /**
+   * How long the stream has played so far, in milliseconds: only time its clock moved, so none
+   * spent paused or waiting for data.
+   */
+  played(): number;
+  /**
+   * Hears when the clock has stood still for a few seconds though the stream should play, and
+   * when it moves again. That is well before a standstill counts as a failure.
+   */
+  onWaiting(listener: (waiting: boolean) => void): void;
   /**
    * Hears each private data packet of the stream, as teletext, DVB subtitles and copied captions
    * travel, with its time on the element's clock in seconds. Only MPEG-TS streams have them.
@@ -246,6 +258,9 @@ function lifecycle(video: HTMLVideoElement, teardown: () => void) {
   let destroyed = false;
   let failureListener: ((error: EngineError) => void) | null = null;
   let pendingFailure: EngineError | null = null;
+  let waitingListener: ((waiting: boolean) => void) | null = null;
+  let waiting = false;
+  let played = 0;
 
   const { promise: started, resolve, reject } = Promise.withResolvers<void>();
   started.catch(() => {});
@@ -253,13 +268,19 @@ function lifecycle(video: HTMLVideoElement, teardown: () => void) {
   const openedAt = Date.now();
   let lastTime = video.currentTime;
   let lastProgressAt = openedAt;
+  let lastCheckAt = openedAt;
 
   const watchdog = setInterval(() => {
     const now = Date.now();
+    const sinceCheck = now - lastCheckAt;
+    lastCheckAt = now;
     if (video.currentTime > lastTime + 0.05) {
       if (!settled && video.currentTime - lastTime > 0.25) begin();
+      // A jump forward to catch up with live moves the clock further than the stream played.
+      played += Math.min((video.currentTime - lastTime) * 1000, sinceCheck);
       lastTime = video.currentTime;
       lastProgressAt = now;
+      wait(false);
       return;
     }
     if (!settled) {
@@ -277,8 +298,10 @@ function lifecycle(video: HTMLVideoElement, teardown: () => void) {
     } else if (video.paused) {
       // Time paused isn't time stalled.
       lastProgressAt = now;
+      wait(false);
     } else {
       const stalled = now - lastProgressAt;
+      if (stalled >= WAITING_MS) wait(true);
       if (stalled > BROKEN_TIMING_STALL_MS && bufferedAhead(video) >= UNPLAYABLE_BUFFER_S) {
         fail({ kind: "media", detail: "The stream arrives, but its timing is broken." });
       } else if (stalled > STALL_TIMEOUT_MS) {
@@ -291,6 +314,12 @@ function lifecycle(video: HTMLVideoElement, teardown: () => void) {
     if (settled || finished) return;
     settled = true;
     resolve();
+  }
+
+  function wait(still: boolean): void {
+    if (waiting === still) return;
+    waiting = still;
+    waitingListener?.(still);
   }
 
   function fail(error: EngineError): void {
@@ -332,6 +361,10 @@ function lifecycle(video: HTMLVideoElement, teardown: () => void) {
           listener(pendingFailure);
           pendingFailure = null;
         }
+      },
+      played: (): number => played,
+      onWaiting(listener: (waiting: boolean) => void): void {
+        waitingListener = listener;
       },
       destroy(): void {
         if (destroyed) return;

@@ -31,8 +31,13 @@ import { WINDOW_BAR } from "../../../../shared/window-bar.ts";
 import { useTitleSession } from "../../player/media-session.ts";
 import { outputs, useOutput, where } from "../../player/output.ts";
 import { Picture } from "../../player/Picture.tsx";
-import { player, type PlaybackProblem } from "../../player/player.ts";
-import { titlePlayer, useTitlePlayer, type TitlePlayerState } from "../../player/title-player.ts";
+import { player } from "../../player/player.ts";
+import {
+  titlePlayer,
+  useTitlePlayer,
+  type TitlePlayerState,
+  type TitleProblem,
+} from "../../player/title-player.ts";
 import { Flash, flash, flashNote } from "../watch/Flash.tsx";
 import { useFullscreen, useWake } from "../watch/layout.ts";
 import { MINI_NEEDS_PICTURE, MiniControls, MiniPlayerButton } from "../watch/MiniPlayer.tsx";
@@ -646,7 +651,7 @@ function miniStatus(phase: TitlePlayerState["phase"], countdown: number | null):
   }
 }
 
-function problemTitle(problem: PlaybackProblem): string {
+function problemTitle(problem: TitleProblem): string {
   switch (problem.kind) {
     case "unavailable":
       return "Not available";
@@ -666,7 +671,7 @@ function problemTitle(problem: PlaybackProblem): string {
 }
 
 /** Why it doesn't play, of a "title" or an "episode". */
-function problemBody(problem: PlaybackProblem, what = "title"): string {
+function problemBody(problem: TitleProblem, what = "title"): string {
   switch (problem.kind) {
     case "unavailable":
       return `The provider has no file for this ${what} right now.`;

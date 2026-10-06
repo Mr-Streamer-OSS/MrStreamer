@@ -6,7 +6,10 @@
 //   channel, digits jump to a number, F is full screen, M mutes, C turns subtitles on or off, G
 //   and H move them earlier or later, I shows the details, S stars, Q opens the quality menu of a
 //   channel with several streams, P shrinks the window into the mini player and back, O opens the
-//   chooser of where it plays. While a menu is open, keys are its own.
+//   chooser of where it plays, R tries a failed channel again. While a menu is open, keys are its
+//   own. Tab reaches what a failed channel offers, and Enter there presses it.
+// A picture that stands still for a few seconds while it should play says "Waiting for data" at
+// the top right until it moves again or the channel reconnects.
 // While a receiver on the network plays the channel, the controls stay: there is no picture to
 // clear. Leaving Watch leaves the receiver playing; only Stop and Play here end it.
 // In the mini player the picture fills the small window; opening the list puts the window back.
@@ -36,14 +39,15 @@ import {
   type ListEntry,
 } from "../live/lists.ts";
 import { ChannelOverlay } from "./ChannelOverlay.tsx";
-import { Flash, flash } from "./Flash.tsx";
+import { Flash, flash, flashNote } from "./Flash.tsx";
 import { useFullscreen, useWake } from "./layout.ts";
 import { MINI_NEEDS_PICTURE, MiniControls } from "./MiniPlayer.tsx";
 import { NowPlayingBar } from "./NowPlaying.tsx";
 import { numberEntry, NumberEntry } from "./NumberEntry.tsx";
 import { ConnectingNote, openChooser } from "./Output.tsx";
 import { nudgeSubtitles } from "./PlaybackMenu.tsx";
-import { PlaybackState, problemTitle } from "./PlaybackState.tsx";
+import { PlaybackAnnouncement, PlaybackState, retryFailed } from "./PlaybackState.tsx";
+import { failureTitle, reconnectingLine } from "./problems.ts";
 import type { TrackMenu } from "./TrackMenus.tsx";
 
 /** Controls fade out after this long without input. */
@@ -74,7 +78,14 @@ export function WatchScreen() {
   const remote = useOutput(
     (state) => state.status.output.kind === "receiver" || state.status.output.kind === "lost",
   );
+  const waiting = usePlayer((state) => state.waiting && state.phase.kind === "playing");
   useLiveSession(channel);
+
+  // A standing note, with nothing that moves: the picture itself says when it is over.
+  useEffect(() => {
+    flashNote(waiting ? "Waiting for data" : null);
+    return () => flashNote(null);
+  }, [waiting]);
 
   // The mini player is a small picture, and a receiver leaves none here.
   useEffect(() => {
@@ -105,6 +116,12 @@ export function WatchScreen() {
     useUi.setState({ channelsOpen: true });
   };
   const closeChannels = () => useUi.setState({ channelsOpen: false });
+  const openQuality = () => {
+    // The menu opens over the full window's controls.
+    if (miniPlayer.on()) void miniPlayer.leave();
+    wake();
+    setMenu("quality");
+  };
   const choose = (picked: ChannelList) => {
     showList(picked);
     setPicking(false);
@@ -128,6 +145,7 @@ export function WatchScreen() {
     switchBy,
     openChannels,
     closeChannels,
+    openQuality,
     pick,
     toggleFullscreen,
     toggleFavourite,
@@ -145,6 +163,7 @@ export function WatchScreen() {
     switchBy,
     openChannels,
     closeChannels,
+    openQuality,
     pick,
     toggleFullscreen,
     toggleFavourite,
@@ -164,10 +183,20 @@ export function WatchScreen() {
       const now = latest.current;
       // The menu's own keys: Escape closes it, and focus goes back to its button.
       if (now.menu) return;
+      // What a failed channel offers takes Enter itself once Tab reached it. Everywhere else
+      // Enter opens the list, also with a control of the bar in focus.
+      if (
+        event.key === "Enter" &&
+        event.target instanceof HTMLButtonElement &&
+        event.target.closest("[data-playback-state]")
+      ) {
+        return;
+      }
       const {
         switchBy,
         openChannels,
         closeChannels,
+        openQuality,
         pick,
         toggleFullscreen,
         toggleFavourite,
@@ -269,10 +298,12 @@ export function WatchScreen() {
           break;
         case "q":
           if ((now.channel?.variants.length ?? 0) < 2) return;
-          // The menu opens over the full window's controls.
-          if (miniPlayer.on()) void miniPlayer.leave();
-          wake();
-          setMenu("quality");
+          openQuality();
+          break;
+        case "r":
+        case "R":
+          // Only a failed channel that Retry can help: nothing while it plays or reconnects.
+          if (event.repeat || !retryFailed()) return;
           break;
         default:
           return;
@@ -317,9 +348,9 @@ export function WatchScreen() {
             phase.kind === "playing"
               ? null
               : phase.kind === "reconnecting"
-                ? "Connection lost"
+                ? reconnectingLine(phase)
                 : phase.kind === "failed"
-                  ? problemTitle(phase.problem, channel)
+                  ? failureTitle(phase, channel)
                   : channel.title
           }
           onClose={closeWatch}
@@ -341,6 +372,7 @@ export function WatchScreen() {
         </MiniControls>
         <NumberEntry onChannel={(target) => player.play(target)} />
         <Flash />
+        <PlaybackAnnouncement channel={channel} />
       </div>
     );
   }
@@ -363,11 +395,16 @@ export function WatchScreen() {
         onClick={() => (channelsOpen ? closeChannels() : wake())}
         onDoubleClick={toggleFullscreen}
       />
-      <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+      <div
+        data-playback-state=""
+        className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center"
+      >
         <PlaybackState
           channel={channel}
           onWatch={() => player.play(channel)}
           onNext={() => switchBy(1)}
+          onQuality={openQuality}
+          onChannels={openChannels}
         />
       </div>
       {!fullscreen && (
@@ -410,6 +447,7 @@ export function WatchScreen() {
       <NumberEntry onChannel={(target) => player.play(target)} />
       <Flash />
       <ConnectingNote />
+      <PlaybackAnnouncement channel={channel} />
     </div>
   );
 }

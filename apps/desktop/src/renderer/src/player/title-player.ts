@@ -22,8 +22,9 @@
 // that takes another's place, or is reached again after its connection broke, has nothing of the
 // title: it is opened and loaded there afresh, where it was, paused when it was.
 import { createStore, useStore } from "zustand";
+import type { AppError } from "@mrstreamer/contracts/errors";
 import type { Episode, SeriesDetails, TitleRef } from "@mrstreamer/contracts/ondemand";
-import type { OutputStatus, RemoteMedia } from "@mrstreamer/contracts/output";
+import type { OutputFailure, OutputStatus, RemoteMedia } from "@mrstreamer/contracts/output";
 import type {
   AudioTrack,
   StreamFailure,
@@ -40,7 +41,7 @@ import { appError } from "../lib/errors.ts";
 import { call } from "../lib/ipc.ts";
 import { titleDecoders } from "./decoders.ts";
 import type { EngineError } from "./engine.ts";
-import { onLiveStart, player, rememberSubtitles, type PlaybackProblem } from "./player.ts";
+import { onLiveStart, player, rememberSubtitles } from "./player.ts";
 import { clearSubtitles, setSubtitleDelay } from "./subtitles.ts";
 import { outputs, positionOf } from "./output.ts";
 import { titleEngine, type SubtitleStatus, type TitleEngine } from "./title-engine.ts";
@@ -98,6 +99,25 @@ export function episodeNow(series: SeriesDetails, episode: Episode): NowPlaying 
   };
 }
 
+/** Why a movie or episode doesn't play. */
+export type TitleProblem =
+  /** The provider has no file for it right now. */
+  | { readonly kind: "unavailable" }
+  /** The provider refused the file. Its status names no cause, and isn't kept. */
+  | { readonly kind: "refused" }
+  /** The file uses a format or codec no engine here can play. */
+  | { readonly kind: "unsupported"; readonly detail: string }
+  /** Data stopped arriving and reconnecting did not help. */
+  | { readonly kind: "network"; readonly detail: string }
+  | { readonly kind: "provider-error"; readonly status: number }
+  /** The session could not be opened at all. */
+  | { readonly kind: "app"; readonly error: AppError }
+  /**
+   * A receiver on the network doesn't play it. `lost` when the receiver itself is gone, and has
+   * to be connected to again.
+   */
+  | { readonly kind: "receiver"; readonly failure: OutputFailure; readonly lost: boolean };
+
 type TitlePhase =
   | { readonly kind: "idle" }
   /** Reading which tracks the file holds. */
@@ -108,7 +128,7 @@ type TitlePhase =
   | { readonly kind: "paused" }
   | { readonly kind: "reconnecting"; readonly attempt: number; readonly of: number }
   | { readonly kind: "ended" }
-  | { readonly kind: "failed"; readonly problem: PlaybackProblem };
+  | { readonly kind: "failed"; readonly problem: TitleProblem };
 
 export interface TitlePlayerState {
   readonly now: NowPlaying | null;
@@ -444,7 +464,7 @@ async function recover(
   if (mine === generation) await run(position, attempt + 1, paused);
 }
 
-function problemOf(upstream: StreamFailure | null, error: EngineError): PlaybackProblem {
+function problemOf(upstream: StreamFailure | null, error: EngineError): TitleProblem {
   switch (upstream?.kind) {
     case "unavailable":
       return { kind: "unavailable" };
@@ -476,7 +496,7 @@ function stopTicking(): void {
 }
 
 /** What didn't open or load on the receiver, as the view says it. */
-function receiverProblem(cause: unknown): PlaybackProblem {
+function receiverProblem(cause: unknown): TitleProblem {
   const error = appError(cause);
   if (error.kind === "output") {
     return error.failure.kind === "stream"

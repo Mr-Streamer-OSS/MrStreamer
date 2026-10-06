@@ -1,6 +1,7 @@
 // The quality button beside Sound and CC, on a channel with several streams: it says what plays,
 // and Q opens it. Automatic starts at the preferred quality and passes a stream that doesn't
-// start; a quality picked here is remembered for the channel and never passed.
+// start; a quality picked here is remembered for the channel and never passed. Each row says what
+// the channel's last try got from its stream, where it got anything.
 import type { ChannelVariant, LiveChannel } from "@mrstreamer/contracts/library";
 import { Button } from "../../components/ui/button.tsx";
 import { qualityChoices, qualityName, shortQuality } from "../../lib/quality.ts";
@@ -12,6 +13,7 @@ export function QualityMenu({
   automatic,
   playing,
   height,
+  notes,
   open,
   onOpenChange,
   onChoose,
@@ -25,6 +27,8 @@ export function QualityMenu({
   playing: ChannelVariant | undefined;
   /** The picture's height as decoded, once known. */
   height: number | null;
+  /** What the channel's last try says of its streams, by stream id: "No stream · 404". */
+  notes: ReadonlyMap<string, string>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onChoose: (variantId: string | null) => void;
@@ -50,6 +54,7 @@ export function QualityMenu({
         <Choice
           key={variant.id}
           chosen={variant.id === chosen?.id}
+          note={notes.get(variant.id) ?? null}
           onChoose={() => pick(variant.id)}
         >
           {name}

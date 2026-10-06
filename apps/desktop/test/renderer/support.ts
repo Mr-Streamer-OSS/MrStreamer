@@ -99,6 +99,9 @@ class StandInMediaSource extends EventTarget {
   endOfStream(): void {}
 }
 Object.assign(globalThis, { MediaSource: StandInMediaSource });
+// Nor a MediaError, whose codes the player reads when the element reports an error. A test sends
+// that `error` event itself, for a stream that stops.
+Object.assign(globalThis, { MediaError: { MEDIA_ERR_SRC_NOT_SUPPORTED: 4 } });
 // The element gets an address for it, as it would for a real one.
 const objectUrl = URL.createObjectURL.bind(URL);
 URL.createObjectURL = (object) =>
