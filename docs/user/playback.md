@@ -81,9 +81,18 @@ A movie or episode starts later on a TV than on your computer, and so does a ski
 
 Mr. Streamer tells you why:
 
-- **Channel unavailable**: the provider has no stream for that channel right now. Try again later or pick another channel.
-- **Stream refused**: the provider turned the stream down, usually because another device uses your subscription's connection. On a public playlist it usually means the channel isn't offered in your country.
-- **Couldn't reconnect**: the stream stopped arriving and reconnecting didn't help, often a network problem.
-- **Can't play this channel** or **Can't play this title**: it uses a format Mr. Streamer can't play or convert. Please [report it](https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose) with its name and the details shown.
+For a channel, a small line under the message adds what Mr. Streamer observed: the provider's HTTP status, the qualities it tried, how often it reconnected and the time. Your provider's address and login never show.
+
+- **No stream right now**: the provider lists the channel and answered 404 or 410 for its stream. Try again later or pick another channel. With a quality picked for the channel it reads **No Full HD stream**, and your pick stays.
+- **Refused by the provider**: the provider turned the stream down, with a status such as 401 or 403. The status doesn't say why. On a subscription, check whether another device is watching, since many allow one connection. On a public playlist, some channels only play in certain countries. Mr. Streamer stops at a refusal instead of trying more streams against it, and offers no other quality.
+- **Provider is limiting requests**: the provider answered 429. Wait a moment before trying again.
+- **Provider error**: the provider answered with another error, such as 502 or 503, instead of the stream.
+- **No answer from the provider**: the provider didn't answer, or sent nothing, also after four reconnects.
+- **No picture arrived**: the provider answered and nothing with a picture or sound came, also after four reconnects.
+- **Lost the stream**: the channel played, stopped arriving, and four reconnects didn't bring it back. Often a network problem.
+- **Keeps dropping**: the channel came back and broke off again within 30 seconds each time, until its four reconnects were used. Another quality may hold better.
+- **Can't play this stream**: the stream arrived and Mr. Streamer couldn't play or convert it, also after one try with the picture re-encoded. Please [report it](https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose) with the channel's name.
+- **Login not accepted**: the provider rejected your username or password when the channel opened. **Update login** opens the login form.
+- **Can't play this title**: the file uses a format Mr. Streamer can't play or convert. Please [report it](https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose) with its name and the details shown.
 - **Not available**: the provider has no file for that movie or episode right now; some providers list titles whose files are gone.
 - **… didn't answer**, **… connection lost**, **… got no stream** or **… can't play this**, with your TV's name: see [Playing on a TV](troubleshooting.md#playing-on-a-tv).

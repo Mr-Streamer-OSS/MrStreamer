@@ -8,8 +8,9 @@
 // A channel moves there when a receiver connects, Stop keeps the receiver, and no page previews
 // meanwhile. Watch says what the receiver last confirmed of a channel, paused and buffering too,
 // as the TV's own remote can pause what the app can't; only a channel the receiver said plays
-// counts as watched and gets every attempt again. The bar at the foot of the pages says what plays
-// where.
+// counts as watched, and only one it said plays for half a minute gets every reconnect again, as
+// on this computer. What the provider refused the receiver reads as it does here. The bar at the
+// foot of the pages says what plays where.
 import { ipc } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement, type FunctionComponent } from "react";
@@ -595,6 +596,21 @@ describe("a channel with a receiver connected", () => {
   const lost = (receiver: Receiver) =>
     status({ kind: "lost", receiver, failure: { kind: "unreachable" } });
 
+  /** The provider's stream stopped arriving for the receiver. */
+  const noStream: OutputFailure = {
+    kind: "stream",
+    failure: { kind: "network", detail: "No data arrived." },
+  };
+
+  /** The receiver takes the channel again as load `generation` and says it plays. */
+  async function playsAgain(generation: number): Promise<void> {
+    const loaded = ipc.hold("output.playChannel");
+    // The longest wait before a reconnect.
+    await wait(8000);
+    await act(async () => loaded.resolve(said(generation, item, "loading")));
+    await emit(connected(said(generation, item, "playing")));
+  }
+
   it("plays there, and no page previews another meanwhile", async () => {
     await playing();
 
@@ -702,10 +718,6 @@ describe("a channel with a receiver connected", () => {
   });
 
   it("gives up after four more tries when the receiver buffers and never gets its stream", async () => {
-    const noStream: OutputFailure = {
-      kind: "stream",
-      failure: { kind: "network", detail: "No data arrived." },
-    };
     let loaded = ipc.hold("output.playChannel");
     player.play(channel("a"));
     await wait(0);
@@ -724,10 +736,71 @@ describe("a channel with a receiver connected", () => {
       expect(ipc.argsOf("output.playChannel")).toHaveLength(tries + 1);
     }
 
-    expect(text()).toContain("Couldn't reconnect");
+    expect(text()).toContain("No answer from the provider");
     await wait(60_000);
     expect(ipc.argsOf("output.playChannel")).toHaveLength(5);
     expect(ipc.argsOf("viewing.recordWatch")).toEqual([]);
+  });
+
+  it("is tried again four times at most while the receiver only gets it back for a moment", async () => {
+    await playing();
+    await show(WatchScreen);
+
+    for (const tries of [1, 2, 3, 4]) {
+      await wait(5000);
+      await emit(connected(null, noStream));
+      expect(text()).toContain(`attempt ${tries} of 4`);
+      await playsAgain(tries + 1);
+      expect(text()).toContain("Playing on Living Room TV");
+    }
+    await wait(5000);
+    await emit(connected(null, noStream));
+
+    expect(text()).toContain("Keeps dropping");
+    expect(text()).toContain("Play here");
+    await wait(60_000);
+    expect(ipc.argsOf("output.playChannel")).toHaveLength(5);
+  });
+
+  it("has every reconnect again once the receiver said it played for half a minute", async () => {
+    await playing();
+    await show(WatchScreen);
+    await wait(5000);
+    await emit(connected(null, noStream));
+    await playsAgain(2);
+
+    // Held paused with the TV's remote meanwhile, which is no time played: 25 seconds in 65.
+    await wait(10_000);
+    await emit(connected(said(2, item, "paused")));
+    await wait(40_000);
+    await emit(connected(said(2, item, "playing")));
+    await wait(15_000);
+    await emit(connected(null, noStream));
+    expect(text()).toContain("attempt 2 of 4");
+
+    await playsAgain(3);
+    await wait(31_000);
+    await emit(connected(null, noStream));
+    expect(text()).toContain("attempt 1 of 4");
+  });
+
+  it("says what the provider refused as it does here, in the bar and in Watch", async () => {
+    const refused: OutputFailure = { kind: "stream", failure: { kind: "refused", status: 403 } };
+    await playing();
+    await show(ReceiverBar);
+    await emit(connected(null, refused));
+    expect(text()).toContain("a · Refused by the provider · HTTP 403");
+
+    await unmount();
+    await show(WatchScreen);
+    expect(text()).toContain("Refused by the provider");
+    expect(text()).toContain("HTTP 403");
+    expect(text()).toContain("Play here");
+    // A refusal isn't tried again by itself: Retry asks the receiver for the same channel.
+    await wait(60_000);
+    expect(ipc.argsOf("output.playChannel")).toHaveLength(1);
+    await press("Retry");
+    expect(ipc.argsOf("output.playChannel").at(-1)).toMatchObject({ channelId: "a" });
   });
 
   it("keeps the lost TV's name while Try again reaches it, and loads there once it answers", async () => {

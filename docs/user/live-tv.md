@@ -45,11 +45,24 @@ The languages you pick carry over to other channels, and to movies and series. A
 
 ### Quality
 
-Channels start in Full HD, or the nearest quality the channel has, lower first. Change that in Settings > General > Live TV. If your provider has no stream for a quality right now, or doesn't answer, Automatic tries the next, at most three, one after another, and the line under the programme says so: "Full HD didn't start, playing HD". If the provider refuses the stream, which usually means another device is using your connection, it stops there.
+Channels start in Full HD, or the nearest quality the channel has, lower first. Change that in Settings > General > Live TV. If your provider has no stream for a quality right now, or doesn't answer, Automatic tries the next, at most three, one after another, and the line under the programme says so: "Full HD didn't start, playing HD". If the provider refuses the stream, Automatic stops there instead of trying more streams against a refusal. The status doesn't say why, so Mr. Streamer can't tell whether another quality would play.
 
-Pick a quality in the menu and that channel keeps it. When it doesn't start, Mr. Streamer says so and offers another instead of switching on its own. **Use Automatic** in the menu, or **Reset** in Settings for every channel, goes back to Automatic.
+Pick a quality in the menu and that channel keeps it. When it doesn't start, Mr. Streamer says why and offers another instead of switching on its own. **Use Automatic** in the menu, or **Reset** in Settings for every channel, goes back to Automatic.
+
+After a channel fell back or failed, the menu says what became of each quality on that try: "No stream · 404", "Refused · 403", "Error · 503", "No data", "No picture", "Can't play", "Playing" or "Not tried". The number is the provider's HTTP status.
 
 The quality is the word your provider puts in the channel's name. The resolution beside it is what the picture actually is. A channel whose name gives no quality says "Not labelled".
+
+### When a channel doesn't play
+
+The middle of the picture says what went wrong, with a small line of what Mr. Streamer observed: the provider's HTTP status, the qualities it tried, how often it reconnected and the time. [What plays](playback.md#when-something-wont-play) lists each message.
+
+- **Retry**, or R, opens the same channel again in the quality it had.
+- **Quality** opens the quality menu. Nothing starts until you pick one.
+- **Channels** opens the list. **Next channel** takes Quality's place when the channel has no quality left to try.
+- A refusal offers Retry and Channels only, and Mr. Streamer never changes channel by itself.
+
+When the picture stands still for three seconds, "Waiting for data" shows at the top right until it moves again. When data stays away for fifteen seconds, or the provider ends the stream, the channel reconnects: up to four times, after 1, 2, 4 and 8 seconds, and **Stop** ends that. A channel that comes back and breaks off again within 30 seconds gets no extra tries, so a stream that keeps dropping ends with "Keeps dropping" instead of reconnecting for ever. Once it played for 30 seconds, the next break has all four again. The mini player, and the bar at the foot of the pages while [a TV](playback.md#playing-on-a-tv) plays, say the same in a few words.
 
 ## Search
 
@@ -72,5 +85,6 @@ The quality is the word your provider puts in the channel's name. The resolution
 | C                  |                                                                | Subtitles on and off                        |
 | G, H               |                                                                | Subtitles 0.1 s earlier or later            |
 | Q                  |                                                                | The quality menu                            |
+| R                  |                                                                | Retry, once a channel failed                |
 | F, M, I            |                                                                | Full screen, mute, show the details         |
 | P                  |                                                                | Mini player, and back                       |

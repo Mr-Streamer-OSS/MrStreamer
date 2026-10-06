@@ -228,6 +228,7 @@ function Controls({
           automatic={quality.automatic}
           playing={quality.playing}
           height={height}
+          notes={quality.notes}
           open={menu === "quality"}
           onOpenChange={(open) => onMenu(open ? "quality" : null)}
           onChoose={(variantId) => chooseQuality(channel, variantId)}

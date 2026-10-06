@@ -19,6 +19,7 @@ import { player, receiverState, usePlayer } from "../../player/player.ts";
 import { titlePlayer, useTitlePlayer, type NowPlaying } from "../../player/title-player.ts";
 import { adjacentChannel, useListChannels } from "../live/lists.ts";
 import { PlayHere, playHere, receiverProblem } from "./Output.tsx";
+import { failureLine } from "./problems.ts";
 
 /** How tall the bar is: 49 px in the smallest window. */
 const HEIGHT = "3.5rem";
@@ -62,7 +63,7 @@ export function ReceiverBar() {
       {title ? (
         <TitleOn now={title} receiver={receiver} />
       ) : channel ? (
-        <ChannelOn channel={channel} receiver={receiver} />
+        <ChannelOn channel={channel} />
       ) : (
         <>
           <span className="min-w-0 flex-1 truncate text-muted-foreground">
@@ -176,10 +177,10 @@ function TitleOn({ now, receiver }: { now: NowPlaying; receiver: Receiver }) {
 }
 
 /**
- * A channel on the receiver: what's on, what the receiver said of it unless it plays, channel up
- * and down, Stop and Play here.
+ * A channel on the receiver: what's on, what the receiver said of it unless it plays, or why it
+ * doesn't, in the words Watch has for it, channel up and down, Stop and Play here.
  */
-function ChannelOn({ channel, receiver }: { channel: LiveChannel; receiver: Receiver }) {
+function ChannelOn({ channel }: { channel: LiveChannel }) {
   const phase = usePlayer((state) => state.phase);
   const list = useUi((state) => state.list);
   const channels = useListChannels(list).channels;
@@ -189,9 +190,7 @@ function ChannelOn({ channel, receiver }: { channel: LiveChannel; receiver: Rece
   const said = receiverState(phase);
   const state =
     phase.kind === "failed"
-      ? phase.problem.kind === "receiver"
-        ? receiverProblem(phase.problem.failure, phase.problem.lost, receiver, null).title
-        : "Didn't play"
+      ? failureLine(phase, channel)
       : phase.kind === "tuning" || said === "loading"
         ? "Loading"
         : phase.kind === "reconnecting"
