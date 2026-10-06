@@ -244,8 +244,8 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
       },
     ]);
     expect(details.directors).toEqual(["Grace Director"]);
-    // The file's own length stands.
-    expect(details.duration).toBe(6000);
+    // TMDB's 101 minutes, not the provider's 100.
+    expect(details.duration).toBe(6060);
     // Opening it again asks no one.
     await onDemand.details("movie", movie?.id ?? "");
     expect(app.tmdb.aboutRequests()).toBe(1);
@@ -360,8 +360,8 @@ describe("episode details", { timeout: 30_000 }, () => {
       plot: "TMDB's story of Origineel 1x1.",
       stillUrl: "https://image.tmdb.org/t/p/w780/still-90000-1-1.jpg",
       airDate: "2020-01-01",
-      // The file's own length stands.
-      duration: 2700,
+      // TMDB's 50 minutes, not the provider's 45.
+      duration: 3000,
       rating: 8.2,
       cast: [
         {

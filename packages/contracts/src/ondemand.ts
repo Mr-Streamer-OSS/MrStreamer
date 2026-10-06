@@ -121,8 +121,8 @@ export interface Episode {
 
 /**
  * An episode once the viewer opened its season: TMDB's name in the viewer's language, story,
- * still, air date, rating, guest stars and directors where it has them, the provider's
- * otherwise. The file's own length comes first, since it is what plays.
+ * still, air date, runtime, rating, guest stars and directors where it has them, the provider's
+ * otherwise.
  */
 export interface EpisodeDetails extends Episode {
   /** Out of 10 on TMDB; null before enough people voted, or without TMDB. */
