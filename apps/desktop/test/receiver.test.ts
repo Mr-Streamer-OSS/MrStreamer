@@ -133,7 +133,14 @@ async function playlist(url: string) {
 
 /** What ffprobe reads of a segment: its tracks, and when each picture shows on the segments' clock. */
 async function segment(url: string, signal?: AbortSignal) {
-  const response = await fetch(url, signal ? { signal } : {});
+  return segmentOf(await fetch(url, signal ? { signal } : {}));
+}
+
+/**
+ * The same of an answer that came already. ffprobe holds this process up while it reads, and the
+ * proxy with it, so a test that sends requests together reads their answers only afterwards.
+ */
+async function segmentOf(response: Response) {
   const body = Buffer.from(await response.arrayBuffer());
   const probed = spawnSync(
     FFPROBE,
@@ -262,16 +269,22 @@ describe.skipIf(!hasTools)("a movie for a receiver", () => {
   });
 
   it("answers requests for segments far apart at once without a second reader", async () => {
-    const { provider, load } = await receiver();
-    const { video } = await load(MATROSKA, "title-receiver.mkv");
+    const { provider, playback, load } = await receiver();
+    const { opened, video } = await load(MATROSKA, "title-receiver.mkv");
+    const asked = () => playback.receiverRequests(opened.sessionId);
 
     // A receiver that skips twice before the first answer came, and asks for the next one too.
-    const answers = await Promise.all(
-      [1, 6, 4, 5].map((index) =>
-        segment(video.segments[index]!.url).then((made) => [index, made] as const),
-      ),
-    );
-    for (const [index, made] of answers) {
+    // The proxy takes where the receiver is from the request that reached it last, and requests
+    // sent together, each on a connection of its own, reach it in any order. So each is sent as
+    // soon as the proxy has counted the one before, and no answer is read until all four are in.
+    const answers = [];
+    for (const index of [1, 6, 4, 5]) {
+      const before = (await asked()) ?? 0;
+      answers.push(fetch(video.segments[index]!.url).then((answer) => [index, answer] as const));
+      await vi.waitFor(async () => expect(await asked()).toBe(before + 1), { interval: 1 });
+    }
+    for (const [index, answer] of await Promise.all(answers)) {
+      const made = await segmentOf(answer);
       // Where it went last, and the segment after, play. One it left may get nothing.
       if (index === 4 || index === 5) expect(made.status, `segment ${index}`).toBe(200);
       else expect([200, 503], `segment ${index}`).toContain(made.status);
