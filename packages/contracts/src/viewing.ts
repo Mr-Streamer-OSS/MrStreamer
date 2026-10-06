@@ -16,7 +16,7 @@ export const CONTINUE_LIMIT = 20;
 export const CONTINUE_OFFERED = 100;
 
 export interface Viewing {
-  /** Channel ids in the order they were added. */
+  /** Channel ids in the order they were added, or the order the viewer gave them since. */
   readonly favourites: readonly string[];
   /** Channel ids, most recently watched first, at most `RECENT_LIMIT`. */
   readonly recent: readonly string[];
@@ -27,6 +27,23 @@ export interface Viewing {
   readonly continueWatching: readonly TitleProgress[];
   /** How far the record has come for this account: a later change has a higher number. */
   readonly sequence: number;
+}
+
+/**
+ * A new order for a subscription's favourites, from the list it was arranged in. The record
+ * takes it only while that list still holds, so an order made from an older one never lands on
+ * favourites changed since, nor on another subscription's.
+ */
+export interface FavouriteOrder {
+  /** The subscription the favourites were read from, by `SubscriptionSummary.id`. */
+  readonly subscription: string;
+  /** Its favourites as `Viewing.favourites` gave them: every one, in order. */
+  readonly original: readonly string[];
+  /**
+   * Those of them the viewer arranged, in the order wanted. The rest, channels the lists don't
+   * show or the provider no longer lists, keep their places.
+   */
+  readonly order: readonly string[];
 }
 
 /** How far a movie or an episode got. */

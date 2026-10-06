@@ -51,6 +51,8 @@ export type ViewingCommand =
       readonly channelIds: readonly string[];
       readonly favourite: boolean;
     }
+  /** The favourites in another order: `favourites` holds the stored ids, each once, and no other. */
+  | { readonly kind: "reorder-favourites"; readonly favourites: readonly string[] }
   | { readonly kind: "record-watch"; readonly channelId: string }
   | {
       readonly kind: "record-progress";
@@ -69,7 +71,7 @@ export type ViewingCommand =
  * more per channel. The service shows them by channel (see ./service.ts).
  */
 export interface ViewingState {
-  /** In the order they were added. */
+  /** In the order they were added, or the order the viewer gave them since. */
   readonly favourites: readonly string[];
   /** Most recent first, at most `RECENT_LIMIT`. */
   readonly recent: readonly string[];
@@ -87,6 +89,18 @@ export function decide(state: ViewingState, command: ViewingCommand): ViewingEve
       }
       if (listed.length > 0) return [];
       return command.channelIds.map((channelId) => ({ type: "favourite-added", channelId }));
+    }
+    case "reorder-favourites": {
+      // A favourite moves only by leaving and coming back, and comes back last. So the start of
+      // the new order that the stored one already holds, in that order, stays where it is, and
+      // the rest leaves and comes back in the order wanted.
+      let kept = 0;
+      for (const id of state.favourites) if (id === command.favourites[kept]) kept++;
+      const moved = command.favourites.slice(kept);
+      return [
+        ...moved.map((channelId): ViewingEvent => ({ type: "favourite-removed", channelId })),
+        ...moved.map((channelId): ViewingEvent => ({ type: "favourite-added", channelId })),
+      ];
     }
     case "record-watch":
       return [{ type: "watched", channelId: command.channelId }];
@@ -112,24 +126,31 @@ export function isTitleEvent(event: ViewingEvent): event is TitleEvent {
   return "title" in event;
 }
 
-/** The state after a channel event. Title events change title rows instead; see ./titles.ts. */
-export function apply(state: ViewingState, event: ChannelEvent): ViewingState {
-  switch (event.type) {
-    case "favourite-added":
-      return state.favourites.includes(event.channelId)
-        ? state
-        : { ...state, favourites: [...state.favourites, event.channelId] };
-    case "favourite-removed":
-      return { ...state, favourites: state.favourites.filter((id) => id !== event.channelId) };
-    case "watched":
-      return {
-        ...state,
-        recent: [event.channelId, ...state.recent.filter((id) => id !== event.channelId)].slice(
+/**
+ * The state after channel events, in their order. Title events change title rows instead; see
+ * ./titles.ts. It takes the favourites and the events once each, however many there are: a new
+ * order of a long list removes and adds most of it.
+ */
+export function apply(state: ViewingState, events: readonly ChannelEvent[]): ViewingState {
+  // A set keeps its ids in the order added, and adding one it holds changes nothing.
+  const favourites = new Set(state.favourites);
+  let recent = state.recent;
+  for (const event of events) {
+    switch (event.type) {
+      case "favourite-added":
+        favourites.add(event.channelId);
+        break;
+      case "favourite-removed":
+        favourites.delete(event.channelId);
+        break;
+      case "watched":
+        recent = [event.channelId, ...recent.filter((id) => id !== event.channelId)].slice(
           0,
           RECENT_LIMIT,
-        ),
-      };
+        );
+    }
   }
+  return { favourites: [...favourites], recent };
 }
 
 /**

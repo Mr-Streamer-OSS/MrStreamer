@@ -7,10 +7,11 @@
 // preferences.json before the record, which the first start imports once, and the catalogue's
 // channels. The record keeps the provider's stream ids, as builds before channels with several
 // streams did, and shows them by channel: a list holding two streams of one channel shows it once,
-// by the channel's id. Nothing stored is rewritten, so those builds still read every list.
+// by the channel's id. Nothing stored is rewritten, so those builds still read every list. A new
+// order of the favourites is no exception: it is the same favourites, removed and added again.
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
-import type { TitleProgress, Viewing } from "@mrstreamer/contracts/viewing";
+import type { FavouriteOrder, TitleProgress, Viewing } from "@mrstreamer/contracts/viewing";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -33,12 +34,15 @@ export class ViewingAccount extends Context.Service<
   { readonly current: Effect.Effect<string | null> }
 >()("mrstreamer/ViewingAccount") {}
 
-/** The connected account's channels, to show lists by channel. */
+/** An account's channels, to show its lists by channel. */
 export class ViewingChannels extends Context.Service<
   ViewingChannels,
   {
-    /** Finds a channel by its id or any of its streams'; none without a catalogue. */
-    readonly lookup: Effect.Effect<(channelId: string) => LiveChannel | undefined>;
+    /**
+     * Finds `account`'s channels by their id or any of their streams'. None without its
+     * catalogue, so a change to one account's record never goes by another's channels.
+     */
+    lookup(account: string): Effect.Effect<(channelId: string) => LiveChannel | undefined>;
   }
 >()("mrstreamer/ViewingChannels") {}
 
@@ -71,13 +75,15 @@ export class ViewingStore extends Context.Service<
     ) => Effect.Effect<readonly TitleProgress[], Failed>;
     /**
      * In one transaction: unless `commandId` ran before, appends the events `decide` makes from
-     * the account's state and stores the state they add up to. Returns the state after.
+     * the account's state and stores the state they add up to. Returns the state after. A
+     * `Failed` from `decide` refuses the command: the call fails with it and stores nothing, the
+     * id neither.
      */
     readonly commit: (input: {
       readonly account: string;
       readonly commandId: string;
       readonly at: number;
-      readonly decide: (state: ViewingState) => readonly ViewingEvent[];
+      readonly decide: (state: ViewingState) => readonly ViewingEvent[] | Failed;
     }) => Effect.Effect<StoredViewing, Failed>;
     /**
      * In one transaction with the import marker: appends `events` for `account`. Does nothing,
@@ -117,6 +123,14 @@ export class ViewingRecord extends Context.Service<
       channelId: string,
       favourite: boolean,
     ): Effect.Effect<Viewing, Failed>;
+    /**
+     * Puts the favourites of the subscription they were read from in another order. Each channel
+     * moves with every stream of it that is stored, and the favourites the order leaves out keep
+     * their places. Fails with `favourites-changed` when the subscription is no longer the one
+     * connected as the change commits, or when its favourites no longer show as
+     * `order.original` by what is stored then. Adds and removes none.
+     */
+    reorderFavourites(commandId: string, order: FavouriteOrder): Effect.Effect<Viewing, Failed>;
     /** Puts a channel first among those watched recently, by its own id. */
     recordWatch(commandId: string, channelId: string): Effect.Effect<Viewing, Failed>;
     /** Remembers how far a movie or episode played, in a play that began at `since`. */
@@ -154,6 +168,36 @@ export class ViewingRecord extends Context.Service<
 const none: Viewing = { favourites: [], recent: [], continueWatching: [], sequence: 0 };
 
 type ChannelOf = (channelId: string) => LiveChannel | undefined;
+
+const changed = new Failed({ error: { kind: "favourites-changed" } });
+
+/**
+ * The stored favourites in the order asked for, or null when they no longer show as the list the
+ * order was made from. Ids the catalogue doesn't know are each their own channel, as they show.
+ */
+function rearranged(
+  stored: readonly string[],
+  channelOf: ChannelOf,
+  { original, order }: FavouriteOrder,
+): readonly string[] | null {
+  const streams = new Map<string, string[]>();
+  for (const id of stored) {
+    const channelId = channelOf(id)?.id ?? id;
+    const ids = streams.get(channelId);
+    if (ids) ids.push(id);
+    else streams.set(channelId, [id]);
+  }
+  const shown = [...streams.keys()];
+  if (shown.length !== original.length || shown.some((id, at) => id !== original[at])) return null;
+  // The channels arranged take one another's places; every other favourite stays in its own.
+  const arranged = new Set(order);
+  let next = 0;
+  const wanted = shown.map((id) => (arranged.has(id) ? (order[next++] ?? id) : id));
+  // An order that changes nothing leaves the stored ids as they are, a channel's streams apart
+  // from one another included.
+  if (wanted.every((id, at) => id === shown[at])) return stored;
+  return wanted.flatMap((id) => streams.get(id) ?? []);
+}
 
 function make() {
   return Effect.gen(function* () {
@@ -198,16 +242,33 @@ function make() {
       };
     };
 
-    const run = (commandId: string, command: (channelOf: ChannelOf) => ViewingCommand) =>
+    /**
+     * Commits the command `command` makes, from the account's channels and from its state as
+     * stored when the change commits, or refuses with the `Failed` it gives instead. `owner`
+     * names the account a command was made for: it is refused unless that account is connected,
+     * when it arrives and again once its channels are found. Nothing waits between that second
+     * answer and the commit, so an account that went or changed meanwhile gets no order.
+     */
+    const run = (
+      commandId: string,
+      command: (channelOf: ChannelOf, state: ViewingState) => ViewingCommand | Failed,
+      owner?: string,
+    ) =>
       Effect.gen(function* () {
         const key = yield* account.current;
         if (!key) return yield* new Failed({ error: { kind: "no-subscription" } });
-        const channelOf = yield* channels.lookup;
+        if (owner !== undefined && key !== owner) return yield* changed;
+        const channelOf = yield* channels.lookup(key);
+        // Finding the channels can take a read of the catalogue from disk.
+        if (owner !== undefined && (yield* account.current) !== owner) return yield* changed;
         const stored = yield* store.commit({
           account: key,
           commandId,
           at: yield* Clock.currentTimeMillis,
-          decide: (state) => decide(state, command(channelOf)),
+          decide: (state) => {
+            const made = command(channelOf, state);
+            return made instanceof Failed ? made : decide(state, made);
+          },
         });
         yield* PubSub.publish(changes, stored.sequence);
         return shown(stored, channelOf);
@@ -227,7 +288,7 @@ function make() {
     return {
       state: Effect.gen(function* () {
         const key = yield* account.current;
-        return key ? shown(yield* store.read(key), yield* channels.lookup) : none;
+        return key ? shown(yield* store.read(key), yield* channels.lookup(key)) : none;
       }),
       setFavourite: (commandId: string, channelId: string, favourite: boolean) =>
         run(commandId, (channelOf) => {
@@ -235,6 +296,30 @@ function make() {
           const ids = channel ? [channel.id, ...channel.variants.map(({ id }) => id)] : [channelId];
           return { kind: "set-favourite", channelIds: [...new Set(ids)], favourite };
         }),
+      reorderFavourites: (commandId: string, order: FavouriteOrder) => {
+        const listed = new Set(order.original);
+        if (
+          new Set(order.order).size !== order.order.length ||
+          order.order.some((id) => !listed.has(id))
+        ) {
+          return Effect.fail(
+            new Failed({
+              error: {
+                kind: "invalid-input",
+                detail: "The order names a channel twice, or one that isn't a favourite.",
+              },
+            }),
+          );
+        }
+        return run(
+          commandId,
+          (channelOf, state) => {
+            const favourites = rearranged(state.favourites, channelOf, order);
+            return favourites ? { kind: "reorder-favourites", favourites } : changed;
+          },
+          order.subscription,
+        );
+      },
       recordWatch: (commandId: string, channelId: string) =>
         run(commandId, (channelOf) => ({
           kind: "record-watch",

@@ -16,13 +16,19 @@ Your subscription may allow a single connection. Home then uses it as soon as it
 
 - Click a channel to watch it. **Back**, or Escape, returns to the same place in the list.
 - The arrow at the end of a row lists the rest of the day. Click a later programme to read about it.
-- The star adds a channel to your favourites, which keep the order you add them in.
+- The star adds a channel to your favourites. A new favourite goes last, and **Reorder** puts them in the order you want.
 
 The field beside the list's name searches the list you're looking at: Favourites, Recently watched, All channels or one category. It finds a channel by its name, also the full name your provider gives it, and by the programmes on now and later today, whatever the capitals and accents. The channels it finds stay in the list's order, with what matched underlined. A later programme that matched stands at the end of its row with its time, and the arrow opens the rest of the day on it. Clicking the row still watches the channel as it is now.
 
 / puts the cursor in the field. Down or Enter there moves to the channels found, and Escape clears the search, as picking another list does. When nothing in the list matches, **Search all channels** looks for the same in every channel. Searching uses what Mr. Streamer already has, so typing asks your provider nothing.
 
-Each subscription keeps its own favourites and watch history. Connecting another one hides them, and they come back when you connect the first one again.
+**Reorder**, beside the field in Favourites, or R, puts your favourites in another order. Every row gets an Up and a Down button: a click moves the channel one place, and a click with Shift moves it to the top or the bottom. On the keyboard, Up and Down choose a row, and with Alt held, Option on a Mac, they move it. Page Up and Page Down move it ten places, Home and End to the top and the bottom. **Save**, or Enter, keeps the order. **Cancel**, or Escape, drops it, and so does leaving the list. Nothing plays while you reorder.
+
+A search hides favourites, so Reorder asks you to clear it first and clears nothing by itself. If the order can't be saved, Mr. Streamer says so and keeps what you arranged: **Retry** saves it again. If your favourites changed in the meantime, **Reload** starts over from them.
+
+Home, the guide and the channel list while watching show your favourites in that order, and channel up and down follow it. The channel numbers stay your provider's, and so does the quality each channel plays in. A favourite that isn't showing, a channel for adults while those are hidden or one your provider stopped listing, keeps its place and comes back to it. One quality of a channel that your provider stops listing keeps its place too: if you moved the channel further down meanwhile, it goes back up to that place when the quality returns.
+
+Each subscription keeps its own favourites, in their own order, and its own watch history. Connecting another one hides them, and they come back when you connect the first one again.
 
 Providers often list a channel once per quality: "VRT 1 FHD", "VRT 1 HD", "VRT 1 SD". Mr. Streamer shows those as one channel, with its qualities after the name, when they are surely the same channel: same name, same region and language, and the same category or one named only for a quality, such as "BE | 4K". Anything less certain stays a row of its own. A channel you starred, or watched, under one of its qualities is the same favourite and the same history entry.
 
@@ -79,12 +85,23 @@ When the picture stands still for three seconds, "Waiting for data" shows at the
 | Left               | Close the rest of the day, then go to the categories           | Open the list, then its categories          |
 | Digits             | Jump to a channel number                                       | Jump to a channel number                    |
 | S                  | Add to or remove from favourites                               | The same, for the channel you're watching   |
+| R                  | Reorder the favourites, in Favourites                          | Retry, once a channel failed                |
 | /                  | Search the list                                                |                                             |
 | Escape             | Clear the search, then Home                                    | Close the list, leave full screen, go back  |
 | Backspace          |                                                                | The previous channel                        |
 | C                  |                                                                | Subtitles on and off                        |
 | G, H               |                                                                | Subtitles 0.1 s earlier or later            |
 | Q                  |                                                                | The quality menu                            |
-| R                  |                                                                | Retry, once a channel failed                |
 | F, M, I            |                                                                | Full screen, mute, show the details         |
 | P                  |                                                                | Mini player, and back                       |
+
+While you reorder favourites, the keys are these alone:
+
+| Key                             | While reordering                                |
+| ------------------------------- | ----------------------------------------------- |
+| Up, Down, Page Up, Page Down    | Choose a row: one up or down, or ten            |
+| Home, End                       | Choose the first or the last row                |
+| Alt with those, Option on a Mac | Move the chosen channel instead                 |
+| Tab                             | Go to Cancel, Save and the chosen row's buttons |
+| Enter                           | Save                                            |
+| Escape                          | Cancel                                          |
