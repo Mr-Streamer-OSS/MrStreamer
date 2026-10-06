@@ -7,8 +7,8 @@
 //
 // `--json` also writes every run of every measure, for compare-builds.ts. Needs ffmpeg on PATH
 // (or MR_STREAMER_FFMPEG). On macOS pass --use-mock-keychain.
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { spawn, type ChildProcess } from "node:child_process";
+import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
@@ -26,7 +26,6 @@ if (!executable) {
 
 const ffmpeg = process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg";
 const RUNS = 3;
-const IDLE_MS = 30_000;
 const TEST_CHANNELS = ["H.264 + AAC", "H.264 + MP2", "H.264 + MP3", "H.264 + AC-3"];
 
 const provider = await startFakeProvider({
@@ -133,23 +132,13 @@ try {
     await delay(500);
   }
 
-  // Idle on Home: first with the muted preview playing, then with playback stopped.
+  // Home's muted preview plays by now. Watch takes over its stream.
   await delay(3000);
-  const withPreview = await idle(app);
-  record("idle CPU, Home with preview (%)", withPreview.cpu);
-  record("memory, Home with preview (MB)", withPreview.memory);
-  // Watch takes over the preview's stream.
   const requests = provider.streamRequests();
   await clickText(page, "Watch");
   await waitFor(() => page.evaluate<boolean>(`!!document.querySelector('[data-view="watch"]')`));
   await delay(1000);
   record("streams opened, Home to Watch (count)", provider.streamRequests() - requests);
-  await page.evaluate(`document.querySelector('[aria-label="Stop"]').click()`);
-  await key(page, "Escape", 27);
-  await delay(3000);
-  const stopped = await idle(app);
-  record("idle CPU, Home stopped (%)", stopped.cpu);
-  record("memory, Home stopped (MB)", stopped.memory);
   page.close();
   await quit(app);
 
@@ -266,65 +255,6 @@ async function quit(child: ChildProcess): Promise<void> {
   await Promise.race([exited, delay(10_000)]);
   child.kill("SIGKILL");
   await delay(1000);
-}
-
-/** CPU use in percent of one core, and memory, of the app's processes over `IDLE_MS`. */
-async function idle(root: ChildProcess): Promise<{ cpu: number; memory: number }> {
-  const before = usage(root.pid!);
-  await delay(IDLE_MS);
-  const after = usage(root.pid!);
-  return {
-    cpu: Math.round(((after.cpuSeconds - before.cpuSeconds) / (IDLE_MS / 1000)) * 1000) / 10,
-    memory: Math.round(after.rssKb / 1024),
-  };
-}
-
-/** CPU seconds used so far and resident memory of `root` and every process under it. */
-function usage(root: number): { cpuSeconds: number; rssKb: number } {
-  const rows = execFileSync("ps", ["-A", "-o", "pid=,ppid=,rss=,time="], { encoding: "utf8" })
-    .trim()
-    .split("\n")
-    .map((line) => line.trim().split(/\s+/))
-    .map(([pid, ppid, rss, time]) => ({
-      pid: Number(pid),
-      ppid: Number(ppid),
-      rss: Number(rss),
-      time: time ?? "0",
-    }));
-  const tree = new Set([root]);
-  for (let grew = true; grew;) {
-    grew = false;
-    for (const row of rows) {
-      if (!tree.has(row.pid) && tree.has(row.ppid)) {
-        tree.add(row.pid);
-        grew = true;
-      }
-    }
-  }
-  const members = rows.filter((row) => tree.has(row.pid));
-  const cpuSeconds = members.reduce(
-    (sum, row) => sum + (process.platform === "linux" ? linuxCpu(row.pid) : psTime(row.time)),
-    0,
-  );
-  return { cpuSeconds, rssKb: members.reduce((sum, row) => sum + row.rss, 0) };
-}
-
-/** Linux's ps rounds to whole seconds, so read the clock ticks instead. */
-function linuxCpu(pid: number): number {
-  try {
-    const fields = readFileSync(`/proc/${pid}/stat`, "utf8").split(") ")[1]?.split(" ") ?? [];
-    return (Number(fields[11]) + Number(fields[12])) / 100;
-  } catch {
-    return 0;
-  }
-}
-
-/** macOS's ps time: [[dd-]hh:]mm:ss.cc. */
-function psTime(text: string): number {
-  const [days, clock] = text.includes("-") ? text.split("-") : ["0", text];
-  const parts = (clock ?? "0").split(":").map(Number);
-  const seconds = parts.reduce((sum, part) => sum * 60 + part, 0);
-  return Number(days) * 86_400 + seconds;
 }
 
 /** The size of the installed app: the .app bundle on macOS, its folder elsewhere. */
