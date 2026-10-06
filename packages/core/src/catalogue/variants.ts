@@ -18,7 +18,11 @@ import {
   type LiveChannel,
   type Quality,
 } from "@mrstreamer/contracts/library";
-import { DEFAULT_LIVE_QUALITY, type Preferences } from "@mrstreamer/contracts/preferences";
+import {
+  DEFAULT_LIVE_QUALITY,
+  type Preferences,
+  type SubscriptionPreferences,
+} from "@mrstreamer/contracts/preferences";
 import { trustedGuideIds } from "./guide-ids.ts";
 import type { NormalizedStream } from "./normalize.ts";
 import { regionForCode } from "./regions.ts";
@@ -32,9 +36,12 @@ const RESOLUTIONS: Readonly<Record<string, Quality>> = {
   "8K": "uhd", "4K": "uhd", UHD: "uhd", FHD: "fhd", HD: "hd", "HD+": "hd", SD: "sd",
 };
 
+/** A channel as a catalogue lists it, before the library says which subscription's it is. */
+export type ListedChannel = Omit<LiveChannel, "subscriptionId">;
+
 export interface LiveChannels {
   /** In the provider's order, each where its first stream is. */
-  readonly channels: readonly LiveChannel[];
+  readonly channels: readonly ListedChannel[];
   /**
    * The guide ids of each channel that has one to trust, by channel id: each spelling its streams
    * give, in their order. The guide lists programmes under one of them, not always the first.
@@ -76,7 +83,7 @@ export function liveChannels(streams: readonly NormalizedStream[]): LiveChannels
     }
   }
 
-  const channels: LiveChannel[] = [];
+  const channels: ListedChannel[] = [];
   const guideIds = new Map<string, readonly string[]>();
   for (const stream of streams) {
     const group = together.get(stream) ?? [stream];
@@ -122,8 +129,8 @@ export function qualityOf(tags: readonly string[]): Quality | null {
  * `AUTO_TRIES`. Equals keep the provider's order, so a backup follows its main stream.
  */
 export function streamsToPlay(
-  channel: LiveChannel,
-  preferences: Pick<Preferences, "liveQuality" | "channelVariants">,
+  channel: Pick<LiveChannel, "variants">,
+  preferences: Pick<Preferences, "liveQuality"> & Pick<SubscriptionPreferences, "channelVariants">,
   asked?: string,
 ): readonly ChannelVariant[] {
   if (asked !== undefined) {
@@ -147,8 +154,8 @@ export function streamsToPlay(
  * counts as none.
  */
 export function chosenVariant(
-  channel: LiveChannel,
-  choices: Preferences["channelVariants"],
+  channel: Pick<LiveChannel, "variants">,
+  choices: SubscriptionPreferences["channelVariants"],
 ): ChannelVariant | null {
   for (const { id } of channel.variants) {
     const chosen = channel.variants.find((variant) => variant.id === choices?.[id]);
@@ -223,7 +230,7 @@ function guideChannel(guideId: string | undefined): string[] {
 }
 
 /** One channel of the streams in `group`, the first of them `first`. */
-function joined(first: NormalizedStream, group: readonly NormalizedStream[]): LiveChannel {
+function joined(first: NormalizedStream, group: readonly NormalizedStream[]): ListedChannel {
   return {
     id: group.map((stream) => stream.id).reduce(lower),
     name: first.name,

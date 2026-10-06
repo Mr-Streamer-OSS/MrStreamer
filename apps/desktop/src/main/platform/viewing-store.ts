@@ -4,6 +4,9 @@
 // (STATE_VERSION), the state is rebuilt from the events at start. If the database can't open, the
 // record reports failures and the rest of the app carries on.
 //
+// Everything in it is kept per account, by the provider's own ids: the service says which
+// subscription an account's channels and titles belong to, and nothing here names one.
+//
 // Older builds read this file too, as when someone goes back to an earlier nightly: they skip
 // event types they don't know, leave the titles table alone, and insert events without a payload.
 // Builds with movies and series before `removed_at`, Stable 0.0.3 among them, write title rows
@@ -11,8 +14,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { titleKey, TitleRef } from "@mrstreamer/contracts/ondemand";
-import type { TitleProgress } from "@mrstreamer/contracts/viewing";
+import { RawTitleRef, titleKey } from "@mrstreamer/contracts/ondemand";
 import {
   apply,
   emptyState,
@@ -27,14 +29,15 @@ import {
 import { Failed } from "@mrstreamer/core/failure";
 import {
   ViewingStore,
+  type RawTitleFilter,
   type StoredViewing,
-  type TitleFilter,
 } from "@mrstreamer/core/viewing/service";
 import {
   continueWatching,
   progressed,
   removalScope,
   removedKeys,
+  type RawProgress,
   type TitleRow,
 } from "@mrstreamer/core/viewing/titles";
 import { type } from "arktype";
@@ -92,7 +95,7 @@ const EventRow = type({
 const ChannelEventType = type("'favourite-added' | 'favourite-removed' | 'watched'");
 const TitlePayload = type("string.json.parse").pipe(
   type({
-    title: TitleRef,
+    title: RawTitleRef,
     "position?": "number >= 0",
     "duration?": "number > 0",
     "since?": "number",
@@ -100,7 +103,7 @@ const TitlePayload = type("string.json.parse").pipe(
 );
 const StateRow = type({ favourites: "string", recent: "string", sequence: "number" });
 const TitleRowShape = type({
-  title: type("string.json.parse").pipe(TitleRef),
+  title: type("string.json.parse").pipe(RawTitleRef),
   position: "number",
   duration: "number",
   finished: "number",
@@ -349,8 +352,8 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
 
   return {
     read: (account) => attempt(() => read(account)),
-    titles: (account, filter: TitleFilter) =>
-      attempt((): TitleProgress[] => {
+    titles: (account, filter: RawTitleFilter) =>
+      attempt((): RawProgress[] => {
         const rows = [
           ...(filter.seriesIds ?? []).flatMap((id) => statements.seriesTitles.all(account, id)),
           ...(filter.movieIds ?? []).flatMap((id) => {

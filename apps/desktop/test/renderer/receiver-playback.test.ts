@@ -5,7 +5,7 @@
 // were asked is left alone: nothing shows, no watch is recorded, and a load that is gone is told
 // nothing. So is what played when the login form took the pages' place, what played under the
 // account before, and what the viewer played something else over.
-import { ipc } from "./support.ts";
+import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
@@ -85,6 +85,7 @@ const subscription: SubscriptionSummary = {
 };
 
 const channel = (id: string): LiveChannel => ({
+  subscriptionId: SUBSCRIPTION,
   id,
   name: `NL | ${id}`,
   title: id,
@@ -94,10 +95,14 @@ const channel = (id: string): LiveChannel => ({
   categoryIds: [],
   variants: [{ id, name: `NL | ${id}`, tags: [], quality: null }],
 });
-const channelItem: RemoteItem = { kind: "channel", channelId: "a" };
+const channelItem: RemoteItem = {
+  kind: "channel",
+  channel: { subscriptionId: SUBSCRIPTION, id: "a" },
+};
 
 const movie: Title = {
   kind: "movie",
+  subscriptionId: SUBSCRIPTION,
   id: "m1",
   name: "Low Tide (EN)",
   title: "Low Tide",
@@ -112,13 +117,14 @@ const movie: Title = {
   adult: false,
   tmdbId: "1",
   genres: [],
-  versions: [{ id: "m1", tags: ["EN"] }],
+  versions: [{ subscriptionId: SUBSCRIPTION, id: "m1", tags: ["EN"] }],
 };
-const movieRef: TitleRef = { kind: "movie", id: "m1" };
+const movieRef: TitleRef = { kind: "movie", subscriptionId: SUBSCRIPTION, id: "m1" };
 const movieItem: RemoteItem = { kind: "title", title: movieRef };
 
 function episode(id: string, number: number, title: string): Episode {
   return {
+    subscriptionId: SUBSCRIPTION,
     id,
     seriesId: "s",
     season: 1,
@@ -151,7 +157,14 @@ const series: SeriesDetails = {
     },
   ],
 };
-const episodeRef: TitleRef = { kind: "episode", id: "e1", seriesId: "s", season: 1, episode: 1 };
+const episodeRef: TitleRef = {
+  kind: "episode",
+  subscriptionId: SUBSCRIPTION,
+  id: "e1",
+  seriesId: "s",
+  season: 1,
+  episode: 1,
+};
 const episodeItem: RemoteItem = { kind: "title", title: episodeRef };
 
 /** What the main process says of the title load `generation` plays, an hour long. */
@@ -242,7 +255,9 @@ const gone = (item: RemoteItem) => [
   },
   {
     how: "the receiver plays something else",
-    now: connected(said(2, { kind: "channel", channelId: "b" }, "playing")),
+    now: connected(
+      said(2, { kind: "channel", channel: { subscriptionId: SUBSCRIPTION, id: "b" } }, "playing"),
+    ),
   },
   { how: "another TV took its place", now: connected(null, bedroom) },
 ];
@@ -260,7 +275,9 @@ describe("a channel a receiver plays as the window opens", () => {
 
     expect(text()).toContain("Playing on Living Room TV");
     expect(player.state().channel?.id).toBe("a");
-    expect(ipc.argsOf("viewing.recordWatch")).toMatchObject([{ channelId: "a" }]);
+    expect(ipc.argsOf("viewing.recordWatch")).toMatchObject([
+      { channel: { subscriptionId: SUBSCRIPTION, id: "a" } },
+    ]);
     expect(ipc.methods()).not.toContain("output.playChannel");
   });
 
@@ -293,7 +310,9 @@ describe("a channel a receiver plays as the window opens", () => {
       await wait();
 
       // The answer held was the one to what the receiver played.
-      expect(ipc.argsOf("library.channels")[0]).toEqual({ ids: ["a"] });
+      expect(ipc.argsOf("library.channels")[0]).toEqual({
+        channels: [{ subscriptionId: SUBSCRIPTION, id: "a" }],
+      });
       expect(useUi.getState().watching).toBe(false);
       expect(player.onReceiver()).toBe(false);
       expect(player.state()).toMatchObject({ channel: null, phase: { kind: "idle" } });
@@ -346,7 +365,10 @@ describe("a movie a receiver plays as the window opens", () => {
     await wait();
 
     // The answer held was the one to what the receiver played.
-    expect(ipc.argsOf("ondemand.titles")[0]).toEqual({ kind: "movie", ids: ["m1"] });
+    expect(ipc.argsOf("ondemand.titles")[0]).toEqual({
+      kind: "movie",
+      versions: [{ subscriptionId: SUBSCRIPTION, id: "m1" }],
+    });
     expect(useUi.getState().playingTitle).toBe(false);
     expect(titlePlayer.state().now).toBeNull();
     expect(titlePlayer.onReceiver()).toBe(false);
@@ -356,7 +378,9 @@ describe("a movie a receiver plays as the window opens", () => {
   });
 
   it("is left alone when the main process says another title's file plays", async () => {
-    const lists = await opened(playingTitle(2, { kind: "movie", id: "m2" }));
+    const lists = await opened(
+      playingTitle(2, { kind: "movie", subscriptionId: SUBSCRIPTION, id: "m2" }),
+    );
 
     await act(async () => lists.resolve([{ ...movie, id: "m2" }]));
     await wait();
@@ -445,6 +469,8 @@ describe("what a receiver plays as the window opens, once the viewer went on", (
     expect(useUi.getState().playingTitle).toBe(false);
     expect(titlePlayer.state().now).toBeNull();
     expect(player.state().channel?.id).toBe("b");
-    expect(ipc.argsOf("output.playChannel")).toMatchObject([{ channelId: "b" }]);
+    expect(ipc.argsOf("output.playChannel")).toMatchObject([
+      { channel: { subscriptionId: SUBSCRIPTION, id: "b" } },
+    ]);
   });
 });

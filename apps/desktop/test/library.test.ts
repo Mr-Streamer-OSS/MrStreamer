@@ -17,8 +17,9 @@ import {
 } from "./support.ts";
 
 /**
- * A library on a connected fake provider, and the statuses it reports. `restart` starts another
- * on the same data folder.
+ * A library on a connected fake provider, and the statuses it reports. `own` names a channel or
+ * category of the connected subscription by the provider's id. `restart` starts another on the
+ * same data folder.
  */
 async function connectedLibrary(channels = 300, adultChannels = false) {
   const provider = await fakeProvider({ channels, adultChannels });
@@ -26,11 +27,9 @@ async function connectedLibrary(channels = 300, adultChannels = false) {
   const start = async () => {
     const runtime = runtimeFor(
       Library.layer({ dataDir, confirmDelay: 0 }).pipe(
+        Layer.provideMerge(Settings.layer(dataDir)),
         Layer.provideMerge(
-          Layer.mergeAll(
-            Subscriptions.layer({ dataDir, secrets: testSecrets, providerOptions: { userAgent } }),
-            Settings.layer(dataDir),
-          ),
+          Subscriptions.layer({ dataDir, secrets: testSecrets, providerOptions: { userAgent } }),
         ),
       ),
     );
@@ -43,14 +42,19 @@ async function connectedLibrary(channels = 300, adultChannels = false) {
     };
   };
   const { library, settings, subscriptions, updates } = await start();
-  await subscriptions.connect({ server: provider.url, username: "demo", password: "demo" });
+  const { id: subscriptionId } = await subscriptions.connect({
+    server: provider.url,
+    username: "demo",
+    password: "demo",
+  });
+  const own = (id: string) => ({ subscriptionId, id });
   const restart = async () => (await start()).library;
-  return { provider, dataDir, library, settings, updates, restart };
+  return { provider, dataDir, library, settings, subscriptions, updates, restart, own };
 }
 
 describe("live library", () => {
   it("loads categories and channels from the provider, without separator entries", async () => {
-    const { provider, library, updates } = await connectedLibrary();
+    const { provider, library, updates, own } = await connectedLibrary();
 
     const categories = await library.categories();
     const all = await library.channels({});
@@ -64,7 +68,7 @@ describe("live library", () => {
     );
     expect(all.some((channel) => channel.name.startsWith("#####"))).toBe(false);
     expect(categories[0]).toEqual({
-      id: "1",
+      ...own("1"),
       name: "TEST | Formats and failures",
       group: null,
       title: "TEST | Formats and failures",
@@ -79,9 +83,9 @@ describe("live library", () => {
   });
 
   it("normalises the provider's loose fields", async () => {
-    const { library } = await connectedLibrary(2000);
+    const { library, own } = await connectedLibrary(2000);
 
-    const channels = await library.channels({ categoryId: "2" });
+    const channels = await library.channels({ category: own("2") });
 
     // The mock sends every third channel number as a string and some logos as "".
     expect(channels.every((channel) => typeof channel.number === "number")).toBe(true);
@@ -117,7 +121,7 @@ describe("live library", () => {
   });
 
   it("shows a channel's qualities as one channel, found by any of its streams' ids", async () => {
-    const { library } = await connectedLibrary();
+    const { library, own } = await connectedLibrary();
     const fhd = String(QUALITY_STREAM_IDS);
     const hd = String(QUALITY_STREAM_IDS + 1);
     const sd = String(QUALITY_STREAM_IDS + 2);
@@ -126,7 +130,7 @@ describe("live library", () => {
 
     expect(found).toMatchObject([
       {
-        id: fhd,
+        ...own(fhd),
         title: "Kwaliteit 1",
         tags: [],
         variants: [
@@ -136,8 +140,70 @@ describe("live library", () => {
         ],
       },
     ]);
-    expect(await library.channel(sd)).toEqual(found[0]);
-    expect(await library.channels({ ids: [sd, hd, fhd] })).toEqual(found);
+    expect(await library.channel(own(sd))).toEqual(found[0]);
+    expect(await library.channels({ channels: [sd, hd, fhd].map(own) })).toEqual(found);
+  });
+
+  it("finds nothing by an id that names another subscription", async () => {
+    const { library, own } = await connectedLibrary();
+    const [channel] = await library.channels({ category: own("2") });
+    if (!channel) throw new Error("Category 2 needs a channel");
+    const elsewhere = (id: string) => ({ subscriptionId: "another-subscription", id });
+
+    // The same provider ids, as another subscription's lists could hold them.
+    await expect(library.channel(elsewhere(channel.id))).rejects.toMatchObject({
+      error: { kind: "no-subscription" },
+    });
+    expect(await library.channels({ channels: [elsewhere(channel.id)] })).toEqual([]);
+    expect(await library.channels({ category: elsewhere("2") })).toEqual([]);
+    expect(await library.channels({ channels: [elsewhere(channel.id), channel] })).toEqual([
+      channel,
+    ]);
+  });
+
+  it("drops channels that arrive for a subscription another has replaced", async () => {
+    const { provider, library, subscriptions, own } = await connectedLibrary();
+    const other = await fakeProvider({ channels: 40 });
+    const held = provider.hold("channels");
+
+    const first = library.refresh();
+    first.catch(() => {});
+    await held.arrived;
+    const replaced = await subscriptions.connect({
+      server: other.url,
+      username: "demo",
+      password: "demo",
+    });
+    held.release();
+
+    await expect(first).rejects.toMatchObject({ error: { kind: "unexpected" } });
+    const channels = await library.channels({});
+    expect(channels.length).toBeLessThan(300);
+    expect(new Set(channels.map((channel) => channel.subscriptionId))).toEqual(
+      new Set([replaced.id]),
+    );
+    // What named the subscription before names nothing now.
+    await expect(library.channel(own(channels[0]?.id ?? ""))).rejects.toMatchObject({
+      error: { kind: "no-subscription" },
+    });
+  });
+
+  it("keeps its channels, and reports no failure, when a refresh begun before the login was entered again ends", async () => {
+    const { provider, library, subscriptions, updates } = await connectedLibrary();
+    await library.refresh();
+    const before = await library.status();
+    const told = updates.length;
+    const held = provider.hold("channels");
+
+    const late = library.refresh();
+    late.catch(() => {});
+    await held.arrived;
+    await subscriptions.connect({ server: provider.url, username: "demo", password: "demo" });
+    held.release();
+
+    await expect(late).rejects.toMatchObject({ error: { kind: "unexpected" } });
+    expect(await library.status()).toEqual(before);
+    expect(updates).toHaveLength(told);
   });
 
   it("serves the cached catalogue after a restart without the provider", async () => {
@@ -239,8 +305,8 @@ describe("live library", () => {
   });
 
   it("keeps channels by provider id when names and order change", async () => {
-    const { provider, library } = await connectedLibrary();
-    const [first, second] = await library.channels({ categoryId: "2" });
+    const { provider, library, own } = await connectedLibrary();
+    const [first, second] = await library.channels({ category: own("2") });
     if (!first || !second) throw new Error("Category 2 needs two channels");
 
     provider.serveChannels((all) =>
@@ -254,45 +320,46 @@ describe("live library", () => {
     await library.refresh();
 
     // What the recently watched list asks for: the renamed channel stays, the removed one drops out.
-    expect(await library.channels({ ids: [second.id, first.id] })).toMatchObject([
+    expect(await library.channels({ channels: [second, first] })).toMatchObject([
       { id: first.id, title: "Renamed One" },
     ]);
-    await expect(library.channel(second.id)).rejects.toMatchObject({
+    await expect(library.channel(second)).rejects.toMatchObject({
       error: { kind: "channel-not-found" },
     });
   });
 
   it("keeps channels for adults to Live TV's lists while Settings shows them, and out of search", async () => {
-    const { library, settings } = await connectedLibrary(300, true);
+    const { library, settings, own } = await connectedLibrary(300, true);
+    const guideChannels = () => library.guideChannels(own("").subscriptionId);
     // One flagged by the provider in an ordinary category, two in a category named for adults.
     const names = ["AFTER HOURS", "LATE SHOW", "NIGHT CLUB"];
     const all = async () => (await library.channels({})).map((channel) => channel.name);
-    const ids = ["4000"];
+    const channels = [own("4000")];
     const adultCategory = async () =>
       (await library.categories()).find((category) => category.name === "XXX | ADULTS");
 
     expect((await all()).filter((name) => names.includes(name))).toEqual([]);
     expect(await adultCategory()).toBeUndefined();
-    expect(await library.channels({ ids })).toEqual([]);
-    await expect(library.channel("4000")).rejects.toMatchObject({
+    expect(await library.channels({ channels })).toEqual([]);
+    await expect(library.channel(own("4000"))).rejects.toMatchObject({
       error: { kind: "channel-not-found" },
     });
-    expect((await library.guideChannels()).channelsOf("afterhours.adult")).toEqual([]);
+    expect((await guideChannels()).channelsOf("afterhours.adult")).toEqual([]);
 
     await settings.update({ adultTitles: true });
 
     expect((await all()).filter((name) => names.includes(name))).toEqual(names);
     expect(await adultCategory()).toMatchObject({ channelCount: 2 });
-    expect((await library.channels({ ids })).map((channel) => channel.adult)).toEqual([true]);
-    expect((await library.guideChannels()).channelsOf("afterhours.adult")).toHaveLength(1);
+    expect((await library.channels({ channels })).map((channel) => channel.adult)).toEqual([true]);
+    expect((await guideChannels()).channelsOf("afterhours.adult")).toHaveLength(1);
     expect(await library.channels({ query: "night club" })).toEqual([]);
     expect(await library.channels({ query: "after hours" })).toEqual([]);
   });
 
   it("reports a missing channel", async () => {
-    const { library } = await connectedLibrary();
+    const { library, own } = await connectedLibrary();
 
-    await expect(library.channel("does-not-exist")).rejects.toMatchObject({
+    await expect(library.channel(own("does-not-exist"))).rejects.toMatchObject({
       error: { kind: "channel-not-found", channelId: "does-not-exist" },
     });
   });

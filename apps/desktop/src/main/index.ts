@@ -13,6 +13,8 @@ import {
   type Rectangle,
 } from "electron";
 import type { IpcEvent, IpcEvents, IpcInput } from "@mrstreamer/contracts/ipc";
+import type { LiveChannel } from "@mrstreamer/contracts/library";
+import { ownedId } from "@mrstreamer/contracts/subscription";
 import { streamsToPlay } from "@mrstreamer/core/catalogue/variants";
 import { Diagnostics } from "@mrstreamer/core/diagnostics";
 import { Failed } from "@mrstreamer/core/failure";
@@ -440,7 +442,7 @@ async function start(): Promise<void> {
   /** Downloads the guide when it is due. A failure keeps the guide in use until the next check. */
   const refreshGuide = guide.refreshIfStale.pipe(warned("[guide] refresh failed"));
 
-  /** A different account: its channels, titles, guide and what was last watched no longer apply. */
+  /** Another account, or none: its channels, titles, guide and what the viewer left it at go. */
   const forgetAccount = Effect.gen(function* () {
     yield* Effect.all([library.clear, onDemand.clear, guide.clear], { concurrency: "unbounded" });
     yield* settings.forget;
@@ -452,6 +454,23 @@ async function start(): Promise<void> {
    */
   let playbackTurn = 0;
   const nextTurn = Effect.sync(() => ++playbackTurn);
+
+  /**
+   * The channel's streams to try, by id: the one asked for, the one picked for it in its
+   * subscription before, or Automatic's. Fails when the channel has none of them.
+   */
+  const streamsOf = (channel: LiveChannel, variant: string | undefined) =>
+    Effect.gen(function* () {
+      const preferences = {
+        ...(yield* settings.get),
+        ...(yield* settings.ofSubscription(channel.subscriptionId)),
+      };
+      const variants = streamsToPlay(channel, preferences, variant).map(({ id }) => id);
+      if (variants.length > 0) return variants;
+      return yield* new Failed({
+        error: { kind: "channel-not-found", channelId: variant ?? channel.id },
+      });
+    });
 
   registerIpc(
     (effect) => runtime.runPromiseExit(effect),
@@ -483,21 +502,20 @@ async function start(): Promise<void> {
           return null;
         }),
       "subscription.recheck": () => subscriptions.recheck,
+      "subscription.preferences": ({ subscriptionId }) => settings.ofSubscription(subscriptionId),
+      "subscription.updatePreferences": ({ subscriptionId, patch }) =>
+        settings.updateSubscription(subscriptionId, patch),
       "library.status": () => library.status,
       "library.categories": () => library.categories,
       "library.channels": (filter) => library.channels(filter),
-      "library.channel": ({ channelId }) => library.channel(channelId),
+      "library.channel": ({ channel }) => library.channel(channel),
       "library.refresh": () => library.refresh,
-      "guide.listings": ({ channelIds }) => guide.listings(channelIds),
-      "guide.schedule": ({ channelId }) => guide.schedule(channelId),
+      "guide.listings": ({ channels }) => guide.listings(channels),
+      "guide.schedule": ({ channel }) => guide.schedule(channel),
       "guide.search": ({ query }) => guide.search(query),
       "guide.searchList": ({ query, until, ...list }) =>
         Effect.flatMap(library.channels(list), (channels) =>
-          guide.searchChannels(
-            query,
-            channels.map((channel) => channel.id),
-            until,
-          ),
+          guide.searchChannels(query, channels, until),
         ),
       "guide.status": () => guide.status,
       "guide.refresh": () => Effect.andThen(guide.refresh, guide.status),
@@ -505,13 +523,21 @@ async function start(): Promise<void> {
       "ondemand.refresh": () => onDemand.refresh,
       "ondemand.search": ({ query }) => onDemand.search(query),
       "ondemand.searchKind": ({ kind, query }) => onDemand.searchKind(kind, query),
-      "ondemand.details": ({ kind, id }) => onDemand.details(kind, id),
-      "ondemand.season": ({ id, season }) => onDemand.season(id, season),
-      "ondemand.titles": ({ kind, ids }) => onDemand.titles(kind, ids),
+      "ondemand.details": ({ kind, version }) => onDemand.details(kind, version),
+      "ondemand.season": ({ series, season }) => onDemand.season(series, season),
+      "ondemand.titles": ({ kind, versions }) => onDemand.titles(kind, versions),
       "ondemand.rows": ({ kind, tab, like }) => onDemand.rows(kind, tab, like),
       "ondemand.tiles": ({ kind, of }) => onDemand.tiles(kind, of),
       "ondemand.collection": (query) => onDemand.collection(query),
-      "playback.open": ({ channelId, variant, decoders, repair, audio, audioLanguage, preview }) =>
+      "playback.open": ({
+        channel: named,
+        variant,
+        decoders,
+        repair,
+        audio,
+        audioLanguage,
+        preview,
+      }) =>
         Effect.gen(function* () {
           // A page's preview never takes the provider's connection from a receiver. Refused
           // here while one is the output, also one that is gone with nothing open; the playback
@@ -522,14 +548,9 @@ async function start(): Promise<void> {
             });
           }
           yield* nextTurn;
-          const channel = yield* library.channel(channelId);
-          const variants = streamsToPlay(channel, yield* settings.get, variant).map(({ id }) => id);
-          if (variants.length === 0) {
-            return yield* new Failed({
-              error: { kind: "channel-not-found", channelId: variant ?? channelId },
-            });
-          }
-          return yield* playback.open(channel.id, decoders, {
+          const channel = yield* library.channel(named);
+          const variants = yield* streamsOf(channel, variant);
+          return yield* playback.open(ownedId(channel), decoders, {
             variants,
             repair: repair ?? false,
             audio: audio ?? null,
@@ -594,17 +615,12 @@ async function start(): Promise<void> {
         }),
       "output.closePicker": ({ request }) => Effect.as(output.closePicker(request), null),
       "output.disconnect": () => Effect.as(output.disconnect, null),
-      "output.playChannel": ({ channelId, variant, audio, audioLanguage, name }) =>
+      "output.playChannel": ({ channel: named, variant, audio, audioLanguage, name }) =>
         Effect.gen(function* () {
           yield* nextTurn;
-          const channel = yield* library.channel(channelId);
-          const variants = streamsToPlay(channel, yield* settings.get, variant).map(({ id }) => id);
-          if (variants.length === 0) {
-            return yield* new Failed({
-              error: { kind: "channel-not-found", channelId: variant ?? channelId },
-            });
-          }
-          return yield* output.playChannel(channel.id, {
+          const channel = yield* library.channel(named);
+          const variants = yield* streamsOf(channel, variant);
+          return yield* output.playChannel(ownedId(channel), {
             variants,
             audio: audio ?? null,
             audioLanguage: audioLanguage ?? null,
@@ -651,22 +667,21 @@ async function start(): Promise<void> {
           return updated;
         }),
       "viewing.get": () => viewing.state,
-      "viewing.setFavourite": ({ commandId, channelId, favourite }) =>
-        viewing.setFavourite(commandId, channelId, favourite),
+      "viewing.setFavourite": ({ commandId, channel, favourite }) =>
+        viewing.setFavourite(commandId, channel, favourite),
       "viewing.reorderFavourites": ({ commandId, ...order }) =>
         viewing.reorderFavourites(commandId, order),
-      "viewing.recordWatch": ({ commandId, channelId }) =>
+      "viewing.recordWatch": ({ commandId, channel }) =>
         Effect.andThen(
-          settings.update({ lastChannelId: channelId }),
-          viewing.recordWatch(commandId, channelId),
+          settings.updateSubscription(channel.subscriptionId, { lastChannelId: channel.id }),
+          viewing.recordWatch(commandId, channel),
         ),
       "viewing.recordProgress": ({ commandId, title, position, duration, since }) =>
         viewing.recordProgress(commandId, title, position, duration, since),
-      "viewing.removeFromContinue": ({ commandId, ...filter }) =>
-        viewing.removeFromContinue(commandId, filter),
-      "viewing.finishSeries": ({ commandId, seriesIds }) =>
-        viewing.finishSeries(commandId, seriesIds),
-      "viewing.progress": (filter) => viewing.progress(filter),
+      "viewing.removeFromContinue": ({ commandId, titles }) =>
+        viewing.removeFromContinue(commandId, titles),
+      "viewing.finishSeries": ({ commandId, series }) => viewing.finishSeries(commandId, series),
+      "viewing.progress": (titles) => viewing.progress(titles),
       "updates.status": () => updates.status,
       "updates.setChannel": ({ channel }) => updates.setChannel(channel),
       "updates.check": () => updates.check,

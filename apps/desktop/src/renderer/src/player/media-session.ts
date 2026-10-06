@@ -20,6 +20,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
+import { ownedKey } from "@mrstreamer/contracts/subscription";
 import { queries } from "../lib/queries.ts";
 import { useOutput } from "./output.ts";
 import { player, receiverState, usePlayer } from "./player.ts";
@@ -260,8 +261,8 @@ export function useLiveSession(channel: LiveChannel | null): void {
   // Only a receiver holds a channel that is on paused: the system shows what it said.
   const held = usePlayer((state) => receiverState(state.phase) === "paused");
   const playing = live && !held;
-  const listings = useQuery(queries.listings(channel ? [channel.id] : []));
-  const programme = (channel && listings.data?.[channel.id]?.now?.title) ?? null;
+  const listings = useQuery(queries.listings(channel ? [channel] : []));
+  const programme = (channel && listings.data?.[ownedKey(channel)]?.now?.title) ?? null;
   const view = useView();
 
   useEffect(() => {

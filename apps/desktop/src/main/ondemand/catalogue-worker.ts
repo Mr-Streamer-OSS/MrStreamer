@@ -3,7 +3,11 @@
 // here that costs nothing the viewer notices. The main process sends small calls and gets pages.
 //
 // The catalogue on disk (ondemand.json.gz) keeps the provider's lists as they came, for one
-// subscription; display names are worked out on load.
+// account; display names are worked out on load. In memory it is one subscription's, and every
+// title and version made from it says so.
+//
+// A refresh takes two calls. The lists it fetches wait aside until the main process, which knows
+// the saved login, says whether they still count: only then do they show and reach the disk.
 import { workerData, parentPort } from "node:worker_threads";
 import { type } from "arktype";
 import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
@@ -15,6 +19,7 @@ import {
   type IndexedCatalogue,
 } from "@mrstreamer/core/ondemand/catalogue";
 import type { CollectionId, Title, TitleKind } from "@mrstreamer/contracts/ondemand";
+import { ownedKey } from "@mrstreamer/contracts/subscription";
 import { adultIn } from "@mrstreamer/core/adult";
 import type { OnDemandCatalogue } from "@mrstreamer/core/provider";
 import { tmdb, tmdbImage } from "@mrstreamer/core/metadata/tmdb";
@@ -23,6 +28,7 @@ import { readJsonFile, removeFile, writeJsonFile } from "../platform/json-file.t
 import { providerFor } from "../providers/account.ts";
 import { metadataStore, type Wanted } from "./metadata.ts";
 import type {
+  CatalogueOwner,
   WorkerCalls,
   WorkerEvent,
   WorkerRequest,
@@ -106,7 +112,8 @@ const CachedCatalogue = type({
 });
 
 interface Loaded {
-  readonly key: string;
+  /** The subscription whose titles these are. */
+  readonly subscriptionId: string;
   readonly fetchedAt: number;
   readonly catalogue: OnDemandCatalogue;
   readonly movies: number;
@@ -118,16 +125,26 @@ interface Loaded {
 }
 
 let loaded: Loaded | null = null;
-/** The refresh in flight, shared by calls for the same account. */
+/** The refresh in flight, shared by calls for the same subscription with the same login. */
 let refreshing: {
-  readonly key: string;
-  readonly done: Promise<WorkerStatus>;
+  readonly subscriptionId: string;
+  readonly revision: number;
+  readonly done: Promise<null>;
   readonly abort: AbortController;
 } | null = null;
+/**
+ * The lists the last refresh fetched, set aside until the main process says whether the login
+ * they were asked under still stands.
+ */
+let fetched: {
+  readonly subscriptionId: string;
+  readonly revision: number;
+  readonly catalogue: OnDemandCatalogue;
+} | null = null;
 
-function remember(key: string, fetchedAt: number, catalogue: OnDemandCatalogue): Loaded {
+function remember(subscriptionId: string, fetchedAt: number, catalogue: OnDemandCatalogue): Loaded {
   loaded = {
-    key,
+    subscriptionId,
     fetchedAt,
     catalogue,
     movies: catalogue.movies.length,
@@ -209,7 +226,9 @@ function named(title: Title, language: string): Title {
 
 /** The catalogue as a viewer of `language` sees it. */
 function indexOf(found: Loaded, language: string): IndexedCatalogue {
-  if (found.index?.language !== language) found.index = indexCatalogue(found.catalogue, language);
+  if (found.index?.language !== language) {
+    found.index = indexCatalogue(found.catalogue, language, found.subscriptionId);
+  }
   return found.index;
 }
 
@@ -236,12 +255,18 @@ function persist(file: object): void {
 const emptyBefore = new Set<string>();
 
 /** The cache file being read, so the calls a start sends together read it once. */
-let reading: { readonly key: string; readonly done: Promise<Loaded | null> } | null = null;
+let reading: {
+  readonly subscriptionId: string;
+  readonly done: Promise<Loaded | null>;
+} | null = null;
 
-/** The catalogue for `key` from memory or disk, or null when there is none yet. */
-function current(key: string): Promise<Loaded | null> {
-  if (loaded?.key === key) return Promise.resolve(loaded);
-  if (reading?.key === key) return reading.done;
+/**
+ * The subscription's catalogue from memory, or from disk when the lists there are its account's,
+ * or null when there is none yet.
+ */
+function current({ subscriptionId, key }: CatalogueOwner): Promise<Loaded | null> {
+  if (loaded?.subscriptionId === subscriptionId) return Promise.resolve(loaded);
+  if (reading?.subscriptionId === subscriptionId) return reading.done;
   const done = (async () => {
     const file =
       (await readJsonFile(setup.cachePath, CachedCatalogue)) ??
@@ -249,11 +274,11 @@ function current(key: string): Promise<Loaded | null> {
         ? null
         : await readJsonFile(legacyCachePath, CachedCatalogue));
     // Cleared while reading, when the account went.
-    if (file?.key !== key || reading?.key !== key) return null;
-    if (loaded?.key === key) return loaded;
-    return remember(key, file.version === 2 ? file.fetchedAt : 0, file);
+    if (file?.key !== key || reading?.subscriptionId !== subscriptionId) return null;
+    if (loaded?.subscriptionId === subscriptionId) return loaded;
+    return remember(subscriptionId, file.version === 2 ? file.fetchedAt : 0, file);
   })();
-  reading = { key, done };
+  reading = { subscriptionId, done };
   const settled = () => {
     if (reading?.done === done) reading = null;
   };
@@ -261,9 +286,9 @@ function current(key: string): Promise<Loaded | null> {
   return done;
 }
 
-/** The catalogue for `key`, or the failure the UI explains when nothing is loaded yet. */
-async function required(key: string): Promise<Loaded> {
-  const found = await current(key);
+/** The subscription's catalogue, or the failure the UI explains when nothing is loaded yet. */
+async function required(owner: CatalogueOwner): Promise<Loaded> {
+  const found = await current(owner);
   if (found) return found;
   throw new AppFailure({ kind: "unexpected", detail: "Movies and series haven't loaded yet." });
 }
@@ -276,19 +301,23 @@ function statusOf(found: Loaded | null): WorkerStatus {
   };
 }
 
-async function refresh(args: WorkerCalls["refresh"]["args"]): Promise<WorkerStatus> {
-  if (refreshing?.key === args.key) return refreshing.done;
+async function refresh(args: WorkerCalls["refresh"]["args"]): Promise<null> {
+  const { subscriptionId, revision } = args;
+  if (refreshing?.subscriptionId === subscriptionId && refreshing.revision === revision) {
+    return refreshing.done;
+  }
+  // Another subscription's, or this one's under the login it had before.
   refreshing?.abort.abort();
   const abort = new AbortController();
   const done = (async () => {
     const provider = providerFor(args.account, { userAgent: setup.userAgent });
     const catalogue = await provider.onDemandCatalogue(abort.signal);
-    const before = await current(args.key);
+    const before = await current(args);
     // An empty list doesn't replace one that had titles, unless it comes twice in a row, as for
     // channels: panels answer an overloaded request with an empty list, and one list can fail
     // while the other arrives.
     for (const list of ["movies", "series"] as const) {
-      const mark = `${args.key}:${list}`;
+      const mark = `${subscriptionId}:${list}`;
       const lost = catalogue[list].length === 0 && (before?.[list] ?? 0) > 0;
       if (!lost || emptyBefore.has(mark)) {
         emptyBefore.delete(mark);
@@ -317,20 +346,41 @@ async function refresh(args: WorkerCalls["refresh"]["args"]): Promise<WorkerStat
           ? catalogue.seriesCategories
           : before.catalogue.seriesCategories,
     };
-    const fetchedAt = Date.now();
-    const status = statusOf(remember(args.key, fetchedAt, kept));
-    // Written after answering, so the lists show without waiting for the disk. A write cut short
-    // by quitting leaves the previous lists for the next start, which refreshes them when due.
-    persist({ version: 2, key: args.key, fetchedAt, ...kept });
-    return status;
+    fetched = { subscriptionId, revision, catalogue: kept };
+    return null;
   })();
-  const running = { key: args.key, done, abort };
+  const running = { subscriptionId, revision, done, abort };
   refreshing = running;
   try {
     return await done;
   } finally {
     if (refreshing === running) refreshing = null;
   }
+}
+
+/**
+ * Ends a refresh as the main process decided: the lists set aside for it become the
+ * subscription's and are saved, or are dropped. Answers the status that leaves.
+ */
+async function finishRefresh({
+  revision,
+  keep,
+  ...owner
+}: WorkerCalls["finishRefresh"]["args"]): Promise<WorkerStatus> {
+  const { subscriptionId } = owner;
+  const aside = fetched;
+  // Gone already when a call that shared the refresh ended it, or the account went.
+  if (aside?.subscriptionId !== subscriptionId || aside.revision !== revision) {
+    return statusOf(await current(owner));
+  }
+  fetched = null;
+  if (!keep) return statusOf(await current(owner));
+  const fetchedAt = Date.now();
+  const status = statusOf(remember(subscriptionId, fetchedAt, aside.catalogue));
+  // Written after answering, so the lists show without waiting for the disk. A write cut short
+  // by quitting leaves the previous lists for the next start, which refreshes them when due.
+  persist({ version: 2, key: owner.key, fetchedAt, ...aside.catalogue });
+  return status;
 }
 
 /** TMDB's names for a title, so search finds it by its translations and its original name too. */
@@ -343,30 +393,31 @@ function aliases(title: Title): string {
 const handlers: {
   [M in keyof WorkerCalls]: (args: WorkerCalls[M]["args"]) => Promise<WorkerCalls[M]["result"]>;
 } = {
-  status: async ({ key, adults: shown }) => {
+  status: async ({ adults: shown, ...owner }) => {
     showing(shown);
-    return statusOf(await current(key));
+    return statusOf(await current(owner));
   },
   refresh,
-  byIds: async ({ key, language, kind, ids }) => {
+  finishRefresh,
+  byIds: async ({ language, kind, ids, ...owner }) => {
     speaking(language);
-    const found = await current(key);
+    const found = await current(owner);
     return found
       ? byIds(indexOf(found, language), kind, ids).map((title) => named(title, language))
       : [];
   },
-  search: async ({ key, language, query }) => {
+  search: async ({ language, query, ...owner }) => {
     speaking(language);
-    const found = await current(key);
+    const found = await current(owner);
     if (!found) return { movies: [], series: [] };
     const index = indexOf(found, language);
     const matches = (kind: TitleKind) =>
       search(index, kind, query, aliases).map((title) => named(title, language));
     return { movies: matches("movie"), series: matches("series") };
   },
-  searchKind: async ({ key, language, kind, query, limit }) => {
+  searchKind: async ({ language, kind, query, limit, ...owner }) => {
     speaking(language);
-    const found = await current(key);
+    const found = await current(owner);
     if (!found) return { titles: [], total: 0 };
     const matches = search(indexOf(found, language), kind, query, aliases, Infinity);
     return {
@@ -374,14 +425,14 @@ const handlers: {
       total: matches.length,
     };
   },
-  rows: async ({ key, language, kind, tab, like }) => {
+  rows: async ({ language, kind, tab, like, ...owner }) => {
     speaking(language);
-    const made = collectionsOf(await required(key), language, kind);
+    const made = collectionsOf(await required(owner), language, kind);
     const ids: CollectionId[] =
       tab === "new"
         ? ["new-week", "new-month", "recent"]
         : [
-            ...(like ? [`like:${like}` as const] : []),
+            ...(like ? [`like:${ownedKey(like)}` as const] : []),
             "popular",
             "new-week",
             "top-rated",
@@ -397,9 +448,9 @@ const handlers: {
       return [{ id, name, total: titles.length, titles: titles.slice(0, ROW_TITLES) }];
     });
   },
-  tiles: async ({ key, language, kind, of }) => {
+  tiles: async ({ language, kind, of, ...owner }) => {
     speaking(language);
-    const made = collectionsOf(await required(key), language, kind);
+    const made = collectionsOf(await required(owner), language, kind);
     return of === "genres"
       ? made.genres().map((genre) => ({
           id: `genre:${genre.name}` as const,
@@ -414,9 +465,9 @@ const handlers: {
           artworkUrl: service.artwork,
         }));
   },
-  collection: async ({ key, language, kind, id, sort, offset, limit }) => {
+  collection: async ({ language, kind, id, sort, offset, limit, ...owner }) => {
     speaking(language);
-    const made = collectionsOf(await required(key), language, kind);
+    const made = collectionsOf(await required(owner), language, kind);
     const titles = made.list(id, sort);
     return {
       name: made.name(id) ?? "",
@@ -424,8 +475,8 @@ const handlers: {
       titles: titles.slice(offset, offset + limit),
     };
   },
-  container: async ({ key, id }) => {
-    const found = await current(key);
+  container: async ({ id, ...owner }) => {
+    const found = await current(owner);
     // Any language's index knows every version's file type.
     return found
       ? (found.catalogue.movies.find((movie) => movie.id === id)?.container ?? null)
@@ -434,6 +485,7 @@ const handlers: {
   clear: async () => {
     refreshing?.abort.abort();
     refreshing = null;
+    fetched = null;
     reading = null;
     loaded = null;
     emptyBefore.clear();

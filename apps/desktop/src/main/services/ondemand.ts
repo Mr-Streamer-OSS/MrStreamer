@@ -2,7 +2,9 @@
 // details come from the provider and TMDB when a title opens, never before, TMDB's episodes when
 // their season opens, and playback asks here which file to stream. A title's details don't wait
 // for TMDB: what it says joins them once it arrives, and `detailsChanged` says so.
-// Every call is for the connected subscription; switching accounts clears what the last one had.
+// A title, version or episode a call names says which subscription lists it, and one of a
+// subscription that isn't saved finds nothing. The lists are the saved subscription's; switching
+// accounts clears what the last one had.
 import { join } from "node:path";
 import type { Worker } from "node:worker_threads";
 import type { AppError } from "@mrstreamer/contracts/errors";
@@ -23,6 +25,7 @@ import type {
   TitleMatches,
   TitleRef,
 } from "@mrstreamer/contracts/ondemand";
+import type { OwnedId } from "@mrstreamer/contracts/subscription";
 import { diagnosed } from "@mrstreamer/core/diagnostics";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
 import {
@@ -52,7 +55,7 @@ import type {
   WorkerStatus,
 } from "../ondemand/protocol.ts";
 import { Settings } from "./preferences.ts";
-import { Subscriptions, type Source } from "./subscription.ts";
+import { sameSource, Subscriptions, type Source } from "./subscription.ts";
 
 /** How many titles' details stay in memory. Opening one again then asks no one. */
 const DETAILS_KEPT = 200;
@@ -101,7 +104,10 @@ export class OnDemand extends Context.Service<
   OnDemand,
   {
     readonly status: Effect.Effect<OnDemandStatus>;
-    /** Fetches both lists. Concurrent calls for one subscription share a fetch. */
+    /**
+     * Fetches both lists. Concurrent calls for one subscription share a fetch. Lists that arrive
+     * after the subscription's login changed are dropped: it fails, and those from before stay.
+     */
     readonly refresh: Effect.Effect<OnDemandStatus, Failed>;
     /** Whether the lists should be fetched again: missing, or older than `maxAge`. */
     isStale(maxAge: Duration.Input): Effect.Effect<boolean>;
@@ -114,23 +120,23 @@ export class OnDemand extends Context.Service<
     /** Movies or series matching `query`: the best SEARCH_PAGE, and how many match. */
     searchKind(kind: TitleKind, query: string): Effect.Effect<TitleMatches, Failed>;
     /**
-     * A title's details, for when the viewer opens it: the provider's, with TMDB's once it has
+     * A version's details, for when the viewer opens it: the provider's, with TMDB's once it has
      * answered. They come as soon as the provider answers; `detailsChanged` says when TMDB's
-     * arrive later.
+     * arrive later. Fails with `no-subscription` when the version's subscription isn't saved.
      */
-    details(kind: TitleKind, id: string): Effect.Effect<TitleDetails, Failed>;
+    details(kind: TitleKind, version: OwnedId): Effect.Effect<TitleDetails, Failed>;
     /**
-     * The episodes of season `season` of series version `id`, for when the viewer opens it: the
+     * The episodes of season `season` of a series version, for when the viewer opens it: the
      * provider's, with TMDB's details.
      */
-    season(id: string, season: number): Effect.Effect<readonly EpisodeDetails[], Failed>;
-    /** Titles by the id of any version, from the lists alone. */
-    titles(kind: TitleKind, ids: readonly string[]): Effect.Effect<readonly Title[], Failed>;
-    /** A tab's rows; For you starts with titles like `like`, one watched lately. */
+    season(series: OwnedId, season: number): Effect.Effect<readonly EpisodeDetails[], Failed>;
+    /** Titles by any of their versions, from the lists alone. */
+    titles(kind: TitleKind, versions: readonly OwnedId[]): Effect.Effect<readonly Title[], Failed>;
+    /** A tab's rows; For you starts with titles like `like`, a version of one watched lately. */
     rows(
       kind: TitleKind,
       tab: RowTab,
-      like?: string,
+      like?: OwnedId,
     ): Effect.Effect<readonly CollectionRow[], Failed>;
     /** Genres or streaming services as tiles. */
     tiles(
@@ -139,7 +145,7 @@ export class OnDemand extends Context.Service<
     ): Effect.Effect<readonly CollectionTile[], Failed>;
     /** One page of a collection. */
     collection(query: CollectionQuery): Effect.Effect<CollectionPage, Failed>;
-    /** The file a movie or episode streams from. */
+    /** The file a movie or episode streams from, at the provider of the subscription it names. */
     file(title: TitleRef): Effect.Effect<TitleFile, Failed>;
     /** Forgets the lists and details, for when the subscription changes or goes. */
     readonly clear: Effect.Effect<void>;
@@ -154,10 +160,9 @@ export class OnDemand extends Context.Service<
   static readonly layer = (deps: OnDemandDeps) => Layer.effect(OnDemand, make(deps));
 }
 
-/** A movie or series version, by its id. */
-interface TitleKey {
+/** A movie or series version. */
+interface TitleKey extends OwnedId {
   readonly kind: TitleKind;
-  readonly id: string;
 }
 
 /**
@@ -218,8 +223,11 @@ function make(deps: OnDemandDeps) {
       (client) => Effect.promise(() => client.stop()),
     );
     /** Why the latest refresh of this subscription failed, until one succeeds. */
-    let failure: { readonly key: string; readonly error: AppError; readonly at: number } | null =
-      null;
+    let failure: {
+      readonly subscriptionId: string;
+      readonly error: AppError;
+      readonly at: number;
+    } | null = null;
     /** Counts restarts of the worker. */
     let generation = 0;
     /**
@@ -256,15 +264,18 @@ function make(deps: OnDemandDeps) {
         catch: (cause) => (cause instanceof Failed ? cause : failedWith(cause)),
       });
 
-    /** The worker's status for `key`, telling it whether the viewer shows titles for adults. */
-    const askStatus = (key: string) =>
+    /** Whose catalogue a call to the worker is about. */
+    const ownerOf = ({ id, key }: Source) => ({ subscriptionId: id, key });
+
+    /** The worker's status for `source`, telling it whether the viewer shows titles for adults. */
+    const askStatus = (source: Source) =>
       Effect.flatMap(settings.get, (preferences) =>
-        call("status", { key, adults: preferences.adultTitles ?? false }),
+        call("status", { ...ownerOf(source), adults: preferences.adultTitles ?? false }),
       );
 
-    const statusOf = (worked: WorkerStatus, key: string): OnDemandStatus => ({
+    const statusOf = (worked: WorkerStatus, source: Source): OnDemandStatus => ({
       ...worked,
-      failure: failure?.key === key ? failure.error : null,
+      failure: failure?.subscriptionId === source.id ? failure.error : null,
       metadata: tmdbKey ? metadataProgress : null,
     });
 
@@ -272,71 +283,88 @@ function make(deps: OnDemandDeps) {
       const source = yield* requireSource;
       // A refresh cut short by restarting the worker, as for a new key, isn't a failure to show.
       const started = generation;
-      return yield* call("refresh", { key: source.key, account: source.account }).pipe(
+      const { revision, account } = source;
+      const owner = { ...ownerOf(source), revision };
+      /**
+       * Whether the login the lists were asked under is still the saved one. What the provider
+       * answered under one that isn't, lists or a refusal, is neither kept nor told.
+       */
+      const stands = Effect.map(subscriptions.source, (now) => sameSource(source, now));
+      // The worker fetches the lists and sets them aside; it keeps them only once told to.
+      const fetched = Effect.gen(function* () {
+        yield* call("refresh", { ...owner, account });
+        const keep = yield* stands;
+        const worked = yield* call("finishRefresh", { ...owner, keep });
+        return keep ? worked : yield* switched;
+      });
+      return yield* fetched.pipe(
         diagnosed("titles"),
         Effect.tap((worked) =>
           Effect.gen(function* () {
             failure = null;
             listsVersion++;
-            yield* PubSub.publish(updates, statusOf(worked, source.key));
+            yield* PubSub.publish(updates, statusOf(worked, source));
           }),
         ),
-        Effect.map((worked) => statusOf(worked, source.key)),
+        Effect.map((worked) => statusOf(worked, source)),
         Effect.tapError((failed) =>
           Effect.gen(function* () {
-            if (started !== generation) return;
-            failure = { key: source.key, error: failed.error, at: Date.now() };
-            const worked = yield* askStatus(source.key).pipe(
+            if (started !== generation || !(yield* stands)) return;
+            failure = { subscriptionId: source.id, error: failed.error, at: Date.now() };
+            const worked = yield* askStatus(source).pipe(
               Effect.orElseSucceed(() => ({ movies: 0, series: 0, fetchedAt: null })),
             );
-            yield* PubSub.publish(updates, statusOf(worked, source.key));
+            yield* PubSub.publish(updates, statusOf(worked, source));
           }),
         ),
       );
     });
 
     /**
-     * Runs a call for the connected subscription in the viewer's language, fetching the lists
-     * first when there are none.
+     * Runs a call for `source`, the saved subscription, in the viewer's language, fetching the
+     * lists first when there are none.
      */
-    const loaded = <A>(run: (source: Source, language: string) => Effect.Effect<A, Failed>) =>
+    const loadedFor = <A>(source: Source, run: (language: string) => Effect.Effect<A, Failed>) =>
       Effect.gen(function* () {
-        const source = yield* requireSource;
-        const worked = yield* askStatus(source.key);
+        const worked = yield* askStatus(source);
         if (worked.fetchedAt === null) {
           // Refresh asks the provider again whenever the viewer does.
-          if (failure?.key === source.key && Date.now() - failure.at < RETRY_AFTER_MS) {
+          if (failure?.subscriptionId === source.id && Date.now() - failure.at < RETRY_AFTER_MS) {
             return yield* new Failed({ error: failure.error });
           }
           yield* refresh;
         }
-        return yield* run(source, yield* language);
+        return yield* run(yield* language);
       });
+    const loaded = <A>(run: (source: Source, language: string) => Effect.Effect<A, Failed>) =>
+      Effect.flatMap(requireSource, (source) =>
+        loadedFor(source, (language) => run(source, language)),
+      );
 
     /**
-     * A title's details: downloaded when it first opens, then kept, and put together each time with
-     * the title as the lists show it now, so its name and original language follow TMDB's metadata
-     * as it arrives without downloading anything again. TMDB is asked at the same time, and what
-     * it said by the time the provider answered is in them.
+     * A version's details: downloaded when it first opens, then kept, and put together each time
+     * with the title as the lists show it now, so its name and original language follow TMDB's
+     * metadata as it arrives without downloading anything again. TMDB is asked at the same time,
+     * and what it said by the time the provider answered is in them.
      */
-    const detailsOf = (kind: TitleKind, id: string) =>
+    const detailsOf = (kind: TitleKind, { subscriptionId, id }: OwnedId) =>
       Effect.gen(function* () {
-        const source = yield* requireSource;
+        const source = yield* subscriptions.sourceOf(subscriptionId);
         const viewer = yield* language;
-        const cacheKey = `${source.key}|${viewer}|${kind}|${id}`;
-        const [listed] = yield* loaded((_, language) =>
-          call("byIds", { key: source.key, language, kind, ids: [id] }),
+        const cacheKey = `${source.id}|${viewer}|${kind}|${id}`;
+        const [listed] = yield* loadedFor(source, (language) =>
+          call("byIds", { ...ownerOf(source), language, kind, ids: [id] }),
         );
         const kept = details.get(cacheKey);
         const title = listed ?? kept?.title;
         if (!title) return yield* new Failed({ error: { kind: "title-not-found", titleId: id } });
-        yield* askAbout(source.key, cacheKey, { kind, id }, title);
+        yield* askAbout(source, cacheKey, { subscriptionId, kind, id }, title);
         const downloaded = kept
           ? yield* renewed(source, kind, id, kept)
           : yield* download(source, kind, id, title);
         details.delete(cacheKey);
-        // Kept again only for the subscription it was asked for.
-        if ((yield* subscriptions.source)?.key === source.key) {
+        // Kept again only for the subscription it was asked for, with the login it had.
+        if (sameSource(source, yield* subscriptions.source)) {
           keep(details, cacheKey, downloaded, DETAILS_KEPT);
         }
         if (asking.has(cacheKey)) late.add(cacheKey);
@@ -378,7 +406,7 @@ function make(deps: OnDemandDeps) {
      * answered already or is being asked. Its answer is kept for the subscription it was asked
      * for, and announced when the title's details were given without it.
      */
-    const askAbout = (sourceKey: string, cacheKey: string, ref: TitleKey, title: Title) =>
+    const askAbout = (source: Source, cacheKey: string, ref: TitleKey, title: Title) =>
       Effect.gen(function* () {
         if (abouts.has(cacheKey) || asking.has(cacheKey)) return;
         if (!title.tmdbId) return keep(abouts, cacheKey, null, DETAILS_KEPT);
@@ -390,7 +418,7 @@ function make(deps: OnDemandDeps) {
           Effect.gen(function* () {
             asking.delete(cacheKey);
             const given = late.delete(cacheKey);
-            if (about === undefined || (yield* subscriptions.source)?.key !== sourceKey) return;
+            if (about === undefined || (yield* subscriptions.source)?.id !== source.id) return;
             keep(abouts, cacheKey, about, DETAILS_KEPT);
             if (given && about) yield* PubSub.publish(detailed, ref);
           });
@@ -471,10 +499,10 @@ function make(deps: OnDemandDeps) {
     const status = Effect.gen(function* () {
       const source = yield* subscriptions.source;
       if (!source) return { movies: 0, series: 0, fetchedAt: null, failure: null, metadata: null };
-      const worked = yield* askStatus(source.key).pipe(
+      const worked = yield* askStatus(source).pipe(
         Effect.orElseSucceed(() => ({ movies: 0, series: 0, fetchedAt: null })),
       );
-      return statusOf(worked, source.key);
+      return statusOf(worked, source);
     });
     const publishStatus = Effect.flatMap(status, (current) => PubSub.publish(updates, current));
 
@@ -487,19 +515,19 @@ function make(deps: OnDemandDeps) {
         Effect.gen(function* () {
           const source = yield* subscriptions.source;
           if (!source) return false;
-          const worked = yield* askStatus(source.key).pipe(
+          const worked = yield* askStatus(source).pipe(
             Effect.orElseSucceed(() => ({ fetchedAt: null })),
           );
           const now = yield* Clock.currentTimeMillis;
           return worked.fetchedAt === null || now - worked.fetchedAt > Duration.toMillis(maxAge);
         }),
 
-      rows: (kind: TitleKind, tab: RowTab, like?: string) =>
+      rows: (kind: TitleKind, tab: RowTab, like?: OwnedId) =>
         loaded((source, language) =>
-          call("rows", { key: source.key, language, kind, tab, ...(like ? { like } : {}) }),
+          call("rows", { ...ownerOf(source), language, kind, tab, ...(like ? { like } : {}) }),
         ),
       tiles: (kind: TitleKind, of: "genres" | "services") =>
-        loaded((source, language) => call("tiles", { key: source.key, language, kind, of })),
+        loaded((source, language) => call("tiles", { ...ownerOf(source), language, kind, of })),
       collection: ({ kind, id, sort, offset, limit }: CollectionQuery) =>
         loaded((source, language) =>
           Effect.gen(function* () {
@@ -508,7 +536,7 @@ function make(deps: OnDemandDeps) {
               return { name: "For adults", total: 0, titles: [] };
             }
             return yield* call("collection", {
-              key: source.key,
+              ...ownerOf(source),
               language,
               kind,
               id,
@@ -519,24 +547,24 @@ function make(deps: OnDemandDeps) {
           }),
         ),
       search: (query: string) =>
-        loaded((source, language) => call("search", { key: source.key, language, query })),
+        loaded((source, language) => call("search", { ...ownerOf(source), language, query })),
       searchKind: (kind: TitleKind, query: string) =>
         loaded((source, language) =>
-          call("searchKind", { key: source.key, language, kind, query, limit: SEARCH_PAGE }),
+          call("searchKind", { ...ownerOf(source), language, kind, query, limit: SEARCH_PAGE }),
         ),
 
-      details: (kind: TitleKind, id: string) =>
-        Effect.map(detailsOf(kind, id), (found) => found.shown),
+      details: (kind: TitleKind, version: OwnedId) =>
+        Effect.map(detailsOf(kind, version), (found) => found.shown),
 
-      season: (id: string, number: number) =>
+      season: (series: OwnedId, number: number) =>
         Effect.gen(function* () {
-          const { shown, about } = yield* detailsOf("series", id);
+          const { shown, about } = yield* detailsOf("series", series);
           const season =
             shown.kind === "series"
               ? shown.seasons.find((each) => each.number === number)
               : undefined;
           if (!season) {
-            return yield* new Failed({ error: { kind: "title-not-found", titleId: id } });
+            return yield* new Failed({ error: { kind: "title-not-found", titleId: series.id } });
           }
           const { tmdbId, originalLanguage } = shown.title;
           const answers: (readonly EpisodeAbout[])[] = [];
@@ -562,23 +590,32 @@ function make(deps: OnDemandDeps) {
           return seasonEpisodes(season, answers);
         }),
 
-      titles: (kind: TitleKind, ids: readonly string[]) =>
-        ids.length === 0
+      titles: (kind: TitleKind, versions: readonly OwnedId[]) =>
+        versions.length === 0
           ? Effect.succeed([])
-          : loaded((source, language) => call("byIds", { key: source.key, language, kind, ids })),
+          : loaded((source, language) => {
+              // Versions of another subscription aren't in these lists, whatever their ids.
+              const ids = versions.flatMap((version) =>
+                version.subscriptionId === source.id ? [version.id] : [],
+              );
+              return call("byIds", { ...ownerOf(source), language, kind, ids });
+            }),
 
       file: (title: TitleRef) =>
         Effect.gen(function* () {
-          const source = yield* requireSource;
+          const source = yield* subscriptions.sourceOf(title.subscriptionId);
           const missing = new Failed({ error: { kind: "title-not-found", titleId: title.id } });
           if (title.kind === "movie") {
-            const container = yield* loaded(() =>
-              call("container", { key: source.key, id: title.id }),
+            const container = yield* loadedFor(source, () =>
+              call("container", { ...ownerOf(source), id: title.id }),
             );
             if (!container) return yield* missing;
             return { url: source.provider.titleFile("movie", title.id, container), container };
           }
-          const series = yield* detailsOf("series", title.seriesId);
+          const series = yield* detailsOf("series", {
+            subscriptionId: title.subscriptionId,
+            id: title.seriesId,
+          });
           const episode = series.raw.episodes.find((each) => each.id === title.id);
           if (!episode) return yield* missing;
           return {
@@ -615,6 +652,12 @@ function make(deps: OnDemandDeps) {
     };
   });
 }
+
+const switched = Effect.fail(
+  new Failed({
+    error: { kind: "unexpected", detail: "The subscription changed while loading titles." },
+  }),
+);
 
 /** Keeps `value` as the most recently used, dropping the least recently used beyond `limit`. */
 function keep<V>(map: Map<string, V>, key: string, value: V, limit: number): void {

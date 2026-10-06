@@ -46,7 +46,7 @@ async function titles(deps: Partial<PlaybackDeps> = {}, options: FakeProviderOpt
   const open = (name: string, decoders: readonly Codec[] = LINUX) => {
     const movie = provider.titles.movies.find((each) => each.name.startsWith(name));
     if (!movie || !source) throw new Error(`No movie ${name}`);
-    const ref: TitleRef = { kind: "movie", id: String(movie.id) };
+    const ref: TitleRef = { kind: "movie", subscriptionId: source.id, id: String(movie.id) };
     return playback.openTitle(
       ref,
       source.provider.titleFile("movie", ref.id, movie.container),

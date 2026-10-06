@@ -8,18 +8,26 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
-import type { SubscriptionSummary } from "@mrstreamer/contracts/subscription";
+import {
+  ownedKey,
+  type OwnedId,
+  type SubscriptionSummary,
+} from "@mrstreamer/contracts/subscription";
 import type { Viewing } from "@mrstreamer/contracts/viewing";
 import { useUi, type ChannelList } from "../../src/renderer/src/app/ui-store.ts";
 import { GuidePage } from "../../src/renderer/src/features/live/GuidePage.tsx";
 import {
+  queries,
   syncGuideUpdates,
   syncLibraryUpdates,
   syncViewing,
 } from "../../src/renderer/src/lib/queries.ts";
 
+/** Names a channel or category by the provider's id, as the subscription "one" lists it. */
+const own = (id: string): OwnedId => ({ subscriptionId: "one", id });
+
 const channel = (id: string): LiveChannel => ({
-  id,
+  ...own(id),
   name: `UK | CHANNEL ${id}`,
   title: `Channel ${id}`,
   tags: [],
@@ -67,15 +75,14 @@ async function favouritesPage(count: number, list: ChannelList = { kind: "favour
   useUi.setState({ view: "live", list, watching: false, searchOpen: false, searchFrom: "" });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const shown = Array.from({ length: count }, (_, index) => String(index + 1));
-  const favourites = [...shown.slice(0, 1), HIDDEN[0], ...shown.slice(1), HIDDEN[1]];
+  const favourites = [...shown.slice(0, 1), HIDDEN[0], ...shown.slice(1), HIDDEN[1]].map(own);
   const channels = shown.map(channel);
   client.setQueryData(["subscription"], subscription("one"));
-  client.setQueryData(
-    ["library", "categories"],
-    [{ id: "uk", name: "UK | NEWS", group: null, title: "News", channelCount: count }],
-  );
-  client.setQueryData(["library", "channels", null], channels);
-  client.setQueryData(["library", "ids", ...favourites], channels);
+  client.setQueryData(queries.categories().queryKey, [
+    { ...own("uk"), name: "UK | NEWS", group: null, title: "News", channelCount: count },
+  ]);
+  client.setQueryData(queries.channels(null).queryKey, channels);
+  client.setQueryData(queries.channelsOf(favourites).queryKey, channels);
   client.setQueryData(["library", "status"], { channelCount: count, fetchedAt: 1, failure: null });
   const viewing: Viewing = { favourites, recent: [], continueWatching: [], sequence: 1 };
   client.setQueryData(["viewing"], viewing);
@@ -157,7 +164,7 @@ async function favouritesPage(count: number, list: ChannelList = { kind: "favour
     /** The record as the main process answers it once `shown` is the order of the channels. */
     saved: (order: readonly string[], sequence = 2): Viewing => ({
       ...viewing,
-      favourites: [...order.slice(0, 1), HIDDEN[0], ...order.slice(1), HIDDEN[1]],
+      favourites: [...order.slice(0, 1), HIDDEN[0], ...order.slice(1), HIDDEN[1]].map(own),
       sequence,
     }),
   };
@@ -272,8 +279,8 @@ describe("putting the favourites in another order", () => {
 
     // Programmes were asked for by the saved order, forty channels at a time: once for each
     // forty that came into view, and never again for a channel that moved.
-    const asked = ipc.argsOf("guide.listings").map(({ channelIds }) => channelIds);
-    const saved = Array.from({ length: 60 }, (_, index) => String(index + 1));
+    const asked = ipc.argsOf("guide.listings").map(({ channels }) => channels);
+    const saved = Array.from({ length: 60 }, (_, index) => own(String(index + 1)));
     expect(asked).toEqual([saved.slice(0, 40), saved.slice(40)]);
   });
 
@@ -294,9 +301,9 @@ describe("putting the favourites in another order", () => {
     expect(ipc.argsOf("viewing.reorderFavourites")).toEqual([
       {
         commandId: expect.any(String),
-        subscription: "one",
+        subscriptionId: "one",
         original: page.favourites,
-        order: ["4", "1", "2", "3"],
+        order: ["4", "1", "2", "3"].map(own),
       },
     ]);
 
@@ -304,7 +311,7 @@ describe("putting the favourites in another order", () => {
     const listed = ipc.hold("library.channels");
     await act(async () => answer.resolve(saved));
     // The list is the main process's to name, and the page waits for it too.
-    expect(ipc.argsOf("library.channels")).toEqual([{ ids: saved.favourites }]);
+    expect(ipc.argsOf("library.channels")).toEqual([{ channels: saved.favourites }]);
     expect(page.inert()).toBe(true);
     await act(async () => listed.resolve(["4", "1", "2", "3"].map(channel)));
     expect(page.button("Save")).toBeUndefined();
@@ -314,7 +321,7 @@ describe("putting the favourites in another order", () => {
     expect(page.client.getQueryData(["viewing"])).toEqual(saved);
     // The guide has its keys back, on the channel that was moved.
     await page.press("s");
-    expect(ipc.argsOf("viewing.setFavourite")).toMatchObject([{ channelId: "4" }]);
+    expect(ipc.argsOf("viewing.setFavourite")).toMatchObject([{ channel: own("4") }]);
   });
 
   it("keeps the draft when saving fails, and sends it again under the same id until it changes", async () => {
@@ -343,7 +350,7 @@ describe("putting the favourites in another order", () => {
     expect(page.text()).not.toContain("Couldn't save the order.");
     answer = ipc.hold("viewing.reorderFavourites");
     await page.click("Save");
-    expect(sent()[2]).toMatchObject({ order: ["2", "3", "1", "4"] });
+    expect(sent()[2]).toMatchObject({ order: ["2", "3", "1", "4"].map(own) });
     expect(sent()[2]?.commandId).not.toBe(sent()[0]?.commandId);
 
     const listed = ipc.hold("library.channels");
@@ -372,14 +379,14 @@ describe("putting the favourites in another order", () => {
     const listed = ipc.hold("library.channels");
     await page.click("Reload");
     const fresh: Viewing = {
-      favourites: ["1", "adult", "2", "3", "gone"],
+      favourites: ["1", "adult", "2", "3", "gone"].map(own),
       recent: [],
       continueWatching: [],
       sequence: 3,
     };
     await act(async () => record.resolve(fresh));
     await act(async () => listed.resolve(["1", "2", "3"].map(channel)));
-    expect(ipc.argsOf("library.channels").at(-1)).toEqual({ ids: fresh.favourites });
+    expect(ipc.argsOf("library.channels").at(-1)).toEqual({ channels: fresh.favourites });
     expect(page.rows()).toEqual(titles(["1", "2", "3"]));
     expect(page.button("Save")).toBeDefined();
     expect(page.focused()).toBe("Channel 1");
@@ -389,7 +396,7 @@ describe("putting the favourites in another order", () => {
     await page.press("Enter");
     expect(ipc.argsOf("viewing.reorderFavourites").at(-1)).toMatchObject({
       original: fresh.favourites,
-      order: ["2", "3", "1"],
+      order: ["2", "3", "1"].map(own),
     });
   });
 
@@ -426,7 +433,7 @@ describe("putting the favourites in another order", () => {
     await reordering();
     await act(async () =>
       page.client.setQueryData(
-        ["library", "ids", ...page.favourites],
+        queries.channelsOf(page.favourites).queryKey,
         ["1", "2", "3"].map(channel),
       ),
     );
@@ -452,26 +459,29 @@ describe("putting the favourites in another order", () => {
     let listed = ipc.hold("library.channels");
     await act(async () => ipc.emit("library.updated", status));
     await act(async () => listed.resolve(["1", "2", "3", "4"].map(channel)));
-    expect(ipc.argsOf("library.channels")).toEqual([{ ids: page.favourites }]);
+    expect(ipc.argsOf("library.channels")).toEqual([{ channels: page.favourites }]);
     // A new guide has a programme for one of them, and a channel watched meanwhile moves the
     // record on and leaves the favourites alone.
-    const guide = ["guide", "listings", "1", "2", "3", "4"];
+    const guide = queries.listings(["1", "2", "3", "4"].map(own)).queryKey;
     await act(async () => page.client.setQueryData(guide, {}));
     const programmes = ipc.hold("guide.listings");
     await act(async () => ipc.emit("guide.updated", null));
     const now = { start: Date.now() - 60_000, stop: Date.now() + 3_600_000 };
     await act(async () =>
       programmes.resolve({
-        "2": { now: { ...now, title: "Evening News", description: null }, next: null },
+        [ownedKey(own("2"))]: {
+          now: { ...now, title: "Evening News", description: null },
+          next: null,
+        },
       }),
     );
     await settled();
     expect(page.text()).toContain("Evening News");
     const record = ipc.hold("viewing.get");
     await act(async () => ipc.emit("viewing.changed", { sequence: 5 }));
-    await act(async () => record.resolve({ ...page.viewing, recent: ["2"], sequence: 5 }));
+    await act(async () => record.resolve({ ...page.viewing, recent: [own("2")], sequence: 5 }));
     await settled();
-    expect(page.client.getQueryData(["viewing"])).toMatchObject({ recent: ["2"] });
+    expect(page.client.getQueryData(["viewing"])).toMatchObject({ recent: [own("2")] });
     expect(page.rows()).toEqual(arranged);
     expect(page.button("Save")).toBeDefined();
     expect(page.focused()).toBe("Channel 3");
@@ -583,13 +593,13 @@ describe("putting the favourites in another order", () => {
     let listed = ipc.hold("library.channels");
     await page.click("Retry");
     const current: Viewing = {
-      favourites: ["5", "adult", "3", "4", "1", "2", "gone"],
+      favourites: ["5", "adult", "3", "4", "1", "2", "gone"].map(own),
       recent: [],
       continueWatching: [],
       sequence: 8,
     };
     await act(async () => answer.resolve(current));
-    expect(ipc.argsOf("library.channels")).toEqual([{ ids: current.favourites }]);
+    expect(ipc.argsOf("library.channels")).toEqual([{ channels: current.favourites }]);
     const renamed = { ...channel("1"), title: "Channel 1 as it is now" };
     const named = [channel("5"), channel("3"), channel("4"), renamed, channel("2")];
     await act(async () => listed.resolve(named));
@@ -597,7 +607,9 @@ describe("putting the favourites in another order", () => {
     expect(page.button("Save")).toBeUndefined();
     expect(page.rows()).toEqual(named.map(({ title }) => title));
     expect(page.client.getQueryData(["viewing"])).toEqual(current);
-    expect(page.client.getQueryData(["library", "ids", ...current.favourites])).toEqual(named);
+    expect(page.client.getQueryData(queries.channelsOf(current.favourites).queryKey)).toEqual(
+      named,
+    );
     unmount();
 
     // A later record, in another order, reaches the lists before the answer does, and the

@@ -27,7 +27,7 @@ Mr. Streamer keeps its data in one folder:
 
 The folder contains:
 
-- your subscription: the server address, your username, and your password, or the link of a playlist you added, which has no password. The password and the playlist link are encrypted with a key held by your system: the macOS Keychain, your Windows account, or GNOME Keyring or KWallet on Linux. On Linux without a keyring, a fixed key is used, so other programs running under your account can read them. The server address and username are not encrypted, and neither is the address of the server a playlist comes from.
+- your subscription: the server address, your username, and your password, or the link of a playlist you added, which has no password. The password and the playlist link are encrypted with a key held by your system: the macOS Keychain, your Windows account, or GNOME Keyring or KWallet on Linux. On Linux without a keyring, a fixed key is used, so other programs running under your account can read them. The server address and username are not encrypted, and neither is the address of the server a playlist comes from. Beside it the app keeps a random id it gives your subscription on this computer, with the server address and username it belongs to. The id is used only inside the app and is never sent anywhere.
 - your preferences, including your own TMDB key if you entered one. This key is not encrypted.
 - your favourites, the channels you watched, and your progress in movies and episodes
 - copies of your provider's channel list, programme guide, and movie and series lists
@@ -106,7 +106,7 @@ Our email and hosting providers process these messages and visits to our website
 
 ## Deleting your data
 
-- **Remove subscription**, in Settings > Subscription, deletes your login or playlist link and the copies of your provider's lists and guide. Tick **Also delete favourites, history and progress** to delete that account's favourites, watched channels and progress in movies and episodes as well. Otherwise they remain, and reappear if you connect the same account again.
+- **Remove subscription**, in Settings > Subscription, deletes your login or playlist link, the id the app gave your subscription, and the copies of your provider's lists and guide. Tick **Also delete favourites, history and progress** to delete that account's favourites, watched channels and progress in movies and episodes as well. Otherwise they remain, and reappear if you connect the same account again.
 - **Deleting the folder** listed above removes everything Mr. Streamer stores there. To also remove the password key, delete "Mr. Streamer Safe Storage" in Keychain Access on macOS, or the matching entry in your Linux keyring. The update folder can be deleted as well: `~/Library/Caches/mrstreamer-updater` on macOS, `%LOCALAPPDATA%\mrstreamer-updater` on Windows, or `~/.cache/mrstreamer-updater` on Linux.
 - **Uninstalling the app does not delete your data**, so a reinstall continues where you left off. The copy from the Microsoft Store is the exception: uninstalling it deletes its folder.
 - To ask us to delete messages or other data we hold about you, email privacy@mrstreamer.app.

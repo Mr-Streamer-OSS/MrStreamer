@@ -23,7 +23,13 @@
 // title: it is opened and loaded there afresh, where it was, paused when it was.
 import { createStore, useStore } from "zustand";
 import type { AppError } from "@mrstreamer/contracts/errors";
-import type { Episode, SeriesDetails, TitleRef } from "@mrstreamer/contracts/ondemand";
+import {
+  seriesOf,
+  type Episode,
+  type SeriesDetails,
+  type TitleRef,
+} from "@mrstreamer/contracts/ondemand";
+import { ownedId, sameOwned } from "@mrstreamer/contracts/subscription";
 import type { OutputFailure, OutputStatus, RemoteMedia } from "@mrstreamer/contracts/output";
 import type {
   AudioTrack,
@@ -86,6 +92,7 @@ export function episodeNow(series: SeriesDetails, episode: Episode): NowPlaying 
   return {
     title: {
       kind: "episode",
+      subscriptionId: episode.subscriptionId,
       id: episode.id,
       seriesId: episode.seriesId,
       season: episode.season,
@@ -286,9 +293,9 @@ function save(): void {
   });
   if (next === null && now.series && !seriesFinished && isFinished(position, duration)) {
     seriesFinished = true;
-    const seriesIds = now.series.title.versions.map((version) => version.id);
+    const series = now.series.title.versions.map(ownedId);
     void saved
-      .then(() => call("viewing.finishSeries", { commandId: crypto.randomUUID(), seriesIds }))
+      .then(() => call("viewing.finishSeries", { commandId: crypto.randomUUID(), series }))
       .catch(() => {});
   }
   void saved.catch(() => {});
@@ -644,8 +651,8 @@ function follow(media: RemoteMedia): void {
       const { now, next: after } = store.getState();
       if (after === null && now?.series && !seriesFinished) {
         seriesFinished = true;
-        const seriesIds = now.series.title.versions.map((version) => version.id);
-        void call("viewing.finishSeries", { commandId: crypto.randomUUID(), seriesIds }).catch(
+        const series = now.series.title.versions.map(ownedId);
+        void call("viewing.finishSeries", { commandId: crypto.randomUUID(), series }).catch(
           () => {},
         );
       }
@@ -857,7 +864,7 @@ export const titlePlayer = {
     const sameSeries =
       before.now?.title.kind === "episode" &&
       now.title.kind === "episode" &&
-      before.now.title.seriesId === now.title.seriesId;
+      sameOwned(seriesOf(before.now.title), seriesOf(now.title));
     titlePlayer.close();
     // Subtitle timing belongs to a file; a new title starts on time.
     setSubtitleDelay(video, 0);

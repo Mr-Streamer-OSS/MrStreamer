@@ -9,7 +9,7 @@
 // A list asked for is its view's from then on. Each goes by a name of its own, and when the view
 // closes or its account goes, the page takes back the lists of that view that are still asked
 // for, by their names, and tells the main process nothing else.
-import { fullScreen, ipc } from "./support.ts";
+import { fullScreen, ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement, StrictMode, type FunctionComponent } from "react";
 import { createRoot } from "react-dom/client";
@@ -30,6 +30,7 @@ const status = (output: Output): OutputStatus => ({
 });
 
 const channel: LiveChannel = {
+  subscriptionId: SUBSCRIPTION,
   id: "a",
   name: "NL | a",
   title: "a",
@@ -42,6 +43,7 @@ const channel: LiveChannel = {
 
 const movie: Title = {
   kind: "movie",
+  subscriptionId: SUBSCRIPTION,
   id: "m1",
   name: "Low Tide (EN)",
   title: "Low Tide",
@@ -56,7 +58,7 @@ const movie: Title = {
   adult: false,
   tmdbId: "1",
   genres: [],
-  versions: [{ id: "m1", tags: ["EN"] }],
+  versions: [{ subscriptionId: SUBSCRIPTION, id: "m1", tags: ["EN"] }],
 };
 
 /** Where the output button is in the full window. happy-dom lays nothing out, so this says. */

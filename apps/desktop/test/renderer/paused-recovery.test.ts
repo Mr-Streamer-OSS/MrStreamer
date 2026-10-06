@@ -4,7 +4,7 @@
 // movie stays paused. So does a second skip before the first one's run starts. Paused, a movie
 // lets go of the provider after five minutes, however it came to be paused, and saves no
 // progress meanwhile.
-import { ipc } from "./support.ts";
+import { ipc, SUBSCRIPTION } from "./support.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EngineError } from "../../src/renderer/src/player/engine.ts";
 import type { TitleRun } from "../../src/renderer/src/player/title-engine.ts";
@@ -72,7 +72,7 @@ async function pausedMovie(from = 0): Promise<void> {
   const opened = ipc.hold("playback.openTitle");
   void titlePlayer.open(
     {
-      title: { kind: "movie", id: "1" },
+      title: { kind: "movie", subscriptionId: SUBSCRIPTION, id: "1" },
       name: "Night Harbour",
       detail: null,
       artworkUrl: null,
@@ -82,7 +82,7 @@ async function pausedMovie(from = 0): Promise<void> {
   );
   opened.resolve({
     sessionId: "s1",
-    title: { kind: "movie", id: "1" },
+    title: { kind: "movie", subscriptionId: SUBSCRIPTION, id: "1" },
     url: "http://127.0.0.1/title/s1.mp4",
     duration: 600,
     audio: [

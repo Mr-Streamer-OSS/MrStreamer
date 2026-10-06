@@ -1,13 +1,12 @@
 // @vitest-environment happy-dom
 // Remove from Continue watching in a film's details takes every version of it out, and the button
 // goes once the record has it, while Resume stays; a removal that fails says why.
-import { ipc } from "./support.ts";
+import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 import type { MovieDetails, Title } from "@mrstreamer/contracts/ondemand";
-import { defaultPreferences } from "@mrstreamer/contracts/preferences";
 import type { TitleProgress, Viewing } from "@mrstreamer/contracts/viewing";
 import { DetailsView } from "../../src/renderer/src/features/titles/DetailsView.tsx";
 import { syncViewing } from "../../src/renderer/src/lib/queries.ts";
@@ -15,6 +14,7 @@ import { syncViewing } from "../../src/renderer/src/lib/queries.ts";
 /** A film in two versions: HD, shown first, and 4K, watched halfway. */
 const film: Title = {
   kind: "movie",
+  subscriptionId: SUBSCRIPTION,
   id: "hd",
   name: "Night Harbour 1080p (EN)",
   title: "Night Harbour",
@@ -30,8 +30,8 @@ const film: Title = {
   tmdbId: "603",
   genres: [],
   versions: [
-    { id: "hd", tags: ["EN", "1080p"] },
-    { id: "4k", tags: ["EN", "4K"] },
+    { subscriptionId: SUBSCRIPTION, id: "hd", tags: ["EN", "1080p"] },
+    { subscriptionId: SUBSCRIPTION, id: "4k", tags: ["EN", "4K"] },
   ],
 };
 
@@ -49,7 +49,7 @@ const details: MovieDetails = {
 };
 
 const halfway: TitleProgress = {
-  title: { kind: "movie", id: "4k" },
+  title: { kind: "movie", subscriptionId: SUBSCRIPTION, id: "4k" },
   position: 3000,
   duration: 6000,
   finished: false,
@@ -81,7 +81,6 @@ async function openDetails(): Promise<HTMLElement> {
   const record = ipc.hold("viewing.get");
   const opened = ipc.hold("ondemand.details");
   const client = new QueryClient();
-  client.setQueryData(["preferences"], defaultPreferences);
   const stopSync = syncViewing(client);
   const container = document.createElement("div");
   document.body.append(container);
@@ -91,7 +90,9 @@ async function openDetails(): Promise<HTMLElement> {
       createElement(
         QueryClientProvider,
         { client },
-        createElement(DetailsView, { target: { kind: "movie", id: "hd" } }),
+        createElement(DetailsView, {
+          target: { kind: "movie", subscriptionId: SUBSCRIPTION, id: "hd" },
+        }),
       ),
     ),
   );
@@ -121,7 +122,15 @@ describe("Remove from Continue watching in a film's details", () => {
     await act(async () => button(page, REMOVE)?.click());
     await settle();
     expect(ipc.argsOf("viewing.removeFromContinue")).toEqual([
-      { commandId: expect.any(String), movieIds: ["hd", "4k"] },
+      {
+        commandId: expect.any(String),
+        titles: {
+          movies: [
+            { subscriptionId: SUBSCRIPTION, id: "hd" },
+            { subscriptionId: SUBSCRIPTION, id: "4k" },
+          ],
+        },
+      },
     ]);
 
     await act(async () => removal.resolve(viewing(6, [])));

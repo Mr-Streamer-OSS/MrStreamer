@@ -17,6 +17,9 @@ import {
 } from "../src/ondemand/tracks.ts";
 import { continueWatching, isFinished, type TitleRow } from "../src/viewing/titles.ts";
 
+/** The subscription every title of these tests is listed by. */
+const SUBSCRIPTION = "subscription";
+
 describe("title names", () => {
   it.each([
     ["Escape from New York (NL)", "Escape from New York", ["NL"], null],
@@ -101,7 +104,7 @@ describe("one title per film", () => {
     series: [],
   };
   const listed = (language: string) =>
-    indexCatalogue(catalogue, language).movies.titles.map((title) => [
+    indexCatalogue(catalogue, language, SUBSCRIPTION).movies.titles.map((title) => [
       title.id,
       title.versions.map((version) => version.id),
     ]);
@@ -132,7 +135,7 @@ describe("one title per film", () => {
     const shown = (language: string) =>
       collections({
         kind: "movie",
-        titles: indexCatalogue(films, language).movies.titles,
+        titles: indexCatalogue(films, language, SUBSCRIPTION).movies.titles,
         language,
         names: () => null,
         metadata: (tmdbId) => ({
@@ -161,7 +164,7 @@ describe("one title per film", () => {
         { ...movie("21", "Wicked", "300", 2), adult: true },
       ],
     };
-    const titles = indexCatalogue(films, "en").movies.titles;
+    const titles = indexCatalogue(films, "en", SUBSCRIPTION).movies.titles;
     expect(titles.map((title) => [title.id, title.adult])).toEqual([
       ["20", false],
       ["21", true],
@@ -193,7 +196,7 @@ describe("one title per film", () => {
         movie("42", "A Quiet Place (NL AUDIO)", "400", 10),
       ],
     };
-    const [title] = indexCatalogue(films, language).movies.titles;
+    const [title] = indexCatalogue(films, language, SUBSCRIPTION).movies.titles;
     expect(title?.versions.map((version) => version.id)).toEqual(order);
   });
 
@@ -211,7 +214,7 @@ describe("one title per film", () => {
     };
     const made = collections({
       kind: "movie",
-      titles: indexCatalogue(films, "en").movies.titles,
+      titles: indexCatalogue(films, "en", SUBSCRIPTION).movies.titles,
       language: "en",
       metadata: () => null,
       names: () => null,
@@ -224,7 +227,7 @@ describe("one title per film", () => {
   });
 
   it("finds the title by any of its versions, and by any version's name", () => {
-    const index = indexCatalogue(catalogue, "en");
+    const index = indexCatalogue(catalogue, "en", SUBSCRIPTION);
     expect(byIds(index, "movie", ["3"]).map((title) => title.id)).toEqual(["2"]);
     expect(search(index, "movie", "speak").map((title) => title.id)).toEqual(["2"]);
   });
@@ -389,6 +392,7 @@ describe("version labels", () => {
 describe("details", () => {
   const title = {
     kind: "movie" as const,
+    subscriptionId: SUBSCRIPTION,
     id: "1",
     name: "Blow 1080p (NL AUDIO)",
     title: "Blow",
@@ -403,7 +407,7 @@ describe("details", () => {
     adult: false,
     tmdbId: null,
     genres: [],
-    versions: [{ id: "1", tags: ["NL AUDIO", "1080p"] }],
+    versions: [{ subscriptionId: SUBSCRIPTION, id: "1", tags: ["NL AUDIO", "1080p"] }],
   };
   const provider = {
     originalName: null,
@@ -437,6 +441,7 @@ describe("details", () => {
     posterUrl: null,
     episodes: [
       {
+        subscriptionId: SUBSCRIPTION,
         id: "10",
         seriesId: "s1",
         season: 1,
@@ -536,6 +541,7 @@ function seriesOf(
   return seriesDetails(
     {
       kind: "series",
+      subscriptionId: SUBSCRIPTION,
       id: "s1",
       name: "Harbour Lights (NL)",
       title: "Harbour Lights",
@@ -550,7 +556,7 @@ function seriesOf(
       adult: false,
       tmdbId: null,
       genres: [],
-      versions: [{ id: "s1", tags: ["NL"] }],
+      versions: [{ subscriptionId: SUBSCRIPTION, id: "s1", tags: ["NL"] }],
     },
     {
       originalName: null,

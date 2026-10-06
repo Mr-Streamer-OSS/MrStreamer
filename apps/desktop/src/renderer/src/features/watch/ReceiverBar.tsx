@@ -7,6 +7,7 @@ import { Airplay, Cast, ChevronDown, ChevronUp, Pause, Play, Square } from "luci
 import { useEffect, type ReactNode } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { Receiver } from "@mrstreamer/contracts/output";
+import { ownedKey } from "@mrstreamer/contracts/subscription";
 import { openWatch, useUi } from "../../app/ui-store.ts";
 import { Progress } from "../../components/Progress.tsx";
 import { Button } from "../../components/ui/button.tsx";
@@ -184,7 +185,8 @@ function ChannelOn({ channel }: { channel: LiveChannel }) {
   const phase = usePlayer((state) => state.phase);
   const list = useUi((state) => state.list);
   const channels = useListChannels(list).channels;
-  const programme = useQuery(queries.listings([channel.id])).data?.[channel.id]?.now?.title ?? null;
+  const programme =
+    useQuery(queries.listings([channel])).data?.[ownedKey(channel)]?.now?.title ?? null;
   // The system's media controls stay with the channel while Watch is closed.
   useLiveSession(channel);
   const said = receiverState(phase);
@@ -201,7 +203,7 @@ function ChannelOn({ channel }: { channel: LiveChannel }) {
               ? "Buffering"
               : null;
   const step = (direction: number) => {
-    const target = adjacentChannel(channels ?? [], channel.id, direction);
+    const target = adjacentChannel(channels ?? [], channel, direction);
     if (target) player.zap(target);
   };
   return (

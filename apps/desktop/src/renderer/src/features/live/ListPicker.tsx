@@ -2,6 +2,7 @@
 // it beside the channels; Watch's channel list swaps to it from its title.
 import { ChevronRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { ownedKey } from "@mrstreamer/contracts/subscription";
 import { sameList, type ChannelList } from "../../app/ui-store.ts";
 import { cn } from "../../lib/utils.ts";
 import type { ListEntry } from "./lists.ts";
@@ -85,5 +86,5 @@ export function ListPicker({
 
 /** A stable key for a list. */
 export function listKey(list: ChannelList): string {
-  return list.kind === "category" ? `c:${list.id}` : list.kind;
+  return list.kind === "category" ? `c:${ownedKey(list.category)}` : list.kind;
 }

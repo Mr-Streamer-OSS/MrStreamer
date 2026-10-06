@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // A title's details show its name and original language from the lists. When the lists change,
 // as TMDB's metadata arrives, opening the details again reads them again.
-import { ipc } from "./support.ts";
+import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import type { MovieDetails } from "@mrstreamer/contracts/ondemand";
@@ -11,6 +11,7 @@ const details: MovieDetails = {
   kind: "movie",
   title: {
     kind: "movie",
+    subscriptionId: SUBSCRIPTION,
     id: "1",
     name: "Night Harbour (NL)",
     title: "Night Harbour",
@@ -25,7 +26,7 @@ const details: MovieDetails = {
     adult: false,
     tmdbId: "603",
     genres: [],
-    versions: [{ id: "1", tags: ["NL"] }],
+    versions: [{ subscriptionId: SUBSCRIPTION, id: "1", tags: ["NL"] }],
   },
   originalTitle: null,
   plot: null,
@@ -43,7 +44,9 @@ describe("a title's details", () => {
     const client = new QueryClient();
     syncOnDemand(client);
     const first = ipc.hold("ondemand.details");
-    const opening = client.fetchQuery(queries.details("movie", "1"));
+    const opening = client.fetchQuery(
+      queries.details("movie", { subscriptionId: SUBSCRIPTION, id: "1" }),
+    );
     first.resolve(details);
     await opening;
 
@@ -54,7 +57,7 @@ describe("a title's details", () => {
       failure: null,
       metadata: null,
     });
-    void client.fetchQuery(queries.details("movie", "1"));
+    void client.fetchQuery(queries.details("movie", { subscriptionId: SUBSCRIPTION, id: "1" }));
 
     expect(ipc.argsOf("ondemand.details")).toHaveLength(2);
   });

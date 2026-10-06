@@ -412,10 +412,10 @@ async function plainStream(page: Page): Promise<{ ok: boolean; detail: string }>
   };
 }
 
-/** The account's favourites, as the main process keeps them. */
+/** The account's favourite channels, by the playlist's ids, as the main process keeps them. */
 function favourites(page: Page): Promise<string[]> {
   return page.evaluate<string[]>(
-    `window.mrStreamer.invoke("viewing.get").then((viewing) => viewing.ok ? viewing.value.favourites : [])`,
+    `window.mrStreamer.invoke("viewing.get").then((viewing) => viewing.ok ? viewing.value.favourites.map((channel) => channel.id) : [])`,
   );
 }
 

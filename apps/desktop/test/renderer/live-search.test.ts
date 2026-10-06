@@ -2,20 +2,23 @@
 // Live TV's search of the list it shows: the channels found by a name or by a programme the main
 // process finds, in the list's order, the keys between the field and the channels, and what
 // another list does to a search.
-import { ipc } from "./support.ts";
+import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ListingMatch, Programme } from "@mrstreamer/contracts/guide";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
+import { ownedKey } from "@mrstreamer/contracts/subscription";
 import { useUi, type ChannelList } from "../../src/renderer/src/app/ui-store.ts";
 import { GuidePage } from "../../src/renderer/src/features/live/GuidePage.tsx";
+import { queries } from "../../src/renderer/src/lib/queries.ts";
 import { player } from "../../src/renderer/src/player/player.ts";
 
 const HOUR = 60 * 60 * 1000;
 
 const channel = (id: string, title: string, name = title): LiveChannel => ({
+  subscriptionId: SUBSCRIPTION,
   id,
   name,
   title,
@@ -35,8 +38,13 @@ const CHANNELS = [
   channel("6", "Dave", "UK | DAVE HD (COMEDY)"),
   channel("7", "Één"),
 ];
+/** Names a channel or category by the provider's id, as the one subscription lists it. */
+const own = (id: string) => ({ subscriptionId: SUBSCRIPTION, id });
 /** Favourites, in the order they were starred. */
-const FAVOURITES = ["4", "2", "1"];
+const FAVOURITES = ["4", "2", "1"].map(own);
+/** What a search found per channel, as the main process answers: by each channel's own key. */
+const found = (matches: Record<string, ListingMatch>): Record<string, ListingMatch> =>
+  Object.fromEntries(Object.entries(matches).map(([id, match]) => [ownedKey(own(id)), match]));
 
 // happy-dom lays nothing out, and the list draws only the rows that fit: the list gets a height
 // and each row its own.
@@ -59,22 +67,27 @@ async function guidePage(list: ChannelList = { kind: "all" }) {
   useUi.setState({ view: "live", list, watching: false, searchOpen: false, searchFrom: "" });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const byId = new Map(CHANNELS.map((each) => [each.id, each]));
+  client.setQueryData(queries.categories().queryKey, [
+    {
+      ...own("uk"),
+      name: "UK | NEWS",
+      group: null,
+      title: "News",
+      channelCount: CHANNELS.length,
+    },
+  ]);
+  client.setQueryData(queries.channels(null).queryKey, CHANNELS);
+  client.setQueryData(queries.channels(own("uk")).queryKey, CHANNELS);
   client.setQueryData(
-    ["library", "categories"],
-    [{ id: "uk", name: "UK | NEWS", group: null, title: "News", channelCount: CHANNELS.length }],
-  );
-  client.setQueryData(["library", "channels", null], CHANNELS);
-  client.setQueryData(["library", "channels", "uk"], CHANNELS);
-  client.setQueryData(
-    ["library", "ids", ...FAVOURITES],
-    FAVOURITES.flatMap((id) => byId.get(id) ?? []),
+    queries.channelsOf(FAVOURITES).queryKey,
+    FAVOURITES.flatMap(({ id }) => byId.get(id) ?? []),
   );
   client.setQueryData(["library", "status"], {
     channelCount: CHANNELS.length,
     fetchedAt: 1,
     failure: null,
   });
-  client.setQueryData(["viewing"], {
+  client.setQueryData(queries.viewing().queryKey, {
     favourites: FAVOURITES,
     recent: [],
     continueWatching: [],
@@ -137,16 +150,19 @@ async function guidePage(list: ChannelList = { kind: "all" }) {
   };
 }
 
-/** Types a search and answers it with what the main process found in the programmes. */
+/**
+ * Types a search and answers it with what the main process found in the programmes, given here
+ * by the provider's channel ids.
+ */
 async function searched(
   page: Awaited<ReturnType<typeof guidePage>>,
   text: string,
-  found: Record<string, ListingMatch> = {},
+  matches: Record<string, ListingMatch> = {},
 ) {
   const answer = ipc.hold("guide.searchList");
   await page.type(text);
   await settled(150);
-  answer.resolve(found);
+  answer.resolve(found(matches));
   await settled();
 }
 
@@ -167,11 +183,13 @@ describe("searching the list Live TV shows", () => {
     expect(page.rows()).toHaveLength(CHANNELS.length);
     expect(ipc.argsOf("guide.searchList")).toEqual([{ query: "News", until: expect.any(Number) }]);
 
-    answer.resolve({
-      "1": { now: true, later: null },
-      "2": later("ITV News at Ten"),
-      "4": later("Newsnight"),
-    });
+    answer.resolve(
+      found({
+        "1": { now: true, later: null },
+        "2": later("ITV News at Ten"),
+        "4": later("Newsnight"),
+      }),
+    );
     await settled();
 
     expect(page.rows()).toEqual(["BBC One", "ITV1", "BBC News", "Euronews"]);
@@ -253,7 +271,10 @@ describe("searching the list Live TV shows", () => {
 
     await searched(page, "bbc");
     expect(page.rows()).toEqual(["BBC News", "BBC One"]);
-    expect(ipc.argsOf("guide.searchList").at(-1)).toMatchObject({ query: "bbc", ids: FAVOURITES });
+    expect(ipc.argsOf("guide.searchList").at(-1)).toMatchObject({
+      query: "bbc",
+      channels: FAVOURITES,
+    });
 
     await searched(page, "dave");
     expect(page.rows()).toEqual([]);
@@ -299,7 +320,9 @@ describe("searching the list Live TV shows", () => {
     ]);
     await settled();
 
-    expect(ipc.argsOf("guide.schedule")).toEqual([{ channelId: "2" }]);
+    expect(ipc.argsOf("guide.schedule")).toEqual([
+      { channel: { subscriptionId: SUBSCRIPTION, id: "2" } },
+    ]);
     expect(page.row("ITV1")?.textContent).toContain("The day's news.");
     expect(page.row("ITV1")?.textContent).not.toContain("Not what was searched for.");
     // Opening it plays nothing: only the row itself watches the channel.

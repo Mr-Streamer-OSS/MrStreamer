@@ -6,13 +6,14 @@
 // stays chosen. Nothing the provider or an engine said in words reaches the screen. Stop, another
 // channel and leaving Watch end a wait, so nothing opens behind the viewer, and no stream is asked
 // for while another is open.
-import { ipc } from "./support.ts";
+import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { LivePlaying, StreamFailure } from "@mrstreamer/contracts/playback";
+import { defaultSubscriptionPreferences } from "@mrstreamer/contracts/preferences";
 import { miniPlayer } from "../../src/renderer/src/app/mini-player.ts";
 import { closeWatch, openWatch, useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { WatchScreen } from "../../src/renderer/src/features/watch/WatchScreen.tsx";
@@ -25,6 +26,7 @@ await vi.hoisted(async () => {
 });
 
 const vrt: LiveChannel = {
+  subscriptionId: SUBSCRIPTION,
   id: "vrt",
   name: "BE | VRT 1 FHD",
   title: "VRT 1",
@@ -40,6 +42,7 @@ const vrt: LiveChannel = {
 };
 
 const een: LiveChannel = {
+  subscriptionId: SUBSCRIPTION,
   id: "een",
   name: "BE | EEN",
   title: "EEN",
@@ -113,7 +116,7 @@ function nextStream(): () => Promise<void> {
       const sessionId = `s${++sessions}`;
       held.resolve({
         sessionId,
-        channelId: "vrt",
+        channel: { subscriptionId: SUBSCRIPTION, id: "vrt" },
         url: `http://127.0.0.1/stream/${sessionId}`,
         format: "hls",
       });
@@ -336,7 +339,7 @@ describe("a channel that never starts", () => {
 
     starts = nextStream();
     await press("Retry");
-    expect(asked().at(-1)).toMatchObject({ channelId: "vrt" });
+    expect(asked().at(-1)).toMatchObject({ channel: { subscriptionId: SUBSCRIPTION, id: "vrt" } });
     await starts();
     await stops(DROPPED);
 
@@ -363,7 +366,7 @@ describe("a stream the provider refuses", () => {
   it("names no other device for a playlist, which has no connection to hold", async () => {
     ipc.hold("subscription.get").resolve({
       kind: "m3u",
-      id: "m3u:1",
+      id: SUBSCRIPTION,
       server: "https://lists.example",
       username: "",
       account: { state: "unknown", expiresAt: null, maxConnections: null, activeConnections: null },
@@ -513,7 +516,12 @@ describe("what a failure shows", () => {
 });
 
 describe("a quality chosen for the channel", () => {
-  beforeEach(() => ipc.prefer({ channelVariants: { vrt: "vrt" } }));
+  // The pick is the channel's subscription's.
+  beforeEach(() =>
+    ipc
+      .hold("subscription.preferences")
+      .resolve({ ...defaultSubscriptionPreferences, channelVariants: { vrt: "vrt" } }),
+  );
 
   it("stays chosen when its stream fails, until another is picked", async () => {
     let starts = nextStream();
@@ -531,12 +539,14 @@ describe("a quality chosen for the channel", () => {
     starts = nextStream();
     await press("Retry");
     expect(asked()).toHaveLength(2);
-    expect(ipc.methods()).not.toContain("preferences.update");
+    expect(ipc.methods()).not.toContain("subscription.updatePreferences");
     await starts();
     await stops(noStream, tried({ vrt: noStream }));
 
     await press("HD");
-    expect(ipc.argsOf("preferences.update")).toEqual([{ channelVariants: { vrt: "vrt-hd" } }]);
+    expect(ipc.argsOf("subscription.updatePreferences")).toEqual([
+      { subscriptionId: SUBSCRIPTION, patch: { channelVariants: { vrt: "vrt-hd" } } },
+    ]);
   });
 
   it("is offered no other quality for a refusal, as nothing shows one would play", async () => {
@@ -547,7 +557,7 @@ describe("a quality chosen for the channel", () => {
 
     expect(text()).toContain("Refused by the provider");
     expect(offered()).toEqual(["Retry", "Channels"]);
-    expect(ipc.methods()).not.toContain("preferences.update");
+    expect(ipc.methods()).not.toContain("subscription.updatePreferences");
   });
 });
 
@@ -602,7 +612,7 @@ describe("what a failed channel offers", () => {
 
     expect(await key("r")).toBe(true);
     expect(asked()).toHaveLength(2);
-    expect(asked().at(-1)).toMatchObject({ channelId: "vrt" });
+    expect(asked().at(-1)).toMatchObject({ channel: { subscriptionId: SUBSCRIPTION, id: "vrt" } });
   });
 
   it("presses what Tab reached with Enter, and keeps Enter and the arrows for channels", async () => {
@@ -617,7 +627,7 @@ describe("what a failed channel offers", () => {
     const starts = nextStream();
     await key("ArrowDown");
     await wait(400);
-    expect(asked().at(-1)).toMatchObject({ channelId: "een" });
+    expect(asked().at(-1)).toMatchObject({ channel: { subscriptionId: SUBSCRIPTION, id: "een" } });
     await starts();
 
     expect(await key("Enter")).toBe(true);
@@ -657,7 +667,7 @@ describe("a wait for the next reconnect", () => {
     await act(async () => player.zap(een));
     await wait(60_000);
 
-    expect(asked().map(({ channelId }) => channelId)).toEqual(["vrt", "vrt", "een"]);
+    expect(asked().map(({ channel }) => channel.id)).toEqual(["vrt", "vrt", "een"]);
   });
 
   it("ends when the viewer leaves Watch, where what is left is a preview", async () => {

@@ -2,18 +2,21 @@
 // A series' details list the provider's episodes at once, and TMDB's details for the season
 // shown once they come: the other seasons ask for nothing until their tab opens. The sheet shows
 // the title from the lists while the provider answers, and TMDB's details once they arrive.
-import { ipc } from "./support.ts";
+import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Episode, SeriesDetails, Title } from "@mrstreamer/contracts/ondemand";
-import { defaultPreferences } from "@mrstreamer/contracts/preferences";
 import { DetailsView } from "../../src/renderer/src/features/titles/DetailsView.tsx";
 import { syncOnDemand } from "../../src/renderer/src/lib/queries.ts";
 
+/** The series version these tests open, as requests name it. */
+const HARBOUR = { subscriptionId: SUBSCRIPTION, id: "harbour" };
+
 const series: Title = {
   kind: "series",
+  subscriptionId: SUBSCRIPTION,
   id: "harbour",
   name: "Night Harbour (NL)",
   title: "Night Harbour",
@@ -28,11 +31,12 @@ const series: Title = {
   adult: false,
   tmdbId: "90000",
   genres: [],
-  versions: [{ id: "harbour", tags: ["NL"] }],
+  versions: [{ subscriptionId: SUBSCRIPTION, id: "harbour", tags: ["NL"] }],
 };
 
 /** What the provider says about an episode: a number and a length. */
 const episode = (season: number, number: number): Episode => ({
+  subscriptionId: SUBSCRIPTION,
   id: `${season}-${number}`,
   seriesId: "harbour",
   season,
@@ -86,14 +90,15 @@ describe("a series' episodes", () => {
     const opened = ipc.hold("ondemand.details");
     const season = ipc.hold("ondemand.season");
     const client = new QueryClient();
-    client.setQueryData(["preferences"], defaultPreferences);
     const root = createRoot(document.createElement("div"));
     await act(async () =>
       root.render(
         createElement(
           QueryClientProvider,
           { client },
-          createElement(DetailsView, { target: { kind: "series", id: "harbour" } }),
+          createElement(DetailsView, {
+            target: { kind: "series", subscriptionId: SUBSCRIPTION, id: "harbour" },
+          }),
         ),
       ),
     );
@@ -105,7 +110,7 @@ describe("a series' episodes", () => {
     // The provider's episodes, with nothing made up while TMDB answers.
     await until(() => {
       expect(text()).toContain("Episode 2");
-      expect(ipc.argsOf("ondemand.season")).toEqual([{ id: "harbour", season: 1 }]);
+      expect(ipc.argsOf("ondemand.season")).toEqual([{ series: HARBOUR, season: 1 }]);
     });
     expect(text()).not.toContain("★");
     expect(text()).not.toContain("Directed by");
@@ -145,8 +150,8 @@ describe("a series' episodes", () => {
 
     await until(() => expect(ipc.argsOf("ondemand.season")).toHaveLength(2));
     expect(ipc.argsOf("ondemand.season")).toEqual([
-      { id: "harbour", season: 1 },
-      { id: "harbour", season: 2 },
+      { series: HARBOUR, season: 1 },
+      { series: HARBOUR, season: 2 },
     ]);
   });
 });
@@ -159,7 +164,6 @@ describe("a series' details", () => {
     const provider = ipc.hold("ondemand.details");
     const withTmdb = ipc.hold("ondemand.details");
     const client = new QueryClient();
-    client.setQueryData(["preferences"], defaultPreferences);
     const stopSync = syncOnDemand(client);
     const root = createRoot(document.createElement("div"));
     await act(async () =>
@@ -167,7 +171,9 @@ describe("a series' details", () => {
         createElement(
           QueryClientProvider,
           { client },
-          createElement(DetailsView, { target: { kind: "series", id: "harbour" } }),
+          createElement(DetailsView, {
+            target: { kind: "series", subscriptionId: SUBSCRIPTION, id: "harbour" },
+          }),
         ),
       ),
     );
@@ -188,7 +194,13 @@ describe("a series' details", () => {
     expect(text()).toContain("Episode 2");
 
     // TMDB's arrive after the provider's: the main process says so, and the sheet reads them.
-    await act(async () => ipc.emit("ondemand.detailsChanged", { kind: "series", id: "harbour" }));
+    await act(async () =>
+      ipc.emit("ondemand.detailsChanged", {
+        kind: "series",
+        subscriptionId: SUBSCRIPTION,
+        id: "harbour",
+      }),
+    );
     await act(async () => withTmdb.resolve({ ...details, plot: "TMDB's story of Night Harbour." }));
     await until(() => expect(text()).toContain("TMDB's story of Night Harbour."));
     expect(text()).not.toContain("All about Night Harbour.");

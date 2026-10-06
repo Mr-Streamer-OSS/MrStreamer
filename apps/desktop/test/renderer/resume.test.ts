@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // Continue watching's Resume on a series waits for the series' details. Whatever the viewer does
 // meanwhile, a new account above all, wins over that wait.
-import { ipc } from "./support.ts";
+import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
@@ -13,6 +13,7 @@ import { useResume, type ContinueEntry } from "../../src/renderer/src/lib/titles
 function seriesOf(id: string): Title {
   return {
     kind: "series",
+    subscriptionId: SUBSCRIPTION,
     id,
     name: `${id} (NL)`,
     title: id,
@@ -27,7 +28,7 @@ function seriesOf(id: string): Title {
     adult: false,
     tmdbId: null,
     genres: [],
-    versions: [{ id, tags: ["NL"] }],
+    versions: [{ subscriptionId: SUBSCRIPTION, id, tags: ["NL"] }],
   };
 }
 
@@ -37,7 +38,14 @@ function entryOf(id: string): ContinueEntry {
     key: `series:${id}`,
     title: seriesOf(id),
     progress: {
-      title: { kind: "episode", id: `${id}-e2`, seriesId: id, season: 1, episode: 2 },
+      title: {
+        kind: "episode",
+        subscriptionId: SUBSCRIPTION,
+        id: `${id}-e2`,
+        seriesId: id,
+        season: 1,
+        episode: 2,
+      },
       position: 600,
       duration: 2700,
       finished: false,
@@ -68,6 +76,7 @@ function detailsOf(id: string) {
         name: "Season 1",
         posterUrl: null,
         episodes: [1, 2].map((number) => ({
+          subscriptionId: SUBSCRIPTION,
           id: `${id}-e${number}`,
           seriesId: id,
           season: 1,
@@ -136,11 +145,11 @@ describe("resuming a series from Continue watching", () => {
   it("gives way to details the viewer opened meanwhile", async () => {
     const answer = ipc.hold("ondemand.details");
     resume(entry);
-    openDetails({ kind: "movie", id: "another" });
+    openDetails({ kind: "movie", subscriptionId: SUBSCRIPTION, id: "another" });
     await act(async () => answer.resolve(details));
 
     expect(useUi.getState()).toMatchObject({
-      details: { kind: "movie", id: "another" },
+      details: { kind: "movie", subscriptionId: SUBSCRIPTION, id: "another" },
       playingTitle: false,
     });
     expect(opened()).toEqual([]);

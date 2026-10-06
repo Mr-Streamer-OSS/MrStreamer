@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useSyncExternalStore } from "react";
+import { ownedKey } from "@mrstreamer/contracts/subscription";
 import { ConnectScreen } from "../features/connect/ConnectScreen.tsx";
 import { HomeScreen } from "../features/home/HomeScreen.tsx";
 import { GuidePage } from "../features/live/GuidePage.tsx";
@@ -11,7 +12,7 @@ import { TitleWatch } from "../features/titles/TitleWatch.tsx";
 import { ReceiverBar, useReceiverBar } from "../features/watch/ReceiverBar.tsx";
 import { WatchScreen } from "../features/watch/WatchScreen.tsx";
 import { appError, describeError } from "../lib/errors.ts";
-import { queries, useLastChannel } from "../lib/queries.ts";
+import { queries, useLastChannel, useSubscriptionPreferences } from "../lib/queries.ts";
 import { cn } from "../lib/utils.ts";
 import { outputs, useOutput } from "../player/output.ts";
 import { player, usePlayer } from "../player/player.ts";
@@ -23,19 +24,30 @@ import { isLivePage, useUi, type View } from "./ui-store.ts";
 export function App() {
   const subscription = useQuery(queries.subscription());
   const preferences = useQuery(queries.preferences());
+  const left = useSubscriptionPreferences();
   const editingLogin = useUi((state) => state.editingLogin);
 
-  // Restore volume and the last category once, before anything plays.
+  // Restore the volume once, before anything plays.
   const hydrated = useRef(false);
   useEffect(() => {
     if (!preferences.data || hydrated.current) return;
     hydrated.current = true;
     player.hydrate(preferences.data);
-    const { lastCategoryId } = preferences.data;
-    useUi.setState({
-      list: lastCategoryId ? { kind: "category", id: lastCategoryId } : { kind: "all" },
-    });
   }, [preferences.data]);
+
+  // Live TV opens on the category the viewer left the subscription at, once per subscription:
+  // reading its preferences again later changes no list.
+  const restored = useRef<string | null>(null);
+  useEffect(() => {
+    if (!left || restored.current === left.subscriptionId) return;
+    const { subscriptionId, lastCategoryId } = left;
+    restored.current = subscriptionId;
+    useUi.setState({
+      list: lastCategoryId
+        ? { kind: "category", category: { subscriptionId, id: lastCategoryId } }
+        : { kind: "all" },
+    });
+  }, [left]);
 
   const login =
     subscription.isSuccess && (!subscription.data || subscription.data.needsSecret || editingLogin);
@@ -126,7 +138,7 @@ function Shell({ liveOnly }: { liveOnly: boolean }) {
       </div>
       {/* Closed under Settings, whose Escape would otherwise reach the sheet's focus first. */}
       {details && !covered && !settingsOpen && (
-        <DetailsView key={`${details.kind}:${details.id}`} target={details} />
+        <DetailsView key={`${details.kind}:${ownedKey(details)}`} target={details} />
       )}
       {!covered && <ReceiverBar />}
       {watching && <WatchScreen />}

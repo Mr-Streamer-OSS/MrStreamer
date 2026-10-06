@@ -8,6 +8,7 @@ import { useMemo, type ReactNode } from "react";
 import type { Listing } from "@mrstreamer/contracts/guide";
 import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
 import type { Title, TitleKind } from "@mrstreamer/contracts/ondemand";
+import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { openDetails, openView, useUi, type ChannelList } from "../../app/ui-store.ts";
 import { CatalogueNotice, catalogueState } from "../../components/CatalogueNotice.tsx";
 import { ChannelLogo, hueOf } from "../../components/ChannelLogo.tsx";
@@ -18,7 +19,12 @@ import { WindowBar } from "../../components/WindowBar.tsx";
 import { useNow } from "../../lib/clock.ts";
 import { appError, describeError } from "../../lib/errors.ts";
 import { categoryOf, channelLine, clockTime, progressOf, timeLeft } from "../../lib/format.ts";
-import { queries, useCategoryMap, useLastChannel } from "../../lib/queries.ts";
+import {
+  queries,
+  useCategoryMap,
+  useLastChannel,
+  useSubscriptionPreferences,
+} from "../../lib/queries.ts";
 import { useContinueWatching, useRemoveFromContinue, useResume } from "../../lib/titles.ts";
 import { useFit } from "../../lib/use-fit.ts";
 import { usePreviewWaits } from "../../player/output.ts";
@@ -26,10 +32,10 @@ import { Picture } from "../../player/Picture.tsx";
 import { player, usePlayer } from "../../player/player.ts";
 import { WINDOW_BAR } from "../../../../shared/window-bar.ts";
 import { watchChannel } from "../live/GuidePage.tsx";
-import { showList } from "../live/lists.ts";
+import { useShowList } from "../live/lists.ts";
 import { openCollection } from "../titles/TitlesPage.tsx";
 
-const NO_IDS: readonly string[] = [];
+const NO_IDS: readonly OwnedId[] = [];
 const NO_CHANNELS: readonly LiveChannel[] = [];
 const NO_TITLES: readonly Title[] = [];
 /** Tile widths: channels and stills at 16:9, posters at 2:3. */
@@ -46,30 +52,40 @@ function notForAdults(channel: LiveChannel | null): LiveChannel | null {
 }
 
 /** Opens a list in Live TV. */
-function browse(list: ChannelList): void {
-  showList(list);
-  openView("live");
+function useBrowse(): (list: ChannelList) => void {
+  const showList = useShowList();
+  return (list) => {
+    showList(list);
+    openView("live");
+  };
 }
 
 export function HomeScreen({ active }: { active: boolean }) {
-  const preferences = useQuery({ ...queries.preferences(), refetchOnMount: "always" });
+  const browse = useBrowse();
+  // Read afresh each time Home opens: watching a channel changes the last one.
+  const left = useSubscriptionPreferences("always");
   const categories = useQuery(queries.categories());
   const categoryMap = useCategoryMap();
   const list = useUi((state) => state.list);
   const viewing = useQuery(queries.viewing());
   const favouriteIds = viewing.data?.favourites ?? NO_IDS;
   const recentIds = viewing.data?.recent ?? NO_IDS;
-  const favourites = ordinary(useQuery(queries.channelsById(favouriteIds)).data);
-  const recent = ordinary(useQuery(queries.channelsById(recentIds)).data);
-  const categoryId =
-    list.kind === "category" ? list.id : (preferences.data?.lastCategoryId ?? null);
-  const category = categoryId ? categoryMap.get(categoryId) : undefined;
+  const favourites = ordinary(useQuery(queries.channelsOf(favouriteIds)).data);
+  const recent = ordinary(useQuery(queries.channelsOf(recentIds)).data);
+  // The category Live TV shows, or the one the viewer left the subscription at.
+  const lastCategory: OwnedId | null =
+    list.kind === "category"
+      ? list.category
+      : left && left.lastCategoryId !== null
+        ? { subscriptionId: left.subscriptionId, id: left.lastCategoryId }
+        : null;
+  const category = lastCategory ? categoryMap.get(ownedKey(lastCategory)) : undefined;
   // Your category, or every channel before you have one.
   const categoryList: ChannelList = category
-    ? { kind: "category", id: category.id }
+    ? { kind: "category", category: ownedId(category) }
     : { kind: "all" };
   const inCategory = ordinary(
-    useQuery({ ...queries.channels(category?.id ?? null), enabled: categories.isSuccess }).data,
+    useQuery({ ...queries.channels(category ?? null), enabled: categories.isSuccess }).data,
   );
   const status = useQuery(queries.libraryStatus());
 
@@ -91,22 +107,23 @@ export function HomeScreen({ active }: { active: boolean }) {
     (state) => state.phase.kind !== "idle" && state.phase.kind !== "failed",
   );
   const last = notForAdults(useLastChannel());
-  const ids = useMemo(
+  // Each channel shown, once.
+  const listed = useMemo(
     () => [
-      ...new Set(
+      ...new Map(
         [playing, last, ...shown.favourites, ...shown.recent, ...shown.category].flatMap(
-          (channel) => (channel ? [channel.id] : []),
+          (channel) => (channel ? [[ownedKey(channel), channel] as const] : []),
         ),
-      ),
+      ).values(),
     ],
     [playing, last, shown.favourites, shown.recent, shown.category],
   );
-  const listings = useQuery(queries.listings(ids)).data ?? {};
+  const listings = useQuery(queries.listings(listed)).data ?? {};
   // Without a last channel, a favourite on now, or the first in your category, stands still.
   const hero =
     playing ??
     last ??
-    shown.favourites.find((channel) => listings[channel.id]?.now) ??
+    shown.favourites.find((channel) => listings[ownedKey(channel)]?.now) ??
     shown.favourites[0] ??
     shown.category[0] ??
     null;
@@ -125,18 +142,18 @@ export function HomeScreen({ active }: { active: boolean }) {
   const tiles = (channels: readonly LiveChannel[]) =>
     channels.map((channel) => (
       <Tile
-        key={channel.id}
+        key={ownedKey(channel)}
         channel={channel}
-        listing={listings[channel.id]}
+        listing={listings[ownedKey(channel)]}
         categories={categoryMap}
       />
     ));
   const titles = (list: readonly Title[]) =>
     list.map((title) => (
       <PosterTile
-        key={title.id}
+        key={ownedKey(title)}
         title={title}
-        onOpen={() => openDetails({ kind: title.kind, id: title.id })}
+        onOpen={() => openDetails({ kind: title.kind, ...ownedId(title) })}
       />
     ));
   const entries = continuing.entries.slice(0, columns);
@@ -145,10 +162,11 @@ export function HomeScreen({ active }: { active: boolean }) {
       <WindowBar className="sticky top-0 z-20 bg-black" />
       <Hero
         channel={hero}
-        live={active && hero !== null && hero.id === playing?.id}
+        live={active && sameOwned(hero, playing)}
         streaming={streaming}
-        listing={hero ? listings[hero.id] : undefined}
+        listing={hero ? listings[ownedKey(hero)] : undefined}
         categories={categoryMap}
+        onBrowse={browse}
       />
       <div ref={grid} className="space-y-9 px-10 pt-2 pb-16">
         {entries.length > 0 && (
@@ -238,6 +256,7 @@ function Hero({
   streaming,
   listing,
   categories,
+  onBrowse: browse,
 }: {
   channel: LiveChannel | null;
   /** The backdrop shows this channel's stream. */
@@ -246,6 +265,8 @@ function Hero({
   streaming: boolean;
   listing: Listing | undefined;
   categories: ReadonlyMap<string, Category>;
+  /** Opens a list in Live TV. */
+  onBrowse: (list: ChannelList) => void;
 }) {
   const now = useNow();
   const audible = usePlayer((state) => state.audible && !state.muted);

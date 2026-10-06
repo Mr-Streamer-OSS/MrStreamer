@@ -2,6 +2,8 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Title } from "@mrstreamer/contracts/ondemand";
+import { ownedId, ownedKey } from "@mrstreamer/contracts/subscription";
 import { tmdb as tmdbClient } from "@mrstreamer/core/metadata/tmdb";
 import { metadataStore, type Wanted } from "../src/main/ondemand/metadata.ts";
 import { OnDemand } from "../src/main/services/ondemand.ts";
@@ -9,7 +11,15 @@ import { Subscriptions } from "../src/main/services/subscription.ts";
 import { mainLayer } from "../src/main/runtime.ts";
 import { Settings } from "../src/main/services/preferences.ts";
 import { startFakeTmdb, tmdbName, type FakeTmdb } from "./fake-tmdb.ts";
-import { collect, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+import {
+  collect,
+  fakeProvider,
+  promised,
+  runtimeFor,
+  tempDir,
+  testConfig,
+  type Promised,
+} from "./support.ts";
 
 let tmdb: FakeTmdb | null = null;
 afterEach(async () => {
@@ -17,7 +27,18 @@ afterEach(async () => {
   tmdb = null;
 });
 
-/** The app with a TMDB key, against the fake provider and a fake TMDB. */
+/** A movie of the lists that TMDB knows. */
+async function knownMovie(onDemand: Promised<OnDemand["Service"]>): Promise<Title> {
+  const { titles } = await onDemand.collection({ kind: "movie", id: "all", offset: 0, limit: 50 });
+  const movie = titles.find((title) => title.tmdbId);
+  if (!movie) throw new Error("The lists have no movie with a TMDB id.");
+  return movie;
+}
+
+/**
+ * The app with a TMDB key, against the fake provider and a fake TMDB. `own` names a title of the
+ * connected subscription by the provider's id.
+ */
 async function metadataApp(key: string | null = "test-key") {
   tmdb = await startFakeTmdb();
   const dataDir = await tempDir();
@@ -33,9 +54,14 @@ async function metadataApp(key: string | null = "test-key") {
   };
   const runtime = runtimeFor(mainLayer(testConfig(dataDir)));
   const subscriptions = await promised(runtime, Subscriptions);
-  await subscriptions.connect({ server: provider.url, username: "demo", password: "demo" });
+  const { id: subscriptionId } = await subscriptions.connect({
+    server: provider.url,
+    username: "demo",
+    password: "demo",
+  });
   await runtime.dispose();
-  return { start, tmdb: tmdb };
+  const own = (id: string) => ({ subscriptionId, id });
+  return { start, tmdb: tmdb, own };
 }
 
 describe("TMDB metadata", { timeout: 30_000 }, () => {
@@ -143,6 +169,23 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
     expect(services).toEqual([expect.objectContaining({ name: "Netflix" })]);
     const rows = await onDemand.rows("movie", "for-you");
     expect(rows.map((row) => row.name)).toEqual(expect.arrayContaining(["Popular", "Netflix"]));
+
+    // For you leads with titles like one watched lately, named by one of its versions.
+    const [watched] = comedy.titles;
+    if (!watched) throw new Error("No comedy to be like.");
+    const [alike] = await onDemand.rows("movie", "for-you", ownedId(watched));
+    expect(alike).toMatchObject({
+      id: `like:${ownedKey(watched)}`,
+      name: `More like ${watched.title}`,
+    });
+    expect(alike?.titles.some((title) => title.id === watched.id)).toBe(false);
+    const page = await onDemand.collection({
+      kind: "movie",
+      id: `like:${ownedKey(watched)}`,
+      offset: 0,
+      limit: 5,
+    });
+    expect(page.titles).toEqual(alike?.titles.slice(0, 5));
   });
 
   it("shows TMDB's names in the viewer's language, and finds titles by their original name", async () => {
@@ -217,24 +260,21 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
   it("gives a title's details without waiting for TMDB, and says when TMDB's arrive", async () => {
     const app = await metadataApp();
     const { runtime, onDemand } = await app.start();
-    const [movie] = (
-      await onDemand.collection({ kind: "movie", id: "all", offset: 0, limit: 50 })
-    ).titles.filter((title) => title.tmdbId);
-    const id = movie?.id ?? "";
+    const movie = await knownMovie(onDemand);
     expect(app.tmdb.aboutRequests()).toBe(0);
     const changed = await collect(runtime, onDemand.detailsChanged);
     app.tmdb.holdAbout(true);
 
-    const early = await onDemand.details("movie", id);
+    const early = await onDemand.details("movie", movie);
 
     expect(early.plot).toMatch(/^The story of /);
     await vi.waitFor(() => expect(app.tmdb.aboutRequests()).toBe(1));
     app.tmdb.holdAbout(false);
-    await vi.waitFor(() => expect(changed).toEqual([{ kind: "movie", id }]));
-    const details = await onDemand.details("movie", id);
+    await vi.waitFor(() => expect(changed).toEqual([{ kind: "movie", ...ownedId(movie) }]));
+    const details = await onDemand.details("movie", movie);
     expect(details.plot).toMatch(/^TMDB's story of /);
     expect(details.title.posterUrl).toBe(
-      `https://image.tmdb.org/t/p/w780/poster-${movie?.tmdbId}.jpg`,
+      `https://image.tmdb.org/t/p/w780/poster-${movie.tmdbId}.jpg`,
     );
     expect(details.cast).toEqual([
       {
@@ -247,17 +287,15 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
     // TMDB's 101 minutes, not the provider's 100.
     expect(details.duration).toBe(6060);
     // Opening it again asks no one.
-    await onDemand.details("movie", movie?.id ?? "");
+    await onDemand.details("movie", movie);
     expect(app.tmdb.aboutRequests()).toBe(1);
   });
 
   it("asks TMDB again for details it couldn't answer, or had no key for", async () => {
     const app = await metadataApp();
     const { runtime, onDemand } = await app.start();
-    const [movie] = (
-      await onDemand.collection({ kind: "movie", id: "all", offset: 0, limit: 50 })
-    ).titles.filter((title) => title.tmdbId);
-    const plot = async () => (await onDemand.details("movie", movie?.id ?? "")).plot;
+    const movie = await knownMovie(onDemand);
+    const plot = async () => (await onDemand.details("movie", movie)).plot;
 
     app.tmdb.refuse(true);
     expect(await plot()).toMatch(/^The story of /);
@@ -266,10 +304,8 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
 
     const keyless = await metadataApp(null);
     const second = await keyless.start();
-    const [other] = (
-      await second.onDemand.collection({ kind: "movie", id: "all", offset: 0, limit: 50 })
-    ).titles.filter((title) => title.tmdbId);
-    const otherPlot = async () => (await second.onDemand.details("movie", other?.id ?? "")).plot;
+    const other = await knownMovie(second.onDemand);
+    const otherPlot = async () => (await second.onDemand.details("movie", other)).plot;
     expect(await otherPlot()).toMatch(/^The story of /);
     await (await promised(second.runtime, Settings)).update({ tmdbKey: "own-key" });
     await second.onDemand.reconfigure();
@@ -282,12 +318,9 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
     // TMDB refuses at first, so the lists and the details have only the provider's names.
     app.tmdb.refuse(true);
     const { runtime, onDemand } = await app.start();
-    const [movie] = (
-      await onDemand.collection({ kind: "movie", id: "all", offset: 0, limit: 50 })
-    ).titles.filter((title) => title.tmdbId);
-    const id = movie?.id ?? "";
-    const early = await onDemand.details("movie", id);
-    expect(early.title).toMatchObject({ title: movie?.title, originalLanguage: null });
+    const movie = await knownMovie(onDemand);
+    const early = await onDemand.details("movie", movie);
+    expect(early.title).toMatchObject({ title: movie.title, originalLanguage: null });
     // Refused too.
     await vi.waitFor(() => expect(app.tmdb.aboutRequests()).toBe(1));
 
@@ -298,7 +331,7 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
     await onDemand.reconfigure();
     const listed = await vi.waitFor(
       async () => {
-        const [title] = await onDemand.titles("movie", [id]);
+        const [title] = await onDemand.titles("movie", [movie]);
         expect(title?.originalLanguage).not.toBeNull();
         return title;
       },
@@ -308,7 +341,7 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
 
     // TMDB didn't answer then, so it is asked once more, now that it does.
     const again = await vi.waitFor(async () => {
-      const details = await onDemand.details("movie", id);
+      const details = await onDemand.details("movie", movie);
       expect(details.plot).toMatch(/^TMDB's story of /);
       return details;
     });
@@ -326,7 +359,7 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
     expect((await onDemand.status()).metadata).toBeNull();
     expect(app.tmdb.detailRequests()).toBe(0);
     // A season's episodes are the provider's.
-    const episodes = await onDemand.season(SERIES, 1);
+    const episodes = await onDemand.season(app.own(SERIES), 1);
     expect(episodes.map((episode) => episode.title)).toEqual(["Part 1", "Part 2", "Part 3"]);
     expect(app.tmdb.seasonRequests()).toEqual([]);
   });
@@ -343,11 +376,11 @@ describe("episode details", { timeout: 30_000 }, () => {
     const app = await metadataApp();
     const { runtime, onDemand } = await app.start();
     await (await promised(runtime, Settings)).update({ titleLanguage: "nl" });
-    const details = await onDemand.details("series", SERIES);
+    const details = await onDemand.details("series", app.own(SERIES));
     if (details.kind !== "series") throw new Error("Not a series.");
     expect(app.tmdb.seasonRequests()).toEqual([]);
 
-    const first = await onDemand.season(SERIES, 1);
+    const first = await onDemand.season(app.own(SERIES), 1);
 
     expect(app.tmdb.seasonRequests()).toEqual(["90000/1/nl"]);
     // The provider's three, not TMDB's fourth.
@@ -376,8 +409,8 @@ describe("episode details", { timeout: 30_000 }, () => {
     expect(first.map((episode) => episode.rating)).toEqual([8.2, 8.2, null]);
 
     // Opened again, it asks no one; the second season asks once it opens.
-    await onDemand.season(SERIES, 1);
-    const second = await onDemand.season(SERIES, 2);
+    await onDemand.season(app.own(SERIES), 1);
+    const second = await onDemand.season(app.own(SERIES), 2);
     expect(app.tmdb.seasonRequests()).toEqual(["90000/1/nl", "90000/2/nl"]);
     // TMDB lists one episode there; the provider's other keeps its own details.
     expect(second.map((episode) => [episode.title, episode.rating])).toEqual([
@@ -392,7 +425,7 @@ describe("episode details", { timeout: 30_000 }, () => {
     const settings = await promised(runtime, Settings);
     await settings.update({ titleLanguage: "de" });
 
-    const episodes = await onDemand.season(SERIES, 1);
+    const episodes = await onDemand.season(app.own(SERIES), 1);
 
     // TMDB names none in German, the odd ones in English, and all in Dutch, the series' own.
     expect(episodes.map((episode) => [episode.title, episode.plot])).toEqual([
@@ -404,7 +437,7 @@ describe("episode details", { timeout: 30_000 }, () => {
 
     // In English, what TMDB said in English and Dutch serves again.
     await settings.update({ titleLanguage: "en" });
-    const english = await onDemand.season(SERIES, 1);
+    const english = await onDemand.season(app.own(SERIES), 1);
     expect(english.map((episode) => episode.title)).toEqual([
       "English 1x1",
       "Origineel 1x2",
@@ -417,8 +450,8 @@ describe("episode details", { timeout: 30_000 }, () => {
     const app = await metadataApp();
     const { onDemand } = await app.start();
 
-    const dutch = await onDemand.season(SERIES, 1);
-    const english = await onDemand.season("79998", 1);
+    const dutch = await onDemand.season(app.own(SERIES), 1);
+    const english = await onDemand.season(app.own("79998"), 1);
 
     expect(dutch.map((episode) => [episode.id, episode.title])).toEqual([
       ["81000", "English 1x1"],
@@ -435,7 +468,8 @@ describe("episode details", { timeout: 30_000 }, () => {
   it("keeps the provider's episodes while TMDB fails or is slow, and asks again later", async () => {
     const app = await metadataApp();
     const { onDemand } = await app.start();
-    const titles = async () => (await onDemand.season(SERIES, 1)).map((episode) => episode.title);
+    const titles = async () =>
+      (await onDemand.season(app.own(SERIES), 1)).map((episode) => episode.title);
 
     app.tmdb.failSeasons(500);
     expect(await titles()).toEqual(["Part 1", "Part 2", "Part 3"]);
@@ -443,7 +477,13 @@ describe("episode details", { timeout: 30_000 }, () => {
     const started = Date.now();
     const slow = titles();
     // Playing an episode doesn't wait for it.
-    await onDemand.file({ kind: "episode", id: "81000", seriesId: SERIES, season: 1, episode: 1 });
+    await onDemand.file({
+      kind: "episode",
+      ...app.own("81000"),
+      seriesId: SERIES,
+      season: 1,
+      episode: 1,
+    });
     expect(Date.now() - started).toBeLessThan(2000);
     expect(await slow).toEqual(["Part 1", "Part 2", "Part 3"]);
     expect(Date.now() - started).toBeLessThan(6000);

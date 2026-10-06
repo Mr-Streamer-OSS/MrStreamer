@@ -23,6 +23,7 @@ import {
 } from "react";
 import type { Listing, ListingMatch, Programme } from "@mrstreamer/contracts/guide";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
+import { ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { matchRanges } from "@mrstreamer/core/text";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Progress } from "../../components/Progress.tsx";
@@ -49,11 +50,11 @@ export interface TableOrder {
   /** Nothing moves: the order is being saved, or can't be. */
   readonly locked: boolean;
   /** A click on a row, which gives it the keys. */
-  onSelect(channelId: string): void;
+  onSelect(channel: OwnedId): void;
   /** The focus went to a row's part by itself, as with Tab. */
-  onFocused(channelId: string, part: RowPart): void;
+  onFocused(channel: OwnedId, part: RowPart): void;
   /** Moves a channel `by` places, keeping the focus on `part` of its row. */
-  onMove(channelId: string, by: number, part: RowPart): void;
+  onMove(channel: OwnedId, by: number, part: RowPart): void;
 }
 
 /**
@@ -64,8 +65,8 @@ export interface TableOrder {
 export function ChannelTable({
   channels,
   selected,
-  playingId,
-  expandedId,
+  playingKey,
+  expandedKey,
   favourites,
   words,
   matches,
@@ -80,18 +81,20 @@ export function ChannelTable({
    * that holds the focus, whichever is in use.
    */
   selected: number | null;
-  playingId: string | null;
-  expandedId: string | null;
+  /** The channel that plays and the one whose schedule is open, each by its `ownedKey`. */
+  playingKey: string | null;
+  expandedKey: string | null;
+  /** The favourite channels, by `ownedKey`. */
   favourites: ReadonlySet<string>;
   /** The words of the search the channels were found by; none without one. */
   words: readonly string[];
-  /** What that search found in each channel's programmes, by channel id. */
+  /** What that search found in each channel's programmes, by the channel's `ownedKey`. */
   matches: Readonly<Record<string, ListingMatch>>;
   /** Set while `channels` are the favourites in an order being made. */
   order?: TableOrder | null;
   onWatch: (channel: LiveChannel) => void;
-  onToggleSchedule: (channelId: string) => void;
-  onToggleFavourite: (channelId: string) => void;
+  onToggleSchedule: (channelKey: string) => void;
+  onToggleFavourite: (channel: LiveChannel) => void;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const rem = useRem();
@@ -110,7 +113,10 @@ export function ChannelTable({
     count: channels.length,
     getScrollElement: () => scroller.current,
     estimateSize: () => ROW_REM * rem,
-    getItemKey: (index) => channels[index]?.id ?? index,
+    getItemKey: (index) => {
+      const channel = channels[index];
+      return channel ? ownedKey(channel) : index;
+    },
     overscan: 8,
     rangeExtractor,
   });
@@ -121,7 +127,7 @@ export function ChannelTable({
 
   // The list opens on the playing channel.
   useEffect(() => {
-    const index = channels.findIndex((channel) => channel.id === playingId);
+    const index = channels.findIndex((channel) => ownedKey(channel) === playingKey);
     virtualizer.scrollToIndex(Math.max(index, 0), { align: index > 0 ? "center" : "start" });
     // Only once its channels are in, not when another channel starts.
   }, [channels.length > 0]);
@@ -134,14 +140,16 @@ export function ChannelTable({
   const items = virtualizer.getVirtualItems();
   const saved = order?.saved;
   const savedAt = useMemo(
-    () => new Map(saved?.map((channel, index) => [channel.id, index])),
+    () => new Map(saved?.map((channel, index) => [ownedKey(channel), index])),
     [saved],
   );
   const listings = useVisibleListings(
     saved ?? channels,
-    items.flatMap((item) =>
-      saved ? (savedAt.get(channels[item.index]?.id ?? "") ?? []) : item.index,
-    ),
+    items.flatMap((item) => {
+      if (!saved) return item.index;
+      const channel = channels[item.index];
+      return (channel && savedAt.get(ownedKey(channel))) ?? [];
+    }),
   );
 
   return (
@@ -154,6 +162,7 @@ export function ChannelTable({
         {items.map((item) => {
           const channel = channels[item.index];
           if (!channel) return null;
+          const key = ownedKey(channel);
           return (
             <div
               key={item.key}
@@ -164,28 +173,28 @@ export function ChannelTable({
             >
               <ChannelRow
                 channel={channel}
-                listing={listings.get(channel.id) ?? null}
+                listing={listings.get(key) ?? null}
                 now={now}
-                playing={channel.id === playingId}
+                playing={key === playingKey}
                 selected={item.index === selected}
-                expanded={channel.id === expandedId}
-                favourite={favourites.has(channel.id)}
+                expanded={key === expandedKey}
+                favourite={favourites.has(key)}
                 words={words}
-                match={matches[channel.id] ?? null}
+                match={matches[key] ?? null}
                 order={
                   order && {
                     position: item.index + 1,
                     count: channels.length,
                     focus: item.index === selected ? order.focus : null,
                     locked: order.locked,
-                    onSelect: () => order.onSelect(channel.id),
-                    onFocused: (part) => order.onFocused(channel.id, part),
-                    onMove: (by, part) => order.onMove(channel.id, by, part),
+                    onSelect: () => order.onSelect(channel),
+                    onFocused: (part) => order.onFocused(channel, part),
+                    onMove: (by, part) => order.onMove(channel, by, part),
                   }
                 }
                 onWatch={() => onWatch(channel)}
-                onToggleSchedule={() => onToggleSchedule(channel.id)}
-                onToggleFavourite={() => onToggleFavourite(channel.id)}
+                onToggleSchedule={() => onToggleSchedule(key)}
+                onToggleFavourite={() => onToggleFavourite(channel)}
               />
             </div>
           );
@@ -352,7 +361,7 @@ function ChannelRow({
         </span>
       </div>
       {expanded && (
-        <Schedule channelId={channel.id} now={now} words={words} match={match} onWatch={onWatch} />
+        <Schedule channel={channel} now={now} words={words} match={match} onWatch={onWatch} />
       )}
     </div>
   );
@@ -432,19 +441,19 @@ function Marked({ text, words }: { text: string; words: readonly string[] }) {
  * on the later programme a search found, with its description, and marks what the search found.
  */
 function Schedule({
-  channelId,
+  channel,
   now,
   words,
   match,
   onWatch,
 }: {
-  channelId: string;
+  channel: LiveChannel;
   now: number;
   words: readonly string[];
   match: ListingMatch | null;
   onWatch: () => void;
 }) {
-  const schedule = useQuery(queries.schedule(channelId));
+  const schedule = useQuery(queries.schedule(channel));
   const found = match?.later?.start ?? null;
   const [open, setOpen] = useState(found);
   // The rest of today, and at least the next few when the day is nearly over.

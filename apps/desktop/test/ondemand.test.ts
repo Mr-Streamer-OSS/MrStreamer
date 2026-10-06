@@ -3,9 +3,13 @@ import { OnDemand } from "../src/main/services/ondemand.ts";
 import { Settings } from "../src/main/services/preferences.ts";
 import { mainLayer } from "../src/main/runtime.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
-import { fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+import { collect, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 
-/** The app's movie and series service on a fake provider, restartable on the same data folder. */
+/**
+ * The app's movie and series service on a fake provider, restartable on the same data folder.
+ * `own` names a title of the connected subscription by the provider's id. `reconnect` enters the
+ * login again, as the viewer does to repair it: the subscription stays the same.
+ */
 async function onDemandApp(options: { titles?: number } = {}) {
   const dataDir = await tempDir();
   const provider = await fakeProvider(options);
@@ -17,8 +21,11 @@ async function onDemandApp(options: { titles?: number } = {}) {
     return { runtime, subscriptions, onDemand, settings };
   };
   const app = await start();
-  await app.subscriptions.connect({ server: provider.url, username: "demo", password: "demo" });
-  return { provider, dataDir, start, ...app };
+  const reconnect = () =>
+    app.subscriptions.connect({ server: provider.url, username: "demo", password: "demo" });
+  const { id: subscriptionId } = await reconnect();
+  const own = (id: string) => ({ subscriptionId, id });
+  return { provider, dataDir, start, own, reconnect, ...app };
 }
 
 // Each test starts the catalogue's worker thread, which takes a moment under a busy suite.
@@ -96,9 +103,9 @@ describe("movies and series", { timeout: 20_000 }, () => {
   });
 
   it("shows the episodes the provider added once the lists are refreshed", async () => {
-    const { onDemand, provider } = await onDemandApp();
+    const { onDemand, provider, own } = await onDemandApp();
     const episodes = async () => {
-      const details = await onDemand.details("series", "80000");
+      const details = await onDemand.details("series", own("80000"));
       return details.kind === "series" ? details.seasons.flatMap((season) => season.episodes) : [];
     };
     const before = await episodes();
@@ -143,18 +150,22 @@ describe("movies and series", { timeout: 20_000 }, () => {
     ]);
   });
 
-  it("finds titles by any version's id from the lists, without asking for details", async () => {
-    const { onDemand, provider } = await onDemandApp();
-    const versions = provider.titles.movies.slice(0, 3).map((movie) => String(movie.id));
+  it("finds titles by any version from the lists, without asking for details", async () => {
+    const { onDemand, provider, own } = await onDemandApp();
+    const versions = provider.titles.movies.slice(0, 3).map((movie) => own(String(movie.id)));
 
-    const found = await onDemand.titles("movie", [...versions, "404"]);
+    const found = await onDemand.titles("movie", [...versions, own("404")]);
 
-    expect(found.map((title) => title.versions.map((version) => version.id)).flat()).toEqual(
-      expect.arrayContaining(versions),
-    );
+    // Each title, and each of its versions, says whose it is.
+    expect(found.every((title) => title.subscriptionId === own("").subscriptionId)).toBe(true);
+    expect(
+      found.flatMap((title) => title.versions.map(({ tags: _tags, ...named }) => named)),
+    ).toEqual(expect.arrayContaining(versions));
     expect(provider.detailRequests()).toBe(0);
     // Without TMDB, a title's details are the provider's.
-    const details = await onDemand.details("movie", versions[0] ?? "");
+    const [first] = versions;
+    if (!first) throw new Error("The fake provider has no movies.");
+    const details = await onDemand.details("movie", first);
     expect(details.cast).toEqual([
       { name: "Ada Lovelace", role: null, photoUrl: null },
       { name: "Alan Turing", role: null, photoUrl: null },
@@ -163,9 +174,9 @@ describe("movies and series", { timeout: 20_000 }, () => {
   });
 
   it("builds a series' seasons from its episodes when the provider lists fewer seasons", async () => {
-    const { onDemand } = await onDemandApp();
+    const { onDemand, own } = await onDemandApp();
 
-    const details = await onDemand.details("series", "80000");
+    const details = await onDemand.details("series", own("80000"));
 
     expect(details.kind).toBe("series");
     if (details.kind !== "series") return;
@@ -174,6 +185,7 @@ describe("movies and series", { timeout: 20_000 }, () => {
       ["Season 2", 2],
     ]);
     expect(details.seasons[0]?.episodes[0]).toMatchObject({
+      ...own("81000"),
       seriesId: "80000",
       season: 1,
       number: 1,
@@ -183,9 +195,9 @@ describe("movies and series", { timeout: 20_000 }, () => {
   });
 
   it("shows one row for an episode the provider lists twice, and still plays the other file", async () => {
-    const { onDemand } = await onDemandApp();
+    const { onDemand, own } = await onDemandApp();
 
-    const details = await onDemand.details("series", "80000");
+    const details = await onDemand.details("series", own("80000"));
 
     if (details.kind !== "series") throw new Error("Not a series.");
     expect(details.seasons[0]?.episodes.map((episode) => [episode.id, episode.number])).toEqual([
@@ -195,7 +207,7 @@ describe("movies and series", { timeout: 20_000 }, () => {
     ]);
     const file = await onDemand.file({
       kind: "episode",
-      id: "81003",
+      ...own("81003"),
       seriesId: "80000",
       season: 1,
       episode: 2,
@@ -269,6 +281,49 @@ describe("movies and series", { timeout: 20_000 }, () => {
     expect((await list()).total).toBeGreaterThan(0);
   });
 
+  it("drops lists that arrive after the login was entered again, and keeps the ones it had", async () => {
+    const app = await onDemandApp();
+    const { onDemand, provider } = app;
+    await onDemand.refresh();
+    const before = await onDemand.status();
+    const told = await collect(app.runtime, onDemand.changes);
+    const held = provider.hold("titles");
+    const late = onDemand.refresh();
+    late.catch(() => {});
+    await held.arrived;
+
+    const again = await app.reconnect();
+    held.release();
+
+    await expect(late).rejects.toMatchObject({ error: { kind: "unexpected" } });
+    expect(app.own("").subscriptionId).toBe(again.id);
+    expect(await onDemand.status()).toEqual(before);
+    expect(told).toEqual([]);
+    // Nor are they what the next start reads.
+    await app.runtime.dispose();
+    expect(await (await app.start()).onDemand.status()).toEqual(before);
+  });
+
+  it("doesn't report a refusal that arrives after the login was entered again", async () => {
+    const app = await onDemandApp();
+    const { onDemand, provider } = app;
+    await onDemand.refresh();
+    const before = await onDemand.status();
+    const told = await collect(app.runtime, onDemand.changes);
+    provider.failTitles("login");
+    const held = provider.hold("titles");
+    const late = onDemand.refresh();
+    late.catch(() => {});
+    await held.arrived;
+
+    await app.reconnect();
+    held.release();
+
+    await expect(late).rejects.toMatchObject({ error: { kind: "invalid-login" } });
+    expect(await onDemand.status()).toEqual(before);
+    expect(told).toEqual([]);
+  });
+
   it("forgets the last account's titles when the subscription goes", async () => {
     const app = await onDemandApp();
     await app.onDemand.collection({ kind: "movie", id: "all", offset: 0, limit: 1 });
@@ -286,8 +341,29 @@ describe("movies and series", { timeout: 20_000 }, () => {
     await expect(app.onDemand.search("story")).rejects.toMatchObject({
       error: { kind: "no-subscription" },
     });
-    await expect(app.onDemand.season("80000", 1)).rejects.toMatchObject({
+    await expect(app.onDemand.season(app.own("80000"), 1)).rejects.toMatchObject({
       error: { kind: "no-subscription" },
     });
+  });
+
+  it("finds nothing by a version that names another subscription", async () => {
+    const { onDemand, provider, own } = await onDemandApp();
+    const id = String(provider.titles.movies[0]?.id);
+    // The same provider id, as another subscription's lists could hold it.
+    const theirs = { subscriptionId: "another-subscription", id };
+
+    expect(await onDemand.titles("movie", [theirs])).toEqual([]);
+    expect(await onDemand.titles("movie", [theirs, own(id)])).toHaveLength(1);
+    for (const asked of [
+      onDemand.details("movie", theirs),
+      onDemand.season({ ...theirs, id: "80000" }, 1),
+      onDemand.file({ kind: "movie", ...theirs }),
+    ]) {
+      await expect(asked).rejects.toMatchObject({ error: { kind: "no-subscription" } });
+    }
+    expect(provider.detailRequests()).toBe(0);
+    // Nor does a title like one of another subscription's lead a row.
+    const rows = (like: typeof theirs) => onDemand.rows("movie", "for-you", like);
+    expect((await rows(theirs)).some((row) => row.id.startsWith("like:"))).toBe(false);
   });
 });

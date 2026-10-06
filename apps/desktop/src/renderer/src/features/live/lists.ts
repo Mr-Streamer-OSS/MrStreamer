@@ -1,17 +1,17 @@
 // The channel lists the guide and Watch's channel list show: favourites, recently watched, every
 // channel, or one category. Categories group under their country, as the provider names them.
-import { useQueries, useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Listing, ListingMatch } from "@mrstreamer/contracts/guide";
 import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
+import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { normalize, searchWords } from "@mrstreamer/core/text";
 import { useUi, type ChannelList } from "../../app/ui-store.ts";
 import { useNow } from "../../lib/clock.ts";
 import { endOfDay } from "../../lib/format.ts";
-import { call } from "../../lib/ipc.ts";
-import { queries } from "../../lib/queries.ts";
+import { queries, updateSubscriptionPreferences } from "../../lib/queries.ts";
 
-const NO_IDS: readonly string[] = [];
+const NO_IDS: readonly OwnedId[] = [];
 /** Channels whose listings are asked for together. */
 const LISTINGS_PAGE = 40;
 const NO_CHANNELS: readonly LiveChannel[] = [];
@@ -32,10 +32,10 @@ export function useListChannels(list: ChannelList): {
       : list.kind === "recent"
         ? (viewing.data?.recent ?? NO_IDS)
         : NO_IDS;
-  const byIds = useQuery(queries.channelsById(ids));
+  const byIds = useQuery(queries.channelsOf(ids));
   const listed = list.kind === "favourites" || list.kind === "recent";
   const byCategory = useQuery({
-    ...queries.channels(list.kind === "category" ? list.id : null),
+    ...queries.channels(list.kind === "category" ? list.category : null),
     enabled: !listed,
   });
   if (!listed) return { channels: byCategory.data, error: byCategory.error };
@@ -63,7 +63,7 @@ export function useListSearch(
   readonly query: string;
   /** Its words as search compares them, for marking what matched. */
   readonly words: readonly string[];
-  /** What it found in each channel's programmes today, by channel id. */
+  /** What it found in each channel's programmes today, by the channel's `ownedKey`. */
   readonly matches: Readonly<Record<string, ListingMatch>>;
 } {
   // What was typed, once typing pauses. An emptied field counts at once: the whole list shows
@@ -82,10 +82,10 @@ export function useListSearch(
   const scope = useMemo(
     () =>
       list.kind === "category"
-        ? { categoryId: list.id }
+        ? { category: ownedId(list.category) }
         : list.kind === "all"
           ? {}
-          : { ids: channels.map((channel) => channel.id) },
+          : { channels: channels.map(ownedId) },
     [list, channels],
   );
   const found = useQuery(queries.listSearch(scope, query, until));
@@ -104,7 +104,8 @@ export function useListSearch(
     return {
       channels: channels.filter(
         (channel, index) =>
-          matches[channel.id] !== undefined || words.every((word) => names[index]?.includes(word)),
+          matches[ownedKey(channel)] !== undefined ||
+          words.every((word) => names[index]?.includes(word)),
       ),
       query,
       words,
@@ -141,17 +142,28 @@ export function listTitle(list: ChannelList, categories: ReadonlyMap<string, Cat
     case "all":
       return "All channels";
     case "category":
-      return categories.get(list.id)?.title ?? "Channels";
+      return categories.get(ownedKey(list.category))?.title ?? "Channels";
   }
 }
 
-/** Shows a list in the guide. A category, or all channels, is where Live TV opens next time. */
-export function showList(list: ChannelList): void {
-  useUi.setState({ list });
-  if (list.kind === "category" || list.kind === "all") {
-    const lastCategoryId = list.kind === "category" ? list.id : null;
-    void call("preferences.update", { lastCategoryId }).catch(() => {});
-  }
+/**
+ * Shows a list in the guide. A category, or all channels, is where Live TV opens next time: kept
+ * for the category's subscription, or for the saved one when every channel shows.
+ */
+export function useShowList(): (list: ChannelList) => void {
+  const client = useQueryClient();
+  const subscriptionId = useQuery(queries.subscription()).data?.id;
+  return useCallback(
+    (list) => {
+      useUi.setState({ list });
+      if (list.kind !== "category" && list.kind !== "all") return;
+      const owner = list.kind === "category" ? list.category.subscriptionId : subscriptionId;
+      if (owner === undefined) return;
+      const lastCategoryId = list.kind === "category" ? list.category.id : null;
+      void updateSubscriptionPreferences(client, owner, { lastCategoryId }).catch(() => {});
+    },
+    [client, subscriptionId],
+  );
 }
 
 export type ListEntry =
@@ -212,7 +224,7 @@ export function useListEntries(open: ReadonlySet<string>): readonly ListEntry[] 
     }
     const categoryEntry = (category: Category, nested: boolean): ListEntry => ({
       kind: "list",
-      list: { kind: "category", id: category.id },
+      list: { kind: "category", category: ownedId(category) },
       title: category.title,
       count: category.channelCount,
       nested,
@@ -241,12 +253,13 @@ export function groupOf(
   list: ChannelList,
   categories: ReadonlyMap<string, Category>,
 ): string | null {
-  return list.kind === "category" ? (categories.get(list.id)?.group ?? null) : null;
+  return list.kind === "category" ? (categories.get(ownedKey(list.category))?.group ?? null) : null;
 }
 
 /**
- * Now and next for the channels at `visible` positions in a long list. Asks in pages of 40, so
- * scrolling a list of thousands asks only for what comes into view.
+ * Now and next for the channels at `visible` positions in a long list, by each channel's
+ * `ownedKey`. Asks in pages of 40, so scrolling a list of thousands asks only for what comes into
+ * view.
  */
 export function useVisibleListings(
   channels: readonly LiveChannel[],
@@ -255,30 +268,26 @@ export function useVisibleListings(
   const pages = [...new Set(visible.map((index) => Math.floor(index / LISTINGS_PAGE)))];
   return useQueries({
     queries: pages.map((page) =>
-      queries.listings(
-        channels
-          .slice(page * LISTINGS_PAGE, (page + 1) * LISTINGS_PAGE)
-          .map((channel) => channel.id),
-      ),
+      queries.listings(channels.slice(page * LISTINGS_PAGE, (page + 1) * LISTINGS_PAGE)),
     ),
     combine: (results) => {
       const merged = new Map<string, Listing>();
       for (const result of results) {
-        for (const [id, listing] of Object.entries(result.data ?? {})) merged.set(id, listing);
+        for (const [key, listing] of Object.entries(result.data ?? {})) merged.set(key, listing);
       }
       return merged;
     },
   });
 }
 
-/** The channel `delta` steps from `currentId` in `list`, wrapping around like channel up and down. */
+/** The channel `delta` steps from `current` in `list`, wrapping around like channel up and down. */
 export function adjacentChannel(
   list: readonly LiveChannel[],
-  currentId: string | null | undefined,
+  current: OwnedId | null | undefined,
   delta: number,
 ): LiveChannel | undefined {
   if (list.length === 0) return undefined;
-  const index = list.findIndex((channel) => channel.id === currentId);
+  const index = list.findIndex((channel) => sameOwned(channel, current));
   if (index === -1) return delta > 0 ? list[0] : list[list.length - 1];
   return list[(index + delta + list.length) % list.length];
 }

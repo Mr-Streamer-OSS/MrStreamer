@@ -10,19 +10,20 @@
 //   - Names in capitals get title case; names with any lowercase keep the provider's casing.
 //   - Nothing ends up worse than the raw name: when cleaning leaves too little, the name stays.
 // Each stream keeps what tells it apart from another of the same title, its region, language and
-// categories, so ./variants.ts can join the streams of one channel.
+// categories, so ./variants.ts can join the streams of one channel. Names don't depend on whose
+// catalogue it is: the library says which subscription's the channels and categories are.
 import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
 import { normalize as fold } from "../text.ts";
 import type { LiveCatalogue } from "../provider.ts";
 import { leadingFlag, regionForCode, regionForName } from "./regions.ts";
 
 export interface NormalizedCatalogue {
-  readonly categories: readonly Omit<Category, "channelCount">[];
+  readonly categories: readonly Omit<Category, "channelCount" | "subscriptionId">[];
   readonly streams: readonly NormalizedStream[];
 }
 
 /** One stream of the provider's list, named as the app shows it. */
-export interface NormalizedStream extends Omit<LiveChannel, "variants"> {
+export interface NormalizedStream extends Omit<LiveChannel, "variants" | "subscriptionId"> {
   /** The provider's guide id. */
   readonly guideId: string | null;
   /** "Belgium": its own prefix's region, else its category's. Null when neither names one. */
@@ -82,7 +83,7 @@ interface ParsedName {
   readonly language: string | null;
 }
 
-interface ShownCategory extends Omit<Category, "channelCount"> {
+interface ShownCategory extends Omit<Category, "channelCount" | "subscriptionId"> {
   /** The region of the category's prefix, grouped or not, for matching its channels' prefixes. */
   readonly region: string | null;
   readonly language: string | null;

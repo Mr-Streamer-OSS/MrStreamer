@@ -2,6 +2,7 @@
 // channel's last try says of each.
 import { useQuery } from "@tanstack/react-query";
 import type { ChannelVariant, LiveChannel } from "@mrstreamer/contracts/library";
+import { sameOwned } from "@mrstreamer/contracts/subscription";
 import { chosenVariant, streamsToPlay } from "@mrstreamer/core/catalogue/variants";
 import { queries } from "../../lib/queries.ts";
 import { usePlayer } from "../../player/player.ts";
@@ -29,12 +30,16 @@ export interface ChannelQuality {
 
 export function useChannelQuality(channel: LiveChannel): ChannelQuality {
   const preferences = useQuery(queries.preferences()).data;
-  const stream = usePlayer((state) => (state.channel?.id === channel.id ? state.stream : null));
-  const fellBack = usePlayer((state) => (state.channel?.id === channel.id ? state.fellBack : null));
-  const phase = usePlayer((state) => (state.channel?.id === channel.id ? state.phase : null));
+  // The streams picked are the channel's subscription's.
+  const picks = useQuery(queries.subscriptionPreferences(channel.subscriptionId)).data;
+  const stream = usePlayer((state) => (sameOwned(state.channel, channel) ? state.stream : null));
+  const fellBack = usePlayer((state) =>
+    sameOwned(state.channel, channel) ? state.fellBack : null,
+  );
+  const phase = usePlayer((state) => (sameOwned(state.channel, channel) ? state.phase : null));
   const variant = (id: string | null | undefined) =>
     channel.variants.find((each) => each.id === id);
-  const chosen = chosenVariant(channel, preferences?.channelVariants);
+  const chosen = chosenVariant(channel, picks?.channelVariants);
   // Automatic's order, whatever was chosen.
   const automatic = streamsToPlay(channel, { ...preferences, channelVariants: {} });
   const playing = variant(stream?.variantId);

@@ -1,8 +1,13 @@
-import type { ChannelVariant, LiveChannel, Quality } from "@mrstreamer/contracts/library";
+import type { ChannelVariant, Quality } from "@mrstreamer/contracts/library";
 import { describe, expect, it } from "vitest";
 import { isAdultCategory } from "../src/adult.ts";
 import { normalizeCatalogue } from "../src/catalogue/normalize.ts";
-import { liveChannels, qualityOf, streamsToPlay } from "../src/catalogue/variants.ts";
+import {
+  liveChannels,
+  qualityOf,
+  streamsToPlay,
+  type ListedChannel,
+} from "../src/catalogue/variants.ts";
 import type { LiveCatalogue } from "../src/provider.ts";
 
 /** A raw catalogue from category names and [channel name, category index] pairs. */
@@ -421,7 +426,7 @@ describe("which stream plays", () => {
     tags: [],
     quality,
   });
-  const channel = (...variants: ChannelVariant[]): LiveChannel => ({
+  const channel = (...variants: ChannelVariant[]): ListedChannel => ({
     id: variants[0]?.id ?? "",
     name: "",
     title: "",

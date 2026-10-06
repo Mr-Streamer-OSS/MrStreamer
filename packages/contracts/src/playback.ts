@@ -1,5 +1,6 @@
 // Stream sessions: the main process opens the upstream connection and hands the UI a local URL.
 import type { TitleRef } from "./ondemand.ts";
+import type { OwnedId } from "./subscription.ts";
 
 /** Container formats the UI's playback engines know how to load. */
 export type StreamFormat = "mpegts" | "hls";
@@ -29,7 +30,8 @@ export type Codec = (typeof CODECS)[number];
 
 export interface StreamSession {
   readonly sessionId: string;
-  readonly channelId: string;
+  /** The channel it plays, and from which subscription. */
+  readonly channel: OwnedId;
   /** Loopback URL that proxies the provider stream. Carries no credentials. */
   readonly url: string;
   readonly format: StreamFormat;

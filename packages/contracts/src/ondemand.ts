@@ -1,6 +1,7 @@
 // Movies and series as the UI sees them, independent of the provider that supplied them.
 import { type } from "arktype";
 import type { AppError } from "./errors.ts";
+import type { OwnedId } from "./subscription.ts";
 
 export const TITLE_KINDS = ["movie", "series"] as const;
 export type TitleKind = (typeof TITLE_KINDS)[number];
@@ -12,6 +13,8 @@ export type TitleKind = (typeof TITLE_KINDS)[number];
  */
 export interface Title {
   readonly kind: TitleKind;
+  /** The subscription that lists `id`. With `id`, it names that version (`OwnedId`). */
+  readonly subscriptionId: string;
   /**
    * The version shown and played first. It can change with the language or when the provider adds
    * a better suited version, so what is kept refers to versions by their own ids.
@@ -57,6 +60,8 @@ export interface TitleMatches {
 
 /** One version of a title as the provider lists it, often one per language. */
 export interface TitleVersion {
+  /** The subscription that lists it. With `id`, it names the version (`OwnedId`). */
+  readonly subscriptionId: string;
   readonly id: string;
   /** Markers from its name: "NL", "MULTI", "4K". */
   readonly tags: readonly string[];
@@ -106,7 +111,10 @@ export interface Season {
 }
 
 export interface Episode {
+  /** The subscription that lists it, and its series. */
+  readonly subscriptionId: string;
   readonly id: string;
+  /** The series version it is an episode of, in the same subscription. */
   readonly seriesId: string;
   readonly season: number;
   readonly number: number;
@@ -164,7 +172,8 @@ export interface TitlePage {
 /**
  * A collection Movies and Series show: everything, what's new, popular or top rated, a genre, a
  * streaming service, titles like one the viewer watched, or titles for adults, which no other
- * collection holds and which shows only once the viewer asks for it in Settings.
+ * collection holds and which shows only once the viewer asks for it in Settings. `like:` names
+ * the title by one of its versions, as `ownedKey` writes it.
  */
 export type CollectionId =
   | "all"
@@ -215,17 +224,35 @@ export interface CollectionPage extends TitlePage {
   readonly name: string;
 }
 
-/** Something that plays on demand: a movie, or one episode of a series. */
-export const TitleRef = type({ kind: "'movie'", id: "string > 0" }, "|", {
+/**
+ * A movie, or one episode of a series, by the provider's own ids: what the viewing record keeps
+ * per account, and what a provider is asked for. Alone it names nothing: `TitleRef` says whose.
+ */
+export const RawTitleRef = type({ kind: "'movie'", id: "string > 0" }, "|", {
   kind: "'episode'",
   id: "string > 0",
   seriesId: "string > 0",
   season: "number.integer >= 0",
   episode: "number.integer >= 0",
 });
+export type RawTitleRef = typeof RawTitleRef.infer;
+
+/**
+ * Something that plays on demand: a movie, or one episode of a series, of one subscription. An
+ * episode's `seriesId` is in that subscription too.
+ */
+export const TitleRef = RawTitleRef.and({ subscriptionId: "string > 0" });
 export type TitleRef = typeof TitleRef.infer;
 
+/** The series version an episode belongs to, in the episode's own subscription. */
+export function seriesOf(episode: {
+  readonly subscriptionId: string;
+  readonly seriesId: string;
+}): OwnedId {
+  return { subscriptionId: episode.subscriptionId, id: episode.seriesId };
+}
+
 /** "movie:123" or "episode:456": one key per thing that plays, within a subscription. */
-export function titleKey(ref: TitleRef): string {
+export function titleKey(ref: RawTitleRef): string {
   return `${ref.kind}:${ref.id}`;
 }

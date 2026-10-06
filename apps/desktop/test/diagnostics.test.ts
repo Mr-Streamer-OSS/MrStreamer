@@ -33,12 +33,16 @@ describe("diagnostics", () => {
     const library = await promised(runtime, Library);
     const guide = await promised(runtime, Guide);
     const playback = await promised(runtime, Playback);
-    const channel = (name: string) =>
-      String(provider.catalogue.channels.find((entry) => entry.name === name)?.streamId);
-
     const login = { server: provider.url, username: "demo", password: "wrong" };
     await expect(subscriptions.connect(login)).rejects.toThrow();
-    await subscriptions.connect({ ...login, password: "s3cret-pass" });
+    const { id: subscriptionId } = await subscriptions.connect({
+      ...login,
+      password: "s3cret-pass",
+    });
+    const channel = (name: string) => ({
+      subscriptionId,
+      id: String(provider.catalogue.channels.find((entry) => entry.name === name)?.streamId),
+    });
     await library.refresh();
     await guide.refresh();
     const direct = await playback.open(channel("TEST | H.264 + AAC"), ["h264", "aac"]);

@@ -3,7 +3,7 @@
 // arrow keys, starts the next one with the viewer's languages rather than the last one's tracks.
 // Captions have no language, so picking them leaves the remembered subtitle language as it was.
 // A channel that stops takes the subtitles on screen with it.
-import { ipc } from "./support.ts";
+import { ipc, SUBSCRIPTION } from "./support.ts";
 import { describe, expect, it } from "vitest";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { ChannelTracks, SubtitleTrack } from "@mrstreamer/contracts/playback";
@@ -11,6 +11,7 @@ import { player } from "../../src/renderer/src/player/player.ts";
 import { addTextCue, subtitleLayer } from "../../src/renderer/src/player/subtitles.ts";
 
 const channel = (id: string): LiveChannel => ({
+  subscriptionId: SUBSCRIPTION,
   id,
   name: `NL | ${id}`,
   title: id,
@@ -50,7 +51,7 @@ async function playing(id: string, tracks: ChannelTracks): Promise<void> {
   await wait(0);
   opened.resolve({
     sessionId: id,
-    channelId: id,
+    channel: { subscriptionId: SUBSCRIPTION, id: id },
     url: `http://127.0.0.1/stream/${id}`,
     format: "hls",
   });
@@ -81,7 +82,7 @@ describe("switching channels", () => {
       switchTo(channel("b"));
       await wait(400);
 
-      expect(lastOpen()).toMatchObject({ channelId: "b" });
+      expect(lastOpen()).toMatchObject({ channel: { subscriptionId: SUBSCRIPTION, id: "b" } });
       expect(lastOpen()).not.toHaveProperty("audio");
       expect(player.state()).toMatchObject({ audioId: null, subtitle: null, tracks: null });
     },

@@ -1,6 +1,7 @@
 // Stands in for the main process in the renderer's tests, which run with happy-dom. Every call is
 // recorded; a call the test holds answers when the test says, the preferences otherwise answer
-// with the defaults and what the test says the viewer saved, and anything else never answers.
+// with the defaults and what the test says the viewer saved, a subscription's with nothing left
+// in it, and anything else never answers.
 // Like the main process, it refuses a call whose input the contract doesn't allow, so a view
 // can't pass here with a call that fails there. Tests send its events themselves. Import it
 // first, before the renderer's modules: it also stands in for Media Source Extensions and full
@@ -16,7 +17,14 @@ import {
   type IpcMethod,
   type IpcOutput,
 } from "@mrstreamer/contracts/ipc";
-import { defaultPreferences, type Preferences } from "@mrstreamer/contracts/preferences";
+import {
+  defaultPreferences,
+  defaultSubscriptionPreferences,
+  type Preferences,
+} from "@mrstreamer/contracts/preferences";
+
+/** The subscription the tests' channels, titles and episodes are listed by. */
+export const SUBSCRIPTION = "3f6c1b5e-2a47-4d0e-9c1f-7b8a5d2e4f10";
 
 const held = new Map<IpcMethod, Promise<Result<unknown>>[]>();
 const listeners = new Map<string, Set<(payload: unknown) => void>>();
@@ -70,6 +78,9 @@ const bridge = {
     if (answer) return answer;
     if (method === "preferences.get") {
       return Promise.resolve({ ok: true, value: preferences });
+    }
+    if (method === "subscription.preferences") {
+      return Promise.resolve({ ok: true, value: defaultSubscriptionPreferences });
     }
     return new Promise(() => {});
   },

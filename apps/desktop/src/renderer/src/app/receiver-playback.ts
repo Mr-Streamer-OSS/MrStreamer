@@ -7,7 +7,9 @@
 // form. So what is taken up is what the receiver still plays once the lists answered, as it has
 // it by then, and never what it played when they were asked.
 import type { QueryClient } from "@tanstack/react-query";
+import { seriesOf } from "@mrstreamer/contracts/ondemand";
 import type { RemoteMedia } from "@mrstreamer/contracts/output";
+import { ownedId } from "@mrstreamer/contracts/subscription";
 import { call } from "../lib/ipc.ts";
 import { queries } from "../lib/queries.ts";
 import { movieNow } from "../lib/titles.ts";
@@ -46,7 +48,7 @@ export async function showReceiverPlayback(
       : null;
   };
   if (began.item.kind === "channel") {
-    const [channel] = await client.fetchQuery(queries.channelsById([began.item.channelId]));
+    const [channel] = await client.fetchQuery(queries.channelsOf([began.item.channel]));
     const media = latest();
     if (!channel || !media) return;
     player.adopt(channel, media);
@@ -59,10 +61,10 @@ export async function showReceiverPlayback(
   const ref = playing.title.title;
   let now: NowPlaying | null = null;
   if (ref.kind === "movie") {
-    const [title] = await client.fetchQuery(queries.titles("movie", [ref.id]));
-    now = title ? movieNow({ ...title, id: ref.id }, title.backdropUrl) : null;
+    const [title] = await client.fetchQuery(queries.titles("movie", [ref]));
+    now = title ? movieNow({ ...title, ...ownedId(ref) }, title.backdropUrl) : null;
   } else {
-    const series = await client.fetchQuery(queries.details("series", ref.seriesId));
+    const series = await client.fetchQuery(queries.details("series", seriesOf(ref)));
     const episode =
       series.kind === "series"
         ? series.seasons
