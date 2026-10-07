@@ -5,6 +5,7 @@ import { parse } from "yaml";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   STORE_APP,
+  STORE_NAME,
   storeGate,
   storeRelease,
   verifyPackage,
@@ -97,8 +98,9 @@ const RELEASE: StoreRelease = {
 const built = (wrong: Partial<Built> = {}) => writeArtifact({ ...RELEASE, ...wrong });
 
 /**
- * A manifest as electron-builder writes it, up to the identity, copied from the 0.0.7 package:
- * each attribute on a line of its own, and the publisher alone in single quotes.
+ * A manifest as electron-builder writes it, up to the properties, copied from the 0.0.7 package:
+ * each attribute on a line of its own, the publisher alone in single quotes, and the name from
+ * before the Store name.
  */
 const builderManifest = (
   publisher: string = STORE_APP.publisher,
@@ -114,6 +116,12 @@ const builderManifest = (
     ProcessorArchitecture="${STORE_APP.architecture}"
     Publisher='${publisher}'
     Version="${RELEASE.packageVersion}" />
+  <Properties>
+    <DisplayName>Mr. Streamer</DisplayName>
+    <PublisherDisplayName>Mr Streamer OSS</PublisherDisplayName>
+    <Description>A cinematic player for your existing IPTV subscriptions.</Description>
+    <Logo>assets\\StoreLogo.png</Logo>
+  </Properties>
 </Package>
 `;
 
@@ -286,13 +294,17 @@ describe("the package a run kept", () => {
       path: join(dir, "Mr-Streamer-0.0.5-win-x64.msix"),
       fileName: `Mr-Streamer-0.0.5-win-x64.5f3a9c000000.${sha256.slice(0, 16)}.msix`,
       sha256,
+      displayName: STORE_NAME,
     });
   });
 
   it("is the release's with the manifest electron-builder writes, its publisher in single quotes", () => {
     const { dir, sha256 } = builtWith(builderManifest());
 
-    expect(verifyPackage(RELEASE, dir, sha256)).toMatchObject({ sha256 });
+    expect(verifyPackage(RELEASE, dir, sha256)).toMatchObject({
+      sha256,
+      displayName: "Mr. Streamer",
+    });
     expect(() => verifyPackage(RELEASE, builtWith(builderManifest("CN=Someone Else")).dir)).toThrow(
       `The package's publisher is "CN=Someone Else"`,
     );
@@ -335,14 +347,14 @@ describe("the package a run kept", () => {
     expect(() => verifyPackage(RELEASE, dir)).toThrow("The record's checksum");
   });
 
-  it("carries the identity electron-builder builds the package with", () => {
-    const builder: { appx: { identityName: string; publisher: string } } = parse(
-      readFileSync("apps/desktop/electron-builder.yml", "utf8"),
-    );
+  it("carries the identity and the name electron-builder builds the package with", () => {
+    const builder: { appx: { identityName: string; publisher: string; displayName: string } } =
+      parse(readFileSync("apps/desktop/electron-builder.yml", "utf8"));
 
     expect(builder.appx).toMatchObject({
       identityName: STORE_APP.identityName,
       publisher: STORE_APP.publisher,
+      displayName: STORE_NAME,
     });
   });
 });

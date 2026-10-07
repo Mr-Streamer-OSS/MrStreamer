@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { afterAll, describe, expect, it } from "vitest";
 import { packageVersion } from "../packages/contracts/src/package-version.ts";
-import { verifyPackage, type StoreRelease } from "../scripts/store-release.ts";
+import { STORE_NAME, verifyPackage, type StoreRelease } from "../scripts/store-release.ts";
 import {
   keyExpiry,
   preflight,
@@ -12,7 +12,7 @@ import {
   type CheckedRelease,
 } from "../scripts/store-submission.ts";
 import { readZipEntry } from "../scripts/zip.ts";
-import { fakeStore, removeArtifacts, writeArtifact } from "./fake-store.ts";
+import { fakeStore, removeArtifacts, writeArtifact, type Built } from "./fake-store.ts";
 
 // A submission can't be tried without sending one, so these talk to a stand-in for Microsoft and
 // check what reaches it: which requests, in what order, and with what in them.
@@ -43,11 +43,28 @@ function released(version = "0.0.5"): StoreRelease {
   };
 }
 
-/** That release with a package built for it, checked as the Store job checks one. */
-function checked(version = "0.0.5", padding = 0): CheckedRelease {
+/**
+ * That release with a package built for it, checked as the Store job checks one. `built` says
+ * where the package differs from one built today.
+ */
+function checked(version = "0.0.5", built: Partial<Built> = {}): CheckedRelease {
   const release = released(version);
-  const { dir } = writeArtifact({ ...release, padding });
+  const { dir } = writeArtifact({ ...release, ...built });
   return { ...release, package: verifyPackage(release, dir) };
+}
+
+/**
+ * `listings` as a submission sends them back: every language's "What's new" replaced, its title
+ * too when the submission gives it `title`, and nothing else.
+ */
+function relisted(listings: unknown, title?: string): unknown {
+  const noted = JSON.stringify(listings).replaceAll(
+    /"releaseNotes":"[^"]*"/g,
+    `"releaseNotes":${JSON.stringify(WHATS_NEW)}`,
+  );
+  return JSON.parse(
+    title ? noted.replaceAll(/"title":"[^"]*"/g, `"title":${JSON.stringify(title)}`) : noted,
+  );
 }
 
 /** What a refused submission says. Fails when it wasn't refused. */
@@ -106,12 +123,8 @@ describe("submitting a stable release", () => {
       fileUploadUrl: expect.stringContaining("upload-1002"),
     });
     expect(rest).toMatchObject({ visibility: "Public", targetPublishMode: "Immediate" });
-    // The listing as it was, screenshots included, but for the notes.
-    expect(sentListings).toEqual(
-      JSON.parse(
-        JSON.stringify(listings).replace('"What 0.0.4 changed."', JSON.stringify(WHATS_NEW)),
-      ),
-    );
+    // Each language's listing as it was, screenshots and title included, but for the notes.
+    expect(sentListings).toEqual(relisted(listings));
     expect(applicationPackages).toEqual([
       { ...offered[0], fileStatus: "PendingDelete" },
       {
@@ -127,7 +140,7 @@ describe("submitting a stable release", () => {
 
   it("uploads a package larger than one block whole", async () => {
     const store = fakeStore();
-    const release = checked("0.0.5", 4 * 1024 * 1024);
+    const release = checked("0.0.5", { padding: 4 * 1024 * 1024 });
 
     await submit(store.access(), release);
 
@@ -164,6 +177,43 @@ describe("submitting a stable release", () => {
       stage: "failed",
       remarks: ["Error: InvalidState: The package targets no device family."],
     });
+  });
+});
+
+describe("listings titled from before the Store name", () => {
+  const RETITLED = `the listing in en-us, nl-nl "${STORE_NAME}", as its package is named.`;
+
+  it("take the name of a package that carries it, in every language, and change nothing else", async () => {
+    const store = fakeStore({ title: "Mr. Streamer" });
+    const { listings } = structuredClone(store.published());
+
+    const outcome = await submit(store.access(), checked());
+
+    expect(outcome).toMatchObject({
+      stage: "in-progress",
+      remarks: [`The submission retitles ${RETITLED}`],
+    });
+    expect(store.sent("PUT /submissions/1002")["listings"]).toEqual(relisted(listings, STORE_NAME));
+  });
+
+  it("keep their title with a package built before that name", async () => {
+    const store = fakeStore({ title: "Mr. Streamer" });
+    const { listings } = structuredClone(store.published());
+
+    const outcome = await submit(store.access(), checked("0.0.5", { displayName: "Mr. Streamer" }));
+
+    expect(outcome).toMatchObject({ stage: "in-progress", remarks: [] });
+    expect(store.sent("PUT /submissions/1002")["listings"]).toEqual(relisted(listings));
+  });
+
+  it("are named by the preflight, which changes nothing", async () => {
+    const store = fakeStore({ title: "Mr. Streamer" });
+
+    const { found, problems } = await preflight(store.access(), checked());
+
+    expect(problems).toEqual([]);
+    expect(found.at(-1)).toBe(`The submission would retitle ${RETITLED}`);
+    expect(store.writes()).toEqual([]);
   });
 });
 
@@ -429,7 +479,7 @@ describe("the preflight", () => {
       "Signed in. Application 9N45GG76ZP4T is MrStreamerOSS.Mr.Streamer.",
       "Published: submission 1001, Public, publishing Immediate.",
       "Package Mr-Streamer-0.0.4-win-x64.msix: 1.0.4.0.",
-      "Listings: en-us with 2 image(s). Trailers: 1.",
+      "Listings: en-us with 2 image(s), nl-nl with 1 image(s). Trailers: 1.",
       "Price: Free.",
       "No submission in progress.",
       `0.0.5 would go in a new submission, as ${release.package.fileName}.`,

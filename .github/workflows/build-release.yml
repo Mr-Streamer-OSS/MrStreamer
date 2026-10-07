@@ -302,13 +302,16 @@ jobs:
       - name: Build the MSIX
         run: pnpm exec electron-builder --win appx --x64 --publish never
 
-      # Partner Center's identity exactly, the Store version for this release, and what the app
-      # needs at run time: ffmpeg, ffprobe and the notices Settings > About reads. The record it
-      # writes beside the package ties the file to the release and its commit by checksum.
+      # Partner Center's identity exactly, a name it reserved, the Store version for this release,
+      # and what the app needs at run time: ffmpeg, ffprobe and the notices Settings > About reads.
+      # The record it writes beside the package ties the file to the release and its commit by
+      # checksum.
       #
       # This workflow is main's, and the checkout is the release's commit, which for a stable
       # release is a nightly tested earlier. scripts/msix-version.ts exports packageVersion in
-      # every one of them, so the check imports it from there and nowhere newer.
+      # every one of them, so the check imports it from there and nowhere newer. A commit from
+      # before the Store name builds a package named "Mr. Streamer", which stays reserved: it
+      # passes, and its submission leaves the listing's title alone.
       - name: Check the package
         id: check
         run: |
@@ -317,11 +320,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           [xml]$manifest = Get-Content "$env:RUNNER_TEMP\msix\AppxManifest.xml"
           $version = node --input-type=module -e 'import { packageVersion } from "./scripts/msix-version.ts"; console.log(packageVersion(process.argv[1]))' $env:VERSION
+          $name = $manifest.Package.Properties.DisplayName
+          $reserved = if ($name -ceq "Mr. Streamer") { $name } else { "Mr. Streamer: IPTV Player" }
           $checks = @(
             @("Identity name", $manifest.Package.Identity.Name, "MrStreamerOSS.Mr.Streamer"),
             @("Publisher", $manifest.Package.Identity.Publisher, "CN=A132E842-C4C9-40BF-83C4-D304E7952C2D"),
             @("Publisher display name", $manifest.Package.Properties.PublisherDisplayName, "Mr Streamer OSS"),
-            @("Display name", $manifest.Package.Properties.DisplayName, "Mr. Streamer"),
+            @("Display name", $name, $reserved),
+            @("Start menu name", $manifest.Package.Applications.Application.VisualElements.DisplayName, $name),
             @("Application id", $manifest.Package.Applications.Application.Id, "MrStreamer"),
             @("Architecture", $manifest.Package.Identity.ProcessorArchitecture, "x64"),
             @("Version", $manifest.Package.Identity.Version, $version)
@@ -337,7 +343,7 @@ jobs:
           [ordered]@{ version = $env:VERSION; packageVersion = $version; commit = $env:SHA; sha256 = $hash } |
             ConvertTo-Json | Set-Content "dist/Mr-Streamer-$env:VERSION-win-x64.msix.json"
           Add-Content $env:GITHUB_OUTPUT "sha256=$hash"
-          Add-Content $env:GITHUB_STEP_SUMMARY "Mr. Streamer $env:VERSION is package $version, built from $env:SHA. SHA-256 $hash."
+          Add-Content $env:GITHUB_STEP_SUMMARY "Mr. Streamer $env:VERSION is package $version, named '$name', built from $env:SHA. SHA-256 $hash."
 
       # Windows installs only signed packages. A certificate made here, with the package's
       # publisher as its subject and trusted on this runner alone, signs a copy to install; the

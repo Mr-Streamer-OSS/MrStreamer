@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isRecord, STORE_APP } from "../scripts/store-release.ts";
+import { isRecord, STORE_APP, STORE_NAME } from "../scripts/store-release.ts";
 import type { Send, StoreAccess } from "../scripts/store-submission.ts";
 import { readZipEntry, storedZip } from "../scripts/zip.ts";
 
@@ -48,6 +48,8 @@ export interface Built {
   readonly identityName?: string;
   readonly publisher?: string;
   readonly architecture?: string;
+  /** The app's name in the manifest, when the package was built before the Store name. */
+  readonly displayName?: string;
   /** The version in the manifest, when it isn't the one the record names. */
   readonly manifestVersion?: string;
   /** Bytes added to the file, for a package larger than one upload block. */
@@ -65,7 +67,8 @@ export function writeArtifact(built: Built): { dir: string; sha256: string } {
     `Version="${built.manifestVersion ?? built.packageVersion}"`,
     `ProcessorArchitecture="${built.architecture ?? STORE_APP.architecture}"`,
   ].join(" ");
-  const manifest = `<?xml version="1.0" encoding="utf-8"?>\n<Package>\n  <Identity ${identity} />\n</Package>${" ".repeat(built.padding ?? 0)}`;
+  const properties = `<Properties>\n    <DisplayName>${built.displayName ?? STORE_NAME}</DisplayName>\n  </Properties>`;
+  const manifest = `<?xml version="1.0" encoding="utf-8"?>\n<Package>\n  <Identity ${identity} />\n  ${properties}\n</Package>${" ".repeat(built.padding ?? 0)}`;
   const file = storedZip("AppxManifest.xml", Buffer.from(manifest));
   const sha256 = createHash("sha256").update(file).digest("hex");
   const dir = mkdtempSync(join(tmpdir(), "mr-streamer-store-"));
@@ -84,8 +87,11 @@ export function writeArtifact(built: Built): { dir: string; sha256: string } {
   return { dir, sha256 };
 }
 
-/** The Store with Mr. Streamer 0.0.4 published as submission 1001, and nothing in progress. */
-export function fakeStore() {
+/**
+ * The Store with Mr. Streamer 0.0.4 published as submission 1001, and nothing in progress. Its
+ * listings, in two languages, carry `title`: the Store name, unless they are from before it.
+ */
+export function fakeStore({ title = STORE_NAME } = {}) {
   const submissions = new Map<string, Submission>();
   /** The uploaded ZIP per upload address, and the blocks it is made of. */
   const blobs = new Map<string, { blocks: Map<string, Buffer>; zip: Buffer | null }>();
@@ -115,7 +121,7 @@ export function fakeStore() {
     listings: {
       "en-us": {
         baseListing: {
-          title: "Mr. Streamer",
+          title,
           description: "Plays the subscription you already have.",
           keywords: ["m3u", "xmltv"],
           features: ["Live TV with a guide"],
@@ -123,6 +129,19 @@ export function fakeStore() {
           images: [
             { id: "7001", fileName: "home.png", fileStatus: "Uploaded", imageType: "Screenshot" },
             { id: "7002", fileName: "guide.png", fileStatus: "Uploaded", imageType: "Screenshot" },
+          ],
+        },
+        platformOverrides: {},
+      },
+      "nl-nl": {
+        baseListing: {
+          title,
+          description: "Speelt het abonnement af dat je al hebt.",
+          keywords: ["m3u", "xmltv"],
+          features: ["Live tv met een gids"],
+          releaseNotes: "Wat 0.0.4 veranderde.",
+          images: [
+            { id: "7003", fileName: "start.png", fileStatus: "Uploaded", imageType: "Screenshot" },
           ],
         },
         platformOverrides: {},
