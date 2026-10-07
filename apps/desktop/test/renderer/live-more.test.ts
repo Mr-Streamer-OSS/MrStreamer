@@ -392,7 +392,7 @@ it("wheel over the Live picture zaps once per gesture and leaves menu, list, dia
   expect(ipc.argsOf("playback.open")).toHaveLength(twice);
 });
 
-it("a pointer Quality open on a failed channel leaves choices unfocused and still supports Back", async () => {
+it("a pointer Quality open on a failed channel starts Down on the chosen quality and supports Back", async () => {
   await watch();
   await act(async () => {
     ipc.always("playback.open", {
@@ -414,6 +414,11 @@ it("a pointer Quality open on a failed channel leaves choices unfocused and stil
   });
   expect(document.activeElement?.getAttribute("role")).toBe("dialog");
   expect(document.activeElement?.getAttribute("aria-pressed")).toBeNull();
+  await pressKey("ArrowDown");
+  expect(document.activeElement?.textContent).toContain("Automatic");
+  expect(document.activeElement?.getAttribute("aria-pressed")).toBe("true");
+  await pressKey("ArrowDown");
+  expect(document.activeElement?.textContent).toBe("Full HD");
   await pressKey("Backspace");
   expect(document.activeElement?.getAttribute("aria-label")).toBe("Quality");
   expect(document.activeElement?.closest('[role="dialog"]')).not.toBeNull();

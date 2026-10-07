@@ -230,7 +230,9 @@ function moveFocus(event: KeyboardEvent<HTMLDivElement>): void {
   const at = items.findIndex((item) => item === document.activeElement);
   const target =
     event.key === "ArrowDown"
-      ? (items[at + 1] ?? items[0])
+      ? at < 0
+        ? chosenItem(event.currentTarget)
+        : (items[at + 1] ?? items[0])
       : event.key === "ArrowUp"
         ? (items[at - 1] ?? items.at(-1))
         : event.key === "Home"
