@@ -30,6 +30,7 @@ import { cn } from "../../lib/utils.ts";
 import { player, usePlayer } from "../../player/player.ts";
 import { titlePlayer, useTitlePlayer } from "../../player/title-player.ts";
 import { Field, LoginForm } from "../connect/LoginForm.tsx";
+import { PlaylistMap, PlaylistRows } from "./PlaylistMap.tsx";
 import { GuideMap } from "./GuideMap.tsx";
 import { GuideForm, guideKey, GuideRows } from "./GuideSource.tsx";
 import { Row, RowForm } from "./Rows.tsx";
@@ -62,6 +63,7 @@ export function SubscriptionSection() {
   const [opened, setOpened] = useState<string | null | undefined>(undefined);
   const [form, setForm] = useState<Form | null>(null);
   /** The subscription whose channels are being mapped to its guide's, in a sheet over the list. */
+  const [playlistMapping, setPlaylistMapping] = useState<string | null>(null);
   const [mapping, setMapping] = useState<string | null>(null);
   /**
    * Closes the form open now, as it asks to when it is done. The main process can answer a form
@@ -116,10 +118,20 @@ export function SubscriptionSection() {
               onForm={(kind) => (kind ? setForm({ kind, id }) : closeForm())}
               onAdd={() => setForm({ kind: "add" })}
               onMap={() => setMapping(id)}
+              onPlaylistMap={() => setPlaylistMapping(id)}
             />
           );
         })}
       </ul>
+      {subscriptions
+        .filter((each) => each.id === playlistMapping && each.kind === "m3u")
+        .map((subscription) => (
+          <PlaylistMap
+            key={subscription.id}
+            subscription={subscription}
+            onClose={() => setPlaylistMapping(null)}
+          />
+        ))}
       {/* Gone with its subscription, or with the guide its channels were mapped to. */}
       {mapped && mappedGuide?.availability === "available" && (
         <GuideMap subscription={mapped} guide={mappedGuide} onClose={() => setMapping(null)} />
@@ -196,6 +208,7 @@ function SubscriptionRow({
   onForm,
   onAdd,
   onMap,
+  onPlaylistMap,
 }: {
   subscription: SubscriptionSummary;
   /** The other saved subscriptions, which stay when this one goes. */
@@ -214,6 +227,7 @@ function SubscriptionRow({
   onAdd: () => void;
   /** Opens the sheet that maps its channels to its guide's. */
   onMap: () => void;
+  onPlaylistMap: () => void;
 }) {
   const client = useQueryClient();
   const { id, kind, account, needsSecret } = subscription;
@@ -364,6 +378,7 @@ function SubscriptionRow({
             titles={titles}
             onGuide={() => onForm("guide")}
             onMap={onMap}
+            onPlaylistMap={onPlaylistMap}
           />
           <button
             onMouseDown={(event) => event.preventDefault()}
@@ -395,7 +410,7 @@ function unanswered(
 
 /**
  * A subscription's account as its provider says it stands, its login, and what was loaded from
- * it, each list refreshed on its own. A playlist has no movies or series, and a guide of its own
+ * it, each list refreshed on its own. A playlist has a guide of its own
  * only when its first line names one: without, the row says so, and its refresh reads that line
  * again.
  */
@@ -406,6 +421,7 @@ function Details({
   titles,
   onGuide,
   onMap,
+  onPlaylistMap,
 }: {
   subscription: SubscriptionSummary;
   catalogue: CatalogueStatus | undefined;
@@ -414,6 +430,7 @@ function Details({
   /** Opens the form that sets where its guide comes from. */
   onGuide: () => void;
   onMap: () => void;
+  onPlaylistMap: () => void;
 }) {
   const client = useQueryClient();
   const { id: subscriptionId, kind, account, server, needsSecret } = subscription;
@@ -459,6 +476,7 @@ function Details({
         onRefresh={() => refreshChannels.mutate()}
       />
       <GuideRows subscription={subscription} guide={guide} onEdit={onGuide} onMap={onMap} />
+      {kind === "m3u" && <PlaylistRows subscription={subscription} onMap={onPlaylistMap} />}
       {kind === "xtream" && (
         <List
           label="Movies and series"

@@ -73,7 +73,11 @@ export function App() {
     );
   }
   if (connect) return <ConnectScreen />;
-  return <Shell liveOnly={subscriptions.data.every((each) => each.kind === "m3u")} />;
+  return (
+    <Shell
+      liveOnly={subscriptions.data.every((each) => each.kind === "m3u" && !each.playlistMapped)}
+    />
+  );
 }
 
 /**

@@ -72,7 +72,7 @@ async function receiver(
    * `file` puts another clip behind its address first: a fixture by name, or its bytes. `asked`
    * gives the turn it is asked under.
    */
-  const open = (
+  const open = async (
     name: string,
     file?: string | Buffer,
     decoders: readonly Codec[] = RECEIVER,
@@ -84,7 +84,7 @@ async function receiver(
     const ref: TitleRef = { kind: "movie", ...own(String(movie.id)) };
     return playback.openReceiverTitle(
       ref,
-      source.provider.titleFile("movie", ref.id, movie.container),
+      (await source.provider.titleFile("movie", ref.id, movie.container)).url,
       { ...target, decoders },
       asked,
     );
@@ -686,7 +686,7 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
     const movie = provider.titles.movies.find((each) => each.name.startsWith(MP4))!;
     await playback.openTitle(
       { kind: "movie", ...own(String(movie.id)) },
-      source!.provider.titleFile("movie", String(movie.id), movie.container),
+      (await source!.provider.titleFile("movie", String(movie.id), movie.container)).url,
       RECEIVER,
     );
     await expect(fetch(video.segments[1]!.url)).rejects.toThrow();

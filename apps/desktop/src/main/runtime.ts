@@ -4,6 +4,7 @@
 // data folder, and disposing waits for the lines still being written.
 import { failedWith } from "@mrstreamer/core/failure";
 import { Guide, GuideAddresses, GuideCatalogue, GuideSource } from "@mrstreamer/core/guide/service";
+import { seriesEpisodeSeasons } from "@mrstreamer/core/ondemand/details";
 import { seriesIdentity } from "@mrstreamer/core/viewing/marks";
 import {
   LegacyViewing,
@@ -182,7 +183,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
               ),
             seasons: (series) =>
               Effect.map(onDemand.details("series", series), (details) =>
-                details.kind === "series" ? details.seasons : [],
+                details.kind === "series" ? seriesEpisodeSeasons(details) : [],
               ),
           })),
         ),

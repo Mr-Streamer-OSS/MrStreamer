@@ -354,11 +354,14 @@ export function xtreamProvider(account: XtreamAccount, options: ProviderOptions)
 
     request: fetchImpl,
 
-    titleFile(kind, id, container) {
+    async titleFile(kind, id, container) {
       const user = encodeURIComponent(account.username);
       const pass = encodeURIComponent(account.password);
       const folder = kind === "movie" ? "movie" : "series";
-      return `${account.server}/${folder}/${user}/${pass}/${encodeURIComponent(id)}.${encodeURIComponent(container)}`;
+      return {
+        url: `${account.server}/${folder}/${user}/${pass}/${encodeURIComponent(id)}.${encodeURIComponent(container)}`,
+        container,
+      };
     },
 
     async liveStream(channelId) {

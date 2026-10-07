@@ -33,7 +33,13 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import { readJsonFile, removeFile, writeJsonFile } from "../platform/json-file.ts";
 import { Settings } from "./preferences.ts";
-import { sameSource, Subscriptions, type SavedSubscription, type Source } from "./subscription.ts";
+import {
+  sameSource,
+  Subscriptions,
+  type SavedSubscription,
+  type Source,
+  type PlaylistRefresh,
+} from "./subscription.ts";
 
 /** How many results a search returns. Enough to scroll, small enough to send per keystroke. */
 const SEARCH_LIMIT = 200;
@@ -55,6 +61,7 @@ const CachedCatalogue = type({
   /** Which subscription produced this catalogue. */
   key: "string",
   fetchedAt: "number",
+  "importRevision?": "string",
   categories: type({ id: "string", name: "string" }).array(),
   channels: type({
     id: "string",
@@ -78,6 +85,7 @@ interface CatalogueFile extends LiveCatalogue {
   readonly version: 4;
   readonly key: string;
   readonly fetchedAt: number;
+  readonly importRevision?: string;
 }
 
 /** A provider category of one subscription, with whether its name says it is for adults. */
@@ -90,6 +98,7 @@ interface IndexedCatalogue {
   /** The subscription whose channels and categories these are. */
   readonly subscriptionId: string;
   readonly fetchedAt: number;
+  readonly importRevision?: string;
   /** Written by a version that didn't keep guide ids. */
   readonly outdated: boolean;
   readonly categories: readonly OwnCategory[];
@@ -137,7 +146,10 @@ export class Library extends Context.Service<
      * Fetches a subscription's catalogue from its provider. Concurrent calls for one subscription
      * share a fetch, and a few subscriptions fetch at a time.
      */
-    refresh(subscriptionId: string): Effect.Effect<CatalogueStatus, Failed>;
+    refresh(
+      subscriptionId: string,
+      playlist?: PlaylistRefresh,
+    ): Effect.Effect<CatalogueStatus, Failed>;
     /**
      * Whether a subscription's catalogue should be fetched again: missing, older than `maxAge`,
      * or outdated.
@@ -245,15 +257,18 @@ function make(options: LibraryOptions) {
         return statusOf(subscription.id, found && ((yield* adults) ? found : withoutAdults(found)));
       });
 
-    const fetchAndStore = (source: Source) =>
+    const fetchAndStore = (source: Source, playlist?: PlaylistRefresh) =>
       Effect.gen(function* () {
-        const fetched = yield* complete(source, yield* cached(source));
+        const fetched = playlist
+          ? (yield* playlist.read).live
+          : yield* complete(source, yield* cached(source));
         // Dropped when the subscription went, or its login changed, while it downloaded.
         if (!(yield* subscriptions.stands(source))) return yield* switched;
         const file: CatalogueFile = {
           version: 4,
           key: source.key,
           fetchedAt: yield* Clock.currentTimeMillis,
+          ...(source.importRevision ? { importRevision: source.importRevision } : {}),
           categories: fetched.categories,
           channels: fetched.channels,
         };
@@ -283,14 +298,23 @@ function make(options: LibraryOptions) {
       );
 
     /** Fetches `source`'s catalogue, or joins the fetch under way for it with the same login. */
-    const refreshOf = (source: Source): Effect.Effect<CatalogueStatus, Failed> =>
+    const refreshOf = (
+      source: Source,
+      playlist?: PlaylistRefresh,
+    ): Effect.Effect<CatalogueStatus, Failed> =>
       Effect.gen(function* () {
         const under = refreshing.get(source.id);
+        // A combined refresh carries a specific snapshot, so it waits for an earlier independent
+        // fetch instead of substituting that fetch's different playlist read.
+        if (playlist && under && sameSource(source, under.source)) {
+          yield* Fiber.await(under.fiber);
+          return yield* refreshOf(source, playlist);
+        }
         let running = under && sameSource(source, under.source) ? under : null;
         if (!running) {
           const token = {};
           const fiber = yield* Effect.forkIn(
-            fetchAndStore(source).pipe(
+            fetchAndStore(source, playlist).pipe(
               Effect.ensuring(
                 Effect.sync(() => {
                   if (refreshing.get(source.id)?.token === token) refreshing.delete(source.id);
@@ -318,7 +342,8 @@ function make(options: LibraryOptions) {
         const fetched = yield* fetch;
         const before = previous?.channels.length ?? 0;
         const received = fetched.channels.length;
-        if (before === 0 || received >= before * SHRINK_CONFIRM_SHARE) return fetched;
+        if (source.kind === "m3u" || before === 0 || received >= before * SHRINK_CONFIRM_SHARE)
+          return fetched;
         if (received > 0) {
           yield* Effect.sleep(options.confirmDelay ?? SHRINK_CONFIRM_DELAY);
           const again = yield* fetch;
@@ -392,8 +417,10 @@ function make(options: LibraryOptions) {
       });
 
     return {
-      refresh: (subscriptionId: string) =>
-        Effect.flatMap(subscriptions.sourceOf(subscriptionId), refreshOf),
+      refresh: (subscriptionId: string, playlist?: PlaylistRefresh) =>
+        playlist
+          ? refreshOf(playlist.source, playlist)
+          : Effect.flatMap(subscriptions.sourceOf(subscriptionId), (source) => refreshOf(source)),
 
       isStale: (subscriptionId: string, maxAge: Duration.Input) =>
         Effect.gen(function* () {
@@ -403,7 +430,10 @@ function make(options: LibraryOptions) {
           const existing = subscription ? yield* cached(subscription) : null;
           const now = yield* Clock.currentTimeMillis;
           return (
-            !existing || existing.outdated || now - existing.fetchedAt > Duration.toMillis(maxAge)
+            !existing ||
+            existing.outdated ||
+            existing.importRevision !== subscription?.importRevision ||
+            now - existing.fetchedAt > Duration.toMillis(maxAge)
           );
         }),
 
@@ -536,6 +566,7 @@ function index(file: CatalogueFile, subscriptionId: string, outdated: boolean): 
   return {
     subscriptionId,
     fetchedAt: file.fetchedAt,
+    ...(file.importRevision ? { importRevision: file.importRevision } : {}),
     outdated,
     categories: categories
       .map((category) => ({

@@ -173,7 +173,11 @@ async function pick(label: string, item: "Mark watched" | "Mark unwatched"): Pro
  */
 async function sheet(
   standing: SeriesViewing | AppError,
-  { saved = [SAVED], title = series }: { saved?: SubscriptionSummary[]; title?: Title } = {},
+  {
+    saved = [SAVED],
+    title = series,
+    shown = details,
+  }: { saved?: SubscriptionSummary[]; title?: Title; shown?: SeriesDetails } = {},
 ): Promise<void> {
   ipc.reset();
   const read = "kind" in standing ? null : standing;
@@ -202,7 +206,7 @@ async function sheet(
   };
   await act(async () => listed.resolve([title]));
   await act(async () => progress.resolve(read?.progress ?? []));
-  await act(async () => opened.resolve({ ...details, title }));
+  await act(async () => opened.resolve({ ...shown, title }));
   await until(() => expect(text()).toContain("Part 1.2"));
 }
 
@@ -538,3 +542,61 @@ describe("Continue watching with a marked series", () => {
     ]);
   });
 });
+
+it.each([
+  { label: "HD", id: "1-2" },
+  { label: "4K", id: "alternate" },
+])(
+  "offers and plays exact episode version $label when another version has progress",
+  async ({ label, id }) => {
+    const exact = {
+      ...details,
+      exactVersions: true as const,
+      episodeOrder: ["1-1", "1-2", "1-3", "2-1", "2-2"],
+      seasons: details.seasons.map((season) => ({
+        ...season,
+        episodes: season.episodes.map((episode) => ({
+          ...episode,
+          exactVersion: true as const,
+          ...(episode.id === "1-2"
+            ? {
+                versions: [
+                  { id: "1-2", name: "Part 1.2 HD", tags: ["HD"], duration: 2700 },
+                  { id: "alternate", name: "Part 1.2 4K", tags: ["4K"], duration: 2800 },
+                ],
+              }
+            : {}),
+        })),
+      })),
+    };
+    const playedAlternate = {
+      ...played(1, 2, 500, 3),
+      title: { ...played(1, 2, 500, 3).title, id: "alternate" },
+    };
+    await sheet(
+      { progress: [played(1, 2, 1000, 2), playedAlternate], marks: [], undoable: null },
+      { shown: exact },
+    );
+    const trigger = document.body.querySelector<HTMLButtonElement>(
+      '[aria-label="Versions for S1 E2"]',
+    );
+    expect(trigger?.textContent).toBe("2 versions");
+    await act(async () => trigger?.click());
+    await until(() =>
+      expect(items().map((each) => each.textContent)).toEqual(["Play HD", "Play 4K"]),
+    );
+    await act(async () =>
+      items()
+        .find((each) => each.textContent === `Play ${label}`)
+        ?.click(),
+    );
+    await until(() => expect(ipc.argsOf("playback.openTitle")[0]?.title.id).toBe(id));
+    expect(ipc.argsOf("playback.openTitle")[0]?.title).toMatchObject({
+      kind: "episode",
+      seriesId: "harbour",
+      season: 1,
+      episode: 2,
+      id,
+    });
+  },
+);

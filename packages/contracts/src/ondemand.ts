@@ -112,6 +112,10 @@ export interface SeriesDetails extends DetailsBase {
   readonly kind: "series";
   /** In order, each with its episodes in order. Seasons without episodes are left out. */
   readonly seasons: readonly Season[];
+  /** M3U logical episodes in original playlist order, including interleaved seasons. */
+  readonly episodeOrder?: readonly string[];
+  /** A removed or replaced source file never supplies progress to its replacement. */
+  readonly exactVersions?: true;
 }
 
 export type TitleDetails = MovieDetails | SeriesDetails;
@@ -139,6 +143,16 @@ export interface Episode {
   readonly duration: number | null;
   readonly stillUrl: string | null;
   readonly airDate: string | null;
+  /** Every exact file of this logical episode, in source order. */
+  readonly versions?: readonly EpisodeVersion[];
+  readonly exactVersion?: true;
+}
+
+export interface EpisodeVersion {
+  readonly id: string;
+  readonly name: string;
+  readonly tags: readonly string[];
+  readonly duration: number | null;
 }
 
 /**
@@ -169,7 +183,7 @@ export interface TitleListsStatus {
 
 /** The movie and series lists of every subscription that has any, and TMDB's metadata for them. */
 export interface OnDemandStatus {
-  /** One per subscription with movies and series, in the subscriptions' order: none of a playlist. */
+  /** One per subscription with movies and series, in the subscriptions' order, including explicitly mapped playlists. */
   readonly lists: readonly TitleListsStatus[];
   /** How far TMDB's metadata has come; null without a key. */
   readonly metadata: MetadataProgress | null;

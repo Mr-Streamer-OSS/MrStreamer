@@ -38,7 +38,7 @@
 // aborts its upstream requests, which ends their ffmpeg processes; the proxy closes with the
 // service.
 import { execFile, spawn } from "node:child_process";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { Readable, Transform } from "node:stream";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
@@ -416,6 +416,10 @@ interface TitleSessionState extends SessionBase {
   readonly kind: "title";
   readonly title: TitleRef;
   readonly upstreamUrl: string;
+  /** Resolved headers of this exact file, shared by probing, playback and receivers. */
+  readonly headers: Headers;
+  /** Probe reuse belongs to this file and saved source, including its request headers. */
+  readonly probeKey: string;
   /** What the file holds, as ffprobe read it when the title opened. */
   probe: TitleProbe | null;
   /**
@@ -588,6 +592,8 @@ export interface PlaybackDeps {
 export interface Asked {
   readonly turn?: number | undefined;
   readonly revision?: number | undefined;
+  /** Main-only headers returned with this exact provider file. */
+  readonly headers?: Readonly<Record<string, string>> | undefined;
 }
 
 export class Playback extends Context.Service<
@@ -1220,7 +1226,7 @@ function make(deps: PlaybackDeps) {
       const held = session.identity.observe(answer, ranged);
       if (held?.other) {
         session.kept = fileKept();
-        probes.delete(session.upstreamUrl);
+        probes.delete(session.probeKey);
         session.feed?.changed();
       }
       // A receiver holds a playlist of the file as it was read when the title opened: its length,
@@ -3053,7 +3059,7 @@ function make(deps: PlaybackDeps) {
      * only when the file stayed the same one meanwhile.
      */
     async function probeTitle(session: TitleSessionState): Promise<TitleProbe> {
-      const known = probes.get(session.upstreamUrl);
+      const known = probes.get(session.probeKey);
       if (known) return known;
       const ffprobe = deps.ffprobe;
       if (!ffprobe) {
@@ -3097,7 +3103,7 @@ function make(deps: PlaybackDeps) {
         });
       }
       if (session.identity.generation === generation) {
-        probes.set(session.upstreamUrl, probe);
+        probes.set(session.probeKey, probe);
         if (probes.size > PROBES_KEPT) probes.delete(probes.keys().next().value ?? "");
       }
       return probe;
@@ -3119,8 +3125,12 @@ function make(deps: PlaybackDeps) {
         const timer = setTimeout(() => timeout.abort(), CONNECT_TIMEOUT_MS);
         let response: Response;
         try {
+          const requested = new Headers({ "User-Agent": deps.userAgent });
+          if (session.kind === "title")
+            session.headers.forEach((value, name) => requested.set(name, value));
+          new Headers(headers).forEach((value, name) => requested.set(name, value));
           response = await session.request(url, {
-            headers: { "User-Agent": deps.userAgent, ...headers },
+            headers: requested,
             signal: AbortSignal.any([signal, timeout.signal]),
           });
         } catch (cause) {
@@ -3322,12 +3332,26 @@ function make(deps: PlaybackDeps) {
         yield* closeAll;
         const id = randomUUID();
         const { closed, scope: forked, lan } = yield* sessionScope(id, receiver);
+        const headers = new Headers(asked.headers);
         const session: TitleSessionState = {
           kind: "title",
           id,
           token: randomBytes(18).toString("base64url"),
           title,
           upstreamUrl,
+          headers,
+          probeKey: createHash("sha256")
+            .update(
+              JSON.stringify([
+                source.id,
+                source.revision,
+                title.kind,
+                title.id,
+                upstreamUrl,
+                [...headers],
+              ]),
+            )
+            .digest("hex"),
           request: source.provider.request,
           decoders: new Set(decoders),
           closed,

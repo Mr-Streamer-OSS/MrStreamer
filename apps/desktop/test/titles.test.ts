@@ -61,13 +61,17 @@ async function titles(
    * Opens a test movie by name, the way the app opens it from the catalogue. `asked` gives the
    * turn it is asked under, and has its address count as made under the login saved by then.
    */
-  const open = (name: string, decoders: readonly Codec[] = LINUX, asked?: { turn: number }) => {
+  const open = async (
+    name: string,
+    decoders: readonly Codec[] = LINUX,
+    asked?: { turn: number },
+  ) => {
     const movie = provider.titles.movies.find((each) => each.name.startsWith(name));
     if (!movie || !source) throw new Error(`No movie ${name}`);
     const ref: TitleRef = { kind: "movie", subscriptionId: source.id, id: String(movie.id) };
     return playback.openTitle(
       ref,
-      source.provider.titleFile("movie", ref.id, movie.container),
+      (await source.provider.titleFile("movie", ref.id, movie.container)).url,
       decoders,
       asked && { ...asked, revision: source.revision },
     );

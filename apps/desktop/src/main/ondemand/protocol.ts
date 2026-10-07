@@ -17,6 +17,7 @@ import type {
 import type { OwnedId } from "@mrstreamer/contracts/subscription";
 import type { WatchlistPage, WatchlistSort } from "@mrstreamer/contracts/watchlist";
 import type { SavedMember, SavedTitle, TitleFacts } from "@mrstreamer/core/ondemand/watchlist";
+import type { OnDemandCatalogue } from "@mrstreamer/core/provider";
 import type { ProviderAccount } from "../providers/account.ts";
 import type { MetadataStatus } from "./metadata.ts";
 
@@ -36,6 +37,7 @@ export interface CatalogueOwner {
   readonly key: string;
   /** The subscription's folder, where its lists are kept. */
   readonly dir: string;
+  readonly importRevision?: string;
 }
 
 /** The subscriptions whose lists make the catalogue a call asks about, in their order. */
@@ -48,6 +50,7 @@ export interface WorkerStatus {
   readonly movies: number;
   readonly series: number;
   readonly fetchedAt: number | null;
+  readonly importRevision?: string;
 }
 
 /** Which page of the watchlist, in which order. */
@@ -72,7 +75,11 @@ export interface WorkerCalls {
    * under another one is given up for this one.
    */
   refresh: {
-    args: CatalogueOwner & { revision: number; account: ProviderAccount };
+    args: CatalogueOwner & {
+      revision: number;
+      account: ProviderAccount;
+      catalogue?: OnDemandCatalogue;
+    };
     result: null;
   };
   /**

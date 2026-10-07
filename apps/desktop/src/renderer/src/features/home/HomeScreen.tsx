@@ -67,6 +67,12 @@ function useBrowse(): (list: ChannelList) => void {
 
 export function HomeScreen({ active }: { active: boolean }) {
   const browse = useBrowse();
+  const subscriptions = useSubscriptions();
+  const mappedOnly =
+    subscriptions.length > 0 &&
+    subscriptions.every((each) => each.kind === "m3u") &&
+    subscriptions.some((each) => each.playlistMapped);
+  const titleCollection = mappedOnly ? "all" : "new-month";
   const left = useSubscriptionPreferences();
   const categories = useQuery(queries.categories());
   const categoryMap = useCategoryMap();
@@ -101,11 +107,10 @@ export function HomeScreen({ active }: { active: boolean }) {
     recent: recent.slice(0, columns),
     category: inCategory.slice(0, columns),
   };
-  const newMovies = useNewest("movie", posters);
-  const newSeries = useNewest("series", posters);
-  // The Watchlist's own first page, so the row and the page read it once. Playlists have no
-  // movies or series to save.
-  const onDemand = useSubscriptions().some((each) => each.kind === "xtream");
+  const newMovies = useHomeTitles("movie", posters, titleCollection);
+  const newSeries = useHomeTitles("series", posters, titleCollection);
+  // The Watchlist's own first page, so the row and the page read it once.
+  const onDemand = subscriptions.some((each) => each.kind === "xtream" || each.playlistMapped);
   const saved = useQuery({ ...queries.watchlist("saved", 0, PAGE), enabled: onDemand }).data;
   const continuing = useContinueWatching();
   const resume = useResume();
@@ -137,7 +142,7 @@ export function HomeScreen({ active }: { active: boolean }) {
     null;
 
   const notice = catalogueState(categories);
-  if (notice) {
+  if (notice && !(mappedOnly && notice.kind === "empty")) {
     return (
       <div className="flex h-full flex-col">
         <WindowBar className="bg-black" />
@@ -168,15 +173,17 @@ export function HomeScreen({ active }: { active: boolean }) {
   return (
     <div className="h-full overflow-y-auto">
       <WindowBar className="sticky top-0 z-20 bg-black" />
-      <Hero
-        channel={hero}
-        live={active && sameOwned(hero, playing)}
-        streaming={streaming}
-        listing={hero ? listings[ownedKey(hero)] : undefined}
-        categories={categoryMap}
-        onBrowse={browse}
-      />
-      <div ref={grid} className="space-y-9 px-10 pt-2 pb-16">
+      {(!mappedOnly || hero) && (
+        <Hero
+          channel={hero}
+          live={active && sameOwned(hero, playing)}
+          streaming={streaming}
+          listing={hero ? listings[ownedKey(hero)] : undefined}
+          categories={categoryMap}
+          onBrowse={browse}
+        />
+      )}
+      <div ref={grid} className={`space-y-9 px-10 ${mappedOnly && !hero ? "pt-10" : "pt-2"} pb-16`}>
         {entries.length > 0 && (
           <div>
             <Section title="Continue watching" tileRem={TILE_REM}>
@@ -233,8 +240,8 @@ export function HomeScreen({ active }: { active: boolean }) {
         )}
         {newMovies.length > 0 && (
           <Section
-            title="New movies"
-            onAll={() => openCollection("movie", "new-month")}
+            title={mappedOnly ? "Movies" : "New movies"}
+            onAll={() => openCollection("movie", titleCollection)}
             tileRem={POSTER_REM}
           >
             {titles(newMovies)}
@@ -242,8 +249,8 @@ export function HomeScreen({ active }: { active: boolean }) {
         )}
         {newSeries.length > 0 && (
           <Section
-            title="New series"
-            onAll={() => openCollection("series", "new-month")}
+            title={mappedOnly ? "Series" : "New series"}
+            onAll={() => openCollection("series", titleCollection)}
             tileRem={POSTER_REM}
           >
             {titles(newSeries)}
@@ -268,9 +275,13 @@ export function HomeScreen({ active }: { active: boolean }) {
   );
 }
 
-/** The newest titles of a kind in the viewer's language, without those for adults. */
-function useNewest(kind: TitleKind, count: number): readonly Title[] {
-  const page = useQuery(queries.collection(kind, "new-month", undefined, 0, Math.max(count, 1)));
+/** Playlists have no reliable added date, so Home uses their full catalogue's first page. */
+function useHomeTitles(
+  kind: TitleKind,
+  count: number,
+  collection: "all" | "new-month",
+): readonly Title[] {
+  const page = useQuery(queries.collection(kind, collection, undefined, 0, Math.max(count, 1)));
   return page.data?.titles.slice(0, count) ?? NO_TITLES;
 }
 

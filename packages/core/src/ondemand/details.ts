@@ -4,10 +4,11 @@
 // off, so it fills in where TMDB has no runtime; playback measures the file itself. Seasons come
 // from the episodes themselves: panels list seasons incompletely, or not at all, and some episodes
 // twice. An episode gets TMDB's details once the viewer opens its season. The provider's numbers
-// also say which episode comes next.
+// say which episode comes next for Xtream; mapped playlists retain their source order.
 import type {
   Episode,
   EpisodeDetails,
+  EpisodeVersion,
   MovieDetails,
   Person,
   Season,
@@ -29,8 +30,8 @@ export function movieDetails(
 
 /**
  * A series version's details for a viewer of `language`. One row per episode: where the provider
- * lists two files of the same season and number, as some panels do, the one shown is picked as a
- * title's version is (`preferredFile`). The other still plays by its id, as from Continue watching.
+ * lists several exact files of one episode, every file stays selectable. Xtream chooses its
+ * preferred file and numeric order; mapped playlists keep the first file and source order.
  */
 export function seriesDetails(
   title: Title,
@@ -38,14 +39,21 @@ export function seriesDetails(
   about: TitleAbout | null,
   language: string,
 ): SeriesDetails {
-  const files = new Map<string, ProviderEpisode>();
+  const files = new Map<string, ProviderEpisode[]>();
   for (const episode of details.episodes) {
     const key = `${episode.season}:${episode.number}`;
-    const other = files.get(key);
-    if (!other || preferredFile(episode, other, language)) files.set(key, episode);
+    const group = files.get(key);
+    if (group) {
+      if (!group.some((each) => each.id === episode.id)) group.push(episode);
+    } else files.set(key, [episode]);
   }
+  const sourceOrder = details.episodeOrder === "source";
   const bySeason = new Map<number, Episode[]>();
-  for (const episode of files.values()) {
+  const episodeOrder: string[] = [];
+  for (const versions of files.values()) {
+    const episode = sourceOrder
+      ? versions[0]!
+      : versions.reduce((best, file) => (preferredFile(file, best, language) ? file : best));
     const shown: Episode = {
       subscriptionId: title.subscriptionId,
       id: episode.id,
@@ -57,7 +65,19 @@ export function seriesDetails(
       duration: episode.duration,
       stillUrl: episode.stillUrl,
       airDate: episode.airDate,
+      ...(sourceOrder ? { exactVersion: true as const } : {}),
+      ...(versions.length > 1
+        ? {
+            versions: versions.map((file) => ({
+              id: file.id,
+              name: file.name,
+              tags: titleName(file.name).tags,
+              duration: file.duration,
+            })),
+          }
+        : {}),
     };
+    episodeOrder.push(shown.id);
     const list = bySeason.get(episode.season);
     if (list) list.push(shown);
     else bySeason.set(episode.season, [shown]);
@@ -65,17 +85,22 @@ export function seriesDetails(
   const provided = new Map(details.seasons.map((season) => [season.number, season]));
   const seasons = [...bySeason.entries()]
     // Specials, season 0, come after the numbered seasons.
-    .sort(([a], [b]) => (a === 0 ? 1 : b === 0 ? -1 : a - b))
+    .sort(([a], [b]) => (sourceOrder ? 0 : a === 0 ? 1 : b === 0 ? -1 : a - b))
     .map(([number, episodes]): Season => {
       const known = provided.get(number);
       return {
         number,
         name: known?.name ?? (number === 0 ? "Specials" : `Season ${number}`),
         posterUrl: known?.posterUrl ?? null,
-        episodes: episodes.sort((a, b) => a.number - b.number),
+        episodes: sourceOrder ? episodes : episodes.sort((a, b) => a.number - b.number),
       };
     });
-  return { kind: "series", ...shared(title, details, about), seasons };
+  return {
+    kind: "series",
+    ...shared(title, details, about),
+    seasons,
+    ...(sourceOrder ? { episodeOrder, exactVersions: true as const } : {}),
+  };
 }
 
 /**
@@ -91,19 +116,23 @@ function preferredFile(file: ProviderEpisode, other: ProviderEpisode, language: 
 
 /**
  * The episode after `current` in the series, in the provider's order: by its season and episode
- * numbers, into the next season after a season's last. Null after the last episode. Specials,
- * season 0, only lead to other specials, so a finale never leads into them. `current` is found by
- * id, else by its numbers, as a second file of an episode is, which the details don't show.
+ * numbers for Xtream, or source order for mapped playlists. Null after the last episode. Xtream
+ * specials only lead to other specials. Every listed exact file identifies its logical row;
+ * numeric fallback remains available for Xtream and refs that have no file id.
  * Undefined when the series doesn't list it, as when its details changed since.
  */
 export function nextEpisode(
   series: SeriesDetails,
   current: { readonly id?: string; readonly season: number; readonly episode: number },
 ): Episode | null | undefined {
-  const episodes = series.seasons
-    .filter((season) => (season.number === 0) === (current.season === 0))
-    .flatMap((season) => season.episodes);
-  const byId = episodes.findIndex((each) => each.id === current.id);
+  const episodes = seriesEpisodeOrder(series).filter(
+    (episode) =>
+      series.episodeOrder !== undefined || (episode.season === 0) === (current.season === 0),
+  );
+  const byId = episodes.findIndex(
+    (each) => each.id === current.id || each.versions?.some((version) => version.id === current.id),
+  );
+  if (series.exactVersions && current.id !== undefined && byId === -1) return undefined;
   const index =
     byId === -1
       ? episodes.findIndex(
@@ -112,6 +141,40 @@ export function nextEpisode(
       : byId;
   if (index === -1) return undefined;
   return episodes[index + 1] ?? null;
+}
+
+/** Resolves a selected or resumed exact episode file without changing the logical episode. */
+export function episodeFileVersion(episode: Episode, id: string | undefined): Episode {
+  const version: EpisodeVersion | undefined = episode.versions?.find((each) => each.id === id);
+  return version ? { ...episode, id: version.id, duration: version.duration } : episode;
+}
+
+/** One authoritative order for episode lists, continuation and automatic next. */
+export function seriesEpisodeOrder<
+  E extends { readonly id?: string; readonly season: number; readonly number: number },
+>(series: {
+  readonly seasons: readonly { readonly number: number; readonly episodes: readonly E[] }[];
+  readonly episodeOrder?: readonly string[] | "source";
+}): E[] {
+  const episodes = series.seasons.flatMap((season) => season.episodes);
+  if (!series.episodeOrder || series.episodeOrder === "source") return episodes;
+  const positions = new Map(series.episodeOrder.map((id, at) => [id, at]));
+  return episodes.toSorted(
+    (a, b) => (positions.get(a.id ?? "") ?? Infinity) - (positions.get(b.id ?? "") ?? Infinity),
+  );
+}
+
+/** The viewing record stores season segments so interleaved source seasons keep their order. */
+export function seriesEpisodeSeasons(
+  series: SeriesDetails,
+): readonly { number: number; episodes: readonly Episode[] }[] {
+  const seasons: { number: number; episodes: Episode[] }[] = [];
+  for (const episode of seriesEpisodeOrder(series)) {
+    const last = seasons.at(-1);
+    if (last?.number === episode.season) last.episodes.push(episode);
+    else seasons.push({ number: episode.season, episodes: [episode] });
+  }
+  return seasons;
 }
 
 /**

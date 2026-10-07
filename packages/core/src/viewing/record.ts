@@ -89,6 +89,8 @@ export type EpisodeTitle = Extract<RawTitleRef, { readonly kind: "episode" }>;
 export type SeriesListing = readonly {
   readonly number: number;
   readonly episodes: readonly number[];
+  /** Exact current M3U source files. Missing on legacy and Xtream listings. */
+  readonly files?: readonly string[];
 }[];
 
 export type ChannelEvent = Extract<ViewingEvent, { readonly channelId: string }>;
