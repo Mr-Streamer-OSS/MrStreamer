@@ -1643,7 +1643,15 @@ function make(deps: PlaybackDeps) {
             })
           : null;
       session.reports.set(id, { start, ...(subtitles ? { subtitles: subtitles.receive } : {}) });
+      // ffmpeg can be gone before the proxy has heard what it sent, as after a run of a file's
+      // last seconds: that arrives in a moment.
+      const heard = ended.then((code) =>
+        code === 0
+          ? arrives(Promise.all([plan.video === "copy" ? start.ended : null, subtitles?.arrived]))
+          : null,
+      );
       void ended.then(async (code) => {
+        await heard;
         const whole = (await subtitles?.whole()) === true;
         // ffmpeg exits cleanly after its input broke off too; the source knows better.
         reading?.end(whole && code === 0 && !signal.aborted && !session.failure);
@@ -1672,7 +1680,7 @@ function make(deps: PlaybackDeps) {
                 },
                 () => settle(firstPacketTime(start.text())),
               );
-              void exited.then(() => settle(firstPacketTime(start.text())));
+              void Promise.all([exited, heard]).then(() => settle(firstPacketTime(start.text())));
             })
           : probe.origin + run.start;
       if (signal.aborted) {
@@ -2173,13 +2181,7 @@ function make(deps: PlaybackDeps) {
       if (!deps.ffmpeg || !plan) throw new Unavailable("unreadable");
       const entries: SubtitleEntry[] = [];
       const subtitles = subtitleSink(plan.subtitle, (entry) => entries.push(entry));
-      const { promise: arrived, resolve: arrive } = Promise.withResolvers<void>();
-      session.reports.set(id, {
-        subtitles: (request) => {
-          subtitles.receive(request);
-          arrive();
-        },
-      });
+      session.reports.set(id, { subtitles: subtitles.receive });
       const child = spawn(deps.ffmpeg, plan.args, { stdio: ["pipe", "ignore", "ignore"] });
       const stop = () => child.kill("SIGKILL");
       signal.addEventListener("abort", stop, { once: true });
@@ -2192,12 +2194,7 @@ function make(deps: PlaybackDeps) {
       child.stdin.end(selected(layout, track.entry, packets));
       const code = await exited;
       // ffmpeg can be gone before the proxy has heard what it sent: that arrives in a moment.
-      if (code === 0) {
-        await Promise.race([
-          arrived,
-          new Promise((resolve) => setTimeout(resolve, REPORT_WAIT_MS)),
-        ]);
-      }
+      if (code === 0) await arrives(subtitles.arrived);
       const whole = await subtitles.whole();
       signal.removeEventListener("abort", stop);
       session.reports.delete(id);
@@ -3648,6 +3645,13 @@ function gone(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
+/** Resolves once what an ffmpeg that has ended `sent` over loopback is here, or has had its time. */
+function arrives(sent: Promise<unknown>): Promise<unknown> {
+  const { promise: late, resolve } = Promise.withResolvers<void>();
+  const timer = setTimeout(resolve, REPORT_WAIT_MS);
+  return Promise.race([sent, late]).finally(() => clearTimeout(timer));
+}
+
 /** Resolves once a response takes more, or its reader has left. */
 function drained(response: ServerResponse): Promise<void> {
   return new Promise((resume) => {
@@ -3667,6 +3671,7 @@ function drained(response: ServerResponse): Promise<void> {
  */
 function subtitleSink(output: SubtitleOutput, entry: (entry: SubtitleEntry) => void) {
   let receiving: Promise<boolean> | null = null;
+  const { promise: arrived, resolve: arrive } = Promise.withResolvers<void>();
 
   function read(request: IncomingMessage): void {
     if (output.kind === "cues") {
@@ -3729,7 +3734,10 @@ function subtitleSink(output: SubtitleOutput, entry: (entry: SubtitleEntry) => v
         request.on("close", () => resolve(whole));
         read(request);
       });
+      arrive();
     },
+    /** Resolves once the request has come. */
+    arrived,
     /**
      * Resolves once everything ffmpeg sent has been read: true when it ended the stream itself,
      * having written all it read of the file, false when it was cut off or never sent any.

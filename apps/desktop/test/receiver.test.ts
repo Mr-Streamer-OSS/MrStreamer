@@ -212,7 +212,10 @@ const CLOCK = 7.5;
 const MATROSKA = "TEST | Long subtitles";
 const MP4 = "TEST | Two sound tracks and subtitles 1080p";
 
-describe.skipIf(!hasTools)("a movie for a receiver", () => {
+// Each test starts ffmpeg and ffprobe several times and waits for the provider's one connection
+// between them, which takes a while under a busy suite. What the proxy must do in time, a test
+// measures itself.
+describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => {
   it("gets a playlist of the whole title, its picture copied in segments that start where it says", async () => {
     const { provider, load } = await receiver();
     const { opened, loaded, main, video } = await load(MATROSKA);

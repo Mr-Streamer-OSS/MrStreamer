@@ -320,8 +320,16 @@ export interface TitlePlan {
 /**
  * How ffmpeg reads the file: over the loopback proxy, which answers byte ranges, so seeking reads
  * only the parts it needs. A dropped connection picks up where it was.
+ *
+ * ffmpeg 6 keeps one packet between the thread that reads its only input and the thread that
+ * writes, and switches between the two for every packet. With room for 64, about a second of
+ * film, it reads a file several times as fast when nothing holds it back. ffmpeg 7 and later
+ * queue packets by themselves and take no notice of the option.
  */
-const INPUT = ["-reconnect", "1", "-reconnect_on_network_error", "1", "-reconnect_delay_max", "4"];
+const INPUT = [
+  ...["-reconnect", "1", "-reconnect_on_network_error", "1", "-reconnect_delay_max", "4"],
+  ...["-thread_queue_size", "64"],
+];
 
 /**
  * The ffmpeg arguments for a run. `source` is the loopback address of the file; `subtitles` and
