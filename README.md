@@ -19,13 +19,13 @@
 
 <img src="docs/assets/readme-live-tv.webp" alt="Live TV: channels with what's on now and next" width="100%">
 
-A programme guide, favourites, and the channels you watched last.
+A programme guide with [search](docs/user/live-tv.md#the-guide), favourites in [the order you want](docs/user/live-tv.md#the-guide), and the channels you watched last. The guide can also come from [an XMLTV address of your own](docs/user/subscriptions.md#a-guide-from-another-address).
 
 ### Movies and series
 
 <img src="docs/assets/readme-library.webp" alt="A title's details: its story, cast and episodes, with Play and its sound language" width="100%">
 
-Stories, artwork and cast, with resume and the next episode.
+Stories, artwork and cast, with resume, the next episode and a [watchlist](docs/user/movies-and-series.md#watchlist). You can [mark episodes watched or unwatched](docs/user/movies-and-series.md#marking-episodes).
 
 ### Sound and subtitles
 
@@ -77,7 +77,7 @@ Mr. Streamer looks for updates after it starts and every four hours. When one is
 <summary><strong>Limits</strong></summary>
 
 - One stream at a time, across every subscription you add: Xtream Codes access, or an M3U playlist for live TV.
-- No recording, downloads or casting to a TV.
+- No recording or downloads. [Playing on a TV](docs/user/playback.md#playing-on-a-tv) uses AirPlay on macOS and Google Cast on Windows; the Linux builds play on the computer only.
 - Surround sound that needs converting plays as stereo, and converting a picture uses much more of your computer's processor than playing it as it is.
 - Choosing another sound track on a live channel starts the channel again for a moment.
 - The Windows installer isn't signed yet; the Microsoft Store version is.
