@@ -110,6 +110,10 @@ export function fakeStore({ title = STORE_NAME } = {}) {
   let publishedId = "1001";
   let pendingId: string | null = null;
   let nextId = 1002;
+  /** What Microsoft keeps of a listing in place of what an update sends, per language. */
+  const rewrites: Record<string, Record<string, unknown>> = {};
+  /** What someone else does at Microsoft as a request arrives, by the request's name. */
+  const meanwhile = new Map<string, () => void>();
 
   submissions.set("1001", {
     id: "1001",
@@ -174,6 +178,36 @@ export function fakeStore({ title = STORE_NAME } = {}) {
     return `https://ingestion.blob.core.windows.net/ingestion/upload-${id}?sv=2022-11-02&sr=b&sig=${SIGNATURE}&se=2026-10-06T00%3A00%3A00Z&sp=rwl`;
   }
 
+  /** Makes a copy of the published submission the one in progress, as a draft. */
+  function copy(): Submission {
+    const id = String(nextId++);
+    const draft: Submission = {
+      ...structuredClone(submissions.get(publishedId)!),
+      id,
+      status: "PendingCommit",
+      fileUploadUrl: uploadUrl(id),
+      friendlyName: `Submission ${id}`,
+    };
+    submissions.set(id, draft);
+    pendingId = id;
+    return draft;
+  }
+
+  function inProgress(): Submission {
+    const submission = submissions.get(pendingId ?? "");
+    if (!submission) throw new Error("No submission is in progress.");
+    return submission;
+  }
+
+  /** The base listing of `submission` in `language`, which holds its title, texts and images. */
+  function baseListing(submission: Record<string, unknown>, language: string) {
+    const { listings } = submission;
+    const listing = isRecord(listings) ? listings[language] : undefined;
+    const base = isRecord(listing) ? listing["baseListing"] : undefined;
+    if (!isRecord(base)) throw new Error(`No listing in ${language}.`);
+    return base;
+  }
+
   const json = (status: number, body: unknown, headers: Record<string, string> = {}) =>
     new Response(JSON.stringify(body), {
       status,
@@ -232,14 +266,7 @@ export function fakeStore({ title = STORE_NAME } = {}) {
     }
     if (method === "POST" && path === "/submissions") {
       if (pendingId) return refused(409, "InvalidState", "A submission is in progress already.");
-      const copy: Submission = structuredClone(submissions.get(publishedId)!);
-      copy.id = String(nextId++);
-      copy.status = "PendingCommit";
-      copy["fileUploadUrl"] = uploadUrl(copy.id);
-      copy["friendlyName"] = `Submission ${copy.id}`;
-      submissions.set(copy.id, copy);
-      pendingId = copy.id;
-      return json(201, copy);
+      return json(201, copy());
     }
     if (!submission || !id) return refused(404, "NotFound", "No such submission.");
     if (method === "GET" && !action) return json(200, submission);
@@ -263,6 +290,9 @@ export function fakeStore({ title = STORE_NAME } = {}) {
         friendlyName,
         applicationPackages: files.filter(isRecord),
       };
+      for (const [language, kept] of Object.entries(rewrites)) {
+        Object.assign(baseListing(updated, language), kept);
+      }
       submissions.set(id, updated);
       return json(200, updated);
     }
@@ -299,6 +329,8 @@ export function fakeStore({ title = STORE_NAME } = {}) {
           ? `PUT ${url.searchParams.get("comp")}`
           : `${method} ${address.slice(API.length) || "/"}`;
     requests.push(name);
+    meanwhile.get(name)?.();
+    meanwhile.delete(name);
     const fault = faults.findIndex((each) => each.request === name);
     const { fault: kind, body: answer } = fault === -1 ? {} : faults.splice(fault, 1)[0]!;
     if (kind === "unanswered") throw new TypeError(`fetch failed: ${address}`);
@@ -377,24 +409,31 @@ export function fakeStore({ title = STORE_NAME } = {}) {
     },
     /** A submission someone started in Partner Center, holding `fileName` at `status`. */
     start(status: string, fileName: string, version = ""): string {
-      const id = String(nextId++);
       const packages = [{ id: "9100", fileName, fileStatus: "PendingUpload", version }];
-      submissions.set(id, {
-        ...structuredClone(submissions.get(publishedId)!),
-        id,
-        status,
-        applicationPackages: packages,
-      });
-      pendingId = id;
-      return id;
+      return Object.assign(copy(), { status, applicationPackages: packages }).id;
+    },
+    /** A draft someone made in Partner Center and left as Microsoft copied it. */
+    draft: (): string => copy().id,
+    /** The submission in progress, as Microsoft holds it now. */
+    pending: inProgress,
+    /** Changes the `language` listing of the submission in progress, as someone would there. */
+    relist(language: string, changes: Record<string, unknown>): void {
+      Object.assign(baseListing(inProgress(), language), changes);
+    },
+    /** From now on Microsoft keeps `kept` of the `language` listing, whatever an update sends. */
+    rewriting(language: string, kept: Record<string, unknown>): void {
+      rewrites[language] = kept;
+    },
+    /** Has `act` happen at Microsoft just as the next request called `name` arrives. */
+    meanwhile(name: string, act: () => void): void {
+      meanwhile.set(name, act);
     },
     /**
      * Moves the submission in progress on. Published, it replaces the published one, with the
      * packages it removed gone.
      */
     advance(verdict: Verdict): void {
-      const submission = submissions.get(pendingId ?? "");
-      if (!submission) throw new Error("No submission is in progress.");
+      const submission = inProgress();
       move(submission, verdict);
       if (submission.status !== "Published") return;
       submission.applicationPackages = submission.applicationPackages

@@ -7,6 +7,9 @@
 # - By hand, from main. preflight checks the account, the listing and what a submission would do.
 #   status reads where a release's submission stands. submit sends a published release's package
 #   when the release's own run couldn't. preflight and status only read.
+# - By hand, into a draft someone made in Partner Center: preflight and submit take the draft's ID,
+#   and submit the fingerprint that preflight printed. A release's own run names no draft, and no
+#   run takes one up or goes on with one unless it names both.
 #
 # Off until the owner turns it on. Submitting needs the repository variable
 # STORE_AUTOMATION_ENABLED to be "true". Every action needs the microsoft-store environment,
@@ -50,6 +53,14 @@ on:
         default: preflight
       version:
         description: A published stable release, such as 0.0.5. Required for status and submit.
+        type: string
+        required: false
+      draft:
+        description: Only to put the release in a draft made in Partner Center, that draft's submission ID. Empty otherwise.
+        type: string
+        required: false
+      draft_metadata_sha256:
+        description: With a draft, the fingerprint that the first preflight with the draft printed. submit needs it.
         type: string
         required: false
 
@@ -148,7 +159,12 @@ jobs:
           STORE_CLIENT_ID: ${{ vars.STORE_CLIENT_ID }}
           STORE_CLIENT_SECRET: ${{ secrets.STORE_CLIENT_SECRET }}
           STORE_CLIENT_SECRET_EXPIRES: ${{ vars.STORE_CLIENT_SECRET_EXPIRES }}
+          # Set by hand alone: a draft made in Partner Center, and its fingerprint for submit.
+          DRAFT: ${{ inputs.draft }}
+          DRAFT_METADATA_SHA256: ${{ inputs.draft_metadata_sha256 }}
         run: |
           args=()
           [ -n "$VERSION" ] && args+=(--release "$RUNNER_TEMP/store-release.json")
+          [ -n "$DRAFT" ] && args+=(--draft "$DRAFT")
+          [ -n "$DRAFT_METADATA_SHA256" ] && args+=(--draft-metadata-sha256 "$DRAFT_METADATA_SHA256")
           node scripts/store-submission.ts "$ACTION" "${args[@]}"
