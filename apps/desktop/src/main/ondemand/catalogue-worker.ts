@@ -28,6 +28,7 @@ import { adultIn } from "@mrstreamer/core/adult";
 import type { OnDemandCatalogue } from "@mrstreamer/core/provider";
 import { tmdb, tmdbImage } from "@mrstreamer/core/metadata/tmdb";
 import { collections, type Collections } from "@mrstreamer/core/ondemand/collections";
+import { relatedTitles } from "@mrstreamer/core/ondemand/related";
 import {
   entriesOf,
   factsOf,
@@ -338,6 +339,11 @@ async function catalogueOf(
   if (required && members.length === 0 && owners.length > 0) {
     throw new AppFailure({ kind: "unexpected", detail: "Movies and series haven't loaded yet." });
   }
+  return shownOf(members, language);
+}
+
+/** Builds an index from the lists supplied, without loading other libraries or metadata. */
+function shownOf(members: readonly Loaded[], language: string): Shown {
   const same =
     shown?.index.language === language &&
     shown.members.length === members.length &&
@@ -548,6 +554,33 @@ const handlers: {
       const name = made.name(id);
       if (titles.length === 0 || !name) return [];
       return [{ id, name, total: titles.length, titles: titles.slice(0, ROW_TITLES) }];
+    });
+  },
+  related: async ({ language, kind, version, owners, metadata: about }) => {
+    const members = owners.flatMap((owner) => {
+      const held = loaded.get(owner.subscriptionId);
+      return held && held.importRevision === owner.importRevision ? [held] : [];
+    });
+    const found = shownOf(members, language);
+    const titles = collectionsOf(found, kind).list("all");
+    const seed = titles.find((title) =>
+      title.versions.some((each) => ownedKey(each) === ownedKey(version)),
+    );
+    if (!seed) return { basis: null, titles: [] };
+    // Category ids belong to this provider. No category from another owner can match it.
+    const own = members.find((member) => member.subscriptionId === version.subscriptionId);
+    const categories = new Map(
+      (kind === "movie" ? own?.catalogue.movies : own?.catalogue.series)?.map((title) => [
+        title.id,
+        title.categoryIds,
+      ]),
+    );
+    return relatedTitles({
+      opened: about ? { ...seed, genres: about.genres, originalLanguage: about.language } : seed,
+      version,
+      titles,
+      categories: (each) =>
+        each.subscriptionId === version.subscriptionId ? (categories.get(each.id) ?? []) : [],
     });
   },
   tiles: async ({ language, kind, of, owners }) => {

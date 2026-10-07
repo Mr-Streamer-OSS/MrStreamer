@@ -19,6 +19,7 @@ import type {
   EpisodeDetails,
   MetadataProgress,
   OnDemandStatus,
+  RelatedTitles,
   RowTab,
   Season,
   Title,
@@ -34,6 +35,7 @@ import { diagnosed } from "@mrstreamer/core/diagnostics";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
 import {
   tmdb,
+  GENRES,
   TmdbError,
   type EpisodeAbout,
   type TitleAbout,
@@ -156,6 +158,8 @@ export class OnDemand extends Context.Service<
      * arrive later. Fails with `no-subscription` when the version's subscription isn't saved.
      */
     details(kind: TitleKind, version: OwnedId): Effect.Effect<TitleDetails, Failed>;
+    /** Related titles from lists already in memory. Never opens another library or file. */
+    related(kind: TitleKind, version: OwnedId): Effect.Effect<RelatedTitles, Failed>;
     /**
      * The episodes of season `season` of a series version, for when the viewer opens it: the
      * provider's, with TMDB's details.
@@ -675,6 +679,30 @@ function make(deps: OnDemandDeps) {
         loaded((owners, language) =>
           call("rows", { owners, language, kind, tab, ...(like ? { like } : {}) }),
         ),
+      related: (kind: TitleKind, version: OwnedId) =>
+        Effect.gen(function* () {
+          const saved = yield* listed;
+          const source = saved.find((each) => each.id === version.subscriptionId);
+          if (!source) return { basis: null, titles: [] };
+          const viewer = yield* language;
+          const about = abouts.get(
+            `${source.id}|${source.revision}|${viewer}|${kind}|${version.id}`,
+          );
+          return yield* call("related", {
+            owners: saved.map(ownerOf),
+            language: viewer,
+            kind,
+            version,
+            ...(about
+              ? {
+                  metadata: {
+                    genres: [...new Set(about.genres.flatMap((id) => GENRES[id] ?? []))],
+                    language: about.language,
+                  },
+                }
+              : {}),
+          });
+        }),
       tiles: (kind: TitleKind, of: "genres" | "services") =>
         loaded((owners, language) => call("tiles", { owners, language, kind, of })),
       collection: ({ kind, id, sort, offset, limit }: CollectionQuery) =>

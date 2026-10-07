@@ -213,6 +213,13 @@ export const queries = {
       staleTime: Infinity,
       placeholderData: (previous) => previous,
     }),
+  /** Related titles, computed when details open from libraries already loaded. */
+  related: (kind: TitleKind, version: OwnedId) =>
+    queryOptions({
+      queryKey: ["ondemand", "related", kind, ownedKey(version)],
+      queryFn: () => call("ondemand.related", { kind, version: ownedId(version) }),
+      retry: false,
+    }),
   /** Genres or streaming services as tiles. */
   tiles: (kind: TitleKind, of: "genres" | "services") =>
     queryOptions({
@@ -560,6 +567,7 @@ export function syncLibraryUpdates(client: QueryClient): () => void {
 export function syncOnDemand(client: QueryClient): () => void {
   const stopDetails = listen("ondemand.detailsChanged", ({ kind, ...version }) => {
     void client.invalidateQueries({ queryKey: queries.details(kind, version).queryKey });
+    void client.invalidateQueries({ queryKey: queries.related(kind, version).queryKey });
   });
   const stopLists = listen("ondemand.updated", () => {
     // Lists change with a refresh and as TMDB's metadata arrives. A season shown is read again

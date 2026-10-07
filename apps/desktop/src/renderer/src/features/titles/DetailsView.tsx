@@ -65,6 +65,7 @@ import { cn } from "../../lib/utils.ts";
 import { useSaveToggle, type SaveToggle } from "../../lib/watchlist.ts";
 import { SaveButton, SaveError } from "../watchlist/SaveButton.tsx";
 import { EpisodeMenu, MarkNotice, useEpisodeMarks } from "./EpisodeMarks.tsx";
+import { RelatedTitles } from "./RelatedTitles.tsx";
 
 const close = () => useUi.setState({ details: null });
 
@@ -213,6 +214,7 @@ function Content({
         </p>
       )}
       <Credits details={details} />
+      <RelatedTitles details={details} switching={switching} />
       {details.kind === "series" && (
         <div inert={switching || undefined}>
           <Episodes details={details} />

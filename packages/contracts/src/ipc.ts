@@ -30,6 +30,7 @@ import {
   type CollectionTile,
   type EpisodeDetails,
   type OnDemandStatus,
+  type RelatedTitles,
   type Title,
   type TitleMatches,
   type TitleDetails,
@@ -199,6 +200,7 @@ export const ipcInputs = {
     }),
   /** The details of one version of a movie or series. */
   "ondemand.details": () => type({ kind: titleKind(), version: owned() }),
+  "ondemand.related": () => type({ kind: titleKind(), version: owned() }),
   /** One season of a series version, by number, asked for when the viewer opens it. */
   "ondemand.season": () => type({ series: owned(), season: "number.integer >= 0" }),
   "ondemand.titles": () => type({ kind: titleKind(), versions: owned().array() }),
@@ -444,6 +446,7 @@ export interface IpcOutputs {
   "ondemand.searchKind": TitleMatches;
   /** A title's details, asked for when the viewer opens it: the provider's and TMDB's. */
   "ondemand.details": TitleDetails;
+  "ondemand.related": RelatedTitles;
   /**
    * The season's episodes as the provider lists them, in its order, with TMDB's name, story,
    * still, date, rating and credits where it has them. Asks TMDB about that season alone.

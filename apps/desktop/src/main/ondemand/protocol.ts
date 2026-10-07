@@ -10,6 +10,7 @@ import type {
   CollectionSort,
   CollectionTile,
   RowTab,
+  RelatedTitles,
   Title,
   TitleKind,
   TitleMatches,
@@ -109,6 +110,16 @@ export interface WorkerCalls {
   rows: {
     args: Owners & { language: string; kind: TitleKind; tab: RowTab; like?: OwnedId };
     result: readonly CollectionRow[];
+  };
+  /** Related uses only loaded lists and metadata already known for the opened version. */
+  related: {
+    args: Owners & {
+      language: string;
+      kind: TitleKind;
+      version: OwnedId;
+      metadata?: { readonly genres: readonly string[]; readonly language: string | null };
+    };
+    result: RelatedTitles;
   };
   /** Genres or streaming services as tiles. */
   tiles: {

@@ -72,6 +72,12 @@ export interface TitleMatches {
   readonly total: number;
 }
 
+/** At most twelve related titles from saved subscriptions' already loaded lists. */
+export interface RelatedTitles {
+  readonly basis: string | null;
+  readonly titles: readonly { readonly title: Title; readonly reason: string }[];
+}
+
 /** One version of a title as the provider lists it, often one per language. */
 export interface TitleVersion {
   /** The subscription that lists it. With `id`, it names the version (`OwnedId`). */
