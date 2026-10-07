@@ -818,6 +818,35 @@ describe("a subscription's guide", () => {
     expect(container.textContent).not.toContain("xmltv.gz");
   });
 
+  it("maps no channels while a switch its form was closed on is on its way, then those of the guide switched to", async () => {
+    const { row, button, click, type, submit, form } = await single(own);
+    await click(button("Guide"));
+    await type([ADDRESS]);
+    ipc.hold("guide.check").resolve(candidate);
+    await submit();
+    const switching = ipc.hold("guide.use");
+    await submit();
+    const sheet = () => document.body.querySelector('[role="dialog"]');
+
+    // The row closes the form over its details; the switch that was sent goes on.
+    await click(row("Holiday house").toggle);
+    expect(form().open).toBe(false);
+    expect(button("Map")?.disabled).toBe(true);
+    await click(button("Map"));
+    expect(sheet()).toBeNull();
+    expect(ipc.methods()).not.toContain("guide.mapChannels");
+
+    switching.resolve({ ...external, fetchedAt: Date.now(), mapped: 0 });
+    await settled();
+    expect(button("Map")?.disabled).toBe(false);
+    await click(button("Map"));
+
+    expect(sheet()?.textContent).toContain(
+      "Holiday house · guide.example.org · 768 channels without programmes",
+    );
+    expect(ipc.argsOf("guide.mapChannels")).toHaveLength(1);
+  });
+
   it("drops what a check found once the field changes, says why one failed, and stops one on Cancel", async () => {
     const { row, button, click, type, submit, form } = await single(own);
     await click(button("Guide"));

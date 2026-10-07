@@ -5,7 +5,7 @@
 // what it lists, and only Use this guide switches to it. A check can be called off, so Cancel
 // stays offered while one runs; the switch itself can't. The address can hold a key, so the field
 // starts empty every time and nothing here shows more of a saved one than its host.
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
 import { RotateCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { AppError } from "@mrstreamer/contracts/errors";
@@ -34,7 +34,9 @@ const externalOf = (guide: GuideStatus | undefined) =>
 /**
  * The Guide row of a subscription's details, and under it the channels mapped by hand: how many
  * channels the guide covers and when it last downloaded, with Refresh, or Retry and the reason
- * once a download failed. Guide opens the form that changes where it comes from.
+ * once a download failed. Guide opens the form that changes where it comes from. Map waits while
+ * a switch is on its way, as its form can be closed on one: the channels are mapped to the guide
+ * switched to, never to one that is about to go.
  */
 export function GuideRows({
   subscription,
@@ -53,6 +55,7 @@ export function GuideRows({
     mutationFn: () => call("guide.refresh", { subscriptionId: subscription.id }),
     onSuccess: (status) => keepGuideStatus(client, status),
   });
+  const switching = useIsMutating({ mutationKey: guideKey(subscription.id) }) > 0;
   const now = Date.now();
   const external = externalOf(guide);
   const failure = refresh.error ? appError(refresh.error) : (guide?.failure ?? null);
@@ -137,7 +140,12 @@ export function GuideRows({
             .filter(Boolean)
             .join(" · ")}
         >
-          <Button size="sm" aria-label={`Map channels of ${name}`} onClick={onMap}>
+          <Button
+            size="sm"
+            aria-label={`Map channels of ${name}`}
+            disabled={switching}
+            onClick={onMap}
+          >
             Map
           </Button>
         </Row>
