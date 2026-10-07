@@ -44,7 +44,7 @@ Partner Center holds two names for the app, under Product management > Manage ap
 
 1. Release 0.0.8 from a nightly that has the rename. The package check's line in the run's summary says `named 'Mr. Streamer: IPTV Player'`. A commit from before the rename builds a package named "Mr. Streamer", which passes too and leaves the listing as it is: the rename would then wait for the next release.
 2. The Store job's report has the line `The submission retitles the listing in en-us "Mr. Streamer: IPTV Player", as its package is named.` Without it, the submission left the title alone.
-3. The API has never changed a title for us. If Microsoft refuses it, at the update or at the commit, delete the submission the error names in Partner Center and [submit by hand](#submitting-by-hand), choosing the name under Product name yourself.
+3. The API has never changed a title for us. If Microsoft refuses it, at the update or at the commit, [submit by hand](#submitting-by-hand), choosing the name under Product name yourself. A submission the automation created is deleted in Partner Center first. A [draft a run named](#using-a-draft-made-in-partner-center) is finished there instead.
 4. Once **status** says `Published`, the public listing shows "Mr. Streamer: IPTV Player".
 5. On a Windows 11 PC that has 0.0.7 from the Store, with a subscription connected, a favourite, something watched and the app pinned to Start or the taskbar, let the Store update it. Don't uninstall first. Then:
    - Start, Windows search and Settings > Apps > Installed apps list "Mr. Streamer: IPTV Player" once, at 1.0.8.0.
@@ -92,6 +92,7 @@ Each on its own line, in the log and the run's summary: the GitHub release, its 
 - It never sets who sees the app or when it is published. The published submission must be `Public` and publish as soon as it is certified, which the API calls `Immediate`. Otherwise the run stops before it creates anything.
 - It never deletes a submission, and never changes one that was committed.
 - It never starts a second submission. The Store takes one at a time: a submission in progress that doesn't hold this release's package stops the run, whoever made it.
+- It never takes up a draft someone made in Partner Center, and never goes on with one an earlier run put a release in, unless a run started by hand [names that draft](#using-a-draft-made-in-partner-center) and its fingerprint.
 - It never sends a package the Store's own doesn't sort before.
 - It never gives a listing a name its package doesn't carry.
 - It repeats only requests that change nothing by being repeated. When creating or committing gets no clear answer, it reads what happened instead of asking twice.
@@ -109,17 +110,48 @@ Run the **Microsoft Store** workflow on `main`, with one of three actions:
 
 Every Store job, a release's or one started by hand, waits its turn in one queue, so no two read or change the Store at once.
 
+### Using a draft made in Partner Center
+
+A draft someone made in Partner Center, to change the listing with the next release, takes that release only when a run names it. A release's own run and a plain **submit** stop at it, as at any submission that doesn't hold their package.
+
+1. Run **preflight** with the version and, under **draft**, the draft's submission ID. A plain preflight prints that ID as the submission in progress. The run reads only. It prints the fields in which the draft differs from the published submission, by their paths and never their contents, and the draft's fingerprint.
+2. Check that those are the fields someone edited.
+3. Run **submit** with the same version and draft, and the fingerprint under **draft_metadata_sha256**.
+
+The fingerprint is the SHA-256 of everything Microsoft's API shows of the draft that a release leaves alone. That is all of it but the packages, each listing's "What's new", its title when the package carries the [Store name](#store-name), and Microsoft's own status and upload address. The order Microsoft sends fields in doesn't change it. The order of a list, such as the search terms, does. Two preflights of an untouched draft print the same one.
+
+**submit** then:
+
+- changes nothing unless the submission in progress is that draft, still has that fingerprint, is `Public` and `Immediate`, and holds no package but the published ones and the release's. It never creates a submission.
+- puts the package, "What's new" and the title in as it does with a new submission, and marks the packages the draft copied for removal
+- reads the draft again, and uploads nothing unless every other field is as it was and the draft holds what was sent. The error names the fields that changed, by their paths.
+- uploads the package
+- reads the draft once more and checks the same again, since anyone who can open the draft may have changed it during the upload. Only then does it commit. When someone committed the draft meanwhile, the run commits nothing and reports where that submission stands.
+
+In such a draft the package has a longer name: the one it has anywhere, then the draft's ID and the first 16 characters of the fingerprint, such as `Mr-Streamer-0.0.5-win-x64.5f3a9c0d1e2f.0a1b2c3d4e5f6071.draft-1152921500000000000.9f8e7d6c5b4a3921.msix`. The file is the same. The name is how runs tell this draft from one the automation created:
+
+- A run that stops after the update leaves the draft listing the package, uncommitted. Go on with **submit**, the same draft and the same fingerprint. It finds the package by that name, uploads again and commits. A **preflight** with both says first what that run would do.
+- A plain **submit** and a release's own run, re-run, look for the shorter name. They stop at the draft and send nothing, however far the earlier run got.
+- **status** finds the package under either name.
+
+When the run says something a release leaves alone has changed, during the update or the upload, the draft no longer has the fingerprint its package is named for. No run goes on with it then, not even one with the fingerprint a new preflight reads. Look at the draft in Partner Center. Putting the fields the error names back as they were makes the first fingerprint fit again, and the same **submit** then goes on. Microsoft may still refuse to commit a draft that was edited there after the API changed it. When it does, or when the fields can't be put back, finish the draft there, following [submitting by hand](#submitting-by-hand) from step 3.
+
+Nothing holds the draft still between that last read and the commit. A change made in those seconds would go in unseen, so leave the draft alone while a run that names it is under way.
+
+Microsoft's API takes an update of a draft made in Partner Center. It may refuse one the API made and someone edited in Partner Center afterwards. When Microsoft refuses, the run prints its answer and leaves the draft as it was. The draft holds its owner's edits, so finish it there, following [submitting by hand](#submitting-by-hand) from step 3.
+
 ## When a submission fails
 
 The release is out either way. The run's error names the case.
 
 - **Submissions are off:** a notice on the release's run, and no failure. [Submit by hand](#submitting-by-hand) or [set the automation up](#setting-up).
 - **The MSIX job failed:** the Store job was skipped. Re-run the failed jobs. When the package passes, the Store job follows in the same run. A package that failed a check is kept as `msix-failed-<version>` and is never submitted.
-- **Another submission is in progress:** let it finish, or delete it in Partner Center if nobody needs it, then run **submit**.
+- **Another submission is in progress:** let it finish, or delete it in Partner Center if nobody needs it, then run **submit**. A draft that carries listing edits is one somebody needs: [put the release in it](#using-a-draft-made-in-partner-center).
+- **A run that named a draft stopped:** the error says whether the draft was changed. [Using a draft](#using-a-draft-made-in-partner-center) says how to go on, always with the draft and its fingerprint named. A plain **submit** and a re-run of the release's Store job stop at such a draft.
 - **A submission appeared and nothing shows whether this run made it:** the request to create one got no answer. Open that submission in Partner Center. When it is an untouched copy of the published one that nobody is working on, delete it there, then run **submit**.
 - **A submission is left as an untouched copy:** Microsoft created it and then refused the package's entry. Delete it in Partner Center, then run **submit**.
-- **A draft holds the package but wasn't uploaded or committed:** run **submit**. It finds the draft by the package's name, uploads again and commits it.
-- **Microsoft refused it** (`CommitFailed`, `CertificationFailed` and the like): the run prints Microsoft's errors, and Partner Center holds the certification report. Nothing of that release is live. A fault in the package needs a fixed stable release: delete the refused submission in Partner Center first, since the API creates a new one only when none is in progress. A fault in the listing or the notes for certification is fixed in Partner Center, where the submission is then sent again by hand.
+- **A draft the automation created holds the package but wasn't uploaded or committed:** run **submit**. It finds the draft by the package's name, uploads again and commits it.
+- **Microsoft refused it** (`CommitFailed`, `CertificationFailed` and the like): the run prints Microsoft's errors, and Partner Center holds the certification report. Nothing of that release is live. A fault in the package needs a fixed stable release: delete the refused submission in Partner Center first, since the API creates a new one only when none is in progress. A fault in the listing or the notes for certification is fixed in Partner Center, where the submission is then sent again by hand. A refused submission that began as a [draft a run named](#using-a-draft-made-in-partner-center) still holds its owner's edits, so its owner decides what becomes of it.
 - **The listing isn't Public and Immediate:** someone changed the audience or the publishing hold. Decide which is meant. The automation only updates a public listing that publishes when certified.
 - **The sign-in is refused:** the key ended or was replaced. [Renew it](#renewing-the-key).
 - **No run holds the package any more:** release runs keep it for 90 days. A later stable release brings a new package.

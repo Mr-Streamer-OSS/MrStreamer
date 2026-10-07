@@ -77,10 +77,37 @@ async function refusal(attempt: Promise<unknown>): Promise<string> {
   return error instanceof Error ? error.message : "";
 }
 
-/** The package in the ZIP uploaded for submission 1002, the first one a fake Store creates. */
-function uploadedPackage(store: ReturnType<typeof fakeStore>, release: CheckedRelease) {
+/**
+ * The package in the ZIP uploaded for submission 1002, the first one a fake Store creates, under
+ * the name it has there.
+ */
+function uploadedPackage(
+  store: ReturnType<typeof fakeStore>,
+  release: CheckedRelease,
+  fileName = release.package.fileName,
+) {
   const zip = store.uploaded("1002");
-  return zip && readZipEntry(zip, release.package.fileName);
+  return zip && readZipEntry(zip, fileName);
+}
+
+/** The search terms and description someone gave the English listing of a draft. */
+const EDITS = {
+  keywords: ["iptv player", "m3u player", "xtream"],
+  description: "Plays the IPTV you already pay for.",
+};
+
+/** A fake Store in which someone made a draft in Partner Center and edited its English listing. */
+function drafted(options?: Parameters<typeof fakeStore>[0]) {
+  const store = fakeStore(options);
+  const id = store.draft();
+  store.relist("en-us", EDITS);
+  return { store, id };
+}
+
+/** The draft `id` as a run names it to submit, with the fingerprint a preflight reads from it. */
+async function named(store: ReturnType<typeof fakeStore>, release: CheckedRelease, id: string) {
+  const read = await preflight(store.access(), release, { id, metadataSha256: null });
+  return { id, metadataSha256: read.draftMetadataSha256 };
 }
 
 afterAll(removeArtifacts);
@@ -374,6 +401,314 @@ describe("what a submission is refused for", () => {
   });
 });
 
+describe("putting a release in a draft made in Partner Center", () => {
+  it("fills the draft the run names and leaves the rest of it as its owner edited it", async () => {
+    const { store, id } = drafted({ title: "Mr. Streamer" });
+    const release = checked();
+    const { applicationPackages: copied, listings, ...kept } = structuredClone(store.pending());
+
+    const { found, problems, draftMetadataSha256 } = await preflight(store.access(), release, {
+      id,
+      metadataSha256: null,
+    });
+
+    expect(problems).toEqual([]);
+    expect(draftMetadataSha256).toMatch(/^[0-9a-f]{64}$/);
+    // The package's name in the draft: its own, then the draft and the start of the fingerprint.
+    const fileName = release.package.fileName.replace(
+      ".msix",
+      `.draft-${id}.${draftMetadataSha256?.slice(0, 16)}.msix`,
+    );
+    // Which fields the owner edited, and never what they hold.
+    expect(found.slice(5)).toEqual([
+      `In progress: submission ${id}, PendingCommit.`,
+      `Of what a release leaves alone, the draft ${id} differs from the published submission in 4 field(s): friendlyName, id, listings.en-us.baseListing.description, listings.en-us.baseListing.keywords.`,
+      `Its fingerprint is ${draftMetadataSha256}, the SHA-256 of what a release leaves alone in it. A submit into the draft takes it.`,
+      `0.0.5 would go in the draft ${id}, as ${fileName}.`,
+      `The submission would retitle the listing in en-us, nl-nl "${STORE_NAME}", as its package is named.`,
+    ]);
+    expect(store.writes()).toEqual([]);
+
+    const outcome = await submit(store.access(), release, {
+      id,
+      metadataSha256: draftMetadataSha256,
+    });
+
+    expect(outcome).toMatchObject({
+      fileName,
+      submissionId: id,
+      status: "PreProcessing",
+      stage: "in-progress",
+    });
+    expect(outcome.remarks.at(-1)).toContain(`It went into the draft ${id}`);
+    // No new submission: the draft is updated, uploaded to and committed.
+    expect(store.writes()).toEqual([
+      `PUT /submissions/${id}`,
+      "PUT block",
+      "PUT blocklist",
+      `POST /submissions/${id}/commit`,
+    ]);
+    const { applicationPackages, listings: sent, ...rest } = store.sent(`PUT /submissions/${id}`);
+    expect(rest).toEqual(kept);
+    expect(sent).toEqual(relisted(listings, STORE_NAME));
+    expect(applicationPackages).toEqual([
+      { ...copied[0], fileStatus: "PendingDelete" },
+      {
+        fileName,
+        fileStatus: "PendingUpload",
+        minimumDirectXVersion: "None",
+        minimumSystemRam: "None",
+      },
+    ]);
+    expect(store.pending()).toMatchObject({ listings: { "en-us": { baseListing: EDITS } } });
+    const uploaded = uploadedPackage(store, release, fileName);
+    expect(uploaded?.equals(readFileSync(release.package.path))).toBe(true);
+  });
+
+  it("reads one fingerprint whatever order Microsoft lists fields in, and another once a list is reordered", async () => {
+    const { store, id } = drafted();
+    const release = checked();
+    const { metadataSha256 } = await named(store, release, id);
+
+    const draft = store.pending();
+    for (const field of Object.keys(draft).reverse()) {
+      const value = draft[field];
+      delete draft[field];
+      draft[field] = value;
+    }
+    expect((await named(store, release, id)).metadataSha256).toBe(metadataSha256);
+
+    store.relist("en-us", { keywords: EDITS.keywords.toReversed() });
+    expect((await named(store, release, id)).metadataSha256).not.toBe(metadataSha256);
+  });
+
+  it.each<[string, (store: ReturnType<typeof fakeStore>) => string, string]>([
+    ["no submission is in progress", () => "1002", "has no submission in progress"],
+    [
+      "another submission is in progress",
+      (store) => `${store.draft()}9`,
+      "Submission 1002 is in progress, not the draft 10029",
+    ],
+    [
+      "Microsoft has the submission already, without the release",
+      (store) => store.start("Certification", "Mr-Streamer-0.0.4-win-x64.msix", "1.0.4.0"),
+      "is Certification, no longer a draft",
+    ],
+    [
+      "the draft holds a package from elsewhere",
+      (store) => store.start("PendingCommit", "Someone-Elses.msix"),
+      "holds 1 package(s) that are neither the published submission's nor",
+    ],
+  ])("creates and changes nothing when %s", async (_, arrange, said) => {
+    const store = fakeStore();
+    const release = checked();
+    const id = arrange(store);
+
+    const read = await preflight(store.access(), release, { id, metadataSha256: null });
+    const metadataSha256 = read.draftMetadataSha256 ?? "0".repeat(64);
+
+    expect(read.problems).toEqual([expect.stringContaining(said)]);
+    expect(await refusal(submit(store.access(), release, { id, metadataSha256 }))).toContain(said);
+    expect(store.writes()).toEqual([]);
+  });
+
+  it.each([null, "", "f230699fecb4296d", "F".repeat(64)])(
+    "asks nothing of Microsoft without the draft's fingerprint, as with %j",
+    async (metadataSha256) => {
+      const { store, id } = drafted();
+
+      const message = await refusal(submit(store.access(), checked(), { id, metadataSha256 }));
+
+      expect(message).toContain("that a preflight with the draft prints");
+      expect(store.requests).toEqual([]);
+    },
+  );
+
+  it("changes nothing in a draft that was edited after its fingerprint was read", async () => {
+    const { store, id } = drafted();
+    const release = checked();
+    const draft = await named(store, release, id);
+    store.relist("en-us", { keywords: ["iptv"] });
+
+    const message = await refusal(submit(store.access(), release, draft));
+
+    expect(message).toContain(`The draft ${id} doesn't have the fingerprint the run names`);
+    expect((await preflight(store.access(), release, draft)).problems).toEqual([message]);
+    expect(store.writes()).toEqual([]);
+  });
+
+  it("stops before the upload when Microsoft's update loses a field, and no run takes the draft up until it is back", async () => {
+    const { store, id } = drafted();
+    const release = checked();
+    const draft = await named(store, release, id);
+    store.rewriting("en-us", { keywords: [] });
+
+    const message = await refusal(submit(store.access(), release, draft));
+
+    // The field by its path, and nothing of what it held.
+    expect(message).toContain(
+      "differs from what the run found, in 1 field(s): listings.en-us.baseListing.keywords. Nothing was uploaded or committed.",
+    );
+    for (const keyword of EDITS.keywords) expect(message).not.toContain(keyword);
+    expect(store.writes()).toEqual([`PUT /submissions/${id}`]);
+
+    // The draft lists the package now. A plain submit stops at it, as a release's own run would.
+    const stopped = store.requests.length;
+    expect(await refusal(submit(store.access(), release))).toContain(
+      "Only a run that names the draft and the same fingerprint goes on with it",
+    );
+    expect(await refusal(submit(store.access(), release, draft))).toContain(
+      "doesn't have the fingerprint the run names",
+    );
+    // So does a run with the fingerprint a new preflight reads from what is left.
+    const left = await named(store, release, id);
+    expect(left.metadataSha256).not.toBe(draft.metadataSha256);
+    expect(await refusal(submit(store.access(), release, left))).toContain(
+      "which a run put there when the draft had another fingerprint",
+    );
+    expect(store.writes(stopped)).toEqual([]);
+
+    // Once its owner put the search terms back, the first fingerprint fits again.
+    store.relist("en-us", EDITS);
+    expect(await submit(store.access(), release, draft)).toMatchObject({ stage: "in-progress" });
+    expect(store.writes(stopped)).toEqual([
+      "PUT block",
+      "PUT blocklist",
+      `POST /submissions/${id}/commit`,
+    ]);
+  });
+
+  it.each<[string, Record<string, unknown>, string]>([
+    [
+      "a search term",
+      { keywords: ["iptv"] },
+      "differs from what the run found, in 1 field(s): listings.en-us.baseListing.keywords.",
+    ],
+    [
+      "the title",
+      { title: "Mr. Streamer" },
+      "lacks what the release puts in it, in 1 field(s): listings.en-us.baseListing.title.",
+    ],
+  ])("commits nothing once %s changed while the package was uploaded", async (_, change, said) => {
+    const { store, id } = drafted();
+    const release = checked();
+    const draft = await named(store, release, id);
+    store.meanwhile("PUT blocklist", () => store.relist("en-us", change));
+
+    const message = await refusal(submit(store.access(), release, draft));
+
+    expect(message).toContain(`After the upload, `);
+    expect(message).toContain(`${said} Nothing was committed.`);
+    expect(store.writes()).toEqual([`PUT /submissions/${id}`, "PUT block", "PUT blocklist"]);
+  });
+
+  it("reports a draft someone committed while the package was uploaded, and commits nothing", async () => {
+    const { store, id } = drafted();
+    const release = checked();
+    const draft = await named(store, release, id);
+    store.meanwhile("PUT blocklist", () => store.advance("Certification"));
+
+    const outcome = await submit(store.access(), release, draft);
+
+    expect(outcome).toMatchObject({ submissionId: id, status: "Certification" });
+    expect(outcome.remarks.at(-1)).toContain("This run committed nothing");
+    expect(store.writes()).toEqual([`PUT /submissions/${id}`, "PUT block", "PUT blocklist"]);
+  });
+
+  it("commits only a draft that kept the release's What's new, whatever its line endings", async () => {
+    const { store, id } = drafted();
+    const release = checked();
+    const draft = await named(store, release, id);
+    store.rewriting("en-us", { releaseNotes: "What 0.0.4 changed." });
+
+    expect(await refusal(submit(store.access(), release, draft))).toContain(
+      "lacks what the release puts in it, in 1 field(s): listings.en-us.baseListing.releaseNotes",
+    );
+    expect(store.writes()).toEqual([`PUT /submissions/${id}`]);
+
+    store.rewriting("en-us", { releaseNotes: WHATS_NEW.replaceAll("\n", "\r\n") });
+    const outcome = await submit(store.access(), release, draft);
+
+    expect(outcome).toMatchObject({ submissionId: id, stage: "in-progress" });
+    // Updated again, with the package it listed already listed once.
+    expect(store.pending().applicationPackages.map((file) => file["fileName"])).toEqual([
+      "Mr-Streamer-0.0.4-win-x64.msix",
+      outcome.fileName,
+    ]);
+  });
+
+  it("goes on with a draft an interrupted run filled, on the same fingerprint and without another update", async () => {
+    const { store, id } = drafted();
+    const release = checked();
+    const draft = await named(store, release, id);
+    store.fail("PUT block", 403, "AuthenticationFailed");
+
+    expect(await refusal(submit(store.access(), release, draft))).toContain(
+      `with submit, the draft ${id} and the same fingerprint`,
+    );
+    const interrupted = store.requests.length;
+    // The draft lists the package, and still a run that doesn't name it sends nothing.
+    expect(await refusal(submit(store.access(), release))).toContain(
+      `Submission ${id} is in progress (PendingCommit) and holds 0.0.5's package`,
+    );
+    expect((await preflight(store.access(), release, draft)).found.at(-1)).toBe(
+      `0.0.5 would be committed in the draft ${id}, which holds it.`,
+    );
+    expect(store.writes(interrupted)).toEqual([]);
+    const outcome = await submit(store.access(), release, draft);
+
+    expect(outcome).toMatchObject({ submissionId: id, stage: "in-progress" });
+    expect(store.writes(interrupted)).toEqual([
+      "PUT block",
+      "PUT blocklist",
+      `POST /submissions/${id}/commit`,
+    ]);
+
+    // Once Microsoft has it, the same run reports where it stands.
+    store.advance("Certification");
+    const committed = store.requests.length;
+    expect(await submit(store.access(), release, draft)).toMatchObject({
+      submissionId: id,
+      status: "Certification",
+      stage: "in-progress",
+    });
+    expect(store.writes(committed)).toEqual([]);
+  });
+
+  it("says what Microsoft answered when it refuses the update, and never to delete the draft", async () => {
+    const { store, id } = drafted();
+    const release = checked();
+    const draft = await named(store, release, id);
+    const before = structuredClone(store.pending());
+    store.fail(
+      `PUT /submissions/${id}`,
+      409,
+      JSON.stringify({ code: "InvalidOperation", message: "It was changed in Partner Center." }),
+    );
+
+    const message = await refusal(submit(store.access(), release, draft));
+
+    expect(message).toContain(
+      `Microsoft answered HTTP 409 to adding the package to submission ${id}`,
+    );
+    expect(message).toContain(
+      "Microsoft says: InvalidOperation: It was changed in Partner Center.",
+    );
+    expect(message).toContain("Nothing was uploaded or committed.");
+    expect(message).not.toMatch(/delet/i);
+    expect(store.pending()).toEqual(before);
+  });
+
+  it("stays untouched by a run that doesn't name it", async () => {
+    const { store, id } = drafted();
+
+    expect(await refusal(submit(store.access(), checked()))).toContain(
+      `Submission ${id} is in progress (PendingCommit) and doesn't hold`,
+    );
+    expect(store.writes()).toEqual([]);
+  });
+});
+
 describe("what a failure prints", () => {
   it("Microsoft's own error without the key, the token or an upload address in it", async () => {
     const store = fakeStore();
@@ -439,6 +774,28 @@ describe("reading where a release stands", () => {
       stage: "live",
     });
     expect(store.writes(sentOnce)).toEqual([]);
+  });
+
+  it("follows a release that went into a draft a run named, by its name there", async () => {
+    const { store, id } = drafted();
+    const release = checked();
+    const { fileName } = await submit(store.access(), release, await named(store, release, id));
+    expect(fileName).toContain(`.draft-${id}.`);
+
+    store.advance("Certification");
+    expect(await status(store.access(), released())).toMatchObject({
+      fileName,
+      submissionId: id,
+      stage: "in-progress",
+      remarks: [],
+    });
+    store.advance("Published");
+    expect(await status(store.access(), released())).toMatchObject({
+      fileName,
+      submissionId: id,
+      stage: "live",
+      remarks: [],
+    });
   });
 
   it("says a release was never submitted, and what the Store offers instead", async () => {

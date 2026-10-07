@@ -2,8 +2,8 @@
 // Store holds, sending a checked package, and reading what Microsoft did with it.
 // scripts/store-release.ts is the GitHub side; docs/maintainers/microsoft-store.md describes both.
 //
-//   node scripts/store-submission.ts preflight [--release <file>]
-//   node scripts/store-submission.ts submit --release <file>
+//   node scripts/store-submission.ts preflight [--release <file> [--draft <id> [--draft-metadata-sha256 <hex>]]]
+//   node scripts/store-submission.ts submit --release <file> [--draft <id> --draft-metadata-sha256 <hex>]
 //   node scripts/store-submission.ts status --release <file>
 //
 // The credential comes from the environment: STORE_TENANT_ID, STORE_CLIENT_ID and
@@ -24,6 +24,15 @@
 // - The Store takes one submission at a time. One that doesn't hold this release's package stops
 //   the run, whoever made it, and so does a published package this one doesn't sort after.
 //   Nothing is ever deleted, and a submission Microsoft is checking is never changed.
+// - A release goes into a draft someone made in Partner Center only when the run names it, with
+//   --draft, and never into a new submission then. submit also takes the draft's fingerprint, which
+//   a preflight with the draft prints: the SHA-256 of all the draft holds that a release leaves
+//   alone. The draft must be the one named, still have that fingerprint and hold no package but
+//   the published ones and this release's. It is read again once the release is in it and once
+//   the package is uploaded, and nothing is uploaded or committed unless the rest is as it was.
+// - In such a draft the package's name also carries the draft's ID and the start of that
+//   fingerprint. Only a run that names both looks for that name, so a release's own run and a
+//   plain submit stop at the draft however far an earlier run got with it.
 // - Only requests that change nothing by being repeated are sent again. When creating or
 //   committing gets no clear answer, the script reads what happened instead of asking twice.
 // - Nothing of a token, the key or an upload address is printed, and of Microsoft's answers only
@@ -77,6 +86,13 @@ const WORKING = [
 
 const RECOVER = "run the Microsoft Store workflow with submit";
 
+/** A draft's fingerprint as a preflight prints it. */
+const FINGERPRINT = /^[0-9a-f]{64}$/;
+
+/** What is left for a draft that holds a release under a fingerprint it no longer has. */
+const CHANGED =
+  "No run goes on with it as it is: put back in Partner Center what changed, or finish the draft there.";
+
 /** What to do about a new submission that got no package: only a person may delete one. */
 const leftover = (id: string) =>
   `Submission ${id} is left as an untouched copy of the published one: delete it in Partner Center, then ${RECOVER}.`;
@@ -106,6 +122,18 @@ export interface StoreAccess {
 /** A release whose package `verify` has checked. */
 export type CheckedRelease = StoreRelease & { readonly package: StorePackage };
 
+/** A draft someone made in Partner Center, named for a release to go into. */
+export interface Draft {
+  /** The draft's submission ID. */
+  readonly id: string;
+  /**
+   * The fingerprint a preflight read from the draft before any release went into it: the SHA-256
+   * of what a release leaves alone in it. `submit` needs it. A preflight compares it when it has
+   * one, and reads the draft's own otherwise.
+   */
+  readonly metadataSha256: string | null;
+}
+
 /** What a submission means for a release. Only "live" says Store users get it. */
 export type Stage = "live" | "in-progress" | "draft" | "failed" | "absent";
 
@@ -116,7 +144,10 @@ export interface Outcome {
   readonly commit: string;
   /** The package version the Store reads. */
   readonly packageVersion: string;
-  /** The package's name in the Store. Null when the Store has none of this release. */
+  /**
+   * The package's name in the Store, which in a draft a run named also carries the draft's ID and
+   * the start of its fingerprint. Null when the Store has none of this release.
+   */
   readonly fileName: string | null;
   readonly submissionId: string | null;
   /** Microsoft's own word for where the submission stands. */
@@ -131,6 +162,8 @@ export interface Preflight {
   readonly found: readonly string[];
   /** What would stop a submission. Empty when one could go ahead. */
   readonly problems: readonly string[];
+  /** The fingerprint of the draft that was named. Null unless that draft is the one in progress. */
+  readonly draftMetadataSha256: string | null;
 }
 
 /** A refusal or failure to show as it is: its message holds nothing secret. */
@@ -188,15 +221,38 @@ type Step =
   /** An earlier run's draft holds the package and was never committed. */
   | { readonly take: "resume"; readonly draft: Submission }
   /** A new submission. `renamed` lists the languages whose listing takes the package's name. */
-  | { readonly take: "create"; readonly renamed: readonly string[] };
+  | { readonly take: "create"; readonly renamed: readonly string[] }
+  /**
+   * The draft the run named takes the release. `lacking` lists the fields that don't hold it yet,
+   * none once an earlier run put it there.
+   */
+  | {
+      readonly take: "adopt";
+      readonly draft: Submission;
+      readonly named: Draft;
+      readonly lacking: readonly string[];
+      readonly renamed: readonly string[];
+    };
+
+/** What a run that named a draft does next, which is never a new submission. */
+type DraftStep = Extract<Step, { take: "adopt" | "report" }>;
 
 /**
- * Says what the account holds and, given a release, what `submit` would do with it. Reads only.
+ * Says what the account holds and, given a release, what `submit` would do with it. With `draft`,
+ * that is what a submit into that draft would do, and the draft's fingerprint is read for it.
+ * Reads only.
  */
 export async function preflight(
   access: StoreAccess,
   release: CheckedRelease | null,
+  draft?: Draft,
 ): Promise<Preflight> {
+  const given = draft?.metadataSha256 ?? null;
+  if (draft && !(release && isId(draft.id) && (given === null || FINGERPRINT.test(given)))) {
+    throw new StoreError(
+      "A preflight with a draft takes the draft's submission ID, the version of the release to put in it and, to compare one, the fingerprint an earlier preflight printed.",
+    );
+  }
   const session = await signIn(access);
   const state = await storeState(session);
   const { published, pending } = state;
@@ -206,7 +262,7 @@ export async function preflight(
     ...published.packages.map((file) => `Package ${file.fileName}: ${file.version || "unread"}.`),
     ...listingFacts(published, session.clean),
     pending
-      ? `In progress: submission ${pending.id}, ${pending.status}. A release waits until it is finished.`
+      ? `In progress: submission ${pending.id}, ${pending.status}.${draft ? "" : " A release waits until it is finished."}`
       : "No submission in progress.",
   ];
   const problems = new Set<string>();
@@ -219,63 +275,112 @@ export async function preflight(
     }
   };
   attempt(() => assertPublic(published, "The published submission"));
+  let draftMetadataSha256: string | null = null;
   if (release) {
+    // The named draft's fingerprint is read whatever else would stop a submission into it.
+    if (draft && pending?.id === draft.id) {
+      draftMetadataSha256 = fingerprint(pending, release);
+      const edited = differing(metadata(published, release), metadata(pending, release));
+      found.push(
+        `Of what a release leaves alone, the draft ${pending.id} differs from the published submission in ${listed(edited, session.clean)}.`,
+        `Its fingerprint is ${draftMetadataSha256}, the SHA-256 of what a release leaves alone in it. A submit into the draft takes it.`,
+      );
+    }
+    // The package is looked for under the fingerprint the run names, or else the draft's own.
+    const original = given ?? draftMetadataSha256;
+    const entering = draft && original ? inDraft(release, draft.id, original) : release;
+    const { fileName } = entering.package;
     attempt(() => {
-      const step = nextStep(state, release);
+      const step = nextStep(state, entering, draft);
       found.push(
         step.take === "create"
-          ? `${release.version} would go in a new submission, as ${release.package.fileName}.`
-          : step.take === "resume"
-            ? `${release.version} would be committed in the draft ${step.draft.id}, which holds it.`
-            : `${release.version} is in submission ${step.submission.id} already: nothing would be sent.`,
+          ? `${release.version} would go in a new submission, as ${fileName}.`
+          : step.take === "adopt" && step.lacking.length > 0
+            ? `${release.version} would go in the draft ${step.draft.id}, as ${fileName}.`
+            : step.take === "report"
+              ? `${release.version} is in submission ${step.submission.id} already: nothing would be sent.`
+              : `${release.version} would be committed in the draft ${step.draft.id}, which holds it.`,
       );
-      if (step.take === "create") {
+      if (step.take === "create" || step.take === "adopt") {
         found.push(...retitling(step.renamed, "would retitle", session.clean));
       }
     });
   }
-  return { found, problems: [...problems] };
+  return { found, problems: [...problems], draftMetadataSha256 };
 }
 
 /**
  * Sends `release`'s package to the Store, unless the Store has it: then it reports where that
  * submission stands and changes nothing. Returns once Microsoft took or refused the commit, which
  * is long before certification ends. Throws a StoreError when the submission is refused here.
+ * With `draft` the release goes into that draft, by its ID and fingerprint, and into nothing else.
  */
-export async function submit(access: StoreAccess, release: CheckedRelease): Promise<Outcome> {
-  const session = await signIn(access);
-  const step = nextStep(await storeState(session), release);
-  if (step.take === "report") {
-    const { submission } = step;
-    return {
-      ...subject(release),
-      fileName: release.package.fileName,
-      submissionId: submission.id,
-      status: submission.status,
-      stage: step.live ? "live" : stageOf(submission.status),
-      remarks: submission.remarks,
-    };
+export async function submit(
+  access: StoreAccess,
+  checked: CheckedRelease,
+  draft?: Draft,
+): Promise<Outcome> {
+  const original = draft?.metadataSha256 ?? "";
+  if (draft && !(isId(draft.id) && FINGERPRINT.test(original))) {
+    throw new StoreError(
+      "A release goes into a draft by the draft's submission ID and its fingerprint: the SHA-256, 64 hexadecimal characters, that a preflight with the draft prints. Nothing was sent.",
+    );
   }
-  const draft =
-    step.take === "resume" ? step.draft : await fill(session, await create(session), release);
-  await upload(session, draft, release);
-  const committed = await commit(session, draft.id);
+  const release = draft ? inDraft(checked, draft.id, original) : checked;
+  const session = await signIn(access);
+  const step = nextStep(await storeState(session), release, draft);
+  const reported = (
+    { submission, live }: Extract<Step, { take: "report" }>,
+    ...remarks: string[]
+  ): Outcome => ({
+    ...subject(release),
+    fileName: release.package.fileName,
+    submissionId: submission.id,
+    status: submission.status,
+    stage: live ? "live" : stageOf(submission.status),
+    remarks: [...submission.remarks, ...remarks],
+  });
+  if (step.take === "report") return reported(step);
+  // Only a run that names the draft and this fingerprint finds the package in it again.
+  const again = draft ? `${RECOVER}, the draft ${draft.id} and the same fingerprint` : RECOVER;
+  let target: Submission;
+  if (step.take === "adopt") {
+    const ready = await adopt(session, step, release, again);
+    if (ready.take === "report") {
+      return reported(
+        ready,
+        `Someone committed the draft ${ready.submission.id} while this run put the release in it. This run committed nothing, and can't say that the rest of the draft was as its fingerprint says by then.`,
+      );
+    }
+    target = ready.draft;
+  } else {
+    target =
+      step.take === "create" ? await fill(session, await create(session), release) : step.draft;
+    await upload(session, target, release, again);
+  }
+  const committed = await commit(session, target.id, again);
   return {
     ...subject(release),
     fileName: release.package.fileName,
-    submissionId: draft.id,
+    submissionId: target.id,
     status: committed.status,
     stage: stageOf(committed.status),
     remarks: [
       ...committed.remarks,
-      ...(step.take === "create" ? retitling(step.renamed, "retitles", session.clean) : []),
+      ...(step.take === "resume" ? [] : retitling(step.renamed, "retitles", session.clean)),
+      ...(step.take === "adopt"
+        ? [
+            `It went into the draft ${target.id}, which the run named. Read again after the upload, right before the commit, the rest of the draft was as its fingerprint says. A repeat of this run names the draft and the fingerprint again.`,
+          ]
+        : []),
     ],
   };
 }
 
 /**
- * Where `release` stands in the Store: by the name this automation gives its packages, or else by
- * the package version, which finds a package someone uploaded in Partner Center. Reads only.
+ * Where `release` stands in the Store: by the name this automation gives its packages, in a draft
+ * a run named too, or else by the package version, which finds a package someone uploaded in
+ * Partner Center. Reads only.
  */
 export async function status(access: StoreAccess, release: StoreRelease): Promise<Outcome> {
   const session = await signIn(access);
@@ -406,11 +511,33 @@ function held(
 }
 
 /**
+ * What the Store's name for `release`'s package starts with in every draft a run named, whatever
+ * the draft and its fingerprint. Takes the release under either of its names.
+ */
+function draftFileStem(release: CheckedRelease): string {
+  return release.package.fileName.replace(/(\.draft-.+)?\.msix$/, ".draft-");
+}
+
+/**
+ * `release` with its package named as it is in the draft `id`, which a run named: the name it has
+ * anywhere, then the draft's ID and the start of `metadataSha256`, the fingerprint that run gave.
+ * A run that names no draft, another one or another fingerprint looks for another name, so none
+ * finds the package there. A fingerprint leaves the packages out, so the name stays the same once
+ * the package is in the draft.
+ */
+function inDraft(release: CheckedRelease, id: string, metadataSha256: string): CheckedRelease {
+  const fileName = `${draftFileStem(release)}${id}.${metadataSha256.slice(0, 16)}.msix`;
+  return { ...release, package: { ...release.package, fileName } };
+}
+
+/**
  * What `submit` does next for `release`. Throws when the Store's state refuses a submission:
  * another one is in progress, a published package isn't older, or the listing isn't Public and
- * Immediate.
+ * Immediate. With `draft`, the release goes into that draft or nowhere.
  */
-function nextStep(state: StoreState, release: CheckedRelease): Step {
+function nextStep(state: StoreState, release: CheckedRelease, draft: Draft): DraftStep;
+function nextStep(state: StoreState, release: CheckedRelease, draft?: Draft): Step;
+function nextStep(state: StoreState, release: CheckedRelease, draft?: Draft): Step {
   const { published, pending } = state;
   const mine = (file: SubmittedPackage) => file.fileName === release.package.fileName;
   if (held(published, mine)) return { take: "report", submission: published, live: true };
@@ -429,13 +556,17 @@ function nextStep(state: StoreState, release: CheckedRelease): Step {
       );
     }
   }
+  if (draft) return draftStep(state, release, draft);
   if (!pending) {
     assertPublic(published, "The published submission");
     return { take: "create", renamed: retitled(published, release) };
   }
   if (!held(pending, mine)) {
+    const named = held(pending, (file) => file.fileName.startsWith(draftFileStem(release)));
     throw new StoreError(
-      `Submission ${pending.id} is in progress (${pending.status}) and doesn't hold ${release.package.fileName}. The Store takes one submission at a time: let it finish, or delete it in Partner Center if nobody needs it, then ${RECOVER}. This script deletes nothing.`,
+      named
+        ? `Submission ${pending.id} is in progress (${pending.status}) and holds ${release.version}'s package as ${named.fileName}: a run that named it as a draft put the release there. Only a run that names the draft and the same fingerprint goes on with it, so nothing is sent.`
+        : `Submission ${pending.id} is in progress (${pending.status}) and doesn't hold ${release.package.fileName}. The Store takes one submission at a time: let it finish, or delete it in Partner Center if nobody needs it, then ${RECOVER}. This script deletes nothing.`,
     );
   }
   if (pending.status !== "PendingCommit") {
@@ -443,6 +574,171 @@ function nextStep(state: StoreState, release: CheckedRelease): Step {
   }
   assertPublic(pending, "The draft");
   return { take: "resume", draft: pending };
+}
+
+/**
+ * What `submit` does next for `release`, named as `inDraft` names it, when the run named `draft`
+ * for it. Throws unless the submission in progress is that draft, with the fingerprint the run
+ * gave and no package but the published ones and this release's. Never a new submission.
+ */
+function draftStep(state: StoreState, release: CheckedRelease, draft: Draft): DraftStep {
+  const { published, pending } = state;
+  const { fileName } = release.package;
+  if (pending?.id !== draft.id) {
+    throw new StoreError(
+      `${pending ? `Submission ${pending.id} is in progress, not the draft ${draft.id} that the run names, and is left alone` : `The app has no submission in progress, so no draft ${draft.id} for ${release.version} to go in`}. A run that names a draft never creates a submission.`,
+    );
+  }
+  const mine = held(pending, (file) => file.fileName === fileName);
+  // Committed with the release in it, by whoever: Microsoft changes it from here on, and no run can.
+  if (mine && pending.status !== "PendingCommit") {
+    return { take: "report", submission: pending, live: false };
+  }
+  if (draft.metadataSha256 !== null && fingerprint(pending, release) !== draft.metadataSha256) {
+    throw new StoreError(
+      `The draft ${pending.id} doesn't have the fingerprint the run names: something a release leaves alone in it differs from what that preflight read. The draft is left as it is. ${mine ? `It holds the release. ${CHANGED}` : "Look at it in Partner Center, then run preflight with the draft to read its fingerprint again."}`,
+    );
+  }
+  const strange = pending.packages.filter(
+    (file) =>
+      file !== mine &&
+      !published.packages.some(
+        (offered) => offered.fileName === file.fileName && offered.version === file.version,
+      ),
+  );
+  const stale = strange.find((file) => file.fileName.startsWith(draftFileStem(release)));
+  if (stale) {
+    throw new StoreError(
+      `The draft ${pending.id} holds ${release.version}'s package as ${stale.fileName}, which a run put there when the draft had another fingerprint: something a release leaves alone in it has changed since. The draft is left as it is. ${CHANGED}`,
+    );
+  }
+  if (strange.length > 0) {
+    throw new StoreError(
+      `The draft ${pending.id} holds ${strange.length} package(s) that are neither the published submission's nor ${fileName} waiting for its upload. This release would replace them, so the draft is left as it is.`,
+    );
+  }
+  if (pending.status !== "PendingCommit") {
+    throw new StoreError(
+      `Submission ${pending.id} is ${pending.status}, no longer a draft, and doesn't hold ${fileName}. It is left alone.`,
+    );
+  }
+  assertPublic(pending, "The draft");
+  return {
+    take: "adopt",
+    draft: pending,
+    named: draft,
+    lacking: unfilled(pending, release),
+    renamed: retitled(pending, release),
+  };
+}
+
+/**
+ * What `submission` lacks of `release` as `fill` leaves one, by the paths of the fields: the
+ * package's entry, a listing's "What's new" and, where the package's name goes into it, its title.
+ * Empty when it holds all of it. Notes that differ only in Microsoft's line endings are the same.
+ */
+function unfilled(submission: Submission, release: CheckedRelease): string[] {
+  const notes = storeNotes(release);
+  const { listings } = submission.raw;
+  return [
+    ...(held(submission, (file) => file.fileName === release.package.fileName)
+      ? []
+      : ["applicationPackages"]),
+    ...retitled(submission, release).map((language) => `listings.${language}.baseListing.title`),
+    ...Object.entries(isRecord(listings) ? listings : {}).flatMap(([language, listing]) => {
+      if (!isRecord(listing) || !isRecord(listing["baseListing"])) return [];
+      const kept = listing["baseListing"]["releaseNotes"];
+      return typeof kept === "string" && kept.replaceAll("\r\n", "\n") === notes
+        ? []
+        : [`listings.${language}.baseListing.releaseNotes`];
+    }),
+  ];
+}
+
+/**
+ * What putting `release` in `submission` leaves alone: all of it but its packages, Microsoft's
+ * status, status details and upload address, and each listing's "What's new" and, where the
+ * package's name goes into it, title.
+ */
+function metadata(submission: Submission, release: CheckedRelease): Record<string, unknown> {
+  const changing = ["applicationPackages", "status", "statusDetails", "fileUploadUrl"];
+  const ours =
+    release.package.displayName === STORE_NAME ? ["releaseNotes", "title"] : ["releaseNotes"];
+  const without = (from: Record<string, unknown>, keys: readonly string[]) =>
+    Object.entries(from).filter(([key]) => !keys.includes(key));
+  return Object.fromEntries(
+    without(submission.raw, changing).map(([key, value]) => [
+      key,
+      key === "listings"
+        ? relisted(value, (base) => Object.fromEntries(without(base, ours)))
+        : value,
+    ]),
+  );
+}
+
+/**
+ * The fingerprint of `submission` for `release`: the SHA-256 of what the release leaves alone in
+ * it. Two reads of an unchanged draft give the same one, and any other change another.
+ */
+function fingerprint(submission: Submission, release: CheckedRelease): string {
+  return createHash("sha256")
+    .update(canonical(metadata(submission, release)))
+    .digest("hex");
+}
+
+/**
+ * `value` as JSON with every object's fields in the order of their names, so the order Microsoft
+ * sends fields in doesn't count. The order of a list does.
+ */
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_key, each: unknown) =>
+    isRecord(each)
+      ? Object.fromEntries(
+          Object.keys(each)
+            .sort()
+            .map((key) => [key, each[key]]),
+        )
+      : each,
+  );
+}
+
+/**
+ * Where `before` and `after` differ, by the paths of the fields and never their values. A list
+ * counts as one field.
+ */
+function differing(before: unknown, after: unknown, path = ""): string[] {
+  if (!isRecord(before) || !isRecord(after)) {
+    return canonical(before) === canonical(after) ? [] : [path];
+  }
+  return [...new Set([...Object.keys(before), ...Object.keys(after)])].sort().flatMap((key) => {
+    const field = path ? `${path}.${key}` : key;
+    return key in before && key in after ? differing(before[key], after[key], field) : [field];
+  });
+}
+
+/** Fields for a message: how many, and the paths of the first ten. Never a value. */
+function listed(paths: readonly string[], clean: Session["clean"]): string {
+  const shown = paths.slice(0, 10).map(clean).join(", ");
+  return `${paths.length} field(s)${shown ? `: ${shown}` : ""}${paths.length > 10 ? " and more" : ""}`;
+}
+
+/**
+ * `listings` with each language's base listing, which holds its title, texts and images, as
+ * `change` returns it. Whatever isn't such a listing stays as it is.
+ */
+function relisted(
+  listings: unknown,
+  change: (base: Record<string, unknown>, language: string) => Record<string, unknown>,
+): unknown {
+  if (!isRecord(listings)) return listings;
+  return Object.fromEntries(
+    Object.entries(listings).map(([language, listing]) => [
+      language,
+      isRecord(listing) && isRecord(listing["baseListing"])
+        ? { ...listing, baseListing: change(listing["baseListing"], language) }
+        : listing,
+    ]),
+  );
 }
 
 /**
@@ -479,53 +775,105 @@ async function create(session: Session): Promise<Submission> {
 }
 
 /**
+ * Puts `release` in the draft the run named, unless an earlier run did, and uploads its package.
+ * The draft is read again after each, the second time right before `submit` commits it. Returns
+ * the draft to commit, or what to report when someone committed it meanwhile. `again` says how to
+ * repeat the run.
+ */
+async function adopt(
+  session: Session,
+  step: Extract<Step, { take: "adopt" }>,
+  release: CheckedRelease,
+  again: string,
+): Promise<DraftStep> {
+  let ready: DraftStep = step;
+  if (step.lacking.length > 0) {
+    const stopped = "Nothing was uploaded or committed.";
+    await fill(session, step.draft, release, `${stopped} To try again, ${again}.`);
+    ready = await reread(session, step, release, "After the update", stopped);
+  }
+  if (ready.take !== "adopt") return ready;
+  await upload(session, ready.draft, release, again);
+  return reread(session, step, release, "After the upload", "Nothing was committed.");
+}
+
+/**
+ * Reads the draft of `step` again, `after` something was sent to it, and says what `submit` does
+ * next: go on, or report a draft someone committed meanwhile. Throws when what the release leaves
+ * alone is no longer what `step` found, when the draft fails a check it passed then, and when it
+ * lacks the package, "What's new" or title. `stopped` says what the run then leaves undone.
+ */
+async function reread(
+  session: Session,
+  step: Extract<Step, { take: "adopt" }>,
+  release: CheckedRelease,
+  after: string,
+  stopped: string,
+): Promise<DraftStep> {
+  const { id } = step.draft;
+  const state = await storeState(session);
+  const now = state.pending;
+  // The fields that changed while it stayed a draft, by name. What else stops the run, `nextStep` says.
+  const changed =
+    now?.id === id && now.status === "PendingCommit"
+      ? differing(metadata(step.draft, release), metadata(now, release))
+      : [];
+  if (changed.length > 0) {
+    throw new StoreError(
+      `${after}, something a release leaves alone in the draft ${id} differs from what the run found, in ${listed(changed, session.clean)}. ${stopped} ${CHANGED}`,
+    );
+  }
+  const next = nextStep(state, release, step.named);
+  if (next.take === "adopt" && next.lacking.length > 0) {
+    throw new StoreError(
+      `${after}, the draft ${id} lacks what the release puts in it, in ${listed(next.lacking, session.clean)}. ${stopped} Look at the draft in Partner Center.`,
+    );
+  }
+  return next;
+}
+
+/**
  * Puts the package, "What's new" and, where `retitled` names a listing, the Store name into `draft`
- * and sends the rest back as it came. The packages it copied are marked for removal: the Store
- * offers the newest one to everyone they served.
+ * and sends the rest back as it came. The other packages it holds are marked for removal: the
+ * Store offers the newest one to everyone they served. A draft that lists the package keeps that
+ * entry. `left` says what becomes of the draft when Microsoft refuses.
  */
 async function fill(
   session: Session,
   draft: Submission,
   release: CheckedRelease,
+  left = leftover(draft.id),
 ): Promise<Submission> {
   const { fileName } = release.package;
-  const copied = Array.isArray(draft.raw["applicationPackages"])
+  const copied: unknown[] = Array.isArray(draft.raw["applicationPackages"])
     ? draft.raw["applicationPackages"]
     : [];
-  const listings = draft.raw["listings"];
+  const mine = (file: unknown) => isRecord(file) && file["fileName"] === fileName;
   const notes = storeNotes(release);
   const renamed = retitled(draft, release);
   const body = {
     ...draft.raw,
     applicationPackages: [
-      ...copied.map((file: unknown) =>
-        isRecord(file) ? { ...file, fileStatus: "PendingDelete" } : file,
+      ...copied.map((file) =>
+        isRecord(file) && !mine(file) ? { ...file, fileStatus: "PendingDelete" } : file,
       ),
       // What Microsoft asks of a new package; the rest it reads from the file.
-      {
-        fileName,
-        fileStatus: "PendingUpload",
-        minimumDirectXVersion: "None",
-        minimumSystemRam: "None",
-      },
-    ],
-    listings: isRecord(listings)
-      ? Object.fromEntries(
-          Object.entries(listings).map(([language, listing]) => [
-            language,
-            isRecord(listing) && isRecord(listing["baseListing"])
-              ? {
-                  ...listing,
-                  baseListing: {
-                    ...listing["baseListing"],
-                    releaseNotes: notes,
-                    ...(renamed.includes(language) && { title: STORE_NAME }),
-                  },
-                }
-              : listing,
+      ...(copied.some(mine)
+        ? []
+        : [
+            {
+              fileName,
+              fileStatus: "PendingUpload",
+              minimumDirectXVersion: "None",
+              minimumSystemRam: "None",
+            },
           ]),
-        )
-      : listings,
+    ],
+    listings: relisted(draft.raw["listings"], (base, language) => ({
+      ...base,
+      releaseNotes: notes,
+      ...(renamed.includes(language) && { title: STORE_NAME }),
+    })),
   };
   const answer = await call(session, "PUT", `/submissions/${draft.id}`, body);
   if (!answer || answer.status < 200 || answer.status >= 300) {
@@ -534,13 +882,11 @@ async function fill(
       answer,
       session.clean,
     );
-    throw new StoreError(`${message} ${leftover(draft.id)}`);
+    throw new StoreError(`${message} ${left}`);
   }
   const filled = submissionOf(answer.body, session.clean);
   if (!filled || !held(filled, (file) => file.fileName === fileName)) {
-    throw new StoreError(
-      `Microsoft took the update without listing ${fileName}. ${leftover(draft.id)}`,
-    );
+    throw new StoreError(`Microsoft took the update without listing ${fileName}. ${left}`);
   }
   return { ...filled, uploadUrl: filled.uploadUrl ?? draft.uploadUrl };
 }
@@ -548,9 +894,14 @@ async function fill(
 /**
  * Uploads the package, in the ZIP the API takes files in, to the address Microsoft gave for
  * `draft`. Sending a block or the list of blocks twice changes nothing, so each is repeated when
- * it fails.
+ * it fails. `again` says how to repeat the run.
  */
-async function upload(session: Session, draft: Submission, release: CheckedRelease): Promise<void> {
+async function upload(
+  session: Session,
+  draft: Submission,
+  release: CheckedRelease,
+  again: string,
+): Promise<void> {
   const url = draft.uploadUrl;
   if (!url || !/^https:\/\/[^/?#]+\/[^?#]*\?[^#]+$/.test(url)) {
     throw new StoreError(`Microsoft gave no upload address for submission ${draft.id}.`);
@@ -569,7 +920,7 @@ async function upload(session: Session, draft: Submission, release: CheckedRelea
     );
     if (answer && answer.status >= 200 && answer.status < 300) return;
     throw new StoreError(
-      `Uploading the package for submission ${draft.id} ${answer ? `was refused with HTTP ${answer.status}` : "got no answer"}. The submission is a draft that holds ${release.package.fileName} by name: to upload and commit it, ${RECOVER}.`,
+      `Uploading the package for submission ${draft.id} ${answer ? `was refused with HTTP ${answer.status}` : "got no answer"}. The submission is a draft that holds ${release.package.fileName} by name: to upload and commit it, ${again}.`,
     );
   };
   const blocks: string[] = [];
@@ -591,10 +942,12 @@ async function upload(session: Session, draft: Submission, release: CheckedRelea
 /**
  * Commits the draft `id` and waits, for ten minutes at most, until Microsoft has taken or refused
  * it. When the commit gets no clear answer, the submission's status says whether it went through.
+ * `again` says how to repeat the run.
  */
 async function commit(
   session: Session,
   id: string,
+  again: string,
 ): Promise<Pick<Submission, "status" | "remarks">> {
   const answer = await call(session, "POST", `/submissions/${id}/commit`);
   const accepted = answer !== null && answer.status >= 200 && answer.status < 300;
@@ -602,7 +955,7 @@ async function commit(
   if (!accepted && current.status === "PendingCommit") {
     const { message } = refusal(`committing submission ${id}`, answer, session.clean);
     throw new StoreError(
-      `${message} It is still a draft that holds this release's package: to commit it, ${RECOVER}.`,
+      `${message} It is still a draft that holds this release's package: to commit it, ${again}.`,
     );
   }
   const waiting = () =>
@@ -891,7 +1244,7 @@ const VERDICTS: Record<Stage, string> = {
   live: "Live: Microsoft has published it.",
   "in-progress":
     "Not live yet: Microsoft is still checking or publishing it. Run the Microsoft Store workflow with status to see how it ends.",
-  draft: `Not submitted: the submission is a draft nobody committed. To commit it, ${RECOVER}.`,
+  draft: `Not submitted: the submission is a draft nobody committed. To commit it, ${RECOVER}, and with the draft and its fingerprint when a run named them.`,
   failed:
     "Not live: Microsoft refused or stopped the submission. Partner Center says why; docs/maintainers/microsoft-store.md#when-a-submission-fails says what to do.",
   absent: "The Store has no submission of this release.",
@@ -936,7 +1289,11 @@ function report(outcome: Outcome, fine: readonly Stage[]): void {
 async function main(): Promise<void> {
   const { positionals, values } = parseArgs({
     allowPositionals: true,
-    options: { release: { type: "string" } },
+    options: {
+      release: { type: "string" },
+      draft: { type: "string" },
+      "draft-metadata-sha256": { type: "string" },
+    },
   });
   const [command] = positionals;
   const env = process.env;
@@ -967,10 +1324,18 @@ async function main(): Promise<void> {
     if (!release.package) throw new StoreError("The release's package wasn't checked first.");
     return { ...release, package: release.package };
   };
+  const given = values["draft-metadata-sha256"];
+  if (given !== undefined && !values.draft) {
+    throw new StoreError("A fingerprint is a draft's: name the draft it was read from as well.");
+  }
+  /** The draft made in Partner Center that the run names, when it names one. */
+  const draft: Draft | undefined = values.draft
+    ? { id: values.draft, metadataSha256: given ?? null }
+    : undefined;
 
   switch (command) {
     case "preflight": {
-      const { found, problems } = await preflight(access, release ? checked() : null);
+      const { found, problems } = await preflight(access, release ? checked() : null, draft);
       console.log(found.join("\n"));
       summary(
         [
@@ -988,10 +1353,11 @@ async function main(): Promise<void> {
       return;
     }
     case "submit":
-      report(await submit(access, checked()), ["live", "in-progress"]);
+      report(await submit(access, checked(), draft), ["live", "in-progress"]);
       return;
     case "status":
       if (!release) throw new StoreError(unnamed);
+      if (draft) throw new StoreError("status takes no draft: it finds a release by its package.");
       report(await status(access, release), ["live", "in-progress"]);
       return;
     default:
