@@ -217,13 +217,18 @@ function packetPosition(name: string, stream: number, seconds: number): number {
 /**
  * The picture and sound of an MP4 clip `times` over as one file, its index first: as large as a
  * real file, where a clip fits in the proxy's memory whole.
+ *
+ * ffmpeg 6 keeps one packet between the thread that reads its only input and the thread that
+ * writes, so the two take turns for every packet, some 60,000 of them for the large file. On a
+ * busy virtual machine that took most of the test's twenty seconds. With room for a pass of the
+ * clip it takes about one, and the file is the same to the byte.
  */
 async function repeated(name: string, times: number): Promise<Buffer> {
   const made = join(await tempDir(), name);
   const done = spawnSync(
     FFMPEG,
     [
-      ...["-v", "error", "-stream_loop", String(times - 1)],
+      ...["-v", "error", "-thread_queue_size", "1024", "-stream_loop", String(times - 1)],
       ...["-i", fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url))],
       ...["-map", "0:v", "-map", "0:a", "-c", "copy", "-movflags", "+faststart", made],
     ],
@@ -925,9 +930,14 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
     const film = await repeated("title-h264-aac.mp4", 70);
     const movie = provider.titles.movies.find((each) => each.name.startsWith("TEST | Index at"));
     provider.replaceMovieFile(movie?.id ?? 0, film);
+    // Half of it comes at once and the rest as slowly as over a network. Sent from this computer
+    // alone, nearly all of it has left the provider by the time ffprobe is done.
+    const half = Math.floor(film.length / 2);
+    provider.stallMovieFile(movie?.id ?? 0, half, 60_000);
     const session = await open("TEST | Index at the end");
     // ffprobe left in the middle of the file, and the provider has stopped sending it.
     await vi.waitFor(() => expect(provider.activeStreams()).toBe(0));
+    provider.stallMovieFile(movie?.id ?? 0, half, 0);
     const before = { requests: provider.fileRequests(), bytes: provider.fileBytes() };
     expect(before.bytes).toBeLessThan(film.length);
 
