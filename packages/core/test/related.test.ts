@@ -37,7 +37,7 @@ describe("available related titles", () => {
     const found = relatedTitles({
       opened,
       version,
-      categories: () => ["films"],
+      provider: (each) => ({ name: each.id, categoryIds: ["films"] }),
       titles: [
         title("fallback"),
         title("english", { genres: ["Drama"], originalLanguage: "en" }),
@@ -59,7 +59,15 @@ describe("available related titles", () => {
     const found = relatedTitles({
       opened,
       version,
-      categories: (each) => (each.id === "words" ? [] : ["films"]),
+      provider: (each) => ({
+        name:
+          each.id === "opened"
+            ? "The Quiet Harbour"
+            : each.id === "words"
+              ? "Harbour Lights"
+              : "The Film",
+        categoryIds: each.id === "words" || each.id === "generic" ? [] : ["films"],
+      }),
       titles: [
         title("words", { title: "Harbour Lights" }),
         title("category"),
@@ -70,7 +78,7 @@ describe("available related titles", () => {
         }),
         title("generic", {
           title: "The Film",
-          versions: [{ subscriptionId: "home", id: "words", tags: [] }],
+          versions: [{ subscriptionId: "home", id: "generic", tags: [] }],
         }),
       ],
     });
@@ -85,7 +93,7 @@ describe("available related titles", () => {
     const found = relatedTitles({
       opened,
       version,
-      categories: () => ["films"],
+      provider: (each) => ({ name: each.id, categoryIds: ["films"] }),
       titles: [
         opened,
         title("alternate", { key: opened.key }),
@@ -105,7 +113,7 @@ describe("available related titles", () => {
     const found = relatedTitles({
       opened: title("opened"),
       version,
-      categories: () => ["films"],
+      provider: (each) => ({ name: each.id, categoryIds: ["films"] }),
       titles: [
         title("foreign", {
           subscriptionId: "other",
@@ -123,12 +131,42 @@ describe("available related titles", () => {
     });
   });
 
+  it("uses the opened provider's names instead of another merged version's display name", () => {
+    const found = relatedTitles({
+      opened: title("opened", { title: "Desert" }),
+      version,
+      provider: (each) => ({
+        name:
+          each.id === "opened"
+            ? "Quiet Harbour"
+            : each.id === "local"
+              ? "Harbour Lights"
+              : "Desert",
+        categoryIds: [],
+      }),
+      titles: [
+        title("foreign", {
+          subscriptionId: "other",
+          title: "Desert",
+          versions: [
+            { subscriptionId: "other", id: "foreign", tags: [] },
+            { subscriptionId: "home", id: "local", tags: [] },
+          ],
+        }),
+        title("false", { title: "Harbour Lights" }),
+      ],
+    });
+    expect(found.titles.map(({ title, reason }) => [title.id, reason])).toEqual([
+      ["local", "Similar name"],
+    ]);
+  });
+
   it("returns an honest empty result when no available facts match", () => {
     expect(
       relatedTitles({
         opened: title("opened"),
         version,
-        categories: () => [],
+        provider: (each) => ({ name: each.id, categoryIds: [] }),
         titles: [title("unrelated")],
       }),
     ).toEqual({ basis: null, titles: [] });

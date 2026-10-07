@@ -29,6 +29,7 @@ import type { OnDemandCatalogue } from "@mrstreamer/core/provider";
 import { tmdb, tmdbImage } from "@mrstreamer/core/metadata/tmdb";
 import { collections, type Collections } from "@mrstreamer/core/ondemand/collections";
 import { relatedTitles } from "@mrstreamer/core/ondemand/related";
+import { titleName } from "@mrstreamer/core/ondemand/names";
 import {
   entriesOf,
   factsOf,
@@ -569,18 +570,23 @@ const handlers: {
     if (!seed) return { basis: null, titles: [] };
     // Category ids belong to this provider. No category from another owner can match it.
     const own = members.find((member) => member.subscriptionId === version.subscriptionId);
-    const categories = new Map(
+    const providerTitles = new Map(
       (kind === "movie" ? own?.catalogue.movies : own?.catalogue.series)?.map((title) => [
         title.id,
-        title.categoryIds,
+        title,
       ]),
     );
     return relatedTitles({
       opened: about ? { ...seed, genres: about.genres, originalLanguage: about.language } : seed,
       version,
       titles,
-      categories: (each) =>
-        each.subscriptionId === version.subscriptionId ? (categories.get(each.id) ?? []) : [],
+      provider: (each) => {
+        if (each.subscriptionId !== version.subscriptionId) return null;
+        const row = providerTitles.get(each.id);
+        return row
+          ? { name: titleName(row.name, row.releaseDate).title, categoryIds: row.categoryIds }
+          : null;
+      },
     });
   },
   tiles: async ({ language, kind, of, owners }) => {

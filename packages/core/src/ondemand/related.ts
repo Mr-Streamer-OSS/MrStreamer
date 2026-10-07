@@ -5,8 +5,11 @@ interface RelatedSource {
   readonly opened: Title;
   readonly version: OwnedId;
   readonly titles: readonly Title[];
-  /** Provider category ids are meaningful only within this version's subscription. */
-  readonly categories: (version: OwnedId) => readonly string[];
+  /** Fallback names and category ids belong to the opened version's provider. */
+  readonly provider: (version: OwnedId) => {
+    readonly name: string;
+    readonly categoryIds: readonly string[];
+  } | null;
 }
 
 const LIMIT = 12;
@@ -25,8 +28,9 @@ function words(name: string): Set<string> {
 export function relatedTitles(source: RelatedSource): RelatedTitles {
   const { opened, version } = source;
   const genres = new Set(opened.genres);
-  const categories = new Set(source.categories(version));
-  const nameWords = words(opened.title);
+  const original = source.provider(version);
+  const categories = new Set(original?.categoryIds ?? []);
+  const nameWords = words(original?.name ?? "");
   const best: { title: Title; reason: string; score: number }[] = [];
   const seen = new Set<string>();
   for (let candidate of source.titles) {
@@ -53,12 +57,13 @@ export function relatedTitles(source: RelatedSource): RelatedTitles {
       }
     } else if (genres.size === 0 || candidate.genres.length === 0) {
       const own = candidate.versions.find((each) => each.subscriptionId === version.subscriptionId);
-      if (!own) continue;
-      if (source.categories(own).some((category) => categories.has(category))) {
+      const facts = own && source.provider(own);
+      if (!own || !facts || !original) continue;
+      if (facts.categoryIds.some((category) => categories.has(category))) {
         score = 20;
         reason = "Same category";
       } else {
-        const sharedWords = [...words(candidate.title)].filter((word) => nameWords.has(word));
+        const sharedWords = [...words(facts.name)].filter((word) => nameWords.has(word));
         if (sharedWords.length === 0) continue;
         score = Math.min(sharedWords.length, 10);
         reason = "Similar name";
