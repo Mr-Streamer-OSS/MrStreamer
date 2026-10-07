@@ -54,6 +54,11 @@ export type AppError =
    * again.
    */
   | { readonly kind: "favourites-changed" }
+  /**
+   * An episode's mark can't be undone any more: the series was marked again, played or taken out
+   * of Continue watching since. Nothing was changed.
+   */
+  | { readonly kind: "mark-changed" }
   /** A receiver on the network didn't take what it was sent, or can't be reached. */
   | { readonly kind: "output"; readonly failure: OutputFailure }
   /** A programme guide that can't be used, or a change to one that no longer applies. */

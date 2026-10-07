@@ -57,6 +57,7 @@ describe("Continue watching", () => {
     finished: false,
     hidden: false,
     removedAt: null,
+    since: partial.at,
     ...partial,
   });
 

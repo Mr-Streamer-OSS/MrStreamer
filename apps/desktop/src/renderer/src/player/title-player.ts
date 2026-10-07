@@ -10,9 +10,15 @@
 // default). The speed lasts for the title, and carries on when another episode of its series opens
 // from it, as Next episode does; live channels always play at their own.
 //
-// An episode knows the next one in its series. At its end that one plays after a countdown,
-// unless the viewer turned it off or cancels; Next plays it at once. Watching into the credits of
-// the last episode records that the series is finished.
+// An episode knows the next one in its series: the next the viewer hasn't watched, in the version
+// that plays, since one played or marked watched already is passed over. At its end that one
+// plays after a countdown, unless the viewer turned it off or cancels; Next plays it at once.
+// Which one it is comes from the viewing record alone: it is asked as the episode opens, as the
+// record changes, as the episode ends and once more before the next one opens, so a mark made
+// meanwhile counts, and while the record doesn't answer none is offered and none opens. A mark
+// alone never stops, moves or starts anything that plays. Watching an episode into its credits
+// records that the series is finished once no numbered episode is left to watch: one before it
+// that isn't watched keeps the series in Continue watching.
 //
 // With a receiver on the network connected (see output.ts), a title plays there instead: it is
 // opened and loaded through the main process, the controls here command the receiver, and the
@@ -20,7 +26,8 @@
 // saves how far it got. Connecting a receiver while a title plays here moves it there at its
 // position, with its tracks; going back to this computer brings it back the same way. A receiver
 // that takes another's place, or is reached again after its connection broke, has nothing of the
-// title: it is opened and loaded there afresh, where it was, paused when it was.
+// title: it is opened and loaded there afresh, where it was, paused when it was. Wherever it
+// plays, it is the one play the viewer began, and its progress is saved as that play's.
 import { createStore, useStore } from "zustand";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import {
@@ -38,13 +45,13 @@ import type {
   SubtitleTrack,
 } from "@mrstreamer/contracts/playback";
 import { ORIGINAL_SOUND, type Preferences } from "@mrstreamer/contracts/preferences";
-import { nextEpisode } from "@mrstreamer/core/ondemand/details";
 import { DEFAULT_TITLE_LANGUAGE } from "@mrstreamer/core/ondemand/languages";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import { chooseTracks } from "@mrstreamer/core/ondemand/tracks";
+import { finishes, nextUnwatched } from "@mrstreamer/core/viewing/episodes";
 import { isFinished } from "@mrstreamer/core/viewing/titles";
 import { appError } from "../lib/errors.ts";
-import { call } from "../lib/ipc.ts";
+import { call, listen } from "../lib/ipc.ts";
 import { titleDecoders } from "./decoders.ts";
 import type { EngineError } from "./engine.ts";
 import { onLiveStart, player, rememberSubtitles } from "./player.ts";
@@ -155,8 +162,9 @@ export interface TitlePlayerState {
   readonly subtitleStatus: SubtitleStatus;
   readonly speed: Speed;
   /**
-   * For an episode, the one after it in its series: null after the last episode, undefined for
-   * movies and for episodes their series doesn't list.
+   * For an episode, the next one in its series the viewer hasn't watched, as the viewing record
+   * last said: null when none is left after it, undefined for movies, for episodes their series
+   * doesn't list, and until the record has answered for this one.
    */
   readonly next: Episode | null | undefined;
   /** At the end of an episode, the seconds until the next one plays; null without a countdown. */
@@ -207,8 +215,11 @@ const video = player.element;
 /** The open session: its id and the address runs play from. */
 let session: { readonly id: string; readonly url: string } | null = null;
 /**
- * When the open title began to play, epoch milliseconds. Its checkpoints bring back a title taken
- * out of Continue watching only when this play began after the removal.
+ * When the viewer began this play of the open title, epoch milliseconds. Its checkpoints bring
+ * back a title taken out of Continue watching only when the play began after the removal, and
+ * take over from an episode's mark only when it began after the mark. It stays as the title moves
+ * to a receiver, on to another and back, and through a new run or load: those are the same play,
+ * and the main process saves a receiver's progress with it too.
  */
 let openedAt = 0;
 let engine: TitleEngine | null = null;
@@ -230,8 +241,20 @@ let lastSubtitle: SubtitleTrack | null = null;
 let countdownTimer: ReturnType<typeof setInterval> | null = null;
 /** The countdown waits, at the seconds it has left, as while Settings is open over the title. */
 let countdownHeld = false;
-/** This play of the last episode has recorded that its series is finished. */
-let seriesFinished = false;
+/** Counts the plays the viewer began: the open title is the last of them. */
+let play = 0;
+/** The play that recorded that its series is finished, or is finding out whether it is. */
+let finishing = 0;
+/**
+ * The latest question to the record about what comes after the open episode, which settles with
+ * whether the record answered it.
+ */
+let nextQuestion: Promise<boolean> = Promise.resolve(false);
+/**
+ * Counts the times the next episode was asked for and the times that was taken back: one asked
+ * for is opened only while it is still the last of them when the record answers.
+ */
+let nextRequest = 0;
 /**
  * The open title is the receiver's: its session there (null until it is opened for that
  * receiver), the load that plays (null while none does), the subtitle track that load carries, and
@@ -275,11 +298,41 @@ window.addEventListener("beforeunload", () => save());
 onLiveStart(() => {
   if (store.getState().now) titlePlayer.close();
 });
+// What comes after the open episode follows the record: one marked or played since is passed over.
+listen("viewing.changed", () => void refreshNext());
+
+/**
+ * Asks the record how the episodes of the open one's series stand now, in its own subscription,
+ * and works out which comes after it. Only the latest question counts. One asked before it takes
+ * nothing from its own answer and settles as the latest does, so an answer from before a mark
+ * neither puts back nor opens what the mark changed, however late the answer after it is.
+ * Answers whether the record said what comes next. When it didn't, the player keeps what it last
+ * heard and this answers false: nothing opens on that.
+ */
+function refreshNext(): Promise<boolean> {
+  const { now } = store.getState();
+  if (!now?.series || now.title.kind !== "episode") return Promise.resolve(false);
+  const { series, title } = now;
+  const mine: Promise<boolean> = call("viewing.episodes", { series: seriesOf(title) })
+    .catch(() => null)
+    .then((standing) => {
+      // Another title opened meanwhile works out its own.
+      if (store.getState().now !== now) return false;
+      // Asked again since: this answer is dropped, read or not, for that question's.
+      if (nextQuestion !== mine) return nextQuestion;
+      if (!standing) return false;
+      store.setState({ next: nextUnwatched(series, title, standing.progress, standing.marks) });
+      return true;
+    });
+  nextQuestion = mine;
+  return mine;
+}
 
 /**
  * Saves how far the title got, when there is a title and a length to measure it against. Once
- * the last episode of a series is in its credits, records that the series is finished, after the
- * progress, so every version played leaves Continue watching, this one included.
+ * an episode with none left after it is in its credits, finds out whether its series is
+ * finished, after the progress is saved. Both say when this play began: an episode marked during
+ * it keeps its mark.
  */
 function save(): void {
   // What a receiver plays, the main process saves, from what the receiver confirmed.
@@ -293,12 +346,9 @@ function save(): void {
     duration,
     since: openedAt,
   });
-  if (next === null && now.series && !seriesFinished && isFinished(position, duration)) {
-    seriesFinished = true;
-    const series = now.series.title.versions.map(ownedId);
-    saved = saved.then(() =>
-      call("viewing.finishSeries", { commandId: crypto.randomUUID(), series }),
-    );
+  if (next === null && isFinished(position, duration)) {
+    const mine = { play, since: openedAt };
+    saved = saved.then(() => finishSeries(now, mine));
   }
   saving = saved.then(
     () => {},
@@ -306,8 +356,40 @@ function save(): void {
   );
 }
 
-/** Stops the countdown to the next episode. */
+/**
+ * Records that the series of `now`, an episode `mine` watched to its end, is finished, so every
+ * version played leaves Continue watching: once per play, and only when the record says no
+ * numbered episode is left to watch (`finishes`). While it can't say, or says one is left,
+ * nothing is recorded, and the play's next save asks again.
+ */
+async function finishSeries(
+  now: NowPlaying,
+  mine: { readonly play: number; readonly since: number },
+): Promise<void> {
+  const { series, title } = now;
+  if (!series || title.kind !== "episode" || finishing === mine.play) return;
+  finishing = mine.play;
+  const { since } = mine;
+  try {
+    const standing = await call("viewing.episodes", { series: seriesOf(title) });
+    if (finishes(series, { ...title, since }, standing.progress, standing.marks)) {
+      const versions = series.title.versions.map(ownedId);
+      await call("viewing.finishSeries", {
+        commandId: crypto.randomUUID(),
+        series: versions,
+        since,
+      });
+      return;
+    }
+  } catch {
+    // Asked again below.
+  }
+  if (finishing === mine.play) finishing = 0;
+}
+
+/** Stops the countdown to the next episode, and one asked for that the record hasn't answered. */
 function stopCountdown(): void {
+  nextRequest++;
   if (countdownTimer) clearInterval(countdownTimer);
   countdownTimer = null;
   if (store.getState().countdown !== null) store.setState({ countdown: null });
@@ -315,10 +397,13 @@ function stopCountdown(): void {
 
 /**
  * At the end of an episode with another after it, counts down to that one once a second, unless
- * the viewer turned that off. The setting is read now, so a change made while it played counts.
+ * the viewer turned that off. Which one comes next and the setting are read now, so an episode
+ * marked and a change made while it played count. Nothing counts down while the record doesn't
+ * say what comes next.
  */
 async function countDown(mine: number): Promise<void> {
-  if (!store.getState().next) return;
+  const known = await refreshNext();
+  if (mine !== generation || !known || !store.getState().next) return;
   const preferences = await call("preferences.get").catch((): Preferences | null => null);
   if (mine !== generation || store.getState().phase.kind !== "ended") return;
   if (preferences?.autoplayNext === false) return;
@@ -330,8 +415,11 @@ async function countDown(mine: number): Promise<void> {
 function tickCountdown(): void {
   countdownTimer = setInterval(() => {
     const left = (store.getState().countdown ?? 0) - 1;
-    if (left > 0) store.setState({ countdown: left });
-    else titlePlayer.playNext();
+    if (left > 0) return store.setState({ countdown: left });
+    // Counted down once: the next episode is asked for again before it opens.
+    if (countdownTimer) clearInterval(countdownTimer);
+    countdownTimer = null;
+    titlePlayer.playNext();
   }, 1000);
 }
 
@@ -536,7 +624,8 @@ async function openOnReceiver(
   confirmedMedia = null;
   try {
     const [opened, preferences] = await Promise.all([
-      call("output.openTitle", { title: now.title }),
+      // The play the viewer began, wherever it played until now.
+      call("output.openTitle", { title: now.title, since: openedAt }),
       call("preferences.get").catch((): Preferences | null => null),
     ]);
     if (mine !== generation || !receiver) return;
@@ -652,16 +741,14 @@ function follow(media: RemoteMedia): void {
         position: length ?? at,
         confirmed: null,
       });
-      // The main process saved how far it got. That its series is finished is said from here.
-      const { now, next: after } = store.getState();
-      if (after === null && now?.series && !seriesFinished) {
-        seriesFinished = true;
-        const series = now.series.title.versions.map(ownedId);
-        void call("viewing.finishSeries", { commandId: crypto.randomUUID(), series }).catch(
-          () => {},
-        );
-      }
-      void countDown(generation);
+      // The main process saves how far it got. That its series is finished is said from here,
+      // once the record was asked again what comes next and none does.
+      const { now } = store.getState();
+      const mine = { play, since: openedAt };
+      void countDown(generation).then(() => {
+        const after = store.getState();
+        if (now && after.now === now && after.next === null) void finishSeries(now, mine);
+      });
       break;
     }
   }
@@ -774,7 +861,6 @@ async function moveHere(): Promise<void> {
   // Nothing plays here unseen: a title the receiver let go of while the viewer browses closes.
   if (!shown && !asked) return titlePlayer.close();
   const mine = ++generation;
-  openedAt = Date.now();
   convertSound = false;
   store.setState({ phase: { kind: "opening" }, shows: null, confirmed: null });
   try {
@@ -876,19 +962,19 @@ export const titlePlayer = {
     player.makeWay();
     const mine = ++generation;
     openedAt = Date.now();
+    play++;
     convertSound = false;
     lastSubtitle = null;
-    seriesFinished = false;
     store.setState({
       ...idle,
       now,
       phase: { kind: "opening" },
       position: from,
       speed: sameSeries ? before.speed : 1,
-      next:
-        now.series && now.title.kind === "episode" ? nextEpisode(now.series, now.title) : undefined,
       continued,
     });
+    // Which episode comes next, the record says: none is offered until it has.
+    void refreshNext();
     if (outputs.remote()) return openOnReceiver(mine, now, from, null);
     try {
       // The languages chosen last, fresh: a choice in the title before counts.
@@ -1015,14 +1101,26 @@ export const titlePlayer = {
   },
 
   /**
-   * Plays the episode after the open one from its beginning, in the same version of the series,
-   * once this one has closed: for the countdown, Next, N and the system's next track. Does nothing
-   * for movies, after the last episode, and while the next episode is already starting.
+   * Plays the next episode the viewer hasn't watched from its beginning, in the same version of
+   * the series, once this one has closed: for the countdown, Next, N and the system's next track.
+   * Which one that is, the record is asked once more first, and only its latest answer opens
+   * one: when it doesn't answer, the countdown stops and the episode on offer stays for another
+   * try. Nothing opens once the viewer cancelled, skipped back or opened something else while it
+   * was asked. Does nothing for movies, with none left after this one, and while the next episode
+   * is already starting.
    */
   playNext(): void {
-    const { now, next, continued, phase } = store.getState();
-    if (!now?.series || !next || (continued && phase.kind !== "failed")) return;
-    void titlePlayer.open(episodeNow(now.series, next), 0, true);
+    const { now, continued, phase } = store.getState();
+    if (!now?.series || (continued && phase.kind !== "failed")) return;
+    const { series } = now;
+    const mine = ++nextRequest;
+    void refreshNext().then((known) => {
+      // Taken back meanwhile, or asked for again: the last press opens it, once.
+      if (mine !== nextRequest) return;
+      const { next } = store.getState();
+      if (!known || !next) return stopCountdown();
+      void titlePlayer.open(episodeNow(series, next), 0, true);
+    });
   },
 
   /** Stops the countdown to the next episode, leaving the end on screen. */
@@ -1039,6 +1137,8 @@ export const titlePlayer = {
     if (held === countdownHeld) return;
     countdownHeld = held;
     if (held) {
+      // One asked for that the record hasn't answered waits too: the countdown asks again.
+      nextRequest++;
       if (countdownTimer) clearInterval(countdownTimer);
       countdownTimer = null;
     } else if (store.getState().countdown !== null) {
@@ -1177,11 +1277,15 @@ export const titlePlayer = {
       readonly shows: readonly SubtitleFormat[];
       readonly audioId: number | null;
       readonly subtitleId: number | null;
+      /** When the receiver's play of it began, as the main process saves its progress. */
+      readonly since: number;
     },
     media: RemoteMedia,
   ): void {
     if (store.getState().now) return;
     generation++;
+    play++;
+    openedAt = playing.since;
     receiver = {
       sessionId: playing.sessionId,
       load: media.generation,
@@ -1197,9 +1301,8 @@ export const titlePlayer = {
       audioId: playing.audioId,
       subtitle: playing.subtitles.find((track) => track.id === playing.subtitleId) ?? null,
       shows: playing.shows,
-      next:
-        now.series && now.title.kind === "episode" ? nextEpisode(now.series, now.title) : undefined,
     });
+    void refreshNext();
     follow(media);
   },
 

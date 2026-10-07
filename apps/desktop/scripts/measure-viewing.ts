@@ -15,6 +15,7 @@ import {
   ViewingAccount,
   ViewingChannels,
   ViewingRecord,
+  ViewingSeries,
 } from "@mrstreamer/core/viewing/service";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -53,6 +54,12 @@ async function start() {
           }),
           Layer.succeed(ViewingChannels, { lookup: () => Effect.succeed(() => undefined) }),
           Layer.succeed(LegacyViewing, { take: Effect.succeed(null), drop: Effect.void }),
+          // Nothing measured here marks an episode.
+          Layer.succeed(ViewingSeries, {
+            identity: ({ id }) =>
+              Effect.succeed({ key: `id:${id}`, keys: [`id:${id}`], versions: [id] }),
+            seasons: () => Effect.succeed([]),
+          }),
           viewingStoreLayer.pipe(Layer.provide(databaseLayer(dataDir))),
         ),
       ),

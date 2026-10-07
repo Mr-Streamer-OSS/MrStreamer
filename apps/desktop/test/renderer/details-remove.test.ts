@@ -55,12 +55,14 @@ const halfway: TitleProgress = {
   duration: 6000,
   finished: false,
   at: 1,
+  since: 1,
 };
 
 const viewing = (sequence: number, continueWatching: readonly TitleProgress[]): Viewing => ({
   favourites: [],
   recent: [],
   continueWatching,
+  marked: [],
   sequence,
 });
 

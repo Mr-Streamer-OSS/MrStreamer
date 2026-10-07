@@ -232,14 +232,20 @@ async function pickVersion(page: Page, words: string): Promise<string[]> {
   return offered;
 }
 
-/** What the sheet of a series shows: its facts, and how many episodes of the season in view. */
+/**
+ * What the sheet of a series shows: its facts, and how many episodes of the season in view, by
+ * the buttons that play them, which start with the episode's number. The dots beside each are
+ * another button.
+ */
 const seriesSheet = (page: Page) =>
   page.evaluate<{ words: string; episodes: number }>(`(() => {
     const sheet = document.querySelector('[role="dialog"]');
     const [episodes] = [...(sheet?.querySelectorAll("section") ?? [])].slice(-1);
     return {
       words: sheet?.innerText ?? "",
-      episodes: episodes?.querySelectorAll("button:not([aria-pressed])").length ?? 0,
+      episodes: [...(episodes?.querySelectorAll("button") ?? [])].filter((row) =>
+        /^\\d+$/.test(row.firstElementChild?.textContent.trim() ?? ""),
+      ).length,
     };
   })()`);
 

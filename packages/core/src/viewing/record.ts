@@ -1,11 +1,12 @@
 // The viewing record's rules: which events a command produces, and what the events add up to.
 // Both are plain functions of their input. They never read the clock, fetch or make ids; the
 // service supplies time and ids, and the store keeps the events and the state they add up to.
-// How far movies and episodes got follows the rules in ./titles.ts, one row per title. A state is
+// How far movies and episodes got follows the rules in ./titles.ts, one row per title, and the
+// episodes marked by hand those in ./marks.ts and ./episodes.ts, one row per episode. A state is
 // one account's, by the provider's own ids: the service says which subscription's. Several
 // accounts' lists read as one name each entry's account beside its id.
 import type { RawTitleRef } from "@mrstreamer/contracts/ondemand";
-import { RECENT_LIMIT } from "@mrstreamer/contracts/viewing";
+import { RECENT_LIMIT, type EpisodeMark } from "@mrstreamer/contracts/viewing";
 
 /** The version events are written with. Readers skip events from a newer version. */
 export const EVENT_VERSION = 1;
@@ -38,10 +39,69 @@ export type ViewingEvent =
    * The series of `title`, its last episode, watched to the end of what the provider lists. It
    * leaves Continue watching as a removal does.
    */
-  | { readonly type: "series-finished"; readonly title: RawTitleRef };
+  | { readonly type: "series-finished"; readonly title: RawTitleRef }
+  /**
+   * The viewer marked an episode watched or unwatched by hand. It says nothing of how far a file
+   * played, and names no length: the episode's own progress stays as it is, under the mark.
+   * `series` is what the mark is kept under (`SeriesIdentity.key`) and `title` the episode in the
+   * version it was marked in. `versions` are the provider's ids of the versions of the series
+   * that subscription listed then, and `listing` the episodes that version listed: the events
+   * hold neither otherwise, and where a marked series goes on is worked out from them. Builds
+   * from before marks skip it.
+   */
+  | {
+      readonly type: "episode-marked";
+      readonly series: string;
+      readonly title: EpisodeTitle;
+      readonly watched: boolean;
+      readonly versions: readonly string[];
+      readonly listing: SeriesListing;
+    }
+  /**
+   * The mark of `series` that the event numbered `revision` made was taken back: its episode, and
+   * whether its series shows in Continue watching, are as before it.
+   */
+  | {
+      readonly type: "episode-mark-undone";
+      readonly series: string;
+      readonly title: EpisodeTitle;
+      readonly revision: number;
+    }
+  /**
+   * The version a marked series was last marked in lists other episodes than it did then, or its
+   * subscription other versions of it: where the series goes on is worked out from these from
+   * now on. Its marks are as they were.
+   */
+  | {
+      readonly type: "series-listed";
+      readonly series: string;
+      readonly versions: readonly string[];
+      readonly listing: SeriesListing;
+    };
+
+/** An episode by the provider's own ids. */
+export type EpisodeTitle = Extract<RawTitleRef, { readonly kind: "episode" }>;
+
+/**
+ * The episodes a series version lists, by their numbers: its seasons in the provider's order,
+ * specials (season 0) wherever they stand, each with its episodes' numbers in order.
+ */
+export type SeriesListing = readonly {
+  readonly number: number;
+  readonly episodes: readonly number[];
+}[];
 
 export type ChannelEvent = Extract<ViewingEvent, { readonly channelId: string }>;
-export type TitleEvent = Extract<ViewingEvent, { readonly title: RawTitleRef }>;
+export type MarkEvent = Extract<ViewingEvent, { readonly series: string }>;
+export type TitleEvent = Exclude<ViewingEvent, ChannelEvent | MarkEvent>;
+
+/** An episode's mark as an account's record keeps it: with the episode it was made on. */
+export interface StoredMark extends EpisodeMark {
+  /** What the series is kept under: see `SeriesIdentity.key`. */
+  readonly series: string;
+  /** The episode in the series version it was marked in. */
+  readonly title: EpisodeTitle;
+}
 
 export type ViewingCommand =
   | {
@@ -145,9 +205,14 @@ export function reordered(
   return [...as("favourite-removed"), ...as("favourite-added")];
 }
 
-/** Whether an event is about a movie or episode, rather than a channel. */
+/** Whether an event is about how far a movie or episode got, or its place in Continue watching. */
 export function isTitleEvent(event: ViewingEvent): event is TitleEvent {
-  return "title" in event;
+  return "title" in event && !isMarkEvent(event);
+}
+
+/** Whether an event is an episode's mark, one taken back, or what a marked series lists. */
+export function isMarkEvent(event: ViewingEvent): event is MarkEvent {
+  return "series" in event;
 }
 
 /**

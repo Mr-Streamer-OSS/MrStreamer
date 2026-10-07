@@ -10,7 +10,6 @@ import { ChevronRight, Play, Search } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 import { create } from "zustand";
 import {
-  seriesOf,
   type CollectionId,
   type CollectionRow,
   type CollectionSort,
@@ -353,8 +352,7 @@ function Rows({
   const posters = fit(POSTER_REM);
   const mine = continuing.entries.filter((entry) => entry.title.kind === kind);
   // Titles like the one watched last, by the version that was watched.
-  const last = mine[0]?.progress.title;
-  const like = !last ? null : last.kind === "movie" ? last : seriesOf(last);
+  const like = mine[0]?.version ?? null;
   const rows = useQuery(queries.rows(kind, tab, tab === "for-you" ? like : null));
   if (rows.error) {
     return <p className="px-10 text-sm text-destructive">{describeError(appError(rows.error))}</p>;

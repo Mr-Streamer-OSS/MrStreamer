@@ -117,7 +117,7 @@ interface Playing {
   readonly offset: number;
   /** Ends the wait for the receiver's first request. */
   readonly watch: AbortController;
-  /** A title: what its file holds, the tracks chosen, and when this play of it began. */
+  /** A title: what its file holds, the tracks chosen, and when the viewer began this play. */
   readonly title: OpenedTitle | null;
   readonly tracks: { readonly audio: number | null; readonly subtitle: number | null };
   media: RemoteMedia;
@@ -128,7 +128,10 @@ interface OpenedTitle {
   readonly info: RemoteTitle;
   /** Seconds between the start of the title and where a receiver's clock starts. */
   readonly offset: number;
-  /** When this play of it began, epoch ms: what its progress is saved with. */
+  /**
+   * When the viewer began this play of it, epoch ms: what its progress is saved with. A play
+   * that came from this computer, or from another receiver, keeps the time it began there.
+   */
   readonly since: number;
 }
 
@@ -182,12 +185,16 @@ export class Output extends Context.Service<
     ): Effect.Effect<RemoteMedia, Failed>;
     /**
      * Opens a movie or episode for the connected receiver from its provider file, in place of
-     * what was open here, and says what it holds. Nothing plays until `playTitle`. Asked under
-     * `asked`, as `Playback.openTitle` is: what gave way meanwhile leaves the receiver as it is.
+     * what was open here, and says what it holds. Nothing plays until `playTitle`. `since` is
+     * when the viewer began this play, epoch ms, which what the receiver gets to is saved with:
+     * the record counts a play that moved here as the play it was, so an episode marked by hand
+     * meanwhile keeps its mark. Asked under `asked`, as `Playback.openTitle` is: what gave way
+     * meanwhile leaves the receiver as it is.
      */
     openTitle(
       title: TitleRef,
       upstreamUrl: string,
+      since: number,
       asked?: Asked,
     ): Effect.Effect<RemoteTitle, Failed>;
     /** Plays an opened title on the receiver from `position` seconds with these tracks. */
@@ -831,7 +838,7 @@ function make(deps: OutputDeps) {
           }),
         ),
 
-      openTitle: (title: TitleRef, upstreamUrl: string, asked: Asked = {}) =>
+      openTitle: (title: TitleRef, upstreamUrl: string, since: number, asked: Asked = {}) =>
         one(
           Effect.gen(function* () {
             const connection = yield* receiver;
@@ -852,7 +859,7 @@ function make(deps: OutputDeps) {
               subtitles: session.subtitles,
               shows: ["text"],
             };
-            opened.set(session.sessionId, { info, offset: session.offset, since: Date.now() });
+            opened.set(session.sessionId, { info, offset: session.offset, since });
             return info;
           }),
         ),
@@ -954,7 +961,9 @@ function make(deps: OutputDeps) {
       remote: Effect.sync(() => output.kind === "receiver" || output.kind === "lost"),
 
       playingTitle: Effect.sync(() =>
-        playing?.title ? { title: playing.title.info, ...playing.tracks } : null,
+        playing?.title
+          ? { title: playing.title.info, since: playing.title.since, ...playing.tracks }
+          : null,
       ),
 
       // The receiver stays, and so does a list of receivers the viewer is at.

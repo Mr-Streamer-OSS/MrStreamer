@@ -179,7 +179,7 @@ describe("removing a subscription", () => {
     expect(ipc.argsOf("subscription.remove")).toEqual([]);
 
     await act(async () =>
-      saved.resolve({ favourites: [], recent: [], continueWatching: [], sequence: 1 }),
+      saved.resolve({ favourites: [], recent: [], continueWatching: [], marked: [], sequence: 1 }),
     );
 
     expect(ipc.argsOf("subscription.remove")).toEqual([

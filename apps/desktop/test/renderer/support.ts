@@ -1,7 +1,8 @@
 // Stands in for the main process in the renderer's tests, which run with happy-dom. Every call is
-// recorded; a call the test holds answers when the test says, the preferences otherwise answer
-// with the defaults and what the test says the viewer saved, a subscription's with nothing left
-// in it, and anything else never answers.
+// recorded; a call the test holds answers when the test says, and a method the test gave a
+// standing answer, or failure, answers with it each time. The preferences otherwise answer with the defaults
+// and what the test says the viewer saved, a subscription's with nothing left in it, how a
+// series' episodes stand with nothing played and nothing marked, and anything else never answers.
 // Like the main process, it refuses a call whose input the contract doesn't allow, so a view
 // can't pass here with a call that fails there. Tests send its events themselves. Import it
 // first, before the renderer's modules: it also stands in for Media Source Extensions and full
@@ -39,6 +40,7 @@ export const SAVED: SubscriptionSummary = {
 };
 
 const held = new Map<IpcMethod, Promise<Result<unknown>>[]>();
+const standing = new Map<IpcMethod, Result<unknown>>();
 const listeners = new Map<string, Set<(payload: unknown) => void>>();
 const calls: { readonly method: IpcMethod; readonly args: unknown }[] = [];
 let preferences = defaultPreferences;
@@ -59,6 +61,17 @@ export const ipc = {
       reject: (error: AppError) => settle({ ok: false, error }),
     };
   },
+  /**
+   * Answers every call to `method` that isn't held with `value` from now on, as the main process
+   * answers a read again and again: what a view reads once more after a change, it finds.
+   */
+  always<M extends IpcMethod>(method: M, value: IpcOutput<M>): void {
+    standing.set(method, { ok: true, value });
+  },
+  /** Fails every call to `method` that isn't held with `error`, until `always` gives it an answer. */
+  refuse(method: IpcMethod, error: AppError): void {
+    standing.set(method, { ok: false, error });
+  },
   /** Sends an event from the main process. */
   emit<E extends IpcEvent>(event: E, payload: IpcEvents[E]): void {
     for (const listener of listeners.get(event) ?? []) listener(payload);
@@ -71,6 +84,7 @@ export const ipc = {
   reset(): void {
     calls.length = 0;
     held.clear();
+    standing.clear();
     preferences = defaultPreferences;
   },
 };
@@ -88,6 +102,11 @@ const bridge = {
     calls.push({ method, args });
     const answer = held.get(method)?.shift();
     if (answer) return answer;
+    const always = standing.get(method);
+    if (always) return Promise.resolve(always);
+    if (method === "viewing.episodes") {
+      return Promise.resolve({ ok: true, value: { progress: [], marks: [], undoable: null } });
+    }
     if (method === "preferences.get") {
       return Promise.resolve({ ok: true, value: preferences });
     }

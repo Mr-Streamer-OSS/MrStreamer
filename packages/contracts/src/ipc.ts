@@ -46,7 +46,7 @@ import {
 import { Preferences, SubscriptionPreferences } from "./preferences.ts";
 import type { OwnedId, SubscriptionSummary } from "./subscription.ts";
 import type { UpdateStatus } from "./updates.ts";
-import type { TitleProgress, Viewing } from "./viewing.ts";
+import type { EpisodeMark, SeriesViewing, TitleProgress, Viewing } from "./viewing.ts";
 import { WATCHLIST_SORTS, type WatchlistPage } from "./watchlist.ts";
 
 // Every schema is built on its method's first call: defining them all would add to every start,
@@ -243,7 +243,12 @@ export const ipcInputs = {
       /** What the receiver may show about it: the channel's name. */
       name: "string",
     }),
-  "output.openTitle": () => type({ title: TitleRef }),
+  /**
+   * `since` is when the viewer began this play of the title, in epoch milliseconds, which its
+   * progress is saved with: a play that moves to a receiver, or on to another one, is still the
+   * play it was.
+   */
+  "output.openTitle": () => type({ title: TitleRef, since: "number" }),
   "output.playTitle": () =>
     type({
       sessionId: "string",
@@ -288,9 +293,32 @@ export const ipcInputs = {
     }),
   /** Every version played of these movies and series. */
   "viewing.removeFromContinue": () => type({ commandId: "string", titles: titleFilter() }),
-  /** Every version of the series. */
-  "viewing.finishSeries": () => type({ commandId: "string", series: owned().array() }),
+  /**
+   * Every version of the series. `since` is when the play that watched it to its end began, in
+   * epoch milliseconds: one begun before the series was last marked by hand changes nothing.
+   */
+  "viewing.finishSeries": () =>
+    type({ commandId: "string", series: owned().array(), since: "number" }),
   "viewing.progress": titleFilter,
+  /** A series by one of its versions: how its episodes stand in that version's subscription. */
+  "viewing.episodes": () => type({ series: owned() }),
+  /** Marks an episode watched or unwatched. Opens no stream, and leaves what plays as it is. */
+  "viewing.markEpisode": () =>
+    type({
+      commandId: "string",
+      episode: {
+        kind: "'episode'",
+        subscriptionId: "string > 0",
+        id: "string > 0",
+        seriesId: "string > 0",
+        season: "number.integer >= 0",
+        episode: "number.integer >= 0",
+      },
+      watched: "boolean",
+    }),
+  /** Takes back the mark `revision` names, of the series a version of which is named. */
+  "viewing.undoMark": () =>
+    type({ commandId: "string", series: owned(), revision: "number.integer > 0" }),
   /** A page of the watchlist every saved subscription's entries make together, in `sort`. */
   "watchlist.list": () =>
     type({
@@ -472,6 +500,23 @@ export interface IpcOutputs {
   "viewing.finishSeries": Viewing;
   /** How far the given movies, or every episode of a series, got. */
   "viewing.progress": readonly TitleProgress[];
+  /**
+   * How far the episodes of a series got in one subscription, across the versions it lists, and
+   * the episodes marked by hand there. The main process says which versions are the series'.
+   */
+  "viewing.episodes": SeriesViewing;
+  /**
+   * Answers once the mark is stored, with the mark as it stands, which Undo names by its
+   * revision. Null when it was taken back since, as for a command sent again after its Undo.
+   * A failure stores nothing, and the same call can be made again.
+   */
+  "viewing.markEpisode": EpisodeMark | null;
+  /**
+   * Puts the episode, and where the series goes on, back as they were before the mark. Fails
+   * with `mark-changed`, changing nothing, once the series was marked again, played or taken out
+   * of Continue watching since.
+   */
+  "viewing.undoMark": null;
   /** The saved titles, with what the lists have of each now. Empty without a subscription. */
   "watchlist.list": WatchlistPage;
   /** The entry the movie or series is saved as, whichever of its versions is named, or null. */
@@ -535,7 +580,7 @@ export interface IpcEvents {
   "ondemand.updated": OnDemandStatus;
   /** TMDB's details of a title version arrived after its details were given without them. */
   "ondemand.detailsChanged": OwnedId & { readonly kind: TitleKind };
-  /** Favourites or recently watched channels changed, up to `sequence`. */
+  /** Favourites, watched channels, progress or marks changed, up to `sequence`. */
   "viewing.changed": { readonly sequence: number };
   /** A title was saved to the watchlist or taken out of it. */
   "watchlist.changed": null;

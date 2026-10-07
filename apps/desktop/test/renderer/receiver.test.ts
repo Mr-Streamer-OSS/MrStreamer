@@ -347,6 +347,58 @@ describe("a movie with a receiver connected", () => {
     expect(titlePlayer.onReceiver()).toBe(false);
   });
 
+  it("stays the play the viewer began as it moves to the TV, on to another and back here", async () => {
+    await emit(HERE);
+    await show(TitleWatch);
+    const here = {
+      title: movieRef,
+      url: "http://127.0.0.1/title/here.mp4",
+      duration: 3600,
+      audio: [],
+      subtitles: [],
+    };
+    const began = Date.now();
+    const first = ipc.hold("playback.openTitle");
+    await act(async () => playTitle(movieNow(movie, null), 120));
+    await act(async () => first.resolve({ ...here, sessionId: "s1" }));
+
+    // A minute in, it moves to the TV: saved here first, then opened there.
+    await wait(60_000);
+    const opened = ipc.hold("output.openTitle");
+    const loaded = ipc.hold("output.playTitle");
+    await emit(connected());
+    await act(async () => opened.resolve(remoteTitle("r1", movieRef)));
+    await act(async () => loaded.resolve(said(1, movieItem, "loading", 120, 3600)));
+    await emit(connected(said(1, movieItem, "playing", 120, 3600)));
+
+    // Another TV takes it over a minute later.
+    await wait(60_000);
+    const other = ipc.hold("output.openTitle");
+    const there = ipc.hold("output.playTitle");
+    await emit(reaching(bedroom));
+    await emit(connected(null, null, bedroom));
+    await act(async () => other.resolve(remoteTitle("b1", movieRef)));
+    await act(async () => there.resolve(said(2, movieItem, "loading", 180, 3600)));
+    await emit(connected(said(2, movieItem, "playing", 180, 3600), null, bedroom));
+
+    // And back here another minute later, where a skip saves how far it got again.
+    await wait(60_000);
+    const back = ipc.hold("playback.openTitle");
+    await press("Play here");
+    await emit(HERE);
+    await act(async () => back.resolve({ ...here, sessionId: "s2" }));
+    await act(async () => titlePlayer.skip(30));
+
+    expect(Date.now() - began).toBe(180_000);
+    expect(ipc.argsOf("output.openTitle")).toEqual([
+      { title: movieRef, since: began },
+      { title: movieRef, since: began },
+    ]);
+    const saved = ipc.argsOf("viewing.recordProgress");
+    expect(saved.length).toBeGreaterThan(1);
+    expect(saved).toEqual(saved.map(() => expect.objectContaining({ since: began })));
+  });
+
   it("is held here, paused, when the receiver lets go by itself", async () => {
     await show(TitleWatch);
     await onReceiver(movieNow(movie, null), 120, 1);
@@ -369,6 +421,7 @@ describe("a movie with a receiver connected", () => {
 
   it("says the connection was lost, where it stopped, and loads there again once reached", async () => {
     await show(TitleWatch);
+    const began = Date.now();
     await onReceiver(movieNow(movie, null), 120, 1);
     await emit(connected(said(1, movieItem, "paused", 724, 3600)));
 
@@ -379,15 +432,20 @@ describe("a movie with a receiver connected", () => {
     titlePlayer.skip(10);
     expect(ipc.argsOf("output.playTitle")).toHaveLength(1);
 
+    await wait(60_000);
     const opened = ipc.hold("output.openTitle");
     await press("Try again");
     expect(ipc.argsOf("output.connect")).toEqual([{ receiverId: "tv" }]);
     await emit(reaching(tv));
     expect(text()).not.toContain("connection lost");
 
-    // It answers with nothing of the movie, which is opened and loaded for it again, still paused.
+    // It answers with nothing of the movie, which is opened and loaded for it again, still paused,
+    // as the play the viewer began a minute ago.
     await emit(connected());
-    expect(ipc.argsOf("output.openTitle")).toEqual([{ title: movieRef }, { title: movieRef }]);
+    expect(ipc.argsOf("output.openTitle")).toEqual([
+      { title: movieRef, since: began },
+      { title: movieRef, since: began },
+    ]);
     await act(async () => opened.resolve(remoteTitle("r2", movieRef)));
     expect(ipc.argsOf("output.playTitle").at(-1)).toMatchObject({
       sessionId: "r2",
@@ -411,6 +469,7 @@ describe("a movie with a receiver connected", () => {
           shows: ["text"],
           audioId: null,
           subtitleId: null,
+          since: 1,
         },
         said(1, movieItem, "playing", 724, 3600),
       ),
@@ -468,7 +527,10 @@ describe("a movie whose TV another takes the place of", () => {
     const loaded = ipc.hold("output.playTitle");
     await emit(connected(null, null, bedroom));
     expect(text()).toContain("Loading on Bedroom TV");
-    expect(ipc.argsOf("output.openTitle")).toEqual([{ title: movieRef }, { title: movieRef }]);
+    expect(ipc.argsOf("output.openTitle")).toMatchObject([
+      { title: movieRef },
+      { title: movieRef },
+    ]);
 
     // The first TV's answer and its last word arrive late, and say nothing of this load.
     await act(async () => underWay.resolve(said(2, item, "loading", 724, 3600)));
@@ -570,6 +632,76 @@ describe("an episode on a receiver", () => {
       title: { kind: "episode", subscriptionId: SUBSCRIPTION, id: "e2", season: 1, episode: 2 },
     });
     expect(ipc.methods()).not.toContain("playback.openTitle");
+  });
+
+  it("says the series is finished with when the viewer began the play, once the rest is watched", async () => {
+    // The only later episode marked watched by hand.
+    ipc.always("viewing.episodes", {
+      progress: [],
+      marks: [{ season: 1, episode: 2, watched: true, at: 5, revision: 5 }],
+      undoable: 5,
+    });
+    await show(TitleWatch);
+    // The receiver answers a minute after the viewer asked for the title.
+    const item: RemoteItem = { kind: "title", title: episodeNow(series, firstLight).title };
+    const opened = ipc.hold("output.openTitle");
+    const loaded = ipc.hold("output.playTitle");
+    const began = Date.now();
+    await act(async () => playTitle(episodeNow(series, firstLight), 0));
+    await wait(60_000);
+    await act(async () => opened.resolve(remoteTitle("r1", item.title)));
+    await act(async () => loaded.resolve(said(1, item, "loading", 0, 3600)));
+
+    await emit(connected(said(1, item, "ended", 3600, 3600)));
+    await wait(0);
+
+    expect(text()).toContain("The rest is watched");
+    expect(text()).not.toContain("Plays in");
+    expect(ipc.argsOf("output.openTitle")).toEqual([{ title: item.title, since: began }]);
+    expect(ipc.argsOf("viewing.finishSeries")).toMatchObject([{ since: began }]);
+  });
+
+  it("keeps the series in Continue watching when the last episode ends there with an earlier one unwatched", async () => {
+    await show(TitleWatch);
+    const item = await onReceiver(episodeNow(series, lowSun), 0, 1);
+
+    await emit(connected(said(1, item, "ended", 3600, 3600)));
+    await wait(15_000);
+
+    expect(text()).toContain("That was the last episode");
+    expect(ipc.methods()).not.toContain("viewing.finishSeries");
+  });
+
+  it("says the series is finished for a play taken up from the receiver, with when that play began", async () => {
+    ipc.always("viewing.episodes", {
+      progress: [],
+      marks: [{ season: 1, episode: 1, watched: true, at: 5, revision: 5 }],
+      undoable: null,
+    });
+    await emit(HERE);
+    const now = episodeNow(series, lowSun);
+    const item: RemoteItem = { kind: "title", title: now.title };
+    await act(async () =>
+      titlePlayer.adopt(
+        now,
+        {
+          sessionId: "r1",
+          duration: 3600,
+          audio: [],
+          subtitles: [],
+          shows: ["text"],
+          audioId: null,
+          subtitleId: null,
+          since: 4000,
+        },
+        said(1, item, "playing", 3000, 3600),
+      ),
+    );
+
+    await emit(connected(said(1, item, "ended", 3600, 3600)));
+    await wait(0);
+
+    expect(ipc.argsOf("viewing.finishSeries")).toMatchObject([{ since: 4000 }]);
   });
 
   it("starts no next one when it was stopped on the receiver", async () => {

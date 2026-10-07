@@ -12,9 +12,14 @@ import {
 import { seriesOf, type Title } from "@mrstreamer/contracts/ondemand";
 import type { SubscriptionPreferences } from "@mrstreamer/contracts/preferences";
 import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
-import { CONTINUE_LIMIT, type TitleProgress } from "@mrstreamer/contracts/viewing";
-import { nextEpisode } from "@mrstreamer/core/ondemand/details";
+import {
+  CONTINUE_LIMIT,
+  type MarkedSeries,
+  type TitleProgress,
+} from "@mrstreamer/contracts/viewing";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
+import { continuation } from "@mrstreamer/core/viewing/episodes";
+import { seriesIdentity } from "@mrstreamer/core/viewing/marks";
 import { openDetails, useUi } from "../app/ui-store.ts";
 import { episodeNow, titlePlayer, type NowPlaying } from "../player/title-player.ts";
 import { call } from "./ipc.ts";
@@ -30,7 +35,9 @@ export function runtime(seconds: number): string {
 }
 
 /** "38 min left", or null when there's nothing to say. */
-export function timeLeftOf(progress: TitleProgress | undefined): string | null {
+export function timeLeftOf(
+  progress: Pick<TitleProgress, "position" | "duration" | "finished"> | undefined,
+): string | null {
   if (!progress || progress.finished) return null;
   return `${runtime(progress.duration - progress.position)} left`;
 }
@@ -165,15 +172,26 @@ export function useRemoveFromContinue() {
   });
 }
 
-/** Whether Continue watching holds a version of `title`, which Remove would take out. */
+/**
+ * Whether Continue watching holds a version of `title`, which Remove would take out: one played,
+ * or a series an episode of which was marked, while its marks hold for the series the lists show.
+ */
 export function useInContinueWatching(title: Title): boolean {
   const viewing = useQuery(queries.viewing());
   const versions = new Set(title.versions.map(ownedKey));
-  return (viewing.data?.continueWatching ?? []).some(({ title: played }) =>
+  const played = (viewing.data?.continueWatching ?? []).some(({ title: played }) =>
     played.kind === "movie"
       ? title.kind === "movie" && versions.has(ownedKey(played))
       : title.kind === "series" && versions.has(ownedKey(seriesOf(played))),
   );
+  const marked = (viewing.data?.marked ?? []).some(
+    ({ series, kept, next }) =>
+      title.kind === "series" &&
+      next !== null &&
+      versions.has(ownedKey(series)) &&
+      seriesIdentity(series, title).keys.includes(kept),
+  );
+  return played || marked;
 }
 
 /** One Continue watching entry, ready to show and play. */
@@ -181,11 +199,16 @@ export interface ContinueEntry {
   readonly key: string;
   /** The movie, or the series. */
   readonly title: Title;
-  /** What the viewer played last. */
-  readonly progress: TitleProgress;
-  /** "38 min left", "S2 E3 · 12 min left", "Next episode". */
+  /** The version that goes on: the movie played, or the series version played or marked in last. */
+  readonly version: OwnedId;
+  /**
+   * How far a movie got. Null for a series, which goes on by its episodes once its details are
+   * read (`continuation`).
+   */
+  readonly progress: TitleProgress | null;
+  /** "38 min left", "S2 E3 · 12 min left", "Next episode", "S2 E5". */
   readonly line: string;
-  /** How far, from 0 to 1; null for a next episode not started. */
+  /** How far, from 0 to 1; null for an episode that plays from its beginning. */
   readonly done: number | null;
   readonly artworkUrl: string | null;
 }
@@ -194,6 +217,14 @@ export interface ContinueEntry {
  * Continue watching from the viewing record, at most `limit`, with what each tile shows. The
  * titles come from the lists, so showing the row asks the provider nothing; titles the provider
  * no longer lists, and titles for adults, are left out. A finished episode offers the next one.
+ *
+ * A series an episode of which the viewer marked goes on where the record says it does, in the
+ * subscription it was marked in: worked out there from how its episodes stand, so the tile needs
+ * no details. A play of the series there begun after the mark takes over from it. One begun
+ * before it doesn't, however late it saves how far it got, though what it watches moves the
+ * series on: so a series with no numbered episode left to watch stays out while a play from
+ * before the mark goes on. Marks the record keeps under what the lists no longer take the series
+ * for are left out.
  */
 export function useContinueWatching(limit = CONTINUE_LIMIT): {
   readonly entries: readonly ContinueEntry[];
@@ -203,13 +234,16 @@ export function useContinueWatching(limit = CONTINUE_LIMIT): {
   const viewing = useQuery(queries.viewing());
   // All the record offers: the limit applies to what is left to show.
   const items = viewing.data?.continueWatching ?? [];
+  const marks = viewing.data?.marked ?? [];
   /** The version each entry played: the movie, or the episode's series. */
   const played = ({ title }: TitleProgress): OwnedId =>
     title.kind === "movie" ? ownedId(title) : seriesOf(title);
   const versions = (kind: "movie" | "episode") =>
     items.flatMap((item) => (item.title.kind === kind ? [played(item)] : []));
   const movies = useQuery(queries.titles("movie", versions("movie")));
-  const series = useQuery(queries.titles("series", versions("episode")));
+  const series = useQuery(
+    queries.titles("series", [...versions("episode"), ...marks.map((mark) => mark.series)]),
+  );
   const byVersion = new Map(
     [...(movies.data ?? []), ...(series.data ?? [])].flatMap((title) =>
       title.versions.map((version) => [`${title.kind}:${ownedKey(version)}`, title] as const),
@@ -219,44 +253,83 @@ export function useContinueWatching(limit = CONTINUE_LIMIT): {
     viewing.isPending ||
     (movies.isPending && movies.fetchStatus !== "idle") ||
     (series.isPending && series.fetchStatus !== "idle");
-  const shown = items.flatMap((progress): ContinueEntry[] => {
+  /** A series' latest mark in each subscription, by the series and that subscription. */
+  const marked = new Map<string, { readonly title: Title; readonly mark: MarkedSeries }>();
+  for (const mark of marks) {
+    const title = byVersion.get(`series:${ownedKey(mark.series)}`);
+    if (!title || title.adult) continue;
+    // Marks kept under what the lists no longer take the series for say nothing of it now.
+    if (!seriesIdentity(mark.series, title).keys.includes(mark.kept)) continue;
+    const key = `${title.key}|${mark.series.subscriptionId}`;
+    if ((marked.get(key)?.mark.at ?? -Infinity) < mark.at) marked.set(key, { title, mark });
+  }
+  /** Marks a play of their series, in their subscription, began after. */
+  const replaced = new Set<string>();
+  const shown = items.flatMap((progress): (ContinueEntry & { readonly at: number })[] => {
     const ref = progress.title;
+    const version = played(progress);
     const title = byVersion.get(
-      `${ref.kind === "movie" ? "movie" : "series"}:${ownedKey(played(progress))}`,
+      `${ref.kind === "movie" ? "movie" : "series"}:${ownedKey(version)}`,
     );
     if (!title || title.adult) return [];
     // One entry per film or series, whichever of its versions was played, of whichever
     // subscription: the one played last stands for the rest, and is the one that resumes.
     const { key } = title;
     const artworkUrl = title.backdropUrl ?? title.posterUrl;
+    const { at } = progress;
     if (ref.kind === "movie") {
       return [
         {
           key,
           title,
+          version,
           progress,
           line: timeLeftOf(progress) ?? "",
           done: progress.position / progress.duration,
           artworkUrl,
+          at,
         },
       ];
+    }
+    const own = `${key}|${ref.subscriptionId}`;
+    const mark = marked.get(own)?.mark;
+    if (mark) {
+      if (progress.since <= mark.at) return [];
+      replaced.add(own);
     }
     return [
       {
         key,
         title,
-        progress,
+        version,
+        progress: null,
         line: progress.finished
           ? "Next episode"
           : `${episodeLabel(ref.season, ref.episode)} · ${timeLeftOf(progress) ?? ""}`,
         done: progress.finished ? null : progress.position / progress.duration,
         artworkUrl,
+        at,
       },
     ];
   });
-  // Most recent first, so the version played last stands for the rest.
+  for (const [own, { title, mark }] of marked) {
+    const { next } = mark;
+    if (!next || replaced.has(own)) continue;
+    const left = next.resume && timeLeftOf({ ...next.resume, finished: false });
+    shown.push({
+      key: title.key,
+      title,
+      version: mark.series,
+      progress: null,
+      line: [episodeLabel(next.season, next.episode), left].filter(Boolean).join(" · "),
+      done: next.resume ? next.resume.position / next.resume.duration : null,
+      artworkUrl: title.backdropUrl ?? title.posterUrl,
+      at: mark.at,
+    });
+  }
+  // Most recent first, so the version played or marked last stands for the rest.
   const entries = new Map<string, ContinueEntry>();
-  for (const entry of shown) {
+  for (const { at: _at, ...entry } of shown.toSorted((a, b) => b.at - a.at)) {
     if (!entries.has(entry.key)) entries.set(entry.key, entry);
   }
   return { entries: [...entries.values()].slice(0, limit), loading, error: viewing.error };
@@ -284,43 +357,42 @@ function stillThere(from: ReturnType<typeof useUi.getState>): boolean {
 }
 
 /**
- * Plays a Continue watching entry: a movie at once, where it stopped; an episode, or the one after
- * a finished one, once the series' details arrive, since only they list the episodes. A series
- * with nothing after the finished episode opens its details instead. Both resume in the
- * subscription the entry was played in: a version picked since plays instead when it is that
- * subscription's too, and never another's, whose file and episodes are its own. A series that
- * answers after the viewer moved on, or after the account changed, does nothing.
+ * Plays a Continue watching entry: a movie at once, where it stopped; a series once its details
+ * and how its episodes stand arrive, since only they say where it goes on, by the rules its
+ * details go by (`continuation`). A series with nothing left to go on with opens its details
+ * instead. Both resume in the subscription the entry was played or marked in: a version picked
+ * since plays instead when it is that subscription's too, and never another's, whose file and
+ * episodes are its own. A series that answers after the viewer moved on, or after the account
+ * changed, does nothing.
  */
 export function useResume(): (entry: ContinueEntry) => void {
   const client = useQueryClient();
-  return ({ title, progress }) => {
-    const ref = progress.title;
+  return ({ title, version, progress }) => {
     // A version picked since in the same subscription plays instead, from the same point.
     const pick = pickedVersion(title, heldPicks(client, title));
-    const picked = pick?.subscriptionId === ref.subscriptionId ? pick : null;
-    if (ref.kind === "movie") {
-      const version = picked ?? ownedId(ref);
-      playTitle(movieNow({ ...title, ...version }, title.backdropUrl), resumePoint(progress));
+    const picked = pick?.subscriptionId === version.subscriptionId ? pick : null;
+    if (progress) {
+      playTitle(
+        movieNow({ ...title, ...(picked ?? version) }, title.backdropUrl),
+        resumePoint(progress),
+      );
       return;
     }
-    const series = picked ?? seriesOf(ref);
+    const series = picked ?? version;
     const mine = ++resuming;
     const from = useUi.getState();
     const wanted = () => mine === resuming && stillThere(from);
     const open = () => openDetails({ kind: "series", ...series });
-    void client.fetchQuery(queries.details("series", series)).then(
-      (found) => {
+    void Promise.all([
+      client.fetchQuery(queries.details("series", series)),
+      client.fetchQuery(queries.episodes(series)),
+    ]).then(
+      ([found, standing]) => {
         if (!wanted()) return;
-        if (found.kind !== "series") return open();
-        const episodes = found.seasons.flatMap((season) => season.episodes);
-        const current =
-          episodes.find((episode) => sameOwned(episode, ref)) ??
-          episodes.find(
-            (episode) => episode.season === ref.season && episode.number === ref.episode,
-          );
-        const next = progress.finished ? nextEpisode(found, ref) : current;
-        if (!next) return open();
-        playTitle(episodeNow(found, next), progress.finished ? 0 : resumePoint(progress));
+        const goesOn =
+          found.kind === "series" ? continuation(found, standing.progress, standing.marks) : null;
+        if (found.kind !== "series" || !goesOn || goesOn.replay) return open();
+        playTitle(episodeNow(found, goesOn.episode), resumePoint(goesOn.resume));
       },
       (error: unknown) => {
         // Cancelled when the account changed, or the details failed: open them only if still wanted.

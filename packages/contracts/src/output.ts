@@ -117,6 +117,11 @@ export interface RemoteTitle {
 /** The title a receiver plays: what its file holds, and the tracks it plays with. */
 export interface RemotePlayingTitle {
   readonly title: RemoteTitle;
+  /**
+   * When the viewer began this play of it: epoch milliseconds, as its progress is saved with,
+   * here or on this computer before it moved to the receiver.
+   */
+  readonly since: number;
   readonly audio: number | null;
   readonly subtitle: number | null;
 }

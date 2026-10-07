@@ -284,6 +284,16 @@ export const queries = {
       staleTime: Infinity,
     }),
   /**
+   * How the episodes of a series stand in the subscription of the version named: how far they
+   * got across its versions there, and the ones marked by hand. Kept current by `syncViewing`.
+   */
+  episodes: (series: OwnedId) =>
+    queryOptions({
+      queryKey: ["viewing", "episodes", ownedKey(series)],
+      queryFn: () => call("viewing.episodes", { series: ownedId(series) }),
+      staleTime: Infinity,
+    }),
+  /**
    * A page of the watchlist: saved titles with what the lists have of each now. Kept current by
    * `syncWatchlist`.
    */
@@ -550,6 +560,8 @@ export function syncOnDemand(client: QueryClient): () => void {
     // So do the names and languages details show. Open details keep what they show; opened
     // again, they are put together anew from what the main process kept, with nothing downloaded.
     void client.invalidateQueries({ queryKey: ["ondemand", "details"], refetchType: "none" });
+    // And which versions and marks are a series' own: the lists say what a series is.
+    void client.invalidateQueries({ queryKey: ["viewing", "episodes"] });
   });
   return () => {
     stopDetails();

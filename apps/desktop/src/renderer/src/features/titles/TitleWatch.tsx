@@ -17,6 +17,7 @@ import { Maximize, Minimize, Pause, Play, RotateCcw, RotateCw, SkipForward } fro
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { SeriesDetails } from "@mrstreamer/contracts/ondemand";
 import { ownedId, sameOwned } from "@mrstreamer/contracts/subscription";
+import { nextEpisode } from "@mrstreamer/core/ondemand/details";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import { miniPlayer, useMiniPlayer } from "../../app/mini-player.ts";
 import { hasModifier, isTyping } from "../../app/platform.ts";
@@ -728,12 +729,14 @@ function NextUp({ series }: { series: SeriesDetails }) {
   }
   const finished = `Finished ${episodeLabel(now.title.season, now.title.episode)}`;
   if (!next) {
+    // None left to watch after it: the series' last episode, or the later ones are watched.
+    const last = nextEpisode(series, now.title) === null;
     return (
       <EndOfEpisode
         artworkUrl={now.artworkUrl}
         line={finished}
-        title="That was the last episode"
-        detail={`${now.name} is finished for now.`}
+        title={last ? "That was the last episode" : "The rest is watched"}
+        detail={last ? `${now.name} is finished for now.` : "Every later episode is watched."}
       >
         <Button variant="secondary" size="lg" onClick={() => toEpisodes(series)}>
           Episodes

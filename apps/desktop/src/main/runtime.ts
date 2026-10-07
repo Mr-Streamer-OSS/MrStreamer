@@ -4,11 +4,13 @@
 // data folder, and disposing waits for the lines still being written.
 import { failedWith } from "@mrstreamer/core/failure";
 import { Guide, GuideAddresses, GuideCatalogue, GuideSource } from "@mrstreamer/core/guide/service";
+import { seriesIdentity } from "@mrstreamer/core/viewing/marks";
 import {
   LegacyViewing,
   ViewingAccount,
   ViewingChannels,
   ViewingRecord,
+  ViewingSeries,
 } from "@mrstreamer/core/viewing/service";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -167,6 +169,21 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
           Effect.map(Settings, (settings) => ({
             take: settings.legacyLists,
             drop: settings.dropLegacyLists,
+          })),
+        ),
+        // What a series is comes from the lists, and its episodes from its details, which the
+        // sheet a mark is made in has just read: both are kept, so neither asks the provider.
+        Layer.effect(
+          ViewingSeries,
+          Effect.map(OnDemand, (onDemand) => ({
+            identity: (series) =>
+              Effect.map(onDemand.titles("series", [series]), ([title]) =>
+                seriesIdentity(series, title),
+              ),
+            seasons: (series) =>
+              Effect.map(onDemand.details("series", series), (details) =>
+                details.kind === "series" ? details.seasons : [],
+              ),
           })),
         ),
         stores,

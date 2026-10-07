@@ -1,9 +1,10 @@
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { Codec } from "@mrstreamer/contracts/playback";
 import { Failed } from "@mrstreamer/core/failure";
-import { ViewingRecord } from "@mrstreamer/core/viewing/service";
+import { ViewingRecord, type EpisodeRef } from "@mrstreamer/core/viewing/service";
 import { airplayAdapter } from "../src/main/receivers/airplay/adapter.ts";
 import type { ScreenRect } from "../src/main/receivers/adapter.ts";
 import { castAdapter } from "../src/main/receivers/cast/adapter.ts";
@@ -101,6 +102,15 @@ async function casting(options: { fetchMs?: number; checkpointMs?: number } = {}
   const movie = provider.titles.movies.find((each) => each.name.startsWith(MOVIE))!;
   const title: TitleRef = { kind: "movie", ...own(String(movie.id)) };
   const file = source!.provider.titleFile("movie", title.id, movie.container);
+  /** The second episode of the series the provider lists first, an MP4, and where its file is. */
+  const episode: EpisodeRef = {
+    kind: "episode",
+    ...own("81001"),
+    seriesId: "80000",
+    season: 1,
+    episode: 2,
+  };
+  const episodeFile = source!.provider.titleFile("episode", episode.id, "mp4");
   /** A channel that streams without end. */
   const channel = own(
     String(provider.catalogue.channels.find((each) => !each.offline && !each.fixture)!.streamId),
@@ -111,9 +121,18 @@ async function casting(options: { fetchMs?: number; checkpointMs?: number } = {}
     await eventually(async () => expect((await output.status()).receivers).toHaveLength(1));
     return output.connect(tv.receiver.id);
   };
-  /** Opens the movie for the receiver and plays it from `position` seconds. */
-  const play = async (position = 0) => {
-    const opened = await output.openTitle(title, file);
+  /**
+   * Opens the movie, or the episode, for the receiver and plays it from `position` seconds, as
+   * the play the viewer began at `since`: now, unless it began on this computer before.
+   */
+  const play = async (
+    position = 0,
+    what: "movie" | "episode" = "movie",
+    since: number = Date.now(),
+  ) => {
+    const opened = await (what === "movie"
+      ? output.openTitle(title, file, since)
+      : output.openTitle(episode, episodeFile, since));
     const media = await output.playTitle(opened.sessionId, {
       position,
       audio: null,
@@ -154,8 +173,10 @@ async function casting(options: { fetchMs?: number; checkpointMs?: number } = {}
     subscriptions,
     playback,
     output,
+    viewing,
     changes,
     title,
+    episode,
     file,
     channel,
     connect,
@@ -400,6 +421,46 @@ describe.skipIf(!hasTools)("playback on a receiver", () => {
     await output.command(media.generation, { command: "seek", position: 140 });
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(await saved(next.id)).toBeNull();
+  });
+
+  it("saves a play moved to the TV as the play it was, so an episode's mark outlasts the move and gives way to one begun there", async () => {
+    const { tv, output, viewing, connect, play, state, episode } = await casting();
+    const series = { subscriptionId: episode.subscriptionId, id: episode.seriesId };
+    await connect();
+    // It began on this computer a minute ago, saved how far it got, and was marked unwatched.
+    const began = Date.now() - 60_000;
+    await viewing.recordProgress(randomUUID(), episode, 3, 12, began);
+    const marked = await viewing.markEpisode(randomUUID(), episode, false);
+    const stands = await viewing.episodes(series);
+    const { sequence } = await viewing.state();
+
+    // Moved to the TV, it plays on, pauses and has the main process save how far it got.
+    await play(3, "episode", began);
+    expect(await output.playingTitle()).toMatchObject({ since: began });
+    tv.status({ playerState: "PLAYING", currentTime: 4 });
+    await eventually(async () => expect(await state()).toMatchObject({ media: { position: 4 } }));
+    tv.status({ playerState: "PAUSED", currentTime: 8 });
+    await eventually(async () =>
+      expect((await viewing.state()).sequence).toBeGreaterThan(sequence),
+    );
+
+    // What it saved is the play from before the mark: the mark stands and can be taken back.
+    expect(await viewing.episodes(series)).toEqual(stands);
+    expect(stands).toMatchObject({ marks: [marked], undoable: marked?.revision });
+
+    // Started again on the TV, a play of its own takes over from the mark.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const again = Date.now();
+    await play(0, "episode", again);
+    tv.status({ playerState: "PLAYING", currentTime: 2 });
+    await eventually(async () => expect(await state()).toMatchObject({ media: { position: 2 } }));
+    tv.status({ playerState: "PAUSED", currentTime: 6 });
+    await eventually(async () =>
+      expect((await viewing.episodes(series)).progress).toMatchObject([{ since: again }]),
+    );
+    const { progress, undoable } = await viewing.episodes(series);
+    expect(progress[0]?.position).toBeCloseTo(6, 0);
+    expect(undoable).toBeNull();
   });
 
   it("never files a receiver's progress under a subscription saved after the other went", async () => {
