@@ -163,5 +163,5 @@ function nameComma(text: string): number {
 function headerValue(value: string | undefined): string | null {
   const trimmed = value?.trim();
   // oxlint-disable-next-line no-control-regex
-  return trimmed && !/[\u0000-\u001f\u007f]/.test(trimmed) ? trimmed : null;
+  return trimmed && !/[\u0000-\u001f\u007f\u0100-\uffff]/.test(trimmed) ? trimmed : null;
 }

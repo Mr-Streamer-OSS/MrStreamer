@@ -1,4 +1,5 @@
 import { ChevronLeft, Search, Settings } from "lucide-react";
+import { hasTitles } from "@mrstreamer/contracts/subscription";
 import { isMac, useWindowFullScreen } from "../app/platform.ts";
 import { closeWatch, isLivePage, openView, useUi, type View } from "../app/ui-store.ts";
 import { UpdateNotice } from "../features/updates/UpdateNotice.tsx";
@@ -28,7 +29,7 @@ const VIEWS: readonly { readonly view: View; readonly label: string }[] = [
 export function WindowBar({ className, onBack }: { className?: string; onBack?: () => void }) {
   const view = useUi((state) => state.view);
   // An unmapped playlist has live TV only; explicit mapping enables the title pages.
-  const liveOnly = useSubscriptions().every((each) => each.kind === "m3u" && !each.playlistMapped);
+  const liveOnly = !useSubscriptions().some(hasTitles);
   const watching = useUi((state) => state.watching);
   const settingsOpen = useUi((state) => state.settings !== null);
   const detailsOpen = useUi((state) => state.details !== null || state.savedEntry !== null);

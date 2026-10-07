@@ -5,6 +5,7 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 import type { PlaylistGroupPage } from "@mrstreamer/contracts/playlist";
+import { syncLibraryUpdates, syncOnDemand } from "../../src/renderer/src/lib/queries.ts";
 import {
   PlaylistMap,
   PlaylistRows,
@@ -65,6 +66,38 @@ async function render(element: ReturnType<typeof createElement>) {
 }
 
 describe("playlist mapping in Settings", () => {
+  it("keeps the import snapshot through metadata arrivals and reads it again after a Live refresh", async () => {
+    ipc.always("playlist.groups", groups);
+    const app = await render(createElement(PlaylistMap, { subscription, onClose: () => {} }));
+    const stopTitles = syncOnDemand(app.client);
+    const stopLive = syncLibraryUpdates(app.client);
+    try {
+      expect(ipc.argsOf("playlist.groups")).toHaveLength(1);
+      await act(async () => {
+        for (const known of [1, 2, 3])
+          ipc.emit("ondemand.updated", {
+            lists: [],
+            metadata: { known, wanted: 3, refused: false, fetching: true },
+          });
+      });
+      await app.settle();
+      expect(ipc.argsOf("playlist.groups")).toHaveLength(1);
+      await act(async () =>
+        ipc.emit("library.updated", {
+          subscriptionId: subscription.id,
+          channelCount: 1,
+          fetchedAt: 1,
+          failure: null,
+          failedAt: null,
+        }),
+      );
+      await app.settle();
+      expect(ipc.argsOf("playlist.groups")).toHaveLength(2);
+    } finally {
+      stopTitles();
+      stopLive();
+    }
+  });
   it("shows a group's mapping and samples, saves each pick immediately and updates the saved subscription", async () => {
     ipc.always("playlist.groups", groups);
     const app = await render(createElement(PlaylistMap, { subscription, onClose: () => {} }));

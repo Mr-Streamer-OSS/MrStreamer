@@ -30,7 +30,7 @@ export function movieDetails(
 
 /**
  * A series version's details for a viewer of `language`. One row per episode: where the provider
- * lists several exact files of one episode, every file stays selectable. Xtream chooses its
+ * lists several exact files of one episode, mapped playlists keep every file selectable. Xtream chooses its
  * preferred file and numeric order; mapped playlists keep the first file and source order.
  */
 export function seriesDetails(
@@ -66,7 +66,7 @@ export function seriesDetails(
       stillUrl: episode.stillUrl,
       airDate: episode.airDate,
       ...(sourceOrder ? { exactVersion: true as const } : {}),
-      ...(versions.length > 1
+      ...(sourceOrder && versions.length > 1
         ? {
             versions: versions.map((file) => ({
               id: file.id,

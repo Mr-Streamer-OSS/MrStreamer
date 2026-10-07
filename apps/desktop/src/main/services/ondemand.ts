@@ -28,7 +28,7 @@ import type {
   TitleMatches,
   TitleRef,
 } from "@mrstreamer/contracts/ondemand";
-import type { OwnedId } from "@mrstreamer/contracts/subscription";
+import { hasTitles, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type { WatchlistPage } from "@mrstreamer/contracts/watchlist";
 import { diagnosed } from "@mrstreamer/core/diagnostics";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
@@ -313,9 +313,7 @@ function make(deps: OnDemandDeps) {
     });
 
     /** The saved subscriptions with movies and series, in their order: Xtream and explicitly mapped playlists. */
-    const listed = Effect.map(subscriptions.saved, (saved) =>
-      saved.filter((each) => each.kind === "xtream" || each.playlistMapped),
-    );
+    const listed = Effect.map(subscriptions.saved, (saved) => saved.filter(hasTitles));
 
     /**
      * Each of those with what the worker holds of its lists, telling the worker whether the
@@ -616,7 +614,7 @@ function make(deps: OnDemandDeps) {
         Effect.gen(function* () {
           const source = playlist?.source ?? (yield* subscriptions.sourceOf(subscriptionId));
           // Unmapped playlists retain Live-only behavior.
-          if (source.kind === "xtream" || source.playlistMapped) yield* refreshOf(source, playlist);
+          if (hasTitles(source)) yield* refreshOf(source, playlist);
           return yield* status;
         }),
 

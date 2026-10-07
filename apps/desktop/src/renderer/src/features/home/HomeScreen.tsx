@@ -9,7 +9,13 @@ import { useMemo, type ReactNode } from "react";
 import type { Listing } from "@mrstreamer/contracts/guide";
 import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
 import type { Title, TitleKind } from "@mrstreamer/contracts/ondemand";
-import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
+import {
+  hasTitles,
+  ownedId,
+  ownedKey,
+  sameOwned,
+  type OwnedId,
+} from "@mrstreamer/contracts/subscription";
 import { openDetails, openView, useUi, type ChannelList } from "../../app/ui-store.ts";
 import { CatalogueNotice, catalogueState } from "../../components/CatalogueNotice.tsx";
 import { ChannelLogo, hueOf } from "../../components/ChannelLogo.tsx";
@@ -71,7 +77,7 @@ export function HomeScreen({ active }: { active: boolean }) {
   const mappedOnly =
     subscriptions.length > 0 &&
     subscriptions.every((each) => each.kind === "m3u") &&
-    subscriptions.some((each) => each.playlistMapped);
+    subscriptions.some(hasTitles);
   const titleCollection = mappedOnly ? "all" : "new-month";
   const left = useSubscriptionPreferences();
   const categories = useQuery(queries.categories());
@@ -110,7 +116,7 @@ export function HomeScreen({ active }: { active: boolean }) {
   const newMovies = useHomeTitles("movie", posters, titleCollection);
   const newSeries = useHomeTitles("series", posters, titleCollection);
   // The Watchlist's own first page, so the row and the page read it once.
-  const onDemand = subscriptions.some((each) => each.kind === "xtream" || each.playlistMapped);
+  const onDemand = subscriptions.some(hasTitles);
   const saved = useQuery({ ...queries.watchlist("saved", 0, PAGE), enabled: onDemand }).data;
   const continuing = useContinueWatching();
   const resume = useResume();

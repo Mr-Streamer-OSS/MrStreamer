@@ -13,6 +13,7 @@ import { Subscriptions } from "../src/main/services/subscription.ts";
 import { Library } from "../src/main/services/library.ts";
 import { OnDemand } from "../src/main/services/ondemand.ts";
 import { Roster } from "../src/main/services/roster.ts";
+import { Watchlist } from "../src/main/services/watchlist.ts";
 import { promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 
 const closers: (() => Promise<void>)[] = [];
@@ -72,12 +73,148 @@ async function started(dir: string) {
     titles: await promised(runtime, OnDemand),
     viewing: await promised(runtime, ViewingRecord),
     roster: await promised(runtime, Roster),
+    watchlist: await promised(runtime, Watchlist),
   };
 }
 const login = (link: string) => ({ server: link, username: "", password: "" });
 const films = playlistGroupId("Films");
 
 describe("saved M3U movie mapping", () => {
+  it.each(["independent", "combined"] as const)(
+    "keeps unmapped Live lists after an empty or unconfirmed short %s refresh",
+    async (mode) => {
+      const provider = await host();
+      const rows = Array.from(
+        { length: 20 },
+        (_, at) => `#EXTINF:-1 group-title="News",Channel ${at}\n${provider.origin}/${at}.ts`,
+      );
+      const full = `#EXTM3U\n${rows.join("\n")}\n`;
+      provider.set(full);
+      const app = await started(await tempDir());
+      const saved = await app.subscriptions.add(login(provider.link));
+      const refresh = () =>
+        mode === "combined" ? app.roster.refreshPlaylist(saved.id) : app.library.refresh(saved.id);
+      await refresh();
+      expect(await app.library.channels({})).toHaveLength(20);
+      provider.set("#EXTM3U\n");
+      await expect(refresh()).rejects.toMatchObject({
+        error: { kind: "incomplete-catalogue", received: 0, previous: 20 },
+      });
+      expect(await app.library.channels({})).toHaveLength(20);
+
+      provider.set(`#EXTM3U\n${rows.slice(0, 2).join("\n")}\n`);
+      const held = provider.hold();
+      const rejected = expect(refresh()).rejects.toMatchObject({
+        error: { kind: "incomplete-catalogue", received: 2, previous: 20 },
+      });
+      await held.arrived;
+      provider.set(full);
+      held.release();
+      await rejected;
+      expect(await app.library.channels({})).toHaveLength(20);
+      expect((await app.library.status())[0]?.failure?.kind).toBe("incomplete-catalogue");
+      expect((await app.subscriptions.list())[0]?.playlistMapped).toBe(false);
+    },
+    15_000,
+  );
+
+  it("saves mapped movies and series, aligns renamed versions, and keeps removable entries after remapping and restart", async () => {
+    const provider = await host();
+    const shows = `#EXTINF:-1 group-title="Shows",Show S01E01\n${provider.origin}/show.mp4\n`;
+    provider.set(provider.list("one", shows));
+    const dir = await tempDir();
+    const app = await started(dir);
+    const saved = await app.subscriptions.add(login(provider.link));
+    const unmapped = await app.subscriptions.add(login(`${provider.link}&other=1`));
+    await app.subscriptions.mapPlaylist(saved.id, films, "movie");
+    await app.subscriptions.mapPlaylist(saved.id, playlistGroupId("Shows"), "series");
+    await app.roster.refreshPlaylist(saved.id);
+    const query = { id: "all" as const, offset: 0, limit: 20 };
+    const movie = (await app.titles.collection({ ...query, kind: "movie" })).titles[0]!;
+    const series = (await app.titles.collection({ ...query, kind: "series" })).titles[0]!;
+    const filmEntry = await app.watchlist.save("movie", movie);
+    const seriesEntry = await app.watchlist.save("series", series);
+    const page = { sort: "title" as const, offset: 0, limit: 20 };
+    const before = await app.watchlist.list(page);
+    expect(before.total).toBe(2);
+    expect(before.entries).toMatchObject([
+      { ...filmEntry, kind: "movie", name: "Film", title: { id: movie.id } },
+      { ...seriesEntry, kind: "series", name: "Show", title: { id: series.id } },
+    ]);
+    expect(await app.watchlist.saved("movie", movie)).toEqual(filmEntry);
+    await expect(
+      app.watchlist.save("movie", { subscriptionId: unmapped.id, id: movie.id }),
+    ).rejects.toMatchObject({ error: { kind: "no-subscription" } });
+
+    // Explicit TMDB identity follows a replacement version; the entry keeps its id and time.
+    provider.set(provider.list("restored", shows).replace(",Film\n", ",Restored film\n"));
+    await app.roster.refreshPlaylist(saved.id);
+    const restored = (await app.titles.collection({ ...query, kind: "movie" })).titles[0]!;
+    expect(restored.id).not.toBe(movie.id);
+    expect(await app.watchlist.saved("movie", restored)).toEqual(filmEntry);
+    expect((await app.watchlist.list(page)).entries[0]).toMatchObject({
+      ...filmEntry,
+      name: "Restored film",
+      savedAt: before.entries[0]!.savedAt,
+      title: { id: restored.id },
+    });
+
+    // Live and Skip choices still mean a mapped subscription, so saved entries remain available
+    // to remove even when its catalogue has no titles left.
+    await app.subscriptions.mapPlaylist(saved.id, films, "live");
+    await app.subscriptions.mapPlaylist(saved.id, playlistGroupId("Shows"), "skip");
+    await app.roster.refreshPlaylist(saved.id);
+    const without = await app.watchlist.list(page);
+    expect(without.entries).toMatchObject([
+      { ...filmEntry, name: "Restored film", title: null, listed: true },
+      { ...seriesEntry, name: "Show", title: null, listed: true },
+    ]);
+    await app.runtime.dispose();
+    const restarted = await started(dir);
+    expect(await restarted.watchlist.list(page)).toEqual(without);
+    await restarted.watchlist.remove(filmEntry);
+    await restarted.watchlist.remove(seriesEntry);
+    expect(await restarted.watchlist.list(page)).toEqual({ total: 0, entries: [] });
+  }, 15_000);
+
+  it("leaves HLS movies and episodes out with their reasons while keeping HLS Live", async () => {
+    const provider = await host();
+    provider.set(
+      `#EXTM3U\n#EXTINF:-1 group-title="News",Live HLS\n${provider.origin}/live.m3u8\n` +
+        `#EXTINF:-1 group-title="Films",HLS film\n${provider.origin}/film.m3u8\n` +
+        `#EXTINF:-1 group-title="Shows",HLS show S01E01\n${provider.origin}/episode.m3u8\n` +
+        `#EXTINF:-1 group-title="Films",File film\n${provider.origin}/film.mp4\n` +
+        `#EXTINF:-1 group-title="Shows",File show S01E01\n${provider.origin}/episode.mp4\n`,
+    );
+    const app = await started(await tempDir());
+    const saved = await app.subscriptions.add(login(provider.link));
+    await app.subscriptions.mapPlaylist(saved.id, films, "movie");
+    await app.subscriptions.mapPlaylist(saved.id, playlistGroupId("Shows"), "series");
+    await app.roster.refreshPlaylist(saved.id);
+    expect((await app.library.channels({})).map((channel) => channel.name)).toEqual(["Live HLS"]);
+    expect((await app.titles.status()).lists[0]).toMatchObject({ movies: 1, series: 1 });
+    const query = { id: "all" as const, offset: 0, limit: 20 };
+    expect(
+      (await app.titles.collection({ ...query, kind: "movie" })).titles.map((title) => title.title),
+    ).toEqual(["File film"]);
+    expect(
+      (await app.titles.collection({ ...query, kind: "series" })).titles.map(
+        (title) => title.title,
+      ),
+    ).toEqual(["File show"]);
+    expect((await app.subscriptions.playlistGroups(saved.id, "", 0, 20)).status).toMatchObject({
+      live: 1,
+      movies: 1,
+      series: 1,
+      episodes: 1,
+      omitted: 2,
+    });
+    expect((await app.subscriptions.playlistOmissions(saved.id, 0, 20)).entries).toEqual([
+      { name: "HLS film", groups: ["Films"], reason: "unsupported-address" },
+      { name: "HLS show S01E01", groups: ["Shows"], reason: "unsupported-address" },
+    ]);
+  });
+
   it("keeps one exact playlist snapshot while both list services wait behind other subscriptions", async () => {
     const app = await started(await tempDir());
     const providers = await Promise.all(Array.from({ length: 5 }, () => host()));
@@ -142,9 +279,16 @@ describe("saved M3U movie mapping", () => {
 
   it("refreshes live and mapped titles from one read and reports failure for both while keeping prior lists", async () => {
     const provider = await host();
+    provider.set(
+      provider.list(
+        "one",
+        `#EXTINF:-1 group-title="Shows",Show S01E01\n${provider.origin}/show.mp4\n`,
+      ),
+    );
     const app = await started(await tempDir());
     const saved = await app.subscriptions.add(login(provider.link));
     await app.subscriptions.mapPlaylist(saved.id, films, "movie");
+    await app.subscriptions.mapPlaylist(saved.id, playlistGroupId("Shows"), "series");
     const before = provider.requests();
     await app.roster.refreshPlaylist(saved.id);
     expect(provider.requests() - before).toBe(1);
@@ -154,6 +298,21 @@ describe("saved M3U movie mapping", () => {
       await app.titles.collection({ kind: "movie", id: "all", offset: 0, limit: 20 })
     ).titles[0]!;
     await app.titles.details("movie", oldMovie);
+    const oldSeries = (
+      await app.titles.collection({ kind: "series", id: "all", offset: 0, limit: 20 })
+    ).titles[0]!;
+    const details = await app.titles.details("series", oldSeries);
+    if (details.kind !== "series") throw new Error("No series");
+    const episode = seriesEpisodeOrder(details)[0]!;
+    const file = {
+      kind: "episode" as const,
+      subscriptionId: saved.id,
+      id: episode.id,
+      seriesId: oldSeries.id,
+      season: episode.season,
+      episode: episode.number,
+    };
+    await app.titles.file(file);
     provider.fail();
     await expect(app.roster.refreshPlaylist(saved.id)).rejects.toBeDefined();
     expect((await app.library.status())[0]?.failure?.kind).toBe("provider-error");
@@ -163,11 +322,15 @@ describe("saved M3U movie mapping", () => {
       (await app.titles.collection({ kind: "movie", id: "all", offset: 0, limit: 20 })).total,
     ).toBe(1);
     provider.set("#EXTM3U\n");
+    const emptyBefore = provider.requests();
     await app.roster.refreshPlaylist(saved.id);
+    expect(provider.requests() - emptyBefore).toBe(1);
     expect(await app.library.channels({})).toHaveLength(0);
-    expect((await app.titles.status()).lists[0]?.movies).toBe(0);
+    expect((await app.titles.status()).lists[0]).toMatchObject({ movies: 0, series: 0 });
     await expect(app.titles.details("movie", oldMovie)).rejects.toBeDefined();
+    await expect(app.titles.details("series", oldSeries)).rejects.toBeDefined();
     await expect(app.titles.file({ ...oldMovie, kind: "movie" })).rejects.toBeDefined();
+    await expect(app.titles.file(file)).rejects.toBeDefined();
     expect((await app.subscriptions.playlistGroups(saved.id, "", 0, 20)).status.omitted).toBe(0);
   });
 
@@ -307,6 +470,68 @@ describe("saved M3U movie mapping", () => {
   });
 });
 
+it.each(["/index.m3u", "/50%/index.m3u", "/50%25/index.m3u"])(
+  "follows credential-free HTTPS to HTTP redirects with ordinary or malformed path %s for unmapped Live",
+  async (path) => {
+    const { playlistProvider } = await import("../src/main/providers/m3u.ts");
+    const requests: string[] = [];
+    const provider = playlistProvider(
+      { link: `https://example.test${path}` },
+      {
+        userAgent: "test",
+        fetch: async (input) => {
+          const address = new URL(String(input));
+          requests.push(address.href);
+          if (address.protocol === "https:") {
+            address.protocol = "http:";
+            return new Response(null, { status: 302, headers: { location: address.href } });
+          }
+          if (address.pathname === path)
+            return new Response(
+              '#EXTM3U x-tvg-url="https://example.test/guide.xml"\n#EXTINF:-1,Live\nhttps://example.test/50%/index.m3u8\n',
+            );
+          return new Response("stream or guide");
+        },
+      },
+    );
+    expect(await provider.authenticate()).toMatchObject({ state: "active" });
+    const catalogue = await provider.liveCatalogue();
+    expect(catalogue.channels).toHaveLength(1);
+    const stream = await provider.liveStream(catalogue.channels[0]!.id);
+    expect((await provider.request(stream.url)).ok).toBe(true);
+    expect((await provider.request("https://example.test/50%/segment-0.ts")).ok).toBe(true);
+    const guide = await provider.liveGuide();
+    expect(guide.kind).toBe("document");
+    if (guide.kind === "document") await guide.body.cancel();
+    expect(requests).toContain(`http://example.test${path}`);
+    expect(requests).toContain("http://example.test/50%/index.m3u8");
+    expect(requests).toContain("http://example.test/guide.xml");
+  },
+);
+
+it.each([
+  "https://player:synthetic-password@example.test/film.mp4",
+  "https://player%:synthetic-password@example.test/film.mp4",
+])("protects a file's userinfo even when its percent encoding is malformed", async (url) => {
+  const { playlistProvider } = await import("../src/main/providers/m3u.ts");
+  const requests: string[] = [];
+  const provider = playlistProvider(
+    { link: "https://example.test/list" },
+    {
+      userAgent: "test",
+      fetch: async (input) => {
+        requests.push(String(input));
+        return new Response(null, {
+          status: 302,
+          headers: { location: url.replace("https:", "http:") },
+        });
+      },
+    },
+  );
+  await expect(provider.request(url)).rejects.toThrow("unencrypted");
+  expect(requests).toHaveLength(1);
+});
+
 it("bounds playlist headers, entry fields and group counts while retaining the last successful exact file", async () => {
   const { playlistProvider } = await import("../src/main/providers/m3u.ts");
   let body = '#EXTM3U\n#EXTINF:-1 group-title="Films",Film\nhttps://example.test/film.mp4\n';
@@ -396,6 +621,9 @@ it("imports series files, resumes the selected exact version after reorder/start
   ]);
   const first = order[0]!;
   const alternate = first.versions![1]!;
+  expect((await app.titles.titles("series", [series]))[0]?.versions[0]?.episodeFiles).toContain(
+    alternate.id,
+  );
   const ref = {
     kind: "episode" as const,
     subscriptionId: saved.id,
@@ -427,6 +655,9 @@ it("imports series files, resumes the selected exact version after reorder/start
   const again = await restarted.titles.details("series", series);
   if (again.kind !== "series") throw new Error("No series");
   const standing = await restarted.viewing.episodes(series);
+  expect(
+    (await restarted.titles.titles("series", [series]))[0]?.versions[0]?.episodeFiles,
+  ).toContain(alternate.id);
   expect(continuation(again, standing.progress, [])?.episode.id).toBe(alternate.id);
   // A different exact file of the same episode must start on its own timeline.
   provider.set(

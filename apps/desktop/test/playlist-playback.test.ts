@@ -9,7 +9,7 @@ import { OnDemand } from "../src/main/services/ondemand.ts";
 import { Playback } from "../src/main/services/playback.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { fixture } from "./fake-provider.ts";
-import { promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+import { promised, runtimeFor, tempDir, testConfig, userAgent } from "./support.ts";
 
 const FFMPEG = process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg";
 const FFPROBE = FFMPEG === "ffmpeg" ? "ffprobe" : FFMPEG.replace(/ffmpeg(\.exe)?$/, "ffprobe$1");
@@ -21,7 +21,7 @@ afterEach(async () => {
 });
 
 /** One URL serves different movie files according to each playlist entry's required headers. */
-async function host() {
+async function host(unsupportedHeaders = false) {
   let origin = "";
   let refused = 0;
   const requests: { agent: string; range: string | undefined }[] = [];
@@ -32,19 +32,23 @@ async function host() {
           "#EXTM3U",
           ...["Twelve", "Twenty"].flatMap((name) => [
             `#EXTINF:-1 group-title="Films",${name}`,
-            `#EXTVLCOPT:http-user-agent=${name}`,
-            `#EXTVLCOPT:http-referrer=${origin}/${name}`,
+            `#EXTVLCOPT:http-user-agent=${unsupportedHeaders && name === "Twelve" ? "Player ’One’" : name}`,
+            `#EXTVLCOPT:http-referrer=${origin}/${unsupportedHeaders && name === "Twelve" ? "’" : name}`,
             `${origin}/same.mp4`,
           ]),
           "",
         ].join("\n"),
       );
     }
-    const agent = request.headers["user-agent"];
+    const agent =
+      unsupportedHeaders && request.headers["user-agent"] === userAgent
+        ? "Twelve"
+        : request.headers["user-agent"];
+    const referer = unsupportedHeaders && agent === "Twelve" ? undefined : `${origin}/${agent}`;
     if (
       request.url !== "/same.mp4" ||
       (agent !== "Twelve" && agent !== "Twenty") ||
-      request.headers.referer !== `${origin}/${agent}`
+      request.headers.referer !== referer
     ) {
       refused++;
       return response.writeHead(403).end();
@@ -100,6 +104,22 @@ async function mapped(provider: Awaited<ReturnType<typeof host>>, dir: string) {
 }
 
 describe.skipIf(!hasTools)("mapped playlist file playback", () => {
+  it("drops unsupported playlist header characters and opens the title with safe HTTP defaults", async () => {
+    const provider = await host(true);
+    const { app, refs } = await mapped(provider, await tempDir());
+    const file = await app.titles.file(refs[0]!);
+    const session = await app.playback.openTitle(refs[0]!, file.url, ["h264", "aac"], file);
+    expect(session.duration).toBeCloseTo(12, 0);
+    const answer = await fetch(session.url);
+    expect(answer.ok).toBe(true);
+    expect((await answer.arrayBuffer()).byteLength).toBeGreaterThan(1000);
+    await app.playback.close(session.sessionId);
+    expect(provider.refused()).toBe(0);
+    expect(provider.requests.some((request) => request.agent === "Twelve" && request.range)).toBe(
+      true,
+    );
+  }, 30_000);
+
   it("rehydrates exact headers after restart and keeps same-URL versions' tracks separate", async () => {
     const provider = await host();
     const dir = await tempDir();

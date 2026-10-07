@@ -29,6 +29,22 @@ describe("mixed playlist imports", () => {
       { name: "New", groups: ["New"], reason: "unmapped" },
     ]);
   });
+  it("preserves unmapped Live duplicate ids, names, guide ids and source order", () => {
+    const legacy = entries(
+      '#EXTINF:-1 tvg-id="news" group-title="News",News\nhttps://example.test/news.ts\n#EXTINF:-1 tvg-id="other" group-title="News",Other\nhttps://example.test/other.ts\n#EXTINF:-1 tvg-id="news" group-title="News",News\nhttps://example.test/news.ts',
+    );
+    expect(
+      importPlaylist(legacy).live.channels.map((channel) => [
+        channel.id,
+        channel.name,
+        channel.guideId,
+      ]),
+    ).toEqual([
+      ["news", "News", "news"],
+      ["other", "Other", "other"],
+      ["news|News", "News", "news"],
+    ]);
+  });
 
   it("keeps every distinct source and header version reachable, collapses only exact entries, and survives reorder", () => {
     const versions = entries(

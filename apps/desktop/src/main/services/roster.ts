@@ -134,19 +134,16 @@ function make() {
         Effect.gen(function* () {
           const source = (yield* subscriptions.sources).find((each) => each.id === subscriptionId);
           if (!source) return;
-          if (source.kind === "m3u")
+          if (source.kind === "m3u") {
             yield* refreshPlaylist(source.id).pipe(warned("[roster] playlist refresh failed"));
-          else
-            yield* Effect.all(
-              [
-                library.refresh(source.id).pipe(warned("[roster] channel refresh failed")),
-                onDemand
-                  .refresh(source.id)
-                  .pipe(warned("[roster] movie and series refresh failed")),
-              ],
-              { concurrency: "unbounded" },
-            );
-          yield* guide.refresh(source.id).pipe(warned("[guide] refresh failed"));
+            yield* guide.refresh(source.id).pipe(warned("[guide] refresh failed"));
+          } else {
+            yield* library.refresh(source.id).pipe(warned("[roster] channel refresh failed"));
+            yield* guide.refresh(source.id).pipe(warned("[guide] refresh failed"));
+            yield* onDemand
+              .refresh(source.id)
+              .pipe(warned("[roster] movie and series refresh failed"));
+          }
         }),
         scope,
       );

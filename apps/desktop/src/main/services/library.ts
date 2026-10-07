@@ -259,9 +259,7 @@ function make(options: LibraryOptions) {
 
     const fetchAndStore = (source: Source, playlist?: PlaylistRefresh) =>
       Effect.gen(function* () {
-        const fetched = playlist
-          ? (yield* playlist.read).live
-          : yield* complete(source, yield* cached(source));
+        const fetched = yield* complete(source, yield* cached(source), playlist);
         // Dropped when the subscription went, or its login changed, while it downloaded.
         if (!(yield* subscriptions.stands(source))) return yield* switched;
         const file: CatalogueFile = {
@@ -330,19 +328,24 @@ function make(options: LibraryOptions) {
       });
 
     /**
-     * Fetches the catalogue and checks it against the one in use. An empty list never replaces
-     * channels, and a much shorter one only when a second fetch returns the same.
+     * Fetches the catalogue and checks it against the one in use. Explicit mapping can remove
+     * every channel. Otherwise an empty list never replaces channels, and a much shorter one
+     * only when a second fetch returns the same.
      */
-    const complete = (source: Source, previous: IndexedCatalogue | null) =>
+    const complete = (
+      source: Source,
+      previous: IndexedCatalogue | null,
+      playlist?: PlaylistRefresh,
+    ) =>
       Effect.gen(function* () {
         const fetch = Effect.tryPromise({
           try: (signal) => source.provider.liveCatalogue(signal),
           catch: failedWith,
         });
-        const fetched = yield* fetch;
+        const fetched = playlist ? (yield* playlist.read).live : yield* fetch;
         const before = previous?.channels.length ?? 0;
         const received = fetched.channels.length;
-        if (source.kind === "m3u" || before === 0 || received >= before * SHRINK_CONFIRM_SHARE)
+        if (source.playlistMapped || before === 0 || received >= before * SHRINK_CONFIRM_SHARE)
           return fetched;
         if (received > 0) {
           yield* Effect.sleep(options.confirmDelay ?? SHRINK_CONFIRM_DELAY);

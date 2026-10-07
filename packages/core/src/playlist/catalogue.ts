@@ -1,5 +1,5 @@
-// A playlist's entries as a live catalogue, with where each channel streams from. Names, guide ids
-// and groups stay exactly as the playlist wrote them: the catalogue module reads quality and
+// A playlist's entries as a live catalogue, with where each channel streams from. Imported entries
+// have bounded display names, guide ids and groups; the catalogue module reads quality and
 // annotations such as "(720p)" or "[Geo-blocked]" from the names, as it does for every provider.
 import type { StreamFormat } from "@mrstreamer/contracts/playback";
 import type {

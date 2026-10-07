@@ -252,15 +252,17 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
  */
 function loginIn(link: string): string[] {
   const url = new URL(link);
-  return [
-    decodeURIComponent(url.username),
-    decodeURIComponent(url.password),
-    ...url.pathname
-      .split("/")
-      .filter(Boolean)
-      .map((part) => decodeURIComponent(part)),
-    ...url.searchParams.values(),
-  ].filter(Boolean);
+  return [decoded(url.username), decoded(url.password), ...url.searchParams.values()].filter(
+    Boolean,
+  );
+}
+
+function decoded(text: string): string {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
 }
 
 function notAPlaylist(link: string): AppFailure {

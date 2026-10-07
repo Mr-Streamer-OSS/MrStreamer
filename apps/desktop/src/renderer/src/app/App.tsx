@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useSyncExternalStore } from "react";
-import { ownedKey } from "@mrstreamer/contracts/subscription";
+import { hasTitles, ownedKey } from "@mrstreamer/contracts/subscription";
 import { ConnectScreen } from "../features/connect/ConnectScreen.tsx";
 import { HomeScreen } from "../features/home/HomeScreen.tsx";
 import { GuidePage } from "../features/live/GuidePage.tsx";
@@ -73,18 +73,14 @@ export function App() {
     );
   }
   if (connect) return <ConnectScreen />;
-  return (
-    <Shell
-      liveOnly={subscriptions.data.every((each) => each.kind === "m3u" && !each.playlistMapped)}
-    />
-  );
+  return <Shell liveOnly={!subscriptions.data.some(hasTitles)} />;
 }
 
 /**
  * The page (Home, Live TV, Movies, Series or Watchlist), with details, Watch and a playing title
  * opening over it. The page stays laid out underneath, so leaving any of them finds it scrolled
  * where it was, and takes no input meanwhile. Search and settings are available everywhere.
- * Subscriptions with live TV only, playlists, have no Movies, Series or Watchlist: Home stands in
+ * Subscriptions with live TV only, unmapped playlists, have no Movies, Series or Watchlist: Home stands in
  * for them. While a receiver on the network is connected, its bar stands at the foot of every
  * page, and the pages end above.
  */

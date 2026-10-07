@@ -21,7 +21,7 @@
 // Which title an entry is now, the lists say each time the watchlist is read, so an entry no
 // provider lists any more stays, without a title, and has one again when it is listed again.
 import type { TitleKind, TitleListsStatus } from "@mrstreamer/contracts/ondemand";
-import type { OwnedId } from "@mrstreamer/contracts/subscription";
+import { hasTitles, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type { WatchlistPage, WatchlistSort } from "@mrstreamer/contracts/watchlist";
 import { Failed } from "@mrstreamer/core/failure";
 import { factsOf } from "@mrstreamer/core/ondemand/watchlist";
@@ -89,11 +89,9 @@ function make() {
 
     /**
      * The saved subscriptions that have movies and series, in their order, also while a password
-     * can't be read: what they saved shows either way. A playlist has none to save.
+     * can't be read: what they saved shows either way. Unmapped playlists have none to save.
      */
-    const saving = Effect.map(subscriptions.saved, (saved) =>
-      saved.filter((each) => each.kind === "xtream"),
-    );
+    const saving = Effect.map(subscriptions.saved, (saved) => saved.filter(hasTitles));
 
     /** Those, when the one `named` belongs to is among them. */
     const savingWith = (named: OwnedId) =>

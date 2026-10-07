@@ -79,6 +79,8 @@ export interface TitleVersion {
   readonly id: string;
   /** Markers from its name: "NL", "MULTI", "4K". */
   readonly tags: readonly string[];
+  /** Exact episode files of a mapped series, for showing progress without opening its details. */
+  readonly episodeFiles?: readonly string[];
 }
 
 interface DetailsBase {

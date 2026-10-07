@@ -42,6 +42,13 @@ export interface SubscriptionSummary {
   readonly playlistMapped?: boolean;
 }
 
+/** Xtream and explicitly mapped playlists support titles, even if every group is Live or Skip. */
+export function hasTitles(
+  subscription: Pick<SubscriptionSummary, "kind" | "playlistMapped">,
+): boolean {
+  return subscription.kind === "xtream" || subscription.playlistMapped === true;
+}
+
 /**
  * Something a provider lists, named in full: its id as the provider gives it, and the subscription
  * it comes from. A provider's ids are unique only within its own lists, so a channel, category,

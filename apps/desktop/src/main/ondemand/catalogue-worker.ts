@@ -87,6 +87,7 @@ const ProviderTitle = type({
   container: "string | null",
   "tmdbId?": "string | null",
   "metadata?": "'lazy'",
+  "episodeFiles?": "string[]",
 });
 /** Version 1 came before TMDB ids: still shown, but refreshed as soon as the app can. */
 const CachedCatalogue = type({

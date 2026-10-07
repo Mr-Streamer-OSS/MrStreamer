@@ -562,7 +562,6 @@ export function syncOnDemand(client: QueryClient): () => void {
     void client.invalidateQueries({ queryKey: queries.details(kind, version).queryKey });
   });
   const stopLists = listen("ondemand.updated", () => {
-    void client.invalidateQueries({ queryKey: ["playlist"] });
     // Lists change with a refresh and as TMDB's metadata arrives. A season shown is read again
     // the next time it shows, not each time more metadata arrives.
     void client.invalidateQueries({

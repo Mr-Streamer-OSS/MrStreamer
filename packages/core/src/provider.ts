@@ -55,6 +55,8 @@ export interface ProviderTitle {
   readonly tmdbId?: string | null;
   /** Playlist metadata is requested when details open, never for the whole import. */
   readonly metadata?: "lazy";
+  /** Mapped series' current exact files. No URLs, headers or guessed episode identities. */
+  readonly episodeFiles?: readonly string[];
 }
 
 /** Movies and series as the provider delivers them, each with its own categories. */

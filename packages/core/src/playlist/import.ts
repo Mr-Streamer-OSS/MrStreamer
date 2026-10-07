@@ -27,7 +27,7 @@ export function playlistGroups(entry: PlaylistEntry): string[] {
   return groups.length ? [...new Set(groups)] : [""];
 }
 
-/** Exact copies collapse. An entry's address, headers and attributes all identify its version. */
+/** Mapped exact copies collapse. Address, headers and attributes identify each title version. */
 export function importPlaylist(
   entries: readonly PlaylistEntry[],
   mapping?: PlaylistMapping,
@@ -72,19 +72,20 @@ export function importPlaylist(
     const name = entry.name || entry.attributes["tvg-name"] || "";
     const format = streamFormat(entry.url);
     const episode = mode === "series" ? playlistEpisode(name) : null;
-    const reason = !format
-      ? "unsupported-address"
-      : choices.some((each) => each === undefined)
-        ? "unmapped"
-        : chosen.size > 1
-          ? "conflicting-groups"
-          : mode === "skip"
-            ? "skip"
-            : mode !== "live" && !name
-              ? "missing-name"
-              : mode === "series" && !episode
-                ? "invalid-episode"
-                : null;
+    const reason =
+      !format || (format === "hls" && (mode === "movie" || mode === "series"))
+        ? "unsupported-address"
+        : choices.some((each) => each === undefined)
+          ? "unmapped"
+          : chosen.size > 1
+            ? "conflicting-groups"
+            : mode === "skip"
+              ? "skip"
+              : mode !== "live" && !name
+                ? "missing-name"
+                : mode === "series" && !episode
+                  ? "invalid-episode"
+                  : null;
     const report: PlaylistSample = {
       name: safeName(name || "Unnamed entry"),
       groups: names.map(safeName),
@@ -187,14 +188,18 @@ export function importPlaylist(
       episodes,
     });
   }
-  const channels = playlistCatalogue(live);
+  // Unmapped Live keeps its original names, ids, duplicates and order for saved favourites.
+  const channels = playlistCatalogue(mapping ? live : entries);
   return {
     live: channels,
     catalogue: {
       movieCategories: [...movieCategories.values()],
       movies,
       seriesCategories: [...seriesCategories.values()],
-      series: [...series.values()].map((each) => each.title),
+      series: [...series.values()].map(({ title, episodes }) => ({
+        ...title,
+        episodeFiles: episodes.map((episode) => episode.id),
+      })),
     },
     files,
     details,
