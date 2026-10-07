@@ -258,7 +258,7 @@ export function PlaybackState({
         });
 
   return (
-    <div className="pointer-events-auto flex max-w-[34rem] flex-col items-center px-8 text-center">
+    <div className="pointer-events-none flex max-w-[34rem] flex-col items-center px-8 text-center">
       <ChannelLogo channel={channel} className="mb-6 h-14 w-20" />
       <h2 className="text-3xl font-semibold tracking-tight text-balance">{message.title}</h2>
       {message.body && (
@@ -267,7 +267,9 @@ export function PlaybackState({
         </p>
       )}
       {message.evidence && <Evidence>{message.evidence}</Evidence>}
-      {message.actions && <div className="mt-7 flex items-center gap-3">{message.actions}</div>}
+      {message.actions && (
+        <div className="pointer-events-auto mt-7 flex items-center gap-3">{message.actions}</div>
+      )}
     </div>
   );
 }
@@ -462,14 +464,14 @@ function Block({
   actions: ReactNode;
 }) {
   return (
-    <div className="pointer-events-auto flex max-w-[34rem] flex-col items-center px-8 text-center">
+    <div className="pointer-events-none flex max-w-[34rem] flex-col items-center px-8 text-center">
       {line}
       {title && <h2 className="text-3xl font-semibold tracking-tight text-balance">{title}</h2>}
       {body && (
         <p className="mt-3 text-[0.9375rem] leading-relaxed text-muted-foreground">{body}</p>
       )}
       {evidence && <Evidence>{evidence}</Evidence>}
-      <div className="mt-5 flex items-center gap-3">{actions}</div>
+      <div className="pointer-events-auto mt-5 flex items-center gap-3">{actions}</div>
     </div>
   );
 }

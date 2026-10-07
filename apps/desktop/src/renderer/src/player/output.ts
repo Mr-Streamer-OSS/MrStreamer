@@ -58,7 +58,7 @@ export function useOutput<T>(selector: (state: OutputState) => T): T {
 const listeners = new Set<(now: OutputStatus, before: OutputStatus) => void>();
 
 /**
- * The views on screen that show an output button, Watch and a playing title, each as the signal
+ * The views on screen with output controls, Watch and a playing title, each as the signal
  * that ends with it, in the order they opened. The system's list belongs to the one opened last
  * when it is asked for.
  */
@@ -66,8 +66,8 @@ const views = new Set<AbortSignal>();
 
 /**
  * Where the system's list of receivers opens from, a place in the window in CSS pixels: the
- * output button where the view shows one, else the middle of the window. Measured for each list
- * and never remembered, since the window and its layout may have changed since the last one.
+ * visible More button on Live TV or the output button on a title, else the middle of the window.
+ * Measured for each list and never remembered, since the window and layout may have changed.
  */
 function listAnchor() {
   const box = document.querySelector("[data-output]")?.getBoundingClientRect();
@@ -183,7 +183,7 @@ export const outputs = {
     );
   },
   /**
-   * Says a view that shows an output button is on screen until `view` ends. The system's list
+   * Says a view with output controls is on screen until `view` ends. The system's list
    * asked for meanwhile is that view's, whatever asked for it there.
    */
   viewShown(view: AbortSignal): void {
@@ -191,8 +191,8 @@ export const outputs = {
     view.addEventListener("abort", () => views.delete(view), { once: true });
   },
   /**
-   * Opens the system's list at the output button, as the view shows it now. The list is that
-   * view's and goes with it, open or still to open, while what plays stays as it is. On a page,
+   * Opens the system's list at Live TV's More button or the title's output button, measured now.
+   * The list belongs to that view and goes with it, open or still to open. Playback stays as it is. On a page,
    * where no view shows the button, the list is the window's alone.
    */
   pick(): void {

@@ -65,14 +65,48 @@ export function MiniControls({
 export const MINI_NEEDS_PICTURE = "Mini player needs the picture here";
 
 /**
- * The button beside full screen that shrinks the window; none where windows can't stay on top.
+ * Shrinks the window from Live TV's More menu or a title's bar; absent without stay-on-top support.
  * While a receiver on the network plays it stays, dimmed, and says why it does nothing.
  */
-export function MiniPlayerButton() {
+export function MiniPlayerButton({
+  inMenu = false,
+  onDone,
+}: {
+  inMenu?: boolean;
+  onDone?: () => void;
+}) {
   const available = useMiniPlayer((state) => state.available);
   const remote = useOutput((state) => state.status.output.kind !== "local");
   if (!available) return null;
   const elsewhere = remote && outputs.receiver() !== null;
+  const enter = () => {
+    if (elsewhere) flash(MINI_NEEDS_PICTURE);
+    else {
+      onDone?.();
+      void miniPlayer.enter();
+    }
+  };
+  if (inMenu) {
+    return (
+      <button
+        data-item
+        aria-label="Mini player"
+        aria-disabled={elsewhere}
+        aria-description={elsewhere ? MINI_NEEDS_PICTURE : undefined}
+        className={cn(
+          "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left outline-none hover:bg-white/6 focus-visible:bg-white/10",
+          elsewhere && "opacity-45",
+        )}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={enter}
+      >
+        <span className="flex-1">Mini player</span>
+        <span aria-hidden className="text-[0.8125rem] text-muted-foreground">
+          P
+        </span>
+      </button>
+    );
+  }
   return (
     <Tooltip label={elsewhere ? MINI_NEEDS_PICTURE : "Mini player"}>
       <Button
@@ -81,7 +115,7 @@ export function MiniPlayerButton() {
         aria-label="Mini player"
         aria-disabled={elsewhere}
         className={cn(elsewhere && "opacity-45")}
-        onClick={() => (elsewhere ? flash(MINI_NEEDS_PICTURE) : void miniPlayer.enter())}
+        onClick={enter}
       >
         <PictureInPicture2 />
       </Button>

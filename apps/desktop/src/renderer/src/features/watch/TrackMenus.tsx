@@ -1,4 +1,4 @@
-// The sound and subtitle controls of Watch and a playing title: two buttons beside the volume.
+// The sound and subtitle controls of Watch and a playing title. Live TV puts Sound in More.
 // Sound lists the stream's sound tracks. CC shows at a glance whether subtitles are on, and lists
 // Off and every subtitle track; C turns the last choice on and off.
 import { Popover } from "@base-ui/react/popover";
@@ -20,6 +20,7 @@ export function TrackMenus({
   subtitleNote = null,
   shows = null,
   hereOnly = null,
+  showSound = true,
   open,
   onOpenChange,
   onAudio,
@@ -39,33 +40,28 @@ export function TrackMenus({
   shows?: readonly SubtitleFormat[] | null;
   /** Why some subtitles play here only, said at the foot of their menu. */
   hereOnly?: string | null;
+  /** Live TV puts Sound in More; titles keep its button here. */
+  showSound?: boolean;
   open: TrackMenu;
   onOpenChange: (open: TrackMenu) => void;
   onAudio: (id: number) => void;
   onSubtitle: (track: SubtitleTrack | null) => void;
 }) {
-  const playing = audioId ?? audio.find((track) => track.default)?.id ?? audio[0]?.id;
   return (
     <>
-      {audio.length > 1 && (
+      {showSound && audio.length > 1 && (
         <Menu
           label="Sound"
           open={open === "sound"}
           onOpenChange={(next) => onOpenChange(next ? "sound" : null)}
           trigger={<AudioLines />}
         >
-          {audio.map((track) => (
-            <Choice
-              key={track.id}
-              chosen={track.id === playing}
-              onChoose={() => {
-                onAudio(track.id);
-                onOpenChange(null);
-              }}
-            >
-              {track.label}
-            </Choice>
-          ))}
+          <SoundChoices
+            audio={audio}
+            audioId={audioId}
+            onAudio={onAudio}
+            onDone={() => onOpenChange(null)}
+          />
         </Menu>
       )}
       {subtitles.length > 0 && (
@@ -112,6 +108,33 @@ export function TrackMenus({
   );
 }
 
+/** Sound choices shared by the title button and Live TV's More page. */
+export function SoundChoices({
+  audio,
+  audioId,
+  onAudio,
+  onDone,
+}: {
+  audio: readonly AudioTrack[];
+  audioId: number | null;
+  onAudio: (id: number) => void;
+  onDone: () => void;
+}) {
+  const playing = audioId ?? audio.find((track) => track.default)?.id ?? audio[0]?.id;
+  return audio.map((track) => (
+    <Choice
+      key={track.id}
+      chosen={track.id === playing}
+      onChoose={() => {
+        onAudio(track.id);
+        onDone();
+      }}
+    >
+      {track.label}
+    </Choice>
+  ));
+}
+
 /**
  * A menu over the player's controls, opened by a button. While it's open a click elsewhere only
  * closes it, so the same click can't also pause, skip or change channel. Opened by the keyboard,
@@ -122,6 +145,9 @@ export function Menu({
   label,
   on = false,
   text = false,
+  focusChosen = false,
+  description,
+  onKeyDown,
   open,
   onOpenChange,
   trigger,
@@ -131,6 +157,10 @@ export function Menu({
   on?: boolean;
   /** The button holds words rather than an icon. */
   text?: boolean;
+  /** A page opened by a shortcut has no keyboard press on its trigger. */
+  focusChosen?: boolean;
+  description?: string | undefined;
+  onKeyDown?: (event: KeyboardEvent<HTMLDivElement>) => void;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   trigger: ReactNode;
@@ -146,6 +176,7 @@ export function Menu({
               variant={on ? "primary" : "media"}
               size={text ? "default" : "icon"}
               aria-label={label}
+              aria-description={description}
               aria-pressed={on}
               className={cn(text && "px-3.5 font-semibold")}
             />
@@ -163,11 +194,14 @@ export function Menu({
             ref={popup}
             aria-label={label}
             initialFocus={(openType) =>
-              (openType === "keyboard" && popup.current && chosenItem(popup.current)) ||
+              ((openType === "keyboard" || focusChosen) &&
+                popup.current &&
+                chosenItem(popup.current)) ||
               popup.current
             }
             finalFocus={(closeType) => closeType === "keyboard"}
             onKeyDown={(event) => {
+              onKeyDown?.(event);
               if (!event.defaultPrevented) moveFocus(event);
             }}
             className="max-h-[60vh] w-[18rem] overflow-y-auto rounded-2xl bg-popover p-2 text-[0.9375rem] shadow-2xl ring-1 ring-white/12 outline-none transition-[opacity,scale] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0"
@@ -180,15 +214,15 @@ export function Menu({
   );
 }
 
-/** The item a menu opens on: the one chosen, else the first. */
+/** The usable choice a menu opens on: the selected row, else its first non-Back row. */
 function chosenItem(popup: HTMLElement): HTMLElement | null {
   return (
-    popup.querySelector<HTMLElement>("[data-item][aria-pressed=true]") ??
-    popup.querySelector<HTMLElement>("[data-item]")
+    popup.querySelector<HTMLElement>("[data-item][aria-pressed=true]:not(:disabled)") ??
+    popup.querySelector<HTMLElement>("[data-item]:not(:disabled):not([data-live-back])")
   );
 }
 
-/** Up, Down, Home and End move focus between a menu's items, round from the last to the first. */
+/** Live and title menus share arrow navigation. Initial Down selects the current usable choice. */
 function moveFocus(event: KeyboardEvent<HTMLDivElement>): void {
   const items = [
     ...event.currentTarget.querySelectorAll<HTMLElement>("[data-item]:not(:disabled)"),
@@ -196,7 +230,9 @@ function moveFocus(event: KeyboardEvent<HTMLDivElement>): void {
   const at = items.findIndex((item) => item === document.activeElement);
   const target =
     event.key === "ArrowDown"
-      ? (items[at + 1] ?? items[0])
+      ? at < 0
+        ? (chosenItem(event.currentTarget) ?? items[0])
+        : (items[at + 1] ?? items[0])
       : event.key === "ArrowUp"
         ? (items[at - 1] ?? items.at(-1))
         : event.key === "Home"

@@ -1,7 +1,9 @@
 // Watch: the picture fills the window, with what's on along the bottom. It opens over Home or the
 // guide, which wait underneath unchanged. The channel list slides over the left to switch without
 // leaving; Escape closes it, then leaves full screen, then goes back to the page underneath.
-//   Up and Down switch channel, or move in the open list. Enter or Left opens the list; in it,
+//   Up and Down switch channel, or move in the open list. The wheel over the full picture
+//   switches channel once per gesture while no menu, list or dialog owns input.
+//   Enter or Left opens the list; in it,
 //   Enter plays, Left swaps to the lists and Right swaps back. Backspace returns to the previous
 //   channel, digits jump to a number, F is full screen, M mutes, C turns subtitles on or off, G
 //   and H move them earlier or later, I shows the details, S stars, Q opens the quality menu of a
@@ -14,7 +16,7 @@
 // clear. Leaving Watch leaves the receiver playing; only Stop and Play here end it.
 // In the mini player the picture fills the small window; opening the list puts the window back.
 import { Play, Square } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type WheelEvent } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { sameOwned } from "@mrstreamer/contracts/subscription";
 import { hasModifier, isTyping } from "../../app/platform.ts";
@@ -49,11 +51,15 @@ import { ConnectingNote, openChooser } from "./Output.tsx";
 import { nudgeSubtitles } from "./PlaybackMenu.tsx";
 import { PlaybackAnnouncement, PlaybackState, retryFailed } from "./PlaybackState.tsx";
 import { failureTitle, reconnectingLine } from "./problems.ts";
-import type { TrackMenu } from "./TrackMenus.tsx";
+import type { LiveMenu } from "./LiveMore.tsx";
 
 /** Controls fade out after this long without input. */
 const IDLE_MS = 3000;
 const PAGE_ROWS = 10;
+// One zap per wheel gesture, with small trackpad movements accumulated first.
+const WHEEL_THRESHOLD = 80;
+const WHEEL_PAUSE_MS = 250;
+const WHEEL_COOLDOWN_MS = 700;
 const NO_CHANNELS: readonly LiveChannel[] = [];
 
 export function WatchScreen() {
@@ -75,13 +81,22 @@ export function WatchScreen() {
   const [picking, setPicking] = useState(false);
   const [selected, setSelected] = useState(0);
   const [entry, setEntry] = useState(0);
-  const [menu, setMenu] = useState<TrackMenu>(null);
+  const [menu, setMenu] = useState<LiveMenu>(null);
+  const keyboardMenu = useRef(false);
   // A receiver on the network has playback, or had it until its connection broke.
   const remote = useOutput(
     (state) => state.status.output.kind === "receiver" || state.status.output.kind === "lost",
   );
   const waiting = usePlayer((state) => state.waiting && state.phase.kind === "playing");
   useLiveSession(channel);
+
+  // Menus belong to this channel and the full controls, never to another channel or mini view.
+  useEffect(() => {
+    setMenu(null);
+  }, [channel?.subscriptionId, channel?.id]);
+  useEffect(() => {
+    if (mini || channelsOpen) setMenu(null);
+  }, [mini, channelsOpen]);
 
   // A standing note, with nothing that moves: the picture itself says when it is over.
   useEffect(() => {
@@ -105,6 +120,47 @@ export function WatchScreen() {
     player.zap(target);
     wake();
   };
+  const wheel = useRef({ total: 0, at: -Infinity, switchedAt: -Infinity, zapped: false });
+  const onPictureWheel = (event: WheelEvent<HTMLDivElement>) => {
+    const ui = useUi.getState();
+    const focused = document.activeElement;
+    if (
+      event.defaultPrevented ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.altKey ||
+      event.shiftKey ||
+      !ui.watching ||
+      ui.searchOpen ||
+      ui.settings ||
+      ui.updateDialog ||
+      channelsOpen ||
+      menu ||
+      document.querySelector('[role="dialog"], [role="alertdialog"]') ||
+      focused?.matches('input, textarea, [contenteditable="true"]')
+    ) {
+      wheel.current.total = 0;
+      return;
+    }
+    if (Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
+    const now = performance.now();
+    const gesture = wheel.current;
+    if (now - gesture.at > WHEEL_PAUSE_MS) {
+      gesture.total = 0;
+      gesture.zapped = false;
+    }
+    gesture.at = now;
+    if (gesture.zapped || now - gesture.switchedAt < WHEEL_COOLDOWN_MS) return;
+    const delta =
+      event.deltaY *
+      (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? event.currentTarget.clientHeight : 1);
+    if (Math.sign(delta) !== Math.sign(gesture.total)) gesture.total = 0;
+    gesture.total += delta;
+    if (Math.abs(gesture.total) < WHEEL_THRESHOLD) return;
+    gesture.zapped = true;
+    gesture.switchedAt = now;
+    switchBy(gesture.total > 0 ? 1 : -1);
+  };
   const openChannels = () => {
     // The list needs the full window.
     if (miniPlayer.on()) void miniPlayer.leave();
@@ -118,7 +174,8 @@ export function WatchScreen() {
     useUi.setState({ channelsOpen: true });
   };
   const closeChannels = () => useUi.setState({ channelsOpen: false });
-  const openQuality = () => {
+  const openQuality = (byKeyboard = false) => {
+    keyboardMenu.current = byKeyboard;
     // The menu opens over the full window's controls.
     if (miniPlayer.on()) void miniPlayer.leave();
     wake();
@@ -275,7 +332,10 @@ export function WatchScreen() {
         case "o":
         case "O":
           wake();
-          void openChooser(() => setMenu("output"), view.signal);
+          void openChooser(() => {
+            keyboardMenu.current = true;
+            setMenu("output");
+          }, view.signal);
           break;
         case "m":
           if (!player.toggleMute()) flash("TV remote sets volume");
@@ -300,7 +360,7 @@ export function WatchScreen() {
           break;
         case "q":
           if ((now.channel?.variants.length ?? 0) < 2) return;
-          openQuality();
+          openQuality(true);
           break;
         case "r":
         case "R":
@@ -396,6 +456,7 @@ export function WatchScreen() {
         style={{ top: fullscreen ? 0 : WINDOW_BAR.height }}
         onClick={() => (channelsOpen ? closeChannels() : wake())}
         onDoubleClick={toggleFullscreen}
+        onWheel={onPictureWheel}
       />
       <div
         data-playback-state=""
@@ -405,7 +466,7 @@ export function WatchScreen() {
           channel={channel}
           onWatch={() => player.play(channel)}
           onNext={() => switchBy(1)}
-          onQuality={openQuality}
+          onQuality={() => openQuality()}
           onChannels={openChannels}
         />
       </div>
@@ -444,6 +505,7 @@ export function WatchScreen() {
         onOpenChannels={openChannels}
         onSwitch={switchBy}
         menu={menu}
+        keyboardMenu={keyboardMenu.current}
         onMenu={setMenu}
       />
       <NumberEntry onChannel={(target) => player.play(target)} />
