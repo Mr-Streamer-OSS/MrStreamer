@@ -142,4 +142,30 @@ describe("playlist mapping in Settings", () => {
       { subscriptionId: subscription.id, offset: 50, limit: 50 },
     ]);
   });
+  it("returns to a valid omission page after mapping removes entries", async () => {
+    ipc.always("playlist.groups", groups);
+    ipc.always("playlist.omissions", {
+      total: 60,
+      entries: [{ name: "Waiting", groups: ["New group"], reason: "unmapped" }],
+    });
+    const app = await render(createElement(PlaylistRows, { subscription, onMap: () => {} }));
+    await app.click("Show");
+    await app.click("Next");
+    expect(app.container.textContent).toContain("51–60 of 60");
+    ipc.always("playlist.omissions", {
+      total: 40,
+      entries: [{ name: "Remaining", groups: ["New group"], reason: "unmapped" }],
+    });
+    await act(async () => {
+      await app.client.invalidateQueries({ queryKey: ["playlist", subscription.id, "omissions"] });
+    });
+    await expect
+      .poll(async () => {
+        await app.settle();
+        return app.container.textContent;
+      })
+      .toContain("1–40 of 40");
+    expect(ipc.argsOf("playlist.omissions").at(-1)).toMatchObject({ offset: 0, limit: 50 });
+    expect(app.container.textContent).not.toContain("51–40");
+  });
 });

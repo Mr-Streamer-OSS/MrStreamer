@@ -1,7 +1,7 @@
 // Explicit group mapping over Settings. Pages and samples contain names and reasons, never links.
 import { Dialog } from "@base-ui/react/dialog";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PLAYLIST_OMISSION_LABELS, type PlaylistMode } from "@mrstreamer/contracts/playlist";
 import type { SubscriptionSummary } from "@mrstreamer/contracts/subscription";
 import { Sheet } from "../../components/Sheet.tsx";
@@ -151,6 +151,11 @@ export function PlaylistRows({
     ...queries.playlistOmissions(subscription.id, offset, PAGE),
     enabled: show && !subscription.needsSecret,
   });
+  const total = omissions.data?.total;
+  useEffect(() => {
+    if (total !== undefined)
+      setOffset((current) => Math.min(current, Math.max(0, Math.floor((total - 1) / PAGE) * PAGE)));
+  }, [total]);
   const status = groups.data?.status;
   return (
     <>

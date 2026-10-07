@@ -67,12 +67,26 @@ async function receiver(
     closed: () => closed.push("closed"),
     failed: (failure) => failed.push(failure),
   };
+  // Resolve the async provider addresses before any competing playback calls take their turns.
+  const files = new Map(
+    await Promise.all(
+      provider.titles.movies.map(
+        async (movie) =>
+          [
+            movie.id,
+            source
+              ? (await source.provider.titleFile("movie", String(movie.id), movie.container)).url
+              : null,
+          ] as const,
+      ),
+    ),
+  );
   /**
    * Opens a test movie by name for the receiver, the way the app opens it from the catalogue.
    * `file` puts another clip behind its address first: a fixture by name, or its bytes. `asked`
    * gives the turn it is asked under.
    */
-  const open = async (
+  const open = (
     name: string,
     file?: string | Buffer,
     decoders: readonly Codec[] = RECEIVER,
@@ -82,12 +96,7 @@ async function receiver(
     if (!movie || !source) throw new Error(`No movie ${name}`);
     if (file !== undefined) provider.replaceMovieFile(movie.id, file);
     const ref: TitleRef = { kind: "movie", ...own(String(movie.id)) };
-    return playback.openReceiverTitle(
-      ref,
-      (await source.provider.titleFile("movie", ref.id, movie.container)).url,
-      { ...target, decoders },
-      asked,
-    );
+    return playback.openReceiverTitle(ref, files.get(movie.id)!, { ...target, decoders }, asked);
   };
   /** Opens a movie and loads it with these tracks: the video playlist a receiver ends up with. */
   const load = async (

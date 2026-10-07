@@ -263,3 +263,40 @@ it("follows source order through specials for next, continuation and finish", as
   expect(finishes(shown, { ...plays[2]!.title, since: 3 }, plays.slice(0, 2), [])).toBe(true);
   expect(finishes(shown, { ...plays[2]!.title, id: "obsolete", since: 3 }, plays, [])).toBe(false);
 });
+
+it("imports long series names without losing the full source identity or episode order", () => {
+  const name = "Harbour" + ".".repeat(50000) + " Specials";
+  const source = entries(
+    [2, 3]
+      .flatMap((number) => [
+        `#EXTINF:-1 group-title="Shows",${name} S01E0${number}`,
+        `https://example.test/episode-${number}.mkv`,
+      ])
+      .join("\n"),
+  );
+  const imported = importPlaylist(source, {
+    version: 1,
+    groups: [{ group: playlistGroupId("Shows"), mode: "series" }],
+  });
+  expect(imported.omissions).toEqual([]);
+  expect(imported.catalogue.series).toHaveLength(1);
+  const title = imported.catalogue.series[0]!;
+  expect(title.name.length).toBeLessThanOrEqual(512);
+  expect(imported.details.get(title.id)?.episodes.map((episode) => episode.number)).toEqual([2, 3]);
+  expect(new Set(imported.details.get(title.id)?.episodes.map((episode) => episode.id)).size).toBe(
+    2,
+  );
+});
+
+it("bounds and strips links from a mapped Live entry's fallback name", () => {
+  const imported = importPlaylist(
+    entries(
+      '#EXTINF:-1 group-title="News" tvg-name="see https://example.test/private",\nhttps://example.test/live.ts',
+    ),
+    { version: 1, groups: [{ group: playlistGroupId("News"), mode: "live" }] },
+  );
+  expect(imported.live.channels).toHaveLength(1);
+  expect(imported.live.channels[0]!.name).not.toContain("https://");
+  expect(imported.live.channels[0]!.id).not.toContain("https://");
+  expect(imported.live.channels[0]!.name.length).toBeLessThanOrEqual(512);
+});

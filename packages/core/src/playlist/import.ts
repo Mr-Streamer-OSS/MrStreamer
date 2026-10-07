@@ -99,7 +99,7 @@ export function importPlaylist(
       if (!mapping) continue;
       live.push({
         ...entry,
-        name: safeName(entry.name),
+        name: safeName(name),
         attributes: {
           ...entry.attributes,
           "tvg-id": safeName(entry.attributes["tvg-id"] || ""),
