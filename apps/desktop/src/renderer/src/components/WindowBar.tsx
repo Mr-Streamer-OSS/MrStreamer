@@ -27,8 +27,8 @@ const VIEWS: readonly { readonly view: View; readonly label: string }[] = [
  */
 export function WindowBar({ className, onBack }: { className?: string; onBack?: () => void }) {
   const view = useUi((state) => state.view);
-  // Playlists have live TV only: Movies, Series and Watchlist show once a subscription has them.
-  const liveOnly = useSubscriptions().every((each) => each.kind === "m3u");
+  // An unmapped playlist has live TV only; explicit mapping enables the title pages.
+  const liveOnly = useSubscriptions().every((each) => each.kind === "m3u" && !each.playlistMapped);
   const watching = useUi((state) => state.watching);
   const settingsOpen = useUi((state) => state.settings !== null);
   const detailsOpen = useUi((state) => state.details !== null || state.savedEntry !== null);
