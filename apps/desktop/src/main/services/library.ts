@@ -302,9 +302,9 @@ function make(options: LibraryOptions) {
     ): Effect.Effect<CatalogueStatus, Failed> =>
       Effect.gen(function* () {
         const under = refreshing.get(source.id);
-        // A combined refresh carries a specific snapshot, so it waits for an earlier independent
-        // fetch instead of substituting that fetch's different playlist read.
-        if (playlist && under && sameSource(source, under.source)) {
+        // A mapped combined refresh needs its own snapshot after an earlier independent fetch.
+        // Unmapped Live has no titles to align and can keep joining the fetch already running.
+        if (playlist && source.playlistMapped && under && sameSource(source, under.source)) {
           yield* Fiber.await(under.fiber);
           return yield* refreshOf(source, playlist);
         }

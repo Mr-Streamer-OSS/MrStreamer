@@ -18,8 +18,9 @@ export function playlistEpisode(name: string): PlaylistEpisode | null {
   if (/^[\s._-]*(?:[&+,/-]\s*)?(?:E\d|\d{1,3}(?![\p{L}\p{N}]))/iu.test(after)) return null;
   // Trim from the end. An unanchored suffix regex retries a long internal separator run at
   // every position, blocking the playlist import even when that run isn't at the end.
+  // Opening brackets around a supported token are separators, not part of the series name.
   let end = token.index;
-  while (end > 0 && /[\s._|:-]/u.test(name[end - 1]!)) end--;
+  while (end > 0 && /[\s._|:([{-]/u.test(name[end - 1]!)) end--;
   const series = name.slice(0, end).trim();
   const season = Number(token[1] ?? token[3]);
   const episode = Number(token[2] ?? token[4]);

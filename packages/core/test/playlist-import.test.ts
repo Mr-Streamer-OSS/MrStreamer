@@ -154,6 +154,16 @@ describe("mixed playlist imports", () => {
 
 it.each([
   ["Show S01E02", { series: "Show", season: 1, episode: 2 }],
+  ["Show [S01E02]", { series: "Show", season: 1, episode: 2 }],
+  ["Show [1x02]", { series: "Show", season: 1, episode: 2 }],
+  ["Show (S01E02)", { series: "Show", season: 1, episode: 2 }],
+  ["Show (1x02)", { series: "Show", season: 1, episode: 2 }],
+  ["Show {1x02}", { series: "Show", season: 1, episode: 2 }],
+  ["Show {S01E02}", { series: "Show", season: 1, episode: 2 }],
+  [
+    "Show [Director's cut] (2019) S01E02",
+    { series: "Show [Director's cut] (2019)", season: 1, episode: 2 },
+  ],
   ["Show - 1x02 - Name (4K)", { series: "Show", season: 1, episode: 2 }],
   ["Show s00e01 1080p", { series: "Show", season: 0, episode: 1 }],
   ["Show 1920x1080", null],
@@ -262,6 +272,58 @@ it("follows source order through specials for next, continuation and finish", as
   expect(continuation(shown, plays.slice(0, 2), [])?.episode.id).toBe(order[2]!.id);
   expect(finishes(shown, { ...plays[2]!.title, since: 3 }, plays.slice(0, 2), [])).toBe(true);
   expect(finishes(shown, { ...plays[2]!.title, id: "obsolete", since: 3 }, plays, [])).toBe(false);
+});
+
+it("groups ordinary bracketed tokens with plain episodes without changing exact file identities or source order", async () => {
+  const { indexCatalogue } = await import("../src/ondemand/catalogue.ts");
+  const { seriesDetails, seriesEpisodeOrder } = await import("../src/ondemand/details.ts");
+  const names = [
+    "Show (2019) [S02E03]",
+    "Show (2019) S00E01",
+    "Show (2019) (1x02)",
+    "Show (2019) {S02E01}",
+    "Show (2019) S02E03",
+  ];
+  const source = entries(
+    names
+      .map(
+        (name) =>
+          `#EXTINF:-1 entry-id="exact" group-title="Shows",${name}\nhttps://example.test/same.mp4`,
+      )
+      .join("\n"),
+  );
+  const mapping = {
+    version: 1 as const,
+    groups: [{ group: playlistGroupId("Shows"), mode: "series" as const }],
+  };
+  const imported = importPlaylist(source, mapping);
+  expect(imported.omissions).toEqual([]);
+  expect(imported.catalogue.series).toHaveLength(1);
+  const title = indexCatalogue([{ subscriptionId: "s", catalogue: imported.catalogue }], "en")
+    .series.titles[0]!;
+  expect(title.name).toBe("Show (2019)");
+  const shown = seriesDetails(title, imported.details.get(title.id)!, null, "en");
+  const order = seriesEpisodeOrder(shown);
+  expect(order.map((episode) => `${episode.season}:${episode.number}`)).toEqual([
+    "2:3",
+    "0:1",
+    "1:2",
+    "2:1",
+  ]);
+  expect(order[0]!.versions).toHaveLength(2);
+  expect(new Set(imported.files.keys()).size).toBe(names.length);
+  const originalFirst = [...imported.files.keys()][0]!;
+  const separate = source.flatMap((entry) => [...importPlaylist([entry], mapping).files.keys()]);
+  expect([...imported.files.keys()].sort()).toEqual(separate.sort());
+  expect([...importPlaylist(source.toReversed(), mapping).files.keys()].sort()).toEqual(
+    separate.sort(),
+  );
+  // Changing only a raw label still changes that exact file, even when its series name agrees.
+  const renamed = importPlaylist(
+    source.map((entry) => ({ ...entry, name: entry.name.replace("[S02E03]", "S02E03") })),
+    mapping,
+  );
+  expect(renamed.files.has(originalFirst)).toBe(false);
 });
 
 it("imports long series names without losing the full source identity or episode order", () => {

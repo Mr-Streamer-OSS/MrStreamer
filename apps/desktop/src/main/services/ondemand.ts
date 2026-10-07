@@ -65,6 +65,7 @@ import type {
 import { Settings } from "./preferences.ts";
 import {
   Subscriptions,
+  sameSource,
   type SavedSubscription,
   type Source,
   type PlaylistRefresh,
@@ -129,7 +130,8 @@ export class OnDemand extends Context.Service<
     /**
      * Fetches a subscription's two lists. Concurrent calls for one subscription share a fetch,
      * and a few subscriptions fetch at a time. Lists that arrive after the subscription's login
-     * changed are dropped: it fails, and those from before stay.
+     * changed are dropped: it fails, and those from before stay. A supplied playlist snapshot
+     * waits for an earlier refresh to finish, so its lists are accepted separately.
      */
     refresh(
       subscriptionId: string,
@@ -271,6 +273,15 @@ function make(deps: OnDemandDeps) {
     );
     /** Why each subscription's latest refresh failed, by its id, until one succeeds. */
     const failures = new Map<string, { readonly error: AppError; readonly at: number }>();
+    /** Owns a refresh through acceptance, including the wait for a title-fetch slot. */
+    const refreshing = new Map<
+      string,
+      {
+        readonly source: Source;
+        readonly token: object;
+        readonly fiber: Fiber.Fiber<void, Failed>;
+      }
+    >();
     /** Counts restarts of the worker. */
     let generation = 0;
     /**
@@ -350,7 +361,7 @@ function make(deps: OnDemandDeps) {
     const publishStatus = Effect.flatMap(status, (current) => PubSub.publish(updates, current));
 
     /** Fetches `source`'s lists, and tells the UI how it ended. */
-    const refreshOf = (source: Source, playlist?: PlaylistRefresh) =>
+    const fetchAndStore = (source: Source, playlist?: PlaylistRefresh) =>
       Effect.gen(function* () {
         // A refresh cut short by restarting the worker, as for a new key, isn't a failure to show.
         const started = generation;
@@ -394,6 +405,33 @@ function make(deps: OnDemandDeps) {
             }),
           ),
         );
+      });
+
+    /** Queries join the active refresh; a distinct supplied snapshot waits for its own acceptance. */
+    const refreshOf = (source: Source, playlist?: PlaylistRefresh): Effect.Effect<void, Failed> =>
+      Effect.gen(function* () {
+        const under = refreshing.get(source.id);
+        if (playlist && under && sameSource(source, under.source)) {
+          yield* Fiber.await(under.fiber);
+          return yield* refreshOf(source, playlist);
+        }
+        let running = under && sameSource(source, under.source) ? under : null;
+        if (!running) {
+          const token = {};
+          const fiber = yield* Effect.forkIn(
+            fetchAndStore(source, playlist).pipe(
+              Effect.ensuring(
+                Effect.sync(() => {
+                  if (refreshing.get(source.id)?.token === token) refreshing.delete(source.id);
+                }),
+              ),
+            ),
+            scope,
+          );
+          running = { source, token, fiber };
+          refreshing.set(source.id, running);
+        }
+        return yield* Fiber.join(running.fiber);
       });
 
     /**

@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
+import * as Effect from "effect/Effect";
 import { ViewingRecord } from "@mrstreamer/core/viewing/service";
 import { continuation } from "@mrstreamer/core/viewing/episodes";
 import { seriesEpisodeOrder, seriesEpisodeSeasons } from "@mrstreamer/core/ondemand/details";
@@ -213,6 +214,99 @@ describe("saved M3U movie mapping", () => {
       { name: "HLS film", groups: ["Films"], reason: "unsupported-address" },
       { name: "HLS show S01E01", groups: ["Shows"], reason: "unsupported-address" },
     ]);
+  });
+
+  it("joins a titles query to the combined snapshot while other subscriptions occupy both title slots", async () => {
+    const app = await started(await tempDir());
+    const providers = await Promise.all([host(), host(), host()]);
+    const saved = [];
+    for (const provider of providers) {
+      provider.set(provider.list().replace(' tmdb-id="42"', ""));
+      const subscription = await app.subscriptions.add(login(provider.link));
+      await app.subscriptions.mapPlaylist(subscription.id, films, "movie");
+      saved.push(subscription);
+    }
+    const held = providers.slice(0, 2).map((provider) => provider.hold());
+    const blockers = Promise.allSettled(saved.slice(0, 2).map(({ id }) => app.titles.refresh(id)));
+    await Promise.all(held.map((request) => request.arrived));
+    const target = providers[2]!;
+    const targetId = saved[2]!.id;
+    const before = target.requests();
+    try {
+      const combined = app.roster.refreshPlaylist(targetId);
+      await vi.waitFor(async () =>
+        expect(
+          (await app.library.status()).find((status) => status.subscriptionId === targetId)
+            ?.channelCount,
+        ).toBe(1),
+      );
+      target.set(
+        target.list(
+          "changed",
+          `#EXTINF:-1 group-title="Films",New film\n${target.origin}/new.mp4\n`,
+        ),
+      );
+      const asked = app.titles.collection({ kind: "movie", id: "all", offset: 0, limit: 20 });
+      // The worker answers this status after the query's status read, while both slots are held.
+      await app.titles.status();
+      for (const request of held) request.release();
+      await blockers;
+      await combined;
+      await asked;
+      const page = await app.titles.collection({ kind: "movie", id: "all", offset: 0, limit: 20 });
+      const own = page.titles.filter((title) => title.subscriptionId === targetId);
+      expect(own).toHaveLength(1);
+      expect(
+        await app.titles.file({ kind: "movie", subscriptionId: targetId, id: own[0]!.id }),
+      ).toMatchObject({ url: `${target.origin}/one.mp4` });
+      expect(target.requests() - before).toBe(1);
+    } finally {
+      for (const request of held) request.release();
+      await blockers;
+    }
+  });
+
+  it.each([false, true])(
+    "keeps the later supplied title snapshot at the same source revision, already loaded=%s",
+    async (loaded) => {
+      const app = await started(await tempDir());
+      const provider = await host();
+      const saved = await app.subscriptions.add(login(provider.link));
+      await app.subscriptions.mapPlaylist(saved.id, films, "movie");
+      if (loaded) await app.titles.refresh(saved.id);
+      const source = await app.subscriptions.sourceOf(saved.id);
+      const first = await source.provider.playlistImport!(undefined, true);
+      provider.set(
+        provider.list(
+          "new",
+          `#EXTINF:-1 group-title="Films",New film\n${provider.origin}/new-film.mp4\n`,
+        ),
+      );
+      const second = await source.provider.playlistImport!(undefined, true);
+      await Promise.all([
+        app.titles.refresh(saved.id, { source, read: Effect.succeed(first) }),
+        app.titles.refresh(saved.id, { source, read: Effect.succeed(second) }),
+      ]);
+      const page = await app.titles.collection({ kind: "movie", id: "all", offset: 0, limit: 20 });
+      expect(page.titles.map((title) => title.name).sort()).toEqual(["Film", "New film"]);
+      expect((await app.titles.status()).lists[0]?.movies).toBe(2);
+    },
+  );
+
+  it("joins an unmapped Live read already running without downloading an unused combined snapshot", async () => {
+    const provider = await host();
+    const app = await started(await tempDir());
+    const saved = await app.subscriptions.add(login(provider.link));
+    const before = provider.requests();
+    const held = provider.hold();
+    const independent = app.library.refresh(saved.id);
+    await held.arrived;
+    const combined = app.roster.refreshPlaylist(saved.id);
+    held.release();
+    await Promise.all([independent, combined]);
+    expect(provider.requests() - before).toBe(1);
+    expect(await app.library.channels({})).toHaveLength(2);
+    expect((await app.titles.status()).lists).toEqual([]);
   });
 
   it("keeps one exact playlist snapshot while both list services wait behind other subscriptions", async () => {
