@@ -22,7 +22,7 @@ import {
   type ReactNode,
 } from "react";
 import type { Listing, ListingMatch, Programme } from "@mrstreamer/contracts/guide";
-import type { LiveChannel } from "@mrstreamer/contracts/library";
+import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
 import { ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { matchRanges } from "@mrstreamer/core/text";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
@@ -34,7 +34,7 @@ import { queries, useSourceOf, useSubscriptionNames } from "../../lib/queries.ts
 import { useRem } from "../../lib/use-rem.ts";
 import { cn } from "../../lib/utils.ts";
 import { useVisibleListings } from "./lists.ts";
-import { searchQualities, type SearchChannelRow } from "./search-rows.ts";
+import { rowPlays, searchQualities, type SearchChannelRow } from "./search-rows.ts";
 import type { RowPart } from "./reorder.ts";
 
 const ROW_REM = 3.75;
@@ -66,6 +66,7 @@ export interface TableOrder {
 export function ChannelTable({
   channels,
   searchRows = null,
+  categories,
   expandedCopies = new Set<string>(),
   onToggleCopies,
   onSelectSearch,
@@ -82,6 +83,7 @@ export function ChannelTable({
 }: {
   channels: readonly LiveChannel[];
   searchRows?: readonly SearchChannelRow[] | null;
+  categories?: ReadonlyMap<string, Category>;
   expandedCopies?: ReadonlySet<string>;
   onToggleCopies?: (key: string) => void;
   onSelectSearch?: (index: number) => void;
@@ -138,7 +140,9 @@ export function ChannelTable({
 
   // The list opens on the playing channel.
   useEffect(() => {
-    const index = channels.findIndex((channel) => ownedKey(channel) === playingKey);
+    const index = channels.findIndex((channel, at) =>
+      rowPlays(channel, searchRows?.[at], playingKey),
+    );
     virtualizer.scrollToIndex(Math.max(index, 0), { align: index > 0 ? "center" : "start" });
     // Only once its channels are in, not when another channel starts.
   }, [channels.length > 0]);
@@ -190,6 +194,13 @@ export function ChannelTable({
                     : sourceOf(channel)
                 }
                 searchRow={searchRows?.[item.index] ?? null}
+                category={
+                  channel.categoryIds
+                    .map((id) =>
+                      categories?.get(ownedKey({ subscriptionId: channel.subscriptionId, id })),
+                    )
+                    .find(Boolean) ?? null
+                }
                 copiesOpen={expandedCopies.has(searchRows?.[item.index]?.group.key ?? "")}
                 onToggleCopies={() => {
                   const row = searchRows?.[item.index];
@@ -198,13 +209,7 @@ export function ChannelTable({
                 onSelectSearch={() => onSelectSearch?.(item.index)}
                 listing={listings.get(key) ?? null}
                 now={now}
-                playing={
-                  searchRows?.[item.index] && !searchRows[item.index]!.copy
-                    ? searchRows[item.index]!.group.copies.some(
-                        (copy) => ownedKey(copy) === playingKey,
-                      )
-                    : key === playingKey
-                }
+                playing={rowPlays(channel, searchRows?.[item.index], playingKey)}
                 selected={item.index === selected}
                 expanded={
                   key === expandedKey &&
@@ -244,6 +249,7 @@ function ChannelRow({
   channel,
   source,
   searchRow,
+  category,
   copiesOpen,
   onToggleCopies,
   onSelectSearch,
@@ -264,6 +270,7 @@ function ChannelRow({
   /** The subscription it is from, by name, where another's channel is called the same. */
   source: string | null;
   searchRow: SearchChannelRow | null;
+  category: Category | null;
   copiesOpen: boolean;
   onToggleCopies: () => void;
   onSelectSearch: () => void;
@@ -283,6 +290,17 @@ function ChannelRow({
 }) {
   const searching = words.length > 0;
   const grouped = searchRow && !searchRow.copy && searchRow.group.copies.length > 1;
+  const subscriptionCount = grouped
+    ? new Set(searchRow.group.copies.map((copy) => copy.subscriptionId)).size
+    : 0;
+  const groupSummary = grouped
+    ? `${subscriptionCount} ${subscriptionCount === 1 ? "subscription" : "subscriptions"} · ${searchQualities(searchRow.group.copies)}`
+    : null;
+  const copySummary = searchRow?.copy
+    ? [source, category?.group, category?.title, searchQualities([channel])]
+        .filter(Boolean)
+        .join(" · ")
+    : null;
   const current = listing?.now ?? null;
   const next = listing?.next ?? null;
   // A match that began since it was found is the programme on now.
@@ -328,13 +346,24 @@ function ChannelRow({
               role: "button",
               tabIndex: searchRow && selected ? 0 : -1,
               onClick: onWatch,
-              onFocus: searchRow ? onSelectSearch : undefined,
+              onFocus: searchRow
+                ? (event: FocusEvent) => {
+                    if (event.target === event.currentTarget) onSelectSearch();
+                  }
+                : undefined,
               "aria-label": searchRow
                 ? [
                     channel.title,
+                    grouped ? groupSummary : null,
+                    grouped
+                      ? `${searchRow.group.streams} ${searchRow.group.streams === 1 ? "stream" : "streams"}`
+                      : null,
                     searchRow?.copy ? source : null,
+                    searchRow?.copy ? category?.group : null,
+                    searchRow?.copy ? category?.title : null,
                     searchRow?.copy ? channel.number : null,
                     searchRow?.copy ? searchQualities([channel]) : null,
+                    match?.now ? current?.title : later?.title,
                   ]
                     .filter((part) => part != null && part !== "")
                     .join(", ")
@@ -366,7 +395,7 @@ function ChannelRow({
         <span
           className={cn(
             "flex w-[13rem] flex-none gap-2",
-            grouped ? "flex-wrap items-center gap-y-0" : "items-center",
+            grouped || searchRow?.copy ? "flex-wrap items-center gap-y-0" : "items-center",
           )}
           title={channel.name}
         >
@@ -377,17 +406,14 @@ function ChannelRow({
           <span
             className={cn(
               "text-xs text-muted-foreground",
-              grouped ? "w-full truncate text-white" : "flex-none",
+              grouped || searchRow?.copy ? "w-full truncate text-white" : "flex-none",
             )}
+            title={copySummary ?? undefined}
           >
-            {grouped
-              ? `${new Set(searchRow.group.copies.map((copy) => copy.subscriptionId)).size} subscriptions · ${searchQualities(searchRow.group.copies)}`
-              : searchRow?.copy
-                ? searchQualities([channel])
-                : qualitiesLine(channel)}
+            {grouped ? groupSummary : searchRow?.copy ? copySummary : qualitiesLine(channel)}
           </span>
           {/* Plain text in the name's cell, which gives way before the name does. */}
-          {!grouped && source && (
+          {!grouped && !searchRow?.copy && source && (
             <span className="min-w-0 flex-shrink-[3] truncate text-xs text-muted-foreground">
               · {source}
             </span>

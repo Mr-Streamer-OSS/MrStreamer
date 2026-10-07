@@ -60,7 +60,7 @@ type Result =
       readonly key: string;
     }
   | { readonly kind: "title"; readonly title: Title }
-  | { readonly kind: "programme"; readonly match: ProgrammeMatch };
+  | { readonly kind: "programme"; readonly match: ProgrammeMatch; readonly key: string };
 
 /** Channel results listed before the rest. */
 const CHANNEL_RESULTS = 20;
@@ -86,7 +86,7 @@ function Palette() {
     () => searchResultGroups(channels.data ?? []).slice(0, CHANNEL_RESULTS),
     [channels.data],
   );
-  const [open, setOpen] = useState<number | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
   const [active, setActive] = useState(0);
   const results = useMemo((): Result[] => {
     if (!debounced.trim()) return [];
@@ -110,7 +110,11 @@ function Palette() {
         ...(titles.data?.movies ?? []).slice(0, TITLE_RESULTS),
         ...(titles.data?.series ?? []).slice(0, TITLE_RESULTS),
       ].map((title): Result => ({ kind: "title", title })),
-      ...(programmes.data ?? []).map((match): Result => ({ kind: "programme", match })),
+      ...(programmes.data ?? []).map((match): Result => ({
+        kind: "programme",
+        match,
+        key: `${ownedKey(match.channel)}:${match.programme.start}`,
+      })),
     ];
   }, [debounced, groups, expanded, titles.data, programmes.data]);
 
@@ -142,7 +146,7 @@ function Palette() {
       }
       openDetails({ kind: result.title.kind, ...ownedId(result.title) });
     } else if (result.match.programme.start <= Date.now()) watchChannel(result.match.channel);
-    else setOpen((current) => (current === index ? null : index));
+    else setOpen((current) => (current === result.key ? null : result.key));
   };
 
   function onKey(event: KeyboardEvent) {
@@ -266,7 +270,7 @@ function Palette() {
                   : `${clockTime(programme.start, now)} · ${shows}`;
               return (
                 <button
-                  key={`${ownedKey(channel)}:${programme.start}`}
+                  key={result.key}
                   id={`${resultsId}-${index}`}
                   role="treeitem"
                   aria-level={1}
@@ -285,7 +289,7 @@ function Palette() {
                       {programme.title}
                     </span>
                     <span className="block truncate text-xs text-muted-foreground">{detail}</span>
-                    {open === index && programme.description && (
+                    {open === result.key && programme.description && (
                       <span className="mt-1.5 block text-[0.8125rem] leading-relaxed text-muted-foreground">
                         {programme.description}
                       </span>

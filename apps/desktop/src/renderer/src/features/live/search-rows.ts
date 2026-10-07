@@ -22,6 +22,16 @@ export interface SearchChannelRow {
   readonly channel: LiveChannel;
 }
 
+/** A collapsed group contains every copy; an expanded copy represents only its own channel. */
+export function rowPlays(
+  channel: LiveChannel,
+  row: SearchChannelRow | undefined,
+  playingKey: string | null,
+): boolean {
+  const copies = row && !row.copy ? row.group.copies : [channel];
+  return copies.some((copy) => ownedKey(copy) === playingKey);
+}
+
 /** Expand canonical copies without changing the collapsed result or stream counts. */
 export function searchChannelRows(
   groups: readonly LiveSearchGroup[],

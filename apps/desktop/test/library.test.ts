@@ -169,7 +169,7 @@ describe("live library", () => {
     ]);
     const canonical = found.map(({ searchGroup: _group, ...channel }) => channel);
     expect(await library.channel(own(sd))).toEqual(canonical[0]);
-    expect(await library.channels({ channels: [sd, hd, fhd].map(own) })).toEqual(canonical);
+    expect(await library.channels({ channels: [sd, hd, fhd].map(own) })).toEqual(found);
   });
 
   it("finds nothing by an id that names another subscription", async () => {
@@ -259,8 +259,12 @@ describe("live library", () => {
     const loaded = await restarted.channels({});
     // Missing guide ids preserve ordinary channel/stream ownership, while search cannot trust
     // guide identities the old cache never stored.
-    expect(loaded.map(({ searchIdentity: _identity, ...channel }) => channel)).toEqual(
-      (await library.channels({})).map(({ searchIdentity: _identity, ...channel }) => channel),
+    expect(
+      loaded.map(({ searchIdentity: _identity, searchGroup: _group, ...channel }) => channel),
+    ).toEqual(
+      (await library.channels({})).map(
+        ({ searchIdentity: _identity, searchGroup: _group, ...channel }) => channel,
+      ),
     );
     expect(loaded.every((channel) => channel.searchIdentity?.guideId == null)).toBe(true);
     expect(await restarted.isStale(60 * 60 * 1000)).toBe(true);

@@ -17,7 +17,11 @@ export interface LiveSearchIndex {
 
 /** Build once per loaded catalogue/list, so a programme-only match can retain all real copies. */
 export function indexLiveSearch(channels: readonly LiveChannel[]): LiveSearchIndex {
-  const groups = groupLiveSearch(channels);
+  // Main stamps list responses against its full catalogue. A favourites/category subset must
+  // retain those decisions rather than treating a missing conflicting copy as agreement.
+  const groups = channels.some((channel) => channel.searchGroup !== undefined)
+    ? searchResultGroups(channels)
+    : groupLiveSearch(channels);
   return {
     groups,
     byCopy: new Map(
@@ -164,14 +168,18 @@ export function searchResultGroups(channels: readonly LiveChannel[]): readonly L
     const id = ownedKey(channel);
     if (seen.has(id)) continue;
     seen.add(id);
-    const key = channel.searchGroup ?? id;
+    const key = channel.searchGroup?.key ?? id;
     const copies = groups.get(key);
     if (copies) copies.push(channel);
     else groups.set(key, [channel]);
   }
   return [...groups].map(([key, copies]) => ({
     key,
-    copies,
+    copies: copies.toSorted(
+      (a, b) =>
+        (a.searchGroup?.order ?? Number.MAX_SAFE_INTEGER) -
+        (b.searchGroup?.order ?? Number.MAX_SAFE_INTEGER),
+    ),
     streams: new Set(
       copies.flatMap((channel) =>
         channel.variants.map((variant) => JSON.stringify([channel.subscriptionId, variant.id])),

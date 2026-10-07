@@ -484,16 +484,20 @@ function make(options: LibraryOptions) {
               ({ subscriptionId, id }) => byId.get(subscriptionId)?.get(id) ?? [],
             );
             if (query)
-              return matchingSearchGroups(searchIndex(searched.channels), found)
-                .slice(0, SEARCH_LIMIT)
-                .flatMap((group) =>
-                  group.copies.map((copy) => ({ ...copy, searchGroup: group.key })),
-                );
-            return [...new Set(found)].map(lists.shown);
+              return stampSearchGroups(
+                matchingSearchGroups(searchIndex(searched.channels), found)
+                  .slice(0, SEARCH_LIMIT)
+                  .flatMap((group) => group.copies),
+                searched.channels,
+              );
+            return stampSearchGroups([...new Set(found)].map(lists.shown), searched.channels);
           }
           if (query) return search(searched.channels, searched.searchNames, query);
-          if (!filter.category) return lists.channels;
-          return lists.byCategory.get(ownedKey(filter.category)) ?? [];
+          if (!filter.category) return stampSearchGroups(lists.channels, searched.channels);
+          return stampSearchGroups(
+            lists.byCategory.get(ownedKey(filter.category)) ?? [],
+            searched.channels,
+          );
         }),
 
       channel: (channel: OwnedId) =>
@@ -717,7 +721,7 @@ function search(
   channels: readonly LiveChannel[],
   names: readonly string[],
   query: string,
-): LiveChannel[] {
+): readonly LiveChannel[] {
   const words = query.split(" ");
   const ranked: { channel: LiveChannel; rank: number; order: number }[] = [];
   for (const [order, channel] of channels.entries()) {
@@ -738,15 +742,49 @@ function search(
     .map((entry) => entry.channel)
     .filter((channel) => selected.has(ownedKey(channel)));
   const matchedKeys = new Set(matched.map(ownedKey));
-  const keys = new Map(
-    groups.flatMap((group) => group.copies.map((copy) => [ownedKey(copy), group.key] as const)),
-  );
-  return [...matched, ...copies.filter((channel) => !matchedKeys.has(ownedKey(channel)))].map(
-    (copy) => ({ ...copy, searchGroup: keys.get(ownedKey(copy))! }),
+  return stampSearchGroups(
+    [...matched, ...copies.filter((channel) => !matchedKeys.has(ownedKey(channel)))],
+    channels,
   );
 }
 
 const searchIndexes = new WeakMap<readonly LiveChannel[], LiveSearchIndex>();
+const stampedSearchResponses = new WeakMap<
+  LiveSearchIndex,
+  {
+    readonly stamps: ReadonlyMap<string, NonNullable<LiveChannel["searchGroup"]>>;
+    readonly responses: WeakMap<readonly LiveChannel[], readonly LiveChannel[]>;
+  }
+>();
+
+/** List subsets carry full-catalogue grouping without changing canonical playback channels. */
+function stampSearchGroups(
+  channels: readonly LiveChannel[],
+  all: readonly LiveChannel[],
+): readonly LiveChannel[] {
+  const index = searchIndex(all);
+  let cache = stampedSearchResponses.get(index);
+  if (!cache) {
+    cache = {
+      stamps: new Map(
+        index.groups.flatMap((group) =>
+          group.copies.map((copy, order) => [ownedKey(copy), { key: group.key, order }] as const),
+        ),
+      ),
+      responses: new WeakMap(),
+    };
+    stampedSearchResponses.set(index, cache);
+  }
+  let response = cache.responses.get(channels);
+  if (!response) {
+    response = channels.map((channel) => ({
+      ...channel,
+      searchGroup: cache.stamps.get(ownedKey(channel)) ?? { key: ownedKey(channel), order: 0 },
+    }));
+    cache.responses.set(channels, response);
+  }
+  return response;
+}
 
 function searchIndex(channels: readonly LiveChannel[]): LiveSearchIndex {
   let index = searchIndexes.get(channels);

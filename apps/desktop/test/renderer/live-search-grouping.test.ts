@@ -52,7 +52,7 @@ const green: readonly LiveChannel[] = catalogue.map((channel) => ({
 const all = [...blue, ...green];
 const responses = (channels: readonly LiveChannel[]) =>
   indexLiveSearch(channels).groups.flatMap((group) =>
-    group.copies.map((copy) => ({ ...copy, searchGroup: group.key })),
+    group.copies.map((copy, order) => ({ ...copy, searchGroup: { key: group.key, order } })),
   );
 const programme = (title: string): Programme => ({
   start: Date.now() - 1000,
@@ -199,12 +199,53 @@ async function page(kind: "guide" | "palette", query = "VRT", realPlayback = fal
 }
 
 describe("real search components with two subscriptions", () => {
+  it("hands keyboard input to the lists without leaving Space on a stale channel row", async () => {
+    const p = await page("guide");
+    await p.search("VRT");
+    await p.press("ArrowDown", p.field());
+    expect(document.activeElement).toBe(p.rows()[0]);
+    await p.press("ArrowLeft");
+    expect(document.activeElement).not.toBe(p.rows()[0]);
+    await p.press(" ");
+    expect(p.watch).not.toHaveBeenCalled();
+    await p.press("ArrowRight");
+    await p.press(" ");
+    expect(p.watch).toHaveBeenLastCalledWith(green[1]);
+  });
+
+  it("keeps focus on a different group's button when reached from the selected row", async () => {
+    const p = await page("guide");
+    await p.search("VRT");
+    await p.press("ArrowDown", p.field());
+    const copies = p.button("Show copies", p.rows()[1]);
+    await act(async () => copies.focus());
+    expect(document.activeElement).toBe(copies);
+    await p.click(copies);
+    expect(p.rows()).toHaveLength(6);
+  });
+
+  it("selects the playing channel's collapsed group even when a different copy represents it", async () => {
+    vi.spyOn(player, "current").mockReturnValue(green[2]!);
+    const p = await page("guide");
+    await p.search("VRT");
+    await p.press("ArrowDown", p.field());
+    expect(document.activeElement).toBe(p.rows()[1]);
+    expect(p.rows()[1]?.textContent).toContain("VRT Canvas");
+    await p.press("Enter");
+    expect(p.watch.mock.calls.at(-1)?.[0].title).toBe("VRT Canvas");
+  });
+
   it("GuidePage preserves ordinary lists, counts groups, chooses a favourite, expands exact copies and returns focus on Left", async () => {
     const p = await page("guide");
     expect(p.rows()).toHaveLength(8);
     await p.search("VRT");
-    expect(p.rows().map((row) => row.getAttribute("aria-label"))).toEqual(["VRT 1", "VRT Canvas"]);
+    expect(p.rows().map((row) => row.getAttribute("aria-label")?.split(",")[0])).toEqual([
+      "VRT 1",
+      "VRT Canvas",
+    ]);
     expect(p.scope().textContent).toContain("2 channels · 10 streams");
+    expect(p.rows()[0]!.getAttribute("aria-label")).toContain("2 subscriptions");
+    expect(p.rows()[0]!.getAttribute("aria-label")).toContain("6 streams");
     p.field().blur();
     await p.press("Enter", window);
     expect(p.watch).toHaveBeenLastCalledWith(green[1]);
@@ -214,7 +255,14 @@ describe("real search components with two subscriptions", () => {
     expect(p.rows()[0]!.getAttribute("aria-expanded")).toBe("true");
     expect(p.rows()[1]!.textContent).toContain("FHD · HD");
     expect(p.rows()[1]!.textContent).toContain("Blue");
-    expect(p.rows()[3]!.textContent).toContain("Green guide 1");
+    expect(p.rows()[1]!.textContent).toContain("Belgium · Vlaanderen");
+    expect(p.rows()[1]!.getAttribute("aria-label")).toContain("Belgium, Vlaanderen, 10");
+    await expect
+      .poll(async () => {
+        await settled();
+        return p.rows()[3]!.textContent;
+      })
+      .toContain("Green guide 1");
     await p.press("ArrowDown", window);
     await p.press("Enter", window);
     expect(p.watch).toHaveBeenLastCalledWith(blue[0]);
@@ -352,6 +400,42 @@ describe("real search components with two subscriptions", () => {
     expect(row.textContent).not.toContain("From this copy's guide.");
     await p.press("Enter", p.field());
     expect(row.textContent).toContain("From this copy's guide.");
+    expect(p.watch).not.toHaveBeenCalled();
+  });
+
+  it("keeps a programme's open description attached when channel copies change its row position", async () => {
+    const p = await page("palette", "news");
+    await act(async () => {
+      p.client.setQueryData(queries.search("news").queryKey, responses(all));
+      p.client.setQueryData(
+        queries.programmes("news").queryKey,
+        ["Alpha", "Beta", "Gamma", "Delta", "Epsilon"].map((title, at) => ({
+          channel: green[1]!,
+          programme: {
+            ...later,
+            title,
+            start: later.start + at * 1000,
+            description: `About ${title}`,
+          },
+        })),
+      );
+    });
+    await settled();
+    const programmeRow = (title: string) =>
+      [...document.querySelectorAll<HTMLElement>('button[role="treeitem"]')].find((row) =>
+        row.textContent?.includes(title),
+      )!;
+    await p.click(programmeRow("Epsilon"));
+    expect(programmeRow("Epsilon").textContent).toContain("About Epsilon");
+    await p.click(
+      p.rows()[0]!.parentElement!.querySelector<HTMLElement>('[aria-label="Show copies"]')!,
+    );
+    expect(programmeRow("Epsilon").textContent).toContain("About Epsilon");
+    expect(programmeRow("Alpha").textContent).not.toContain("About Alpha");
+    await p.click(
+      p.rows()[0]!.parentElement!.querySelector<HTMLElement>('[aria-label="Hide copies"]')!,
+    );
+    expect(programmeRow("Epsilon").textContent).toContain("About Epsilon");
     expect(p.watch).not.toHaveBeenCalled();
   });
 

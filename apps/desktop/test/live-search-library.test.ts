@@ -3,7 +3,12 @@ import { join } from "node:path";
 import { type } from "arktype";
 import * as Layer from "effect/Layer";
 import { expect, it } from "vitest";
-import { groupLiveSearch, searchResultGroups } from "@mrstreamer/core/catalogue/search";
+import {
+  automaticSearchCopy,
+  groupLiveSearch,
+  indexLiveSearch,
+  searchResultGroups,
+} from "@mrstreamer/core/catalogue/search";
 import { Library } from "../src/main/services/library.ts";
 import { Settings } from "../src/main/services/preferences.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
@@ -68,6 +73,18 @@ it("search keeps every provider/category/quality copy and reconstructs safe meta
   ]);
   const qualityMatches = await library.channels({ query: "FHD" });
   expect(qualityMatches).toHaveLength(8);
+  const savedOrder = ids.map((id) => ({ id }));
+  const sdMatches = await library.channels({ query: "VRT 1 SD" });
+  expect(searchResultGroups(sdMatches)).toHaveLength(1);
+  const qualityGroup = searchResultGroups(sdMatches).find(
+    (group) => group.copies[0]?.title === "VRT 1",
+  )!;
+  const ordinaryGroup = indexLiveSearch(ordinary).groups.find(
+    (group) => group.copies[0]?.title === "VRT 1",
+  )!;
+  expect(automaticSearchCopy(qualityGroup, new Set(), savedOrder)).toEqual(
+    automaticSearchCopy(ordinaryGroup, new Set(), savedOrder),
+  );
   const programmeMatches = await library.channels({
     query: "evening news",
     channels: [{ subscriptionId: ids[1]!, id: "1002" }],
@@ -77,9 +94,10 @@ it("search keeps every provider/category/quality copy and reconstructs safe meta
   ).toEqual([[4, 6]]);
   for (const { searchGroup: _group, ...channel } of results)
     expect(await library.channel(channel)).toEqual(channel);
-  const cached = type({ version: "4", channels: type({ "searchIdentity?": "undefined" }).array() })(
-    JSON.parse(await readFile(join(dataDir, "catalogue.json"), "utf8")),
-  );
+  const cached = type({
+    version: "4",
+    channels: type({ "searchIdentity?": "undefined", "searchGroup?": "undefined" }).array(),
+  })(JSON.parse(await readFile(join(dataDir, "catalogue.json"), "utf8")));
   expect(cached).not.toBeInstanceOf(type.errors);
   await Promise.all(providers.map((provider) => provider.close()));
   const restart = await started(dataDir);
@@ -116,5 +134,11 @@ it("palette responses retain full-catalogue ambiguity when the query excludes a 
   const partial = await library.channels({ query: "vrt 1 fhd" });
   expect(partial).toHaveLength(2);
   expect(searchResultGroups(partial)).toHaveLength(2);
-  expect(new Set(partial.map((copy) => copy.searchGroup)).size).toBe(2);
+  expect(new Set(partial.map((copy) => copy.searchGroup?.key)).size).toBe(2);
+  const list = await library.channels({
+    channels: partial.map(({ subscriptionId, id }) => ({ subscriptionId, id })),
+  });
+  // A list can hide the conflicting guide, but it cannot turn that absence into identity.
+  expect(indexLiveSearch(list).groups).toHaveLength(2);
+  expect(list.map((copy) => copy.searchGroup)).toEqual(partial.map((copy) => copy.searchGroup));
 });

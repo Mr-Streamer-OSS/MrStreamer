@@ -44,7 +44,7 @@ import { usePreviewWaits } from "../../player/output.ts";
 import { Picture } from "../../player/Picture.tsx";
 import { player, usePlayer } from "../../player/player.ts";
 import { numberEntry, NumberEntry } from "../watch/NumberEntry.tsx";
-import { searchChannelRows } from "./search-rows.ts";
+import { rowPlays, searchChannelRows } from "./search-rows.ts";
 import { ChannelTable } from "./ChannelTable.tsx";
 import { ListPicker, listKey, useOpenGroups } from "./ListPicker.tsx";
 import {
@@ -204,8 +204,11 @@ export function GuidePage({ active }: { active: boolean }) {
   // A new list, or another search of it, selects its playing channel, or its first.
   const loaded = listed !== undefined;
   useEffect(() => {
+    const playing = player.current();
     const index = Math.max(
-      rows.findIndex((channel) => sameOwned(channel, player.current())),
+      rows.findIndex((channel, at) =>
+        rowPlays(channel, searchRows?.[at], playing ? ownedKey(playing) : null),
+      ),
       0,
     );
     setChosen({ index, channel: rows[index] ?? null });
@@ -352,7 +355,11 @@ export function GuidePage({ active }: { active: boolean }) {
                 (candidate) => candidate.group.key === row.group.key && !candidate.copy,
               ),
             );
-          } else if (now.focus === "channels") setFocus("lists");
+          } else if (now.focus === "channels") {
+            setFocus("lists");
+            const focused = document.activeElement;
+            if (focused instanceof HTMLElement && page.current?.contains(focused)) focused.blur();
+          }
           break;
         }
         case "Backspace":
@@ -533,6 +540,7 @@ export function GuidePage({ active }: { active: boolean }) {
               />
             ) : (
               <ChannelTable
+                categories={categoryMap}
                 key={`${key}\n${search.query}`}
                 channels={rows}
                 searchRows={searchRows}
