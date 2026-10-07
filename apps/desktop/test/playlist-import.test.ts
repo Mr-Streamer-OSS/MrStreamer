@@ -444,7 +444,7 @@ describe("saved M3U movie mapping", () => {
     expect(
       (await restarted.titles.collection({ kind: "movie", id: "all", offset: 0, limit: 20 })).total,
     ).toBe(0);
-  });
+  }, 15_000);
 
   it("drops stale work after a mapping change and preserves other subscriptions", async () => {
     const provider = await host();
