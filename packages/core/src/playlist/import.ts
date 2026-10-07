@@ -39,17 +39,12 @@ export function importPlaylist(
     const exact = JSON.stringify([
       entry.name,
       entry.url,
-      Object.entries(entry.attributes).sort(([a], [b]) => a.localeCompare(b)),
+      Object.entries(entry.attributes).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
       entry.group,
       entry.userAgent,
       entry.referrer,
     ]);
     if (!unique.has(exact)) unique.set(exact, entry);
-  }
-  const entryIds = new Map<string, number>();
-  for (const entry of unique.values()) {
-    const id = entry.attributes["entry-id"];
-    if (id) entryIds.set(id, (entryIds.get(id) ?? 0) + 1);
   }
   const modes = new Map(mapping?.groups.map(({ group, mode }) => [group, mode]));
   const files = new Map<string, PlaylistFile>();
@@ -101,6 +96,7 @@ export function importPlaylist(
       continue;
     }
     if (mode === "live") {
+      if (!mapping) continue;
       live.push({
         ...entry,
         name: safeName(entry.name),
@@ -114,11 +110,7 @@ export function importPlaylist(
     }
     if (mode !== "movie" && mode !== "series") continue;
     // tvg-id often identifies a channel, not an exact file. Hash the complete source version.
-    const explicitId = entry.attributes["entry-id"];
-    const id =
-      explicitId && entryIds.get(explicitId) === 1
-        ? `m3u:${digest(`entry-id:${explicitId}`)}:${digest(exact)}`
-        : `m3u:${digest(exact)}`;
+    const id = `m3u:${digest(exact)}`;
     const container = fileContainer(entry.url);
     const categories = mode === "movie" ? movieCategories : seriesCategories;
     for (const group of names)
@@ -272,5 +264,8 @@ function artwork(value: string | undefined): string | null {
 
 /** Playlist names and groups are untrusted copy, and must never expose a provider link. */
 export function safeName(value: string): string {
-  return value.replace(/\b[a-z][a-z\d+.-]*:\/\/[^\s"'<>]+/gi, "[address]");
+  return value
+    .slice(0, 512)
+    .replace(/\b[a-z][a-z\d+.-]*:\/\/[^\s"'<>]+/gi, "[address]")
+    .slice(0, 512);
 }

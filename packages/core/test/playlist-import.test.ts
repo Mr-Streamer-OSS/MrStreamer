@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
 import { importPlaylist, mapPlaylistGroup, playlistGroupId } from "../src/playlist/import.ts";
 import { m3uReader } from "../src/playlist/m3u.ts";
 
@@ -63,6 +64,47 @@ describe("mixed playlist imports", () => {
     ).toMatchObject({ container: "mp4", headers: { Referer: "https://example.test/" } });
   });
 
+  it("keeps exact movie and episode identities across a change of system language", () => {
+    const importer = new URL("../src/playlist/import.ts", import.meta.url).href;
+    const reader = new URL("../src/playlist/m3u.ts", import.meta.url).href;
+    const playlist =
+      '#EXTM3U\n#EXTINF:-1 group-title="Films" channel-id="film" tvg-chno="7" tvg-country="NL",Film\nhttps://example.test/film.mp4\n#EXTINF:-1 group-title="Shows" channel-id="show" tvg-chno="8" tvg-country="NL",Show S01E02\nhttps://example.test/episode.mp4\n';
+    const script = `
+      import { importPlaylist, playlistGroupId } from ${JSON.stringify(importer)};
+      import { m3uReader } from ${JSON.stringify(reader)};
+      const reader = m3uReader();
+      const imported = importPlaylist([...reader.push(${JSON.stringify(playlist)}), ...reader.end()], {
+        version: 1, groups: [
+          { group: playlistGroupId("Films"), mode: "movie" },
+          { group: playlistGroupId("Shows"), mode: "series" },
+        ],
+      });
+      console.log(JSON.stringify([...imported.files.keys()]));
+    `;
+    const identities = (locale: string) =>
+      execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+        env: { ...process.env, LC_ALL: locale, LANG: locale },
+        encoding: "utf8",
+      });
+    expect(identities("cs_CZ.UTF-8")).toBe(identities("en_US.UTF-8"));
+  });
+
+  it("bounds displayed names while retaining each full source identity", () => {
+    const name = "a-".repeat(50_000);
+    const long = entries(`#EXTINF:-1 group-title="Films",${name}\nhttps://example.test/long.mp4`);
+    const pending = importPlaylist(long, { version: 1, groups: [] });
+    expect(pending.omissions[0]?.name).toHaveLength(512);
+    expect([...pending.groups.values()][0]?.[0]?.name).toHaveLength(512);
+    const imported = importPlaylist(
+      [...long, ...long.map((entry) => ({ ...entry, name: `${entry.name}Different` }))],
+      mapping,
+    );
+    expect(imported.catalogue.movies).toHaveLength(2);
+    expect(new Set(imported.catalogue.movies.map(({ id }) => id)).size).toBe(2);
+    expect(imported.catalogue.movies.every(({ name }) => name.length <= 512)).toBe(true);
+    expect(importPlaylist(long).live.channels[0]?.name).toBe(name);
+  });
+
   it("leaves conflicting, partially unmapped, unsupported and nameless entries out with their reasons", () => {
     const list = entries(
       `#EXTINF:-1 group-title="News;Films",Conflict\nhttps://example.test/a.mp4\n#EXTINF:-1 group-title="Films;New",Unmapped\nhttps://example.test/b.mp4\n#EXTINF:-1 group-title="Films",Unsupported\nrtmp://example.test/a\n#EXTINF:-1 group-title="Films",\nhttps://example.test/c.mp4`,
@@ -106,6 +148,7 @@ describe("mixed playlist imports", () => {
       mapping,
     );
     expect(new Set(collision.catalogue.movies.map((title) => title.id)).size).toBe(2);
+    expect(collision.catalogue.movies[0]?.id).toBe(original.id);
   });
 });
 

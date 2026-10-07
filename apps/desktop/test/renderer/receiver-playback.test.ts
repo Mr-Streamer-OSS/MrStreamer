@@ -397,6 +397,55 @@ describe("a movie a receiver plays as the window opens", () => {
 });
 
 describe("an episode a receiver plays as the window opens", () => {
+  it.each([true, false])(
+    "takes up the exact alternate file only while it remains listed: %s",
+    async (listed) => {
+      const ref = { ...episodeRef, id: "e1-4k" };
+      const playing = ipc.hold("output.playingTitle");
+      const lists = ipc.hold("ondemand.details");
+      await open(connected(said(1, { kind: "title", title: ref }, "paused", 600, 2700)));
+      await act(async () => playing.resolve(playingTitle(1, ref)));
+      await act(async () =>
+        lists.resolve({
+          ...series,
+          exactVersions: true,
+          seasons: [
+            {
+              ...series.seasons[0]!,
+              episodes: [
+                {
+                  ...episode("e1", 1, "First Light"),
+                  exactVersion: true,
+                  versions: [
+                    { id: "e1", name: "Standard", tags: [], duration: 2700 },
+                    ...(listed ? [{ id: ref.id, name: "4K", tags: ["4K"], duration: 2700 }] : []),
+                  ],
+                },
+                episode("e2", 2, "Low Sun"),
+              ],
+            },
+          ],
+        }),
+      );
+      await wait();
+
+      expect(useUi.getState().playingTitle).toBe(listed);
+      if (listed) {
+        expect(titlePlayer.state()).toMatchObject({
+          now: { title: ref },
+          phase: { kind: "paused" },
+          position: 600,
+          next: { id: "e2" },
+        });
+        await press("Play");
+        expect(commands()).toEqual([{ generation: 1, command: "play" }]);
+      } else {
+        expect(titlePlayer.state().now).toBeNull();
+        expect(commands()).toEqual([]);
+      }
+    },
+  );
+
   it("shows in its view, with the one after it to come", async () => {
     const playing = ipc.hold("output.playingTitle");
     const lists = ipc.hold("ondemand.details");
