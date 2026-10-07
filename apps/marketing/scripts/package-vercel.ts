@@ -4,9 +4,8 @@
 //   node scripts/package-vercel.ts    (after `vite build`)
 //
 // - static/: everything in dist/.
-// - config.json: /privacy and /privacy/ answer the privacy page, which the app and the Store
-//   listing link to. An address with no page or file answers 404.html with status 404, and so
-//   does /404.html itself. No builds.json: without one the CLI deploys to the target it is told,
+// - config.json: each page answers its canonical address, with or without a trailing slash.
+//   An unknown address or an HTML alias answers 404.html with status 404. No builds.json: without one the CLI deploys to the target it is told,
 //   where a builds.json naming a preview would win.
 // - Nothing for analytics: Vercel adds /_vercel/insights/, where src/main.ts loads the script
 //   from, and answers it ahead of these routes. It adds that in its build step, which this
@@ -14,20 +13,19 @@
 //
 // Fails, listing every problem, when:
 // - a page names a file the package lacks, or has no script or styles
-// - the home or privacy page lacks its address, description or social picture, or the sitemap
+// - a listed page lacks its address, description or social picture, or the sitemap
 //   doesn't list it
 // - the home page lacks the script that picks its one download button, links an installer
 //   anywhere but this repository's releases, or describes the app to search engines in data
 //   that doesn't read or shows a picture the package lacks
-// - the privacy page doesn't hold the whole policy
+// - a Markdown page lacks source headings, or a public link or fragment is missing
 // - search engines could list 404.html
 // - robots.txt doesn't name the sitemap, or a route answers with a missing page
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { PAGES, SITE } from "./pages.ts";
 
-const SITE = "https://mrstreamer.app";
-/** The pages search engines list, by address. */
-const LISTED = { "/": "index.html", "/privacy": "privacy/index.html" };
+const LISTED = Object.fromEntries(PAGES.map(({ address, file }) => [address, file]));
 
 const root = join(import.meta.dirname, "..");
 const output = join(root, ".vercel/output");
@@ -40,8 +38,11 @@ cpSync(join(root, "dist"), files, { recursive: true });
 // before the package's files, the one below it after them.
 const missing = { status: 404, dest: "/404.html" };
 const routes = [
-  { src: "^/privacy/?$", dest: `/${LISTED["/privacy"]}` },
-  { src: "^/404\\.html$", ...missing },
+  ...PAGES.map(({ address, file }) => ({
+    src: address === "/" ? "^/$" : `^${address}/?$`,
+    dest: `/${file}`,
+  })),
+  { src: "^/.*\\.html$", ...missing },
   { handle: "filesystem" },
   { src: "^/.*$", ...missing },
 ];
@@ -81,9 +82,14 @@ for (const [address, name] of Object.entries(LISTED)) {
   check(name, {
     "its address": `<link rel="canonical" href="${SITE}${address}"`,
     "a description": '<meta name="description" content="',
-    "a title for shared links": '<meta property="og:title" content="',
+    "a title for shared links": '<meta property="og:title"',
+    "a description for shared links": '<meta property="og:description" content="',
+    "its address for shared links": `<meta property="og:url" content="${SITE}${address}"`,
     "a picture for shared links": `<meta property="og:image" content="${SITE}/generated/social.png"`,
   });
+  if (!/<title\b[^>]*>[^<\s][^<]*<\/title>/.test(read(name))) {
+    problems.push(`${name} lacks a title.`);
+  }
   if (!sitemap.includes(`<loc>${SITE}${address}</loc>`)) {
     problems.push(`sitemap.xml doesn't list ${address}.`);
   }
@@ -93,7 +99,7 @@ check("404.html", {
 });
 
 // The home page's download button, installer links and structured data.
-const home = read(LISTED["/"]);
+const home = read("index.html");
 if (!home.includes("document.documentElement.dataset.os=")) {
   problems.push(`${LISTED["/"]} lacks the script that names the visitor's system.`);
 }
@@ -101,9 +107,11 @@ const RELEASES = "https://github.com/Mr-Streamer-OSS/MrStreamer/releases";
 const installer = new RegExp(
   `^${RELEASES}/(latest|download/v(\\d+\\.\\d+\\.\\d+)/Mr-Streamer-\\2-[\\w.-]+)$`,
 );
-const links = [...home.matchAll(/<a\s[^>]*\bdata-installer="\w+"[^>]*>/g)].map(
-  ([tag]) => /\shref="([^"]*)"/.exec(tag)?.[1] ?? "",
-);
+const links = [
+  ...[home, read("download/index.html")]
+    .join("\n")
+    .matchAll(/<a\s[^>]*\bdata-installer="\w+"[^>]*>/g),
+].map(([tag]) => /\shref="([^"]*)"/.exec(tag)?.[1] ?? "");
 if (links.length === 0) problems.push(`${LISTED["/"]} links no installer.`);
 for (const link of new Set(links.filter((link) => !installer.test(link)))) {
   problems.push(`${LISTED["/"]} links an installer at "${link}", outside the project's releases.`);
@@ -111,11 +119,18 @@ for (const link of new Set(links.filter((link) => !installer.test(link)))) {
 try {
   const [, json = ""] = /<script type="application\/ld\+json">(.*?)<\/script>/s.exec(home) ?? [];
   const { "@type": type, screenshot }: Record<string, unknown> = JSON.parse(json);
-  const picture = typeof screenshot === "string" ? screenshot.replace(SITE, "") : "";
+  const pictures = Array.isArray(screenshot) ? screenshot : [screenshot];
   if (
-    type !== "SoftwareApplication" ||
-    !picture.startsWith("/") ||
-    !existsSync(join(files, picture))
+    !(Array.isArray(type)
+      ? type.includes("SoftwareApplication")
+      : type === "SoftwareApplication") ||
+    pictures.length === 0 ||
+    pictures.some(
+      (picture: unknown) =>
+        typeof picture !== "string" ||
+        !picture.startsWith(`${SITE}/`) ||
+        !existsSync(join(files, picture.slice(SITE.length))),
+    )
   ) {
     problems.push(`${LISTED["/"]} describes no app, or shows a picture that is missing.`);
   }
@@ -123,17 +138,38 @@ try {
   problems.push(`${LISTED["/"]} holds structured data that doesn't read.`);
 }
 
-// The privacy page is docs/privacy.md, rendered: each heading there is a heading here.
-const headings = readFileSync(join(root, "../../docs/privacy.md"), "utf8").match(/^#+ /gm) ?? [];
-const rendered = read(LISTED["/privacy"]).match(/<h[1-6][ >]/g) ?? [];
-if (headings.length === 0 || rendered.length !== headings.length) {
-  problems.push(`${LISTED["/privacy"]} doesn't hold the whole privacy policy.`);
+// Every Markdown page holds its source's headings, even without JavaScript.
+for (const page of PAGES) {
+  if (!page.markdown) continue;
+  const headings = readFileSync(join(root, "../..", page.markdown), "utf8").match(/^#+ /gm) ?? [];
+  const rendered = read(page.file).match(/<h[1-6][ >]/g) ?? [];
+  const extra = page.address.startsWith("/docs/") ? 1 : 0;
+  if (headings.length === 0 || rendered.length !== headings.length + extra) {
+    problems.push(`${page.file} doesn't hold the whole Markdown document.`);
+  }
+}
+
+// Public links and fragments must lead to a real page, rather than maintainer-only 404s.
+for (const page of PAGES) {
+  for (const [, href = ""] of read(page.file).matchAll(/\shref="([^"<>]+)"/g)) {
+    if (!href.startsWith("/") && !href.startsWith("#")) continue;
+    const url = new URL(href.replaceAll("&amp;", "&"), SITE + page.address);
+    const target = PAGES.find(({ address }) => address === url.pathname);
+    if (!target) {
+      if (!existsSync(join(files, url.pathname)))
+        problems.push(`${page.file} links missing ${url.pathname}.`);
+      continue;
+    }
+    if (url.hash && !read(target.file).includes(`id="${decodeURIComponent(url.hash.slice(1))}"`)) {
+      problems.push(`${page.file} links missing fragment ${url.pathname}${url.hash}.`);
+    }
+  }
 }
 
 if (!read("robots.txt").includes(`Sitemap: ${SITE}/sitemap.xml`)) {
   problems.push("robots.txt doesn't name the sitemap.");
 }
-for (const dest of new Set(routes.flatMap(({ dest }) => dest ?? []))) {
+for (const dest of new Set(routes.flatMap((route) => ("dest" in route ? route.dest : [])))) {
   if (!existsSync(join(files, dest))) {
     problems.push(`A route answers with ${dest}, which is missing.`);
   }

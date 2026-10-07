@@ -5,11 +5,11 @@
  * - From 1120 px the hero's window sits whole and the feature windows run off alternate edges.
  * - From 1600 px the page stops growing and stays centred.
  * The hero shows one download button, for the visitor's system (src/system.ts). Every installer is
- * in Downloads, above the footer.
+ * on /download and linked in the homepage's shorter Downloads section.
  * Nothing moves by itself, and every animation runs once and ends. The home page's motion is at
  * the end of its rules. With reduced motion nothing moves. Without JavaScript the hero still comes
  * in, and the rest is in place with the window upright.
- * The privacy and 404 pages share the bar, the buttons and the footer. Their own rules come last.
+ * Document pages and 404 share the bar and footer. Their own rules come last.
  */
 :root {
   color-scheme: dark;
@@ -222,7 +222,9 @@ h1 {
 }
 
 .note a,
-.questions a {
+.questions a,
+.download-links a,
+#downloads > p a {
   color: #fff;
   text-decoration: underline;
   text-decoration-thickness: 1px;
@@ -345,7 +347,8 @@ h1 {
 }
 
 /* Only a link that isn't its file yet says where it goes instead. */
-.rows a[href*="/releases/download/"] .where {
+.rows a[href*="/releases/download/"] .where,
+.download-links a[href*="/releases/download/"] .where {
   display: none;
 }
 
@@ -691,7 +694,7 @@ footer p {
   }
 }
 
-/* The privacy page, one reading column, and the page for a missing address, centred. */
+/* Document pages reuse the privacy reading column. */
 .subpage .page {
   display: flex;
   flex-direction: column;
@@ -742,11 +745,13 @@ footer p {
 }
 
 .policy p,
-.policy ul {
+.policy ul,
+.policy ol {
   margin: 0 0 1em;
 }
 
-.policy ul {
+.policy ul,
+.policy ol {
   padding-left: 1.2em;
 }
 
@@ -772,6 +777,50 @@ footer p {
     Consolas,
     monospace;
   overflow-wrap: anywhere;
+}
+
+.hero .kicker {
+  display: block;
+  margin-bottom: 0.35em;
+  color: var(--soft);
+  font-size: 0.33em;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.policy .crumb {
+  margin-bottom: 1em;
+  font-size: 0.85em;
+}
+
+.guide-list > div,
+.release,
+.other-guides {
+  margin-top: 1.5em;
+  padding-top: 1em;
+  border-top: 1px solid var(--line);
+}
+
+.guide-list dt {
+  font-weight: 650;
+}
+
+.guide-list dd {
+  margin-top: 0.3em;
+}
+
+.policy .release h2,
+.policy .other-guides h2 {
+  margin-top: 0;
+}
+
+.policy pre {
+  overflow-x: auto;
+  padding-block: 0.5em;
+}
+
+.policy pre code {
+  overflow-wrap: normal;
 }
 
 .policy table {

@@ -63,7 +63,7 @@ const hero = () => ({
 
 /** The links in Downloads, as [words, address]. */
 const listed = () =>
-  shown("#downloads dl a").map((link) => [said(link), link.getAttribute("href")]);
+  shown("#downloads .download-links a").map((link) => [said(link), link.getAttribute("href")]);
 
 describe("the hero", () => {
   it("offers Downloads, which scrolls to the list, when the system is unknown", () => {
@@ -125,11 +125,11 @@ describe("Downloads", () => {
       open(system, RELEASED);
 
       expect(listed()).toEqual([
-        ["Download the DMG", `${FILES}/v0.0.7/Mr-Streamer-0.0.7-mac-arm64.dmg`],
+        ["DMG", `${FILES}/v0.0.7/Mr-Streamer-0.0.7-mac-arm64.dmg`],
         ["Microsoft Store", STORE],
-        ["Download the setup .exe", `${FILES}/v0.0.7/Mr-Streamer-0.0.7-win-x64-setup.exe`],
-        ["Download the AppImage", `${FILES}/v0.0.7/Mr-Streamer-0.0.7-linux-x86_64.AppImage`],
-        ["Download the .deb", `${FILES}/v0.0.7/Mr-Streamer-0.0.7-linux-amd64.deb`],
+        ["setup .exe", `${FILES}/v0.0.7/Mr-Streamer-0.0.7-win-x64-setup.exe`],
+        ["AppImage", `${FILES}/v0.0.7/Mr-Streamer-0.0.7-linux-x86_64.AppImage`],
+        [".deb", `${FILES}/v0.0.7/Mr-Streamer-0.0.7-linux-amd64.deb`],
       ]);
     },
   );
@@ -138,11 +138,11 @@ describe("Downloads", () => {
     open();
 
     expect(listed()).toEqual([
-      ["Download the DMG on GitHub Releases", LATEST],
+      ["DMG on GitHub Releases", LATEST],
       ["Microsoft Store", STORE],
-      ["Download the setup .exe on GitHub Releases", LATEST],
-      ["Download the AppImage on GitHub Releases", LATEST],
-      ["Download the .deb on GitHub Releases", LATEST],
+      ["setup .exe on GitHub Releases", LATEST],
+      ["AppImage on GitHub Releases", LATEST],
+      [".deb on GitHub Releases", LATEST],
     ]);
   });
 
@@ -150,11 +150,11 @@ describe("Downloads", () => {
     open(undefined, { version: "0.0.8", installers: ["dmg", "exe", "appImage"] });
 
     expect(listed()).toEqual([
-      ["Download the DMG", `${FILES}/v0.0.8/Mr-Streamer-0.0.8-mac-arm64.dmg`],
+      ["DMG", `${FILES}/v0.0.8/Mr-Streamer-0.0.8-mac-arm64.dmg`],
       ["Microsoft Store", STORE],
-      ["Download the setup .exe", `${FILES}/v0.0.8/Mr-Streamer-0.0.8-win-x64-setup.exe`],
-      ["Download the AppImage", `${FILES}/v0.0.8/Mr-Streamer-0.0.8-linux-x86_64.AppImage`],
-      ["Download the .deb on GitHub Releases", LATEST],
+      ["setup .exe", `${FILES}/v0.0.8/Mr-Streamer-0.0.8-win-x64-setup.exe`],
+      ["AppImage", `${FILES}/v0.0.8/Mr-Streamer-0.0.8-linux-x86_64.AppImage`],
+      [".deb on GitHub Releases", LATEST],
     ]);
   });
 });

@@ -22,7 +22,7 @@ When a check doesn't work, Settings says why in a few words: you're offline, the
 
 ## Install a newer version by hand
 
-**GitHub ›** beside an offered update in Settings opens its release. You can also take any installer from the [Releases page](https://github.com/Mr-Streamer-OSS/MrStreamer/releases) and install it over the old one, as the [README](../../README.md#download) describes. Mr. Streamer keeps its data in a folder of its own (see [Troubleshooting](troubleshooting.md#where-your-data-is)), so everything carries over.
+**GitHub ›** beside an offered update in Settings opens its release. You can also take an installer from the [download page](https://mrstreamer.app/download) and install it over the old one. Mr. Streamer keeps its data in a folder of its own (see [Troubleshooting](troubleshooting.md#where-your-data-is)), so everything carries over.
 
 ## Installed from the Microsoft Store
 

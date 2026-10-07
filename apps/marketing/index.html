@@ -30,8 +30,15 @@
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
-        "@type": "SoftwareApplication",
+        "@type": ["SoftwareApplication", "SoftwareSourceCode"],
         "name": "Mr. Streamer",
+        "alternateName": "Mr. Streamer: IPTV Player",
+        "publisher": {
+          "@type": "Organization",
+          "name": "Mr Streamer OSS",
+          "url": "https://github.com/Mr-Streamer-OSS"
+        },
+        "codeRepository": "https://github.com/Mr-Streamer-OSS/MrStreamer",
         "url": "https://mrstreamer.app/",
         "description": "Free, open source IPTV player for Mac, Windows and Linux. Live TV from an M3U playlist or Xtream Codes login. Movies and series with Xtream Codes.",
         "applicationCategory": "MultimediaApplication",
@@ -39,7 +46,12 @@
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
         "license": "https://www.gnu.org/licenses/gpl-3.0.html",
         "downloadUrl": "https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest",
-        "screenshot": "https://mrstreamer.app/generated/home-1920.webp"
+        "screenshot": [
+          "https://mrstreamer.app/generated/home-1920.webp",
+          "https://mrstreamer.app/generated/live-tv-1920.webp",
+          "https://mrstreamer.app/generated/library-1920.webp",
+          "https://mrstreamer.app/generated/watching-1920.webp"
+        ]
       }
     </script>
     <!-- system -->
@@ -55,14 +67,14 @@
         </a>
         <nav aria-label="Site">
           <a href="#live-tv">Live TV</a>
-          <a href="https://github.com/Mr-Streamer-OSS/MrStreamer/blob/main/docs/README.md">Help</a>
-          <a class="heavy" href="#downloads">Downloads</a>
+          <a href="/docs">Guides</a>
+          <a class="heavy" href="/download">Downloads</a>
         </nav>
       </header>
 
       <main id="main">
         <section class="hero">
-          <h1>IPTV without the junk.</h1>
+          <h1><span class="kicker">Mr. Streamer</span> IPTV without the junk.</h1>
           <p class="lead">
             Mr. Streamer is a free, open source IPTV player for Mac, Windows and Linux. No ads, no
             account. Bring the subscription you already have.
@@ -332,75 +344,51 @@
           </dl>
         </section>
 
-        <!--
-          Every installer, for every visitor. A link with data-installer starts on the Releases
-          page; the build and the page's script point it at its file (src/downloads.ts).
-        -->
         <section class="column" id="downloads">
           <h2 data-reveal>Downloads</h2>
-          <p data-reveal>
-            On Windows, the Microsoft Store installs Mr. Streamer and keeps it updated. Every other
-            installer comes from GitHub Releases, and the app then checks for updates on its own.
+          <p class="download-links" data-reveal>
+            <span data-release-version>Stable release on GitHub.</span>
+            Mac
+            <a
+              data-installer="dmg"
+              href="https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest"
+              >DMG<span class="where"> on GitHub Releases</span></a
+            >. Windows
+            <a href="https://apps.microsoft.com/detail/9N45GG76ZP4T?referrer=appbadge"
+              >Microsoft Store</a
+            >
+            or
+            <a
+              data-installer="exe"
+              href="https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest"
+              >setup .exe<span class="where"> on GitHub Releases</span></a
+            >
+            (unsigned; SmartScreen may warn). Linux
+            <a
+              data-installer="appImage"
+              href="https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest"
+              >AppImage<span class="where"> on GitHub Releases</span></a
+            >
+            or
+            <a
+              data-installer="deb"
+              href="https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest"
+              >.deb<span class="where"> on GitHub Releases</span></a
+            >.
           </p>
-          <dl class="rows">
-            <div class="row" data-reveal>
-              <dt>macOS 13 or later, Apple silicon</dt>
-              <dd>
-                <a
-                  data-installer="dmg"
-                  href="https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest"
-                  >Download the DMG<span class="where"> on GitHub Releases</span></a
-                >
-                <small>Open it and drag Mr. Streamer to Applications.</small>
-              </dd>
-            </div>
-            <div class="row" data-reveal>
-              <dt>Windows 11, 64-bit</dt>
-              <dd>
-                <a href="https://apps.microsoft.com/detail/9N45GG76ZP4T?referrer=appbadge"
-                  >Microsoft Store</a
-                >
-                <a
-                  data-installer="exe"
-                  href="https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest"
-                  >Download the setup .exe<span class="where"> on GitHub Releases</span></a
-                >
-                <small>
-                  The .exe installs for your user without administrator rights. It isn't signed yet,
-                  so SmartScreen may warn. Choose More info, then Run anyway.
-                </small>
-              </dd>
-            </div>
-            <div class="row" data-reveal>
-              <dt>Linux, 64-bit</dt>
-              <dd>
-                <a
-                  data-installer="appImage"
-                  href="https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest"
-                  >Download the AppImage<span class="where"> on GitHub Releases</span></a
-                >
-                <a
-                  data-installer="deb"
-                  href="https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest"
-                  >Download the .deb<span class="where"> on GitHub Releases</span></a
-                >
-                <small>
-                  The AppImage needs FUSE 2, which is libfuse2t64 on Ubuntu. The .deb is for Ubuntu
-                  and Debian.
-                </small>
-              </dd>
-            </div>
-          </dl>
-          <p class="note" data-reveal>
-            Checksums and older versions are on the
-            <a href="https://github.com/Mr-Streamer-OSS/MrStreamer/releases">Releases page</a>.
+          <p data-reveal>
+            Requirements, checksums and source are on the <a href="/download">download page</a>.
           </p>
         </section>
       </main>
 
       <footer>
         <b>mr. streamer</b>
-        <a href="https://github.com/Mr-Streamer-OSS/MrStreamer/blob/main/docs/README.md">Help</a>
+        <a href="/docs">Guides</a>
+        <a href="/download">Downloads</a>
+        <a href="/releases">Releases</a>
+        <a href="/about">About</a>
+        <a href="/security">Security</a>
         <a href="/privacy">Privacy</a>
         <a href="https://github.com/Mr-Streamer-OSS/MrStreamer">Source</a>
         <a href="https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose">Report a bug</a>

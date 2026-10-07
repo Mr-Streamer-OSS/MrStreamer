@@ -1,6 +1,6 @@
 # Builds the website, apps/marketing, on every pull request and push to main: the pictures from
 # the captures, the page, and the package Vercel takes, which checks itself. It installs only what
-# the website declares, as publishing does. No secrets, so pull requests from forks run it too.
+# the website declares, as publishing does. No owner secrets; a read-only workflow token fetches release history. Fork PRs run it too.
 #
 # Publishing is marketing-deploy.yml's. The release's checks (ci.yml) leave the website out: a
 # page that doesn't build never holds back an app release.
@@ -33,4 +33,6 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile --filter mrstreamer-marketing...
       - name: Build
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: pnpm --filter mrstreamer-marketing build
