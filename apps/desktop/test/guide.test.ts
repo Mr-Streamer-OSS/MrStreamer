@@ -232,17 +232,32 @@ describe("programme guide", () => {
 
   it("says how many channels it covers, and since when, for Settings", async () => {
     const { guide } = await connectedGuide();
-    expect(await guide.status()).toEqual({ channels: 0, fetchedAt: null, availability: "unknown" });
+    const listed = (await guide.library.channels({})).length;
+    expect(await guide.status()).toEqual({
+      source: { kind: "own" },
+      channels: 0,
+      listed,
+      guideChannels: 0,
+      fetchedAt: null,
+      availability: "unknown",
+      mapped: 0,
+      unresolved: 0,
+      failure: null,
+      failedAt: null,
+    });
 
     await guide.refresh();
 
     const ids = (await guide.library.channels({})).map((channel) => channel.id);
     const shown = Object.keys(await guide.listings(ids)).length;
     expect(shown).toBeGreaterThan(0);
-    expect(await guide.status()).toEqual({
+    expect(await guide.status()).toMatchObject({
+      source: { kind: "own" },
       channels: shown,
+      listed,
       fetchedAt: NOW,
       availability: "available",
+      failure: null,
     });
   });
 
@@ -384,10 +399,17 @@ describe("programme guide", () => {
     });
     provider.serveGuide('<?xml version="1.0"?><tv></tv>');
     await expect(guide.refreshIfStale()).rejects.toMatchObject({
-      error: { detail: "The guide lists no programmes." },
+      error: { kind: "guide", failure: { kind: "empty" } },
     });
 
     expect((await guide.listings([guided]))[guided]?.now?.start).toBe(at("02:00") + 24 * HOUR);
+    // Settings says why the latest download failed, since the first one that did, and from when
+    // the guide in use is.
+    expect(await guide.status()).toMatchObject({
+      fetchedAt: NOW,
+      failure: { kind: "guide", failure: { kind: "empty" } },
+      failedAt: NOW + 6 * HOUR,
+    });
   });
 
   it("checks on its own and downloads once the guide is six hours old", async () => {

@@ -156,10 +156,8 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
       const { playlist, guideUrl } = await firstLine(signal);
       if (!playlist) throw notAPlaylist(account.link);
       if (!guideUrl) return { kind: "none" };
-      return {
-        kind: "document",
-        body: await unpacked(await open(guideUrl, GUIDE_TIMEOUT_MS, signal)),
-      };
+      // As it comes: the guide service unpacks one that is gzip, as guides named .xml.gz are.
+      return { kind: "document", body: await open(guideUrl, GUIDE_TIMEOUT_MS, signal) };
     },
 
     async onDemandCatalogue() {
@@ -210,24 +208,4 @@ function abortable<A>(promise: Promise<A>, signal: AbortSignal | undefined): Pro
     signal.addEventListener("abort", stop, { once: true });
     promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", stop));
   });
-}
-
-/** The document unpacked when it is gzip, as guides named .xml.gz are, whatever the server says. */
-async function unpacked(body: ReadableStream<Uint8Array>): Promise<ReadableStream<Uint8Array>> {
-  const reader = body.getReader();
-  const first = await reader.read();
-  const whole = new ReadableStream<Uint8Array>({
-    start(controller) {
-      if (first.done) controller.close();
-      else controller.enqueue(first.value);
-    },
-    async pull(controller) {
-      const next = await reader.read();
-      if (next.done) controller.close();
-      else controller.enqueue(next.value);
-    },
-    cancel: (reason) => reader.cancel(reason),
-  });
-  const gzip = first.value?.[0] === 0x1f && first.value[1] === 0x8b;
-  return gzip ? whole.pipeThrough(new DecompressionStream("gzip")) : whole;
 }

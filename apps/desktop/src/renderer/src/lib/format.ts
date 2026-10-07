@@ -71,6 +71,36 @@ export function clockTime(at: number, now: number): string {
   return `${dayOf(at) > dayOf(now) ? "Tomorrow " : ""}${time.format(at)}`;
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+const weekday = new Intl.DateTimeFormat(undefined, { weekday: "short" });
+const dayOfMonth = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" });
+
+/** How many days `at` is after today, by the calendar: -1 for any time yesterday. */
+function daysFrom(now: number, at: number): number {
+  const dayOf = (moment: number) => new Date(moment).setHours(0, 0, 0, 0);
+  return Math.round((dayOf(at) - dayOf(now)) / DAY_MS);
+}
+
+/** "2 Oct" */
+export function shortDay(at: number): string {
+  return dayOfMonth.format(at);
+}
+
+/** A time that has been: "14:02" earlier today, "yesterday 14:02", "2 Oct 14:02" before. */
+export function pastTime(at: number, now: number): string {
+  const days = daysFrom(now, at);
+  if (days >= 0) return time.format(at);
+  return `${days === -1 ? "yesterday" : shortDay(at)} ${time.format(at)}`;
+}
+
+/** A time still to come: "today 23:00", "tomorrow 06:00", "Fri 23:00" this week, "12 Oct 23:00". */
+export function comingTime(at: number, now: number): string {
+  const days = daysFrom(now, at);
+  const day =
+    days <= 0 ? "today" : days === 1 ? "tomorrow" : days < 7 ? weekday.format(at) : shortDay(at);
+  return `${day} ${time.format(at)}`;
+}
+
 /** The midnight that ends the day of `at`. */
 export function endOfDay(at: number): number {
   return new Date(at).setHours(24, 0, 0, 0);

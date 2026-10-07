@@ -4,7 +4,18 @@
 // The main process refuses to start unless every method has a handler (see src/main/ipc.ts).
 import { type } from "arktype";
 import type { Result } from "./errors.ts";
-import type { GuideStatus, Listing, ListingMatch, Programme, ProgrammeMatch } from "./guide.ts";
+import {
+  MAP_FILTERS,
+  type GuideCandidate,
+  type GuideChannelPage,
+  type GuideStatus,
+  type Listing,
+  type ListingMatch,
+  type MapChannel,
+  type MapChannelPage,
+  type Programme,
+  type ProgrammeMatch,
+} from "./guide.ts";
 import type { CatalogueStatus, Category, LiveChannel } from "./library.ts";
 import type { ThirdPartyNotice } from "./licences.ts";
 import {
@@ -112,6 +123,46 @@ export const ipcInputs = {
    * the subscription has no guide, which is no failure.
    */
   "guide.refresh": () => type({ subscriptionId: "string > 0" }),
+  /**
+   * Downloads and reads the XMLTV guide at `address` for a subscription, changing nothing. The
+   * address can hold a key: it goes to the main process here and never comes back. Without one,
+   * the address saved for the subscription is checked again.
+   */
+  "guide.check": () => type({ subscriptionId: "string > 0", "address?": "string <= 4096" }),
+  /** Stops a subscription's check and drops what it found, as when its form closes. */
+  "guide.cancelCheck": () => type({ subscriptionId: "string > 0" }),
+  /** Makes what a check found the subscription's guide, by the check's `GuideCandidate.id`. */
+  "guide.use": () => type({ subscriptionId: "string > 0", candidate: "string > 0" }),
+  /** Goes back to the subscription's own guide: its provider's, or its playlist's. */
+  "guide.restore": () => type({ subscriptionId: "string > 0" }),
+  /**
+   * Maps one of a subscription's channels to a guide channel by its exact id, or back to
+   * automatic with null. `revision` is the `MapChannelPage.revision` the choice was made from.
+   */
+  "guide.map": () =>
+    type({
+      subscriptionId: "string > 0",
+      channelId: "string > 0",
+      guideId: "string > 0 | null",
+      revision: "string",
+    }),
+  /** A page of a subscription's channels, with how each gets its programmes. */
+  "guide.mapChannels": () =>
+    type({
+      subscriptionId: "string > 0",
+      filter: type.enumerated(...MAP_FILTERS),
+      query: "string",
+      offset: "number.integer >= 0",
+      limit: "1 <= number.integer <= 200",
+    }),
+  /** A page of the channels a subscription's guide lists, to map one of its channels to. */
+  "guide.mapOptions": () =>
+    type({
+      subscriptionId: "string > 0",
+      query: "string",
+      offset: "number.integer >= 0",
+      limit: "1 <= number.integer <= 200",
+    }),
   "ondemand.status": none,
   "ondemand.refresh": () => type({ subscriptionId: "string > 0" }),
   "ondemand.search": () => type({ query: "string" }),
@@ -309,6 +360,31 @@ export interface IpcOutputs {
   /** Each saved subscription's guide, in the subscriptions' order. */
   "guide.status": readonly GuideStatus[];
   "guide.refresh": GuideStatus;
+  /**
+   * Resolves once the guide is read, with what it lists and how many of the subscription's
+   * channels it covers. Fails, and keeps the guide in use, when it can't be had or read.
+   */
+  "guide.check": GuideCandidate;
+  "guide.cancelCheck": null;
+  /**
+   * The subscription's guide from then on, its address sealed. Fails with `changed`, switching
+   * nothing, when the check is no longer the latest or the subscription changed since.
+   */
+  "guide.use": GuideStatus;
+  /**
+   * The own guide's status: loaded from what was kept of it, or asked for now. One that can't
+   * be had says why in `failure`. The viewer's mappings were for the other guide, and go.
+   */
+  "guide.restore": GuideStatus;
+  /** The channel as it is mapped now, or null when the provider no longer lists it. */
+  "guide.map": MapChannel | null;
+  /**
+   * The channels the lists show, in their order: those without programmes, those mapped by hand,
+   * with any the provider no longer lists last, or all; cut down to `query` by name or number.
+   */
+  "guide.mapChannels": MapChannelPage;
+  /** Guide channels by name, those `query` finds in a name or an id. No programmes among them. */
+  "guide.mapOptions": GuideChannelPage;
   "ondemand.status": OnDemandStatus;
   /** Fetches one subscription's movie and series lists again. */
   "ondemand.refresh": OnDemandStatus;
@@ -450,7 +526,10 @@ export type IpcArgs<M extends IpcMethod> =
 export interface IpcEvents {
   /** A subscription's catalogue refresh finished, or failed and kept the previous channels. */
   "library.updated": CatalogueStatus;
-  /** A new programme guide is loaded, or the one loaded was dropped. */
+  /**
+   * A new programme guide is loaded or the one loaded was dropped, a subscription's guide or
+   * mappings changed, or a download failed.
+   */
   "guide.updated": null;
   /** The movie and series lists were fetched again, or the fetch failed and kept them. */
   "ondemand.updated": OnDemandStatus;

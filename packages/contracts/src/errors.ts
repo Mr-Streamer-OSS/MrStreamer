@@ -1,4 +1,5 @@
 // Failures the UI knows how to explain. Every IPC call resolves to a value or one of these.
+import type { GuideFailure } from "./guide.ts";
 import type { OutputFailure } from "./output.ts";
 import type { StreamFailure } from "./playback.ts";
 
@@ -55,6 +56,8 @@ export type AppError =
   | { readonly kind: "favourites-changed" }
   /** A receiver on the network didn't take what it was sent, or can't be reached. */
   | { readonly kind: "output"; readonly failure: OutputFailure }
+  /** A programme guide that can't be used, or a change to one that no longer applies. */
+  | { readonly kind: "guide"; readonly failure: GuideFailure }
   /** An IPC call carried input that failed validation. Indicates a UI bug. */
   | { readonly kind: "invalid-input"; readonly detail: string }
   | { readonly kind: "unexpected"; readonly detail: string };

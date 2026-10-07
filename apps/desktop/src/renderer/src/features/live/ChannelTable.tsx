@@ -429,7 +429,7 @@ function MoveButton({ by, channel, order }: { by: -1 | 1; channel: LiveChannel; 
 }
 
 /** `text` with what a search's `words` matched in it underlined. */
-function Marked({ text, words }: { text: string; words: readonly string[] }) {
+export function Marked({ text, words }: { text: string; words: readonly string[] }) {
   const parts: ReactNode[] = [];
   let at = 0;
   for (const [start, end] of matchRanges(text, words)) {

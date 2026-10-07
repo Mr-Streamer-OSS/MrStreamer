@@ -2,15 +2,17 @@
 // account stands. Everything they list shows together in the app, so a row is inspected here,
 // never chosen: opening one shows its account and what was loaded from it, each list with its own
 // refresh, and changes nothing outside Settings. Add, Edit, the field that asks for a password or
-// link the keychain lost, and Remove's question are forms in the list, one at a time. What a form
-// sent to the main process can't be called back: until it is answered its Cancel, or Remove's
-// Keep, is not offered, and the rest of the list stays in reach.
+// link the keychain lost, the form that sets where its guide comes from (./GuideSource.tsx) and
+// Remove's question are forms in the list, one at a time. What a form sent to the main process
+// can't be called back: until it is answered its Cancel, or Remove's Keep, is not offered, and
+// the rest of the list stays in reach. A subscription's channels are mapped to its guide's by
+// hand in a sheet over the list (./GuideMap.tsx).
 //   A server shows, with a note when the login travels over plain http; a password never does,
 // nor a playlist's link beyond its host.
 import { Checkbox } from "@base-ui/react/checkbox";
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronRight, RotateCw } from "lucide-react";
-import { useEffect, useId, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import type { GuideStatus } from "@mrstreamer/contracts/guide";
 import type { CatalogueStatus } from "@mrstreamer/contracts/library";
@@ -21,21 +23,26 @@ import { Button } from "../../components/ui/button.tsx";
 import { Input } from "../../components/ui/input.tsx";
 import { appError, describeError, formatDate } from "../../lib/errors.ts";
 import { clockTime, hostOf, namesList } from "../../lib/format.ts";
+import { useKeyboardMode } from "../../lib/input-mode.ts";
 import { call } from "../../lib/ipc.ts";
 import { queries, subscriptionName, useSubscriptions } from "../../lib/queries.ts";
 import { cn } from "../../lib/utils.ts";
 import { player, usePlayer } from "../../player/player.ts";
 import { titlePlayer, useTitlePlayer } from "../../player/title-player.ts";
 import { Field, LoginForm } from "../connect/LoginForm.tsx";
-import { Row } from "./Rows.tsx";
+import { GuideMap } from "./GuideMap.tsx";
+import { GuideForm, guideKey, GuideRows } from "./GuideSource.tsx";
+import { Row, RowForm } from "./Rows.tsx";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** An account that ends within this many days says how many are left, in place of the date. */
 const SOON_DAYS = 30;
 
+/** A form under a subscription's row. */
+type RowFormKind = "edit" | "secret" | "guide" | "remove";
+
 /** The one form open in the list: a row's, or the one that adds a subscription. */
-type Form =
-  { readonly kind: "add" } | { readonly kind: "edit" | "secret" | "remove"; readonly id: string };
+type Form = { readonly kind: "add" } | { readonly kind: RowFormKind; readonly id: string };
 
 export function SubscriptionSection() {
   const client = useQueryClient();
@@ -54,6 +61,8 @@ export function SubscriptionSection() {
   /** The row whose details show; undefined until the viewer opened or closed one. */
   const [opened, setOpened] = useState<string | null | undefined>(undefined);
   const [form, setForm] = useState<Form | null>(null);
+  /** The subscription whose channels are being mapped to its guide's, in a sheet over the list. */
+  const [mapping, setMapping] = useState<string | null>(null);
   /**
    * Closes the form open now, as it asks to when it is done. The main process can answer a form
    * the viewer left meanwhile: that closes no form opened since, with what was typed in it.
@@ -80,6 +89,8 @@ export function SubscriptionSection() {
   const channels = useQuery(queries.libraryStatus()).data;
   const guides = useQuery(queries.guideStatus()).data;
   const titles = useQuery(queries.onDemandStatus()).data;
+  const mapped = subscriptions.find((each) => each.id === mapping);
+  const mappedGuide = guides?.find((each) => each.subscriptionId === mapping);
 
   return (
     <section>
@@ -104,10 +115,15 @@ export function SubscriptionSection() {
               }}
               onForm={(kind) => (kind ? setForm({ kind, id }) : closeForm())}
               onAdd={() => setForm({ kind: "add" })}
+              onMap={() => setMapping(id)}
             />
           );
         })}
       </ul>
+      {/* Gone with its subscription, or with the guide its channels were mapped to. */}
+      {mapped && mappedGuide?.availability === "available" && (
+        <GuideMap subscription={mapped} guide={mappedGuide} onClose={() => setMapping(null)} />
+      )}
       {form?.kind === "add" ? (
         <div className="mt-8">
           <h2 className="mb-6 text-2xl font-semibold tracking-tight">Add subscription</h2>
@@ -179,6 +195,7 @@ function SubscriptionRow({
   onToggle,
   onForm,
   onAdd,
+  onMap,
 }: {
   subscription: SubscriptionSummary;
   /** The other saved subscriptions, which stay when this one goes. */
@@ -190,11 +207,13 @@ function SubscriptionRow({
   titles: TitleListsStatus | undefined;
   expanded: boolean;
   /** This row's form, when it is the one open. */
-  form: "edit" | "secret" | "remove" | null;
+  form: RowFormKind | null;
   onToggle: () => void;
-  onForm: (form: "edit" | "secret" | "remove" | null) => void;
+  onForm: (form: RowFormKind | null) => void;
   /** Opens the form that adds a subscription. */
   onAdd: () => void;
+  /** Opens the sheet that maps its channels to its guide's. */
+  onMap: () => void;
 }) {
   const client = useQueryClient();
   const { id, kind, account, needsSecret } = subscription;
@@ -202,8 +221,23 @@ function SubscriptionRow({
   const secret = kind === "m3u" ? "link" : "password";
   const rowId = useId();
   // The form that asks for its password or link has its Cancel here on the row, which waits
-  // while a change to the subscription is on its way.
+  // while a change to the subscription is on its way. So has the form for its guide: its Cancel
+  // stops a check, and waits only while the guide is being switched.
   const saving = useIsMutating({ mutationKey: updateKey(id) }) > 0;
+  const switching = useIsMutating({ mutationKey: guideKey(id) }) > 0;
+  // Whoever works by the keyboard is back on the row once its guide's form closes, where the
+  // field that had the keyboard went with it.
+  const keyboard = useKeyboardMode();
+  const toggle = useRef<HTMLButtonElement>(null);
+  const hadGuideForm = useRef(false);
+  useEffect(() => {
+    const closed = hadGuideForm.current && form !== "guide";
+    hadGuideForm.current = form === "guide";
+    const held = document.activeElement;
+    if (closed && keyboard && (!held?.isConnected || held === document.body)) {
+      toggle.current?.focus();
+    }
+  }, [form, keyboard]);
   const retry = useMutation({
     mutationFn: () => call("library.refresh", { subscriptionId: id }),
     onSuccess: (status) =>
@@ -232,6 +266,7 @@ function SubscriptionRow({
         )}
       >
         <button
+          ref={toggle}
           id={rowId}
           aria-expanded={expanded}
           onMouseDown={(event) => event.preventDefault()}
@@ -247,8 +282,13 @@ function SubscriptionRow({
           </span>
         </button>
         <div className="flex flex-none items-center gap-2">
-          {form === "secret" ? (
-            <Button variant="ghost" size="sm" disabled={saving} onClick={() => onForm(null)}>
+          {form === "secret" || form === "guide" ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={form === "guide" ? switching : saving}
+              onClick={() => onForm(null)}
+            >
               Cancel
             </Button>
           ) : (
@@ -300,6 +340,9 @@ function SubscriptionRow({
           onAdd={onAdd}
         />
       )}
+      {form === "guide" && (
+        <GuideForm subscription={subscription} guide={guide} onDone={() => onForm(null)} />
+      )}
       {form === "remove" && (
         <Remove
           subscription={subscription}
@@ -319,6 +362,8 @@ function SubscriptionRow({
             catalogue={catalogue}
             guide={guide}
             titles={titles}
+            onGuide={() => onForm("guide")}
+            onMap={onMap}
           />
           <button
             onMouseDown={(event) => event.preventDefault()}
@@ -350,33 +395,34 @@ function unanswered(
 
 /**
  * A subscription's account as its provider says it stands, its login, and what was loaded from
- * it, each list refreshed on its own. A playlist has no movies or series, and a guide only when
- * its first line names one: without, the row says so, and its refresh reads that line again.
+ * it, each list refreshed on its own. A playlist has no movies or series, and a guide of its own
+ * only when its first line names one: without, the row says so, and its refresh reads that line
+ * again.
  */
 function Details({
   subscription,
   catalogue,
   guide,
   titles,
+  onGuide,
+  onMap,
 }: {
   subscription: SubscriptionSummary;
   catalogue: CatalogueStatus | undefined;
   guide: GuideStatus | undefined;
   titles: TitleListsStatus | undefined;
+  /** Opens the form that sets where its guide comes from. */
+  onGuide: () => void;
+  onMap: () => void;
 }) {
   const client = useQueryClient();
   const { id: subscriptionId, kind, account, server, needsSecret } = subscription;
-  // New channels, a new guide or new lists reach every view through `library.updated`,
-  // `guide.updated` and `ondemand.updated`; the row shows what the refresh answered at once.
+  // New channels or new lists reach every view through `library.updated` and
+  // `ondemand.updated`; the row shows what the refresh answered at once.
   const refreshChannels = useMutation({
     mutationFn: () => call("library.refresh", { subscriptionId }),
     onSuccess: (status) =>
       client.setQueryData(queries.libraryStatus().queryKey, (all) => replaced(all, status)),
-  });
-  const refreshGuide = useMutation({
-    mutationFn: () => call("guide.refresh", { subscriptionId }),
-    onSuccess: (status) =>
-      client.setQueryData(queries.guideStatus().queryKey, (all) => replaced(all, status)),
   });
   const refreshTitles = useMutation({
     mutationFn: () => call("ondemand.refresh", { subscriptionId }),
@@ -412,16 +458,7 @@ function Details({
         refreshing={refreshChannels.isPending}
         onRefresh={() => refreshChannels.mutate()}
       />
-      <List
-        label="Guide"
-        count={guide?.channels ?? 0}
-        unit="channels"
-        fetchedAt={guide?.fetchedAt ?? null}
-        without={guide?.availability === "none" ? "none in this playlist" : null}
-        failure={refreshGuide.error ? appError(refreshGuide.error) : null}
-        refreshing={refreshGuide.isPending}
-        onRefresh={() => refreshGuide.mutate()}
-      />
+      <GuideRows subscription={subscription} guide={guide} onEdit={onGuide} onMap={onMap} />
       {kind === "xtream" && (
         <List
           label="Movies and series"
@@ -445,38 +482,23 @@ function loginOf({ username, server }: SubscriptionSummary): string {
 function List({
   label,
   count,
-  unit,
   fetchedAt,
-  without = null,
   failure,
   refreshing,
   onRefresh,
 }: {
   label: string;
   count: number;
-  /** What `count` counts, when not the list itself. */
-  unit?: string;
   fetchedAt: number | null;
-  /** What to say, in place of a count and a time, for a list the subscription doesn't have. */
-  without?: string | null;
   failure: AppError | null;
   refreshing: boolean;
   onRefresh: () => void;
 }) {
-  const loaded = without === null && fetchedAt !== null;
   return (
     <>
-      <Row
-        label={label}
-        note={
-          without ??
-          (fetchedAt === null
-            ? "not loaded yet"
-            : [count.toLocaleString(), unit].filter(Boolean).join(" "))
-        }
-      >
+      <Row label={label} note={fetchedAt === null ? "not loaded yet" : count.toLocaleString()}>
         <span className="text-muted-foreground">
-          {refreshing ? "refreshing…" : loaded ? relativeTime(fetchedAt) : ""}
+          {refreshing ? "refreshing…" : fetchedAt !== null ? relativeTime(fetchedAt) : ""}
         </span>
         <Button
           variant="ghost"
@@ -513,21 +535,6 @@ function useUpdate(subscriptionId: string, onDone: () => void) {
       if (change.secret !== undefined) await client.invalidateQueries();
     },
   });
-}
-
-/** A form in the list, under the row it belongs to. */
-function RowForm({ onSubmit, children }: { onSubmit: () => void; children: ReactNode }) {
-  return (
-    <form
-      className="mb-2 ml-5 max-w-[26rem] border-b border-white/8 pt-2 pb-6"
-      onSubmit={(event: FormEvent) => {
-        event.preventDefault();
-        onSubmit();
-      }}
-    >
-      {children}
-    </form>
-  );
 }
 
 /**

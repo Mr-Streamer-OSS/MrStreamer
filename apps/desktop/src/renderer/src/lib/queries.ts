@@ -9,6 +9,7 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
+import type { GuideStatus, MapFilter } from "@mrstreamer/contracts/guide";
 import type { IpcInput, IpcOutput } from "@mrstreamer/contracts/ipc";
 import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
 import type {
@@ -64,8 +65,8 @@ export const queries = {
       staleTime: Infinity,
     }),
   /**
-   * For each subscription, how many channels its guide covers and since when, or that it has
-   * none. Read again on `guide.updated`.
+   * For each subscription, where its guide comes from, how many channels it covers and since
+   * when, why its latest download failed, or that it has none. Read again on `guide.updated`.
    */
   guideStatus: () =>
     queryOptions({ queryKey: ["guide", "status"], queryFn: () => call("guide.status") }),
@@ -161,6 +162,31 @@ export const queries = {
       enabled: query !== "",
       staleTime: LISTINGS_REFRESH_MS / 2,
       refetchInterval: LISTINGS_REFRESH_MS,
+    }),
+  /**
+   * A page of a subscription's channels with how each gets its programmes, for mapping them by
+   * hand. Every page read is read again on `guide.updated`, and by the sheet once a mapping is
+   * answered: either changes which channels a filter shows, and so where each page begins.
+   * Nothing of it is kept once its sheet closes: the next one reads the guide as it is then.
+   */
+  mapChannels: (
+    subscriptionId: string,
+    filter: MapFilter,
+    query: string,
+    offset: number,
+    limit: number,
+  ) =>
+    queryOptions({
+      queryKey: ["guide", "map", subscriptionId, "channels", filter, query, offset, limit],
+      queryFn: () => call("guide.mapChannels", { subscriptionId, filter, query, offset, limit }),
+      gcTime: 0,
+    }),
+  /** A page of the channels a subscription's guide lists, those `query` finds. */
+  mapOptions: (subscriptionId: string, query: string, offset: number, limit: number) =>
+    queryOptions({
+      queryKey: ["guide", "map", subscriptionId, "options", query, offset, limit],
+      queryFn: () => call("guide.mapOptions", { subscriptionId, query, offset, limit }),
+      gcTime: 0,
     }),
   /** How many movies and series there are, and when they were fetched. */
   onDemandStatus: () =>
@@ -347,6 +373,13 @@ export function useChooseQuality(): (channel: LiveChannel, variantId: string | n
       })().catch(() => {});
     },
     [client],
+  );
+}
+
+/** Keeps what the main process answered for one subscription's guide among the others'. */
+export function keepGuideStatus(client: QueryClient, status: GuideStatus): void {
+  client.setQueryData(queries.guideStatus().queryKey, (all) =>
+    all?.map((each) => (each.subscriptionId === status.subscriptionId ? status : each)),
   );
 }
 
