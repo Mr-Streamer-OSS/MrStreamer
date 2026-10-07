@@ -36,7 +36,7 @@ export function Sheet({
         <Dialog.Popup
           {...(initialFocus ? { initialFocus } : {})}
           className={cn(
-            "fixed inset-x-[max(1.5rem,calc((100vw-68rem)/2))] bottom-[var(--receiver-bar,0px)] z-20 overflow-y-auto overscroll-contain rounded-t-3xl bg-[#0b0b0c] shadow-2xl ring-1 ring-white/10 outline-none transition-[opacity,translate] duration-200 data-ending-style:translate-y-4 data-ending-style:opacity-0 data-starting-style:translate-y-4 data-starting-style:opacity-0",
+            "fixed inset-x-[max(1.5rem,calc((100vw-68rem)/2))] bottom-[var(--receiver-bar,0px)] z-20 overflow-y-auto overscroll-contain rounded-t-3xl bg-black shadow-2xl ring-1 ring-white/10 outline-none transition-[opacity,translate] duration-200 data-ending-style:translate-y-4 data-ending-style:opacity-0 data-starting-style:translate-y-4 data-starting-style:opacity-0",
             short ? "max-h-[calc(100%-3.75rem-var(--receiver-bar,0px))]" : "top-[3.75rem]",
             overSettings && "z-50",
           )}

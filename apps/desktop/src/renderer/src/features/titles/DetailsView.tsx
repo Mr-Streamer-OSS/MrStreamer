@@ -256,7 +256,7 @@ function Header({
     <>
       <div className="relative h-[clamp(12rem,32vh,22rem)] overflow-hidden rounded-t-3xl">
         <Artwork url={backdropUrl ?? title.posterUrl} name={title.title} size="full" plain />
-        <div className="absolute inset-0 bg-gradient-to-t from-[#0b0b0c] via-[#0b0b0c]/40 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
       </div>
       <div className="relative -mt-20 px-10 pb-12">
         <Dialog.Title className="text-4xl font-semibold tracking-tight text-balance">
