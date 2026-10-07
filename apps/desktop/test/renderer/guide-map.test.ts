@@ -1,0 +1,423 @@
+// @vitest-environment happy-dom
+// Settings > Subscriptions > Map: the sheet that maps a subscription's channels to its guide's
+// by hand. Its channels are read a page at a time and drawn only where in view, the guide's
+// channels are searched by name or id, a mapping is made for the exact guide channel picked, the
+// channels are read again after it, and the keyboard goes through both lists.
+import { ipc } from "./support.ts";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
+import { afterEach, describe, expect, it } from "vitest";
+import type {
+  GuideChannelPage,
+  GuideStatus,
+  MapChannel,
+  MapChannelPage,
+} from "@mrstreamer/contracts/guide";
+import type { SubscriptionSummary } from "@mrstreamer/contracts/subscription";
+import { SubscriptionSection } from "../../src/renderer/src/features/settings/SubscriptionSection.tsx";
+import { syncGuideUpdates } from "../../src/renderer/src/lib/queries.ts";
+
+// happy-dom lays nothing out, and the lists draw only the rows that fit: each gets a height.
+Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+  configurable: true,
+  get: () => 400,
+});
+
+let unmount = () => {};
+afterEach(() => unmount());
+
+const holiday: SubscriptionSummary = {
+  kind: "xtream",
+  id: "holiday",
+  name: "Holiday house",
+  server: "https://panel.sunhouse.example",
+  username: "viewer02",
+  account: { state: "active", expiresAt: null, maxConnections: 2, activeConnections: 0 },
+  needsSecret: false,
+};
+const guide: GuideStatus = {
+  subscriptionId: holiday.id,
+  source: { kind: "external", origin: "https://guide.example.org", since: 0, locked: false },
+  channels: 412,
+  listed: 1180,
+  guideChannels: 1204,
+  fetchedAt: Date.now(),
+  availability: "available",
+  mapped: 1,
+  unresolved: 0,
+  failure: null,
+  failedAt: null,
+};
+
+const channel = (id: string, title: string, mappedTo: string | null = null): MapChannel => ({
+  id,
+  number: Number(id),
+  title,
+  guideId: mappedTo,
+  mappedTo,
+  listed: true,
+});
+/** The channels a search of those without programmes found. */
+const WITHOUT: MapChannelPage = {
+  total: 3,
+  channels: [
+    channel("12", "Canal Nord Sport"),
+    channel("14", "Canal Nord HD"),
+    channel("22", "News 24", "news24.ex"),
+  ],
+  revision: "7.2",
+};
+const OPTIONS: GuideChannelPage = {
+  total: 3,
+  channels: [
+    { id: "canalnord.ex", name: "Canal Nord", programmes: true },
+    { id: "canalnord-plus1.ex", name: "Canal Nord +1", programmes: false },
+    { id: "canalnordsport.ex", name: "Canal Nord Sport", programmes: true },
+  ],
+};
+
+/** Lets the screen take in what was just answered, and a search its pause after typing. */
+const settled = (ms = 20) => act(() => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+
+/** The sheet, opened from Holiday house's Map, with its first channels and their guide's answered. */
+async function sheet(pages: { channels?: MapChannelPage; options?: GuideChannelPage } = {}) {
+  ipc.reset();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(["subscriptions"], [holiday]);
+  client.setQueryData(["guide", "status"], [guide]);
+  client.setQueryData(["library", "status"], []);
+  client.setQueryData(["ondemand", "status"], { lists: [], metadata: null });
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  await act(async () =>
+    root.render(createElement(QueryClientProvider, { client }, createElement(SubscriptionSection))),
+  );
+  // As the app does: what the main process reports of the guides is read again.
+  const stopSync = syncGuideUpdates(client);
+  unmount = () => {
+    stopSync();
+    act(() => root.unmount());
+    container.remove();
+  };
+  const dialog = () => document.body.querySelector('[role="dialog"]');
+  const lists = () => [...(dialog()?.querySelectorAll('[role="listbox"]') ?? [])];
+  /** A list's rows as they read, with the one the keyboard is on marked. */
+  const rows = (list: Element | undefined) =>
+    [...(list?.querySelectorAll('[role="option"]') ?? [])].map(
+      (row) => `${row.getAttribute("aria-selected") === "true" ? "> " : ""}${row.textContent}`,
+    );
+  const press = async (target: Element | null | undefined, key: string) => {
+    await act(async () => {
+      target?.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+    });
+    await settled();
+  };
+  const click = async (element: Element | null | undefined) => {
+    await act(async () => (element as HTMLElement | null | undefined)?.click());
+    await settled();
+  };
+  const type = async (field: Element | null | undefined, value: string) => {
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    await act(async () => {
+      setValue?.call(field, value);
+      field?.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    // A search waits for typing to pause, and its answer comes after.
+    await settled(200);
+    await settled();
+  };
+
+  const channels = ipc.hold("guide.mapChannels");
+  const options = ipc.hold("guide.mapOptions");
+  await click(container.querySelector('[aria-label="Map channels of Holiday house"]'));
+  channels.resolve(pages.channels ?? WITHOUT);
+  await settled();
+  options.resolve(pages.options ?? OPTIONS);
+  await settled();
+  return {
+    dialog,
+    press,
+    click,
+    type,
+    channels: () => rows(lists()[0]),
+    options: () => rows(lists()[1]),
+    channelList: () => lists()[0],
+    optionList: () => lists()[1],
+    fields: () => [...(dialog()?.querySelectorAll("input") ?? [])],
+    button: (text: string, within: Element | null | undefined = dialog()) =>
+      [...(within?.querySelectorAll("button") ?? [])].find(
+        (each) => each.textContent?.trim() === text,
+      ),
+    alert: () => dialog()?.querySelector('[role="alert"]')?.textContent ?? null,
+  };
+}
+
+describe("mapping channels to a guide's by hand", () => {
+  it("lists the channels without programmes a page at a time, and the guide's channels for the one picked", async () => {
+    const { dialog, channels, options, fields } = await sheet();
+
+    expect(dialog()?.textContent).toContain("Map channels");
+    expect(dialog()?.textContent).toContain(
+      "Holiday house · guide.example.org · 768 channels without programmes",
+    );
+    // Asked for by the page, never all at once.
+    expect(ipc.argsOf("guide.mapChannels")).toEqual([
+      { subscriptionId: holiday.id, filter: "without", query: "", offset: 0, limit: 120 },
+    ]);
+    expect(channels()).toEqual([
+      "> 12Canal Nord Sportno id match",
+      "14Canal Nord HDno id match",
+      "22News 24mapped · news24.ex",
+    ]);
+    // The first channel is picked, and its name is where the search of the guide starts.
+    expect(dialog()?.textContent).toContain("Guide for Canal Nord Sport");
+    expect(fields()[1]?.value).toBe("Canal Nord Sport");
+    expect(ipc.argsOf("guide.mapOptions")).toEqual([
+      { subscriptionId: holiday.id, query: "Canal Nord Sport", offset: 0, limit: 120 },
+    ]);
+    // Each guide channel shows its name and its id; none is picked for the viewer.
+    expect(options()).toEqual([
+      "> Automatic · no id matchCurrent",
+      "Canal Nordcanalnord.exMap",
+      "Canal Nord +1 · no programmescanalnord-plus1.exMap",
+      "Canal Nord Sportcanalnordsport.exMap",
+    ]);
+    expect(dialog()?.textContent).toContain(`3 of ${(1204).toLocaleString()} shown`);
+    expect(ipc.methods()).not.toContain("guide.map");
+  });
+
+  it("draws only the channels in view of a long list, and asks for no more than its first page", async () => {
+    const page = Array.from({ length: 120 }, (_, at) =>
+      channel(String(at + 1), `Channel ${at + 1}`),
+    );
+    const { channels } = await sheet({ channels: { total: 768, channels: page, revision: "7.2" } });
+
+    expect(channels().length).toBeLessThan(40);
+    expect(channels()[0]).toBe("> 1Channel 1no id match");
+    expect(ipc.argsOf("guide.mapChannels")).toHaveLength(1);
+  });
+
+  it("maps the channel to the exact guide channel picked, reads the channels again, and back to automatic", async () => {
+    const { click, button, channels, options, optionList } = await sheet();
+    const sport = channel("12", "Canal Nord Sport", "canalnordsport.ex");
+    /** Answers the channels' next reading with the first of them as `first`. */
+    const readAgain = (first: MapChannel) =>
+      ipc.hold("guide.mapChannels").resolve({
+        ...WITHOUT,
+        channels: [first, ...WITHOUT.channels.slice(1)],
+      });
+    const mapped = ipc.hold("guide.map");
+    readAgain(sport);
+
+    await click(button("Map", optionList()?.querySelectorAll('[role="option"]')[3]));
+    mapped.resolve(sport);
+    await settled();
+
+    expect(ipc.argsOf("guide.map")).toEqual([
+      {
+        subscriptionId: holiday.id,
+        channelId: "12",
+        guideId: "canalnordsport.ex",
+        revision: "7.2",
+      },
+    ]);
+    // The list shows what the main process answers once it is mapped, not what was read before.
+    expect(ipc.argsOf("guide.mapChannels")).toHaveLength(2);
+    expect(channels()[0]).toBe("> 12Canal Nord Sportmapped · canalnordsport.ex");
+    expect(options()[0]).toBe("> AutomaticRestore");
+    expect(options()[3]).toBe("Canal Nord Sportcanalnordsport.exCurrent");
+
+    const restored = ipc.hold("guide.map");
+    readAgain(channel("12", "Canal Nord Sport"));
+    await click(button("Restore"));
+    restored.resolve(channel("12", "Canal Nord Sport"));
+    await settled();
+
+    expect(ipc.argsOf("guide.map")[1]).toMatchObject({ channelId: "12", guideId: null });
+    expect(ipc.argsOf("guide.mapChannels")).toHaveLength(3);
+    expect(channels()[0]).toBe("> 12Canal Nord Sportno id match");
+  });
+
+  it("moves on to the next channel once the one mapped leaves the list, with every page after it in step", async () => {
+    // What the main process lists without programmes: 250 channels, less each one mapped.
+    const without = Array.from({ length: 250 }, (_, at) =>
+      channel(String(at + 1), `Channel ${at + 1}`),
+    );
+    /** Answers the next reading of a page from `without` as it is then, as the main process does. */
+    const page = () => {
+      const held = ipc.hold("guide.mapChannels");
+      return (offset: number) =>
+        held.resolve({
+          total: without.length,
+          channels: without.slice(offset, offset + 120),
+          revision: "7.2",
+        });
+    };
+    const { click, button, dialog, channels, channelList, optionList } = await sheet({
+      channels: { total: 250, channels: without.slice(0, 120), revision: "7.2" },
+    });
+    const mapped = ipc.hold("guide.map");
+    const first = page();
+
+    await click(button("Map", optionList()?.querySelectorAll('[role="option"]')[1]));
+    mapped.resolve(channel("1", "Channel 1", "canalnord.ex"));
+    without.shift();
+    await settled();
+    // The page that was read is asked for again, and answered as the list is by now.
+    expect(ipc.argsOf("guide.mapChannels").map((each) => each.offset)).toEqual([0, 0]);
+    first(0);
+    await settled();
+
+    // The channel has programmes now and left; the keyboard is on the one that took its place.
+    expect(dialog()?.textContent).toContain("Channels · 249");
+    expect(channels()[0]).toBe("> 2Channel 2no id match");
+    expect(dialog()?.textContent).toContain("Guide for Channel 2");
+    expect(document.activeElement).toBe(channelList());
+
+    // Further down, where the first page ends and the second begins.
+    const second = page();
+    const list = channelList();
+    await act(async () => {
+      if (list) list.scrollTop = 112 * 40;
+      list?.dispatchEvent(new Event("scroll"));
+    });
+    await settled();
+    expect(ipc.argsOf("guide.mapChannels").at(-1)).toMatchObject({ offset: 120 });
+    second(120);
+    await settled();
+
+    // No channel is left out between the pages, and none shows twice.
+    const numbers = channels().map((row) => Number.parseInt(row, 10));
+    expect(numbers).toContain(121);
+    expect(numbers).toContain(122);
+    expect(numbers).toEqual(numbers.map((_, at) => (numbers[0] ?? 0) + at));
+  });
+
+  it("goes through both lists by the keyboard, and maps with Enter", async () => {
+    const { press, channels, options, channelList, optionList, fields } = await sheet();
+    expect(document.activeElement).toBe(channelList());
+    ipc.hold("guide.mapOptions").resolve(OPTIONS);
+
+    await press(channelList(), "ArrowDown");
+
+    expect(channels()[1]).toBe("> 14Canal Nord HDno id match");
+    expect(ipc.argsOf("guide.mapOptions").at(-1)).toMatchObject({ query: "Canal Nord HD" });
+    // Enter goes on to that channel's guide channels, and Down into them.
+    await press(channelList(), "Enter");
+    expect(document.activeElement).toBe(fields()[1]);
+    await press(fields()[1], "ArrowDown");
+    expect(document.activeElement).toBe(optionList());
+    await press(optionList(), "ArrowDown");
+    expect(options()[1]).toBe("> Canal Nordcanalnord.exMap");
+
+    const mapped = ipc.hold("guide.map");
+    const hd = channel("14", "Canal Nord HD", "canalnord.ex");
+    ipc.hold("guide.mapChannels").resolve({
+      ...WITHOUT,
+      channels: WITHOUT.channels.map((each) => (each.id === hd.id ? hd : each)),
+    });
+    await press(optionList(), "Enter");
+    mapped.resolve(hd);
+    await settled();
+
+    expect(ipc.argsOf("guide.map")).toEqual([
+      { subscriptionId: holiday.id, channelId: "14", guideId: "canalnord.ex", revision: "7.2" },
+    ]);
+    // The keyboard is back in the channels, to go on to the next.
+    expect(document.activeElement).toBe(channelList());
+    expect(channels()[1]).toBe("> 14Canal Nord HDmapped · canalnord.ex");
+    // Up from the first guide channel leaves for the channels too.
+    await press(optionList(), "ArrowUp");
+    await press(optionList(), "ArrowUp");
+    expect(document.activeElement).toBe(channelList());
+  });
+
+  it("searches and filters the channels, and searches the guide by what is typed", async () => {
+    const { type, dialog, fields, channels, options } = await sheet();
+
+    ipc.hold("guide.mapChannels").resolve({
+      total: 1,
+      channels: [channel("14", "Canal Nord HD")],
+      revision: "7.2",
+    });
+    await type(fields()[0], " nord hd ");
+    expect(ipc.argsOf("guide.mapChannels").at(-1)).toMatchObject({
+      filter: "without",
+      query: "nord hd",
+      offset: 0,
+    });
+    expect(channels()).toEqual(["> 14Canal Nord HDno id match"]);
+
+    ipc.hold("guide.mapOptions").resolve({ total: 1, channels: OPTIONS.channels.slice(0, 1) });
+    await type(fields()[1], "canalnord.ex");
+    expect(ipc.argsOf("guide.mapOptions").at(-1)).toMatchObject({ query: "canalnord.ex" });
+    expect(options()).toEqual(["> Automatic · no id matchCurrent", "Canal Nordcanalnord.exMap"]);
+
+    const select = dialog()?.querySelector("select");
+    ipc.hold("guide.mapChannels").resolve({ total: 0, channels: [], revision: "7.2" });
+    await act(async () => {
+      if (select) select.value = "mapped";
+      select?.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await settled();
+    expect(ipc.argsOf("guide.mapChannels").at(-1)).toMatchObject({ filter: "mapped" });
+    expect(dialog()?.textContent).toContain("No channel matches.");
+  });
+
+  it("says when the guide is another one than the lists were read from, and reads them again", async () => {
+    const { click, button, alert, optionList } = await sheet();
+    const asked = ipc.argsOf("guide.mapChannels").length;
+    ipc.hold("guide.map").reject({ kind: "guide", failure: { kind: "changed" } });
+
+    await click(button("Map", optionList()?.querySelectorAll('[role="option"]')[1]));
+
+    expect(alert()).toBe("The guide changed meanwhile, so nothing was changed.");
+    expect(ipc.argsOf("guide.mapChannels").length).toBeGreaterThan(asked);
+  });
+
+  it("reads the channels again when the main process reports a guide that loaded meanwhile", async () => {
+    const { channels } = await sheet();
+    ipc.hold("guide.mapChannels").resolve({
+      ...WITHOUT,
+      total: 1,
+      channels: WITHOUT.channels.slice(1, 2),
+    });
+
+    await act(async () => ipc.emit("guide.updated", null));
+    await settled();
+
+    expect(channels()).toEqual(["> 14Canal Nord HDno id match"]);
+  });
+
+  it("leaves a channel the provider no longer lists only its mapping to take away, and closes on Done", async () => {
+    const gone: MapChannel = {
+      ...channel("77", "Old Channel", "old.ex"),
+      number: null,
+      guideId: null,
+      listed: false,
+    };
+    const { click, button, channels, options, dialog, fields } = await sheet({
+      channels: { total: 1, channels: [gone], revision: "7.2" },
+    });
+
+    expect(channels()).toEqual(["> Old Channelno longer listed"]);
+    // Nothing is searched for it, and nothing can be mapped anew.
+    expect(fields()[1]?.value).toBe("");
+    expect(options()[0]).toBe("> AutomaticRestore");
+    const cleared = ipc.hold("guide.map");
+    ipc.hold("guide.mapChannels").resolve({ total: 0, channels: [], revision: "7.2" });
+    await click(button("Restore"));
+    cleared.resolve(null);
+    await settled();
+    expect(ipc.argsOf("guide.map")).toEqual([
+      { subscriptionId: holiday.id, channelId: "77", guideId: null, revision: "7.2" },
+    ]);
+    // Nothing is left of it once its mapping is gone.
+    expect(channels()).toEqual([]);
+
+    await click(button("Done"));
+    expect(dialog()).toBeNull();
+  });
+});

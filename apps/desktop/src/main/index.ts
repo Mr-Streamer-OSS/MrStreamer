@@ -495,6 +495,15 @@ async function start(): Promise<void> {
           // Removed while its guide downloaded.
           return status ?? (yield* new Failed({ error: { kind: "no-subscription" } }));
         }),
+      "guide.check": ({ subscriptionId, address }) => guide.check(subscriptionId, address ?? ""),
+      "guide.cancelCheck": ({ subscriptionId }) =>
+        Effect.as(guide.cancelCheck(subscriptionId), null),
+      "guide.use": ({ subscriptionId, candidate }) => guide.use(subscriptionId, candidate),
+      "guide.restore": ({ subscriptionId }) => guide.restore(subscriptionId),
+      "guide.map": ({ subscriptionId, channelId, guideId, revision }) =>
+        guide.map(subscriptionId, channelId, guideId, revision),
+      "guide.mapChannels": (query) => guide.mapChannels(query),
+      "guide.mapOptions": (query) => guide.mapOptions(query),
       "ondemand.status": () => onDemand.status,
       "ondemand.refresh": ({ subscriptionId }) => onDemand.refresh(subscriptionId),
       "ondemand.search": ({ query }) => onDemand.search(query),

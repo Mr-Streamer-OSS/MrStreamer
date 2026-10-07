@@ -1,6 +1,6 @@
 // The pieces Settings is built from: titled lists of rows, each with its name on the left and
 // its control or value on the right, like the system's own settings.
-import type { ReactNode } from "react";
+import type { FormEvent, ReactNode } from "react";
 
 /** A titled list of rows. */
 export function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -30,6 +30,21 @@ export function Row({
       </div>
       {children && <div className="flex flex-none items-center gap-2">{children}</div>}
     </div>
+  );
+}
+
+/** A form in a list of rows, under the row it belongs to. */
+export function RowForm({ onSubmit, children }: { onSubmit: () => void; children: ReactNode }) {
+  return (
+    <form
+      className="mb-2 ml-5 max-w-[26rem] border-b border-white/8 pt-2 pb-6"
+      onSubmit={(event: FormEvent) => {
+        event.preventDefault();
+        onSubmit();
+      }}
+    >
+      {children}
+    </form>
   );
 }
 

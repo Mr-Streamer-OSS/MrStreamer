@@ -2,7 +2,8 @@
 // `mainLayer` at start and disposes of it when quitting: that stops background work and downloads,
 // closes streams and the proxy, and closes the database. Their diagnostics go to a log in the
 // data folder, and disposing waits for the lines still being written.
-import { Guide, GuideCatalogue, GuideSource } from "@mrstreamer/core/guide/service";
+import { failedWith } from "@mrstreamer/core/failure";
+import { Guide, GuideAddresses, GuideCatalogue, GuideSource } from "@mrstreamer/core/guide/service";
 import {
   LegacyViewing,
   ViewingAccount,
@@ -16,6 +17,7 @@ import { diagnosticsLogLayer } from "./platform/diagnostics-log.ts";
 import { guideStoreLayer } from "./platform/guide-store.ts";
 import type { Secrets } from "./platform/secrets.ts";
 import { viewingStoreLayer } from "./platform/viewing-store.ts";
+import { xmltvFetch } from "./providers/xmltv.ts";
 import { watchlistStoreLayer } from "./platform/watchlist-store.ts";
 import { Library } from "./services/library.ts";
 import { OnDemand, type OnDemandDeps } from "./services/ondemand.ts";
@@ -122,6 +124,22 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
           Effect.map(Library, (library) => ({ channels: library.guideChannels })),
         ),
         guideStoreLayer,
+        // An address a viewer gave for a guide is sealed as a login's secret is, and requested
+        // as the app, never as a provider's login.
+        Layer.succeed(GuideAddresses, {
+          seal: (address) =>
+            Effect.try({ try: () => config.secrets.seal(address), catch: failedWith }),
+          open: (sealed) =>
+            Effect.sync(() => {
+              try {
+                return config.secrets.open(sealed);
+              } catch {
+                // A new signature, a reset keychain or a denied prompt all end here.
+                return null;
+              }
+            }),
+          fetch: xmltvFetch({ userAgent: config.userAgent }),
+        }),
       ),
     ),
   );

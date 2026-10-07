@@ -19,7 +19,7 @@ import { normalizeCatalogue } from "@mrstreamer/core/catalogue/normalize";
 import { liveChannels } from "@mrstreamer/core/catalogue/variants";
 import { diagnosed } from "@mrstreamer/core/diagnostics";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
-import type { GuideChannels } from "@mrstreamer/core/guide/programmes";
+import type { CatalogueChannels, GuideChannels } from "@mrstreamer/core/guide/programmes";
 import type { LiveCatalogue } from "@mrstreamer/core/provider";
 import { normalize } from "@mrstreamer/core/text";
 import * as Clock from "effect/Clock";
@@ -143,8 +143,11 @@ export class Library extends Context.Service<
      * or outdated.
      */
     isStale(subscriptionId: string, maxAge: Duration.Input): Effect.Effect<boolean>;
-    /** The channels of a subscription's catalogue by guide id, for the programme guide. */
-    guideChannels(subscriptionId: string): Effect.Effect<GuideChannels, Failed>;
+    /**
+     * A subscription's channels as the lists show them, with their guide ids, for the programme
+     * guide: the same object while its catalogue and what the lists show of it stay the same.
+     */
+    guideChannels(subscriptionId: string): Effect.Effect<CatalogueChannels, Failed>;
     /** Each saved subscription's catalogue, in the subscriptions' order. */
     readonly status: Effect.Effect<readonly CatalogueStatus[]>;
     /** The categories of every subscription, those that show as one joined. */
@@ -200,6 +203,8 @@ function make(options: LibraryOptions) {
       all: null,
       ordinary: null,
     };
+    /** Each subscription's channels as the guide reads them, kept while the lists are the same. */
+    const guideViews = new WeakMap<Combined, Map<string, CatalogueChannels>>();
     const noSubscription = new Failed({ error: { kind: "no-subscription" } });
 
     const cachePath = (subscription: SavedSubscription) => join(subscription.dir, "catalogue.json");
@@ -403,10 +408,26 @@ function make(options: LibraryOptions) {
         }),
 
       guideChannels: (subscriptionId: string) =>
-        Effect.map(memberOf(subscriptionId), ({ member, lists }): GuideChannels => ({
-          guideIdsOf: member.guide.guideIdsOf,
-          channelsOf: (guideId) => member.guide.channelsOf(guideId).map(lists.shown),
-        })),
+        Effect.map(memberOf(subscriptionId), ({ member, lists }) => {
+          const views = guideViews.get(lists) ?? new Map<string, CatalogueChannels>();
+          guideViews.set(lists, views);
+          const kept = views.get(subscriptionId);
+          if (kept) return kept;
+          const view: CatalogueChannels = {
+            all: member.channels.map((channel) => lists.shown(channel)),
+            searchNames: member.searchNames,
+            channel: (channelId) => {
+              const found = member.byId.get(channelId);
+              return found && lists.shown(found);
+            },
+            // Of the whole catalogue: a channel the lists only hide is still the provider's.
+            listed: (channelId) => catalogues.get(subscriptionId)?.byId.has(channelId) ?? false,
+            guideIdsOf: member.guide.guideIdsOf,
+            channelsOf: (guideId) => member.guide.channelsOf(guideId).map(lists.shown),
+          };
+          views.set(subscriptionId, view);
+          return view;
+        }),
 
       status: Effect.flatMap(subscriptions.saved, (saved) => Effect.forEach(saved, statusNow)),
 

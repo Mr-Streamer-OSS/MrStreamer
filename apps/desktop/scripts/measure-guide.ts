@@ -1,10 +1,14 @@
 // Measures the programme guide against its budgets: download and index under 3 s, no
 // main-process stall over 50 ms, now and next for a screen of channels under 5 ms, and under 80 MB
-// of memory. Uses a generated guide the size of a large subscription, or a real XMLTV file.
+// of memory. Uses a generated guide the size of a large subscription, or a real XMLTV file. It
+// also times what Settings asks to map channels by hand: a page of the 13,000 channels, a search
+// of the guide's channels, and now and next with a few hundred of them mapped.
 //
 //   node --expose-gc scripts/measure-guide.ts [--file guide.xml]
+//       [--guide-channels 1300] [--programmes 70]
 //
-// The file stays local: provider guides are not committed.
+// The last two size the generated guide, as for one near the limits a guide is read under
+// (`GUIDE_LIMITS`). The file stays local: provider guides are not committed.
 import { createReadStream } from "node:fs";
 import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -13,19 +17,27 @@ import { monitorEventLoopDelay } from "node:perf_hooks";
 import { Readable } from "node:stream";
 import { parseArgs } from "node:util";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
-import type { GuideChannels } from "@mrstreamer/core/guide/programmes";
-import { Guide, GuideCatalogue, GuideSource } from "@mrstreamer/core/guide/service";
+import type { CatalogueChannels } from "@mrstreamer/core/guide/programmes";
+import { Guide, GuideAddresses, GuideCatalogue, GuideSource } from "@mrstreamer/core/guide/service";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import { guideStoreLayer } from "../src/main/platform/guide-store.ts";
 
 const CHANNELS = 13_000;
-const GUIDE_CHANNELS = 1_300;
-const PROGRAMMES_PER_CHANNEL = 70;
 const CHUNK_BYTES = 64 * 1024;
+/** How many channels the measurement maps by hand. */
+const MAPPED = 300;
 
-const { values } = parseArgs({ options: { file: { type: "string" } } });
+const { values } = parseArgs({
+  options: {
+    file: { type: "string" },
+    "guide-channels": { type: "string", default: "1300" },
+    programmes: { type: "string", default: "70" },
+  },
+});
+const GUIDE_CHANNELS = Number(values["guide-channels"]);
+const PROGRAMMES_PER_CHANNEL = Number(values.programmes);
 const now = Date.now();
 const dataDir = await mkdtemp(join(tmpdir(), "mr-streamer-guide-"));
 // The document streams from a file, as it would from the network, so it never sits in the heap.
@@ -56,7 +68,12 @@ for (const [index, channel] of channels.entries()) {
   guideIdsOf.set(channel.id, [guideId]);
   byGuideId.set(guideId, [...(byGuideId.get(guideId) ?? []), channel]);
 }
-const guideChannels: GuideChannels = {
+const byId = new Map(channels.map((channel) => [channel.id, channel]));
+const guideChannels: CatalogueChannels = {
+  all: channels,
+  searchNames: channels.map((channel) => channel.name.toLowerCase()),
+  channel: (id) => byId.get(id),
+  listed: (id) => byId.has(id),
   guideIdsOf: (id) => guideIdsOf.get(id) ?? [],
   channelsOf: (id) => byGuideId.get(id) ?? [],
 };
@@ -85,6 +102,12 @@ async function create() {
           }),
           Layer.succeed(GuideCatalogue, { channels: () => Effect.succeed(guideChannels) }),
           guideStoreLayer,
+          // The measured guide is the subscription's own: no address is sealed or requested.
+          Layer.succeed(GuideAddresses, {
+            seal: (address) => Effect.succeed(address),
+            open: (sealed) => Effect.succeed(sealed),
+            fetch: async () => createReadStream(documentPath, { highWaterMark: CHUNK_BYTES }),
+          }),
         ),
       ),
     ),
@@ -100,6 +123,22 @@ async function create() {
     search: (query: string) => runtime.runPromise(guide.search(query)),
     searchChannels: (query: string, asked: readonly LiveChannel[], until: number) =>
       runtime.runPromise(guide.searchChannels(query, asked, until)),
+    mapChannels: (query: string) =>
+      runtime.runPromise(
+        guide.mapChannels({
+          subscriptionId: SUBSCRIPTION,
+          filter: "without",
+          query,
+          offset: 0,
+          limit: 120,
+        }),
+      ),
+    mapOptions: (query: string) =>
+      runtime.runPromise(
+        guide.mapOptions({ subscriptionId: SUBSCRIPTION, query, offset: 0, limit: 120 }),
+      ),
+    map: (channelId: string, guideId: string, revision: string) =>
+      runtime.runPromise(guide.map(SUBSCRIPTION, channelId, guideId, revision)),
     dispose: () => runtime.dispose(),
   };
 }
@@ -147,6 +186,29 @@ for (let round = 0; round < 20; round++) {
 const listSearchMs = (performance.now() - started) / 20;
 const found = Object.keys(await restarted.searchChannels("news", channels, endOfDay)).length;
 
+// What Settings asks to map channels by hand: a page of the channels without programmes, and
+// the guide's channels a search finds, as the viewer types.
+started = performance.now();
+for (let round = 0; round < 20; round++) await restarted.mapChannels("");
+const mapPageMs = (performance.now() - started) / 20;
+started = performance.now();
+for (let round = 0; round < 20; round++) await restarted.mapChannels("channel 12");
+const mapSearchMs = (performance.now() - started) / 20;
+await restarted.mapOptions("");
+started = performance.now();
+for (let round = 0; round < 20; round++) await restarted.mapOptions("c1");
+const optionsMs = (performance.now() - started) / 20;
+const unmatched = await restarted.mapChannels("");
+// Channels without a guide id of their own, each mapped to one of the guide's channels.
+const byHand = channels.filter((_, index) => index % 6 === 1).slice(0, MAPPED);
+for (const [at, channel] of byHand.entries()) {
+  const guideId = guideIds[at % guideIds.length];
+  if (guideId) await restarted.map(channel.id, guideId, unmatched.revision);
+}
+started = performance.now();
+for (let round = 0; round < 100; round++) await restarted.listings(screen);
+const mappedListingsMs = (performance.now() - started) / 100;
+
 const size = ((await stat(documentPath)).size / 1e6).toFixed(1);
 const row = (label: string, value: string, budget: string) =>
   console.log(`${label.padEnd(34)} ${value.padStart(10)}   ${budget}`);
@@ -158,6 +220,10 @@ row("longest stall while reading", `${diskStall.toFixed(1)} ms`, "under 50 ms");
 row("now and next for 60 channels", `${listingsMs.toFixed(2)} ms`, "under 5 ms");
 row(`search "news" (${matches.length} results)`, `${searchMs.toFixed(1)} ms`, "");
 row(`list search "news" (${found} found)`, `${listSearchMs.toFixed(1)} ms`, "");
+row(`mapping list (${unmatched.total} without)`, `${mapPageMs.toFixed(1)} ms`, "");
+row("mapping list, searched", `${mapSearchMs.toFixed(1)} ms`, "");
+row("guide channels, searched", `${optionsMs.toFixed(1)} ms`, "");
+row("now and next, channels mapped", `${mappedListingsMs.toFixed(2)} ms`, "under 5 ms");
 row(
   "memory held by the guide",
   gc ? `${heapMb.toFixed(0)} MB` : "run with --expose-gc",

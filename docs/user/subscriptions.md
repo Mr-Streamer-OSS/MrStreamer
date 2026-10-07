@@ -46,18 +46,47 @@ Settings > **Subscriptions** lists each one with its kind and how it stands: whe
 
 - **Edit** changes the name, and the password or the playlist link when you type a new one. The server and username can't be changed: another server, username or playlist is another subscription, which you add.
 - The refresh buttons beside **Channels**, **Guide** and **Movies and series** fetch that list again, for that subscription alone.
+- **Guide** sets where that subscription's programme guide comes from, and **Map** gives a channel the guide channel you pick; see [A guide from another address](#a-guide-from-another-address).
 - **Retry** shows on a subscription whose provider didn't answer, with the time it stopped answering. Its lists stay as they were then, and the other subscriptions carry on. Live TV says the same in one line above the channels.
 - **Enter password**, or **Enter link**, shows on a subscription whose saved password or link your system no longer gives back. What was loaded from it still shows; it plays again once you've entered it. See [troubleshooting](troubleshooting.md#mr-streamer-asks-for-my-password-or-playlist-link-again).
+
+## A guide from another address
+
+A subscription's programme guide comes from its provider, or from the guide its playlist names. You can give a subscription a guide from an XMLTV address of your own instead, such as a paid guide service's. It replaces the guide for that subscription only.
+
+Open the subscription's row and choose **Guide**:
+
+1. Type the address in **XMLTV address**. Plain XML and gzip both work.
+2. **Check** downloads the guide and reads it. It says how many channels the guide lists, how many of your channels match it by id, and how far ahead its programmes run. Nothing has changed yet.
+3. **Use this guide** switches to it. **Cancel** on the row stops a check and leaves everything as it was.
+
+A guide that can't be downloaded, isn't XMLTV, stops before its end, lists no programmes still to come or is larger than Mr. Streamer reads is refused, and the guide you had stays in use.
+
+- **The address is kept like a password.** It often holds a key, so it is encrypted on your computer and never shown again: Settings names only its host, and the field starts empty each time. Leave it empty and **Check** reads the saved address again. An address starting with `http://` travels unencrypted, key included, and the form says so before anything is sent.
+- **Nothing falls back.** When the guide's server stops answering, the listings stay as they were at the last download, and the Guide row says since when, with **Retry**. Your provider's guide isn't used in its place until you choose **Use provider guide**, or **Use playlist guide**, in the same form. That also forgets the address.
+- **Times** follow the offset each programme carries, such as `+0200`, and count as UTC without one. They show in your computer's time zone. There is no setting to shift them.
+
+### Channels without programmes
+
+A channel shows programmes when the guide id your provider gives it is one the guide lists, exactly. Mr. Streamer never matches by name: two channels called the same are often not the same channel. **Map**, beside **Mapped channels**, is for the rest:
+
+- The left list has your channels: those without programmes, those you mapped, or all. The field searches them by name or number.
+- Pick a channel and the right list has the guide's channels, each with its name and its id. Its field starts with the channel's name; change it to search by another name or by id.
+- **Map** gives the channel that guide channel's programmes, at once, in Live TV, on Home and in search. A mapped channel uses its mapping alone, and moves from the channels without programmes to those you mapped. **Restore**, on the **Automatic** row, takes it away again.
+
+The arrow keys move through either list. Enter goes from a channel to its guide channels, and maps there.
+
+Mappings stay through restarts and new channel lists. If the guide stops listing a channel you mapped to, or your provider stops listing the channel, the mapping is counted as unresolved and shows no programmes, rather than another channel's. Mappings belong to the guide they were made for: another address, or going back to the provider's guide, starts without them. Entering the same address again keeps them.
 
 ## Removing one
 
 Open its row and choose **Remove**. Mr. Streamer asks first, and says what happens:
 
 - What plays from it stops. What plays from another subscription carries on.
-- Its login, its lists and its guide are deleted from this computer. The other subscriptions keep theirs.
+- Its login, its lists and its guide are deleted from this computer, with a guide address you gave it and the channels you mapped. The other subscriptions keep theirs.
 - Its favourites, watchlist, history and progress stay, and come back when you add the same account again. Tick **Also delete favourites, watchlist, history and progress** to delete them too. A title on the watchlist that another subscription saved as well stays there either way.
 - Removing your only subscription returns to the Connect screen.
 
 ## Going back to an older version
 
-Versions before several subscriptions know one: the first you added. Going back to one of them shows that subscription alone and leaves the others on your computer untouched, so they are there again after updating. If you removed that first one since, the older version asks you to connect. An account you connect there that you had added here shows once after updating, with its favourites, watchlist, history and progress.
+Versions before several subscriptions know one: the first you added. Going back to one of them shows that subscription alone and leaves the others on your computer untouched, so they are there again after updating. A version from before guides from another address shows the provider's guide, without your mapped channels, and leaves your address and mappings where they are for the version that knows them. If you removed that first one since, the older version asks you to connect. An account you connect there that you had added here shows once after updating, with its favourites, watchlist, history and progress.

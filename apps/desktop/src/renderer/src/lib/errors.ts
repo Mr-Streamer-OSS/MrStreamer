@@ -1,6 +1,8 @@
 import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
+import type { GuideFailure } from "@mrstreamer/contracts/guide";
 import type { OutputFailure } from "@mrstreamer/contracts/output";
 import type { StreamFailure } from "@mrstreamer/contracts/playback";
+import { GUIDE_LIMITS } from "@mrstreamer/core/guide/limits";
 import { isMac } from "../app/platform.ts";
 
 /** The typed error behind a failed call, or an `unexpected` error for anything else. */
@@ -42,6 +44,8 @@ export function describeError(error: AppError): string {
       return describeStreamFailure(error.failure);
     case "output":
       return describeOutputFailure(error.failure);
+    case "guide":
+      return describeGuideFailure(error.failure);
     case "favourites-changed":
       return "Your favourites changed.";
     case "incomplete-catalogue":
@@ -86,6 +90,49 @@ function describeOutputFailure(failure: OutputFailure): string {
       return `Mr. Streamer can't reach receivers right now. ${failure.detail}`;
     case "stream":
       return describeStreamFailure(failure.failure);
+  }
+}
+
+/** Why a guide can't be used, or why a change to one didn't happen. */
+function describeGuideFailure(failure: GuideFailure): string {
+  switch (failure.kind) {
+    case "address":
+      return "Enter the address of an XMLTV guide.";
+    case "locked":
+      return "This guide needs its address again.";
+    case "redirect":
+      return failure.reason === "unencrypted"
+        ? "The address redirected to an unencrypted one, so Mr. Streamer stopped."
+        : "The address redirected too many times.";
+    case "not-xmltv":
+      return "The address answered, but not with an XMLTV guide.";
+    case "incomplete":
+      return "The guide stopped before its end, or is damaged.";
+    case "empty":
+      return "The guide lists no programmes.";
+    case "ended":
+      return "Every programme in this guide has ended.";
+    case "too-large":
+      return `This guide is larger than Mr. Streamer reads: ${tooLarge(failure.limit)}.`;
+    case "changed":
+      return "The guide changed meanwhile, so nothing was changed.";
+    case "cancelled":
+      return "Stopped.";
+  }
+}
+
+/** Which of the limits a guide is read under it is past, in the limit's own measure. */
+function tooLarge(limit: Extract<GuideFailure, { kind: "too-large" }>["limit"]): string {
+  const megabytes = (bytes: number) => `${(bytes / (1024 * 1024)).toLocaleString()} MB`;
+  switch (limit) {
+    case "bytes":
+      return `over ${megabytes(GUIDE_LIMITS.bytes)} unpacked`;
+    case "element":
+      return `one of its entries is over ${megabytes(GUIDE_LIMITS.elementBytes)}`;
+    case "channels":
+      return `over ${GUIDE_LIMITS.channels.toLocaleString()} channels`;
+    case "programmes":
+      return `over ${GUIDE_LIMITS.programmes.toLocaleString()} programmes still to come`;
   }
 }
 

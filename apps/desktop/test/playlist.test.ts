@@ -347,12 +347,17 @@ describe("playlist subscriptions", () => {
     await subscriptions.add(linkOnly(`${host.origin}/other.m3u`));
     await library.channels({});
     // Not read for a guide yet: nothing says it has none.
-    expect(await guide.status()).toEqual({ channels: 0, fetchedAt: null, availability: "unknown" });
+    expect(await guide.status()).toMatchObject({
+      channels: 0,
+      fetchedAt: null,
+      availability: "unknown",
+    });
 
     await guide.refreshIfStale();
 
-    const none = { channels: 0, fetchedAt: null, availability: "none" };
-    expect(await guide.status()).toEqual(none);
+    // An answer, not a failure: nothing is reported as one.
+    const none = { channels: 0, fetchedAt: null, availability: "none", failure: null };
+    expect(await guide.status()).toMatchObject(none);
     const read = host.requests("/other.m3u");
     // The checks the app makes on its own leave the playlist alone from then on.
     await guide.refreshIfStale();
@@ -361,7 +366,7 @@ describe("playlist subscriptions", () => {
     // Refresh in Settings reads its first line again, and still succeeds.
     await guide.refresh();
     expect(host.requests("/other.m3u")).toBe(read + 1);
-    expect(await guide.status()).toEqual(none);
+    expect(await guide.status()).toMatchObject(none);
     expect(host.requests("/guide.xml.gz")).toBe(0);
   });
 
@@ -387,7 +392,11 @@ describe("playlist subscriptions", () => {
     await guide.refresh();
 
     expect(await guide.listings(["Alpha.test@HD"])).toEqual({});
-    expect(await guide.status()).toEqual({ channels: 0, fetchedAt: null, availability: "none" });
+    expect(await guide.status()).toMatchObject({
+      channels: 0,
+      fetchedAt: null,
+      availability: "none",
+    });
     // Nothing of the dropped guide is left for the next start to read.
     const restarted = await app(dataDir);
     await restarted.library.channels({});
@@ -409,7 +418,7 @@ describe("playlist subscriptions", () => {
     host.serve("/guide.xml.gz", 502);
     expect(await failureOf(guide.refresh())).toEqual({ kind: "provider-error", status: 502 });
     host.serve("/guide.xml.gz", "<tv></tv>");
-    expect(await failureOf(guide.refresh())).toMatchObject({ kind: "unexpected" });
+    expect(await failureOf(guide.refresh())).toEqual({ kind: "guide", failure: { kind: "empty" } });
     host.serve("/list.m3u", 503);
     expect(await failureOf(guide.refresh())).toEqual({ kind: "provider-error", status: 503 });
     // A page in the playlist's place says nothing about its guide either.

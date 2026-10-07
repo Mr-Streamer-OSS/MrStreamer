@@ -1,6 +1,6 @@
 # Privacy policy
 
-Last updated 6 October 2026. The current version is at <https://mrstreamer.app/privacy>.
+Last updated 7 October 2026. The current version is at <https://mrstreamer.app/privacy>.
 
 Mr. Streamer is a free, open-source desktop player for the IPTV subscription you already have. This policy explains what it stores on your computer, what it sends and to whom, and what we receive.
 
@@ -12,6 +12,7 @@ Data controller: Wout Stiens, Belgium, publishing as Mr Streamer OSS. Contact: p
 - Your login, settings, favourites, watchlist and viewing history are stored only on your computer.
 - To play anything, the app connects to the provider or playlist you add, and the servers it points to. They can see what you watch, and a provider receives your login. Images and film information come from other services, and update checks go to GitHub.
 - If your provider has no encrypted address, your login is sent unencrypted. The app tells you before it does this.
+- A programme guide you add from another address is downloaded from that address's server. It receives the address and your IP address, and never your login.
 - When you play on a TV, the TV fetches the stream from your computer over your local network. It never receives your login or your provider's address.
 
 ## Data stored on your computer
@@ -32,6 +33,8 @@ The folder contains:
 - your favourites, the channels you watched, and your progress in movies and episodes
 - your watchlist: for each movie or series you saved, and each subscription you saved it from, its name, year and kind, whether the provider marks it for adults, when you saved it, its TMDB id, and the numbers that provider lists its versions under
 - copies of each provider's channel list, programme guide, and movie and series lists
+- for a subscription you gave a programme guide from another address: that address, the copy of the guide downloaded from it, and the reason its latest download failed, if it did. The address can hold a key, so it is encrypted like a password. Its server's address is not encrypted.
+- the channels you mapped to a guide channel by hand: for each, the number your provider lists the channel under, its name, and the guide channel's id
 - information from TMDB about your providers' movies and series
 - your update channel
 - a diagnostics log of what the app did and how long it took. It contains no server addresses, logins or channel names, and it leaves your computer only if you attach it to an issue or an email.
@@ -56,6 +59,10 @@ Over http, your username and password are sent as plain text, and anyone on your
 ### A playlist
 
 When you add a playlist link, Mr. Streamer downloads the playlist from that address when you add it, each time the app starts, when you open Settings > Subscriptions, and when it refreshes the channel list or the guide. To play a channel, it connects to the address the playlist lists for that channel, often on another server, and follows that server's redirects, often to further servers. If the playlist names a programme guide, the app downloads it from the server named. Each of these servers receives your IP address and the app version, or the browser identification and referring address the playlist names for that channel. The servers that play a channel can see what you watch, and when. A playlist link without a login sends no username or password. A channel listed with an `http://` address plays unencrypted.
+
+### A guide from another address
+
+If you give a subscription a programme guide from an address of your own, Mr. Streamer downloads the guide from that address: when you choose **Check**, when you refresh it, and about every six hours while it is that subscription's guide. The address's server, and any server it redirects to, receives your IP address, the app version and the address itself, with any key in it. It never receives your provider's address or login, and the app sends it nothing about your channels or what you watch. An address starting with `http://` is sent unencrypted, key included, and the form says so before the first request. Mr. Streamer never follows a redirect from an `https://` address to an `http://` one.
 
 ### Images
 
@@ -109,7 +116,8 @@ Our email and hosting providers process these messages and visits to our website
 
 ## Deleting your data
 
-- **Remove**, on a subscription in Settings > Subscriptions, deletes that subscription's login or playlist link, the id and the name the app kept for it, and the copies of its provider's lists and guide. Your other subscriptions keep theirs. Tick **Also delete favourites, watchlist, history and progress** to delete that account's favourites, watchlist, watched channels and progress in movies and episodes as well. Otherwise they remain, and reappear if you add the same account again.
+- **Remove**, on a subscription in Settings > Subscriptions, deletes that subscription's login or playlist link, the id and the name the app kept for it, the copies of its provider's lists and guide, and a guide address you gave it with the copy of that guide and the channels you mapped. Your other subscriptions keep theirs. Tick **Also delete favourites, watchlist, history and progress** to delete that account's favourites, watchlist, watched channels and progress in movies and episodes as well. Otherwise they remain, and reappear if you add the same account again.
+- **Use provider guide**, or **Use playlist guide**, in a subscription's Guide form deletes the guide address you gave it, the copy of that guide and the channels you mapped.
 - **Deleting the folder** listed above removes everything Mr. Streamer stores there. To also remove the password key, delete "Mr. Streamer Safe Storage" in Keychain Access on macOS, or the matching entry in your Linux keyring. The update folder can be deleted as well: `~/Library/Caches/mrstreamer-updater` on macOS, `%LOCALAPPDATA%\mrstreamer-updater` on Windows, or `~/.cache/mrstreamer-updater` on Linux.
 - **Uninstalling the app does not delete your data**, so a reinstall continues where you left off. The copy from the Microsoft Store is the exception: uninstalling it deletes its folder.
 - To ask us to delete messages or other data we hold about you, email privacy@mrstreamer.app.
@@ -118,7 +126,7 @@ Our email and hosting providers process these messages and visits to our website
 
 The data on your computer stays under your control. We cannot access or delete it, and you can view or delete it at any time as described above.
 
-For personal data we hold, mainly messages you sent us, the GDPR gives you the right to access, correct and erase it, to restrict or object to its use, and to receive a copy. Email privacy@mrstreamer.app and we will respond within one month. For data held by your provider, the servers a playlist names, TMDB or GitHub, contact them directly.
+For personal data we hold, mainly messages you sent us, the GDPR gives you the right to access, correct and erase it, to restrict or object to its use, and to receive a copy. Email privacy@mrstreamer.app and we will respond within one month. For data held by your provider, the servers a playlist names, the server of a guide address you gave, TMDB or GitHub, contact them directly.
 
 Mr Streamer OSS is based in Belgium. You can lodge a complaint with the Belgian [Data Protection Authority](https://www.dataprotectionauthority.be/citizen/actions/lodge-a-complaint) or with the data protection authority in your country.
 
