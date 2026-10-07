@@ -146,7 +146,9 @@ async function viewingApp(options: FakeProviderOptions = {}) {
       remove: async (filter: RawTitleFilter) =>
         plain(await viewing.removeFromContinue(randomUUID(), await owned(filter))),
       finish: async (seriesIds: readonly string[]) =>
-        plain(await viewing.finishSeries(randomUUID(), (await owned({ seriesIds })).series)),
+        plain(
+          await viewing.finishSeries(randomUUID(), (await owned({ seriesIds })).series, Date.now()),
+        ),
       progress: async (filter: RawTitleFilter) =>
         (await viewing.progress(await owned(filter))).map(plainProgress),
       /** The sequences the UI is told about from now on. */
@@ -737,7 +739,7 @@ describe("whose channels and titles the record names", () => {
       viewing.record.recordWatch(randomUUID(), gone),
       viewing.record.recordProgress(randomUUID(), late, 900, 6000, Date.now()),
       viewing.record.removeFromContinue(randomUUID(), { movies: [gone] }),
-      viewing.record.finishSeries(randomUUID(), [gone]),
+      viewing.record.finishSeries(randomUUID(), [gone], Date.now()),
     ]) {
       await expect(change).rejects.toMatchObject({ error: { kind: "no-subscription" } });
     }

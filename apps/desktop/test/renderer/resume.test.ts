@@ -1,12 +1,13 @@
 // @vitest-environment happy-dom
-// Continue watching's Resume on a series waits for the series' details. Whatever the viewer does
-// meanwhile, a new account above all, wins over that wait.
+// Continue watching's Resume on a series waits for the series' details and for how its episodes
+// stand. Whatever the viewer does meanwhile, a new account above all, wins over that wait.
 import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Title } from "@mrstreamer/contracts/ondemand";
+import type { TitleProgress } from "@mrstreamer/contracts/viewing";
 import { openDetails, resetForAccount, useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { useResume, type ContinueEntry } from "../../src/renderer/src/lib/titles.ts";
 
@@ -33,30 +34,38 @@ function seriesOf(id: string): Title {
   };
 }
 
-/** Halfway through episode 2 of `id`. */
+/** Series `id` as Continue watching offers it. */
 function entryOf(id: string): ContinueEntry {
   return {
     key: `series:${id}`,
     title: seriesOf(id),
-    progress: {
-      title: {
-        kind: "episode",
-        subscriptionId: SUBSCRIPTION,
-        id: `${id}-e2`,
-        seriesId: id,
-        season: 1,
-        episode: 2,
-      },
-      position: 600,
-      duration: 2700,
-      finished: false,
-      at: 1,
-    },
+    version: { subscriptionId: SUBSCRIPTION, id },
+    progress: null,
     line: "S1 E2",
     done: 0.2,
     artworkUrl: null,
   };
 }
+
+/** A play of episode `episode` that stopped at `position` of 45 minutes. */
+const played = (episode: number, position: number): TitleProgress => ({
+  title: {
+    kind: "episode",
+    subscriptionId: SUBSCRIPTION,
+    id: `e${episode}`,
+    seriesId: "series",
+    season: 1,
+    episode,
+  },
+  position,
+  duration: 2700,
+  finished: position >= 2650,
+  at: 1,
+  since: 1,
+});
+
+/** Halfway through episode 2: how every series here stands in the record. */
+const halfway = played(2, 600);
 
 /** The details of series `id`: one season of two episodes. */
 function detailsOf(id: string) {
@@ -106,6 +115,7 @@ let unmount: () => void;
 
 beforeEach(async () => {
   ipc.reset();
+  ipc.always("viewing.episodes", { progress: [halfway], marks: [], undoable: null });
   useUi.setState(useUi.getInitialState(), true);
   client = new QueryClient();
   function Probe() {
@@ -165,5 +175,47 @@ describe("resuming a series from Continue watching", () => {
     await act(async () => first.resolve(details));
 
     expect(opened()).toEqual(["new-series-e2"]);
+  });
+
+  it("goes on where the series' details would: past an episode marked watched, from its beginning", async () => {
+    ipc.always("viewing.episodes", {
+      progress: [played(1, 600)],
+      marks: [{ season: 1, episode: 1, watched: true, at: 5, revision: 5 }],
+      undoable: 5,
+    });
+    const answer = ipc.hold("ondemand.details");
+
+    resume(entry);
+    await act(async () => answer.resolve(details));
+
+    expect(opened()).toEqual(["old-series-e2"]);
+    expect(ipc.argsOf("viewing.episodes")[0]).toEqual({
+      series: { subscriptionId: SUBSCRIPTION, id: "old-series" },
+    });
+  });
+
+  it("opens the details instead once every episode is watched", async () => {
+    ipc.always("viewing.episodes", {
+      progress: [],
+      marks: [1, 2].map((episode) => ({
+        season: 1,
+        episode,
+        watched: true,
+        at: 5,
+        revision: episode,
+      })),
+      undoable: 2,
+    });
+    const answer = ipc.hold("ondemand.details");
+
+    resume(entry);
+    await act(async () => answer.resolve(details));
+
+    expect(opened()).toEqual([]);
+    expect(useUi.getState().details).toEqual({
+      kind: "series",
+      subscriptionId: SUBSCRIPTION,
+      id: "old-series",
+    });
   });
 });

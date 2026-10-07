@@ -1,6 +1,7 @@
-// How far movies and episodes got, as rules without storage: what a checkpoint changes, when a
-// title counts as finished, and what Continue watching shows. The viewing store keeps one row per
-// title and account and runs these on it.
+// How far movies and episodes got, as rules without storage: which checkpoints count, what one
+// changes, when a title counts as finished, and what Continue watching shows. The viewing store
+// keeps one row per title and account and runs these on it, when a change commits and when it
+// rebuilds the rows from the events.
 import { titleKey, type RawTitleRef } from "@mrstreamer/contracts/ondemand";
 import { CONTINUE_OFFERED, type TitleProgress } from "@mrstreamer/contracts/viewing";
 
@@ -38,6 +39,26 @@ export function isFinished(position: number, duration: number): boolean {
 }
 
 /**
+ * Whether a checkpoint saved at `at`, from a play that began at `since`, counts for its title.
+ * One of a play older than the play `row` holds doesn't, however late it arrives: what the viewer
+ * played last stays. Neither does one of a play begun no later than `markedAt`, when the episode
+ * was last marked by hand: the row keeps what it held when the mark was made, so taking the mark
+ * back finds exactly that. A checkpoint that doesn't count changes nothing.
+ *
+ * A row saved later than `at` was saved by a clock that has been set back since. Which play is
+ * the older one can't be told then, so the checkpoint counts, and the row goes by this clock
+ * from there on rather than refusing every play until the old time comes round again.
+ */
+export function accepted(
+  row: Pick<TitleRow, "since" | "at"> | undefined,
+  { since, at }: { readonly since: number; readonly at: number },
+  markedAt: number | null,
+): boolean {
+  const older = row !== undefined && since < row.since && at >= row.at;
+  return !older && !(markedAt !== null && since <= markedAt);
+}
+
+/**
  * The row after a checkpoint at `position`, from a play that began at `since`. `removedAt` is when
  * the movie, or the episode's series, last left Continue watching. A play begun after that shows
  * it again; the checkpoints of one already going then, as every minute while it plays, leave it out.
@@ -59,6 +80,7 @@ export function progressed(
     duration,
     finished: isFinished(position, duration),
     at,
+    since,
     hidden: removedAt !== null && since <= removedAt,
     removedAt,
   };

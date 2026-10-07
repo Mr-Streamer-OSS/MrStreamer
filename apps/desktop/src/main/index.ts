@@ -1,4 +1,5 @@
 // Composition root: creates the window and wires the services to IPC.
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
@@ -508,7 +509,13 @@ async function start(): Promise<void> {
       "ondemand.refresh": ({ subscriptionId }) => onDemand.refresh(subscriptionId),
       "ondemand.search": ({ query }) => onDemand.search(query),
       "ondemand.searchKind": ({ kind, query }) => onDemand.searchKind(kind, query),
-      "ondemand.details": ({ kind, version }) => onDemand.details(kind, version),
+      "ondemand.details": ({ kind, version }) =>
+        Effect.tap(onDemand.details(kind, version), (details) =>
+          // What a series lists now says where its marks have it go on, on Home as in the sheet.
+          details.kind === "series"
+            ? Effect.ignore(viewing.relist(randomUUID(), version, details.seasons))
+            : Effect.void,
+        ),
       "ondemand.season": ({ series, season }) => onDemand.season(series, season),
       "ondemand.titles": ({ kind, versions }) => onDemand.titles(kind, versions),
       "ondemand.rows": ({ kind, tab, like }) => onDemand.rows(kind, tab, like),
@@ -610,11 +617,11 @@ async function start(): Promise<void> {
             turn,
           });
         }),
-      "output.openTitle": ({ title }) =>
+      "output.openTitle": ({ title, since }) =>
         Effect.gen(function* () {
           const turn = yield* playback.begin;
           const { url, revision } = yield* onDemand.file(title);
-          return yield* output.openTitle(title, url, { turn, revision });
+          return yield* output.openTitle(title, url, since, { turn, revision });
         }),
       "output.playTitle": ({
         sessionId,
@@ -658,8 +665,14 @@ async function start(): Promise<void> {
         viewing.recordProgress(commandId, title, position, duration, since),
       "viewing.removeFromContinue": ({ commandId, titles }) =>
         viewing.removeFromContinue(commandId, titles),
-      "viewing.finishSeries": ({ commandId, series }) => viewing.finishSeries(commandId, series),
+      "viewing.finishSeries": ({ commandId, series, since }) =>
+        viewing.finishSeries(commandId, series, since),
       "viewing.progress": (titles) => viewing.progress(titles),
+      "viewing.episodes": ({ series }) => viewing.episodes(series),
+      "viewing.markEpisode": ({ commandId, episode, watched }) =>
+        viewing.markEpisode(commandId, episode, watched),
+      "viewing.undoMark": ({ commandId, series, revision }) =>
+        Effect.as(viewing.undoMark(commandId, series, revision), null),
       "watchlist.list": (query) => watchlist.list(query),
       "watchlist.saved": ({ kind, version }) => watchlist.saved(kind, version),
       "watchlist.save": ({ kind, version }) => watchlist.save(kind, version),

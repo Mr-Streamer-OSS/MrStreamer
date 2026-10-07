@@ -85,6 +85,7 @@ export async function showReceiverPlayback(
       shows: playing.title.shows,
       audioId: playing.audio,
       subtitleId: playing.subtitle,
+      since: playing.since,
     },
     media,
   );

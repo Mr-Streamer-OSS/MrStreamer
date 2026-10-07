@@ -1,7 +1,7 @@
-// The viewing record service: favourites, watch history and how far movies and episodes got, as
-// events per account. Commands carry an id, so sending one again changes nothing more; the store
-// appends a command's events and the state they add up to in one transaction, and the service
-// tells the UI after the commit.
+// The viewing record service: favourites, watch history, how far movies and episodes got and the
+// episodes marked by hand, as events per account. Commands carry an id, so sending one again
+// changes nothing more; the store appends a command's events and the state they add up to in one
+// transaction, and the service tells the UI after the commit.
 //
 // Every channel and title a call names says which subscription it belongs to, and so does every
 // one it answers with. The record keeps them per account by the provider's own ids, under the key
@@ -15,19 +15,31 @@
 // record, so removing a subscription takes its entries out of the lists and nothing else, and
 // what another build wrote for one account still reads as it wrote it.
 //
-// The app supplies four ports: which subscriptions are saved, the store, the lists kept in
-// preferences.json before the record, which the first start imports once, and the catalogues'
-// channels. The record keeps the provider's stream ids, as builds before channels with several
+// An episode's mark is kept by its series and its numbers, apart from how far any file played
+// (see ./marks.ts and ./episodes.ts). Which series that is, and which versions of it a
+// subscription lists, the lists say when the mark is made and each time it is read: the UI names
+// a version and never says what it belongs to. Where a marked series goes on is worked out each
+// time the record is read, from how it stands then and the episodes the series listed when it
+// was last marked, so it follows what a play saves afterwards and asks no provider. When the
+// app reads those episodes again for its own ends, it tells the record what they are now.
+//
+// The app supplies five ports: which subscriptions are saved, the store, the lists kept in
+// preferences.json before the record, which the first start imports once, the catalogues'
+// channels, and what the lists and a series' details say of a series. The record keeps the
+// provider's stream ids, as builds before channels with several
 // streams did, and shows them by channel: a list holding two streams of one channel shows it once,
 // by the channel's id. Nothing stored is rewritten, so those builds still read every list. A new
 // order of the favourites is no exception: it is the same favourites, removed and added again.
 import type { LiveChannel } from "@mrstreamer/contracts/library";
-import type { TitleRef } from "@mrstreamer/contracts/ondemand";
+import { seriesOf, type TitleRef } from "@mrstreamer/contracts/ondemand";
 import { ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import {
   CONTINUE_OFFERED,
   RECENT_LIMIT,
+  type EpisodeMark,
   type FavouriteOrder,
+  type MarkedNext,
+  type SeriesViewing,
   type TitleFilter,
   type TitleProgress,
   type Viewing,
@@ -39,13 +51,16 @@ import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
 import { Failed } from "../failure.ts";
+import { leading, standing, undoable, type SeriesIdentity, type SeriesMarks } from "./marks.ts";
 import { removalScope, type RawProgress } from "./titles.ts";
 import {
   decide,
   importEvents,
   reordered,
   type AccountEvent,
+  type SeriesListing,
   type StoredChannel,
+  type StoredMark,
   type ViewingCommand,
   type ViewingEvent,
   type ViewingState,
@@ -81,6 +96,30 @@ export class ViewingChannels extends Context.Service<
   }
 >()("mrstreamer/ViewingChannels") {}
 
+/** An episode of a series, in one subscription. */
+export type EpisodeRef = Extract<TitleRef, { readonly kind: "episode" }>;
+
+/** The seasons a series version lists, each with its episodes in order. */
+export type SeriesSeasons = readonly {
+  readonly number: number;
+  readonly episodes: readonly {
+    readonly id: string;
+    readonly season: number;
+    readonly number: number;
+  }[];
+}[];
+
+/** What the lists and a series' details say of a series, which its marks go by. */
+export class ViewingSeries extends Context.Service<
+  ViewingSeries,
+  {
+    /** What a series version is as the lists have it now. Asks no provider. */
+    readonly identity: (series: OwnedId) => Effect.Effect<SeriesIdentity, Failed>;
+    /** The seasons that version lists: what its details hold, as when its sheet opened. */
+    readonly seasons: (series: OwnedId) => Effect.Effect<SeriesSeasons, Failed>;
+  }
+>()("mrstreamer/ViewingSeries") {}
+
 /** The records of some accounts read as one, and how far they have come. */
 export interface StoredViewing {
   /** Stream ids in the order they were starred, or the order the viewer gave them since. */
@@ -92,8 +131,26 @@ export interface StoredViewing {
     readonly account: string;
     readonly progress: RawProgress;
   }[];
+  /**
+   * For each marked series, its latest mark and where it goes on as its record stands (`goesOn`
+   * in ./marks.ts), unless the series left Continue watching since. Most recent first.
+   */
+  readonly marked: readonly {
+    readonly account: string;
+    readonly mark: StoredMark;
+    readonly next: MarkedNext | null;
+  }[];
   /** A later change to any of the accounts has a higher number. */
   readonly sequence: number;
+}
+
+/** What a change reads of an account's record as it commits, in its transaction. */
+export interface StoredLook {
+  readonly titles: (account: string, filter: RawTitleFilter) => readonly RawProgress[];
+  /** What is kept under each of a series' keys (`SeriesIdentity.keys`) that holds marks. */
+  readonly marks: (account: string, keys: readonly string[]) => readonly SeriesMarks[];
+  /** The marks of every series that listed one of these versions when it was last marked. */
+  readonly marksIn: (account: string, seriesIds: readonly string[]) => readonly StoredMark[];
 }
 
 /**
@@ -119,6 +176,16 @@ export class ViewingStore extends Context.Service<
       account: string,
       filter: RawTitleFilter,
     ) => Effect.Effect<readonly RawProgress[], Failed>;
+    /** What `account` keeps under each of a series' keys that holds marks. */
+    readonly marks: (
+      account: string,
+      keys: readonly string[],
+    ) => Effect.Effect<readonly SeriesMarks[], Failed>;
+    /** Its marks of every series that listed one of these versions when it was last marked. */
+    readonly marksIn: (
+      account: string,
+      seriesIds: readonly string[],
+    ) => Effect.Effect<readonly StoredMark[], Failed>;
     /**
      * In one transaction: unless `commandId` ran before, appends the events `decide` makes from
      * the records of `accounts` as they stand, each to its own account's and in the order given,
@@ -129,7 +196,10 @@ export class ViewingStore extends Context.Service<
       readonly accounts: readonly string[];
       readonly commandId: string;
       readonly at: number;
-      readonly decide: (stored: StoredViewing) => readonly AccountEvent[] | Failed;
+      readonly decide: (
+        stored: StoredViewing,
+        look: StoredLook,
+      ) => readonly AccountEvent[] | Failed;
     }) => Effect.Effect<StoredViewing, Failed>;
     /**
      * In one transaction with the import marker: appends `events` for `account`. Does nothing,
@@ -186,7 +256,9 @@ export class ViewingRecord extends Context.Service<
     recordWatch(commandId: string, channel: OwnedId): Effect.Effect<Viewing, Failed>;
     /**
      * Remembers how far a movie or episode played, in a play that began at `since`, in the record
-     * of the subscription the title names.
+     * of the subscription the title names. One that arrives from a play older than the one last
+     * recorded for the title, or from a play begun no later than its episode was last marked by
+     * hand, is noted and changes nothing else: see `accepted` in ./titles.ts.
      */
     recordProgress(
       commandId: string,
@@ -202,18 +274,64 @@ export class ViewingRecord extends Context.Service<
      */
     removeFromContinue(commandId: string, titles: TitleFilter): Effect.Effect<Viewing, Failed>;
     /**
-     * Records that a series' last episode was watched, by its versions: every version played
-     * leaves Continue watching, as a removal does, until a play begun afterwards.
+     * Records that a play watched a series to its end, with no episode left to go on with, by
+     * the series' versions: every version played leaves Continue watching, as a removal does,
+     * until a play begun afterwards. `since` is when that play began: in a subscription that
+     * marked an episode of the series during it or after it, this changes nothing, and where the
+     * series goes on is what its marks say.
      */
-    finishSeries(commandId: string, series: readonly OwnedId[]): Effect.Effect<Viewing, Failed>;
+    finishSeries(
+      commandId: string,
+      series: readonly OwnedId[],
+      since: number,
+    ): Effect.Effect<Viewing, Failed>;
     /**
      * How far the matching titles got, each in its own subscription's record. Titles of a
      * subscription that isn't saved have none.
      */
     progress(titles: TitleFilter): Effect.Effect<readonly TitleProgress[], Failed>;
     /**
+     * How the episodes of a series stand in the subscription of the version named: how far the
+     * files of every version that subscription lists got, the marks that hold for the series as
+     * the lists show it now, and the mark `undoMark` would still take back. None for a
+     * subscription that isn't saved. Fails with whatever kept the lists or the record from
+     * answering, and never answers as if nothing were played or marked.
+     */
+    episodes(series: OwnedId): Effect.Effect<SeriesViewing, Failed>;
+    /**
+     * Marks an episode watched or unwatched, in the record of the subscription it names, with
+     * the episodes its series version lists, which say where the series goes on. Nothing of how
+     * far its file played is changed, no length is made up, and nothing is asked of what plays.
+     * Marking it as it is already marked changes nothing. Answers the mark as it stands, or null
+     * once it was taken back.
+     *
+     * Fails, storing nothing, with `title-not-found` when the series version doesn't list the
+     * episode, and with whatever kept the lists or the details from answering.
+     */
+    markEpisode(
+      commandId: string,
+      episode: EpisodeRef,
+      watched: boolean,
+    ): Effect.Effect<EpisodeMark | null, Failed>;
+    /**
+     * Takes back the mark of a series that `revision` names: its episode, with how far it had
+     * got, where the series goes on and whether it shows in Continue watching are as before it.
+     * Fails with `mark-changed`, changing nothing, unless that mark is still the series' latest
+     * and no play of the series began after it: checked in the transaction that takes it back.
+     */
+    undoMark(commandId: string, series: OwnedId, revision: number): Effect.Effect<void, Failed>;
+    /**
+     * Notes the episodes a series version lists now, as its details were just read, and the
+     * versions its subscription lists of the series: where a series last marked in that version
+     * goes on is worked out from them from then on. Changes nothing for a series without marks,
+     * for one last marked in another version, whose episodes are its own, for one that lists
+     * what it did, and for details that list no episode.
+     */
+    relist(commandId: string, series: OwnedId, seasons: SeriesSeasons): Effect.Effect<void, Failed>;
+    /**
      * Deletes everything `account` recorded, saved or not: favourites, watched channels, how far
-     * titles got and what left Continue watching. Other accounts keep theirs.
+     * titles got, the episodes it marked and what left Continue watching. Other accounts keep
+     * theirs.
      */
     erase(account: string): Effect.Effect<void, Failed>;
     /** The sequence after each committed change. */
@@ -223,7 +341,13 @@ export class ViewingRecord extends Context.Service<
   static readonly layer = Layer.effect(ViewingRecord, make());
 }
 
-const none: Viewing = { favourites: [], recent: [], continueWatching: [], sequence: 0 };
+const none: Viewing = {
+  favourites: [],
+  recent: [],
+  continueWatching: [],
+  marked: [],
+  sequence: 0,
+};
 
 type ChannelOf = (channelId: string) => LiveChannel | undefined;
 
@@ -242,7 +366,38 @@ interface Found extends Saved {
 }
 
 const changed = new Failed({ error: { kind: "favourites-changed" } });
+const markChanged = new Failed({ error: { kind: "mark-changed" } });
 const noSubscription = new Failed({ error: { kind: "no-subscription" } });
+
+/** A mark as the UI reads it: without what the record keeps beside it. */
+function markOf({ season, episode, watched, at, revision }: StoredMark): EpisodeMark {
+  return { season, episode, watched, at, revision };
+}
+
+/** The episodes a series version lists by their numbers alone: two files of one are one episode. */
+function listingOf(seasons: SeriesSeasons): SeriesListing {
+  return seasons.map((season) => ({
+    number: season.number,
+    episodes: [...new Set(season.episodes.map((each) => each.number))],
+  }));
+}
+
+/**
+ * The keys of a series' marks that go on in the version `seriesId` and list other episodes, or
+ * other versions, than `now`.
+ */
+function relisted(
+  kept: readonly SeriesMarks[],
+  seriesId: string,
+  now: { readonly versions: readonly string[]; readonly listing: SeriesListing },
+): string[] {
+  // The versions in whatever order: the lists put the one that suits the viewer best in front.
+  const said = (each: typeof now) => JSON.stringify([each.versions.toSorted(), each.listing]);
+  return kept.flatMap((state) => {
+    const last = leading(state);
+    return last?.title.seriesId === seriesId && said(state) !== said(now) ? [last.series] : [];
+  });
+}
 
 /** Every title a filter names. */
 function namedIn(filter: TitleFilter): readonly OwnedId[] {
@@ -312,6 +467,7 @@ function make() {
     const channels = yield* ViewingChannels;
     const store = yield* ViewingStore;
     const legacy = yield* LegacyViewing;
+    const listed = yield* ViewingSeries;
     const changes = yield* PubSub.unbounded<number>();
 
     // The first start with the record brings in the lists preferences.json kept, which were the
@@ -398,6 +554,14 @@ function make() {
             return owner ? [progressOf(owner, progress)] : [];
           })
           .slice(0, CONTINUE_OFFERED),
+        marked: stored.marked
+          .flatMap(({ account, mark, next }) => {
+            const owner = found.ofAccount.get(account);
+            if (!owner) return [];
+            const series = { subscriptionId: owner.subscriptionId, id: mark.title.seriesId };
+            return [{ series, kept: mark.series, at: mark.at, next }];
+          })
+          .slice(0, CONTINUE_OFFERED),
         sequence: stored.sequence,
       };
     };
@@ -424,7 +588,11 @@ function make() {
     const run = (
       commandId: string,
       named: readonly { readonly subscriptionId: string }[],
-      events: (found: Found, owners: readonly ViewingOwner[]) => readonly AccountEvent[] | Failed,
+      events: (
+        found: Found,
+        owners: readonly ViewingOwner[],
+        look: StoredLook,
+      ) => readonly AccountEvent[] | Failed,
       gone: Failed = noSubscription,
     ) =>
       Effect.gen(function* () {
@@ -432,11 +600,12 @@ function make() {
         const found = yield* settled;
         const owners = ownersOf(found.owners, named);
         if (!owners) return yield* gone;
+        const at = yield* Clock.currentTimeMillis;
         const stored = yield* store.commit({
           accounts: found.owners.map((owner) => owner.key),
           commandId,
-          at: yield* Clock.currentTimeMillis,
-          decide: (stored) => events({ ...found, stored }, owners),
+          at,
+          decide: (stored, look) => events({ ...found, stored }, owners, look),
         });
         yield* PubSub.publish(changes, stored.sequence);
         return shown({ ...found, stored });
@@ -444,21 +613,25 @@ function make() {
 
     /**
      * The titles `filter` matches that their subscriptions played, by the account of each: each
-     * movie, and one episode of each version of a series, which stands for the series.
+     * movie, and one episode of each version of a series, which stands for the series. A series
+     * that was marked counts as well, played or not, by an episode marked in it.
      */
     const playedIn = (filter: TitleFilter) =>
       Effect.gen(function* () {
         const owners = ownersOf(yield* account.owners, namedIn(filter));
         if (!owners) return yield* noSubscription;
         const played = yield* Effect.forEach(owners, (owner) =>
-          Effect.map(
-            store.titles(owner.key, rawFilter(filter, owner)),
-            (titles) =>
-              [
-                owner.key,
-                [...new Map(titles.map(({ title }) => [removalScope(title), title])).values()],
-              ] as const,
-          ),
+          Effect.gen(function* () {
+            const own = rawFilter(filter, owner);
+            const titles = [
+              ...(yield* store.marksIn(owner.key, own.seriesIds ?? [])),
+              ...(yield* store.titles(owner.key, own)),
+            ].map(({ title }) => title);
+            return [
+              owner.key,
+              [...new Map(titles.map((title) => [removalScope(title), title])).values()],
+            ] as const;
+          }),
         );
         return new Map(played);
       });
@@ -539,15 +712,19 @@ function make() {
             ),
           ),
         ),
-      finishSeries: (commandId: string, series: readonly OwnedId[]) =>
+      finishSeries: (commandId: string, series: readonly OwnedId[], since: number) =>
         Effect.flatMap(playedIn({ series }), (played) =>
-          run(commandId, series, (found, owners) =>
-            owners.flatMap((owner) =>
-              eventsOf(found, owner, {
+          run(commandId, series, (found, owners, look) =>
+            owners.flatMap((owner) => {
+              // The word of a play the viewer marked an episode during, or after, comes too
+              // late: where the series goes on is what its marks say.
+              const marks = look.marksIn(owner.key, rawFilter({ series }, owner).seriesIds ?? []);
+              if (marks.some((mark) => mark.at >= since)) return [];
+              return eventsOf(found, owner, {
                 kind: "finish-series",
                 titles: played.get(owner.key) ?? [],
-              }),
-            ),
+              });
+            }),
           ),
         ),
       progress: (titles: TitleFilter) =>
@@ -560,6 +737,99 @@ function make() {
             ),
           );
           return played.flat();
+        }),
+      episodes: (series: OwnedId) =>
+        Effect.gen(function* () {
+          const owner = ownersOf(yield* account.owners, [series])?.[0];
+          if (!owner) return { progress: [], marks: [], undoable: null };
+          const { keys, versions } = yield* listed.identity(series);
+          const played = yield* store.titles(owner.key, { seriesIds: versions });
+          const kept = yield* store.marks(owner.key, keys);
+          return {
+            progress: played.map((progress) => progressOf(owner, progress)),
+            marks: standing(kept).map(markOf),
+            undoable: undoable(kept, played)?.revision ?? null,
+          };
+        }),
+      markEpisode: (commandId: string, episode: EpisodeRef, watched: boolean) =>
+        Effect.gen(function* () {
+          const { subscriptionId: _owner, ...title } = episode;
+          const same = (mark: { readonly season: number; readonly episode: number }) =>
+            mark.season === title.season && mark.episode === title.episode;
+          // Asked first: the lists and the details can take a while, and nothing of the record
+          // is read until they answered.
+          const { key, keys, versions } = yield* listed.identity(seriesOf(episode));
+          const listing = listingOf(yield* listed.seasons(seriesOf(episode)));
+          const lists = listing.some(
+            (season) => season.number === title.season && season.episodes.includes(title.episode),
+          );
+          if (!lists) {
+            return yield* new Failed({ error: { kind: "title-not-found", titleId: episode.id } });
+          }
+          yield* run(commandId, [episode], (_found, [owner], look) => {
+            if (!owner) return noSubscription;
+            const held = standing(look.marks(owner.key, keys)).find(same);
+            const replayed = look
+              .titles(owner.key, { seriesIds: versions })
+              .some(
+                (entry) =>
+                  entry.title.kind === "episode" &&
+                  same(entry.title) &&
+                  entry.since > (held?.at ?? Infinity),
+              );
+            if (held?.watched === watched && !replayed) return [];
+            return [
+              {
+                account: owner.key,
+                event: { type: "episode-marked", series: key, title, watched, versions, listing },
+              },
+            ];
+          });
+          const owner = ownersOf(yield* account.owners, [episode])?.[0];
+          const stored = owner ? standing(yield* store.marks(owner.key, keys)).find(same) : null;
+          return stored ? markOf(stored) : null;
+        }),
+      undoMark: (commandId: string, series: OwnedId, revision: number) =>
+        Effect.gen(function* () {
+          const { keys, versions } = yield* listed.identity(series);
+          yield* run(commandId, [series], (_found, [owner], look) => {
+            if (!owner) return noSubscription;
+            const mark = undoable(
+              look.marks(owner.key, keys),
+              look.titles(owner.key, { seriesIds: versions }),
+            );
+            if (mark?.revision !== revision) return markChanged;
+            return [
+              {
+                account: owner.key,
+                event: {
+                  type: "episode-mark-undone",
+                  series: mark.series,
+                  title: mark.title,
+                  revision,
+                },
+              },
+            ];
+          });
+        }),
+      relist: (commandId: string, series: OwnedId, seasons: SeriesSeasons) =>
+        Effect.gen(function* () {
+          const listing = listingOf(seasons);
+          const owner = ownersOf(yield* account.owners, [series])?.[0];
+          if (!owner || !listing.some((season) => season.episodes.length > 0)) return;
+          const { keys, versions } = yield* listed.identity(series);
+          const now = { versions, listing };
+          // Read first: most details read are of a series that lists what it did, or has no marks.
+          const stale = relisted(yield* store.marks(owner.key, keys), series.id, now);
+          if (stale.length === 0) return;
+          yield* run(commandId, [series], (_found, [mine], look) =>
+            mine
+              ? relisted(look.marks(mine.key, keys), series.id, now).map((key) => ({
+                  account: mine.key,
+                  event: { type: "series-listed", series: key, ...now },
+                }))
+              : noSubscription,
+          );
         }),
       erase: (key: string) => store.erase(key),
       changes: Stream.fromPubSub(changes),

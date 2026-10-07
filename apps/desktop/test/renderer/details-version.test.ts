@@ -96,6 +96,7 @@ describe("a film's details", () => {
       duration: 6000,
       finished: false,
       at: 1,
+      since: 1,
     };
 
     expect(

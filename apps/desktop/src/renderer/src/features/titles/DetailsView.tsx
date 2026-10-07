@@ -9,12 +9,16 @@
 // each one's, and Resume goes by how far the version that plays got in its own subscription,
 // never by another's. A series opens on the season being watched, and marks the episode. Each
 // episode's row carries everything known about it, TMDB's details once the season shown has its
-// answer. The title from the lists heads the sheet at once; the rest follows when the provider
-// answers, and TMDB's details when they arrive.
+// answer, and beside it the three dots that mark it watched or unwatched by hand (see
+// EpisodeMarks.tsx). Where a series goes on, and how each episode stands, follow one set of rules
+// (`@mrstreamer/core/viewing/episodes`), which Continue watching and the player go by too, on
+// what the viewing record says: when it can't be read, the sheet says so, names no episode to go
+// on with and shows none as watched or not. The title from the lists heads the sheet at once; the
+// rest follows when the provider answers, and TMDB's details when they arrive.
 import { Dialog } from "@base-ui/react/dialog";
 import { Menu } from "@base-ui/react/menu";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Check, ChevronDown, Play, RotateCcw } from "lucide-react";
+import { Check, ChevronDown, CircleDashed, Play, RotateCcw } from "lucide-react";
 import { useState, type ReactElement, type ReactNode } from "react";
 import type {
   Episode,
@@ -27,9 +31,9 @@ import type {
 } from "@mrstreamer/contracts/ondemand";
 import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type { TitleProgress } from "@mrstreamer/contracts/viewing";
-import { nextEpisode } from "@mrstreamer/core/ondemand/details";
 import { versionLabels } from "@mrstreamer/core/ondemand/languages";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
+import { continuation, episodeStates } from "@mrstreamer/core/viewing/episodes";
 import { openSubscription, useUi, type DetailsTarget } from "../../app/ui-store.ts";
 import { Progress } from "../../components/Progress.tsx";
 import { Sheet } from "../../components/Sheet.tsx";
@@ -59,6 +63,7 @@ import {
 import { cn } from "../../lib/utils.ts";
 import { useSaveToggle, type SaveToggle } from "../../lib/watchlist.ts";
 import { SaveButton, SaveError } from "../watchlist/SaveButton.tsx";
+import { EpisodeMenu, MarkNotice, useEpisodeMarks } from "./EpisodeMarks.tsx";
 
 const close = () => useUi.setState({ details: null });
 
@@ -97,6 +102,16 @@ export function DetailsView({ target }: { target: DetailsTarget }) {
     enabled: known,
     placeholderData: keepPreviousData,
   });
+  // How a series' episodes stand in the subscription of the version that plays: read beside its
+  // details, so the sheet opens on where the series goes on and never on a guess. When it can't
+  // be read the sheet opens all the same, and says so in place of where the series goes on.
+  const standing = useQuery({
+    ...queries.episodes(playing),
+    enabled: known && target.kind === "series",
+    placeholderData: keepPreviousData,
+  });
+  // Once it answered, or failed, the sheet stays up while it is read again.
+  const ready = target.kind !== "series" || !standing.isPending || standing.isFetched;
   const failure = details.error ? appError(details.error) : null;
   // The version that plays is of a subscription whose password or link the keychain lost.
   const subscriptions = useSubscriptions();
@@ -109,7 +124,7 @@ export function DetailsView({ target }: { target: DetailsTarget }) {
   const saving = useSaveToggle(target.kind, target, title !== null);
   return (
     <Sheet onClose={close}>
-      {details.data ? (
+      {details.data && ready ? (
         <Content
           details={details.data}
           versions={{ title, playing, picked, automatic }}
@@ -364,35 +379,19 @@ function ownProgress(
 }
 
 /**
- * An episode of these details matching a progress entry: the same one, or the same season and
- * number in another version of the series.
+ * How the episodes of the series version these details are of stand, in its own subscription,
+ * as the main process last read them: what it read before stays when a later read fails.
+ * `error` says why there is nothing to go by. No episode counts as unwatched on that.
  */
-function episodeOf(episodes: readonly Episode[], progress: TitleProgress): Episode | undefined {
-  const { title } = progress;
-  if (title.kind !== "episode") return undefined;
-  return (
-    episodes.find((episode) => sameOwned(episode, title)) ??
-    episodes.find((episode) => episode.season === title.season && episode.number === title.episode)
-  );
-}
-
-/** Where a series goes on: the episode watched last, its next one once finished, or the first. */
-function resumeTarget(
-  details: SeriesDetails,
-  progress: readonly TitleProgress[],
-): { episode: Episode; progress: TitleProgress | undefined } | null {
-  const episodes = details.seasons.flatMap((season) => season.episodes);
-  const latest = progress.toSorted((a, b) => b.at - a.at)[0];
-  const watched = latest && episodeOf(episodes, latest);
-  if (latest && watched) {
-    if (!latest.finished) return { episode: watched, progress: latest };
-    const next = nextEpisode(details, { season: watched.season, episode: watched.number });
-    if (next) return { episode: next, progress: undefined };
-  }
-  // The first episode of the first numbered season, before specials.
-  const first = details.seasons.find((season) => season.number > 0) ?? details.seasons[0];
-  const episode = first?.episodes[0];
-  return episode ? { episode, progress: undefined } : null;
+function useStanding(details: SeriesDetails) {
+  // The sheet asked as it opened: a read that failed is tried again when the viewer says so, or
+  // the record changes, and not by each part of the sheet that shows up.
+  const read = useQuery({ ...queries.episodes(ownedId(details.title)), retryOnMount: false });
+  return {
+    standing: read.data,
+    error: read.data || !read.error ? null : appError(read.error),
+    retry: () => void read.refetch(),
+  };
 }
 
 function SeriesActions({
@@ -406,10 +405,28 @@ function SeriesActions({
   switching: boolean;
   saving: SaveToggle;
 }) {
-  const progress = useQuery(queries.progress({ series: details.title.versions }));
+  const { standing, error, retry } = useStanding(details);
   const removal = useRemoveFromContinue();
   const listed = useInContinueWatching(details.title);
-  const target = resumeTarget(details, ownProgress(progress.data, details.title));
+  if (!standing) {
+    // Where the series goes on can't be said: nothing offers to play or resume on a guess. The
+    // episodes below still play, each from its beginning.
+    return (
+      <div className="mt-6">
+        <SaveButton state={saving} />
+        <SaveError state={saving} />
+        {error && (
+          <p role="alert" className="mt-6 text-[0.9375rem] text-destructive">
+            Couldn't read what you watched. {describeError(error)}{" "}
+            <button onClick={retry} className="text-white underline underline-offset-4">
+              Try again
+            </button>
+          </p>
+        )}
+      </div>
+    );
+  }
+  const target = continuation(details, standing.progress, standing.marks);
   if (!target) {
     // Nothing to play yet, and still a series to save for when there is.
     return (
@@ -420,9 +437,10 @@ function SeriesActions({
       </div>
     );
   }
-  const { episode } = target;
-  const partly = target.progress && target.progress.position > 0 ? target.progress : undefined;
-  const label = `${partly ? "Resume" : "Play"} ${episodeLabel(episode.season, episode.number)}`;
+  const { episode, resume: partly, replay } = target;
+  // Replay once every numbered episode is watched: the first of them, from its beginning.
+  const verb = replay ? "Replay" : partly ? "Resume" : "Play";
+  const label = `${verb} ${episodeLabel(episode.season, episode.number)}`;
   const now = episodeNow(details, episode);
   return (
     <Actions
@@ -677,21 +695,15 @@ function creditsOf(episode: Partial<EpisodeDetails>): string {
 }
 
 function Episodes({ details }: { details: SeriesDetails }) {
-  const progress = useQuery(queries.progress({ series: details.title.versions }));
-  // How far the episodes got in this version's own subscription: another's are other files.
-  const own = ownProgress(progress.data, details.title);
-  const byEpisode = new Map(own.map((entry) => [ownedKey(entry.title), entry]));
-  // Another version's episodes count by season and number; the latest wins.
-  const byNumber = new Map(
-    own
-      .toSorted((a, b) => a.at - b.at)
-      .flatMap((entry) =>
-        entry.title.kind === "episode"
-          ? [[`${entry.title.season}:${entry.title.episode}`, entry] as const]
-          : [],
-      ),
-  );
-  const target = resumeTarget(details, own);
+  // How far the episodes got in this version's own subscription, and the ones marked there:
+  // another subscription's are other files. While that can't be read, a row says nothing of how
+  // its episode stands and offers no mark.
+  const { standing } = useStanding(details);
+  const stateOf = standing && episodeStates(standing.progress, standing.marks);
+  const target = standing ? continuation(details, standing.progress, standing.marks) : null;
+  const marking = useEpisodeMarks(ownedId(details.title), standing);
+  // Whose record a mark goes to, said once the title's versions are of several subscriptions.
+  const source = useVersionNames(details.title)(details.title)?.source ?? null;
   // The season picked here, else the one being watched once progress has loaded.
   const [picked, setSeason] = useState<number | null>(null);
   const season = picked ?? target?.episode.season ?? details.seasons[0]?.number ?? 1;
@@ -704,10 +716,19 @@ function Episodes({ details }: { details: SeriesDetails }) {
   });
   if (!shown) return null;
   const episodes: readonly (Episode & Partial<EpisodeDetails>)[] = enriched.data ?? shown.episodes;
+  // A mark can move the series on to another season. The season in view stays, so the row just
+  // marked keeps its place, with its dots and the keyboard's focus on them.
+  const marks = {
+    ...marking,
+    mark: (episode: Episode, watched: boolean) => {
+      setSeason(shown.number);
+      marking.mark(episode, watched);
+    },
+  };
   return (
     <section className="mt-10">
       {details.seasons.length > 1 && (
-        <div className="mb-2 flex flex-wrap gap-x-6 gap-y-2 border-b border-border">
+        <div className="mb-2 flex flex-wrap items-baseline gap-x-6 gap-y-2 border-b border-border">
           {details.seasons.map((each) => (
             <button
               key={each.number}
@@ -724,75 +745,91 @@ function Episodes({ details }: { details: SeriesDetails }) {
               {each.name}
             </button>
           ))}
+          {source && <span className="ml-auto pb-2 text-xs text-muted-foreground">{source}</span>}
         </div>
       )}
+      <MarkNotice marks={marks} source={source} />
       <div>
         {episodes.map((episode) => {
-          const done =
-            byEpisode.get(ownedKey(episode)) ?? byNumber.get(`${episode.season}:${episode.number}`);
+          const state = stateOf?.(episode);
           const current = sameOwned(target?.episode, episode);
-          const partly = done && !done.finished && done.position > 0 ? done : undefined;
+          const partly = state?.kind === "partial" ? state.progress : undefined;
+          const saving = marks.busy && marks.change?.episode.id === episode.id;
           const facts = [
             episode.airDate ? airDate(episode.airDate) : null,
             timeLeftOf(partly) ?? (episode.duration ? runtime(episode.duration) : null),
+            saving ? "Saving…" : null,
           ]
             .filter(Boolean)
             .join(" · ");
           const credits = creditsOf(episode);
           return (
-            <button
+            // The row plays, and the dots beside it mark: two buttons side by side, neither
+            // inside the other. Rows hold their top as they grow, so what is in view stays put.
+            <div
               key={episode.id}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => playTitle(episodeNow(details, episode), resumePoint(partly))}
-              // Rows hold their top as they grow, so what is in view stays put.
               className={cn(
-                "grid w-full grid-cols-[2.5rem_12.5rem_minmax(0,1fr)_auto] items-start gap-4 rounded-xl px-2 py-3 text-left hover:bg-white/5",
+                "group grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4 rounded-xl px-2 py-3 hover:bg-white/5",
                 current && "bg-white/[0.04]",
               )}
             >
-              <span className="text-center text-lg text-muted-foreground tabular-nums">
-                {episode.number}
-              </span>
-              <span className="relative block aspect-video overflow-hidden rounded-lg">
-                <Artwork
-                  url={episode.stillUrl}
-                  name={episode.title}
-                  size="wide"
-                  className="text-[0.625rem]"
-                />
-              </span>
-              <span className="min-w-0">
-                <span className="flex items-baseline gap-3">
-                  <span className="min-w-0 flex-1 truncate text-[0.9375rem] font-medium">
-                    {episode.title}
+              <button
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => playTitle(episodeNow(details, episode), resumePoint(partly))}
+                className="grid w-full min-w-0 grid-cols-[2.5rem_12.5rem_minmax(0,1fr)] items-start gap-4 text-left"
+              >
+                <span className="text-center text-lg text-muted-foreground tabular-nums">
+                  {episode.number}
+                </span>
+                <span className="relative block aspect-video overflow-hidden rounded-lg">
+                  <Artwork
+                    url={episode.stillUrl}
+                    name={episode.title}
+                    size="wide"
+                    className="text-[0.625rem]"
+                  />
+                </span>
+                <span className="min-w-0">
+                  <span className="flex items-baseline gap-3">
+                    <span className="min-w-0 flex-1 truncate text-[0.9375rem] font-medium">
+                      {episode.title}
+                    </span>
+                    {episode.rating != null && (
+                      <span className="flex-none text-[0.8125rem] text-muted-foreground">
+                        ★ {episode.rating.toFixed(1)}
+                      </span>
+                    )}
                   </span>
-                  {episode.rating != null && (
-                    <span className="flex-none text-[0.8125rem] text-muted-foreground">
-                      ★ {episode.rating.toFixed(1)}
+                  {facts && (
+                    <span className="block truncate text-xs text-muted-foreground">{facts}</span>
+                  )}
+                  {partly && (
+                    <Progress value={partly.position / partly.duration} className="mt-2 w-40" />
+                  )}
+                  {episode.plot && (
+                    <span className="mt-1 line-clamp-3 block text-[0.8125rem] text-foreground/85">
+                      {episode.plot}
+                    </span>
+                  )}
+                  {credits && (
+                    <span className="mt-1 block truncate text-xs text-muted-foreground">
+                      {credits}
                     </span>
                   )}
                 </span>
-                {facts && (
-                  <span className="block truncate text-xs text-muted-foreground">{facts}</span>
+              </button>
+              <span className="flex w-8 flex-col items-center gap-1.5 text-muted-foreground">
+                {/* While a mark is stored the row claims neither state. */}
+                {saving ? (
+                  <CircleDashed className="size-4 opacity-50" aria-hidden />
+                ) : (
+                  state?.kind === "watched" && <Check className="size-4" aria-label="Watched" />
                 )}
-                {partly && (
-                  <Progress value={partly.position / partly.duration} className="mt-2 w-40" />
-                )}
-                {episode.plot && (
-                  <span className="mt-1 line-clamp-3 block text-[0.8125rem] text-foreground/85">
-                    {episode.plot}
-                  </span>
-                )}
-                {credits && (
-                  <span className="mt-1 block truncate text-xs text-muted-foreground">
-                    {credits}
-                  </span>
+                {state && (
+                  <EpisodeMenu episode={episode} state={state.kind} source={source} marks={marks} />
                 )}
               </span>
-              <span className="w-6 text-muted-foreground">
-                {done?.finished && <Check className="size-4" aria-label="Watched" />}
-              </span>
-            </button>
+            </div>
           );
         })}
       </div>

@@ -97,6 +97,7 @@ async function liveTv(statuses: readonly CatalogueStatus[]) {
     favourites: [],
     recent: [],
     continueWatching: [],
+    marked: [],
     sequence: 1,
   });
   const container = document.createElement("div");
@@ -275,6 +276,7 @@ describe("a film two subscriptions list", () => {
       duration: 6000,
       finished: false,
       at: 1,
+      since: 1,
     });
     // Stopped halfway in the first's file, and the viewer picked the second's version since.
     const other = await filmSheet([halfway(northline, "91001")], { [holiday.id]: "91000" });

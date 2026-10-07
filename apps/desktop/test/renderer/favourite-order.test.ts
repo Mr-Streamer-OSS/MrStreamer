@@ -95,7 +95,13 @@ async function favouritesPage(count: number, list: ChannelList = { kind: "favour
     ["library", "status"],
     [{ subscriptionId: "one", channelCount: count, fetchedAt: 1, failure: null, failedAt: null }],
   );
-  const viewing: Viewing = { favourites, recent: [], continueWatching: [], sequence: 1 };
+  const viewing: Viewing = {
+    favourites,
+    recent: [],
+    continueWatching: [],
+    marked: [],
+    sequence: 1,
+  };
   client.setQueryData(["viewing"], viewing);
   const container = document.createElement("div");
   // In the page, as an element takes the focus only there.
@@ -392,6 +398,7 @@ describe("putting the favourites in another order", () => {
       favourites: ["1", "adult", "2", "3", "gone"].map(own),
       recent: [],
       continueWatching: [],
+      marked: [],
       sequence: 3,
     };
     await act(async () => record.resolve(fresh));
@@ -613,6 +620,7 @@ describe("putting the favourites in another order", () => {
       favourites: ["5", "adult", "3", "4", "1", "2", "gone"].map(own),
       recent: [],
       continueWatching: [],
+      marked: [],
       sequence: 8,
     };
     await act(async () => answer.resolve(current));

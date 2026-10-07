@@ -1,8 +1,14 @@
 // The viewing record on disk, in the SQLite database it shares with the watchlist (database.ts):
 // the events in order, the state they add up to per account, one row per movie or episode played,
-// the ids of commands already done and a few markers. Every command is one transaction. When the
-// rules change (STATE_VERSION), the state is rebuilt from the events at start. If the database
-// can't open, the record reports failures and the rest of the app carries on.
+// one per episode marked by hand and one per marked series, with the episodes it listed and what
+// its latest mark replaced, the ids of commands already done and a few markers. Every command is
+// one transaction. When the rules change (STATE_VERSION), the state is rebuilt from the events at
+// start. If the database can't open, the record reports failures and the rest of the app carries
+// on.
+//
+// What an event does to the title rows and the marks is one function, `project`, run on the
+// tables as a change commits and on a rebuild's memory, so a record rebuilt from its events
+// reads as the one they were committed to.
 //
 // Everything in it is kept per account, by the provider's own ids: the service says which
 // subscription an account's channels and titles belong to, and nothing here names one.
@@ -16,18 +22,33 @@
 // Older builds read this file too, as when someone goes back to an earlier nightly: they skip
 // event types they don't know, leave the titles table alone, and insert events without a payload.
 // Builds with movies and series before `removed_at`, Stable 0.0.3 among them, write title rows
-// without it, and read `hidden` as this one writes it.
+// without it, and read `hidden` as this one writes it. Builds from before marks write title rows
+// without `since`, which then read as a play begun when the row was saved, and never look at the
+// tables that hold the marks: a mark is no title row, so none of them takes it for a play. When
+// such a build erases an account it leaves that account's marks, which this one deletes at its
+// next start: none are kept without the events that made them.
 import type { DatabaseSync } from "node:sqlite";
 import { RawTitleRef, titleKey } from "@mrstreamer/contracts/ondemand";
 import { CONTINUE_OFFERED } from "@mrstreamer/contracts/viewing";
 import {
+  goesOn,
+  leading,
+  left,
+  marked,
+  noMarks,
+  standing,
+  type SeriesMarks,
+} from "@mrstreamer/core/viewing/marks";
+import {
   apply,
   emptyState,
   EVENT_VERSION,
+  isMarkEvent,
   isTitleEvent,
   STATE_VERSION,
   type AccountEvent,
   type ChannelEvent,
+  type MarkEvent,
   type StoredChannel,
   type TitleEvent,
   type ViewingEvent,
@@ -37,9 +58,11 @@ import { Failed } from "@mrstreamer/core/failure";
 import {
   ViewingStore,
   type RawTitleFilter,
+  type StoredLook,
   type StoredViewing,
 } from "@mrstreamer/core/viewing/service";
 import {
+  accepted,
   continueWatching,
   progressed,
   removalScope,
@@ -86,7 +109,30 @@ const SCHEMA = `
   );
   create index if not exists titles_by_time on titles (account, at);
   create index if not exists titles_by_series on titles (account, series_id);
+  create table if not exists marked_episodes (
+    account text not null,
+    series text not null,
+    season integer not null,
+    episode integer not null,
+    mark text not null,
+    primary key (account, series, season, episode)
+  );
+  create table if not exists marked_series (
+    account text not null,
+    series text not null,
+    versions text not null,
+    listing text not null,
+    hidden integer not null,
+    left_at integer,
+    changed integer not null,
+    undo text,
+    at integer not null,
+    primary key (account, series)
+  );
 `;
+
+/** The tables that hold an account's marks, each with an `account` column: erasing takes both. */
+const MARK_TABLES = ["marked_episodes", "marked_series"] as const;
 
 /** How many of an account's most recent titles Continue watching looks at. */
 const CONTINUE_WINDOW = 2000;
@@ -110,14 +156,133 @@ const TitlePayload = type("string.json.parse").pipe(
     "since?": "number",
   }),
 );
+const Listing = type({
+  number: "number.integer >= 0",
+  episodes: "(number.integer >= 0)[]",
+}).array();
+const EpisodeTitle = type({
+  kind: "'episode'",
+  id: "string > 0",
+  seriesId: "string > 0",
+  season: "number.integer >= 0",
+  episode: "number.integer >= 0",
+});
+const MarkPayload = type("string.json.parse").pipe(
+  type({
+    series: "string > 0",
+    "title?": EpisodeTitle,
+    "watched?": "boolean",
+    "versions?": "string[]",
+    "listing?": Listing,
+    "revision?": "number",
+  }),
+);
+/** A mark as its row and an Undo keep it, whole. */
+const Mark = type({
+  series: "string",
+  title: EpisodeTitle,
+  season: "number",
+  episode: "number",
+  watched: "boolean",
+  at: "number",
+  revision: "number",
+});
+const MarkRow = type({ mark: type("string.json.parse").pipe(Mark) });
+const ListedRow = type({
+  series: "string",
+  versions: type("string.json.parse").pipe(type("string[]")),
+});
+/** What a marked series keeps beside its episodes' marks. */
+const SeriesRow = type({
+  series: "string",
+  versions: type("string.json.parse").pipe(type("string[]")),
+  listing: type("string.json.parse").pipe(Listing),
+  hidden: "number",
+  left_at: "number | null",
+  changed: "number",
+  undo: type("null").or(
+    type("string.json.parse").pipe(
+      type({ revision: "number", prior: Mark.or("null"), hidden: "boolean" }),
+    ),
+  ),
+});
 const StateRow = type({ favourites: "string", recent: "string", sequence: "number" });
 const PlacedRow = type({ type: ChannelEventType, channel_id: "string", sequence: "number" });
 
-/** One account's lists and titles as stored, and how far its record has come. */
+/** One account's lists, titles and marks as stored, and how far its record has come. */
 interface AccountRecord {
   readonly state: ViewingState;
   readonly continueWatching: readonly RawProgress[];
+  /** Each marked series' latest mark and where the series goes on, most recent first. */
+  readonly marked: readonly Omit<StoredViewing["marked"][number], "account">[];
   readonly sequence: number;
+}
+
+/**
+ * One account's title rows and marks, as `project` reads and changes them: in the tables as a
+ * change commits, in memory while a rebuild folds the events.
+ */
+interface Projected {
+  readonly row: (key: string) => TitleRow | undefined;
+  /** Every episode's row of a series version. */
+  readonly rowsOf: (seriesId: string) => readonly TitleRow[];
+  /** When the movie, or the episode's series version, last left Continue watching. */
+  readonly removedAt: (title: RawTitleRef) => number | null;
+  readonly saveRow: (row: TitleRow) => void;
+  /** Takes the rows `keys` out of Continue watching, with the movie or series version of `title`. */
+  readonly remove: (title: RawTitleRef, keys: readonly string[], at: number) => void;
+  /** What is kept under a series' key. */
+  readonly series: (key: string) => SeriesMarks;
+  /** The marked series that listed this version when last marked, each by its key. */
+  readonly covering: (seriesId: string) => readonly (readonly [key: string, SeriesMarks])[];
+  /** Stores what is kept under `key`, with the marks of `changed`. */
+  readonly saveSeries: (key: string, state: SeriesMarks, changed: ChangedMarks) => void;
+}
+
+/** Which marks of a series a change touched: every one, none, or one episode's. */
+type ChangedMarks = "all" | "none" | { readonly season: number; readonly episode: number };
+
+/** The latest of some times, or null when none is given. */
+function latest(times: readonly (number | null)[]): number | null {
+  const known = times.filter((time) => time !== null);
+  return known.length > 0 ? Math.max(...known) : null;
+}
+
+/**
+ * What a title or mark event, saved at `at` as the record's event numbered `sequence`, does to an
+ * account's rows and marks. A checkpoint that doesn't count (`accepted`) changes nothing. A
+ * series version that leaves Continue watching takes the marked series that list it out too.
+ */
+function project(
+  view: Projected,
+  event: TitleEvent | MarkEvent,
+  at: number,
+  sequence: number,
+): void {
+  if (isMarkEvent(event)) {
+    const state = marked(view.series(event.series), event, at, sequence);
+    // A mark and its Undo change one episode's mark, and what a series lists changes none.
+    return view.saveSeries(event.series, state, "title" in event ? event.title : "none");
+  }
+  const { title } = event;
+  const covering = title.kind === "episode" ? view.covering(title.seriesId) : [];
+  if (event.type === "title-progress") {
+    const markedAt = latest(
+      covering.flatMap(([, { marks }]) =>
+        marks.flatMap((mark) =>
+          title.kind === "episode" && mark.season === title.season && mark.episode === title.episode
+            ? [mark.at]
+            : [],
+        ),
+      ),
+    );
+    if (!accepted(view.row(titleKey(title)), { since: event.since, at }, markedAt)) return;
+    const removedAt = latest([view.removedAt(title), ...covering.map(([, each]) => each.leftAt)]);
+    return view.saveRow(progressed(event, at, removedAt));
+  }
+  const rows = title.kind === "episode" ? view.rowsOf(title.seriesId) : [];
+  view.remove(title, removedKeys(title, rows), at);
+  for (const [key, state] of covering) view.saveSeries(key, left(state, at), "none");
 }
 
 /**
@@ -171,6 +336,7 @@ const TitleRowShape = type({
   at: "number",
   hidden: "number",
   "removed_at?": "number | null",
+  "since?": "number | null",
 });
 
 /** The viewing store, on the database the runtime keeps open. */
@@ -207,9 +373,35 @@ function prepare(db: DatabaseSync): void {
         .some((column) => column["name"] === name);
     if (!has("events", "payload")) db.exec("alter table events add column payload text");
     if (!has("titles", "removed_at")) db.exec("alter table titles add column removed_at integer");
+    if (!has("titles", "since")) db.exec("alter table titles add column since integer");
   });
+  // A build from before marks that erased an account deleted its events and left its marks.
+  const erased = db
+    .prepare(
+      "select distinct account from marked_series as kept where not exists (select 1 from events where events.account = kept.account)",
+    )
+    .all();
+  for (const { account } of erased) {
+    if (typeof account === "string") deleteForGood(db, MARK_TABLES, account);
+  }
   const stored = db.prepare("select value from meta where key = 'state-version'").get();
   if (stored?.["value"] !== String(STATE_VERSION)) rebuild(db);
+}
+
+/**
+ * Deletes what `tables` hold of `account` so that none of it lingers in the file: SQLite zeroes
+ * what it deletes, and the checkpoint moves it out of the write-ahead log.
+ */
+function deleteForGood(db: DatabaseSync, tables: readonly string[], account: string): void {
+  db.exec("pragma secure_delete = on");
+  try {
+    transaction(db, () => {
+      for (const table of tables) db.prepare(`delete from ${table} where account = ?`).run(account);
+    });
+  } finally {
+    db.exec("pragma secure_delete = off");
+  }
+  db.exec("pragma wal_checkpoint(truncate)");
 }
 
 /** An event as stored, or null when this version can't read it: newer, or of an unknown type. */
@@ -222,6 +414,29 @@ function eventOf(
   const channelType = ChannelEventType(row.type);
   if (!(channelType instanceof type.errors)) {
     return { ...base, event: { type: channelType, channelId: row.channel_id } };
+  }
+  if (
+    row.type === "episode-marked" ||
+    row.type === "episode-mark-undone" ||
+    row.type === "series-listed"
+  ) {
+    const said = row.payload ? MarkPayload(row.payload) : null;
+    if (!said || said instanceof type.errors) return null;
+    const { series, title, watched, versions, listing, revision } = said;
+    if (row.type === "series-listed") {
+      return versions && listing
+        ? { ...base, event: { type: row.type, series, versions, listing } }
+        : null;
+    }
+    if (!title) return null;
+    if (row.type === "episode-mark-undone") {
+      return revision === undefined
+        ? null
+        : { ...base, event: { type: row.type, series, title, revision } };
+    }
+    return watched === undefined || !versions || !listing
+      ? null
+      : { ...base, event: { type: row.type, series, title, watched, versions, listing } };
   }
   const payload = row.payload ? TitlePayload(row.payload) : null;
   if (!payload || payload instanceof type.errors) return null;
@@ -243,12 +458,11 @@ function eventOf(
   return null;
 }
 
-/** Folds every event into the state and title rows again, per account, in order. */
+/** Folds every event into the state, the title rows and the marks again, per account, in order. */
 function rebuild(db: DatabaseSync): void {
   transaction(db, () => {
     const records = new Map<string, { channelEvents: ChannelEvent[]; sequence: number }>();
-    const titles = new Map<string, Map<string, TitleRow>>();
-    const removals = new Map<string, Map<string, number>>();
+    const views = new Map<string, ReturnType<typeof remembered>>();
     for (const raw of db.prepare("select * from events order by sequence").all()) {
       const read = eventOf(raw);
       if (!read) continue;
@@ -256,22 +470,23 @@ function rebuild(db: DatabaseSync): void {
       let record = records.get(account);
       if (!record) records.set(account, (record = { channelEvents: [], sequence: 0 }));
       record.sequence = sequence;
-      if (isTitleEvent(event)) {
-        let rows = titles.get(account);
-        if (!rows) titles.set(account, (rows = new Map()));
-        let removed = removals.get(account);
-        if (!removed) removals.set(account, (removed = new Map()));
-        foldTitle(rows, removed, event, at);
-      } else {
+      if (!isMarkEvent(event) && !isTitleEvent(event)) {
         record.channelEvents.push(event);
+        continue;
       }
+      let memory = views.get(account);
+      if (!memory) views.set(account, (memory = remembered()));
+      project(memory.view, event, at, sequence);
     }
-    db.exec("delete from state; delete from titles;");
+    db.exec(
+      "delete from state; delete from titles; delete from marked_episodes; delete from marked_series;",
+    );
     for (const [account, { channelEvents, sequence }] of records) {
       save(db, account, apply(emptyState, channelEvents), sequence);
     }
-    for (const [account, rows] of titles) {
+    for (const [account, { rows, series }] of views) {
       for (const row of rows.values()) saveTitle(db, account, row);
+      for (const [key, state] of series) saveSeries(db, account, key, state, "all");
     }
     db.prepare("insert or replace into meta (key, value) values ('state-version', ?)").run(
       String(STATE_VERSION),
@@ -280,25 +495,36 @@ function rebuild(db: DatabaseSync): void {
 }
 
 /**
- * Applies a title event to rows held in memory, as the rebuild does. `removals` holds when each
- * movie and series last left Continue watching, by `removalScope`.
+ * An account's rows and marks held in memory, as a rebuild folds its events into them. `removals`
+ * holds when each movie and series version last left Continue watching, by `removalScope`, as far
+ * as the tables would: they keep a removal on the rows it took out, so one that found no row
+ * leaves nothing behind there, and none here.
  */
-function foldTitle(
-  rows: Map<string, TitleRow>,
-  removals: Map<string, number>,
-  event: TitleEvent,
-  at: number,
-): void {
-  const scope = removalScope(event.title);
-  if (event.type === "title-progress") {
-    rows.set(titleKey(event.title), progressed(event, at, removals.get(scope) ?? null));
-    return;
-  }
-  removals.set(scope, at);
-  for (const key of removedKeys(event.title, [...rows.values()])) {
-    const row = rows.get(key);
-    if (row) rows.set(key, { ...row, hidden: true, removedAt: at });
-  }
+function remembered() {
+  const rows = new Map<string, TitleRow>();
+  const removals = new Map<string, number>();
+  const series = new Map<string, SeriesMarks>();
+  const view: Projected = {
+    row: (key) => rows.get(key),
+    rowsOf: (seriesId) =>
+      [...rows.values()].filter(
+        ({ title }) => title.kind === "episode" && title.seriesId === seriesId,
+      ),
+    removedAt: (title) => removals.get(removalScope(title)) ?? null,
+    saveRow: (row) => void rows.set(titleKey(row.title), row),
+    remove: (title, keys, at) => {
+      for (const key of keys) {
+        const row = rows.get(key);
+        if (!row) continue;
+        rows.set(key, { ...row, hidden: true, removedAt: at });
+        removals.set(removalScope(title), at);
+      }
+    },
+    series: (key) => series.get(key) ?? noMarks,
+    covering: (seriesId) => [...series].filter(([, each]) => each.versions.includes(seriesId)),
+    saveSeries: (key, state) => void series.set(key, state),
+  };
+  return { view, rows, series };
 }
 
 function storeOn(db: DatabaseSync): ViewingStore["Service"] {
@@ -322,6 +548,14 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
     // An account's channel events, as far as this version reads them, in order.
     placed: db.prepare(
       "select type, channel_id, sequence from events where account = ? and version <= ? and type in ('favourite-added', 'favourite-removed', 'watched') order by sequence",
+    ),
+    marks: db.prepare("select mark from marked_episodes where account = ? and series = ?"),
+    series: db.prepare("select * from marked_series where account = ? and series = ?"),
+    // What each marked series listed when it was last marked: a few short rows per account.
+    listed: db.prepare("select series, versions from marked_series where account = ?"),
+    // The marked series that didn't leave Continue watching since, by when each was last marked.
+    shown: db.prepare(
+      "select series from marked_series where account = ? and hidden = 0 and at > 0 order by at desc limit ?",
     ),
   };
   /** Where each account's channels stand, by account, once worked out in this run. */
@@ -353,8 +587,107 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
           at: row.at,
           hidden: row.hidden === 1,
           removedAt: row.removed_at ?? null,
+          // A build from before marks wrote the row: a play begun when it was saved.
+          since: row.since ?? row.at,
         },
       ];
+    });
+
+  const progressOf = (rows: readonly unknown[]): RawProgress[] =>
+    titleRows(rows).map(({ hidden: _hidden, removedAt: _removedAt, ...progress }) => progress);
+
+  const titlesOf = (account: string, filter: RawTitleFilter): RawProgress[] =>
+    progressOf([
+      ...(filter.seriesIds ?? []).flatMap((id) => statements.seriesTitles.all(account, id)),
+      ...(filter.movieIds ?? []).flatMap((id) => {
+        const row = statements.title.get(account, `movie:${id}`);
+        return row ? [row] : [];
+      }),
+    ]);
+
+  /** What `account` keeps under a series' key, or null when nothing was ever marked under it. */
+  const seriesOf = (account: string, key: string): SeriesMarks | null => {
+    const row = SeriesRow(statements.series.get(account, key));
+    if (row instanceof type.errors) return null;
+    return {
+      marks: statements.marks.all(account, key).flatMap((raw) => {
+        const mark = MarkRow(raw);
+        return mark instanceof type.errors ? [] : [mark.mark];
+      }),
+      versions: row.versions,
+      listing: row.listing,
+      hidden: row.hidden === 1,
+      leftAt: row.left_at,
+      undo: row.undo,
+      changed: row.changed,
+    };
+  };
+
+  /** What `account` keeps under each of `keys` that anything was marked under. */
+  const marksOf = (account: string, keys: readonly string[]): SeriesMarks[] =>
+    keys.flatMap((key) => seriesOf(account, key) ?? []);
+
+  /** The keys of the series of `account` that listed one of these versions when last marked. */
+  const seriesIn = (account: string, seriesIds: readonly string[]): string[] =>
+    statements.listed.all(account).flatMap((raw) => {
+      const row = ListedRow(raw);
+      if (row instanceof type.errors) return [];
+      return row.versions.some((id) => seriesIds.includes(id)) ? [row.series] : [];
+    });
+
+  const look: StoredLook = {
+    titles: titlesOf,
+    marks: marksOf,
+    marksIn: (account, seriesIds) =>
+      marksOf(account, seriesIn(account, seriesIds)).flatMap(({ marks }) => marks),
+  };
+
+  /** `account`'s rows and marks in the tables, as a change that commits reads and changes them. */
+  const stored = (account: string): Projected => ({
+    row: (key) => titleRows([statements.title.get(account, key)])[0],
+    rowsOf: (seriesId) => titleRows(statements.seriesTitles.all(account, seriesId)),
+    // The movie's row, or every row of the episode's series version.
+    removedAt: (title) => {
+      const seriesId = title.kind === "episode" ? title.seriesId : null;
+      const removed = statements.removedAt.get(account, titleKey(title), seriesId);
+      return typeof removed?.["removed_at"] === "number" ? removed["removed_at"] : null;
+    },
+    saveRow: (row) => saveTitle(db, account, row),
+    remove: (_title, keys, at) => {
+      for (const key of keys) statements.hide.run(at, account, key);
+    },
+    series: (key) => seriesOf(account, key) ?? noMarks,
+    covering: (seriesId) =>
+      seriesIn(account, [seriesId]).flatMap((key) => {
+        const state = seriesOf(account, key);
+        return state ? [[key, state] as const] : [];
+      }),
+    saveSeries: (key, state, changed) => saveSeries(db, account, key, state, changed),
+  });
+
+  /**
+   * Where a marked series goes on as `account`'s record stands: from how far the versions it
+   * listed got, the marks kept under its key and under each of those versions' ids, and the
+   * episodes it listed when it was last marked.
+   */
+  const nextOf = (account: string, key: string, state: SeriesMarks) => {
+    const keys = [...new Set([key, ...state.versions.map((id) => `id:${id}`)])];
+    return goesOn(
+      state.listing,
+      titlesOf(account, { seriesIds: state.versions }),
+      standing(marksOf(account, keys)),
+    );
+  };
+
+  /** Each marked series of `account` that shows, most recently marked first. */
+  const markedOf = (account: string): AccountRecord["marked"] =>
+    statements.shown.all(account, CONTINUE_OFFERED).flatMap((row) => {
+      const key = row["series"];
+      const state = typeof key === "string" ? seriesOf(account, key) : null;
+      const mark = state && leading(state);
+      return typeof key === "string" && state && mark
+        ? [{ mark, next: nextOf(account, key, state) }]
+        : [];
     });
 
   /** An account's lists as stored, and how far its record has come. */
@@ -377,6 +710,7 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
     continueWatching: continueWatching(
       titleRows(statements.recentTitles.all(account, CONTINUE_WINDOW)),
     ),
+    marked: markedOf(account),
   });
 
   /** The records of `accounts` as one. One account's is its lists as they are stored. */
@@ -397,12 +731,18 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
     const continuing = records.flatMap(({ account, continueWatching }) =>
       continueWatching.map((progress) => ({ account, progress })),
     );
+    const marks = records.flatMap(({ account, marked }) =>
+      marked.map((each) => ({ account, ...each })),
+    );
     return {
       favourites: list("favourites"),
       recent: list("recent"),
       continueWatching: several
         ? continuing.sort((a, b) => b.progress.at - a.progress.at).slice(0, CONTINUE_OFFERED)
         : continuing,
+      marked: several
+        ? marks.sort((a, b) => b.mark.at - a.mark.at).slice(0, CONTINUE_OFFERED)
+        : marks,
       sequence: Math.max(0, ...records.map((record) => record.sequence)),
     };
   };
@@ -420,33 +760,20 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
     /** How far each account's record came, by account, in the order first written to. */
     const last = new Map<string, number>();
     for (const { account, event } of events) {
-      const title = isTitleEvent(event);
+      const channel = !isTitleEvent(event) && !isMarkEvent(event);
       const result = statements.event.run(
         account,
         event.type,
         EVENT_VERSION,
-        title ? "" : event.channelId,
+        channel ? event.channelId : "",
         at,
         commandId,
-        title ? payloadOf(event) : null,
+        channel ? null : payloadOf(event),
       );
       const sequence = Number(result.lastInsertRowid);
       last.set(account, sequence);
-      if (!title) {
-        written.push({ account, event, sequence });
-      } else if (event.type === "title-progress") {
-        const seriesId = event.title.kind === "episode" ? event.title.seriesId : null;
-        const removed = statements.removedAt.get(account, titleKey(event.title), seriesId);
-        const removedAt =
-          typeof removed?.["removed_at"] === "number" ? removed["removed_at"] : null;
-        saveTitle(db, account, progressed(event, at, removedAt));
-      } else {
-        const rows =
-          event.title.kind === "episode"
-            ? titleRows(statements.seriesTitles.all(account, event.title.seriesId))
-            : [];
-        for (const key of removedKeys(event.title, rows)) statements.hide.run(at, account, key);
-      }
+      if (channel) written.push({ account, event, sequence });
+      else project(stored(account), event, at, sequence);
     }
     for (const [account, sequence] of last) {
       const own = written.flatMap((each) => (each.account === account ? [each.event] : []));
@@ -469,24 +796,14 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
 
   return {
     read: (accounts) => attempt(() => read(accounts)),
-    titles: (account, filter: RawTitleFilter) =>
-      attempt((): RawProgress[] => {
-        const rows = [
-          ...(filter.seriesIds ?? []).flatMap((id) => statements.seriesTitles.all(account, id)),
-          ...(filter.movieIds ?? []).flatMap((id) => {
-            const row = statements.title.get(account, `movie:${id}`);
-            return row ? [row] : [];
-          }),
-        ];
-        return titleRows(rows).map(
-          ({ hidden: _hidden, removedAt: _removedAt, ...progress }) => progress,
-        );
-      }),
+    titles: (account, filter) => attempt(() => titlesOf(account, filter)),
+    marks: (account, keys) => attempt(() => look.marks(account, keys)),
+    marksIn: (account, seriesIds) => attempt(() => look.marksIn(account, seriesIds)),
     commit: ({ accounts, commandId, at, decide }) =>
       attempt(() => {
         written(() => {
           if (statements.done.get(commandId)) return [];
-          const events = decide(read(accounts));
+          const events = decide(read(accounts), look);
           // Thrown, so the transaction ends with nothing written.
           if (events instanceof Failed) throw events;
           statements.receipt.run(commandId);
@@ -512,38 +829,52 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
         return imported;
       }),
     // The events go too, so no rebuild, here or in an older build, brings anything back, and so
-    // does what the account saved to its watchlist, which the same file keeps. SQLite zeroes what
-    // it deletes, and the checkpoint moves it out of the write-ahead log, so the account's key
+    // does what the account saved to its watchlist, which the same file keeps. The account's key
     // and titles don't linger in the file either.
     erase: (account) =>
       attempt(() => {
         places.delete(account);
-        db.exec("pragma secure_delete = on");
-        try {
-          transaction(db, () => {
-            for (const table of ["events", "state", "titles", ...WATCHLIST_TABLES]) {
-              db.prepare(`delete from ${table} where account = ?`).run(account);
-            }
-          });
-        } finally {
-          db.exec("pragma secure_delete = off");
-        }
-        db.exec("pragma wal_checkpoint(truncate)");
+        deleteForGood(
+          db,
+          ["events", "state", "titles", ...MARK_TABLES, ...WATCHLIST_TABLES],
+          account,
+        );
       }),
   };
 }
 
-function payloadOf(event: TitleEvent): string {
-  return JSON.stringify(
-    event.type === "title-progress"
-      ? {
-          title: event.title,
-          position: event.position,
-          duration: event.duration,
-          since: event.since,
-        }
-      : { title: event.title },
-  );
+function payloadOf(event: TitleEvent | MarkEvent): string {
+  switch (event.type) {
+    case "title-progress":
+      return JSON.stringify({
+        title: event.title,
+        position: event.position,
+        duration: event.duration,
+        since: event.since,
+      });
+    case "episode-marked":
+      return JSON.stringify({
+        series: event.series,
+        title: event.title,
+        watched: event.watched,
+        versions: event.versions,
+        listing: event.listing,
+      });
+    case "episode-mark-undone":
+      return JSON.stringify({
+        series: event.series,
+        title: event.title,
+        revision: event.revision,
+      });
+    case "series-listed":
+      return JSON.stringify({
+        series: event.series,
+        versions: event.versions,
+        listing: event.listing,
+      });
+    default:
+      return JSON.stringify({ title: event.title });
+  }
 }
 
 function save(db: DatabaseSync, account: string, state: ViewingState, sequence: number): void {
@@ -552,9 +883,53 @@ function save(db: DatabaseSync, account: string, state: ViewingState, sequence: 
   ).run(account, JSON.stringify(state.favourites), JSON.stringify(state.recent), sequence);
 }
 
+/**
+ * Stores what `account` keeps under a series' key, in place of what it kept, with the marks of
+ * `changed`: a mark or its Undo changes one episode's, and only a rebuild writes them all.
+ */
+function saveSeries(
+  db: DatabaseSync,
+  account: string,
+  key: string,
+  state: SeriesMarks,
+  changed: ChangedMarks,
+): void {
+  db.prepare(
+    "insert or replace into marked_series (account, series, versions, listing, hidden, left_at, changed, undo, at) values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  ).run(
+    account,
+    key,
+    JSON.stringify(state.versions),
+    JSON.stringify(state.listing),
+    state.hidden ? 1 : 0,
+    state.leftAt,
+    state.changed,
+    state.undo && JSON.stringify(state.undo),
+    // When it was last marked, which the series that show are read in the order of.
+    leading(state)?.at ?? 0,
+  );
+  if (changed === "none") return;
+  if (changed === "all") {
+    db.prepare("delete from marked_episodes where account = ? and series = ?").run(account, key);
+  } else {
+    db.prepare(
+      "delete from marked_episodes where account = ? and series = ? and season = ? and episode = ?",
+    ).run(account, key, changed.season, changed.episode);
+  }
+  const insert = db.prepare(
+    "insert into marked_episodes (account, series, season, episode, mark) values (?, ?, ?, ?, ?)",
+  );
+  for (const mark of state.marks) {
+    if (changed !== "all" && (mark.season !== changed.season || mark.episode !== changed.episode)) {
+      continue;
+    }
+    insert.run(account, key, mark.season, mark.episode, JSON.stringify(mark));
+  }
+}
+
 function saveTitle(db: DatabaseSync, account: string, row: TitleRow): void {
   db.prepare(
-    "insert or replace into titles (account, key, title, series_id, position, duration, finished, at, hidden, removed_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "insert or replace into titles (account, key, title, series_id, position, duration, finished, at, hidden, removed_at, since) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   ).run(
     account,
     titleKey(row.title),
@@ -566,6 +941,7 @@ function saveTitle(db: DatabaseSync, account: string, row: TitleRow): void {
     row.at,
     row.hidden ? 1 : 0,
     row.removedAt,
+    row.since,
   );
 }
 
@@ -575,6 +951,8 @@ function closed(detail: string): ViewingStore["Service"] {
   return {
     read: () => fail,
     titles: () => fail,
+    marks: () => fail,
+    marksIn: () => fail,
     commit: () => fail,
     importOnce: () => fail,
     erase: () => fail,

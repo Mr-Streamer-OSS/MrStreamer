@@ -123,6 +123,7 @@ describe("the system's media controls", () => {
           shows: ["text"],
           audioId: null,
           subtitleId: null,
+          since: 1,
         },
         media("playing"),
       );

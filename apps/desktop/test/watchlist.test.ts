@@ -1243,7 +1243,7 @@ describe("the watchlist beside the viewing record", { timeout: 30_000 }, () => {
     await saving.viewing.recordProgress(randomUUID(), movie, 5990, 6000, Date.now());
     await saving.viewing.recordProgress(randomUUID(), episode, 2690, 2700, Date.now());
     await saving.viewing.removeFromContinue(randomUUID(), { movies: [movie] });
-    await saving.viewing.finishSeries(randomUUID(), [series]);
+    await saving.viewing.finishSeries(randomUUID(), [series], Date.now());
 
     expect(await saving.list()).toEqual(before);
   });

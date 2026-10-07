@@ -99,6 +99,7 @@ async function guidePage(list: ChannelList = { kind: "all" }) {
     favourites: FAVOURITES,
     recent: [],
     continueWatching: [],
+    marked: [],
     sequence: 1,
   });
   const container = document.createElement("div");

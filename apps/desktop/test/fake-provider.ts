@@ -187,7 +187,8 @@ export interface FakeProvider {
   emptyTitleCategories(empty: boolean): void;
   /**
    * Picks the movies, series and categories each later list request returns, as a panel's
-   * updates would: titles dropped, listed again, renamed, or given another TMDB id.
+   * updates would: titles dropped, listed again, renamed, given another TMDB id, or a series
+   * given other episodes, which its details then list.
    */
   serveTitles(select: (all: FakeTitles) => FakeTitles): void;
   /** Streams currently holding a connection slot. */
@@ -430,9 +431,10 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
       });
     }
     if (action === "get_series_info") {
-      const series = titles.series.find(
-        (each) => String(each.id) === url.searchParams.get("series_id"),
-      );
+      // As the lists have it now, with the episodes a panel's update gave it, or as it was listed
+      // before it was dropped.
+      const asked = (each: FakeSeries) => String(each.id) === url.searchParams.get("series_id");
+      const series = listedNow.series.find(asked) ?? titles.series.find(asked);
       if (!series) return json(response, { info: [], episodes: [] });
       // Panels list seasons incompletely: the last season is missing here.
       return json(response, {

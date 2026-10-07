@@ -181,6 +181,7 @@ function playingTitle(generation: number, title: TitleRef): RemotePlayingTitle {
       subtitles: [],
       shows: ["text"],
     },
+    since: 1,
     audio: null,
     subtitle: null,
   };
