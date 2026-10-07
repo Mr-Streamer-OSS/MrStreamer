@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
-import { artifactName, STORE_ENVIRONMENT } from "../scripts/store-release.ts";
+import { artifactName, STORE_ENVIRONMENT, STORE_NAME } from "../scripts/store-release.ts";
 
 // A stable run can build and publish two releases, a nightly of main first and then the stable
 // release, through the same reusable workflows. Artifacts are named per run, so every artifact the
@@ -173,6 +173,10 @@ describe("checking the Store package of a stable release", () => {
     // Nightlies from before packages/contracts/src/package-version.ts have it only in this script.
     expect(script).toContain('from "./scripts/msix-version.ts"');
     expect(version.trim()).toBe("1.0.4.0");
+  });
+
+  it("insists on the name the Store's listings take", () => {
+    expect(check).toContain(`"${STORE_NAME}"`);
   });
 });
 

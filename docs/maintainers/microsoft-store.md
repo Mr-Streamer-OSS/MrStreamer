@@ -20,6 +20,42 @@ From Partner Center's Product identity page. These values are public: every pack
 
 The publisher display name has no period on purpose: Partner Center doesn't allow one there. The Store ID is also what the submission API calls the application ID. `scripts/store-release.ts` holds the identity the automation insists on.
 
+## Store name
+
+The Store lists the app as "Mr. Streamer: IPTV Player". On 7 October 2026 the Store's search put "Mr. Streamer" first for "mr streamer" and outside the top 20 for "iptv", "iptv player", "m3u player" and "xtream". Every app in the top 12 for "iptv player" but VLC had "IPTV" in its title.
+
+Partner Center holds two names for the app, under Product management > Manage app names: that one, reserved the same day, and "Mr. Streamer", which every package up to 0.0.7 carries. Keep both reserved.
+
+| Where                                                       | Name                                    |
+| ----------------------------------------------------------- | --------------------------------------- |
+| The Store's listing and search                              | Mr. Streamer: IPTV Player               |
+| Start, Windows search and Settings > Apps, for a Store copy | Mr. Streamer: IPTV Player               |
+| The window, `Mr. Streamer.exe` and the direct installers    | Mr. Streamer                            |
+| The Store copy's data folder                                | `Mr. Streamer Store`, under the package |
+
+- `appx.displayName` in `apps/desktop/electron-builder.yml` sets it, and `STORE_NAME` in `scripts/store-release.ts` is the same string. A test fails when they differ.
+- electron-builder 26 has one setting for the package's name and for the name of its Start entry, and writes the same string to both. The release run's package check fails when the two differ. Giving Start the short name would take a manifest template of our own (`appx.customManifestPath`). We use the Store name in both, so the app is called in Start what it is called where it was installed from.
+- The [identity](#package-identity), the application id and the data folder don't follow the name. Windows updates, pins and keeps data by those, so a renamed package is an update of the installed one.
+- A listing has to carry the name its package does, and Partner Center offers a name under Product name only once a package with it is uploaded. So the automation goes by the package. When the package is named "Mr. Streamer: IPTV Player", every listing titled otherwise takes that name in the same submission, and the report says so. A package named "Mr. Streamer" changes no title.
+
+### The first rename
+
+0.0.8 is the first release whose package carries the name. Until its submission is published, the listing and every installed copy say "Mr. Streamer". These are 0.0.8's checks, with their results recorded on its release card:
+
+1. Release 0.0.8 from a nightly that has the rename. The package check's line in the run's summary says `named 'Mr. Streamer: IPTV Player'`. A commit from before the rename builds a package named "Mr. Streamer", which passes too and leaves the listing as it is: the rename would then wait for the next release.
+2. The Store job's report has the line `The submission retitles the listing in en-us "Mr. Streamer: IPTV Player", as its package is named.` Without it, the submission left the title alone.
+3. The API has never changed a title for us. If Microsoft refuses it, at the update or at the commit, delete the submission the error names in Partner Center and [submit by hand](#submitting-by-hand), choosing the name under Product name yourself.
+4. Once **status** says `Published`, the public listing shows "Mr. Streamer: IPTV Player".
+5. On a Windows 11 PC that has 0.0.7 from the Store, with a subscription connected, a favourite, something watched and the app pinned to Start or the taskbar, let the Store update it. Don't uninstall first. Then:
+   - Start, Windows search and Settings > Apps > Installed apps list "Mr. Streamer: IPTV Player" once, at 1.0.8.0.
+   - The pin opens the app.
+   - The subscription, favourites, watchlist, history and progress are there, and nothing asks for the login again.
+   - The data is still in `%LOCALAPPDATA%\Packages\MrStreamerOSS.Mr.Streamer_5yzg1erdm3xmr\LocalCache\Roaming\Mr. Streamer Store`.
+6. Two weeks after publication, run the searches above again and record the positions on the Store name's card.
+7. The report of the release after 0.0.8 has no retitling line, and the listing keeps the name.
+
+To see the names Windows uses before any of that, sideload a dry run's package as [signing](signing.md#microsoft-store-package) describes.
+
 ## How a release reaches the Store
 
 1. The stable release run builds the MSIX, tests it installed, and keeps it as the artifact `msix-<version>` with a record of its release, commit and SHA-256 ([releasing](releasing.md#microsoft-store-package)).
@@ -27,11 +63,12 @@ The publisher display name has no period on purpose: Partner Center doesn't allo
 3. `scripts/store-release.ts` checks, before anything signs in:
    - the release is published, neither a draft nor a pre-release, and its tag points at the commit the run built, which `main` contains
    - the package is that run's own artifact, and its checksum is the one the build job reported and the one in its record
-   - the package's manifest carries the identity above, x64, and the release's [Store version](releasing.md#store-versions)
+   - the package's manifest carries the identity above, x64, and the release's [Store version](releasing.md#store-versions). It also reads the name the manifest gives the app.
 4. `scripts/store-submission.ts` then signs in and:
    - reads the published submission and any submission in progress
    - creates a submission, which is Microsoft's copy of the published one
    - changes two things in it. The package: the new one is added and the copied ones are marked for removal, since the Store gives the newest to everyone they served. And "What's new": the titles of the release's changes, without authors and links. The description, screenshots, trailers, price, markets and every other field go back as they came.
+   - gives every listing the package's name as its title, when the package carries the [Store name](#store-name) and a listing doesn't yet. That happens once, in the first submission with such a package.
    - uploads the package under a name that carries the release's commit and the file's checksum, such as `Mr-Streamer-0.0.5-win-x64.5f3a9c0d1e2f.0a1b2c3d4e5f6071.msix`
    - commits the submission and waits, ten minutes at most, until Microsoft has taken or refused the upload
 5. Microsoft certifies the submission, which can take up to three business days, and the listing publishes it as soon as it passes. The job doesn't wait for that: [status](#checking-and-repeating) reads how it ended.
@@ -56,6 +93,7 @@ Each on its own line, in the log and the run's summary: the GitHub release, its 
 - It never deletes a submission, and never changes one that was committed.
 - It never starts a second submission. The Store takes one at a time: a submission in progress that doesn't hold this release's package stops the run, whoever made it.
 - It never sends a package the Store's own doesn't sort before.
+- It never gives a listing a name its package doesn't carry.
 - It repeats only requests that change nothing by being repeated. When creating or committing gets no clear answer, it reads what happened instead of asking twice.
 - It prints nothing of the key, a token or an upload address, and of Microsoft's answers only what the script knows the shape of.
 
@@ -93,7 +131,7 @@ The release is out either way. The run's error names the case.
 3. Under Packages, upload the artifact's `.msix` unchanged. A rebuild from `pnpm dist:msix` is a different file, one the release run never checked.
 4. Wait for the row to show the package version from `.msix.json`, such as `1.0.6.0` for 0.0.6. If it stays on "Analyzing package", reload the page first. A reload has cleared such a row before. Upload again only when the reloaded page doesn't list the package.
 5. Save, then look at Packages again. It should list the new version alone. Partner Center removed the lower version by itself when 1.0.6.0 was saved. Microsoft [describes](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/upload-app-packages#removing-redundant-packages) a warning with an option to remove redundant packages instead, so use that option if a lower version is still listed.
-6. Check the [settings below](#settings-every-submission-keeps) and update "What's new" in the listing.
+6. Check the [settings below](#settings-every-submission-keeps) and update "What's new" in the listing. When the package carries a name the listing doesn't show, choose it under Product name in each language's listing. Partner Center offers it once the package is uploaded.
 7. Submit for certification, which can take up to three business days. Nothing holds the submission after that. The listing publishes it to everyone as soon as it passes, so submitting is the decision to publish, and that decision is Wout's.
 8. Partner Center sends a notice when the submission is published. Check that the public listing shows a new "Last updated date". Record the submission, its package version and when it was submitted and published on the release's card in the GitHub project.
 
@@ -154,6 +192,7 @@ A submission copies the one before it, by hand or through the API, so these stay
 
 **Listing.** English (United States).
 
+- Product name "Mr. Streamer: IPTV Player", the [name](#store-name) the package carries.
 - The description opens with what the app needs, as policy 10.2.4 asks: it supplies no channels, playlists or subscriptions, and the user connects their own provider.
 - Screenshots and artwork come from the fake provider with made-up titles, as for the README ([development](../contributing/development.md#artwork)), and stay at a PEGI 12 level (policy 11.1) whatever the app's rating.
 - The trailer stays selected to play at the top of the listing.

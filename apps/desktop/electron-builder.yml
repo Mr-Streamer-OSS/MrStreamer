@@ -84,7 +84,10 @@ appx:
   publisher: CN=A132E842-C4C9-40BF-83C4-D304E7952C2D
   # No period, on purpose: Partner Center doesn't allow one in the publisher's name.
   publisherDisplayName: Mr Streamer OSS
-  displayName: Mr. Streamer
+  # The name the Store lists the app under, one Partner Center reserved. electron-builder writes it
+  # as the package's name and as its Start entry's, so Windows shows it for an installed Store copy.
+  # The product, its .exe, its window and its data folder keep "Mr. Streamer".
+  displayName: "Mr. Streamer: IPTV Player"
   applicationId: MrStreamer
   backgroundColor: "#000000"
   languages: [en-US]

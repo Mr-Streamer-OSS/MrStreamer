@@ -15,7 +15,8 @@
 //   it also names the release run whose artifact holds the package: the one given, or the newest
 //   that still has it.
 // - verify: the downloaded package must be that release's: its record, its checksum, and the
-//   identity and version in its own manifest. It adds the package to the file release wrote.
+//   identity and version in its own manifest. It adds the package to the file release wrote, with
+//   the name the manifest gives the app.
 //
 // Reads GitHub with gh, prints GitHub Actions outputs, and fails with the reason. The Store job
 // runs it with plain node and installs no packages, so it imports only node: modules and
@@ -38,6 +39,13 @@ export const STORE_APP = {
   publisher: "CN=A132E842-C4C9-40BF-83C4-D304E7952C2D",
   architecture: "x64",
 } as const;
+
+/**
+ * The name the Store lists the app under, one of those Partner Center reserved for it.
+ * electron-builder writes it into the package, and a listing has to carry its package's name.
+ * Packages built before it are named "Mr. Streamer", which stays reserved.
+ */
+export const STORE_NAME = "Mr. Streamer: IPTV Player";
 
 /** The GitHub environment that holds the Store credential. */
 export const STORE_ENVIRONMENT = "microsoft-store";
@@ -124,6 +132,8 @@ export interface StorePackage {
    */
   readonly fileName: string;
   readonly sha256: string;
+  /** The app's name in its manifest, which the Store's listings have to carry too. */
+  readonly displayName: string;
 }
 
 /** The artifact a release run keeps the package in. */
@@ -273,7 +283,8 @@ function releaseRunProblem(github: GitHub, run: WorkflowRun | null): string | nu
  * The package in `dir`, the release run's downloaded artifact, once it is shown to be `release`'s:
  * the record beside it names the release, its commit and its checksum, the file has that checksum
  * and `expected` when the job that built it reported one, and its manifest carries the Store's
- * identity and the release's package version. Throws at the first that differs.
+ * identity and the release's package version. Throws at the first that differs. The app's name is
+ * read, not checked: a package built before the Store name carries the one before it.
  */
 export function verifyPackage(
   release: StoreRelease,
@@ -308,8 +319,15 @@ export function verifyPackage(
   differs("The package's publisher", attribute("Publisher"), STORE_APP.publisher);
   differs("The package's architecture", attribute("ProcessorArchitecture"), STORE_APP.architecture);
   differs("The package's version", attribute("Version"), release.packageVersion);
+  const displayName = /<DisplayName>([^<]+)<\/DisplayName>/.exec(manifest ?? "")?.[1];
+  if (!displayName) throw new Error("The package's manifest names no app.");
 
-  return { path, fileName: `${storeFilePrefix(release)}${sha256.slice(0, 16)}.msix`, sha256 };
+  return {
+    path,
+    fileName: `${storeFilePrefix(release)}${sha256.slice(0, 16)}.msix`,
+    sha256,
+    displayName,
+  };
 }
 
 /** Whether `value` is a JSON object, whose fields are still to be checked. */
@@ -339,6 +357,7 @@ export function readStoreRelease(path: string): StoreRelease {
         path: text(checked, "path"),
         fileName: text(checked, "fileName"),
         sha256: text(checked, "sha256"),
+        displayName: text(checked, "displayName"),
       },
     }),
   };
@@ -502,7 +521,7 @@ async function main(): Promise<void> {
         values.release,
         `${JSON.stringify({ ...release, package: checked }, null, 2)}\n`,
       );
-      const record = `The package of ${release.version} is ${release.packageVersion}, built from ${release.commit} in run ${release.run}, SHA-256 ${checked.sha256}. The Store knows it as ${checked.fileName}.`;
+      const record = `The package of ${release.version} is ${release.packageVersion}, named "${checked.displayName}", built from ${release.commit} in run ${release.run}, SHA-256 ${checked.sha256}. The Store knows it as ${checked.fileName}.`;
       console.log(record);
       summary(record);
       return;

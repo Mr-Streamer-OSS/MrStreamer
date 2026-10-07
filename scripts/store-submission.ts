@@ -14,6 +14,9 @@
 // - A new submission is Microsoft's copy of the published one. It goes back as it came, fields
 //   this script doesn't know included, with two changes: the package, and "What's new". The
 //   description, screenshots, trailers, price and markets stay as they are.
+// - A listing has to carry its package's name. With a package named STORE_NAME, every listing
+//   titled otherwise gets that name as its title, which happens once. A package built before
+//   that name changes no title.
 // - It never sets who sees the app or when it is published. The published submission must be
 //   Public and publish as soon as it is certified (Immediate), or nothing is created.
 // - A package is uploaded under a name that carries the release's commit and the file's checksum.
@@ -38,6 +41,7 @@ import {
   readStoreRelease,
   STORE_APP,
   STORE_ENVIRONMENT,
+  STORE_NAME,
   storeFilePrefix,
   type StorePackage,
   type StoreRelease,
@@ -183,7 +187,8 @@ type Step =
   | { readonly take: "report"; readonly submission: Submission; readonly live: boolean }
   /** An earlier run's draft holds the package and was never committed. */
   | { readonly take: "resume"; readonly draft: Submission }
-  | { readonly take: "create" };
+  /** A new submission. `renamed` lists the languages whose listing takes the package's name. */
+  | { readonly take: "create"; readonly renamed: readonly string[] };
 
 /**
  * Says what the account holds and, given a release, what `submit` would do with it. Reads only.
@@ -224,6 +229,9 @@ export async function preflight(
             ? `${release.version} would be committed in the draft ${step.draft.id}, which holds it.`
             : `${release.version} is in submission ${step.submission.id} already: nothing would be sent.`,
       );
+      if (step.take === "create") {
+        found.push(...retitling(step.renamed, "would retitle", session.clean));
+      }
     });
   }
   return { found, problems: [...problems] };
@@ -258,7 +266,10 @@ export async function submit(access: StoreAccess, release: CheckedRelease): Prom
     submissionId: draft.id,
     status: committed.status,
     stage: stageOf(committed.status),
-    remarks: committed.remarks,
+    remarks: [
+      ...committed.remarks,
+      ...(step.take === "create" ? retitling(step.renamed, "retitles", session.clean) : []),
+    ],
   };
 }
 
@@ -354,6 +365,38 @@ function stageOf(status: string): Stage {
   return WORKING.includes(status) ? "in-progress" : "failed";
 }
 
+/**
+ * The languages whose listing takes the Store name as its title when `release` goes into
+ * `submission`. A listing has to carry its package's name: one titled otherwise changes when the
+ * package is named STORE_NAME. A package built before that name changes none.
+ */
+function retitled(submission: Submission, release: CheckedRelease): string[] {
+  const { listings } = submission.raw;
+  if (release.package.displayName !== STORE_NAME || !isRecord(listings)) return [];
+  return Object.entries(listings).flatMap(([language, listing]) =>
+    isRecord(listing) &&
+    isRecord(listing["baseListing"]) &&
+    listing["baseListing"]["title"] !== STORE_NAME
+      ? [language]
+      : [],
+  );
+}
+
+/**
+ * What to say about a submission that gives the listings in `languages` the Store name: it
+ * "retitles" them once it is made, and "would retitle" them before. Nothing when none changes.
+ */
+function retitling(
+  languages: readonly string[],
+  verb: "retitles" | "would retitle",
+  clean: Session["clean"],
+): string[] {
+  if (languages.length === 0) return [];
+  return [
+    `The submission ${verb} the listing in ${languages.map(clean).join(", ")} "${STORE_NAME}", as its package is named.`,
+  ];
+}
+
 /** The package of `submission` that `mine` recognises, unless it is on its way out. */
 function held(
   submission: Submission,
@@ -388,7 +431,7 @@ function nextStep(state: StoreState, release: CheckedRelease): Step {
   }
   if (!pending) {
     assertPublic(published, "The published submission");
-    return { take: "create" };
+    return { take: "create", renamed: retitled(published, release) };
   }
   if (!held(pending, mine)) {
     throw new StoreError(
@@ -436,8 +479,9 @@ async function create(session: Session): Promise<Submission> {
 }
 
 /**
- * Puts the package and "What's new" into `draft` and sends the rest back as it came. The packages
- * it copied are marked for removal: the Store offers the newest one to everyone they served.
+ * Puts the package, "What's new" and, where `retitled` names a listing, the Store name into `draft`
+ * and sends the rest back as it came. The packages it copied are marked for removal: the Store
+ * offers the newest one to everyone they served.
  */
 async function fill(
   session: Session,
@@ -450,6 +494,7 @@ async function fill(
     : [];
   const listings = draft.raw["listings"];
   const notes = storeNotes(release);
+  const renamed = retitled(draft, release);
   const body = {
     ...draft.raw,
     applicationPackages: [
@@ -469,7 +514,14 @@ async function fill(
           Object.entries(listings).map(([language, listing]) => [
             language,
             isRecord(listing) && isRecord(listing["baseListing"])
-              ? { ...listing, baseListing: { ...listing["baseListing"], releaseNotes: notes } }
+              ? {
+                  ...listing,
+                  baseListing: {
+                    ...listing["baseListing"],
+                    releaseNotes: notes,
+                    ...(renamed.includes(language) && { title: STORE_NAME }),
+                  },
+                }
               : listing,
           ]),
         )
