@@ -4,7 +4,7 @@
 //
 // - Settings > Subscriptions says the playlist names no guide, without an error, also after its
 //   refresh button; finds the guide once the playlist names one; and drops it again.
-// - An HLS channel with two sound renditions and three subtitle renditions offers Sound and CC,
+// - An HLS channel with two sound renditions and three subtitle renditions offers Sound in More and CC,
 //   plays its own sound, and shows no subtitles though the stream marks some as its default.
 // - Picking the other sound switches where the stream plays: the same stream goes on, now
 //   loading the other rendition's segments, with sound still decoded.
@@ -15,7 +15,7 @@
 //   Stop and the same channel again they are still chosen, and show as the new stream brings them,
 //   once: a line left from the stream before would show beside it.
 // - Back on the first channel, the sound and subtitles in the languages picked come on by
-//   themselves; a stream with nothing to choose shows neither button.
+//   themselves; a stream with nothing to choose offers neither Sound in More nor CC.
 // - After the keychain loses the link, the app opens on what it had loaded, Settings > Subscriptions
 //   says the playlist needs its link again and asks for it there, naming only its host, and the
 //   same link is taken for the same account with its favourite.
@@ -25,6 +25,7 @@
 // The app runs with a throwaway profile and remote debugging on a random port; on macOS pass
 // --use-mock-keychain so the test never touches a real keychain. No sound device is needed:
 // sound counts as playing when the element decodes it.
+import { once } from "node:events";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -45,11 +46,17 @@ import {
 const [executable, ...rest] = process.argv.slice(2).filter((arg) => arg !== "--");
 if (!executable) throw new Error("Usage: node test/e2e/playlist-app.ts <app executable> [-- args]");
 
-const profile = mkdtempSync(join(tmpdir(), "mr-streamer-e2e-"));
+// A named prefix lets a maintainer keep this run separate from other app checks.
+const profile = mkdtempSync(
+  process.env["MR_STREAMER_E2E_PROFILE_PREFIX"] ?? join(tmpdir(), "mr-streamer-e2e-"),
+);
 const host = await startFakePlaylist();
 const randomPort = () => 20000 + Math.floor(Math.random() * 20000);
 let port = randomPort();
 let app = launch(executable, rest, { port, profile });
+
+const morePopup = `document.querySelector('[role="dialog"][aria-label="More"]')`;
+const soundRow = `[...${morePopup}?.querySelectorAll("button") ?? []].find((b) => b.getAttribute("aria-label") === "Sound")`;
 
 let failed = false;
 /** Prints how a check went. */
@@ -71,7 +78,7 @@ try {
   report("A stream without tracks has no buttons", await plainStream(page));
   await favourite(page);
   page.close();
-  app.kill("SIGKILL");
+  await quit();
   await delay(1500);
 
   loseLink();
@@ -85,12 +92,20 @@ try {
   console.error(`FAIL ${String(error)}`);
   failed = true;
 } finally {
-  app.kill("SIGKILL");
+  await quit();
   await host.close();
   await delay(1000);
   rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
 }
 process.exit(failed ? 1 : 0);
+
+/** Waits for this app to exit before restarting it or removing its throwaway profile. */
+async function quit(): Promise<void> {
+  if (app.exitCode !== null || app.signalCode !== null) return;
+  const exited = once(app, "exit");
+  app.kill("SIGKILL");
+  await exited;
+}
 
 /** A button by its exact words, as an expression for the page. */
 function buttonNamed(text: string, within = "document"): string {
@@ -177,7 +192,6 @@ interface Playing {
   readonly lines: readonly string[];
   /** Whether the CC button is there, and lit. */
   readonly cc: "on" | "off" | "absent";
-  readonly soundButton: boolean;
 }
 
 function playing(page: Page): Promise<Playing> {
@@ -194,7 +208,6 @@ function playing(page: Page): Promise<Playing> {
         .filter((text) => text !== "")
         .reverse(),
       cc: !cc ? "absent" : cc.getAttribute("aria-pressed") === "true" ? "on" : "off",
-      soundButton: !!document.querySelector('[data-view="watch"] [aria-label="Sound"]'),
     };
   })()`);
 }
@@ -207,13 +220,44 @@ async function choices(page: Page, menu: "Sound" | "Subtitles"): Promise<string[
   return items;
 }
 
+/** Opens Live TV's More menu through its visible trigger. */
+async function openMore(page: Page): Promise<void> {
+  await click(page, `document.querySelector('[data-view="watch"] [aria-label="More"]')`);
+  await waitFor(
+    () => page.evaluate<boolean>(`!!${morePopup}?.querySelector("[data-item]")`),
+    10_000,
+  );
+}
+
+/** Checks the actual Sound row, so a trackless stream cannot pass with a broken old trigger probe. */
+async function hasSound(page: Page): Promise<boolean> {
+  await openMore(page);
+  const offered = await page.evaluate<boolean>(`!!(${soundRow})`);
+  await key(page, "Escape", 27);
+  await delay(300);
+  return offered;
+}
+
+function menuPopup(menu: "Sound" | "Subtitles"): string {
+  return menu === "Sound"
+    ? morePopup
+    : `document.querySelector('[role="dialog"][aria-label^="Subtitles"]')`;
+}
+
 async function openMenu(page: Page, menu: "Sound" | "Subtitles"): Promise<string[]> {
-  const trigger = `document.querySelector('[data-view="watch"] [aria-label^="${menu}"]')`;
-  await click(page, trigger);
-  const popup = `document.querySelector('[role="dialog"][aria-label^="${menu}"]')`;
-  await waitFor(() => page.evaluate<boolean>(`!!${popup}?.querySelector("[data-item]")`), 10_000);
+  if (menu === "Sound") {
+    await openMore(page);
+    await click(page, soundRow);
+  } else {
+    await click(page, `document.querySelector('[data-view="watch"] [aria-label^="Subtitles"]')`);
+  }
+  const popup = menuPopup(menu);
+  await waitFor(
+    () => page.evaluate<boolean>(`!!${popup}?.querySelector("[aria-pressed]")`),
+    10_000,
+  );
   return page.evaluate<string[]>(
-    `[...${popup}.querySelectorAll("[data-item]")].map((item) =>
+    `[...${popup}.querySelectorAll("[data-item][aria-pressed]")].map((item) =>
       (item.getAttribute("aria-pressed") === "true" ? "*" : "") + item.textContent.trim())`,
   );
 }
@@ -221,10 +265,10 @@ async function openMenu(page: Page, menu: "Sound" | "Subtitles"): Promise<string
 /** Chooses `label` in the Sound or CC menu. */
 async function choose(page: Page, menu: "Sound" | "Subtitles", label: string): Promise<void> {
   await openMenu(page, menu);
-  const popup = `document.querySelector('[role="dialog"][aria-label^="${menu}"]')`;
+  const popup = menuPopup(menu);
   await click(
     page,
-    `[...${popup}.querySelectorAll("[data-item]")].find((item) => item.textContent.trim().startsWith(${JSON.stringify(label)}))`,
+    `[...${popup}.querySelectorAll("[data-item][aria-pressed]")].find((item) => item.textContent.trim().startsWith(${JSON.stringify(label)}))`,
   );
   await delay(300);
 }
@@ -353,6 +397,7 @@ async function showsCaptions(page: Page): Promise<{ ok: boolean; detail: string 
   await play(page, PLAYLIST_CHANNELS.captions.name);
   // hls.js finds the captions as it reads the picture; CC shows from then on.
   await waitFor(async () => (await playing(page)).cc !== "absent", 15_000).catch(() => {});
+  const soundOffered = await hasSound(page);
   const before = await playing(page);
   const listed = before.cc === "absent" ? [] : await choices(page, "Subtitles");
   // "HELLO CAPTIONS" shows from 1 to 3 s.
@@ -377,7 +422,7 @@ async function showsCaptions(page: Page): Promise<{ ok: boolean; detail: string 
   const said = (lines: readonly string[]) => lines.join(" ").replace(/\s+/g, " ").trim();
   const ok =
     listed.join() === "*Off,Captions" &&
-    !before.soundButton &&
+    !soundOffered &&
     shown.cc === "on" &&
     said(shown.lines) === "HELLO CAPTIONS" &&
     after.lines.length === 0 &&
@@ -387,7 +432,7 @@ async function showsCaptions(page: Page): Promise<{ ok: boolean; detail: string 
     said(again.lines) === "HELLO CAPTIONS";
   return {
     ok,
-    detail: `CC [${listed}], at 2 s "${shown.lines.join(" | ")}", at 3.5 s ${after.lines.length} lines, Sound ${before.soundButton ? "shown" : "hidden"}; after Stop and the same channel CC ${reopened.cc} [${kept}], at 2 s "${again.lines.join(" | ")}"`,
+    detail: `CC [${listed}], at 2 s "${shown.lines.join(" | ")}", at 3.5 s ${after.lines.length} lines, Sound ${soundOffered ? "shown" : "hidden"}; after Stop and the same channel CC ${reopened.cc} [${kept}], at 2 s "${again.lines.join(" | ")}"`,
   };
 }
 
@@ -417,9 +462,10 @@ async function plainStream(page: Page): Promise<{ ok: boolean; detail: string }>
   await play(page, PLAYLIST_CHANNELS.plain.name);
   await delay(1500);
   const now = await playing(page);
+  const soundOffered = await hasSound(page);
   return {
-    ok: !now.soundButton && now.cc === "absent" && now.lines.length === 0,
-    detail: `Sound ${now.soundButton ? "shown" : "hidden"}, CC ${now.cc}, ${now.lines.length} lines`,
+    ok: !soundOffered && now.cc === "absent" && now.lines.length === 0,
+    detail: `Sound ${soundOffered ? "shown" : "hidden"}, CC ${now.cc}, ${now.lines.length} lines`,
   };
 }
 

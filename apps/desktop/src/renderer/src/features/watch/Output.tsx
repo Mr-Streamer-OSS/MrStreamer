@@ -1,9 +1,9 @@
-// Sending playback to a TV, as Watch and a playing title show it: the output button beside the
-// volume, which opens the chooser, and what the picture area says while a receiver plays.
+// Sending playback to a TV: Live TV uses More > Play on; titles keep the output button.
+// The picture area says where playback is while a receiver plays.
 //
 // Where the app finds receivers itself, as with Google Cast, the button opens its own list: This
 // computer, the receivers found, and what is going on. Where only the system knows them, as with
-// AirPlay on macOS, it opens the system's list at the button, which the app can't draw or read.
+// AirPlay on macOS, it opens the system's list at More or the title's output button.
 // O opens either. Choosing changes nothing by itself: what plays goes on here until the receiver
 // answers, and This computer cancels. The system's list belongs to the view it was asked from,
 // and goes when that view closes (see `outputs.pick`).
@@ -41,7 +41,7 @@ export function playHere(): void {
  * controls are left to open over. `view` ends with the view that took the O, so one that opened
  * in its place meanwhile, or under another account, gets no chooser it never asked for. Where the
  * app lists receivers itself, `showList` opens that list; where only the system knows them, its
- * list opens at the output button.
+ * list opens at Live TV's More button or the title's output button.
  */
 export async function openChooser(showList: () => void, view: AbortSignal): Promise<void> {
   const { account } = useUi.getState();
@@ -71,7 +71,7 @@ function ReceiverIcon({ kind, className }: { kind: Receiver["kind"]; className?:
 }
 
 /**
- * The output button, between the volume and the mini player. `open` and `onOpenChange` are the
+ * The title's output button, between the volume and the mini player. `open` and `onOpenChange` are the
  * app's own list, one of the menus over the controls; the system's list has no state here.
  */
 export function OutputButton({
@@ -134,7 +134,13 @@ export function OutputButton({
 }
 
 /** The app's own list: This computer, the receivers found, and what is going on. */
-function Receivers({ onDone, onSystemList }: { onDone: () => void; onSystemList: () => void }) {
+export function Receivers({
+  onDone,
+  onSystemList,
+}: {
+  onDone: () => void;
+  onSystemList: () => void;
+}) {
   const status = useOutput((state) => state.status);
   const connectingSince = useOutput((state) => state.connectingSince);
   const refused = useOutput((state) => state.refused);
@@ -207,10 +213,12 @@ function Receivers({ onDone, onSystemList }: { onDone: () => void; onSystemList:
         {output.kind === "connecting"
           ? "Plays here until the TV answers. This computer cancels."
           : !nothing
-            ? status.offers.includes("airplay") && "AirPlay opens Apple's list at this button."
-            : looking < NONE_FOUND_MS / 1000
-              ? `Looking for Cast devices · ${looking} s`
-              : "No Cast devices found on this network."}
+            ? status.offers.includes("airplay") && "AirPlay opens Apple's list at the controls."
+            : !status.offers.includes("cast")
+              ? "AirPlay opens Apple's list at the controls."
+              : looking < NONE_FOUND_MS / 1000
+                ? `Looking for Cast devices · ${looking} s`
+                : "No Cast devices found on this network."}
       </MenuNote>
     </>
   );

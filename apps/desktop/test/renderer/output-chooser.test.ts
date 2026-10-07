@@ -147,8 +147,33 @@ const key = (name: string) =>
 /** How a view asks for the system's list. */
 const ways = {
   O: () => key("o"),
-  "its button": () =>
-    act(async () => container.querySelector<HTMLElement>('[aria-label="AirPlay"]')?.click()),
+  "its button": async () => {
+    const more = container.querySelector<HTMLElement>('[aria-label="More"]');
+    if (more) {
+      await act(async () => {
+        more.click();
+        await settle();
+      });
+      await act(async () => {
+        const output = document.querySelector<HTMLButtonElement>('[aria-label="Play on"]');
+        if (!output) throw new Error("No Play on row in More");
+        output.click();
+        await settle();
+      });
+      await act(async () => {
+        const airplay = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+          (button) => button.textContent === "AirPlay",
+        );
+        if (!airplay) throw new Error("No AirPlay choice in More > Play on");
+        airplay.click();
+        await settle();
+      });
+    } else {
+      await act(async () =>
+        container.querySelector<HTMLElement>('[aria-label="AirPlay"]')?.click(),
+      );
+    }
+  },
 };
 
 /** The view closes, as when the viewer leaves it. */
@@ -216,8 +241,7 @@ describe("the system's list of receivers", () => {
   it("opens at the output button, from the button and from O", async () => {
     await watching();
 
-    const button = container.querySelector<HTMLElement>('[aria-label="AirPlay"]');
-    await act(async () => button?.click());
+    await ways["its button"]();
     expect(asked()).toEqual([{ anchor: BUTTON }]);
 
     await key("o");

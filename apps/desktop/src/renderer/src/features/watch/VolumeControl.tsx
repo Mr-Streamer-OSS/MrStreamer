@@ -7,9 +7,10 @@ import { player, usePlayer } from "../../player/player.ts";
 
 /**
  * Mute toggle plus a volume slider: this computer's, or the receiver's while one has playback. A
- * receiver whose volume can't be set from here says whose remote sets it.
+ * receiver whose volume can't be set from here says whose remote sets it. Compact Live controls
+ * show only mute below 720 CSS pixels, with the full slider in More.
  */
-export function VolumeControl() {
+export function VolumeControl({ compact = false }: { compact?: boolean }) {
   const local = usePlayer((state) => state.volume);
   const localMuted = usePlayer((state) => state.muted);
   const output = useOutput((state) => state.status.output);
@@ -35,6 +36,7 @@ export function VolumeControl() {
         </Button>
       </Tooltip>
       <Slider
+        className={compact ? "max-[720px]:hidden" : ""}
         label="Volume"
         value={muted ? 0 : volume}
         onValueChange={(value) => player.setVolume(value)}

@@ -1,4 +1,4 @@
-// The sliders button beside Sound and CC: one menu for speed, subtitle timing and the subtitles'
+// Live TV's More > Playback and the title's sliders button share speed, subtitle timing and the subtitles'
 // look, each on a page of its own. Speed is for movies and episodes; timing for text subtitles,
 // teletext and captions; the look for any subtitles, those drawn as pictures (PGS, DVD, DVB)
 // taking only size and position. The player keeps all three, so they hold after a seek or another
@@ -66,14 +66,7 @@ export function stepSpeed(direction: -1 | 1): void {
   flash(`Speed ${speedLabel(titlePlayer.stepSpeed(direction))}`);
 }
 
-export function PlaybackMenu({
-  speed,
-  subtitles,
-  subtitle,
-  hereOnly = false,
-  open,
-  onOpenChange,
-}: {
+interface PlaybackProps {
   /** A title's speed and how to change it; live channels play at their own and leave it out. */
   speed?: { readonly value: Speed; readonly onChange: (speed: Speed) => void };
   subtitles: readonly SubtitleTrack[];
@@ -83,21 +76,48 @@ export function PlaybackMenu({
   hereOnly?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-}) {
-  const pages = [
+}
+
+/** Pages available for these tracks, shared by the button's availability and its contents. */
+function pagesFor(
+  speed: PlaybackProps["speed"],
+  subtitles: readonly SubtitleTrack[],
+  subtitle: SubtitleTrack | null,
+) {
+  return [
     speed !== undefined && ("speed" as const),
     subtitle && isText(subtitle) && ("timing" as const),
     subtitles.length > 0 && ("look" as const),
   ].filter((page) => page !== false && page !== null);
+}
+
+export function PlaybackMenu(props: PlaybackProps) {
+  if (pagesFor(props.speed, props.subtitles, props.subtitle).length === 0) return null;
+  return (
+    <Menu
+      label="Playback"
+      open={props.open}
+      onOpenChange={props.onOpenChange}
+      trigger={<SlidersHorizontal />}
+    >
+      <PlaybackChoices {...props} />
+    </Menu>
+  );
+}
+
+/** Playback pages shared by the title button and Live TV's More menu. */
+export function PlaybackChoices({
+  speed,
+  subtitles,
+  subtitle,
+  hereOnly = false,
+  onOpenChange,
+}: Omit<PlaybackProps, "open">) {
+  const pages = pagesFor(speed, subtitles, subtitle);
   if (pages.length === 0) return null;
   if (hereOnly) {
     return (
-      <Menu
-        label="Playback"
-        open={open}
-        onOpenChange={onOpenChange}
-        trigger={<SlidersHorizontal />}
-      >
+      <>
         {speed !== undefined && (
           <Choice chosen={false} disabled note="1×" onChoose={() => {}}>
             Speed
@@ -114,22 +134,20 @@ export function PlaybackMenu({
             ? "Speed and the subtitle settings apply on this computer only."
             : "The subtitle settings apply on this computer only."}
         </MenuNote>
-      </Menu>
+      </>
     );
   }
   return (
-    <Menu label="Playback" open={open} onOpenChange={onOpenChange} trigger={<SlidersHorizontal />}>
-      <Pages
-        pages={pages}
-        speed={speed?.value ?? null}
-        onSpeed={(next) => {
-          speed?.onChange(next);
-          onOpenChange(false);
-        }}
-        // The text settings count while text shows, or could: picture subtitles have their own.
-        text={subtitle ? isText(subtitle) : subtitles.some(isText)}
-      />
-    </Menu>
+    <Pages
+      pages={pages}
+      speed={speed?.value ?? null}
+      onSpeed={(next) => {
+        speed?.onChange(next);
+        onOpenChange(false);
+      }}
+      // The text settings count while text shows, or could: picture subtitles have their own.
+      text={subtitle ? isText(subtitle) : subtitles.some(isText)}
+    />
   );
 }
 

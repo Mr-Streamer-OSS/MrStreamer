@@ -1,23 +1,13 @@
-// The quality button beside Sound and CC, on a channel with several streams: it says what plays,
-// and Q opens it. Automatic starts at the preferred quality and passes a stream that doesn't
+// A channel with several streams offers quality choices in Live TV's More menu; Q opens its page.
+// Automatic starts at the preferred quality and passes a stream that doesn't
 // start; a quality picked here is remembered for the channel and never passed. Each row says what
 // the channel's last try got from its stream, where it got anything.
 import type { ChannelVariant, LiveChannel } from "@mrstreamer/contracts/library";
 import { Button } from "../../components/ui/button.tsx";
-import { qualityChoices, qualityName, shortQuality } from "../../lib/quality.ts";
-import { Choice, Menu } from "./TrackMenus.tsx";
+import { qualityChoices, qualityName } from "../../lib/quality.ts";
+import { Choice } from "./TrackMenus.tsx";
 
-export function QualityMenu({
-  channel,
-  chosen,
-  automatic,
-  playing,
-  height,
-  notes,
-  open,
-  onOpenChange,
-  onChoose,
-}: {
+interface QualityProps {
   channel: LiveChannel;
   /** The stream chosen for the channel, or null for Automatic. */
   chosen: ChannelVariant | null;
@@ -29,24 +19,28 @@ export function QualityMenu({
   height: number | null;
   /** What the channel's last try says of its streams, by stream id: "No stream · 404". */
   notes: ReadonlyMap<string, string>;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  onDone: () => void;
   onChoose: (variantId: string | null) => void;
-}) {
+}
+
+/** Quality choices shown as a page anchored to Live TV's More button. */
+export function QualityChoices({
+  channel,
+  chosen,
+  automatic,
+  playing,
+  height,
+  notes,
+  onChoose,
+  onDone,
+}: QualityProps) {
   const choices = qualityChoices(channel);
-  const shown = playing ?? chosen ?? automatic;
   const pick = (variantId: string | null) => {
     onChoose(variantId);
-    onOpenChange(false);
+    onDone();
   };
   return (
-    <Menu
-      label="Quality"
-      open={open}
-      onOpenChange={onOpenChange}
-      trigger={shortQuality(shown) ?? (height ? `${height}p` : "Quality")}
-      text
-    >
+    <>
       <Choice chosen={chosen === null} onChoose={() => pick(null)}>
         Automatic<span className="text-muted-foreground"> · {qualityName(automatic)}</span>
       </Choice>
@@ -78,6 +72,6 @@ export function QualityMenu({
           </div>
         )
       )}
-    </Menu>
+    </>
   );
 }

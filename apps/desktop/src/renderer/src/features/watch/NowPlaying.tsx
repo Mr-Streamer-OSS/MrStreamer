@@ -1,15 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import {
-  ChevronDown,
-  ChevronUp,
-  List,
-  Maximize,
-  Minimize,
-  Play,
-  Square,
-  Star,
-  Undo2,
-} from "lucide-react";
+import { List, Maximize, Minimize, Play, Square, Star } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
 import { ownedKey, sameOwned } from "@mrstreamer/contracts/subscription";
@@ -17,11 +7,8 @@ import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Progress } from "../../components/Progress.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { Tooltip } from "../../components/ui/tooltip.tsx";
-import { MiniPlayerButton } from "./MiniPlayer.tsx";
-import { OutputButton } from "./Output.tsx";
-import { PlaybackMenu } from "./PlaybackMenu.tsx";
-import { QualityMenu } from "./QualityMenu.tsx";
-import { TrackMenus, type TrackMenu } from "./TrackMenus.tsx";
+import { LiveMore, type LiveMenu } from "./LiveMore.tsx";
+import { TrackMenus } from "./TrackMenus.tsx";
 import { useNow } from "../../lib/clock.ts";
 import { channelLine, clockTime, progressOf, techLine, timeLeft } from "../../lib/format.ts";
 import { qualityName } from "../../lib/quality.ts";
@@ -41,9 +28,11 @@ import { VolumeControl } from "./VolumeControl.tsx";
 
 interface NowPlayingProps {
   channel: LiveChannel;
-  /** The sound, subtitle or quality menu open over the controls. */
-  menu: TrackMenu;
-  onMenu: (menu: TrackMenu) => void;
+  /** The menu or More page open over the Live TV controls. */
+  menu: LiveMenu;
+  /** Direct shortcuts focus a choice; pointer opens keep focus off the choices. */
+  keyboardMenu: boolean;
+  onMenu: (menu: LiveMenu) => void;
   categories: ReadonlyMap<string, Category>;
   fullscreen: boolean;
   onToggleFullscreen: () => void;
@@ -57,7 +46,7 @@ export function NowPlayingBar({ visible, ...props }: NowPlayingProps & { visible
   return (
     <div
       className={cn(
-        "no-drag absolute inset-x-0 bottom-0 z-10 flex items-end gap-8 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-10 pt-32 pb-8 transition-opacity duration-300",
+        "no-drag absolute inset-x-0 bottom-0 z-10 flex items-end gap-8 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-10 pt-32 pb-8 transition-opacity duration-300 max-[720px]:flex-col max-[720px]:items-stretch max-[720px]:gap-3 max-[720px]:px-4 max-[720px]:pb-4",
         visible ? "opacity-100" : "pointer-events-none opacity-0",
       )}
     >
@@ -89,7 +78,7 @@ function Details({ channel, categories }: NowPlayingProps) {
     : [channelLine(channel, categories), source];
   const fellBack = quality.fellBack;
   return (
-    <div className="flex min-w-0 items-center gap-5">
+    <div className="flex min-w-0 items-center gap-5 min-[720px]:flex-1">
       <ChannelLogo channel={channel} className="h-12 w-18" />
       <div className="min-w-0">
         <div className="truncate text-3xl font-semibold tracking-tight">
@@ -124,6 +113,7 @@ function Controls({
   onOpenChannels,
   onSwitch,
   menu,
+  keyboardMenu,
   onMenu,
 }: NowPlayingProps) {
   const tracks = usePlayer((state) => state.tracks);
@@ -142,31 +132,11 @@ function Controls({
   const toggleFavourite = useToggleFavourite();
   // A receiver shows none of a channel's subtitles, and takes none of their settings.
   const remote = useOutput((state) => state.status.output.kind !== "local") && player.onReceiver();
+  useEffect(() => {
+    if (menu === "subtitles" && !tracks?.subtitles.length) onMenu(null);
+  }, [menu, tracks?.subtitles.length, onMenu]);
   return (
-    <div className="ml-auto flex flex-none items-center gap-3">
-      <div className="flex items-center gap-1.5">
-        <Tooltip label="Channel up">
-          <Button variant="media" size="icon" aria-label="Channel up" onClick={() => onSwitch(-1)}>
-            <ChevronUp />
-          </Button>
-        </Tooltip>
-        <Tooltip label="Channel down">
-          <Button variant="media" size="icon" aria-label="Channel down" onClick={() => onSwitch(1)}>
-            <ChevronDown />
-          </Button>
-        </Tooltip>
-        <Tooltip label={previous ? `Back to ${previous.title}` : "Previous channel"}>
-          <Button
-            variant="media"
-            size="icon"
-            aria-label="Previous channel"
-            disabled={!previous}
-            onClick={() => player.back()}
-          >
-            <Undo2 />
-          </Button>
-        </Tooltip>
-      </div>
+    <div className="ml-auto flex flex-none flex-wrap items-center justify-end gap-3 max-[720px]:gap-1.5">
       <Tooltip label="Channels">
         <Button variant="media" size="icon" aria-label="Channels" onClick={onOpenChannels}>
           <List />
@@ -203,6 +173,7 @@ function Controls({
       )}
       {tracks && (
         <TrackMenus
+          showSound={false}
           audio={tracks.audio}
           audioId={audioId ?? tracks.playing}
           subtitles={tracks.subtitles}
@@ -210,45 +181,60 @@ function Controls({
           subtitleNote={subtitleLoading ? "Loading" : null}
           shows={remote ? [] : null}
           hereOnly="Live subtitles play on this computer only."
-          open={menu}
+          open={menu === "subtitles" ? menu : null}
           onOpenChange={onMenu}
           onAudio={(id) => player.setAudio(id)}
           onSubtitle={(track) => player.setSubtitle(track)}
         />
       )}
-      {tracks && (
-        <PlaybackMenu
-          subtitles={tracks.subtitles}
-          subtitle={subtitle}
-          hereOnly={remote}
-          open={menu === "playback"}
-          onOpenChange={(next) => onMenu(next ? "playback" : null)}
-        />
-      )}
-      {channel.variants.length > 1 && (
-        <QualityMenu
-          channel={channel}
-          chosen={quality.chosen}
-          automatic={quality.automatic}
-          playing={quality.playing}
-          height={height}
-          notes={quality.notes}
-          open={menu === "quality"}
-          onOpenChange={(open) => onMenu(open ? "quality" : null)}
-          onChoose={(variantId) => chooseQuality(channel, variantId)}
-        />
-      )}
-      <VolumeControl />
-      <OutputButton
-        open={menu === "output"}
-        onOpenChange={(open) => onMenu(open ? "output" : null)}
-      />
-      <MiniPlayerButton />
+      <VolumeControl compact />
       <Tooltip label={fullscreen ? "Exit full screen" : "Full screen"}>
         <Button variant="media" size="icon" aria-label="Full screen" onClick={onToggleFullscreen}>
           {fullscreen ? <Minimize /> : <Maximize />}
         </Button>
       </Tooltip>
+      <LiveMore
+        menu={menu}
+        keyboardOpen={keyboardMenu}
+        onMenu={onMenu}
+        previous={previous}
+        onSwitch={onSwitch}
+        onPrevious={() => player.back()}
+        sound={
+          tracks && tracks.audio.length > 1
+            ? {
+                audio: tracks.audio,
+                audioId: audioId ?? tracks.playing,
+                onAudio: (id) => player.setAudio(id),
+                onDone: () => onMenu(null),
+              }
+            : null
+        }
+        quality={
+          channel.variants.length > 1
+            ? {
+                channel,
+                chosen: quality.chosen,
+                automatic: quality.automatic,
+                playing: quality.playing,
+                height,
+                notes: quality.notes,
+                onDone: () => onMenu(null),
+                onChoose: (variantId) => chooseQuality(channel, variantId),
+              }
+            : null
+        }
+        playback={
+          tracks && tracks.subtitles.length > 0
+            ? {
+                subtitles: tracks.subtitles,
+                subtitle,
+                hereOnly: remote,
+                onOpenChange: (open) => onMenu(open ? "playback" : null),
+              }
+            : null
+        }
+      />
     </div>
   );
 }
