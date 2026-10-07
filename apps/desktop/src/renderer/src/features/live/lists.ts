@@ -6,6 +6,12 @@ import type { Listing, ListingMatch } from "@mrstreamer/contracts/guide";
 import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
 import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { normalize, searchWords } from "@mrstreamer/core/text";
+import {
+  indexLiveSearch,
+  matchingSearchGroups,
+  type LiveSearchGroup,
+  type LiveSearchIndex,
+} from "@mrstreamer/core/catalogue/search";
 import { useUi, type ChannelList } from "../../app/ui-store.ts";
 import { useNow } from "../../lib/clock.ts";
 import { endOfDay } from "../../lib/format.ts";
@@ -65,6 +71,7 @@ export function useListSearch(
   readonly words: readonly string[];
   /** What it found in each channel's programmes today, by the channel's `ownedKey`. */
   readonly matches: Readonly<Record<string, ListingMatch>>;
+  readonly groups: readonly LiveSearchGroup[] | null;
 } {
   // What was typed, once typing pauses. An emptied field counts at once: the whole list shows
   // without a wait, and what the field held before never searches the list shown next.
@@ -97,16 +104,18 @@ export function useListSearch(
   return useMemo(() => {
     const words = answer ? searchWords(answer.query) : NO_WORDS;
     if (!answer || words.length === 0) {
-      return { channels, query: "", words: NO_WORDS, matches: NO_MATCHES };
+      return { channels, query: "", words: NO_WORDS, matches: NO_MATCHES, groups: null };
     }
     const { query, matches } = answer;
     const names = searchNames(channels);
+    const found = channels.filter(
+      (channel, index) =>
+        matches[ownedKey(channel)] !== undefined ||
+        words.every((word) => names[index]?.includes(word)),
+    );
     return {
-      channels: channels.filter(
-        (channel, index) =>
-          matches[ownedKey(channel)] !== undefined ||
-          words.every((word) => names[index]?.includes(word)),
-      ),
+      channels: found,
+      groups: matchingSearchGroups(searchIndex(channels), found),
       query,
       words,
       matches,
@@ -116,6 +125,16 @@ export function useListSearch(
 
 /** Each list's names as search compares them, worked out at its first search. */
 const foldedNames = new WeakMap<readonly LiveChannel[], readonly string[]>();
+const searchIndexes = new WeakMap<readonly LiveChannel[], LiveSearchIndex>();
+
+function searchIndex(channels: readonly LiveChannel[]): LiveSearchIndex {
+  let index = searchIndexes.get(channels);
+  if (!index) {
+    index = indexLiveSearch(channels);
+    searchIndexes.set(channels, index);
+  }
+  return index;
+}
 
 /**
  * The names of each of a list's channels, folded and in the list's order: the one shown, then

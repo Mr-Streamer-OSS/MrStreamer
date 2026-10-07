@@ -16,6 +16,7 @@ import {
   QUALITIES,
   type ChannelVariant,
   type LiveChannel,
+  type LiveSearchIdentity,
   type Quality,
 } from "@mrstreamer/contracts/library";
 import {
@@ -88,12 +89,53 @@ export function liveChannels(streams: readonly NormalizedStream[]): LiveChannels
   for (const stream of streams) {
     const group = together.get(stream) ?? [stream];
     if (group[0] !== stream) continue;
-    const channel = joined(stream, group);
+    const searchIdentity = searchIdentityOf(group, trusted);
+    const channel = { ...joined(stream, group), ...(searchIdentity ? { searchIdentity } : {}) };
     channels.push(channel);
     const spellings = new Set(group.flatMap((each) => trusted.get(each.id) ?? []));
     if (spellings.size > 0) guideIds.set(channel.id, [...spellings]);
   }
   return { channels, guideIds };
+}
+
+/** Search gets only metadata that every stream of the canonical channel agrees on. */
+function searchIdentityOf(
+  streams: readonly NormalizedStream[],
+  trusted: ReadonlyMap<string, string>,
+): LiveSearchIdentity | undefined {
+  const first = streams[0];
+  if (!first) return;
+  // Catch-up and regional/category labels can disappear from a cleaned display title.
+  if (
+    streams.some(
+      (stream) =>
+        stream.searchUncertain ||
+        /catch[ -]?up|timeshift|\+\s*\d+\s*h\b/i.test([stream.name, ...stream.topics].join(" ")),
+    )
+  )
+    return;
+  if (
+    streams.some(
+      (stream) =>
+        identity(stream.title) !== identity(first.title) || stream.language !== first.language,
+    )
+  )
+    return;
+  const regions = new Set(streams.flatMap((stream) => stream.region ?? []));
+  if (regions.size > 1) return;
+  const guides = new Set(streams.flatMap((stream) => guideChannel(trusted.get(stream.id))));
+  if (guides.size > 1) return;
+  const informative = streams.filter((stream) => stream.topics.length > 0);
+  const topics = (informative[0]?.topics ?? []).filter((topic) =>
+    informative.every((stream) => stream.topics.includes(topic)),
+  );
+  return {
+    title: identity(first.title),
+    language: first.language,
+    region: [...regions][0] ?? null,
+    topics,
+    guideId: [...guides][0] ?? null,
+  };
 }
 
 /**

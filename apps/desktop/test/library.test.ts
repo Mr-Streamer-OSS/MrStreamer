@@ -255,7 +255,13 @@ describe("live library", () => {
 
     const restarted = await restart();
 
-    expect(await restarted.channels({})).toEqual(await library.channels({}));
+    const loaded = await restarted.channels({});
+    // Missing guide ids preserve ordinary channel/stream ownership, while search cannot trust
+    // guide identities the old cache never stored.
+    expect(loaded.map(({ searchIdentity: _identity, ...channel }) => channel)).toEqual(
+      (await library.channels({})).map(({ searchIdentity: _identity, ...channel }) => channel),
+    );
+    expect(loaded.every((channel) => channel.searchIdentity?.guideId == null)).toBe(true);
     expect(await restarted.isStale(60 * 60 * 1000)).toBe(true);
     expect(await library.isStale(60 * 60 * 1000)).toBe(false);
   });

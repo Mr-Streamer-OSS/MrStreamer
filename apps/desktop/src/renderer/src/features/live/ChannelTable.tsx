@@ -30,10 +30,11 @@ import { Progress } from "../../components/Progress.tsx";
 import { useNow } from "../../lib/clock.ts";
 import { clockTime, endOfDay, progressOf, timeLeft } from "../../lib/format.ts";
 import { qualitiesLine } from "../../lib/quality.ts";
-import { queries, useSourceOf } from "../../lib/queries.ts";
+import { queries, useSourceOf, useSubscriptionNames } from "../../lib/queries.ts";
 import { useRem } from "../../lib/use-rem.ts";
 import { cn } from "../../lib/utils.ts";
 import { useVisibleListings } from "./lists.ts";
+import { searchQualities, type SearchChannelRow } from "./search-rows.ts";
 import type { RowPart } from "./reorder.ts";
 
 const ROW_REM = 3.75;
@@ -64,6 +65,10 @@ export interface TableOrder {
  */
 export function ChannelTable({
   channels,
+  searchRows = null,
+  expandedCopies = new Set<string>(),
+  onToggleCopies,
+  onSelectSearch,
   selected,
   playingKey,
   expandedKey,
@@ -76,6 +81,10 @@ export function ChannelTable({
   onToggleFavourite,
 }: {
   channels: readonly LiveChannel[];
+  searchRows?: readonly SearchChannelRow[] | null;
+  expandedCopies?: ReadonlySet<string>;
+  onToggleCopies?: (key: string) => void;
+  onSelectSearch?: (index: number) => void;
   /**
    * The keyboard selection, or null while the pointer is in use. While `order` is set, the row
    * that holds the focus, whichever is in use.
@@ -92,7 +101,7 @@ export function ChannelTable({
   matches: Readonly<Record<string, ListingMatch>>;
   /** Set while `channels` are the favourites in an order being made. */
   order?: TableOrder | null;
-  onWatch: (channel: LiveChannel) => void;
+  onWatch: (channel: LiveChannel, index: number) => void;
   onToggleSchedule: (channelKey: string) => void;
   onToggleFavourite: (channel: LiveChannel) => void;
 }) {
@@ -100,8 +109,9 @@ export function ChannelTable({
   const rem = useRem();
   const now = useNow();
   const sourceOf = useSourceOf();
+  const subscriptionName = useSubscriptionNames();
   // The row with the focus stays in the page when it scrolls out of view, so it keeps the focus.
-  const kept = order ? selected : null;
+  const kept = order || searchRows ? selected : null;
   const rangeExtractor = useCallback(
     (range: Range) => {
       const drawn = defaultRangeExtractor(range);
@@ -116,7 +126,7 @@ export function ChannelTable({
     estimateSize: () => ROW_REM * rem,
     getItemKey: (index) => {
       const channel = channels[index];
-      return channel ? ownedKey(channel) : index;
+      return searchRows?.[index]?.key ?? (channel ? ownedKey(channel) : index);
     },
     overscan: 8,
     rangeExtractor,
@@ -174,12 +184,36 @@ export function ChannelTable({
             >
               <ChannelRow
                 channel={channel}
-                source={sourceOf(channel)}
+                source={
+                  searchRows?.[item.index]?.copy
+                    ? subscriptionName(channel.subscriptionId)
+                    : sourceOf(channel)
+                }
+                searchRow={searchRows?.[item.index] ?? null}
+                copiesOpen={expandedCopies.has(searchRows?.[item.index]?.group.key ?? "")}
+                onToggleCopies={() => {
+                  const row = searchRows?.[item.index];
+                  if (row) onToggleCopies?.(row.group.key);
+                }}
+                onSelectSearch={() => onSelectSearch?.(item.index)}
                 listing={listings.get(key) ?? null}
                 now={now}
-                playing={key === playingKey}
+                playing={
+                  searchRows?.[item.index] && !searchRows[item.index]!.copy
+                    ? searchRows[item.index]!.group.copies.some(
+                        (copy) => ownedKey(copy) === playingKey,
+                      )
+                    : key === playingKey
+                }
                 selected={item.index === selected}
-                expanded={key === expandedKey}
+                expanded={
+                  key === expandedKey &&
+                  !(
+                    searchRows?.[item.index] &&
+                    !searchRows[item.index]!.copy &&
+                    searchRows[item.index]!.group.copies.length > 1
+                  )
+                }
                 favourite={favourites.has(key)}
                 words={words}
                 match={matches[key] ?? null}
@@ -194,7 +228,7 @@ export function ChannelTable({
                     onMove: (by, part) => order.onMove(channel, by, part),
                   }
                 }
-                onWatch={() => onWatch(channel)}
+                onWatch={() => onWatch(channel, item.index)}
                 onToggleSchedule={() => onToggleSchedule(key)}
                 onToggleFavourite={() => onToggleFavourite(channel)}
               />
@@ -209,6 +243,10 @@ export function ChannelTable({
 function ChannelRow({
   channel,
   source,
+  searchRow,
+  copiesOpen,
+  onToggleCopies,
+  onSelectSearch,
   listing,
   now,
   playing,
@@ -225,6 +263,10 @@ function ChannelRow({
   channel: LiveChannel;
   /** The subscription it is from, by name, where another's channel is called the same. */
   source: string | null;
+  searchRow: SearchChannelRow | null;
+  copiesOpen: boolean;
+  onToggleCopies: () => void;
+  onSelectSearch: () => void;
   listing: Listing | null;
   now: number;
   playing: boolean;
@@ -240,6 +282,7 @@ function ChannelRow({
   onToggleFavourite: () => void;
 }) {
   const searching = words.length > 0;
+  const grouped = searchRow && !searchRow.copy && searchRow.group.copies.length > 1;
   const current = listing?.now ?? null;
   const next = listing?.next ?? null;
   // A match that began since it was found is the programme on now.
@@ -259,6 +302,10 @@ function ChannelRow({
         : row.current?.querySelector<HTMLElement>(`[data-move="${part}"]`);
     if (target && document.activeElement !== target) target.focus({ preventScroll: true });
   }, [part, asked, locked]);
+  useLayoutEffect(() => {
+    if (searchRow && selected && document.activeElement?.tagName !== "INPUT")
+      row.current?.focus({ preventScroll: true });
+  }, [searchRow?.key, selected]);
   return (
     <div className="pb-1">
       <div
@@ -277,26 +324,67 @@ function ChannelRow({
                 if (event.target === event.currentTarget) order.onFocused("row");
               },
             }
-          : { role: "button", tabIndex: -1, onClick: onWatch })}
+          : {
+              role: "button",
+              tabIndex: searchRow && selected ? 0 : -1,
+              onClick: onWatch,
+              onFocus: searchRow ? onSelectSearch : undefined,
+              "aria-label": [
+                channel.title,
+                searchRow?.copy ? source : null,
+                searchRow?.copy ? channel.number : null,
+                searchRow?.copy ? searchQualities([channel]) : null,
+              ]
+                .filter((part) => part != null && part !== "")
+                .join(", "),
+              ...(grouped ? { "aria-expanded": copiesOpen } : {}),
+              onKeyDown: (event) => {
+                if (event.target !== event.currentTarget) return;
+                if (event.key === " " || event.key === "Enter") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onWatch();
+                }
+              },
+            })}
         className={cn(
           "group flex h-[3.5rem] items-center gap-4 rounded-xl px-3 outline-none hover:bg-white/8",
           expanded && "rounded-b-none bg-white/8",
+          searchRow && "rounded-none text-white",
+          searchRow?.copy && "ml-8",
           playing && !expanded && "bg-white/5",
           selected && "ring-2 ring-white/70 ring-inset",
         )}
       >
         <span className="w-9 flex-none text-right text-xs text-muted-foreground tabular-nums">
-          {channel.number ?? ""}
+          {grouped ? "" : (channel.number ?? "")}
         </span>
         <ChannelLogo channel={channel} className="h-8 w-12" />
-        <span className="flex w-[13rem] flex-none items-center gap-2" title={channel.name}>
+        <span
+          className={cn(
+            "flex w-[13rem] flex-none gap-2",
+            grouped ? "flex-wrap items-center gap-y-0" : "items-center",
+          )}
+          title={channel.name}
+        >
           <span className={cn("truncate text-[0.9375rem]", playing && "font-semibold text-white")}>
             <Marked text={channel.title} words={words} />
           </span>
           {playing && <span className="size-1.5 flex-none rounded-full bg-white" />}
-          <span className="flex-none text-xs text-muted-foreground">{qualitiesLine(channel)}</span>
+          <span
+            className={cn(
+              "text-xs text-muted-foreground",
+              grouped ? "w-full truncate text-white" : "flex-none",
+            )}
+          >
+            {grouped
+              ? `${new Set(searchRow.group.copies.map((copy) => copy.subscriptionId)).size} subscriptions · ${searchQualities(searchRow.group.copies)}`
+              : searchRow?.copy
+                ? searchQualities([channel])
+                : qualitiesLine(channel)}
+          </span>
           {/* Plain text in the name's cell, which gives way before the name does. */}
-          {source && (
+          {!grouped && source && (
             <span className="min-w-0 flex-shrink-[3] truncate text-xs text-muted-foreground">
               · {source}
             </span>
@@ -351,21 +439,32 @@ function ChannelRow({
             </>
           ) : (
             <>
-              <IconButton
-                label={favourite ? "Remove from favourites" : "Add to favourites"}
-                onClick={onToggleFavourite}
-                className={cn(!favourite && !selected && "opacity-0 group-hover:opacity-100")}
-              >
-                <Star className={cn("size-4", favourite && "fill-current")} />
-              </IconButton>
-              {listing && (
+              {!grouped && (
                 <IconButton
-                  label={expanded ? "Hide later programmes" : "Later programmes"}
-                  onClick={onToggleSchedule}
-                  className={cn(!expanded && !selected && "opacity-0 group-hover:opacity-100")}
+                  label={favourite ? "Remove from favourites" : "Add to favourites"}
+                  onClick={onToggleFavourite}
+                  className={cn(!favourite && !selected && "opacity-0 group-hover:opacity-100")}
                 >
-                  <ChevronDown className={cn("size-4", expanded && "rotate-180")} />
+                  <Star className={cn("size-4", favourite && "fill-current")} />
                 </IconButton>
+              )}
+              {grouped ? (
+                <IconButton
+                  label={copiesOpen ? "Hide copies" : "Show copies"}
+                  onClick={onToggleCopies}
+                >
+                  <ChevronDown className={cn("size-4", !copiesOpen && "-rotate-90")} />
+                </IconButton>
+              ) : (
+                listing && (
+                  <IconButton
+                    label={expanded ? "Hide later programmes" : "Later programmes"}
+                    onClick={onToggleSchedule}
+                    className={cn(!expanded && !selected && "opacity-0 group-hover:opacity-100")}
+                  >
+                    <ChevronDown className={cn("size-4", expanded && "rotate-180")} />
+                  </IconButton>
+                )
               )}
             </>
           )}
@@ -561,6 +660,9 @@ function IconButton({
       aria-label={label}
       title={label}
       onMouseDown={(event) => event.preventDefault()}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") event.stopPropagation();
+      }}
       onClick={(event) => {
         event.stopPropagation();
         onClick();

@@ -16,6 +16,11 @@ import type { CatalogueStatus, Category, LiveChannel } from "@mrstreamer/contrac
 import { ownedId, ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { adultIn, isAdultCategory } from "@mrstreamer/core/adult";
 import { normalizeCatalogue } from "@mrstreamer/core/catalogue/normalize";
+import {
+  indexLiveSearch,
+  matchingSearchGroups,
+  type LiveSearchIndex,
+} from "@mrstreamer/core/catalogue/search";
 import { liveChannels } from "@mrstreamer/core/catalogue/variants";
 import { diagnosed } from "@mrstreamer/core/diagnostics";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
@@ -127,7 +132,7 @@ interface Combined {
   readonly shown: (channel: LiveChannel) => LiveChannel;
 }
 
-/** Which channels to list: a category's, those matching a query, the given ones, or all. */
+/** Given ids plus a query name programme matches to show with all their search companions. */
 export interface ChannelFilter {
   readonly category?: OwnedId;
   readonly query?: string;
@@ -470,15 +475,19 @@ function make(options: LibraryOptions) {
 
       channels: (filter: ChannelFilter) =>
         Effect.map(visible, ({ lists, search: searched }) => {
+          const query = normalize(filter.query ?? "");
           if (filter.channels) {
             // Those of a subscription that isn't saved are in no catalogue, whatever their ids.
             const byId = new Map(lists.members.map((each) => [each.subscriptionId, each.byId]));
             const found = filter.channels.flatMap(
               ({ subscriptionId, id }) => byId.get(subscriptionId)?.get(id) ?? [],
             );
+            if (query)
+              return matchingSearchGroups(searchIndex(searched.channels), found)
+                .slice(0, SEARCH_LIMIT)
+                .flatMap((group) => group.copies);
             return [...new Set(found)].map(lists.shown);
           }
-          const query = normalize(filter.query ?? "");
           if (query) return search(searched.channels, searched.searchNames, query);
           if (!filter.category) return lists.channels;
           return lists.byCategory.get(ownedKey(filter.category)) ?? [];
@@ -698,8 +707,8 @@ function combine(members: readonly IndexedCatalogue[]): Combined {
 
 /**
  * Every query word must appear in the channel name. Names that start with the query rank first,
- * then names with a word starting with it, then the rest. Ties keep the lists' order: the
- * subscriptions', and within one its provider's.
+ * then names with a word starting with it, then the rest. Ties keep the subscriptions' order,
+ * and within one its provider's.
  */
 function search(
   channels: readonly LiveChannel[],
@@ -715,5 +724,27 @@ function search(
     ranked.push({ channel, rank, order });
   }
   ranked.sort((a, b) => a.rank - b.rank || a.order - b.order);
-  return ranked.slice(0, SEARCH_LIMIT).map((entry) => entry.channel);
+  // Limit display groups, retaining all their real copies and stream variants.
+  const groups = matchingSearchGroups(
+    searchIndex(channels),
+    ranked.map((entry) => entry.channel),
+  ).slice(0, SEARCH_LIMIT);
+  const copies = groups.flatMap((group) => group.copies);
+  const selected = new Set(copies.map(ownedKey));
+  const matched = ranked
+    .map((entry) => entry.channel)
+    .filter((channel) => selected.has(ownedKey(channel)));
+  const matchedKeys = new Set(matched.map(ownedKey));
+  return [...matched, ...copies.filter((channel) => !matchedKeys.has(ownedKey(channel)))];
+}
+
+const searchIndexes = new WeakMap<readonly LiveChannel[], LiveSearchIndex>();
+
+function searchIndex(channels: readonly LiveChannel[]): LiveSearchIndex {
+  let index = searchIndexes.get(channels);
+  if (!index) {
+    index = indexLiveSearch(channels);
+    searchIndexes.set(channels, index);
+  }
+  return index;
 }
