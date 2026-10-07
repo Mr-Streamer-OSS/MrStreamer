@@ -245,9 +245,16 @@ let countdownHeld = false;
 let play = 0;
 /** The play that recorded that its series is finished, or is finding out whether it is. */
 let finishing = 0;
-/** Counts the questions to the record about what comes next, and names the last one answered. */
-let nextAsked = 0;
-let nextAnswered = 0;
+/**
+ * The latest question to the record about what comes after the open episode, which settles with
+ * whether the record answered it.
+ */
+let nextQuestion: Promise<boolean> = Promise.resolve(false);
+/**
+ * Counts the times the next episode was asked for and the times that was taken back: one asked
+ * for is opened only while it is still the last of them when the record answers.
+ */
+let nextRequest = 0;
 /**
  * The open title is the receiver's: its session there (null until it is opened for that
  * receiver), the load that plays (null while none does), the subtitle track that load carries, and
@@ -296,24 +303,29 @@ listen("viewing.changed", () => void refreshNext());
 
 /**
  * Asks the record how the episodes of the open one's series stand now, in its own subscription,
- * and works out which comes after it. Answers whether what the player holds is at least as new
- * as this question: an answer that arrives after a later question's is dropped, so a slow one
- * never puts back what a mark changed since. When the record doesn't answer, the player keeps
- * what it last heard and this answers false: nothing opens on that.
+ * and works out which comes after it. Only the latest question counts. One asked before it takes
+ * nothing from its own answer and settles as the latest does, so an answer from before a mark
+ * neither puts back nor opens what the mark changed, however late the answer after it is.
+ * Answers whether the record said what comes next. When it didn't, the player keeps what it last
+ * heard and this answers false: nothing opens on that.
  */
-async function refreshNext(): Promise<boolean> {
+function refreshNext(): Promise<boolean> {
   const { now } = store.getState();
-  if (!now?.series || now.title.kind !== "episode") return false;
+  if (!now?.series || now.title.kind !== "episode") return Promise.resolve(false);
   const { series, title } = now;
-  const mine = ++nextAsked;
-  const standing = await call("viewing.episodes", { series: seriesOf(title) }).catch(() => null);
-  // Another title opened meanwhile works out its own.
-  if (store.getState().now !== now) return false;
-  if (nextAnswered > mine) return true;
-  if (!standing) return false;
-  nextAnswered = mine;
-  store.setState({ next: nextUnwatched(series, title, standing.progress, standing.marks) });
-  return true;
+  const mine: Promise<boolean> = call("viewing.episodes", { series: seriesOf(title) })
+    .catch(() => null)
+    .then((standing) => {
+      // Another title opened meanwhile works out its own.
+      if (store.getState().now !== now) return false;
+      // Asked again since: this answer is dropped, read or not, for that question's.
+      if (nextQuestion !== mine) return nextQuestion;
+      if (!standing) return false;
+      store.setState({ next: nextUnwatched(series, title, standing.progress, standing.marks) });
+      return true;
+    });
+  nextQuestion = mine;
+  return mine;
 }
 
 /**
@@ -375,8 +387,9 @@ async function finishSeries(
   if (finishing === mine.play) finishing = 0;
 }
 
-/** Stops the countdown to the next episode. */
+/** Stops the countdown to the next episode, and one asked for that the record hasn't answered. */
 function stopCountdown(): void {
+  nextRequest++;
   if (countdownTimer) clearInterval(countdownTimer);
   countdownTimer = null;
   if (store.getState().countdown !== null) store.setState({ countdown: null });
@@ -1090,21 +1103,23 @@ export const titlePlayer = {
   /**
    * Plays the next episode the viewer hasn't watched from its beginning, in the same version of
    * the series, once this one has closed: for the countdown, Next, N and the system's next track.
-   * Which one that is, the record is asked once more first, and only its answer opens one: when
-   * it doesn't answer, the countdown stops and the episode on offer stays for another try. Does
-   * nothing for movies, with none left after this one, and while the next episode is already
-   * starting.
+   * Which one that is, the record is asked once more first, and only its latest answer opens
+   * one: when it doesn't answer, the countdown stops and the episode on offer stays for another
+   * try. Nothing opens once the viewer cancelled, skipped back or opened something else while it
+   * was asked. Does nothing for movies, with none left after this one, and while the next episode
+   * is already starting.
    */
   playNext(): void {
     const { now, continued, phase } = store.getState();
     if (!now?.series || (continued && phase.kind !== "failed")) return;
     const { series } = now;
+    const mine = ++nextRequest;
     void refreshNext().then((known) => {
-      const after = store.getState();
-      // Another title took its place meanwhile, as a second press does once the first one opened.
-      if (after.now !== now) return;
-      if (!known || !after.next) return stopCountdown();
-      void titlePlayer.open(episodeNow(series, after.next), 0, true);
+      // Taken back meanwhile, or asked for again: the last press opens it, once.
+      if (mine !== nextRequest) return;
+      const { next } = store.getState();
+      if (!known || !next) return stopCountdown();
+      void titlePlayer.open(episodeNow(series, next), 0, true);
     });
   },
 
@@ -1122,6 +1137,8 @@ export const titlePlayer = {
     if (held === countdownHeld) return;
     countdownHeld = held;
     if (held) {
+      // One asked for that the record hasn't answered waits too: the countdown asks again.
+      nextRequest++;
       if (countdownTimer) clearInterval(countdownTimer);
       countdownTimer = null;
     } else if (store.getState().countdown !== null) {

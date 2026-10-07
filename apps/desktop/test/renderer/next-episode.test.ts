@@ -5,7 +5,8 @@
 // leaving, another title or a new account plays nothing. A next episode that fails says it didn't start, and the last
 // episode records that its series is finished once every other one is watched. The next one is
 // the next the viewer hasn't watched: one played or marked watched is passed over, as the record
-// stands when it counts, and nothing opens on an answer of the record's that is old or missing.
+// stands when it counts, and nothing opens on an answer of the record's that is old or missing,
+// or once the viewer took the next episode back while the record was asked.
 import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
@@ -494,6 +495,79 @@ describe("the next episode, as the record answers", () => {
     expect(text()).toContain("S2 E2 · Open Water");
     await wait(10_000);
     expect(opened()).toEqual(["e13", "e22"]);
+  });
+
+  it("waits for the answer to a later question before it opens one", async () => {
+    await playToEnd(pilotHouse, "s1");
+    const atCountdown = ipc.hold("viewing.episodes");
+    const afterMark = ipc.hold("viewing.episodes");
+
+    // Asked as the countdown ends and again as an episode is marked. The first answers first,
+    // with the record as it stood before the mark.
+    await wait(10_000);
+    await act(async () => ipc.emit("viewing.changed", { sequence: 2 }));
+    await act(async () => atCountdown.resolve(standing()));
+    expect(opened()).toEqual(["e13"]);
+
+    await act(async () => afterMark.resolve(standing(watched(2, 1))));
+    expect(opened()).toEqual(["e13", "e22"]);
+  });
+
+  it.each([
+    ["before", true],
+    ["after", false],
+  ])(
+    "opens nothing on an earlier answer when the later question fails %s it arrives",
+    async (_, failsFirst) => {
+      await playToEnd(pilotHouse, "s1");
+      const atCountdown = ipc.hold("viewing.episodes");
+      const afterMark = ipc.hold("viewing.episodes");
+      await wait(10_000);
+      await act(async () => ipc.emit("viewing.changed", { sequence: 2 }));
+
+      if (failsFirst) await act(async () => afterMark.reject(unread));
+      await act(async () => atCountdown.resolve(standing()));
+      if (!failsFirst) await act(async () => afterMark.reject(unread));
+
+      expect(text()).not.toContain("Plays in");
+      await wait(15_000);
+      expect(opened()).toEqual(["e13"]);
+
+      // Another try asks again, and plays what the record says then.
+      marked(watched(2, 1));
+      await press("Next episode");
+      expect(opened()).toEqual(["e13", "e22"]);
+    },
+  );
+
+  it.each([
+    ["cancels", () => press("Cancel")],
+    ["plays the episode again", () => key(" ")],
+  ])("opens nothing once the viewer %s before the record answers", async (_, takeBack) => {
+    await playToEnd(pilotHouse, "s1");
+    const asked = ipc.hold("viewing.episodes");
+    await wait(10_000);
+
+    await takeBack();
+    await act(async () => asked.resolve(standing()));
+    await wait(15_000);
+
+    expect(opened()).toEqual(["e13"]);
+  });
+
+  it("opens nothing behind Settings opened before the record answers, and asks again once it closes", async () => {
+    await playToEnd(pilotHouse, "s1");
+    const asked = ipc.hold("viewing.episodes");
+    await wait(10_000);
+
+    await act(async () => useUi.setState({ settings: "general" }));
+    await act(async () => asked.resolve(standing()));
+    await wait(15_000);
+    expect(opened()).toEqual(["e13"]);
+
+    await act(async () => useUi.setState({ settings: null }));
+    await wait(1000);
+    expect(opened()).toEqual(["e13", "e21"]);
   });
 
   it("opens nothing when the record doesn't answer as the countdown ends, and the next one on another try", async () => {
