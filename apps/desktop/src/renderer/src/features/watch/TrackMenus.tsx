@@ -214,7 +214,7 @@ export function Menu({
   );
 }
 
-/** The item a menu opens on: the one chosen, else the first. */
+/** The usable choice a menu opens on: the selected row, else its first non-Back row. */
 function chosenItem(popup: HTMLElement): HTMLElement | null {
   return (
     popup.querySelector<HTMLElement>("[data-item][aria-pressed=true]:not(:disabled)") ??
