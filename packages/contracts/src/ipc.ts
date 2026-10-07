@@ -4,6 +4,7 @@
 // The main process refuses to start unless every method has a handler (see src/main/ipc.ts).
 import { type } from "arktype";
 import type { Result } from "./errors.ts";
+import type { DiagnosticsPreview } from "./diagnostics.ts";
 import {
   MAP_FILTERS,
   type GuideCandidate,
@@ -339,6 +340,9 @@ export const ipcInputs = {
   "updates.restart": none,
   "updates.dismiss": () => type({ version: "string" }),
   "updates.openStore": none,
+  "updates.rateStore": none,
+  "diagnostics.preview": none,
+  "diagnostics.save": () => type({ id: "string" }),
   "licences.list": none,
   "licences.text": () => type({ id: "string" }),
   "window.miniPlayerAvailable": none,
@@ -546,6 +550,12 @@ export interface IpcOutputs {
   "updates.dismiss": UpdateStatus;
   /** Opens the app's page in the Microsoft Store, for a copy the Store updates. */
   "updates.openStore": null;
+  /** Opens this product's review dialog, only for a copy installed from the Microsoft Store. */
+  "updates.rateStore": null;
+  /** Builds a bounded local preview. No data is uploaded. */
+  "diagnostics.preview": DiagnosticsPreview;
+  /** Saves that exact preview after a system Save dialog. False when the viewer cancels. */
+  "diagnostics.save": boolean;
   /** Third-party components the app ships, with their licences, by name. */
   "licences.list": readonly ThirdPartyNotice[];
   /** The full notice of one component from `licences.list`, as plain text. */
