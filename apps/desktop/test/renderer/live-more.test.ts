@@ -37,10 +37,13 @@ it("keeps mouse actions, page focus and discovery tied to More as tracks and out
   ipc.reset();
   const calls: (number | string)[] = [];
   let removeSound = () => {};
+  let useReceiver = () => {};
   function Controls() {
     const [menu, setMenu] = useState<LiveMenu>(null);
     const [soundAvailable, setSoundAvailable] = useState(true);
+    const [hereOnly, setHereOnly] = useState(false);
     removeSound = () => setSoundAvailable(false);
+    useReceiver = () => setHereOnly(true);
     const sound: ComponentProps<typeof LiveMore>["sound"] = soundAvailable
       ? {
           audio: [
@@ -61,6 +64,7 @@ it("keeps mouse actions, page focus and discovery tied to More as tracks and out
       sound,
       quality: null,
       playback: {
+        hereOnly,
         subtitles: [
           {
             id: 1,
@@ -152,6 +156,18 @@ it("keeps mouse actions, page focus and discovery tied to More as tracks and out
   await key("Backspace");
   expect(document.activeElement?.textContent).toBe("Subtitle lookMedium, box");
   await key("ArrowLeft");
+  expect(document.activeElement?.getAttribute("aria-label")).toBe("Playback");
+  await key("Escape");
+
+  await act(async () => {
+    useReceiver();
+    await settle();
+  });
+  await click("More");
+  await click("Playback");
+  await key("ArrowDown");
+  expect(document.activeElement?.getAttribute("aria-label")).toBe("Back to More");
+  await key("Backspace");
   expect(document.activeElement?.getAttribute("aria-label")).toBe("Playback");
   await key("Escape");
 

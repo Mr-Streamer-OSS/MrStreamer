@@ -46,8 +46,8 @@ export function NowPlayingBar({ visible, ...props }: NowPlayingProps & { visible
   return (
     <div
       className={cn(
-        "no-drag absolute inset-x-0 bottom-0 z-10 flex items-end gap-8 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-10 pt-32 pb-8 transition-opacity duration-300 max-[720px]:flex-col max-[720px]:items-stretch max-[720px]:gap-3 max-[720px]:px-4 max-[720px]:pb-4",
-        visible ? "opacity-100" : "pointer-events-none opacity-0",
+        "pointer-events-none no-drag absolute inset-x-0 bottom-0 z-10 flex items-end gap-8 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-10 pt-32 pb-8 transition-opacity duration-300 max-[720px]:flex-col max-[720px]:items-stretch max-[720px]:gap-3 max-[720px]:px-4 max-[720px]:pb-4",
+        visible ? "opacity-100 [&>div]:pointer-events-auto" : "opacity-0",
       )}
     >
       <Details {...props} />

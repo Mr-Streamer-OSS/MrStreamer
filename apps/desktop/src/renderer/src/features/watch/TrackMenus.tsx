@@ -222,7 +222,7 @@ function chosenItem(popup: HTMLElement): HTMLElement | null {
   );
 }
 
-/** Up, Down, Home and End move focus between a menu's items, round from the last to the first. */
+/** Live and title menus share arrow navigation. Initial Down selects the current usable choice. */
 function moveFocus(event: KeyboardEvent<HTMLDivElement>): void {
   const items = [
     ...event.currentTarget.querySelectorAll<HTMLElement>("[data-item]:not(:disabled)"),
@@ -231,7 +231,7 @@ function moveFocus(event: KeyboardEvent<HTMLDivElement>): void {
   const target =
     event.key === "ArrowDown"
       ? at < 0
-        ? chosenItem(event.currentTarget)
+        ? (chosenItem(event.currentTarget) ?? items[0])
         : (items[at + 1] ?? items[0])
       : event.key === "ArrowUp"
         ? (items[at - 1] ?? items.at(-1))
