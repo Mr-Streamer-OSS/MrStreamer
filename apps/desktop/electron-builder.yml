@@ -108,7 +108,7 @@ linux:
   # Desktop environments match the window to the menu entry by this name.
   syncDesktopName: true
   icon: build/icon.png
-  synopsis: A cinematic player for your existing IPTV subscriptions.
+  synopsis: A clean, fast, open-source IPTV player for macOS, Windows and Linux.
   maintainer: Wout Stiens <hello@mrstreamer.app>
   artifactName: Mr-Streamer-${version}-linux-${arch}.${ext}
 deb:

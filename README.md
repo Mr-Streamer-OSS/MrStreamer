@@ -2,7 +2,9 @@
 
 <h1 align="center">Mr. Streamer</h1>
 
-<p align="center"><strong>IPTV without the junk.</strong><br>No ads. No account. No nonsense. Bring your own subscription.</p>
+<p align="center"><strong>IPTV without the junk.</strong></p>
+
+A clean, fast, open-source IPTV player for macOS, Windows and Linux. Bring your own Xtream Codes or M3U subscription and watch live TV with a programme guide, movies and series. It includes no channels, shows no ads and needs no account.
 
 <p align="center">
   <a href="https://apps.microsoft.com/detail/9N45GG76ZP4T?referrer=appbadge">
@@ -14,6 +16,19 @@
 </p>
 
 <p align="center"><strong><a href="https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest">Download for macOS, Windows or Linux</a></strong></p>
+
+<table>
+  <thead><tr><th></th><th>Xtream Codes login</th><th>M3U playlist</th></tr></thead>
+  <tbody>
+    <tr><th>Live TV with a guide</th><td>Yes</td><td>Yes, guide from the playlist or an XMLTV address</td></tr>
+    <tr><th>Movies and series</th><td>Yes</td><td>No</td></tr>
+    <tr><th>Sound and subtitle tracks</th><td colspan="2">Every track the provider sends</td></tr>
+    <tr><th>Streams at once</th><td colspan="2">One, across every subscription</td></tr>
+    <tr><th>Recording, downloads</th><td colspan="2">No</td></tr>
+    <tr><th>On a TV</th><td colspan="2">AirPlay on macOS, Google Cast on Windows, not on Linux</td></tr>
+    <tr><th>Signed</th><td colspan="2">Mac DMG and Store package. The Windows .exe is not signed yet</td></tr>
+  </tbody>
+</table>
 
 ### Live TV
 

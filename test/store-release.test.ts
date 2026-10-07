@@ -119,7 +119,7 @@ const builderManifest = (
   <Properties>
     <DisplayName>Mr. Streamer</DisplayName>
     <PublisherDisplayName>Mr Streamer OSS</PublisherDisplayName>
-    <Description>A cinematic player for your existing IPTV subscriptions.</Description>
+    <Description>A clean, fast, open-source IPTV player for macOS, Windows and Linux.</Description>
     <Logo>assets\\StoreLogo.png</Logo>
   </Properties>
 </Package>

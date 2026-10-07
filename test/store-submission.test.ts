@@ -1,7 +1,12 @@
 import { readFileSync } from "node:fs";
 import { afterAll, describe, expect, it } from "vitest";
 import { packageVersion } from "../packages/contracts/src/package-version.ts";
-import { STORE_NAME, verifyPackage, type StoreRelease } from "../scripts/store-release.ts";
+import {
+  isRecord,
+  STORE_NAME,
+  verifyPackage,
+  type StoreRelease,
+} from "../scripts/store-release.ts";
 import {
   keyExpiry,
   preflight,
@@ -58,12 +63,26 @@ function checked(version = "0.0.5", built: Partial<Built> = {}): CheckedRelease 
  * too when the submission gives it `title`, and nothing else.
  */
 function relisted(listings: unknown, title?: string): unknown {
-  const noted = JSON.stringify(listings).replaceAll(
-    /"releaseNotes":"[^"]*"/g,
-    `"releaseNotes":${JSON.stringify(WHATS_NEW)}`,
-  );
-  return JSON.parse(
-    title ? noted.replaceAll(/"title":"[^"]*"/g, `"title":${JSON.stringify(title)}`) : noted,
+  if (!isRecord(listings)) return listings;
+  return Object.fromEntries(
+    Object.entries(listings).map(([language, listing]) => {
+      if (!isRecord(listing) || !isRecord(listing["baseListing"])) return [language, listing];
+      const prefix =
+        language === "nl-nl"
+          ? "Nieuwe versie met verbeteringen en oplossingen. De volledige wijzigingen staan in het Engels op github.com/Mr-Streamer-OSS/MrStreamer/releases.\n"
+          : "";
+      return [
+        language,
+        {
+          ...listing,
+          baseListing: {
+            ...listing["baseListing"],
+            releaseNotes: prefix + WHATS_NEW,
+            ...(title && { title }),
+          },
+        },
+      ];
+    }),
   );
 }
 
@@ -860,6 +879,28 @@ describe("the preflight", () => {
 });
 
 describe("What's new in the Store", () => {
+  it.each([
+    ["nl-NL", "Nieuwe versie met verbeteringen en oplossingen."],
+    ["fr-fr", "Nouvelle version avec améliorations et corrections."],
+    ["DE-de", "Neue Version mit Verbesserungen und Fehlerbehebungen."],
+    ["es-ES", "Nueva versión con mejoras y correcciones."],
+  ])(
+    "keeps a fixed %s introduction and English change titles within the field limit",
+    (language, introduction) => {
+      const notes = Array.from(
+        { length: 80 },
+        (_, index) =>
+          `* A viewer-visible change ${index} by @wout in https://github.com/owner/app/pull/${index}`,
+      ).join("\n");
+      const text = storeNotes({ version: "0.0.9", notes }, language);
+      expect(text.startsWith(introduction)).toBe(true);
+      expect(text).toContain("github.com/Mr-Streamer-OSS/MrStreamer/releases");
+      expect(text).toContain("\n- A viewer-visible change 0");
+      expect(text.length).toBeLessThanOrEqual(1500);
+      expect(text.split("\n").at(-1)).toMatch(/^- A viewer-visible change \d+$/);
+    },
+  );
+
   it("lists the titles of the release's changes, without authors and links", () => {
     expect(storeNotes(released())).toBe(WHATS_NEW);
   });

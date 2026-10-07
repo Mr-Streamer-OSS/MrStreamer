@@ -71,6 +71,13 @@ const COMMIT_POLL_MS = 15_000;
 const COMMIT_POLLS = 40;
 /** The Store's "What's new in this version" takes 1500 characters. */
 const NOTES_MAX = 1500;
+/** Approved listing text. The app interface and the change titles remain English. */
+const NOTES_INTRO = {
+  nl: "Nieuwe versie met verbeteringen en oplossingen. De volledige wijzigingen staan in het Engels op github.com/Mr-Streamer-OSS/MrStreamer/releases.",
+  fr: "Nouvelle version avec améliorations et corrections. Les notes complètes sont en anglais sur github.com/Mr-Streamer-OSS/MrStreamer/releases.",
+  de: "Neue Version mit Verbesserungen und Fehlerbehebungen. Die vollständigen Hinweise stehen auf Englisch unter github.com/Mr-Streamer-OSS/MrStreamer/releases.",
+  es: "Nueva versión con mejoras y correcciones. Las notas completas están en inglés en github.com/Mr-Streamer-OSS/MrStreamer/releases.",
+};
 /** The key's end is worth a warning this long before it comes. */
 const EXPIRY_WARNING_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -426,11 +433,16 @@ export async function status(access: StoreAccess, release: StoreRelease): Promis
 }
 
 /**
- * The Store's "What's new" for a release: the titles its GitHub notes list, oldest first, without
- * authors and links, as many as fit. The Store shows plain text.
+ * The Store's plain-text "What's new": a fixed introduction for Dutch, French, German and
+ * Spanish, then whole English PR titles in release-note order, within the field limit. Other
+ * languages keep English notes. With no titles, use the introduction or the release version.
  */
-export function storeNotes(release: Pick<StoreRelease, "version" | "notes">): string {
-  let notes = "";
+export function storeNotes(
+  release: Pick<StoreRelease, "version" | "notes">,
+  language = "en-us",
+): string {
+  const locale = language.toLowerCase().split("-")[0];
+  let notes = Object.entries(NOTES_INTRO).find(([key]) => key === locale)?.[1] ?? "";
   for (const [, title] of release.notes.matchAll(/^\* (.+) by @\S+ in \S+$/gm)) {
     const next = `${notes}${notes ? "\n" : ""}- ${title}`;
     if (next.length > NOTES_MAX) break;
@@ -638,7 +650,6 @@ function draftStep(state: StoreState, release: CheckedRelease, draft: Draft): Dr
  * Empty when it holds all of it. Notes that differ only in Microsoft's line endings are the same.
  */
 function unfilled(submission: Submission, release: CheckedRelease): string[] {
-  const notes = storeNotes(release);
   const { listings } = submission.raw;
   return [
     ...(held(submission, (file) => file.fileName === release.package.fileName)
@@ -647,6 +658,7 @@ function unfilled(submission: Submission, release: CheckedRelease): string[] {
     ...retitled(submission, release).map((language) => `listings.${language}.baseListing.title`),
     ...Object.entries(isRecord(listings) ? listings : {}).flatMap(([language, listing]) => {
       if (!isRecord(listing) || !isRecord(listing["baseListing"])) return [];
+      const notes = storeNotes(release, language);
       const kept = listing["baseListing"]["releaseNotes"];
       return typeof kept === "string" && kept.replaceAll("\r\n", "\n") === notes
         ? []
@@ -849,7 +861,6 @@ async function fill(
     ? draft.raw["applicationPackages"]
     : [];
   const mine = (file: unknown) => isRecord(file) && file["fileName"] === fileName;
-  const notes = storeNotes(release);
   const renamed = retitled(draft, release);
   const body = {
     ...draft.raw,
@@ -871,7 +882,7 @@ async function fill(
     ],
     listings: relisted(draft.raw["listings"], (base, language) => ({
       ...base,
-      releaseNotes: notes,
+      releaseNotes: storeNotes(release, language),
       ...(renamed.includes(language) && { title: STORE_NAME }),
     })),
   };
