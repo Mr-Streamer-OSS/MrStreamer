@@ -30,7 +30,7 @@ import type {
   TitleDetails,
 } from "@mrstreamer/contracts/ondemand";
 import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
-import type { TitleProgress } from "@mrstreamer/contracts/viewing";
+import type { EpisodeMark, TitleProgress } from "@mrstreamer/contracts/viewing";
 import { episodeFileVersion } from "@mrstreamer/core/ondemand/details";
 import { versionLabels } from "@mrstreamer/core/ondemand/languages";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
@@ -826,12 +826,13 @@ function Episodes({ details }: { details: SeriesDetails }) {
                   )}
                 </span>
               </button>
-              <span className="flex flex-col items-center gap-1.5 text-muted-foreground">
+              <span className="flex min-w-8 flex-col items-center gap-1.5 text-muted-foreground">
                 {episode.versions && episode.versions.length > 1 && (
                   <EpisodeVersionMenu
                     episode={episode}
                     details={details}
                     progress={standing?.progress ?? []}
+                    marks={standing?.marks ?? []}
                   />
                 )}
                 {/* While a mark is stored the row claims neither state. */}
@@ -857,10 +858,12 @@ function EpisodeVersionMenu({
   episode,
   details,
   progress,
+  marks,
 }: {
   episode: Episode;
   details: SeriesDetails;
   progress: readonly TitleProgress[];
+  marks: readonly EpisodeMark[];
 }) {
   const versions = episode.versions ?? [];
   const labels = versionLabels(versions, details.title.originalLanguage);
@@ -886,11 +889,16 @@ function EpisodeVersionMenu({
                 title={version.name}
                 className="block w-full px-2 py-2 text-left text-sm outline-none data-highlighted:bg-white/10"
                 onClick={() => {
-                  const own = progress.find(
-                    (entry) =>
-                      entry.title.id === version.id &&
-                      entry.title.subscriptionId === episode.subscriptionId,
-                  );
+                  const state = episodeStates(
+                    progress,
+                    marks,
+                  )({
+                    ...episode,
+                    id: version.id,
+                    versions: [version],
+                    exactVersion: true,
+                  });
+                  const own = state.kind === "partial" ? state.progress : undefined;
                   playTitle(
                     episodeNow(details, episodeFileVersion(episode, version.id)),
                     resumePoint(own),

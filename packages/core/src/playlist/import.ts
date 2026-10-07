@@ -64,8 +64,6 @@ export function importPlaylist(
   let episodeCount = 0;
   for (const [exact, entry] of unique) {
     const names = playlistGroups(entry);
-    if (names.length > 32)
-      throw new AppFailure({ kind: "unexpected", detail: "Playlist entry exceeds 32 groups." });
     const choices = names.map((group) => (mapping ? modes.get(playlistGroupId(group)) : "live"));
     const chosen = new Set(choices);
     const mode = chosen.size === 1 ? choices[0] : undefined;

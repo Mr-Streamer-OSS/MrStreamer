@@ -19,6 +19,7 @@ import type {
   Viewing,
 } from "@mrstreamer/contracts/viewing";
 import { DetailsView } from "../../src/renderer/src/features/titles/DetailsView.tsx";
+import { titlePlayer } from "../../src/renderer/src/player/title-player.ts";
 import { queries, syncViewing } from "../../src/renderer/src/lib/queries.ts";
 import { useContinueWatching } from "../../src/renderer/src/lib/titles.ts";
 
@@ -544,11 +545,13 @@ describe("Continue watching with a marked series", () => {
 });
 
 it.each([
-  { label: "HD", id: "1-2" },
-  { label: "4K", id: "alternate" },
+  { label: "HD", id: "1-2", reset: false, position: 995 },
+  { label: "4K", id: "alternate", reset: false, position: 495 },
+  { label: "HD", id: "1-2", reset: true, position: 0 },
+  { label: "4K", id: "alternate", reset: true, position: 0 },
 ])(
-  "offers and plays exact episode version $label when another version has progress",
-  async ({ label, id }) => {
+  "plays exact episode version $label with progress reset=$reset",
+  async ({ label, id, reset, position }) => {
     const exact = {
       ...details,
       exactVersions: true as const,
@@ -574,7 +577,11 @@ it.each([
       title: { ...played(1, 2, 500, 3).title, id: "alternate" },
     };
     await sheet(
-      { progress: [played(1, 2, 1000, 2), playedAlternate], marks: [], undoable: null },
+      {
+        progress: [played(1, 2, 1000, 2), playedAlternate],
+        marks: reset ? [marked(1, 2, false, 10)] : [],
+        undoable: null,
+      },
       { shown: exact },
     );
     const trigger = document.body.querySelector<HTMLButtonElement>(
@@ -591,6 +598,7 @@ it.each([
         ?.click(),
     );
     await until(() => expect(ipc.argsOf("playback.openTitle")[0]?.title.id).toBe(id));
+    expect(titlePlayer.state().position).toBe(position);
     expect(ipc.argsOf("playback.openTitle")[0]?.title).toMatchObject({
       kind: "episode",
       seriesId: "harbour",

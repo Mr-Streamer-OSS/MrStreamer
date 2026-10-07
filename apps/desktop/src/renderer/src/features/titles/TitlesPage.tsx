@@ -25,7 +25,7 @@ import { Artwork, PosterTile, StillTile } from "../../components/TitleArt.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { WindowBar } from "../../components/WindowBar.tsx";
 import { appError, describeError } from "../../lib/errors.ts";
-import { queries, useSubscriptionPreferences } from "../../lib/queries.ts";
+import { queries, useSubscriptions, useSubscriptionPreferences } from "../../lib/queries.ts";
 import { call } from "../../lib/ipc.ts";
 import {
   movieNow,
@@ -75,6 +75,10 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
   const place = usePlace((state) => state[kind]);
   const go = (next: Partial<Place>) =>
     usePlace.setState((state) => ({ [kind]: { ...state[kind], ...next } }));
+  const subscriptions = useSubscriptions();
+  const playlistOnly =
+    subscriptions.some((each) => each.playlistMapped) &&
+    !subscriptions.some((each) => each.kind === "xtream");
   const status = useQuery(queries.onDemandStatus());
   const fourK = useQuery(queries.collection(kind, "4k", undefined, 0, 1));
   // Empty unless Settings shows titles for adults.
@@ -83,10 +87,20 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
   const emptied =
     (place.tab === "4k" && fourK.data?.total === 0) ||
     (place.tab === "adult" && adult.data?.total === 0);
-  const tab = emptied ? "for-you" : place.tab;
+  // Playlists have no added dates or eager metadata. Open their complete catalogue immediately.
+  const tab =
+    emptied || (playlistOnly && (place.tab === "for-you" || place.tab === "new"))
+      ? playlistOnly
+        ? "all"
+        : "for-you"
+      : place.tab;
   const tabs: readonly { value: Tab; label: string }[] = [
-    { value: "for-you", label: "For you" },
-    { value: "new", label: "New" },
+    ...(playlistOnly
+      ? []
+      : [
+          { value: "for-you" as const, label: "For you" },
+          { value: "new" as const, label: "New" },
+        ]),
     { value: "genres", label: "Genres" },
     { value: "services", label: "Services" },
     ...(fourK.data?.total ? [{ value: "4k" as const, label: "4K" }] : []),

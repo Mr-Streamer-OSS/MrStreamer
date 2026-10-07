@@ -27,6 +27,7 @@ const GUIDE_TIMEOUT_MS = 5 * 60_000;
 export function playlistProvider(account: PlaylistAccount, options: ProviderOptions): Provider {
   const fetchImpl = providerFetch(options.fetch ?? fetch, loginIn(account.link));
   let last: ImportedPlaylist | null = null;
+  let titleAddresses = new Set<string>();
   /** The read in progress, shared by every call that needs one. */
   let reading: Promise<ImportedPlaylist> | null = null;
 
@@ -94,25 +95,10 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
         }
         for (const entry of reader.end()) entries.push(entry);
         if (!reader.playlist) throw notAPlaylist(account.link);
-        if (
-          entries.some(
-            (entry) =>
-              entry.name.length > 4096 ||
-              entry.url.length > 4096 ||
-              Object.values(entry.attributes).some((value) => value.length > 4096) ||
-              (entry.group?.length ?? 0) > 4096 ||
-              (entry.userAgent?.length ?? 0) > 4096 ||
-              (entry.referrer?.length ?? 0) > 4096,
-          )
-        ) {
-          throw new AppFailure({
-            kind: "unexpected",
-            detail: "Playlist entry exceeds the 4,096 character field limit.",
-          });
-        }
         if (entries.length > 100_000)
           throw new AppFailure({ kind: "unexpected", detail: "Playlist exceeds 100,000 entries." });
         last = importPlaylist(entries, account.mapping);
+        titleAddresses = new Set([...last.files.values()].map((file) => file.url));
         return last;
       } catch (cause) {
         throw lost(cause);
@@ -190,11 +176,13 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
     },
 
     request(url, init) {
-      // A file can carry credentials of its own, beyond those in the playlist link.
-      return providerFetch(options.fetch ?? fetch, [...loginIn(account.link), ...loginIn(url)])(
-        url,
-        init,
-      );
+      // Title credentials belong to exact imported files. Live keeps its existing redirect policy.
+      return titleAddresses.has(url)
+        ? providerFetch(options.fetch ?? fetch, [...loginIn(account.link), ...loginIn(url)])(
+            url,
+            init,
+          )
+        : fetchImpl(url, init);
     },
 
     /**

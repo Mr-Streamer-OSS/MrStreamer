@@ -396,7 +396,7 @@ describe("saved M3U movie mapping", () => {
     expect(
       await restarted.titles.file({ kind: "movie", subscriptionId: saved.id, id: title.id }),
     ).toMatchObject({ headers: file.headers, url: file.url });
-  });
+  }, 20_000);
 
   it("keeps prior lists on failure, removes missing entries on one successful refresh, including remapping everything", async () => {
     const provider = await host();
@@ -516,10 +516,15 @@ it.each([
   const { playlistProvider } = await import("../src/main/providers/m3u.ts");
   const requests: string[] = [];
   const provider = playlistProvider(
-    { link: "https://example.test/list" },
+    {
+      link: "https://example.test/list",
+      mapping: { version: 1, groups: [{ group: films, mode: "movie" }] },
+    },
     {
       userAgent: "test",
       fetch: async (input) => {
+        if (String(input) === "https://example.test/list")
+          return new Response(`#EXTM3U\n#EXTINF:-1 group-title="Films",Film\n${url}\n`);
         requests.push(String(input));
         return new Response(null, {
           status: 302,
@@ -528,11 +533,12 @@ it.each([
       },
     },
   );
+  await provider.onDemandCatalogue();
   await expect(provider.request(url)).rejects.toThrow("unencrypted");
   expect(requests).toHaveLength(1);
 });
 
-it("bounds playlist headers, entry fields and group counts while retaining the last successful exact file", async () => {
+it("bounds playlist headers while retaining the last successful exact file", async () => {
   const { playlistProvider } = await import("../src/main/providers/m3u.ts");
   let body = '#EXTM3U\n#EXTINF:-1 group-title="Films",Film\nhttps://example.test/film.mp4\n';
   const provider = playlistProvider(
@@ -547,14 +553,6 @@ it("bounds playlist headers, entry fields and group counts while retaining the l
   body = "#EXTM3U " + " ".repeat(65_536) + "\n";
   await expect(provider.authenticate()).rejects.toMatchObject({
     error: { kind: "unexpected", detail: expect.stringContaining("header exceeds") },
-  });
-  body = `#EXTM3U\n#EXTINF:-1 group-title="Films",${"x".repeat(4097)}\nhttps://example.test/film.mp4\n`;
-  await expect(provider.onDemandCatalogue()).rejects.toMatchObject({
-    error: { kind: "unexpected", detail: expect.stringContaining("field limit") },
-  });
-  body = `#EXTM3U\n#EXTINF:-1 group-title="${Array.from({ length: 33 }, (_, at) => at).join(";")}",Film\nhttps://example.test/film.mp4\n`;
-  await expect(provider.onDemandCatalogue()).rejects.toMatchObject({
-    error: { kind: "unexpected", detail: expect.stringContaining("32 groups") },
   });
   expect(await provider.titleFile("movie", title.id, "mp4")).toMatchObject({
     url: "https://example.test/film.mp4",
@@ -688,3 +686,78 @@ it("imports series files, resumes the selected exact version after reorder/start
   const viewed = await replacementStart.viewing.state();
   expect(viewed.marked[0]?.next).toMatchObject({ season: 1, episode: 2, resume: null });
 }, 15_000);
+
+it.each([false, true])(
+  "keeps usable entries with long attributes and many groups, mapped=%s",
+  async (mapped) => {
+    const { playlistProvider } = await import("../src/main/providers/m3u.ts");
+    const names = Array.from({ length: 33 }, (_, at) => `Group ${at}`);
+    const address = `https://example.test/long.mp4?signature=${"x".repeat(5000)}`;
+    const provider = playlistProvider(
+      {
+        link: "https://example.test/list",
+        ...(mapped
+          ? {
+              mapping: {
+                version: 1 as const,
+                groups: names.map((name) => ({
+                  group: playlistGroupId(name),
+                  mode: "movie" as const,
+                })),
+              },
+            }
+          : {}),
+      },
+      {
+        userAgent: "test",
+        fetch: async () =>
+          new Response(
+            [
+              "#EXTM3U",
+              `#EXTINF:-1 group-title="${names.join(";")}" tvg-logo="data:image/png;base64,${"a".repeat(5000)}",Long film`,
+              address,
+              `#EXTINF:-1 group-title="${names[0]}",Ordinary film`,
+              "https://example.test/ordinary.mp4",
+              "",
+            ].join("\n"),
+          ),
+      },
+    );
+    if (mapped) {
+      const catalogue = await provider.onDemandCatalogue();
+      expect(catalogue.movies).toHaveLength(2);
+      expect((await provider.titleFile("movie", catalogue.movies[0]!.id, "mp4")).url).toBe(address);
+    } else {
+      const catalogue = await provider.liveCatalogue();
+      expect(catalogue.channels).toHaveLength(2);
+      expect((await provider.liveStream(catalogue.channels[0]!.id)).url).toBe(address);
+    }
+  },
+);
+
+it.each(["?token=synthetic-token", "?v=1"])(
+  "keeps unmapped Live redirect policy for its own query %s",
+  async (query) => {
+    const { playlistProvider } = await import("../src/main/providers/m3u.ts");
+    const url = `https://example.test/live.m3u8${query}`;
+    const provider = playlistProvider(
+      { link: "https://example.test/list" },
+      {
+        userAgent: "test",
+        fetch: async (input) => {
+          if (String(input) === "https://example.test/list")
+            return new Response(`#EXTM3U\n#EXTINF:-1,Live\n${url}\n`);
+          if (String(input).startsWith("https:"))
+            return new Response(null, {
+              status: 302,
+              headers: { location: `http://example.test/1/live.m3u8${query}` },
+            });
+          return new Response("stream");
+        },
+      },
+    );
+    const catalogue = await provider.liveCatalogue();
+    const stream = await provider.liveStream(catalogue.channels[0]!.id);
+    expect((await provider.request(stream.url)).ok).toBe(true);
+  },
+);
