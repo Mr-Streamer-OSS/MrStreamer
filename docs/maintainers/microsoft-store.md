@@ -6,6 +6,14 @@ The Store gets a Windows x64 MSIX of each stable release, beside the direct-down
 
 After a stable release is published, the release run sends its package to Partner Center through Microsoft's [Store submission API](https://learn.microsoft.com/en-us/windows/uwp/monetize/create-and-manage-submissions-using-windows-store-services). That is off until the owner [sets it up](#setting-up) and turns it on. Until then, and whenever the automation can't go on, a package is [submitted by hand](#submitting-by-hand). Credentials, identity documents and anyone's addresses never go into the repository, logs or published evidence.
 
+## Listing languages
+
+[store-listings.json](store-listings.json) holds an English reference for the translations, not a replacement for the live English listing, and the approved Dutch, French, German and Spanish listing text. It describes 0.0.8. Each listing says the interface is in English; the package still declares only en-US. Before using it for a later release, check its feature claims against that release, including what a plain M3U playlist can play.
+
+The owner adds a listing language in Partner Center and pastes its short description, description, features and keywords. Confirm that Partner Center accepts a listing language without a matching package language, and check which screenshots it requires. Paste the fixed introduction from `scripts/store-submission.ts` into What's new and save it, to confirm the field accepts its release-history address. A refusal needs revised copy approval before submission. Put the next release into this existing draft by [naming it and its fingerprint](#using-a-draft-made-in-partner-center); an ordinary release run stops at a listing draft. The JSON is a copy source, not an automatic submission input. Existing listing descriptions, keywords and screenshots are preserved by the submission script.
+
+The automated submission gives each Dutch, French, German and Spanish listing a fixed introduction in its language, followed by the English PR titles. The introduction links to the English release history. English and other listings keep the English notes. Each field stays within 1,500 characters, with whole PR titles only.
+
 ## Package identity
 
 From Partner Center's Product identity page. These values are public: every package carries them, `apps/desktop/electron-builder.yml` uses them exactly, and none may change.
