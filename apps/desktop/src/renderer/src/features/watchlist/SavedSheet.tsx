@@ -45,7 +45,7 @@ export function SavedSheet({ entry }: { entry: WatchlistEntry }) {
           plain
           className="opacity-50 saturate-[0.2]"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-[#0b0b0c] via-[#0b0b0c]/40 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
       </div>
       <div className="relative -mt-20 px-10 pb-12">
         <Dialog.Title className="text-4xl font-semibold tracking-tight text-balance">

@@ -25,11 +25,14 @@ import {
 import type { CollectionId, Title, TitleKind } from "@mrstreamer/contracts/ondemand";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
 import { adultIn } from "@mrstreamer/core/adult";
-import type { OnDemandCatalogue } from "@mrstreamer/core/provider";
+import type { OnDemandCatalogue, ProviderTitle } from "@mrstreamer/core/provider";
 import { tmdb, tmdbImage } from "@mrstreamer/core/metadata/tmdb";
 import { collections, type Collections } from "@mrstreamer/core/ondemand/collections";
-import { relatedTitles } from "@mrstreamer/core/ondemand/related";
-import { titleName } from "@mrstreamer/core/ondemand/names";
+import {
+  relatedProviderFacts,
+  relatedTitles,
+  type RelatedProviderFacts,
+} from "@mrstreamer/core/ondemand/related";
 import {
   entriesOf,
   factsOf,
@@ -117,6 +120,32 @@ interface Loaded {
 
 /** Each subscription's lists, by its id, once read from disk or fetched. */
 const loaded = new Map<string, Loaded>();
+/** Related facts follow raw list identity, so replacement or removal retains no stale snapshot. */
+const relatedFacts = new WeakMap<
+  readonly ProviderTitle[],
+  ReadonlyMap<string, RelatedProviderFacts>
+>();
+
+function relatedFactsOf(member: Loaded, kind: TitleKind, index: IndexedCatalogue) {
+  const rows = kind === "movie" ? member.catalogue.movies : member.catalogue.series;
+  let facts = relatedFacts.get(rows);
+  if (!facts) {
+    const names = new Map<string, string>();
+    for (const row of rows) {
+      const indexed = kindOf(index, kind).byId.get(
+        ownedKey({ subscriptionId: member.subscriptionId, id: row.id }),
+      );
+      // The index's display name belongs to its primary version, before TMDB naming.
+      if (indexed?.subscriptionId === member.subscriptionId && indexed.id === row.id) {
+        names.set(row.id, indexed.title);
+      }
+    }
+    facts = relatedProviderFacts(rows, names);
+    relatedFacts.set(rows, facts);
+  }
+  return facts;
+}
+
 /** The refreshes in flight, by subscription, shared by calls with the same login. */
 const refreshing = new Map<
   string,
@@ -570,22 +599,14 @@ const handlers: {
     if (!seed) return { basis: null, titles: [] };
     // Category ids belong to this provider. No category from another owner can match it.
     const own = members.find((member) => member.subscriptionId === version.subscriptionId);
-    const providerTitles = new Map(
-      (kind === "movie" ? own?.catalogue.movies : own?.catalogue.series)?.map((title) => [
-        title.id,
-        title,
-      ]),
-    );
+    const providerTitles = own ? relatedFactsOf(own, kind, found.index) : undefined;
     return relatedTitles({
       opened: about ? { ...seed, genres: about.genres, originalLanguage: about.language } : seed,
       version,
       titles,
       provider: (each) => {
         if (each.subscriptionId !== version.subscriptionId) return null;
-        const row = providerTitles.get(each.id);
-        return row
-          ? { name: titleName(row.name, row.releaseDate).title, categoryIds: row.categoryIds }
-          : null;
+        return providerTitles?.get(each.id) ?? null;
       },
     });
   },

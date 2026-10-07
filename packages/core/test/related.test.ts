@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Title } from "@mrstreamer/contracts/ondemand";
-import { relatedTitles } from "../src/ondemand/related.ts";
+import { relatedProviderFacts, relatedTitles } from "../src/ondemand/related.ts";
 
 const title = (id: string, overrides: Partial<Title> = {}): Title => ({
   kind: "movie",
@@ -23,6 +23,21 @@ const title = (id: string, overrides: Partial<Title> = {}): Title => ({
   versions: [{ subscriptionId: "home", id, tags: [] }],
   ...overrides,
 });
+const facts = (name: string, categoryIds: readonly string[]) =>
+  relatedProviderFacts([
+    {
+      id: "row",
+      name,
+      categoryIds,
+      releaseDate: null,
+      posterUrl: null,
+      backdropUrl: null,
+      rating: null,
+      addedAt: null,
+      adult: false,
+      container: null,
+    },
+  ]).get("row")!;
 const version = { subscriptionId: "home", id: "opened" };
 
 describe("available related titles", () => {
@@ -37,7 +52,7 @@ describe("available related titles", () => {
     const found = relatedTitles({
       opened,
       version,
-      provider: (each) => ({ name: each.id, categoryIds: ["films"] }),
+      provider: (each) => facts(each.id, ["films"]),
       titles: [
         title("fallback"),
         title("english", { genres: ["Drama"], originalLanguage: "en" }),
@@ -59,15 +74,15 @@ describe("available related titles", () => {
     const found = relatedTitles({
       opened,
       version,
-      provider: (each) => ({
-        name:
+      provider: (each) =>
+        facts(
           each.id === "opened"
             ? "The Quiet Harbour"
             : each.id === "words"
               ? "Harbour Lights"
               : "The Film",
-        categoryIds: each.id === "words" || each.id === "generic" ? [] : ["films"],
-      }),
+          each.id === "words" || each.id === "generic" ? [] : ["films"],
+        ),
       titles: [
         title("words", { title: "Harbour Lights" }),
         title("category"),
@@ -93,7 +108,7 @@ describe("available related titles", () => {
     const found = relatedTitles({
       opened,
       version,
-      provider: (each) => ({ name: each.id, categoryIds: ["films"] }),
+      provider: (each) => facts(each.id, ["films"]),
       titles: [
         opened,
         title("alternate", { key: opened.key }),
@@ -113,7 +128,7 @@ describe("available related titles", () => {
     const found = relatedTitles({
       opened: title("opened"),
       version,
-      provider: (each) => ({ name: each.id, categoryIds: ["films"] }),
+      provider: (each) => facts(each.id, ["films"]),
       titles: [
         title("foreign", {
           subscriptionId: "other",
@@ -135,15 +150,15 @@ describe("available related titles", () => {
     const found = relatedTitles({
       opened: title("opened", { title: "Desert" }),
       version,
-      provider: (each) => ({
-        name:
+      provider: (each) =>
+        facts(
           each.id === "opened"
             ? "Quiet Harbour"
             : each.id === "local"
               ? "Harbour Lights"
               : "Desert",
-        categoryIds: [],
-      }),
+          [],
+        ),
       titles: [
         title("foreign", {
           subscriptionId: "other",
@@ -166,9 +181,73 @@ describe("available related titles", () => {
       relatedTitles({
         opened: title("opened"),
         version,
-        provider: (each) => ({ name: each.id, categoryIds: [] }),
+        provider: (each) => facts(each.id, []),
         titles: [title("unrelated")],
       }),
     ).toEqual({ basis: null, titles: [] });
+  });
+  it.each([
+    ["FR - Les Misérables (2012)", "Les Visiteurs"],
+    ["NL | Het Bombardement", "Het Diner"],
+    ["Der Untergang", "Der Schuh des Manitu"],
+    ["Los Otros", "Los Lunes al Sol"],
+    ["Dune Part Two", "Mission Impossible Dead Reckoning Part One"],
+    ["ENG - Quiet Harbour (2019)", "ENG - Desert Storm"],
+    ["ENGLISH - Quiet Harbour", "ENGLISH - Desert Storm"],
+    ["VLAAMS - Quiet Harbour", "VLAAMS - Desert Storm"],
+    ["Dune", "Dune Again"],
+  ])("rejects uninformative name overlap between %s and %s", (opened, candidate) => {
+    expect(
+      relatedTitles({
+        opened: title("opened"),
+        version,
+        titles: [title("candidate")],
+        provider: (each) => facts(each.id === "opened" ? opened : candidate, []),
+      }),
+    ).toEqual({ basis: null, titles: [] });
+  });
+
+  it.each([
+    ["ENG - Quiet Harbour (2019)", "Harbour Lights"],
+    ["Red Sun", "Sun Red Rising"],
+  ])("keeps informative name overlap between %s and %s", (opened, candidate) => {
+    const found = relatedTitles({
+      opened: title("opened"),
+      version,
+      titles: [title("candidate")],
+      provider: (each) => facts(each.id === "opened" ? opened : candidate, []),
+    });
+    expect(found.titles.map(({ title, reason }) => [title.id, reason])).toEqual([
+      ["candidate", "Similar name"],
+    ]);
+  });
+
+  it("checks every own version for category evidence and opens the matching version without episode files on the title", () => {
+    const found = relatedTitles({
+      opened: title("opened", { kind: "series" }),
+      version,
+      provider: (each) => facts("Unrelated", each.id === "first" ? ["nl"] : ["en"]),
+      titles: [
+        title("first", {
+          kind: "series",
+          versions: [
+            { subscriptionId: "home", id: "first", tags: ["NL"] },
+            { subscriptionId: "home", id: "matching", tags: ["ENG"], episodeFiles: ["episode"] },
+          ],
+        }),
+      ],
+    });
+    expect(found.basis).toBe("Same category");
+    expect(found.titles[0]?.title).toEqual(
+      title("first", {
+        kind: "series",
+        id: "matching",
+        tags: ["ENG"],
+        versions: [
+          { subscriptionId: "home", id: "first", tags: ["NL"] },
+          { subscriptionId: "home", id: "matching", tags: ["ENG"], episodeFiles: ["episode"] },
+        ],
+      }),
+    );
   });
 });

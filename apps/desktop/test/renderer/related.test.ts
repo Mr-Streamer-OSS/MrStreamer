@@ -80,14 +80,19 @@ async function mount(opened = "opened", switching = false) {
   return { container, render, until };
 }
 
-it("opens an available exact version and shows its reason, then refreshes after catalogue changes", async () => {
+it("opens an available exact version without repeating its heading basis, then refreshes after catalogue changes", async () => {
   ipc.always("ondemand.related", {
     basis: "Drama · Dutch",
-    titles: [{ title: movie("Harbour Lights"), reason: "Drama · Dutch" }],
+    titles: [
+      { title: movie("Harbour Lights"), reason: "Drama · Dutch" },
+      { title: movie("Neighbour"), reason: "Drama" },
+    ],
   });
   const { container, until } = await mount();
   await until(() => expect(container.textContent).toContain("Harbour Lights"));
-  expect(container.textContent).toContain("2020 · Drama · Dutch");
+  expect(container.textContent?.match(/Drama · Dutch/g)).toHaveLength(1);
+  expect(container.textContent).toContain("Harbour Lights2020");
+  expect(container.textContent).toContain("2020 · Drama");
   expect(ipc.argsOf("ondemand.related")).toEqual([
     { kind: "movie", version: { subscriptionId: SUBSCRIPTION, id: "opened" } },
   ]);

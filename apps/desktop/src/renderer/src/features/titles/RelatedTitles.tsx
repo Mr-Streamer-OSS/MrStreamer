@@ -36,7 +36,9 @@ export function RelatedTitles({
             <div key={title.key} className="w-36 shrink-0">
               <PosterTile
                 title={title}
-                line={[title.year, reason].filter(Boolean).join(" · ")}
+                line={[title.year, reason !== related.data?.basis ? reason : null]
+                  .filter(Boolean)
+                  .join(" · ")}
                 onOpen={() => openDetails({ kind: title.kind, ...ownedId(title) })}
               />
             </div>

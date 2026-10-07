@@ -493,6 +493,14 @@ function make(deps: OnDemandDeps) {
         return yield* run(made, yield* language);
       });
 
+    /** Details and lazy TMDB facts share the exact source revision and viewer language. */
+    const aboutKey = (
+      source: Pick<SavedSubscription, "id" | "revision">,
+      viewer: string,
+      kind: TitleKind,
+      id: string,
+    ) => `${source.id}|${source.revision}|${viewer}|${kind}|${id}`;
+
     /**
      * A version's details: downloaded when it first opens, then kept, and put together each time
      * with the title as the lists show it now, so its name and original language follow TMDB's
@@ -503,7 +511,7 @@ function make(deps: OnDemandDeps) {
       Effect.gen(function* () {
         const source = yield* subscriptions.sourceOf(subscriptionId);
         const viewer = yield* language;
-        const cacheKey = `${source.id}|${source.revision}|${viewer}|${kind}|${id}`;
+        const cacheKey = aboutKey(source, viewer, kind, id);
         const [listed] = yield* loaded((owners, language) =>
           call("byIds", { owners, language, kind, versions: [{ subscriptionId, id }] }),
         );
@@ -685,9 +693,7 @@ function make(deps: OnDemandDeps) {
           const source = saved.find((each) => each.id === version.subscriptionId);
           if (!source) return { basis: null, titles: [] };
           const viewer = yield* language;
-          const about = abouts.get(
-            `${source.id}|${source.revision}|${viewer}|${kind}|${version.id}`,
-          );
+          const about = abouts.get(aboutKey(source, viewer, kind, version.id));
           return yield* call("related", {
             owners: saved.map(ownerOf),
             language: viewer,
