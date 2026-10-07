@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { type } from "arktype";
 import * as Layer from "effect/Layer";
 import { expect, it } from "vitest";
-import { groupLiveSearch } from "@mrstreamer/core/catalogue/search";
+import { groupLiveSearch, searchResultGroups } from "@mrstreamer/core/catalogue/search";
 import { Library } from "../src/main/services/library.ts";
 import { Settings } from "../src/main/services/preferences.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
@@ -75,7 +75,8 @@ it("search keeps every provider/category/quality copy and reconstructs safe meta
   expect(
     groupLiveSearch(programmeMatches).map((group) => [group.copies.length, group.streams]),
   ).toEqual([[4, 6]]);
-  for (const channel of results) expect(await library.channel(channel)).toEqual(channel);
+  for (const { searchGroup: _group, ...channel } of results)
+    expect(await library.channel(channel)).toEqual(channel);
   const cached = type({ version: "4", channels: type({ "searchIdentity?": "undefined" }).array() })(
     JSON.parse(await readFile(join(dataDir, "catalogue.json"), "utf8")),
   );
@@ -85,4 +86,35 @@ it("search keeps every provider/category/quality copy and reconstructs safe meta
   expect(await restart.library.channels({ query: "VRT" })).toEqual(results);
   expect(await restart.library.channels({})).toEqual(ordinary);
   expect((await restart.library.status()).map((status) => status.subscriptionId)).toEqual(ids);
+});
+
+it("palette responses retain full-catalogue ambiguity when the query excludes a conflicting copy", async () => {
+  const providers = [await fakeProvider(), await fakeProvider(), await fakeProvider()];
+  for (const [index, provider] of providers.entries()) {
+    const category = provider.catalogue.categories.find((each) => each.name.startsWith("BE |"))!;
+    provider.serveChannels((channels) => [
+      {
+        ...channels[0]!,
+        name: index === 2 ? "BE | VRT 1 HD" : "BE | VRT 1 FHD",
+        categoryId: category.id,
+        guideId: ["VRT1.be", "", "een.be"][index]!,
+        adult: false,
+      },
+    ]);
+  }
+  const { library, subscriptions } = await started(await tempDir());
+  for (const provider of providers) {
+    const saved = await subscriptions.add({
+      server: provider.url,
+      username: "demo",
+      password: "demo",
+    });
+    await library.refresh(saved.id);
+  }
+  const whole = await library.channels({ query: "vrt 1" });
+  expect(searchResultGroups(whole)).toHaveLength(3);
+  const partial = await library.channels({ query: "vrt 1 fhd" });
+  expect(partial).toHaveLength(2);
+  expect(searchResultGroups(partial)).toHaveLength(2);
+  expect(new Set(partial.map((copy) => copy.searchGroup)).size).toBe(2);
 });

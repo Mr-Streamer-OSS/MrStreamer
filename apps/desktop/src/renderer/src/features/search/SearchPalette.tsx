@@ -7,7 +7,7 @@ import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { Title } from "@mrstreamer/contracts/ondemand";
 import {
   automaticSearchCopy,
-  groupLiveSearch,
+  searchResultGroups,
   type LiveSearchGroup,
 } from "@mrstreamer/core/catalogue/search";
 import { ownedId, ownedKey } from "@mrstreamer/contracts/subscription";
@@ -58,9 +58,9 @@ type Result =
       readonly group: LiveSearchGroup;
       readonly copy: boolean;
       readonly key: string;
-      readonly match: ProgrammeMatch | null;
     }
-  | { readonly kind: "title"; readonly title: Title };
+  | { readonly kind: "title"; readonly title: Title }
+  | { readonly kind: "programme"; readonly match: ProgrammeMatch };
 
 /** Channel results listed before the rest. */
 const CHANNEL_RESULTS = 20;
@@ -74,11 +74,6 @@ function Palette() {
   const debounced = useDebounced(query, 120);
   const channels = useQuery(queries.search(debounced));
   const programmes = useQuery(queries.programmes(debounced));
-  const programmeChannels = useMemo(
-    () => (programmes.data ?? []).map((match) => match.channel),
-    [programmes.data],
-  );
-  const programmeCopies = useQuery(queries.searchWithProgrammes(debounced, programmeChannels));
   const titles = useQuery(queries.titleSearch(debounced));
   const categories = useCategoryMap();
   // Results come from every subscription: one says whose it is where another reads the same.
@@ -87,29 +82,19 @@ function Palette() {
   const favourites = useFavouriteKeys();
   const subscriptions = useSubscriptions();
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
-  const matches = useMemo(
-    () => new Map((programmes.data ?? []).map((match) => [ownedKey(match.channel), match])),
-    [programmes.data],
+  const groups = useMemo(
+    () => searchResultGroups(channels.data ?? []).slice(0, CHANNEL_RESULTS),
+    [channels.data],
   );
-  const groups = useMemo(() => {
-    const named = groupLiveSearch(channels.data ?? []).slice(0, CHANNEL_RESULTS);
-    const matches = [
-      ...named.flatMap((group) => group.copies),
-      ...(programmeCopies.data ?? []),
-      ...(programmes.data ?? []).map((match) => match.channel),
-    ];
-    return groupLiveSearch(matches);
-  }, [channels.data, programmeCopies.data, programmes.data]);
+  const [open, setOpen] = useState<number | null>(null);
   const [active, setActive] = useState(0);
   const results = useMemo((): Result[] => {
     if (!debounced.trim()) return [];
     return [
       ...groups.flatMap((group): Result[] => {
-        const match =
-          group.copies.map((channel) => matches.get(ownedKey(channel))).find(Boolean) ?? null;
-        const channel = match?.channel ?? group.copies[0]!;
+        const channel = group.copies[0]!;
         return [
-          { kind: "channel", group, channel, copy: false, key: group.key, match },
+          { kind: "channel", group, channel, copy: false, key: group.key },
           ...(expanded.has(group.key) && group.copies.length > 1
             ? group.copies.map((channel): Result => ({
                 kind: "channel",
@@ -117,7 +102,6 @@ function Palette() {
                 channel,
                 copy: true,
                 key: `${group.key}/copy/${ownedKey(channel)}`,
-                match: matches.get(ownedKey(channel)) ?? null,
               }))
             : []),
         ];
@@ -126,12 +110,14 @@ function Palette() {
         ...(titles.data?.movies ?? []).slice(0, TITLE_RESULTS),
         ...(titles.data?.series ?? []).slice(0, TITLE_RESULTS),
       ].map((title): Result => ({ kind: "title", title })),
+      ...(programmes.data ?? []).map((match): Result => ({ kind: "programme", match })),
     ];
-  }, [debounced, groups, expanded, matches, titles.data]);
+  }, [debounced, groups, expanded, titles.data, programmes.data]);
 
   useEffect(() => {
     setActive(0);
     setExpanded(new Set());
+    setOpen(null);
   }, [debounced]);
 
   // Keep the highlighted result in view while moving through the list with the keyboard.
@@ -155,7 +141,8 @@ function Palette() {
         useUi.setState({ playingTitle: false });
       }
       openDetails({ kind: result.title.kind, ...ownedId(result.title) });
-    }
+    } else if (result.match.programme.start <= Date.now()) watchChannel(result.match.channel);
+    else setOpen((current) => (current === index ? null : index));
   };
 
   function onKey(event: KeyboardEvent) {
@@ -174,7 +161,7 @@ function Palette() {
     else if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
       const result = results[active];
       if (result?.kind !== "channel" || result.group.copies.length < 2) return;
-      if (event.key === "ArrowRight" && !result.copy)
+      if (event.key === "ArrowRight" && !result.copy && !expanded.has(result.group.key))
         setExpanded((current) => new Set(current).add(result.group.key));
       else if (event.key === "ArrowLeft" && expanded.has(result.group.key)) {
         setExpanded((current) => {
@@ -185,11 +172,6 @@ function Palette() {
         setActive(
           results.findIndex((row) => row.kind === "channel" && row.key === result.group.key),
         );
-        list.current
-          ?.querySelector<HTMLElement>(
-            `[data-group-row="${results.findIndex((row) => row.kind === "channel" && row.key === result.group.key)}"]`,
-          )
-          ?.focus();
       } else return;
     } else return;
     event.preventDefault();
@@ -216,7 +198,9 @@ function Palette() {
       </div>
       {debounced.trim() && groups.length > 0 && (
         <div role="status" className="px-5 py-2 text-xs">
-          {groups.length} channels · {groups.reduce((sum, group) => sum + group.streams, 0)} streams
+          {groups.length} {groups.length === 1 ? "channel" : "channels"} ·{" "}
+          {groups.reduce((sum, group) => sum + group.streams, 0)}{" "}
+          {groups.reduce((sum, group) => sum + group.streams, 0) === 1 ? "stream" : "streams"}
         </div>
       )}
       {results.length > 0 && (
@@ -272,7 +256,45 @@ function Palette() {
                 </button>
               );
             }
-            const { channel, group, copy, match } = result;
+            if (result.kind === "programme") {
+              const { channel, programme } = result.match;
+              const source = sourceOf(channel);
+              const shows = source ? `${channel.title} · ${source}` : channel.title;
+              const detail =
+                programme.start <= now
+                  ? `On now · ${shows} · ${timeLeft(programme, now)}`
+                  : `${clockTime(programme.start, now)} · ${shows}`;
+              return (
+                <button
+                  key={`${ownedKey(channel)}:${programme.start}`}
+                  id={`${resultsId}-${index}`}
+                  role="treeitem"
+                  aria-level={1}
+                  aria-selected={index === active}
+                  data-index={index}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => choose(index)}
+                  className={cn(
+                    "flex w-full items-center gap-3.5 rounded-2xl px-3 py-2.5 text-left hover:bg-white/6",
+                    index === active && "bg-white/10 hover:bg-white/10",
+                  )}
+                >
+                  <ChannelLogo channel={channel} className="h-8 w-12 self-start" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[0.9375rem] text-white">
+                      {programme.title}
+                    </span>
+                    <span className="block truncate text-xs text-muted-foreground">{detail}</span>
+                    {open === index && programme.description && (
+                      <span className="mt-1.5 block text-[0.8125rem] leading-relaxed text-muted-foreground">
+                        {programme.description}
+                      </span>
+                    )}
+                  </span>
+                </button>
+              );
+            }
+            const { channel, group, copy } = result;
             const [categoryId] = channel.categoryIds;
             const category = categoryId
               ? categories.get(ownedKey({ subscriptionId: channel.subscriptionId, id: categoryId }))
@@ -284,8 +306,6 @@ function Palette() {
                 channel={channel}
                 group={group}
                 copy={copy}
-                match={match}
-                now={now}
                 index={index}
                 active={active === index}
                 expanded={expanded.has(group.key)}
@@ -322,8 +342,6 @@ function LiveResultRow({
   channel,
   group,
   copy,
-  match,
-  now,
   index,
   active,
   expanded,
@@ -336,8 +354,6 @@ function LiveResultRow({
   channel: LiveChannel;
   group: LiveSearchGroup;
   copy: boolean;
-  match: ProgrammeMatch | null;
-  now: number;
   index: number;
   active: boolean;
   expanded: boolean;
@@ -350,8 +366,8 @@ function LiveResultRow({
   const favourites = useFavouriteKeys();
   const toggleFavourite = useToggleFavourite();
   const grouped = !copy && group.copies.length > 1;
+  const subscriptionCount = new Set(group.copies.map((copy) => copy.subscriptionId)).size;
   const listing = useQuery({ ...queries.listings([channel]), enabled: copy });
-  const programme = match?.programme;
   const guide = listing.data?.[ownedKey(channel)];
   return (
     <div
@@ -368,9 +384,10 @@ function LiveResultRow({
         data-group-row={index}
         aria-label={[
           channel.title,
-          copy ? nameOf(channel.subscriptionId) : null,
-          copy ? channel.number : null,
-          copy ? searchQualities([channel]) : null,
+          category,
+          !grouped ? nameOf(channel.subscriptionId) : null,
+          !grouped ? channel.number : null,
+          !grouped ? searchQualities([channel]) : null,
         ]
           .filter((part) => part != null && part !== "")
           .join(", ")}
@@ -386,24 +403,22 @@ function LiveResultRow({
             {grouped
               ? [
                   category,
-                  `${new Set(group.copies.map((copy) => copy.subscriptionId)).size} subscriptions`,
-                  `${group.streams} streams`,
+                  `${subscriptionCount} ${subscriptionCount === 1 ? "subscription" : "subscriptions"}`,
+                  `${group.streams} ${group.streams === 1 ? "stream" : "streams"}`,
                   searchQualities(group.copies),
                 ]
                   .filter(Boolean)
                   .join(" · ")
-              : [nameOf(channel.subscriptionId), channel.number, searchQualities([channel])]
+              : [
+                  category,
+                  nameOf(channel.subscriptionId),
+                  channel.number,
+                  searchQualities([channel]),
+                ]
                   .filter((part) => part !== null && part !== "")
                   .join(" · ")}
           </span>
-          {programme ? (
-            <span className="block text-xs">
-              {programme.start <= now ? "On now" : clockTime(programme.start, now)} ·{" "}
-              {programme.title}
-              {programme.start <= now ? ` · ${timeLeft(programme, now)}` : ""}
-              {programme.description ? ` · ${programme.description}` : ""}
-            </span>
-          ) : copy && guide?.now ? (
+          {copy && guide?.now ? (
             <span className="block truncate text-xs">
               {guide.now.title}
               {guide.next ? ` · Next ${guide.next.title}` : ""}
@@ -415,6 +430,7 @@ function LiveResultRow({
         <button
           aria-label={expanded ? "Hide copies" : "Show copies"}
           aria-expanded={expanded}
+          onMouseDown={(event) => event.preventDefault()}
           onClick={onToggle}
           className="p-3"
         >
@@ -428,6 +444,7 @@ function LiveResultRow({
           onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === " ") event.stopPropagation();
           }}
+          onMouseDown={(event) => event.preventDefault()}
           onClick={() => toggleFavourite(channel)}
           className="p-3"
         >

@@ -124,14 +124,6 @@ export const queries = {
       staleTime: Infinity,
       enabled: query.trim().length > 0,
     }),
-  /** Real search companions of programme matches, read from the loaded catalogue. */
-  searchWithProgrammes: (query: string, channels: readonly OwnedId[]) =>
-    queryOptions({
-      queryKey: ["library", "searchProgrammes", query, ...channels.map(ownedKey)],
-      queryFn: () => call("library.channels", { query, channels: channels.map(ownedId) }),
-      staleTime: Infinity,
-      enabled: query.trim().length > 0 && channels.length > 0,
-    }),
   /**
    * Now and next for the given channels, by each channel's `ownedKey`. Channels without guide
    * data are missing.

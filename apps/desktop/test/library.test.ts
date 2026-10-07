@@ -167,8 +167,9 @@ describe("live library", () => {
         ],
       },
     ]);
-    expect(await library.channel(own(sd))).toEqual(found[0]);
-    expect(await library.channels({ channels: [sd, hd, fhd].map(own) })).toEqual(found);
+    const canonical = found.map(({ searchGroup: _group, ...channel }) => channel);
+    expect(await library.channel(own(sd))).toEqual(canonical[0]);
+    expect(await library.channels({ channels: [sd, hd, fhd].map(own) })).toEqual(canonical);
   });
 
   it("finds nothing by an id that names another subscription", async () => {

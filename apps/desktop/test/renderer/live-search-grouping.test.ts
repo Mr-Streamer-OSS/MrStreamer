@@ -9,6 +9,7 @@ import { ownedKey } from "@mrstreamer/contracts/subscription";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { ListingMatch, Programme } from "@mrstreamer/contracts/guide";
 import { normalizeCatalogue } from "@mrstreamer/core/catalogue/normalize";
+import { indexLiveSearch } from "@mrstreamer/core/catalogue/search";
 import { liveChannels } from "@mrstreamer/core/catalogue/variants";
 import { useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { GuidePage } from "../../src/renderer/src/features/live/GuidePage.tsx";
@@ -49,6 +50,10 @@ const green: readonly LiveChannel[] = catalogue.map((channel) => ({
   subscriptionId: GREEN,
 }));
 const all = [...blue, ...green];
+const responses = (channels: readonly LiveChannel[]) =>
+  indexLiveSearch(channels).groups.flatMap((group) =>
+    group.copies.map((copy) => ({ ...copy, searchGroup: group.key })),
+  );
 const programme = (title: string): Programme => ({
   start: Date.now() - 1000,
   stop: Date.now() + 3600000,
@@ -117,15 +122,11 @@ async function page(kind: "guide" | "palette", query = "VRT", realPlayback = fal
     marked: [],
     sequence: 1,
   });
-  client.setQueryData(queries.search(query).queryKey, query === "VRT" ? all : []);
+  client.setQueryData(queries.search(query).queryKey, query === "VRT" ? responses(all) : []);
   client.setQueryData(queries.titleSearch(query).queryKey, { movies: [], series: [] });
   client.setQueryData(
     queries.programmes(query).queryKey,
     query === "news" ? [{ channel: green[1]!, programme: later }] : [],
-  );
-  client.setQueryData(
-    queries.searchWithProgrammes(query, query === "news" ? [green[1]!] : []).queryKey,
-    query === "news" ? [...blue.slice(0, 2), ...green.slice(0, 2)] : [],
   );
   ipc.always(
     "guide.listings",
@@ -232,6 +233,27 @@ describe("real search components with two subscriptions", () => {
     expect(p.rows()).toHaveLength(8);
   });
 
+  it("GuidePage plays the selected ordinary row after leaving an empty search field", async () => {
+    const p = await page("guide", "");
+    expect(p.rows().every((row) => !row.hasAttribute("aria-label"))).toBe(true);
+    await p.press("/", window);
+    await p.press("ArrowDown", p.field());
+    await p.press("ArrowDown", window);
+    await p.press("ArrowDown", window);
+    await p.press("Enter");
+    expect(p.watch).toHaveBeenLastCalledWith(blue[2]);
+  });
+
+  it("GuidePage commits a typed channel number from a focused search row", async () => {
+    const p = await page("guide");
+    await p.search("VRT");
+    await p.press("ArrowDown", p.field());
+    await p.press("1");
+    await p.press("3");
+    await p.press("Enter");
+    expect(p.watch).toHaveBeenLastCalledWith(blue[2]);
+  });
+
   it("GuidePage keeps the actual matching copy's programme and schedule while retaining the entire group", async () => {
     const p = await page("guide");
     await p.search("news", {
@@ -239,7 +261,7 @@ describe("real search components with two subscriptions", () => {
     });
     expect(p.rows()).toHaveLength(1);
     expect(p.rows()[0]!.textContent).toContain("Evening news");
-    expect(p.scope().textContent).toContain("1 channels · 6 streams");
+    expect(p.scope().textContent).toContain("1 channel · 6 streams");
     p.field().blur();
     await p.press("ArrowRight", window);
     expect(p.rows()).toHaveLength(5);
@@ -263,16 +285,16 @@ describe("real search components with two subscriptions", () => {
     expect(p.scope().textContent).toContain("2 channels · 10 streams");
     expect(ipc.argsOf("library.channels")).toEqual([]);
     await p.press("Enter", p.field());
-    expect(p.watch).toHaveBeenLastCalledWith(green[1]);
+    expect(p.watch).toHaveBeenLastCalledWith(expect.objectContaining(green[1]!));
     // Keep this mounted popup's input available for the keyboard path after playback closes it.
     await act(async () => useUi.setState({ watching: false, searchOpen: true }));
     await settled();
     await p.press("ArrowRight", p.field());
     expect(p.rows()).toHaveLength(6);
-    expect(p.rows()[1]!.textContent).toContain("Blue · 10 · FHD · HD");
+    expect(p.rows()[1]!.textContent).toContain("Belgium · Vlaanderen · Blue · 10 · FHD · HD");
     await p.press("ArrowDown", p.field());
     await p.press("Enter", p.field());
-    expect(p.watch).toHaveBeenLastCalledWith(blue[0]);
+    expect(p.watch).toHaveBeenLastCalledWith(expect.objectContaining(blue[0]!));
     await act(async () => useUi.setState({ watching: false, searchOpen: true }));
     await settled();
     await p.press("ArrowRight", p.field());
@@ -283,7 +305,7 @@ describe("real search components with two subscriptions", () => {
     });
     await p.press("ArrowLeft", p.field());
     expect(p.rows()).toHaveLength(2);
-    expect(document.activeElement).toBe(p.rows()[0]);
+    expect(document.activeElement).toBe(p.field());
   });
 
   it("Q after an explicit copy opens only that subscription's qualities and remembers its choice", async () => {
@@ -322,15 +344,36 @@ describe("real search components with two subscriptions", () => {
     expect(player.state().channel?.subscriptionId).toBe(GREEN);
   });
 
-  it("SearchPalette finds programme-only matches with their original guide and all canonical copies", async () => {
+  it("SearchPalette keeps later programme rows and opens their description without playing", async () => {
     const p = await page("palette", "news");
-    expect(p.rows()).toHaveLength(1);
-    expect(p.rows()[0]!.textContent).toContain("Evening news");
-    expect(p.rows()[0]!.textContent).toContain("From this copy's guide.");
-    expect(p.scope().textContent).toContain("1 channels · 6 streams");
-    await p.press("ArrowRight", p.field());
-    expect(p.rows()).toHaveLength(5);
-    expect(p.rows()[4]!.textContent).toContain("Evening news");
+    expect(p.rows()).toHaveLength(0);
+    const row = document.querySelector<HTMLElement>('button[role="treeitem"]')!;
+    expect(row.textContent).toContain("Evening news");
+    expect(row.textContent).not.toContain("From this copy's guide.");
+    await p.press("Enter", p.field());
+    expect(row.textContent).toContain("From this copy's guide.");
+    expect(p.watch).not.toHaveBeenCalled();
+  });
+
+  it("SearchPalette retains both an on-now programme and its later match", async () => {
+    const p = await page("palette", "news");
+    await act(async () =>
+      p.client.setQueryData(queries.programmes("news").queryKey, [
+        {
+          channel: green[1]!,
+          programme: { ...programme("Morning news"), start: Date.now() - 120000 },
+        },
+        { channel: green[1]!, programme: later },
+      ]),
+    );
+    await settled();
+    const rows = [...document.querySelectorAll<HTMLElement>('button[role="treeitem"]')];
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.textContent).toContain("Morning news");
+    expect(rows[0]!.textContent).toContain("On now");
+    expect(rows[1]!.textContent).toContain("Evening news");
+    await p.press("Enter", p.field());
+    expect(p.watch).toHaveBeenLastCalledWith(green[1]);
   });
 
   it("SearchPalette retains programme matches beyond the twenty channel-name results", async () => {
@@ -349,15 +392,16 @@ describe("real search components with two subscriptions", () => {
       },
       variants: [{ id: `news-${index}`, name: `News ${index}`, tags: [], quality: null }],
     }));
-    await act(async () => p.client.setQueryData(queries.search("news").queryKey, names));
-    await expect.poll(() => p.rows().length).toBe(21);
-    expect(p.rows()[20]!.textContent).toContain("Evening news");
-    expect(p.scope().textContent).toContain("21 channels · 26 streams");
+    await act(async () => p.client.setQueryData(queries.search("news").queryKey, responses(names)));
+    await expect.poll(() => p.rows().length).toBe(20);
+    const rows = [...document.querySelectorAll<HTMLElement>('[role="treeitem"]')];
+    expect(rows).toHaveLength(21);
+    expect(rows[20]!.textContent).toContain("Evening news");
+    expect(p.scope().textContent).toContain("20 channels · 20 streams");
     for (let index = 0; index < 20; index++) await p.press("ArrowDown", p.field());
-    await p.press("ArrowRight", p.field());
-    expect(p.rows()).toHaveLength(25);
-    expect(p.rows()[24]!.textContent).toContain("Evening news");
-    expect(p.field().getAttribute("aria-activedescendant")).toBe(p.rows()[20]!.parentElement!.id);
-    expect(p.rows()[21]!.parentElement!.getAttribute("aria-level")).toBe("2");
+    expect(p.field().getAttribute("aria-activedescendant")).toBe(rows[20]!.id);
+    await p.press("Enter", p.field());
+    expect(rows[20]!.textContent).toContain("From this copy's guide.");
+    expect(p.watch).not.toHaveBeenCalled();
   });
 });

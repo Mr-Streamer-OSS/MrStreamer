@@ -156,6 +156,30 @@ export function groupLiveSearch(channels: readonly LiveChannel[]): readonly Live
     .sort((a, b) => (order.get(a.copies[0]!) ?? 0) - (order.get(b.copies[0]!) ?? 0));
 }
 
+/** Reconstruct search responses without regrouping a subset of the catalogue. */
+export function searchResultGroups(channels: readonly LiveChannel[]): readonly LiveSearchGroup[] {
+  const groups = new Map<string, LiveChannel[]>();
+  const seen = new Set<string>();
+  for (const channel of channels) {
+    const id = ownedKey(channel);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const key = channel.searchGroup ?? id;
+    const copies = groups.get(key);
+    if (copies) copies.push(channel);
+    else groups.set(key, [channel]);
+  }
+  return [...groups].map(([key, copies]) => ({
+    key,
+    copies,
+    streams: new Set(
+      copies.flatMap((channel) =>
+        channel.variants.map((variant) => JSON.stringify([channel.subscriptionId, variant.id])),
+      ),
+    ).size,
+  }));
+}
+
 /** Favourite copies first, then saved subscription order. Never synthesizes a playback owner. */
 export function automaticSearchCopy(
   group: LiveSearchGroup,

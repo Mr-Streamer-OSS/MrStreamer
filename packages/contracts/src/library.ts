@@ -41,6 +41,8 @@ export interface LiveChannel {
   readonly ambiguous?: true;
   /** Catalogue-validated identity for display-only search folding. Missing means keep apart. */
   readonly searchIdentity?: LiveSearchIdentity;
+  /** Response-only group chosen from the whole catalogue. Never stored or used for playback. */
+  readonly searchGroup?: string;
 }
 
 export interface LiveSearchIdentity {

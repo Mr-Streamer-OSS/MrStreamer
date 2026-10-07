@@ -343,15 +343,15 @@ export function GuidePage({ active }: { active: boolean }) {
           break;
         case "ArrowLeft": {
           const row = now.searchRows?.[now.selected];
-          if (now.focus === "channels" && row && now.expandedCopies.has(row.group.key)) {
+          if (now.focus === "channels" && channel && now.expandedKey === ownedKey(channel)) {
+            setExpandedKey(null);
+          } else if (now.focus === "channels" && row && now.expandedCopies.has(row.group.key)) {
             now.toggleCopies(row.group.key);
             select(
               now.searchRows!.findIndex(
                 (candidate) => candidate.group.key === row.group.key && !candidate.copy,
               ),
             );
-          } else if (now.focus === "channels" && channel && now.expandedKey === ownedKey(channel)) {
-            setExpandedKey(null);
           } else if (now.focus === "channels") setFocus("lists");
           break;
         }
@@ -370,9 +370,12 @@ export function GuidePage({ active }: { active: boolean }) {
           field.current.select();
           break;
         case "s":
-        case "S":
-          if (channel) toggleFavourite(channel);
+        case "S": {
+          const row = now.searchRows?.[now.selected];
+          if (channel && (!row || row.copy || row.group.copies.length === 1))
+            toggleFavourite(channel);
           break;
+        }
         case "r":
         case "R":
           now.reorder();
@@ -448,11 +451,14 @@ export function GuidePage({ active }: { active: boolean }) {
                 <>
                   {searching && listed && (
                     <span role="status" className="flex-none text-sm text-white tabular-nums">
-                      {search.groups?.length.toLocaleString()} channels ·{" "}
+                      {search.groups?.length.toLocaleString()}{" "}
+                      {search.groups?.length === 1 ? "channel" : "channels"} ·{" "}
                       {search.groups
                         ?.reduce((sum, group) => sum + group.streams, 0)
                         .toLocaleString()}{" "}
-                      streams
+                      {search.groups?.reduce((sum, group) => sum + group.streams, 0) === 1
+                        ? "stream"
+                        : "streams"}
                     </span>
                   )}
                   <div className="ml-auto flex flex-none items-center gap-2">
@@ -476,11 +482,12 @@ export function GuidePage({ active }: { active: boolean }) {
                         onLeave={() => {
                           setFocus("channels");
                           showSelection();
-                          page.current
-                            ?.querySelector<HTMLElement>(
-                              `[data-index="${selected}"] [role="button"]`,
-                            )
-                            ?.focus({ preventScroll: true });
+                          if (searchRows)
+                            page.current
+                              ?.querySelector<HTMLElement>(
+                                `[data-index="${selected}"] [role="button"]`,
+                              )
+                              ?.focus({ preventScroll: true });
                         }}
                       />
                     )}

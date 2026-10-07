@@ -329,18 +329,21 @@ function ChannelRow({
               tabIndex: searchRow && selected ? 0 : -1,
               onClick: onWatch,
               onFocus: searchRow ? onSelectSearch : undefined,
-              "aria-label": [
-                channel.title,
-                searchRow?.copy ? source : null,
-                searchRow?.copy ? channel.number : null,
-                searchRow?.copy ? searchQualities([channel]) : null,
-              ]
-                .filter((part) => part != null && part !== "")
-                .join(", "),
+              "aria-label": searchRow
+                ? [
+                    channel.title,
+                    searchRow?.copy ? source : null,
+                    searchRow?.copy ? channel.number : null,
+                    searchRow?.copy ? searchQualities([channel]) : null,
+                  ]
+                    .filter((part) => part != null && part !== "")
+                    .join(", ")
+                : undefined,
               ...(grouped ? { "aria-expanded": copiesOpen } : {}),
               onKeyDown: (event) => {
-                if (event.target !== event.currentTarget) return;
-                if (event.key === " " || event.key === "Enter") {
+                if (!searchRow || event.target !== event.currentTarget || event.repeat) return;
+                // Enter belongs to the page, which also commits a typed channel number.
+                if (event.key === " ") {
                   event.preventDefault();
                   event.stopPropagation();
                   onWatch();

@@ -132,7 +132,7 @@ interface Combined {
   readonly shown: (channel: LiveChannel) => LiveChannel;
 }
 
-/** Given ids plus a query name programme matches to show with all their search companions. */
+/** Select a category, search names, or look up explicit ids. Ids with a query include search companions. */
 export interface ChannelFilter {
   readonly category?: OwnedId;
   readonly query?: string;
@@ -172,8 +172,9 @@ export class Library extends Context.Service<
     readonly categories: Effect.Effect<readonly Category[], Failed>;
     /**
      * All channels in a category, the best matches for a query across every catalogue, or the
-     * given channels in that order; without any of those, every channel. A channel's id may be
-     * any of its streams'; a channel shows once.
+     * given channels in that order; without any of those, every channel. Search responses carry
+     * their full-catalogue display group and all its real copies. Ids with a query return their
+     * search companions. A channel's id may be any of its streams'; a channel shows once.
      */
     channels(filter: ChannelFilter): Effect.Effect<readonly LiveChannel[], Failed>;
     /**
@@ -485,7 +486,9 @@ function make(options: LibraryOptions) {
             if (query)
               return matchingSearchGroups(searchIndex(searched.channels), found)
                 .slice(0, SEARCH_LIMIT)
-                .flatMap((group) => group.copies);
+                .flatMap((group) =>
+                  group.copies.map((copy) => ({ ...copy, searchGroup: group.key })),
+                );
             return [...new Set(found)].map(lists.shown);
           }
           if (query) return search(searched.channels, searched.searchNames, query);
@@ -735,7 +738,12 @@ function search(
     .map((entry) => entry.channel)
     .filter((channel) => selected.has(ownedKey(channel)));
   const matchedKeys = new Set(matched.map(ownedKey));
-  return [...matched, ...copies.filter((channel) => !matchedKeys.has(ownedKey(channel)))];
+  const keys = new Map(
+    groups.flatMap((group) => group.copies.map((copy) => [ownedKey(copy), group.key] as const)),
+  );
+  return [...matched, ...copies.filter((channel) => !matchedKeys.has(ownedKey(channel)))].map(
+    (copy) => ({ ...copy, searchGroup: keys.get(ownedKey(copy))! }),
+  );
 }
 
 const searchIndexes = new WeakMap<readonly LiveChannel[], LiveSearchIndex>();
