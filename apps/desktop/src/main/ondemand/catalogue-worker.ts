@@ -604,10 +604,22 @@ const handlers: {
   byIds: async ({ language, kind, versions, owners, files }) => {
     speaking(language);
     const found = await catalogueOf(owners, language);
-    const observed = files?.some((file) => file.tracks) ? filterFiles(found, kind, files) : null;
-    return byIds(found.index, kind, versions).map((title) => {
-      const shown = named(title, language);
-      if (!observed) return shown;
+    const selected = byIds(found.index, kind, versions).map((title) => named(title, language));
+    if (!files?.some((file) => file.tracks)) return selected;
+    const wanted = new Set(selected.flatMap((title) => title.versions.map(ownedKey)));
+    const read = files.filter(
+      (file) =>
+        file.tracks &&
+        wanted.has(
+          ownedKey({
+            subscriptionId: file.subscriptionId,
+            id: kind === "movie" ? file.id : (file.seriesId ?? ""),
+          }),
+        ),
+    );
+    if (read.length === 0) return selected;
+    const observed = filterFiles(found, kind, read);
+    return selected.map((shown) => {
       return {
         ...shown,
         versions: shown.versions.map((version) => {
