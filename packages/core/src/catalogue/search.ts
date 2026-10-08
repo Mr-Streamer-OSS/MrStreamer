@@ -78,13 +78,15 @@ export function groupLiveSearch(channels: readonly LiveChannel[]): readonly Live
       alone.push([channel]);
       continue;
     }
-    const regional = regionKeys(channel);
     if (identity.guideId) {
       const key = JSON.stringify([identity.title, identity.language, identity.guideId]);
       const copies = guidedCandidates.get(key);
       if (copies) copies.push(channel);
       else guidedCandidates.set(key, [channel]);
-    } else if (regional.length > 0) {
+      continue;
+    }
+    const regional = regionKeys(channel);
+    if (regional.length > 0) {
       const key = JSON.stringify(regional.sort());
       const copies = ordinary.get(key);
       if (copies) copies.push(channel);
