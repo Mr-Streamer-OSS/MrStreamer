@@ -1,5 +1,5 @@
 // mrstreamer.db, the one SQLite database: opened once and shared by what keeps its tables there,
-// viewing, the watchlist and verified file tracks. Each makes and
+// viewing, the watchlist, verified file tracks and downloaded subtitle cues. Each makes and
 // reads only its own tables, and every change is one transaction. If the file can't open, they
 // report failures and the rest of the app carries on.
 import { mkdirSync } from "node:fs";

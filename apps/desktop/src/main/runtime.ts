@@ -20,6 +20,7 @@ import { diagnosticsLogLayer } from "./platform/diagnostics-log.ts";
 import { guideStoreLayer } from "./platform/guide-store.ts";
 import type { Secrets } from "./platform/secrets.ts";
 import { VerifiedFiles, verifiedFilesLayer } from "./platform/verified-files.ts";
+import { SavedSubtitles, savedSubtitlesLayer } from "./platform/saved-subtitles.ts";
 import { viewingStoreLayer } from "./platform/viewing-store.ts";
 import { xmltvFetch } from "./providers/xmltv.ts";
 import { watchlistStoreLayer } from "./platform/watchlist-store.ts";
@@ -29,6 +30,7 @@ import { Output, type OutputDeps } from "./services/output.ts";
 import { appNotices, Licences } from "./services/licences.ts";
 import { Playback } from "./services/playback.ts";
 import { Settings } from "./services/preferences.ts";
+import { SubtitleAccounts } from "./services/subtitle-accounts.ts";
 import { Roster } from "./services/roster.ts";
 import { Subscriptions } from "./services/subscription.ts";
 import { Updates, type UpdatesConfig } from "./services/updates.ts";
@@ -68,7 +70,9 @@ export type MainServices =
   | ViewingRecord
   | Watchlist
   | Licences
-  | VerifiedFiles;
+  | VerifiedFiles
+  | SavedSubtitles
+  | SubtitleAccounts;
 
 /** Every main-process service, with the app's adapters for their ports. */
 export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
@@ -84,6 +88,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
   );
   const database = databaseLayer(dataDir);
   const verifiedFiles = verifiedFilesLayer.pipe(Layer.provide(database));
+  const savedSubtitles = savedSubtitlesLayer.pipe(Layer.provide(database));
   const services = Layer.mergeAll(
     Library.layer(),
     OnDemand.layer({
@@ -101,7 +106,8 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
     }),
     Updates.layer({ dataDir, ...config.updates }),
     Licences.layer(appNotices()),
-  ).pipe(Layer.provideMerge(Layer.merge(accounts, verifiedFiles)));
+    SubtitleAccounts.layer(dataDir, config.secrets),
+  ).pipe(Layer.provideMerge(Layer.mergeAll(accounts, verifiedFiles, savedSubtitles)));
 
   const guide = Guide.layer.pipe(
     Layer.provide(
@@ -150,7 +156,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
       ),
     ),
   );
-  // One connection for viewing, saved titles and verified file tracks.
+  // One connection for viewing, saved titles, verified tracks and downloaded subtitle cues.
   const stores = Layer.mergeAll(viewingStoreLayer, watchlistStoreLayer).pipe(
     Layer.provide(database),
   );
