@@ -193,9 +193,9 @@ describe("movies and series", { timeout: 20_000 }, () => {
 
     // Each title, and each of its versions, says whose it is.
     expect(found.every((title) => title.subscriptionId === own("").subscriptionId)).toBe(true);
-    expect(
-      found.flatMap((title) => title.versions.map(({ tags: _tags, ...named }) => named)),
-    ).toEqual(expect.arrayContaining(versions));
+    expect(found.flatMap((title) => title.versions)).toEqual(
+      expect.arrayContaining(versions.map((version) => expect.objectContaining(version))),
+    );
     expect(provider.detailRequests()).toBe(0);
     // Without TMDB, a title's details are the provider's.
     const [first] = versions;
