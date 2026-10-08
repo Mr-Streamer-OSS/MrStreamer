@@ -40,7 +40,12 @@ function serveRuns(ready = true) {
   let send: (text: string) => void = () => {};
   /** The pictures asked for, by their query. */
   const pictures: string[] = [];
-  vi.stubGlobal("fetch", async (url: string) => {
+  const requests: { readonly subtitles: boolean; readonly signal: AbortSignal | null }[] = [];
+  vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+    requests.push({
+      subtitles: new URL(url).searchParams.get("only") === "subtitles",
+      signal: init?.signal ?? null,
+    });
     if (new URL(url).searchParams.get("only") === "subtitles") {
       return new Response(
         new ReadableStream<Uint8Array>({
@@ -55,7 +60,7 @@ function serveRuns(ready = true) {
     pictures.push(new URL(url).search);
     return new Response(new ReadableStream());
   });
-  return { send: (text: string) => send(text), pictures };
+  return { send: (text: string) => send(text), pictures, requests };
 }
 
 /** Opens the movie at `from` seconds, with English and Dutch subtitles to choose. */
@@ -116,10 +121,11 @@ async function watching(): Promise<() => string | null> {
 }
 
 afterEach(() => {
-  titlePlayer.close();
+  act(() => titlePlayer.close());
   unmount();
   unmount = () => {};
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("subtitles on a playing movie", () => {
@@ -218,6 +224,63 @@ describe("subtitles on a playing movie", () => {
     await act(async () => nudgeSubtitles(english, -1));
     expect(shown()).toEqual([]);
     expect(note()).toBe("Subtitles 0.1 s earlier");
+  });
+
+  it("ends the loading note when a subtitle feed stays silent, while the picture remains independent", async () => {
+    const runs = serveRuns(false);
+    await opened(0);
+    const note = await watching();
+    vi.useFakeTimers();
+    await act(async () => titlePlayer.setSubtitle(english));
+    await act(async () => vi.advanceTimersByTimeAsync(50));
+    expect(note()).toBe("Subtitles loading");
+    await act(async () => vi.advanceTimersByTimeAsync(35_000));
+    expect(note()).toBe("Subtitles unavailable");
+    expect(runs.pictures).toContain("?start=0.000&subtitle=3");
+    expect(runs.requests.filter((request) => request.subtitles).at(-1)?.signal?.aborted).toBe(true);
+    expect(runs.requests.filter((request) => !request.subtitles).at(-1)?.signal?.aborted).toBe(
+      false,
+    );
+  });
+
+  it.each(["ready", "off"])("cancels the loading deadline once the track is %s", async (state) => {
+    const runs = serveRuns(false);
+    await opened(0);
+    const note = await watching();
+    vi.useFakeTimers();
+    await act(async () => titlePlayer.setSubtitle(english));
+    await act(async () => vi.advanceTimersByTimeAsync(10_000));
+    if (state === "ready") {
+      runs.send('{"ready":true}\n' + line(0, "We sail at first light."));
+      await act(async () => vi.advanceTimersByTimeAsync(50));
+    } else {
+      await act(async () => titlePlayer.setSubtitle(null));
+    }
+    await act(async () => vi.advanceTimersByTimeAsync(25_100));
+    expect(note()).toBeNull();
+    expect(shown()).toEqual(state === "ready" ? ["We sail at first light."] : []);
+    expect(runs.requests.filter((request) => request.subtitles).at(-1)?.signal?.aborted).toBe(
+      state === "off",
+    );
+  });
+
+  it("gives a replacement track its own loading deadline", async () => {
+    const runs = serveRuns(false);
+    await opened(0);
+    const note = await watching();
+    vi.useFakeTimers();
+    await act(async () => titlePlayer.setSubtitle(english));
+    await act(async () => vi.advanceTimersByTimeAsync(20_000));
+    await act(async () => titlePlayer.setSubtitle(dutch));
+    await act(async () => vi.advanceTimersByTimeAsync(16_000));
+    expect(note()).toBe("Subtitles loading");
+    const tracks = runs.requests.filter((request) => request.subtitles);
+    expect(tracks.at(-2)?.signal?.aborted).toBe(true);
+    expect(tracks.at(-1)?.signal?.aborted).toBe(false);
+    runs.send('{"ready":true}\n' + line(0, "We varen bij het eerste licht."));
+    await act(async () => vi.advanceTimersByTimeAsync(50));
+    expect(note()).toBeNull();
+    expect(shown()).toEqual(["We varen bij het eerste licht."]);
   });
 
   it("load beside the picture, and show what was on screen once the feed has it", async () => {
