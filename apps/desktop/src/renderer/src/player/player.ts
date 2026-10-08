@@ -56,6 +56,9 @@ import type {
 } from "@mrstreamer/contracts/playback";
 import { channelSubtitle } from "@mrstreamer/core/ondemand/tracks";
 import { subtitleDecoder, type SubtitleDecoder } from "@mrstreamer/core/subtitles/decoder";
+import { teletextPagePresent } from "@mrstreamer/core/subtitles/teletext";
+import { dvbPagePresent } from "@mrstreamer/core/subtitles/dvb";
+import { flash } from "../features/watch/Flash.tsx";
 import type { Cue } from "@mrstreamer/core/subtitles/webvtt";
 import { appError } from "../lib/errors.ts";
 import { call } from "../lib/ipc.ts";
@@ -253,6 +256,17 @@ let shown: {
 } | null = null;
 /** The subtitles chosen last on this channel, which C turns on again. */
 let lastSubtitle: SubtitleTrack | null = null;
+/** Declared tracks belong to this stream; proof belongs to the channel until it changes. */
+let declaredTracks: ChannelTracks | null = null;
+const provenSubtitles = new Set<string>();
+let subtitlesOff = false;
+let availabilityAnnounced = false;
+let tracksRevision = 0;
+/** A bounded packet sample lets first-proof autoselection decode the data that proved it. */
+let recentSubtitlePackets: { pid: number; data: Uint8Array; at: number }[] = [];
+const subtitleKey = (track: Pick<SubtitleTrack, "id" | "page" | "format">) =>
+  `${track.format}:${track.id}:${track.page}`;
+
 /**
  * The selected channel is the receiver's: the load that plays there, null until it was taken,
  * whether the receiver said it plays, for how long it has said so in all, in milliseconds, and
@@ -295,6 +309,8 @@ function release(): void {
   clearSubtitles(video);
   void call("playback.close", { sessionId: current.sessionId }).catch(() => {});
   current = null;
+  declaredTracks = null;
+  recentSubtitlePackets = [];
   // Nothing loads the chosen subtitles any more, and no picture is left to stand still.
   const { subtitleLoading, waiting } = store.getState();
   if (subtitleLoading || waiting) store.setState({ subtitleLoading: false, waiting: false });
@@ -372,8 +388,11 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
 
   let session: StreamSession;
   let sound: SoundChoice;
+  let subtitleLanguage: string | null = null;
   try {
-    const preferred = (await call("preferences.get").catch(() => null))?.audioLanguage;
+    const preferences = await call("preferences.get").catch(() => null);
+    const preferred = preferences?.audioLanguage;
+    subtitleLanguage = preferences?.subtitleLanguage ?? null;
     sound = {
       audio: store.getState().audioId,
       // The sound in the viewer's language, when the channel has it; the original is its own.
@@ -402,10 +421,21 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
 
   let engine = createEngine(session.format, video, session.url, sound);
   current = { sessionId: session.sessionId, engine };
-  engine.onPrivateData(showSubtitles);
+  engine.onPrivateData((pid, data, at) => {
+    if (mine === selection) showSubtitles(pid, data, at);
+  });
   engine.tracks?.onChange((tracks) => engineTracks(mine, tracks));
   engine.tracks?.onLine((line) => showLine(mine, line));
   engine.tracks?.onSubtitleLoaded(() => subtitlesLoaded(mine));
+  engine.tracks?.onSubtitleAvailable(
+    (track) => {
+      if (mine !== selection) return;
+      provenSubtitles.add(subtitleKey(track));
+      if (declaredTracks) void applyTracks(mine, declaredTracks);
+    },
+    subtitleLanguage,
+    store.getState().tracks?.subtitles,
+  );
   restartSubtitles();
   let failure = await startFailure(engine);
   // Some "live" channels are raw audio (AAC radio) rather than MPEG-TS. Chromium plays those itself.
@@ -693,6 +723,12 @@ function tune(channel: LiveChannel): void {
     fellBack: null,
   });
   lastSubtitle = null;
+  declaredTracks = null;
+  provenSubtitles.clear();
+  subtitlesOff = false;
+  availabilityAnnounced = false;
+  tracksRevision++;
+  recentSubtitlePackets = [];
   shown = null;
   clearSubtitles(video);
   setSubtitleDelay(video, 0);
@@ -738,15 +774,33 @@ function engineTracks(mine: number, tracks: ChannelTracks): void {
  * none when the viewer turned subtitles off, whatever the stream marks as its default.
  */
 async function applyTracks(mine: number, tracks: ChannelTracks): Promise<void> {
-  store.setState({ tracks });
-  const chosen = () => store.getState().subtitle !== null || lastSubtitle !== null;
-  if (chosen()) return;
+  declaredTracks = tracks;
+  // The main process declares captions only after seeing them in the current video data.
+  if (!current?.engine.tracks) {
+    for (const track of tracks.subtitles) {
+      if (track.format === "captions") provenSubtitles.add(subtitleKey(track));
+    }
+    for (const packet of recentSubtitlePackets) observeSubtitles(packet.pid, packet.data);
+  }
+  const available = {
+    ...tracks,
+    subtitles: tracks.subtitles.filter((track) => provenSubtitles.has(subtitleKey(track))),
+  };
+  const revision = ++tracksRevision;
+  store.setState({ tracks: available });
+  const chosen = () => subtitlesOff || store.getState().subtitle !== null || lastSubtitle !== null;
   const wanted = (await call("preferences.get").catch(() => null))?.subtitleLanguage ?? null;
-  // The viewer may have chosen meanwhile, and the stream may list other tracks by now.
-  const latest = store.getState().tracks;
-  if (mine !== selection || chosen() || !latest) return;
-  const match = channelSubtitle(latest, wanted);
-  if (match) choose(match);
+  if (mine !== selection || revision !== tracksRevision) return;
+  if (!chosen()) {
+    const match = channelSubtitle(available, wanted);
+    if (match) choose(match);
+  }
+  if (!availabilityAnnounced && available.subtitles.length > 0) {
+    availabilityAnnounced = true;
+    if (!store.getState().subtitle && (current?.engine.played() ?? 0) >= 10_000) {
+      flash("Subtitles available · C");
+    }
+  }
 }
 
 /** Puts a line of an HLS stream's subtitles on the element's track, at the viewer's timing. */
@@ -790,9 +844,48 @@ function restartSubtitles(): void {
         presenter: subtitlePresenter(video),
       }
     : null;
+  if (shown) {
+    for (const packet of recentSubtitlePackets) {
+      if (packet.pid !== shown.pid) continue;
+      const change = shown.decoder.push(packet.data, packet.at);
+      if (change) shown.presenter.show(change);
+    }
+  }
+}
+
+/** Checks addresses and segment structure only; unselected tracks are never decoded. */
+function observeSubtitles(pid: number, data: Uint8Array): boolean {
+  let changed = false;
+  for (const track of declaredTracks?.subtitles ?? []) {
+    if (track.id !== pid || provenSubtitles.has(subtitleKey(track))) continue;
+    const present =
+      track.format === "teletext"
+        ? teletextPagePresent(data, track.page)
+        : track.format === "picture" && dvbPagePresent(data, track.page);
+    if (present) {
+      provenSubtitles.add(subtitleKey(track));
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 function showSubtitles(pid: number, data: Uint8Array, at: number): void {
+  if (!declaredTracks || declaredTracks.subtitles.some((track) => track.id === pid)) {
+    if (data.byteLength <= 65_536) {
+      recentSubtitlePackets.push({ pid, data: data.slice(), at });
+      let bytes = recentSubtitlePackets.reduce(
+        (total, packet) => total + packet.data.byteLength,
+        0,
+      );
+      while (bytes > 65_536 || recentSubtitlePackets.length > 64) {
+        bytes -= recentSubtitlePackets.shift()!.data.byteLength;
+      }
+    }
+  }
+  if (declaredTracks && observeSubtitles(pid, data)) {
+    void applyTracks(selection, declaredTracks);
+  }
   if (!shown || pid !== shown.pid) return;
   const change = shown.decoder.push(data, at);
   if (change) shown.presenter.show(change);
@@ -1008,6 +1101,8 @@ export const player = {
     onReceiver = null;
     player.suspend();
     tuned = null;
+    provenSubtitles.clear();
+    declaredTracks = null;
     store.setState({ channel: null, previous: null, stopped: false });
   },
 
@@ -1075,6 +1170,12 @@ export const player = {
   /** Shows a subtitle track, or none, and remembers the choice. A receiver shows none of a channel's. */
   setSubtitle(track: SubtitleTrack | null): void {
     if (onReceiver) return;
+    if (
+      track &&
+      !store.getState().tracks?.subtitles.some((each) => subtitleKey(each) === subtitleKey(track))
+    )
+      return;
+    subtitlesOff = track === null;
     choose(track);
     rememberSubtitles(track);
   },

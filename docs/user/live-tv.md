@@ -53,6 +53,8 @@ From 0.0.9, the bar keeps Channels, Favourite, Stop or Watch, CC when available,
 
 The languages you pick carry over to other channels, and to movies and series. A channel in another language starts with subtitles in yours when it has them. Subtitles a stream marks as its own default don't come on by themselves.
 
+Live CC shows only tracks whose data has arrived. A teletext page that sends only filler, an empty DVB page or an HLS rendition without cues stays hidden, and C does nothing until a track is available. Once proven, a track stays available until you change channel. Your saved language or Off choice applies when data first arrives. After ten seconds of playback, late availability flashes "Subtitles available · C" once if subtitles stay off. HLS discovery checks a few subtitle segments at a time while CC is off, without opening another channel connection.
+
 ### Quality
 
 Channels start in Full HD, or the nearest quality the channel has, lower first. Change that in Settings > General > Live TV. If your provider has no stream for a quality right now, or doesn't answer, Automatic tries the next, at most three, one after another, and the line under the programme says so: "Full HD didn't start, playing HD". If the provider refuses the stream, Automatic stops there instead of trying more streams against a refusal. The status doesn't say why, so Mr. Streamer can't tell whether another quality would play.

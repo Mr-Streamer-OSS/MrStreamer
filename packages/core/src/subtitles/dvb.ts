@@ -544,3 +544,34 @@ function rgba(y: number, cr: number, cb: number, alpha: number): number {
 function clamp(value: number): number {
   return Math.max(0, Math.min(255, Math.round(value)));
 }
+
+/**
+ * Meaningful data for a declared DVB composition page, without allocating subtitle pictures.
+ * A page with regions, a region with objects or fill, or pixel object data proves availability.
+ * An empty page, display dimensions alone, end marker and incomplete segments do not.
+ */
+export function dvbPagePresent(payload: Uint8Array, page: number | null): boolean {
+  if (payload[0] !== 0x20 || payload[1] !== 0) return false;
+  for (let offset = 2; offset + 6 <= payload.length && payload[offset] === 0x0f;) {
+    const type = payload[offset + 1]!;
+    const pageId = (payload[offset + 2]! << 8) | payload[offset + 3]!;
+    const length = (payload[offset + 4]! << 8) | payload[offset + 5]!;
+    const end = offset + 6 + length;
+    if (end > payload.length) return false;
+    const body = payload.subarray(offset + 6, end);
+    offset = end;
+    if (page !== null && pageId !== page) continue;
+    if (type === 0x10 && body.length >= 8 && (body.length - 2) % 6 === 0) return true;
+    if (type === 0x11 && body.length >= 10) {
+      const width = (body[2]! << 8) | body[3]!;
+      const height = (body[4]! << 8) | body[5]!;
+      if (width > 0 && height > 0 && (body.length >= 16 || (body[1]! & 0x08) !== 0)) return true;
+    }
+    if (type === 0x13 && body.length >= 7 && ((body[2]! >> 2) & 3) === 0) {
+      const top = (body[3]! << 8) | body[4]!;
+      const bottom = (body[5]! << 8) | body[6]!;
+      if (top + bottom > 0 && body.length >= 7 + top + bottom) return true;
+    }
+  }
+  return false;
+}

@@ -64,7 +64,12 @@ async function open(id: string) {
 async function playing(id: string) {
   const stream = await open(id);
   stream.variant({ audio: SOUND, subtitles: SUBTITLES });
+  // Supply expired cue data so the selection tests use proven tracks. Discovery ordering and
+  // empty renditions are exercised separately by live-hls-availability.test.ts.
+  stream.subtitleLines([{ start: -2, end: -1, text: "Proof" }], "English");
+  stream.subtitleLines([{ start: -2, end: -1, text: "Proof" }], "Deutsch");
   await wait();
+  player.element.currentTime = 7;
   return stream;
 }
 
@@ -121,15 +126,15 @@ beforeEach(() => {
 });
 
 describe("an HLS channel's tracks", () => {
-  it("lists what the stream declares, and starts with its own sound and no subtitles", async () => {
+  it("lists proven tracks, and starts with its own sound and no subtitles", async () => {
     const stream = await playing("a");
 
     expect(listed()).toEqual({ sound: ["English", "Español"], subtitles: ["English", "Deutsch"] });
     expect(soundPlaying()).toBe("English");
-    // The stream's default subtitles stay off, and aren't loaded either.
+    // Discovery reads subtitle-only segments without enabling the stream's default.
     expect(player.state().subtitle).toBeNull();
     expect(stream.subtitleTrack).toBe(-1);
-    expect(stream.subtitlesLoaded).toEqual([]);
+    expect(stream.subtitlesLoaded[0]).toBe("English");
   });
 
   it("starts with the sound and subtitles in the viewer's languages", async () => {
@@ -141,7 +146,7 @@ describe("an HLS channel's tracks", () => {
     expect(stream.audioTrack).toBe(1);
     expect(player.state().subtitle).toMatchObject({ label: "Deutsch", format: "text" });
     expect(stream.subtitleTrack).toBe(1);
-    expect(stream.subtitlesLoaded).toEqual(["Deutsch"]);
+    expect(new Set(stream.subtitlesLoaded)).toEqual(new Set(["Deutsch"]));
   });
 
   it("leaves subtitles off for a viewer who turned them off, whatever the stream lists later", async () => {
@@ -276,6 +281,8 @@ describe("an HLS channel's tracks", () => {
     const stream = await open("a");
     stream.manifest([{ name: "English", lang: "en", instreamId: "CC1" }]);
     stream.variant({ subtitles: [{ name: "English", lang: "en" }] });
+    stream.subtitleLines([{ start: -2, end: -1, text: "Proof" }], "English");
+    stream.captionLines(1, -2, -1, ["Proof"]);
     // A second caption channel the playlist didn't declare.
     stream.captionLines(3, 1, 3, ["TEXT THREE"]);
     await wait();
@@ -312,6 +319,8 @@ describe("an HLS channel's tracks", () => {
       ],
       subtitles: [{ name: "deu" }, { name: "eng", lang: "eng", forced: true }],
     });
+    stream.subtitleLines([{ start: -2, end: -1, text: "Proof" }], "deu");
+    stream.subtitleLines([{ start: -2, end: -1, text: "Proof" }], "eng");
     await wait();
 
     expect(listed()).toEqual({
@@ -448,10 +457,12 @@ describe("an HLS channel's tracks", () => {
     });
     await wait();
 
+    second.subtitleLines([{ start: -2, end: -1, text: "Proof" }], "Deutsch (Schweiz)");
+    await wait();
     // Not Italiano and Français, which are where Español and Deutsch were listed before.
     expect(soundPlaying()).toBe("Español (Latinoamérica)");
     expect(player.state().subtitle).toMatchObject({ label: "Deutsch (Schweiz)" });
-    expect(second.subtitlesLoaded).toEqual(["Deutsch (Schweiz)"]);
+    expect(new Set(second.subtitlesLoaded)).toEqual(new Set(["Deutsch (Schweiz)"]));
   });
 
   it("opens the channel again with the captions chosen from its picture, before any line of them", async () => {
