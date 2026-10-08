@@ -209,10 +209,27 @@ try {
     app = launch(executable, rest, { port, profile });
     page = await connect(port, "page", 5);
     activePage = page;
-    await observe(
-      page,
-      `!!document.querySelector("section h1") && !document.body.innerText.includes("Loading channels")`,
-    );
+    // The target URL can change before Electron finishes replacing its blank-page context.
+    // Reattach once across that initial navigation; keep the original launch clock running.
+    let navigationObserved = false;
+    for (;;) {
+      try {
+        await observe(
+          page,
+          `!!document.querySelector("section h1") && !document.body.innerText.includes("Loading channels")`,
+        );
+        break;
+      } catch (error) {
+        if (
+          navigationObserved ||
+          !(error instanceof Error) ||
+          !error.message.includes('"message":"Execution context was destroyed."')
+        )
+          throw error;
+        navigationObserved = true;
+      }
+    }
+    observations.push({ name: "cold start", initialNavigationObserved: navigationObserved });
     record("cold start to Home", performance.now() - started);
     await openLongSeries(page);
     page.close();
