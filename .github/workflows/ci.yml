@@ -62,7 +62,21 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # The conversion tests need ffmpeg, and ffprobe to check what the player would receive.
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      # Keep the complete distro toolchain. A different runner image or week gets fresh packages.
+      - id: multimedia-key
+        run: |
+          sources=$(find /etc/apt/sources.list.d -type f -exec sha256sum {} + | sha256sum | cut -d' ' -f1)
+          echo "key=test-ffmpeg-${ImageOS}-${ImageVersion}-$(date -u +%G-W%V)-$sources" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/ffmpeg-packages/*.deb
+            ${{ runner.temp }}/ffmpeg-packages/SHA256SUMS
+          key: ${{ steps.multimedia-key.outputs.key }}-${{ hashFiles('apps/desktop/scripts/ci-ffmpeg.sh') }}
+      - name: Multimedia tools
+        run: bash apps/desktop/scripts/ci-ffmpeg.sh "$RUNNER_TEMP/ffmpeg-packages"
       - name: Test
-        run: pnpm test
+        run: pnpm test --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/multimedia-results.json"
+      - name: Require multimedia coverage
+        if: always()
+        run: node apps/desktop/scripts/ci-multimedia-results.ts "$RUNNER_TEMP/multimedia-results.json"
