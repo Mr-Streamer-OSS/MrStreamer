@@ -609,7 +609,7 @@ it.each([
       "HD",
     ]);
     expect(files()[0]?.textContent).toContain("Part 1.2 4K · MKV");
-    expect(files()[0]?.textContent).toContain("English sound · Dutch subtitles");
+    expect(files()[0]?.textContent).toContain("English sound · Nederlands subtitles");
     expect(files()[0]?.querySelector('[aria-label="Tracks read locally"]')).not.toBeNull();
     expect(files()[1]?.textContent).toContain("Part 1.2 HD · MP4");
     expect(files()[1]?.querySelector('[aria-label="Tracks read locally"]')).toBeNull();
