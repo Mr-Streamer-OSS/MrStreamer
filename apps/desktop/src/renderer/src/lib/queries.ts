@@ -150,6 +150,20 @@ export const queries = {
       staleTime: LISTINGS_REFRESH_MS,
       enabled: query.trim().length > 0,
     }),
+  /** Full-catalogue display stamps, shared by every list and read only while searching. */
+  searchGroups: () =>
+    queryOptions({
+      queryKey: ["library", "searchGroups"],
+      queryFn: async () => {
+        const groups = await call("library.searchGroups");
+        return Object.fromEntries(
+          groups.flatMap(({ key, copies }) =>
+            copies.map((id, order) => [id, { key, order }] as const),
+          ),
+        );
+      },
+      staleTime: Infinity,
+    }),
   /**
    * What a search finds in the programmes of one list's channels, on now and later until
    * `until`: a category's, the given ones, or every channel, by each channel's `ownedKey`. The
@@ -553,6 +567,9 @@ export async function rememberCategory(
 /** Refetches library data whenever the main process reports a new catalogue. */
 export function syncLibraryUpdates(client: QueryClient): () => void {
   return listen("library.updated", () => {
+    // Invalidation alone reuses an in-flight first read with no cached data. Its old decision
+    // must not become fresh after a catalogue update.
+    void client.cancelQueries({ queryKey: queries.searchGroups().queryKey, exact: true });
     void client.invalidateQueries({ queryKey: ["library"] });
     void client.invalidateQueries({ queryKey: ["playlist"] });
     // Favourites and history show by channel, and a new catalogue can join a channel's streams.

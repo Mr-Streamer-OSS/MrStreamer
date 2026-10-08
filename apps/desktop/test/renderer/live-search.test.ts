@@ -78,6 +78,7 @@ async function guidePage(list: ChannelList = { kind: "all" }) {
     },
   ]);
   client.setQueryData(queries.channels(null).queryKey, CHANNELS);
+  ipc.always("library.searchGroups", []);
   client.setQueryData(queries.channels(own("uk")).queryKey, CHANNELS);
   client.setQueryData(
     queries.channelsOf(FAVOURITES).queryKey,
@@ -202,7 +203,7 @@ describe("searching the list Live TV shows", () => {
     await settled();
 
     expect(page.rows()).toEqual(["BBC One", "ITV1", "BBC News", "Euronews"]);
-    expect(page.text()).toContain("4 of 7");
+    expect(page.text()).toContain("4 channels · 4 streams");
     expect(page.row("ITV1")?.textContent).toContain("ITV News at Ten");
     // What matched is marked: in a name, inside a word, and in the later programme.
     const marked = (title: string) =>
@@ -222,7 +223,7 @@ describe("searching the list Live TV shows", () => {
     expect(page.rows()).toEqual(["Dave"]);
 
     await searched(page, "EEN");
-    expect(page.rows()).toEqual(["Één"]);
+    await expect.poll(page.rows).toEqual(["Één"]);
 
     await searched(page, "bbc news");
     expect(page.rows()).toEqual(["BBC News"]);

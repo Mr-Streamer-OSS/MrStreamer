@@ -39,6 +39,32 @@ export interface LiveChannel {
    * subscription each is from. Worked out over every channel there is, whatever list it shows in.
    */
   readonly ambiguous?: true;
+  /** Catalogue-validated identity for display-only search folding. Missing means keep apart. */
+  readonly searchIdentity?: LiveSearchIdentity;
+  /** Response-only full-catalogue group and source order. Never stored or used for playback. */
+  readonly searchGroup?: LiveSearchStamp;
+}
+
+/** Full-catalogue display decision for one owned channel. */
+export interface LiveSearchStamp {
+  readonly key: string;
+  readonly order: number;
+}
+
+/** Full-catalogue joins only; copies are owned keys in canonical source order. */
+export type LiveSearchGroups = readonly {
+  readonly key: string;
+  readonly copies: readonly string[];
+}[];
+
+export interface LiveSearchIdentity {
+  readonly title: string;
+  readonly language: string | null;
+  /** Explicit region only. A guide's country suffix is not an explicit region. */
+  readonly region: string | null;
+  readonly topics: readonly string[];
+  /** Canonical identity of a guide id validated against this catalogue, else null. */
+  readonly guideId: string | null;
 }
 
 /** How sharp a stream's picture is, best first: 4K, Full HD, HD and SD. */

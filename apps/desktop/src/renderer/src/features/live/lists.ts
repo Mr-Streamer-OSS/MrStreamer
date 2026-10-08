@@ -6,6 +6,7 @@ import type { Listing, ListingMatch } from "@mrstreamer/contracts/guide";
 import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
 import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { normalize, searchWords } from "@mrstreamer/core/text";
+import { searchResultGroups, type LiveSearchGroup } from "@mrstreamer/core/catalogue/search";
 import { useUi, type ChannelList } from "../../app/ui-store.ts";
 import { useNow } from "../../lib/clock.ts";
 import { endOfDay } from "../../lib/format.ts";
@@ -51,7 +52,8 @@ export function useListChannels(list: ChannelList): {
  * programmes in the guide it has loaded, so typing asks the provider nothing, and a list without
  * a guide still finds names.
  *   Rows change once the programmes for what was typed are in, names and programmes together:
- * until then they keep to the search answered before.
+ * until then the previous search still filters the current list. Grouping waits for its first
+ * full-catalogue decision; a stale or failed decision keeps current copies apart during refresh.
  */
 export function useListSearch(
   list: ChannelList,
@@ -65,6 +67,7 @@ export function useListSearch(
   readonly words: readonly string[];
   /** What it found in each channel's programmes today, by the channel's `ownedKey`. */
   readonly matches: Readonly<Record<string, ListingMatch>>;
+  readonly groups: readonly LiveSearchGroup[] | null;
 } {
   // What was typed, once typing pauses. An emptied field counts at once: the whole list shows
   // without a wait, and what the field held before never searches the list shown next.
@@ -88,30 +91,60 @@ export function useListSearch(
           : { channels: channels.map(ownedId) },
     [list, channels],
   );
+  const searching = text.trim() !== "";
+  const grouped = useQuery({
+    ...queries.searchGroups(),
+    // Start the one catalogue decision during the typing delay, before programme search waits.
+    enabled: searching,
+  });
   const found = useQuery(queries.listSearch(scope, query, until));
+  useEffect(() => {
+    if (!searching) return;
+    // Fold names during the typing delay, alongside the catalogue decision.
+    const timer = setTimeout(() => searchNames(channels), 0);
+    return () => clearTimeout(timer);
+  }, [channels, searching]);
   // The answer the rows are drawn from: the latest, kept while the next search is asked for.
   const [kept, keep] = useState(found.data);
   const answer = query === "" ? undefined : (found.data ?? kept);
   if (answer !== kept) keep(answer);
 
   return useMemo(() => {
-    const words = answer ? searchWords(answer.query) : NO_WORDS;
+    // Wait for the first catalogue decision. Once it has answered or failed, retries keep
+    // filtering the current list, with singletons until a fresh successful decision arrives.
+    const words = answer && grouped.isFetched ? searchWords(answer.query) : NO_WORDS;
     if (!answer || words.length === 0) {
-      return { channels, query: "", words: NO_WORDS, matches: NO_MATCHES };
+      return { channels, query: "", words: NO_WORDS, matches: NO_MATCHES, groups: null };
     }
     const { query, matches } = answer;
     const names = searchNames(channels);
+    const found = channels.filter(
+      (channel, index) =>
+        matches[ownedKey(channel)] !== undefined ||
+        words.every((word) => names[index]?.includes(word)),
+    );
+    // Only fresh decisions join copies. Keep every current copy of a matching group, without
+    // constructing display groups for the rest of a large list.
+    const stamps = !grouped.isStale && !grouped.isError ? grouped.data : undefined;
+    const keys = new Set(
+      found.map((channel) => stamps?.[ownedKey(channel)]?.key ?? ownedKey(channel)),
+    );
+    const stamped = channels.flatMap((channel) => {
+      const id = ownedKey(channel);
+      const stamp = stamps?.[id];
+      return keys.has(stamp?.key ?? id)
+        ? [{ ...channel, searchGroup: stamp ?? { key: id, order: 0 } }]
+        : [];
+    });
+    const groups = new Map(searchResultGroups(stamped).map((group) => [group.key, group]));
     return {
-      channels: channels.filter(
-        (channel, index) =>
-          matches[ownedKey(channel)] !== undefined ||
-          words.every((word) => names[index]?.includes(word)),
-      ),
+      channels: found,
+      groups: [...keys].flatMap((key) => groups.get(key) ?? []),
       query,
       words,
       matches,
     };
-  }, [channels, answer]);
+  }, [channels, answer, grouped.data, grouped.isStale, grouped.isError, grouped.isFetched]);
 }
 
 /** Each list's names as search compares them, worked out at its first search. */

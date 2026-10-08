@@ -1,18 +1,32 @@
 import { Dialog } from "@base-ui/react/dialog";
 import { useQuery } from "@tanstack/react-query";
-import { Search } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { ChevronDown, Search, Star } from "lucide-react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { ProgrammeMatch } from "@mrstreamer/contracts/guide";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { Title } from "@mrstreamer/contracts/ondemand";
+import {
+  automaticSearchCopy,
+  searchResultGroups,
+  type LiveSearchGroup,
+} from "@mrstreamer/core/catalogue/search";
 import { ownedId, ownedKey } from "@mrstreamer/contracts/subscription";
 import { openDetails, useUi } from "../../app/ui-store.ts";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Artwork } from "../../components/TitleArt.tsx";
 import { useNow } from "../../lib/clock.ts";
 import { clockTime, timeLeft } from "../../lib/format.ts";
-import { queries, useCategoryMap, useSourceOf } from "../../lib/queries.ts";
+import {
+  queries,
+  useCategoryMap,
+  useSourceOf,
+  useFavouriteKeys,
+  useSubscriptions,
+  useSubscriptionNames,
+  useToggleFavourite,
+} from "../../lib/queries.ts";
 import { useDebounced } from "../../lib/use-debounced.ts";
+import { searchQualities } from "../live/search-rows.ts";
 import { cn } from "../../lib/utils.ts";
 import { titlePlayer } from "../../player/title-player.ts";
 import { watchChannel } from "../live/GuidePage.tsx";
@@ -27,7 +41,7 @@ export function SearchPalette() {
     <Dialog.Root open={open} onOpenChange={(next) => useUi.setState({ searchOpen: next })}>
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/70 transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
-        <Dialog.Popup className="fixed top-[12vh] left-1/2 z-50 w-[40rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 overflow-hidden rounded-3xl bg-popover shadow-2xl ring-1 ring-white/10 outline-none transition-[opacity,scale] duration-150 data-ending-style:scale-[0.98] data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0">
+        <Dialog.Popup className="fixed top-[12vh] left-1/2 z-50 w-[40rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 overflow-hidden rounded-3xl bg-black text-white shadow-2xl ring-1 ring-white/10 outline-none transition-[opacity,scale] duration-150 data-ending-style:scale-[0.98] data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0">
           <Dialog.Title className="sr-only">Search</Dialog.Title>
           <Palette />
         </Dialog.Popup>
@@ -38,9 +52,15 @@ export function SearchPalette() {
 
 /** A search result: a channel, a movie or series, or a programme on the channel that shows it. */
 type Result =
-  | { readonly kind: "channel"; readonly channel: LiveChannel }
+  | {
+      readonly kind: "channel";
+      readonly channel: LiveChannel;
+      readonly group: LiveSearchGroup;
+      readonly copy: boolean;
+      readonly key: string;
+    }
   | { readonly kind: "title"; readonly title: Title }
-  | { readonly kind: "programme"; readonly match: ProgrammeMatch };
+  | { readonly kind: "programme"; readonly match: ProgrammeMatch; readonly key: string };
 
 /** Channel results listed before the rest. */
 const CHANNEL_RESULTS = 20;
@@ -48,9 +68,12 @@ const CHANNEL_RESULTS = 20;
 const TITLE_RESULTS = 6;
 
 function Palette() {
+  const resultsId = useId();
   // Mounted each time it opens.
   const [query, setQuery] = useState(() => useUi.getState().searchFrom);
   const debounced = useDebounced(query, 120);
+  // Share the Guide's catalogue read so the first name search builds during the typing delay.
+  useQuery({ ...queries.searchGroups(), enabled: query.trim() !== "" });
   const channels = useQuery(queries.search(debounced));
   const programmes = useQuery(queries.programmes(debounced));
   const titles = useQuery(queries.titleSearch(debounced));
@@ -58,24 +81,48 @@ function Palette() {
   // Results come from every subscription: one says whose it is where another reads the same.
   const sourceOf = useSourceOf();
   const now = useNow();
+  const favourites = useFavouriteKeys();
+  const subscriptions = useSubscriptions();
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const groups = useMemo(
+    () => searchResultGroups(channels.data ?? []).slice(0, CHANNEL_RESULTS),
+    [channels.data],
+  );
+  const [open, setOpen] = useState<string | null>(null);
   const [active, setActive] = useState(0);
-  const [open, setOpen] = useState<number | null>(null);
   const results = useMemo((): Result[] => {
     if (!debounced.trim()) return [];
     return [
-      ...(channels.data ?? [])
-        .slice(0, CHANNEL_RESULTS)
-        .map((channel): Result => ({ kind: "channel", channel })),
+      ...groups.flatMap((group): Result[] => {
+        const channel = group.copies[0]!;
+        return [
+          { kind: "channel", group, channel, copy: false, key: group.key },
+          ...(expanded.has(group.key) && group.copies.length > 1
+            ? group.copies.map((channel): Result => ({
+                kind: "channel",
+                group,
+                channel,
+                copy: true,
+                key: `${group.key}/copy/${ownedKey(channel)}`,
+              }))
+            : []),
+        ];
+      }),
       ...[
         ...(titles.data?.movies ?? []).slice(0, TITLE_RESULTS),
         ...(titles.data?.series ?? []).slice(0, TITLE_RESULTS),
       ].map((title): Result => ({ kind: "title", title })),
-      ...(programmes.data ?? []).map((match): Result => ({ kind: "programme", match })),
+      ...(programmes.data ?? []).map((match): Result => ({
+        kind: "programme",
+        match,
+        key: `${ownedKey(match.channel)}:${match.programme.start}`,
+      })),
     ];
-  }, [debounced, channels.data, titles.data, programmes.data]);
+  }, [debounced, groups, expanded, titles.data, programmes.data]);
 
   useEffect(() => {
     setActive(0);
+    setExpanded(new Set());
     setOpen(null);
   }, [debounced]);
 
@@ -85,11 +132,14 @@ function Palette() {
     list.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" });
   }, [active]);
 
-  /** Plays a channel, or a programme on now; a later programme shows its description instead. */
+  /** Group rows use Automatic; expanded copies keep their real subscription and quality choices. */
   const choose = (index: number) => {
     const result = results[index];
     if (!result) return;
-    if (result.kind === "channel") watchChannel(result.channel);
+    if (result.kind === "channel")
+      watchChannel(
+        result.copy ? result.channel : automaticSearchCopy(result.group, favourites, subscriptions),
+      );
     else if (result.kind === "title") {
       // Details show over the page, so a title playing gives way first, saving how far it got.
       if (useUi.getState().playingTitle) {
@@ -98,40 +148,87 @@ function Palette() {
       }
       openDetails({ kind: result.title.kind, ...ownedId(result.title) });
     } else if (result.match.programme.start <= Date.now()) watchChannel(result.match.channel);
-    else setOpen((current) => (current === index ? null : index));
+    else setOpen((current) => (current === result.key ? null : result.key));
   };
 
   function onKey(event: KeyboardEvent) {
+    if (
+      event.defaultPrevented ||
+      event.nativeEvent.isComposing ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.altKey
+    )
+      return;
+    if (event.key === "Enter" && event.target instanceof HTMLButtonElement) return;
     if (event.key === "ArrowDown") setActive((index) => Math.min(index + 1, results.length - 1));
     else if (event.key === "ArrowUp") setActive((index) => Math.max(index - 1, 0));
     else if (event.key === "Enter") choose(active);
-    else return;
+    else if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+      const result = results[active];
+      if (result?.kind !== "channel" || result.group.copies.length < 2) return;
+      if (event.key === "ArrowRight" && !result.copy && !expanded.has(result.group.key))
+        setExpanded((current) => new Set(current).add(result.group.key));
+      else if (event.key === "ArrowLeft" && expanded.has(result.group.key)) {
+        setExpanded((current) => {
+          const next = new Set(current);
+          next.delete(result.group.key);
+          return next;
+        });
+        setActive(
+          results.findIndex((row) => row.kind === "channel" && row.key === result.group.key),
+        );
+      } else return;
+    } else return;
     event.preventDefault();
   }
 
   return (
-    <>
+    <div onKeyDown={onKey}>
       <div className="flex items-center gap-3 border-b border-border px-5">
         <Search className="size-5 text-muted-foreground" />
         <input
           autoFocus
+          role="combobox"
+          aria-label="Search channels, movies, series and programmes"
+          aria-haspopup="tree"
+          aria-expanded={results.length > 0}
+          aria-controls={results.length > 0 ? resultsId : undefined}
+          aria-activedescendant={results[active] ? `${resultsId}-${active}` : undefined}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          onKeyDown={onKey}
           placeholder="Search channels, movies, series and programmes"
           spellCheck={false}
           className="h-16 flex-1 bg-transparent text-lg text-foreground outline-none placeholder:text-muted-foreground/70"
         />
       </div>
+      {debounced.trim() && groups.length > 0 && (
+        <div role="status" className="px-5 py-2 text-xs">
+          {groups.length} {groups.length === 1 ? "channel" : "channels"} ·{" "}
+          {groups.reduce((sum, group) => sum + group.streams, 0)}{" "}
+          {groups.reduce((sum, group) => sum + group.streams, 0) === 1 ? "stream" : "streams"}
+        </div>
+      )}
       {results.length > 0 && (
-        <div ref={list} className="max-h-[28rem] overflow-y-auto overscroll-contain p-2">
+        <div
+          ref={list}
+          id={resultsId}
+          role="tree"
+          aria-label="Search results"
+          className="max-h-[28rem] overflow-y-auto overscroll-contain p-2"
+        >
           {results.map((result, index) => {
             if (result.kind === "title") {
               const { title } = result;
               return (
                 <button
                   key={title.key}
+                  id={`${resultsId}-${index}`}
+                  role="treeitem"
+                  aria-level={1}
+                  aria-selected={index === active}
                   data-index={index}
+                  onFocus={() => setActive(index)}
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => choose(index)}
                   className={cn(
@@ -165,49 +262,74 @@ function Palette() {
                 </button>
               );
             }
-            const channel = result.kind === "channel" ? result.channel : result.match.channel;
-            const programme = result.kind === "programme" ? result.match.programme : null;
-            const [categoryId] = channel.categoryIds;
-            const category =
-              categoryId === undefined
-                ? undefined
-                : categories.get(
-                    ownedKey({ subscriptionId: channel.subscriptionId, id: categoryId }),
-                  );
-            const source = sourceOf(channel);
-            // A programme names its channel, and whose that is where two are called the same.
-            const shows = source ? `${channel.title} · ${source}` : channel.title;
-            const detail = programme
-              ? programme.start <= now
-                ? `On now · ${shows} · ${timeLeft(programme, now)}`
-                : `${clockTime(programme.start, now)} · ${shows}`
-              : [channel.number, category?.group, category?.title, ...channel.tags, source]
-                  .filter((part) => part != null)
-                  .join(" · ");
-            return (
-              <button
-                key={programme ? `${ownedKey(channel)}:${programme.start}` : ownedKey(channel)}
-                data-index={index}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => choose(index)}
-                className={cn(
-                  "flex w-full items-center gap-3.5 rounded-2xl px-3 py-2.5 text-left hover:bg-white/6",
-                  index === active && "bg-white/10 hover:bg-white/10",
-                )}
-              >
-                <ChannelLogo channel={channel} className="h-8 w-12 self-start" />
-                <span className="min-w-0 flex-1" title={programme ? undefined : channel.name}>
-                  <span className="block truncate text-[0.9375rem] text-foreground">
-                    {programme?.title ?? channel.title}
-                  </span>
-                  <span className="block truncate text-xs text-muted-foreground">{detail}</span>
-                  {programme && open === index && programme.description && (
-                    <span className="mt-1.5 block text-[0.8125rem] leading-relaxed text-muted-foreground">
-                      {programme.description}
-                    </span>
+            if (result.kind === "programme") {
+              const { channel, programme } = result.match;
+              const source = sourceOf(channel);
+              const shows = source ? `${channel.title} · ${source}` : channel.title;
+              const detail =
+                programme.start <= now
+                  ? `On now · ${shows} · ${timeLeft(programme, now)}`
+                  : `${clockTime(programme.start, now)} · ${shows}`;
+              return (
+                <button
+                  key={result.key}
+                  id={`${resultsId}-${index}`}
+                  role="treeitem"
+                  aria-level={1}
+                  aria-selected={index === active}
+                  data-index={index}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => choose(index)}
+                  className={cn(
+                    "flex w-full items-center gap-3.5 rounded-2xl px-3 py-2.5 text-left hover:bg-white/6",
+                    index === active && "bg-white/10 hover:bg-white/10",
                   )}
-                </span>
-              </button>
+                >
+                  <ChannelLogo channel={channel} className="h-8 w-12 self-start" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[0.9375rem] text-white">
+                      {programme.title}
+                    </span>
+                    <span className="block truncate text-xs text-muted-foreground">{detail}</span>
+                    {open === result.key && programme.description && (
+                      <span className="mt-1.5 block text-[0.8125rem] leading-relaxed text-muted-foreground">
+                        {programme.description}
+                      </span>
+                    )}
+                  </span>
+                </button>
+              );
+            }
+            const { channel, group, copy } = result;
+            const [categoryId] = channel.categoryIds;
+            const category = categoryId
+              ? categories.get(ownedKey({ subscriptionId: channel.subscriptionId, id: categoryId }))
+              : undefined;
+            return (
+              <LiveResultRow
+                id={`${resultsId}-${index}`}
+                key={result.key}
+                channel={channel}
+                group={group}
+                copy={copy}
+                index={index}
+                active={active === index}
+                expanded={expanded.has(group.key)}
+                category={
+                  category ? [category.group, category.title].filter(Boolean).join(" · ") : ""
+                }
+                onWatch={() => choose(index)}
+                onSelect={() => setActive(index)}
+                onToggle={() => {
+                  setActive(index);
+                  setExpanded((current) => {
+                    const next = new Set(current);
+                    if (next.has(group.key)) next.delete(group.key);
+                    else next.add(group.key);
+                    return next;
+                  });
+                }}
+              />
             );
           })}
         </div>
@@ -217,6 +339,129 @@ function Palette() {
           No matches
         </div>
       )}
-    </>
+    </div>
+  );
+}
+
+function LiveResultRow({
+  id,
+  channel,
+  group,
+  copy,
+  index,
+  active,
+  expanded,
+  category,
+  onWatch,
+  onSelect,
+  onToggle,
+}: {
+  id: string;
+  channel: LiveChannel;
+  group: LiveSearchGroup;
+  copy: boolean;
+  index: number;
+  active: boolean;
+  expanded: boolean;
+  category: string;
+  onWatch: () => void;
+  onSelect: () => void;
+  onToggle: () => void;
+}) {
+  const nameOf = useSubscriptionNames();
+  const favourites = useFavouriteKeys();
+  const toggleFavourite = useToggleFavourite();
+  const grouped = !copy && group.copies.length > 1;
+  const subscriptionCount = new Set(group.copies.map((copy) => copy.subscriptionId)).size;
+  const listing = useQuery({ ...queries.listings([channel]), enabled: copy });
+  const guide = listing.data?.[ownedKey(channel)];
+  return (
+    <div
+      id={id}
+      role="treeitem"
+      aria-level={copy ? 2 : 1}
+      aria-selected={active}
+      aria-expanded={grouped ? expanded : undefined}
+      onFocus={onSelect}
+      data-index={index}
+      className={cn("flex items-center hover:bg-white/6", copy && "ml-8", active && "bg-white/10")}
+    >
+      <button
+        data-group-row={index}
+        aria-label={[
+          channel.title,
+          category,
+          grouped
+            ? `${subscriptionCount} ${subscriptionCount === 1 ? "subscription" : "subscriptions"}`
+            : null,
+          grouped ? `${group.streams} ${group.streams === 1 ? "stream" : "streams"}` : null,
+          grouped ? searchQualities(group.copies) : null,
+          !grouped ? nameOf(channel.subscriptionId) : null,
+          !grouped ? channel.number : null,
+          !grouped ? searchQualities([channel]) : null,
+        ]
+          .filter((part) => part != null && part !== "")
+          .join(", ")}
+        aria-expanded={grouped ? expanded : undefined}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={onWatch}
+        className="flex min-w-0 flex-1 items-center gap-3.5 px-3 py-2.5 text-left"
+      >
+        <ChannelLogo channel={channel} className="h-8 w-12 self-start" />
+        <span className="min-w-0 flex-1" title={channel.name}>
+          <span className="block truncate text-[0.9375rem] text-white">{channel.title}</span>
+          <span className="block truncate text-xs">
+            {grouped
+              ? [
+                  category,
+                  `${subscriptionCount} ${subscriptionCount === 1 ? "subscription" : "subscriptions"}`,
+                  `${group.streams} ${group.streams === 1 ? "stream" : "streams"}`,
+                  searchQualities(group.copies),
+                ]
+                  .filter(Boolean)
+                  .join(" · ")
+              : [
+                  category,
+                  nameOf(channel.subscriptionId),
+                  channel.number,
+                  searchQualities([channel]),
+                ]
+                  .filter((part) => part !== null && part !== "")
+                  .join(" · ")}
+          </span>
+          {copy && guide?.now ? (
+            <span className="block truncate text-xs">
+              {guide.now.title}
+              {guide.next ? ` · Next ${guide.next.title}` : ""}
+            </span>
+          ) : null}
+        </span>
+      </button>
+      {grouped ? (
+        <button
+          aria-label={expanded ? "Hide copies" : "Show copies"}
+          aria-expanded={expanded}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={onToggle}
+          className="p-3"
+        >
+          <ChevronDown className={cn("size-4", !expanded && "-rotate-90")} />
+        </button>
+      ) : (
+        <button
+          aria-label={
+            favourites.has(ownedKey(channel)) ? "Remove from favourites" : "Add to favourites"
+          }
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") event.stopPropagation();
+          }}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => toggleFavourite(channel)}
+          className="p-3"
+        >
+          <Star className={cn("size-4", favourites.has(ownedKey(channel)) && "fill-current")} />
+        </button>
+      )}
+    </div>
   );
 }

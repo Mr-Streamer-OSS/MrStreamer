@@ -20,6 +20,8 @@ Your subscription may allow a single connection. Home then uses it as soon as it
 
 The field beside the list's name searches the list you're looking at: Favourites, Recently watched, All channels or one category. It finds a channel by its name, also the full name your provider gives it, and by the programmes on now and later today, whatever the capitals and accents. The channels it finds stay in the list's order, with what matched underlined. A later programme that matched stands at the end of its row with its time, and the arrow opens the rest of the day on it. Clicking the row still watches the channel as it is now.
 
+In search results, copies that the catalogue can safely identify as one channel share a row. The count says how many channels and playable streams match. **Show copies**, or Right, lists each provider's actual copy with its source, category and qualities. Enter on the shared row prefers a favourite copy, then the saved subscription order. Enter on a copy plays that copy. Left closes its open schedule first, then the copies. Stars and S apply to individual copies.
+
 / puts the cursor in the field. Down or Enter there moves to the channels found, and Escape clears the search, as picking another list does. When nothing in the list matches, **Search all channels** looks for the same in every channel. Searching uses what Mr. Streamer already has, so typing asks your provider nothing.
 
 **Reorder**, beside the field in Favourites, or R, puts your favourites in another order. Every row gets an Up and a Down button: a click moves the channel one place, and a click with Shift moves it to the top or the bottom. On the keyboard, Up and Down choose a row, and with Alt held, Option on a Mac, they move it. Page Up and Page Down move it ten places, Home and End to the top and the bottom. **Save**, or Enter, keeps the order. **Cancel**, or Escape, drops it, and so does leaving the list. Nothing plays while you reorder.
@@ -74,7 +76,7 @@ When the picture stands still for three seconds, "Waiting for data" shows at the
 
 ## Search
 
-⌘K (Ctrl K on Windows and Linux) searches every channel, movies and series, and the programmes on now and later today, in every subscription. Pick a channel, or a programme that's on, to watch it. Pick a later programme to read about it, or a movie or series to see its details. Opened from Live TV, it starts with what the list's field searched for. Live TV searches the list it shows from [that field](#the-guide), and Movies and Series their own titles from a field in their tabs; see [Movies and series](movies-and-series.md#finding-something).
+⌘K (Ctrl K on Windows and Linux) searches every channel, movies and series, and the programmes on now and later today, in every subscription. Pick a channel, or a programme that's on, to watch it. Pick a later programme to read about it, or a movie or series to see its details. Opened from Live TV, it starts with what the list's field searched for. Live TV searches the list it shows from [that field](#the-guide), and Movies and Series their own titles from a field in their tabs; see [Movies and series](movies-and-series.md#finding-something). Channel name results use the same safe groups and **Show copies**. Right expands and Left collapses while the search field keeps focus. Programme results keep their own rows after movies and series.
 
 ## Keys
 

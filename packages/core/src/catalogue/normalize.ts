@@ -24,6 +24,8 @@ export interface NormalizedCatalogue {
 
 /** One stream of the provider's list, named as the app shows it. */
 export interface NormalizedStream extends Omit<LiveChannel, "variants" | "subscriptionId"> {
+  /** Conflicting or unknown category metadata cannot establish a search identity. */
+  readonly searchUncertain?: true;
   /** The provider's guide id. */
   readonly guideId: string | null;
   /** "Belgium": its own prefix's region, else its category's. Null when neither names one. */
@@ -142,6 +144,15 @@ export function normalizeCatalogue(catalogue: LiveCatalogue): NormalizedCatalogu
       );
     };
     const placed = own.find((category) => category.region !== null);
+    const regions = new Set(own.flatMap((category) => category.region ?? []));
+    const languages = new Set(own.flatMap((category) => category.language ?? []));
+    const uncertain =
+      regions.size > 1 ||
+      languages.size > 1 ||
+      (name.region !== null && !name.known) ||
+      own.some((category) => category.region !== null && !regionForName(category.region)) ||
+      (name.region !== null && regions.size > 0 && !regions.has(name.region)) ||
+      (name.language !== null && languages.size > 0 && !languages.has(name.language));
     return {
       id: channel.id,
       name: channel.name,
@@ -153,6 +164,7 @@ export function normalizeCatalogue(catalogue: LiveCatalogue): NormalizedCatalogu
       region: recognised(name) ? name.region : (placed?.region ?? null),
       language: name.language ?? placed?.language ?? null,
       topics: own.flatMap((category) => category.topic ?? []),
+      ...(uncertain ? { searchUncertain: true } : {}),
     };
   });
 

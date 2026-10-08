@@ -512,6 +512,7 @@ async function start(): Promise<void> {
       "library.status": () => library.status,
       "library.categories": () => library.categories,
       "library.channels": (filter) => library.channels(filter),
+      "library.searchGroups": () => library.searchGroups,
       "library.channel": ({ channel }) => library.channel(channel),
       "library.refresh": ({ subscriptionId }) =>
         Effect.gen(function* () {

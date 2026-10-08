@@ -2,6 +2,8 @@
 // current stream, muted, on top. A click on a channel opens Watch; Back returns here unchanged.
 //   Up and Down move the selection; PageUp, PageDown, Home and End jump. Enter watches. Right opens
 //   the rest of the day and Left closes it; Left again moves to the lists and Right comes back.
+//   Search folds safe matches for display. Right opens their canonical copies; Left returns to
+//   the group. Enter on a group uses a favourite copy, then saved subscription order.
 //   Digits jump to a channel number, S stars, Escape goes Home.
 //   The field at the end of the list's title searches that list, by channel name and by the
 // programmes on now and later today, and shows the channels it finds in the list's order. / goes
@@ -13,7 +15,8 @@
 // channels it loaded, and a line under the title says so, with Retry.
 import { useQuery } from "@tanstack/react-query";
 import { Play, Search, Volume2, VolumeX, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { automaticSearchCopy } from "@mrstreamer/core/catalogue/search";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { hasModifier, isMac, isTyping } from "../../app/platform.ts";
@@ -41,6 +44,7 @@ import { usePreviewWaits } from "../../player/output.ts";
 import { Picture } from "../../player/Picture.tsx";
 import { player, usePlayer } from "../../player/player.ts";
 import { numberEntry, NumberEntry } from "../watch/NumberEntry.tsx";
+import { rowPlays, searchChannelRows } from "./search-rows.ts";
 import { ChannelTable } from "./ChannelTable.tsx";
 import { ListPicker, listKey, useOpenGroups } from "./ListPicker.tsx";
 import {
@@ -70,6 +74,7 @@ export function GuidePage({ active }: { active: boolean }) {
   const channels = listed ?? NO_CHANNELS;
   const playingKey = usePlayer((state) => (state.channel ? ownedKey(state.channel) : null));
   const favourites = useFavouriteKeys();
+  const subscriptions = useSubscriptions();
   const toggleFavourite = useToggleFavourite();
   const showList = useShowList();
   const keyboard = useKeyboardMode();
@@ -107,21 +112,61 @@ export function GuidePage({ active }: { active: boolean }) {
   const order = useFavouriteOrder(active && ordered, ordered ? listed : undefined);
   const { draft } = order;
   // The rows are the list's, or what a search found of them, or the favourites as arranged.
-  const rows = draft?.order ?? search.channels;
+  const [searchFocus, setSearchFocus] = useState(0);
+  const [expandedCopies, setExpandedCopies] = useState<ReadonlySet<string>>(new Set());
+  const searchRows = useMemo(
+    () => (search.groups ? searchChannelRows(search.groups, expandedCopies, search.matches) : null),
+    [search.groups, expandedCopies, search.matches],
+  );
+  const rows = useMemo(
+    () => draft?.order ?? searchRows?.map((row) => row.channel) ?? search.channels,
+    [draft?.order, searchRows, search.channels],
+  );
+  const toggleCopies = (key: string) => {
+    const index = searchRows?.findIndex((row) => row.group.key === key && !row.copy) ?? -1;
+    if (index >= 0) setChosen({ index, channel: rows[index] ?? null, searchKey: key });
+    if (
+      expandedCopies.has(key) &&
+      searchRows?.[index]?.group.copies.some((copy) => ownedKey(copy) === expandedKey)
+    )
+      setExpandedKey(null);
+    setExpandedCopies((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+  const playRow = (index: number) => {
+    const row = searchRows?.[index];
+    const channel =
+      row && !row.copy ? automaticSearchCopy(row.group, favourites, subscriptions) : rows[index];
+    if (channel) watchChannel(channel);
+  };
   // Reorder was asked for while a search hides favourites, which it never clears by itself.
   const [refused, setRefused] = useState(false);
   if (refused && (text.trim() === "" || !ordered)) setRefused(false);
 
   // The selection keeps to its channel when the rows change under it, as a search's do while
   // programmes begin and end, and stays among the rows once its channel has gone.
-  const [chosen, setChosen] = useState<{ index: number; channel: OwnedId | null }>({
+  const [chosen, setChosen] = useState<{
+    index: number;
+    channel: OwnedId | null;
+    searchKey?: string | undefined;
+  }>({
     index: 0,
     channel: null,
   });
+  const byKey =
+    searchRows && chosen.searchKey
+      ? searchRows.findIndex((row) => row.key === chosen.searchKey)
+      : -1;
   const kept =
-    chosen.channel === null || sameOwned(rows[chosen.index], chosen.channel)
-      ? chosen.index
-      : rows.findIndex((channel) => sameOwned(channel, chosen.channel));
+    byKey !== -1
+      ? byKey
+      : chosen.channel === null || sameOwned(rows[chosen.index], chosen.channel)
+        ? chosen.index
+        : rows.findIndex((channel) => sameOwned(channel, chosen.channel));
   const selected = draft
     ? Math.max(
         rows.findIndex((channel) => sameOwned(channel, draft.focus.channel)),
@@ -169,12 +214,16 @@ export function GuidePage({ active }: { active: boolean }) {
   // A new list, or another search of it, selects its playing channel, or its first.
   const loaded = listed !== undefined;
   useEffect(() => {
+    const playing = player.current();
     const index = Math.max(
-      rows.findIndex((channel) => sameOwned(channel, player.current())),
+      rows.findIndex((channel, at) =>
+        rowPlays(channel, searchRows?.[at], playing ? ownedKey(playing) : null),
+      ),
       0,
     );
     setChosen({ index, channel: rows[index] ?? null });
     setExpandedKey(null);
+    setExpandedCopies(new Set());
   }, [key, loaded, search.query]);
 
   // ⌘K and the search button search everything for what this list is searched for.
@@ -200,6 +249,10 @@ export function GuidePage({ active }: { active: boolean }) {
     showList,
     order,
     reorder,
+    searchRows,
+    expandedCopies,
+    toggleCopies,
+    playRow,
   });
   state.current = {
     focus,
@@ -215,6 +268,10 @@ export function GuidePage({ active }: { active: boolean }) {
     showList,
     order,
     reorder,
+    searchRows,
+    expandedCopies,
+    toggleCopies,
+    playRow,
   };
 
   useEffect(() => {
@@ -240,7 +297,14 @@ export function GuidePage({ active }: { active: boolean }) {
       const channel = now.rows[now.selected];
       const step = (value: number, delta: number, length: number) =>
         Math.min(Math.max(value + delta, 0), Math.max(length - 1, 0));
-      const select = (index: number) => setChosen({ index, channel: now.rows[index] ?? null });
+      const select = (index: number) => {
+        setChosen({
+          index,
+          channel: now.rows[index] ?? null,
+          searchKey: now.searchRows?.[index]?.key,
+        });
+        setSearchFocus((asked) => asked + 1);
+      };
 
       if (/^[0-9]$/.test(event.key)) {
         numberEntry.type(event.key);
@@ -270,7 +334,7 @@ export function GuidePage({ active }: { active: boolean }) {
           if (event.repeat) break;
           if (numberEntry.commit()) break;
           if (now.focus === "channels") {
-            if (channel) watchChannel(channel);
+            if (channel) now.playRow(now.selected);
           } else {
             const picked = now.entries[now.entry];
             if (picked?.kind === "group") toggle(picked.group);
@@ -282,14 +346,35 @@ export function GuidePage({ active }: { active: boolean }) {
           break;
         }
         case "ArrowRight":
+          setSearchFocus((asked) => asked + 1);
           if (now.focus === "lists") setFocus("channels");
-          else if (channel) setExpandedKey(ownedKey(channel));
+          else if (
+            now.searchRows?.[now.selected] &&
+            !now.searchRows[now.selected]!.copy &&
+            now.searchRows[now.selected]!.group.copies.length > 1
+          ) {
+            const row = now.searchRows[now.selected]!;
+            if (!now.expandedCopies.has(row.group.key)) now.toggleCopies(row.group.key);
+          } else if (channel) setExpandedKey(ownedKey(channel));
           break;
-        case "ArrowLeft":
+        case "ArrowLeft": {
+          const row = now.searchRows?.[now.selected];
           if (now.focus === "channels" && channel && now.expandedKey === ownedKey(channel)) {
             setExpandedKey(null);
-          } else if (now.focus === "channels") setFocus("lists");
+          } else if (now.focus === "channels" && row && now.expandedCopies.has(row.group.key)) {
+            now.toggleCopies(row.group.key);
+            select(
+              now.searchRows!.findIndex(
+                (candidate) => candidate.group.key === row.group.key && !candidate.copy,
+              ),
+            );
+          } else if (now.focus === "channels") {
+            setFocus("lists");
+            const focused = document.activeElement;
+            if (focused instanceof HTMLElement && page.current?.contains(focused)) focused.blur();
+          }
           break;
+        }
         case "Backspace":
           if (numberEntry.active()) numberEntry.cancel();
           break;
@@ -305,9 +390,12 @@ export function GuidePage({ active }: { active: boolean }) {
           field.current.select();
           break;
         case "s":
-        case "S":
-          if (channel) toggleFavourite(channel);
+        case "S": {
+          const row = now.searchRows?.[now.selected];
+          if (channel && (!row || row.copy || row.group.copies.length === 1))
+            toggleFavourite(channel);
           break;
+        }
         case "r":
         case "R":
           now.reorder();
@@ -382,8 +470,15 @@ export function GuidePage({ active }: { active: boolean }) {
               ) : (
                 <>
                   {searching && listed && (
-                    <span className="flex-none text-sm text-muted-foreground tabular-nums">
-                      {rows.length.toLocaleString()} of {listed.length.toLocaleString()}
+                    <span role="status" className="flex-none text-sm text-white tabular-nums">
+                      {search.groups?.length.toLocaleString()}{" "}
+                      {search.groups?.length === 1 ? "channel" : "channels"} ·{" "}
+                      {search.groups
+                        ?.reduce((sum, group) => sum + group.streams, 0)
+                        .toLocaleString()}{" "}
+                      {search.groups?.reduce((sum, group) => sum + group.streams, 0) === 1
+                        ? "stream"
+                        : "streams"}
                     </span>
                   )}
                   <div className="ml-auto flex flex-none items-center gap-2">
@@ -407,6 +502,7 @@ export function GuidePage({ active }: { active: boolean }) {
                         onLeave={() => {
                           setFocus("channels");
                           showSelection();
+                          setSearchFocus((asked) => asked + 1);
                         }}
                       />
                     )}
@@ -452,8 +548,20 @@ export function GuidePage({ active }: { active: boolean }) {
               />
             ) : (
               <ChannelTable
+                categories={categoryMap}
                 key={`${key}\n${search.query}`}
                 channels={rows}
+                searchRows={searchRows}
+                searchFocus={searchFocus}
+                expandedCopies={expandedCopies}
+                onToggleCopies={toggleCopies}
+                onSelectSearch={(index) =>
+                  setChosen({
+                    index,
+                    channel: rows[index] ?? null,
+                    searchKey: searchRows?.[index]?.key,
+                  })
+                }
                 selected={draft || (keyboard && focus === "channels") ? selected : null}
                 playingKey={playingKey}
                 expandedKey={expandedKey}
@@ -470,9 +578,9 @@ export function GuidePage({ active }: { active: boolean }) {
                     onMove: order.move,
                   }
                 }
-                onWatch={(channel) => {
-                  setChosen({ index: rows.indexOf(channel), channel });
-                  watchChannel(channel);
+                onWatch={(channel, index) => {
+                  setChosen({ index, channel, searchKey: searchRows?.[index]?.key });
+                  playRow(index);
                 }}
                 onToggleSchedule={(key) =>
                   setExpandedKey((current) => (current === key ? null : key))

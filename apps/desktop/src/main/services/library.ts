@@ -12,10 +12,21 @@
 import { join } from "node:path";
 import { type } from "arktype";
 import type { AppError } from "@mrstreamer/contracts/errors";
-import type { CatalogueStatus, Category, LiveChannel } from "@mrstreamer/contracts/library";
+import type {
+  CatalogueStatus,
+  Category,
+  LiveChannel,
+  LiveSearchGroups,
+  LiveSearchStamp,
+} from "@mrstreamer/contracts/library";
 import { ownedId, ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { adultIn, isAdultCategory } from "@mrstreamer/core/adult";
 import { normalizeCatalogue } from "@mrstreamer/core/catalogue/normalize";
+import {
+  indexLiveSearch,
+  matchingSearchGroups,
+  type LiveSearchIndex,
+} from "@mrstreamer/core/catalogue/search";
 import { liveChannels } from "@mrstreamer/core/catalogue/variants";
 import { diagnosed } from "@mrstreamer/core/diagnostics";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
@@ -127,7 +138,7 @@ interface Combined {
   readonly shown: (channel: LiveChannel) => LiveChannel;
 }
 
-/** Which channels to list: a category's, those matching a query, the given ones, or all. */
+/** Select a category, search names, or look up explicit ids. Ids with a query include search companions. */
 export interface ChannelFilter {
   readonly category?: OwnedId;
   readonly query?: string;
@@ -167,10 +178,14 @@ export class Library extends Context.Service<
     readonly categories: Effect.Effect<readonly Category[], Failed>;
     /**
      * All channels in a category, the best matches for a query across every catalogue, or the
-     * given channels in that order; without any of those, every channel. A channel's id may be
-     * any of its streams'; a channel shows once.
+     * given channels in that order; without any of those, every channel. Search responses carry
+     * their full-catalogue display group and retain all its real copies. Ids with a
+     * query return their search companions. A channel's id may be any of its streams'; a channel
+     * shows once.
      */
     channels(filter: ChannelFilter): Effect.Effect<readonly LiveChannel[], Failed>;
+    /** Lazy, full-catalogue joins shared by every searched list. An absent key stands alone. */
+    readonly searchGroups: Effect.Effect<LiveSearchGroups, Failed>;
     /**
      * The channel by its id or any of its streams'. Fails with `no-subscription` when it names a
      * subscription that isn't saved.
@@ -468,20 +483,29 @@ function make(options: LibraryOptions) {
 
       categories: Effect.map(visible, ({ lists }) => lists.categories),
 
+      searchGroups: Effect.map(visible, ({ search }) => searchGroupCache(search.channels).groups),
+
       channels: (filter: ChannelFilter) =>
         Effect.map(visible, ({ lists, search: searched }) => {
+          const query = normalize(filter.query ?? "");
           if (filter.channels) {
             // Those of a subscription that isn't saved are in no catalogue, whatever their ids.
             const byId = new Map(lists.members.map((each) => [each.subscriptionId, each.byId]));
             const found = filter.channels.flatMap(
               ({ subscriptionId, id }) => byId.get(subscriptionId)?.get(id) ?? [],
             );
-            return [...new Set(found)].map(lists.shown);
+            if (query)
+              return stampSearchGroups(
+                matchingSearchGroups(searchIndex(searched.channels), found)
+                  .slice(0, SEARCH_LIMIT)
+                  .flatMap((group) => group.copies),
+                searched.channels,
+              );
+            return plainChannels([...new Set(found)].map(lists.shown));
           }
-          const query = normalize(filter.query ?? "");
           if (query) return search(searched.channels, searched.searchNames, query);
-          if (!filter.category) return lists.channels;
-          return lists.byCategory.get(ownedKey(filter.category)) ?? [];
+          if (!filter.category) return plainChannels(lists.channels);
+          return plainChannels(lists.byCategory.get(ownedKey(filter.category)) ?? []);
         }),
 
       channel: (channel: OwnedId) =>
@@ -698,14 +722,14 @@ function combine(members: readonly IndexedCatalogue[]): Combined {
 
 /**
  * Every query word must appear in the channel name. Names that start with the query rank first,
- * then names with a word starting with it, then the rest. Ties keep the lists' order: the
- * subscriptions', and within one its provider's.
+ * then names with a word starting with it, then the rest. Ties keep the subscriptions' order,
+ * and within one its provider's.
  */
 function search(
   channels: readonly LiveChannel[],
   names: readonly string[],
   query: string,
-): LiveChannel[] {
+): readonly LiveChannel[] {
   const words = query.split(" ");
   const ranked: { channel: LiveChannel; rank: number; order: number }[] = [];
   for (const [order, channel] of channels.entries()) {
@@ -715,5 +739,82 @@ function search(
     ranked.push({ channel, rank, order });
   }
   ranked.sort((a, b) => a.rank - b.rank || a.order - b.order);
-  return ranked.slice(0, SEARCH_LIMIT).map((entry) => entry.channel);
+  // Limit display groups, retaining all their real copies and stream variants.
+  const groups = matchingSearchGroups(
+    searchIndex(channels),
+    ranked.map((entry) => entry.channel),
+  ).slice(0, SEARCH_LIMIT);
+  const copies = groups.flatMap((group) => group.copies);
+  const selected = new Set(copies.map(ownedKey));
+  const matched = ranked
+    .map((entry) => entry.channel)
+    .filter((channel) => selected.has(ownedKey(channel)));
+  const matchedKeys = new Set(matched.map(ownedKey));
+  return stampSearchGroups(
+    [...matched, ...copies.filter((channel) => !matchedKeys.has(ownedKey(channel)))],
+    channels,
+  );
+}
+
+const plainResponses = new WeakMap<readonly LiveChannel[], readonly LiveChannel[]>();
+
+/** Ordinary lists need neither display groups nor canonical grouping identities. */
+function plainChannels(channels: readonly LiveChannel[]): readonly LiveChannel[] {
+  let response = plainResponses.get(channels);
+  if (!response) {
+    response = channels.map(({ searchIdentity: _identity, ...channel }) => channel);
+    plainResponses.set(channels, response);
+  }
+  return response;
+}
+
+const searchIndexes = new WeakMap<readonly LiveChannel[], LiveSearchIndex>();
+const stampedSearchResponses = new WeakMap<
+  LiveSearchIndex,
+  {
+    readonly groups: LiveSearchGroups;
+    readonly stamps: Readonly<Record<string, LiveSearchStamp>>;
+  }
+>();
+
+/** One lazy authority per catalogue, shared by stamp-only and channel search responses. */
+function searchGroupCache(all: readonly LiveChannel[]) {
+  const index = searchIndex(all);
+  let cache = stampedSearchResponses.get(index);
+  if (!cache) {
+    const groups = index.groups
+      .filter((group) => group.copies.length > 1)
+      .map((group) => ({ key: group.key, copies: group.copies.map(ownedKey) }));
+    cache = {
+      groups,
+      stamps: Object.fromEntries(
+        groups.flatMap(({ key, copies }) =>
+          copies.map((id, order) => [id, { key, order }] as const),
+        ),
+      ),
+    };
+    stampedSearchResponses.set(index, cache);
+  }
+  return cache;
+}
+
+/** List subsets carry full-catalogue grouping. Identity stays on canonical playback channels. */
+function stampSearchGroups(
+  channels: readonly LiveChannel[],
+  all: readonly LiveChannel[],
+): readonly LiveChannel[] {
+  const cache = searchGroupCache(all);
+  return channels.map(({ searchIdentity: _identity, ...channel }) => ({
+    ...channel,
+    searchGroup: cache.stamps[ownedKey(channel)] ?? { key: ownedKey(channel), order: 0 },
+  }));
+}
+
+function searchIndex(channels: readonly LiveChannel[]): LiveSearchIndex {
+  let index = searchIndexes.get(channels);
+  if (!index) {
+    index = indexLiveSearch(channels);
+    searchIndexes.set(channels, index);
+  }
+  return index;
 }
