@@ -287,6 +287,28 @@ it.each(["filter", "4k tab", "normal list"] as const)(
     expect(hd).toBeDefined();
     await act(async () => hd!.click());
     await page.until(() => expect(ipc.argsOf("ondemand.details").at(-1)?.version.id).toBe("hd"));
+    await page.until(() =>
+      expect(
+        page.client.getQueryData<{ titleVersions: Record<string, string> }>(
+          queries.subscriptionPreferences(SUBSCRIPTION).queryKey,
+        )?.titleVersions["movie:603"],
+      ).toBe("hd"),
+    );
+    const returning = useUi.getState().details!;
+    // App unmounts this sheet while Settings or playback covers it.
+    await page.render("movie");
+    await page.showDetails(returning);
+    await page.until(() =>
+      expect(document.querySelector('[aria-label="Versions"]')).not.toBeNull(),
+    );
+    await act(async () =>
+      document.querySelector<HTMLButtonElement>('[aria-label="Versions"]')!.click(),
+    );
+    await page.until(() =>
+      expect(
+        document.querySelector('[role="menuitemradio"][aria-checked="true"]')?.textContent,
+      ).toContain("1080p"),
+    );
   },
 );
 

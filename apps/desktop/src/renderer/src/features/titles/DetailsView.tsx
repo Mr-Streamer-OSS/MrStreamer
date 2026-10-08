@@ -94,6 +94,15 @@ export function DetailsView({ target }: { target: DetailsTarget }) {
   const picks = useSubscriptionPreferences();
   const remembered = title ? pickedVersion(title, picks) : null;
   const [chosenHere, setChosenHere] = useState<OwnedId | null | undefined>(undefined);
+  const chooseVersion = (version: OwnedId | null) => {
+    setChosenHere(version);
+    // App remounts the sheet after playback or Settings. The explicit menu choice then wins.
+    useUi.setState(({ details }) =>
+      details?.kind === target.kind && sameOwned(details, target)
+        ? { details: { ...details, asked: false } }
+        : {},
+    );
+  };
   // A filtered or 4K tile asks for a particular real version. A later menu choice in this
   // sheet can still replace it and is remembered by the usual subscription preference owner.
   const picked =
@@ -141,7 +150,7 @@ export function DetailsView({ target }: { target: DetailsTarget }) {
       {details.data && ready ? (
         <Content
           details={details.data}
-          versions={{ title, playing, picked, automatic, onPick: setChosenHere }}
+          versions={{ title, playing, picked, automatic, onPick: chooseVersion }}
           switching={details.isPlaceholderData}
           saving={saving}
         />
@@ -173,7 +182,7 @@ export function DetailsView({ target }: { target: DetailsTarget }) {
                   title={title}
                   picked={picked}
                   automatic={automatic}
-                  onPick={setChosenHere}
+                  onPick={chooseVersion}
                   trigger={<Button variant="secondary" />}
                 >
                   Other versions
