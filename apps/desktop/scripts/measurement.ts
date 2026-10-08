@@ -48,7 +48,7 @@ const Result = type({
     "revisionScope?": "string",
     "sourceStateScope?": "string",
     revision: "string",
-    sourceDirty: "boolean",
+    sourceDirty: "boolean | 'unknown'",
     buildMode: "string",
     buildSha256: "string",
   },
@@ -110,6 +110,7 @@ export function environment(
       : existsSync(bundled)
         ? (command(bundled, ["-version"]).split("\n")[0] ?? "unavailable")
         : "unavailable";
+  const sourceState = command("git", ["status", "--porcelain"]);
   return {
     recordedAt: new Date().toISOString(),
     platform: `${platform()} ${release()}`,
@@ -139,7 +140,7 @@ export function environment(
       : buildMode === "packaged"
         ? "unavailable"
         : "measuring checkout HEAD; rebuild required",
-    sourceDirty: command("git", ["status", "--porcelain"]) !== "",
+    sourceDirty: sourceState === "unavailable" ? "unknown" : sourceState !== "",
     sourceStateScope: "measuring checkout, not packaged source",
     buildMode,
     buildHashScope: builtCheckout
@@ -384,6 +385,8 @@ export function saveMeasurement(path: string | undefined, result: Measurement): 
   if (path) writeFileSync(path, `${JSON.stringify(result, null, 2)}\n`);
 }
 
+export const MINIMUM_COMPARISON_SAMPLES = 5;
+
 export function compareMeasurements(baseline: unknown[], candidate: unknown[]) {
   if (!baseline.length || baseline.length !== candidate.length)
     throw new Error("Incomplete comparison rounds");
@@ -450,6 +453,16 @@ export function compareMeasurements(baseline: unknown[], candidate: unknown[]) {
       max: Math.max(...values),
       samples: values.length,
     });
+    const insufficientSamples =
+      a.length < MINIMUM_COMPARISON_SAMPLES || b.length < MINIMUM_COMPARISON_SAMPLES;
+    const warning =
+      observedRangeGap > noise &&
+      (unit === "count" ? absoluteDelta > 0 : relativeDelta === null || relativeDelta > 0.1);
+    const outcome: "warning" | "inconclusive" | "pass" = warning
+      ? "warning"
+      : insufficientSamples
+        ? "inconclusive"
+        : "pass";
     return {
       name,
       unit,
@@ -463,18 +476,21 @@ export function compareMeasurements(baseline: unknown[], candidate: unknown[]) {
       observationFloor: noise,
       observedRangeGap,
       withinBuildSpread,
-      insufficientSamples: a.length < 3 || b.length < 3,
+      insufficientSamples,
       warningPolicy:
         unit === "count"
-          ? "exact median increase"
+          ? "observed ranges separated and positive count delta"
           : "observed ranges separated beyond observation floor and median +10%",
-      outcome:
-        (unit === "count" ? absoluteDelta > 0 : observedRangeGap > noise) &&
-        (relativeDelta === null || relativeDelta > 0.1)
-          ? "warning"
-          : "pass",
+      outcome,
     };
   });
+}
+
+/** Valid instrumentation can still be inconclusive; observed warnings survive small samples. */
+export function comparisonVerdict(comparison: ReturnType<typeof compareMeasurements>) {
+  if (comparison.some((measure) => measure.outcome === "warning")) return "warning";
+  if (comparison.some((measure) => measure.insufficientSamples)) return "inconclusive";
+  return "pass";
 }
 
 export const APP_METRICS = {

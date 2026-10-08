@@ -406,14 +406,19 @@ try {
   }
 } finally {
   stalls.disable();
-  await Promise.all(runtimes.map((runtime) => runtime.dispose()));
-  await rm(dataDir, { recursive: true, force: true });
-  await writeFile(
-    `${output}.cleanup.json`,
-    JSON.stringify(
-      { dataDir, runtimesDisposed: true, dataDirRemoved: !(await stat(dataDir).catch(() => null)) },
-      null,
-      2,
-    ),
-  );
+  let runtimesDisposed = false;
+  try {
+    await Promise.all(runtimes.map((runtime) => runtime.dispose()));
+    runtimesDisposed = true;
+  } finally {
+    await rm(dataDir, { recursive: true, force: true });
+    await writeFile(
+      `${output}.cleanup.json`,
+      JSON.stringify(
+        { dataDir, runtimesDisposed, dataDirRemoved: !(await stat(dataDir).catch(() => null)) },
+        null,
+        2,
+      ),
+    );
+  }
 }

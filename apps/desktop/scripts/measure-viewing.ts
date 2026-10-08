@@ -120,7 +120,11 @@ try {
   for (let index = 0; index < events; index++) {
     const command =
       index % 20 === 0
-        ? viewing.setFavourite(`fill-${index}`, own(pick(FAVOURITES * 2), index), random() < 0.5)
+        ? viewing.setFavourite(
+            `fill-${index}`,
+            own(pick(FAVOURITES * 2), Math.floor(index / 20)),
+            random() < 0.5,
+          )
         : viewing.recordWatch(`fill-${index}`, own(pick(CHANNELS), index));
     await runtime.runPromise(command);
   }
@@ -259,14 +263,19 @@ try {
   });
   console.log(`Raw measurement: ${output}`);
 } finally {
-  await Promise.all(runtimes.map((runtime) => runtime.dispose()));
-  await rm(dataDir, { recursive: true, force: true });
-  await writeFile(
-    `${output}.cleanup.json`,
-    JSON.stringify(
-      { dataDir, runtimesDisposed: true, dataDirRemoved: !(await stat(dataDir).catch(() => null)) },
-      null,
-      2,
-    ),
-  );
+  let runtimesDisposed = false;
+  try {
+    await Promise.all(runtimes.map((runtime) => runtime.dispose()));
+    runtimesDisposed = true;
+  } finally {
+    await rm(dataDir, { recursive: true, force: true });
+    await writeFile(
+      `${output}.cleanup.json`,
+      JSON.stringify(
+        { dataDir, runtimesDisposed, dataDirRemoved: !(await stat(dataDir).catch(() => null)) },
+        null,
+        2,
+      ),
+    );
+  }
 }

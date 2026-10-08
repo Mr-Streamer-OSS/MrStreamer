@@ -16,6 +16,8 @@ import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import {
   compareMeasurements,
+  comparisonVerdict,
+  MINIMUM_COMPARISON_SAMPLES,
   positiveCount,
   validateMeasurement,
 } from "../../scripts/measurement.ts";
@@ -86,6 +88,8 @@ try {
         );
         runs[build].push(JSON.parse(readFileSync(output, "utf8")));
       }
+      // Reject mismatched identity or instrumentation before paying for another pair.
+      compareMeasurements(runs.baseline, runs.candidate);
     }
   }
   const comparison = compareMeasurements(runs.baseline, runs.candidate);
@@ -95,7 +99,9 @@ try {
     JSON.stringify(
       {
         status: "valid",
-        verdict: warnings.length ? "warning" : "pass",
+        verdict: comparisonVerdict(comparison),
+        insufficientSamples: comparison.some((measure) => measure.insufficientSamples),
+        minimumSamplesPerSide: MINIMUM_COMPARISON_SAMPLES,
         rounds: runs.baseline.length,
         elapsedMs: performance.now() - started,
         rawFiles,
@@ -117,20 +123,21 @@ try {
   );
   const shown = (value: number) => value.toFixed(1);
   const lines = [
-    "| Measure | Unit | Baseline median [min, max] | Candidate median [min, max] | Absolute delta | Relative delta | Outcome |",
-    "| --- | --- | --- | --- | --- | --- | --- |",
+    "| Measure | Unit | Baseline median [min, max] | Candidate median [min, max] | Absolute delta | Relative delta | Samples per side | Outcome |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- |",
   ];
   for (const measure of comparison) {
     const before = `${shown(measure.baselineMedian)} [${shown(measure.baselineSpread.min)}, ${shown(measure.baselineSpread.max)}]`;
     const after = `${shown(measure.candidateMedian)} [${shown(measure.candidateSpread.min)}, ${shown(measure.candidateSpread.max)}]`;
     lines.push(
-      `| ${measure.name} | ${measure.unit} | ${before} | ${after} | ${shown(measure.absoluteDelta)} | ${measure.relativeDelta === null ? "n/a (zero baseline)" : `${shown(measure.relativeDelta * 100)}%`} | ${measure.outcome} |`,
+      `| ${measure.name} | ${measure.unit} | ${before} | ${after} | ${shown(measure.absoluteDelta)} | ${measure.relativeDelta === null ? "n/a (zero baseline)" : `${shown(measure.relativeDelta * 100)}%`} | ${measure.baselineSpread.samples}/${measure.candidateSpread.samples}${measure.insufficientSamples ? ` (insufficient; minimum ${MINIMUM_COMPARISON_SAMPLES})` : ""} | ${measure.outcome} |`,
     );
   }
   const table = lines.join("\n");
-  console.log(table);
+  const verdict = `Instrumentation valid; verdict ${comparisonVerdict(comparison)}${comparison.some((measure) => measure.insufficientSamples) ? "; insufficient samples" : ""}.`;
+  console.log(`${verdict}\n${table}`);
   const summary = process.env["GITHUB_STEP_SUMMARY"];
-  if (summary) appendFileSync(summary, `\n${table}\n`);
+  if (summary) appendFileSync(summary, `\n${verdict}\n${table}\n`);
   for (const measure of warnings)
     console.log(
       `::warning title=Performance comparison::${measure.name}: +${shown(measure.absoluteDelta)} ${measure.unit}; repeat on the same host before calling it a regression`,

@@ -113,7 +113,7 @@ describe("measurement result contract", () => {
     const result = compareMeasurements([before], [after]);
     expect(result.find((measure) => measure.name === "time to picture")).toMatchObject({
       noise: 60,
-      outcome: "pass",
+      outcome: "inconclusive",
     });
     expect(
       result.find((measure) => measure.name === "streams opened, Home to Watch (count)"),
@@ -145,8 +145,23 @@ it("comparison CLI retains a warning verdict but exits nonzero for invalid instr
     expect(JSON.parse(readFileSync(join(output, "comparison.json"), "utf8"))).toMatchObject({
       status: "valid",
       verdict: "warning",
+      insufficientSamples: true,
+      minimumSamplesPerSide: 5,
       rawFiles: [before, after],
     });
+    expect(valid.stdout).toContain("insufficient samples");
+    expect(valid.stdout).toContain("1/1 (insufficient; minimum 5)");
+    writeFileSync(after, JSON.stringify(report()));
+    const inconclusive = spawnSync(process.execPath, args, { encoding: "utf8" });
+    expect(inconclusive.status, inconclusive.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(join(output, "comparison.json"), "utf8"))).toMatchObject({
+      status: "valid",
+      verdict: "inconclusive",
+      insufficientSamples: true,
+    });
+    expect(inconclusive.stdout).toContain(
+      "Instrumentation valid; verdict inconclusive; insufficient samples",
+    );
     delete candidate.metrics["time to picture"];
     writeFileSync(after, JSON.stringify(candidate));
     const invalid = spawnSync(process.execPath, args, { encoding: "utf8" });
@@ -359,7 +374,7 @@ it("reports separated slowdowns, overlapping ranges and insufficient samples thr
       }[];
     };
     expect(saved.comparison.find((value) => value.name === "time to picture")).toMatchObject({
-      outcome: "pass",
+      outcome: "inconclusive",
       insufficientSamples: true,
       observedRangeGap: -10,
     });
@@ -370,4 +385,39 @@ it("reports separated slowdowns, overlapping ranges and insufficient samples thr
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+it("requires five pooled samples and warns on separated count increases, including exactly one", () => {
+  const countReport = (count: number) => {
+    const value = report();
+    value.metrics["streams opened per tune (count)"]!.samples = [count];
+    return value;
+  };
+  const baseline = [1, 1, 2, 1, 1].map(countReport);
+  const candidate = [2, 2, 2, 2, 2].map(countReport);
+  const overlap = compareMeasurements(baseline, candidate);
+  expect(overlap.find((value) => value.name === "streams opened per tune (count)")).toMatchObject({
+    absoluteDelta: 1,
+    observedRangeGap: 0,
+    insufficientSamples: false,
+    outcome: "pass",
+  });
+  expect(overlap.every((value) => value.outcome === "pass")).toBe(true);
+  expect(
+    compareMeasurements(baseline.slice(0, 4), candidate.slice(0, 4)).every(
+      (value) => value.outcome === "inconclusive" && value.insufficientSamples,
+    ),
+  ).toBe(true);
+  const separated = compareMeasurements(
+    Array.from({ length: 5 }, () => countReport(10)),
+    Array.from({ length: 5 }, () => countReport(11)),
+  );
+  expect(separated.find((value) => value.name === "streams opened per tune (count)")).toMatchObject(
+    {
+      absoluteDelta: 1,
+      relativeDelta: 0.1,
+      observedRangeGap: 1,
+      outcome: "warning",
+    },
+  );
 });
