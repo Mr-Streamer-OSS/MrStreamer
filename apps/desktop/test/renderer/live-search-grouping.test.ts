@@ -326,6 +326,42 @@ describe("real search components with two subscriptions", () => {
     },
   );
 
+  it("restores a chosen companion copy after its programme match regroups", async () => {
+    const p = await page("guide");
+    await p.search("news", { [ownedKey(green[3]!)]: { now: true, later: null } });
+    p.field().blur();
+    await p.press("ArrowRight", window);
+    const chosenRow = () =>
+      p
+        .rows()
+        .find((row) =>
+          row.getAttribute("aria-label")?.startsWith("VRT Canvas, Blue, Belgium, Vlaanderen"),
+        )!;
+    await act(async () => chosenRow().focus());
+    expect(chosenRow().className).toContain("ring-2");
+    const groups = ipc.hold("library.searchGroups");
+    const channels = ipc.hold("library.channels");
+    await act(async () =>
+      ipc.emit("library.updated", {
+        subscriptionId: GREEN,
+        channelCount: all.length,
+        fetchedAt: 2,
+        failure: null,
+        failedAt: null,
+      }),
+    );
+    channels.resolve(plain(all));
+    await settled();
+    expect(p.rows()).toHaveLength(1);
+    expect(document.activeElement).toBe(p.rows()[0]);
+    groups.resolve(stamps(all));
+    await settled();
+    expect(chosenRow().className).toContain("ring-2");
+    expect(document.activeElement).toBe(chosenRow());
+    await p.press("Enter");
+    expect(p.watch).toHaveBeenLastCalledWith(expect.objectContaining(ownedId(blue[2]!)));
+  });
+
   it("keeps a retried search filtered after the first catalogue decision failed", async () => {
     const p = await page("guide");
     const groups = ipc.hold("library.searchGroups");

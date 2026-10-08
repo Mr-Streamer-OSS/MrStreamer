@@ -377,7 +377,7 @@ function ChannelRow({
               onClick: onWatch,
               onFocus: searchRow
                 ? (event: FocusEvent) => {
-                    if (event.target === event.currentTarget) onSelectSearch();
+                    if (event.target === event.currentTarget && !selected) onSelectSearch();
                   }
                 : undefined,
               "aria-label": searchRow
