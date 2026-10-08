@@ -201,12 +201,11 @@ describe("an HLS channel's tracks", () => {
 
     player.setSubtitle(subtitles("English"));
     expect(loading()).toBe(true);
-    // A rendition that can't be read turns off without stopping the picture; it can be retried.
+    // One unreadable fragment leaves the choice on while hls.js can recover.
     stream.subtitleUnreadable();
-    expect(loading()).toBe(false);
-    expect(player.state().subtitle).toBeNull();
+    expect(loading()).toBe(true);
+    expect(player.state().subtitle?.label).toBe("English");
     expect(stream.loading).toBe(true);
-    player.setSubtitle(subtitles("English"));
     expect(loading()).toBe(true);
     // As a broadcaster sends while nothing is subtitled: a segment without a line.
     stream.subtitleLines([]);

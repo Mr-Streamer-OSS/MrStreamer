@@ -232,7 +232,7 @@ const FAILED_STREAM_MS = 2 * 60_000;
  * segments, subtitles and HLS addresses those name. Nothing else has a path there.
  */
 const RECEIVER_ROUTE =
-  /^\/r\/([\w-]+)\/(?:(master|video|subs|live)\.m3u8|v(\d{1,6})\.ts|s(\d{1,6})\.vtt|l(\d{1,9})\.ts|h([0-9a-z]{1,12}))$/;
+  /^\/r\/([\w-]+)\/(?:(master|video|subs|live)\.m3u8|v(\d{1,6})\.ts|s(\d{1,6})\.vtt|l(\d{1,9})\.ts|h((?:subs-)?[0-9a-z]{1,12}))$/;
 /** What reading where a movie's keyframes are may take of the provider, before any of it plays. */
 const INDEX_LIMITS = { bytes: 24 * 1024 * 1024, requests: 96, ms: 20_000 } as const;
 /** A run for a receiver that hasn't asked for anything this long ends, as a long pause does here. */

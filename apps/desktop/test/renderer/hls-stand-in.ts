@@ -53,6 +53,12 @@ export interface Stream {
     fatal?: boolean,
     of?: string,
   ): void;
+  /** An internal subtitle-fragment abort caused by a choice change. */
+  subtitleAborted(of: string): void;
+  /** A parsed playlist supplies its segment cadence. */
+  subtitlePlaylist(seconds: number): void;
+  /** A parser may defer a fragment without an error, including after IMSC fallback. */
+  subtitleDeferred(afterSuccess?: boolean): void;
   /** The place in its list of the sound track selected, or -1. */
   readonly audioTrack: number;
   /** The place in its list of the subtitle rendition selected, or -1 for none. */
@@ -158,6 +164,36 @@ export function standIn(real: typeof Hls) {
               ? { type: target === "video" ? "main" : "audio" }
               : undefined,
         error: new Error("Fixture request failed"),
+      });
+    }
+
+    subtitleAborted(of: string): void {
+      this.#tell(Events.ERROR, {
+        fatal: false,
+        type: real.ErrorTypes.NETWORK_ERROR,
+        details: real.ErrorDetails.INTERNAL_ABORTED,
+        frag: {
+          type: "subtitle",
+          level: this.subtitleTracks.findIndex((track) => track.name === of),
+        },
+      });
+    }
+    subtitlePlaylist(seconds: number): void {
+      this.#tell(Events.SUBTITLE_TRACK_LOADED, {
+        id: this.#subtitle,
+        details: { targetduration: seconds },
+      });
+    }
+    subtitleDeferred(afterSuccess = false): void {
+      const frag = this.#nextSegment(this.#subtitle);
+      if (afterSuccess) frag.start -= SEGMENT_S;
+      this.#tell(Events.SUBTITLE_FRAG_PROCESSED, {
+        success: false,
+        frag,
+        part: null,
+        ...(afterSuccess
+          ? { error: new Error("WebVTT failed before successful IMSC fallback") }
+          : {}),
       });
     }
 

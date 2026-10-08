@@ -838,7 +838,12 @@ describe("an HLS channel for a receiver", () => {
         "/list.m3u",
         `#EXTM3U\n#EXTINF:-1 tvg-id="Alpha.test" http-user-agent="Player/1.0",Alpha\n${origin}/alpha/index.m3u8?token=s3cret\n`,
       ],
-      ["/alpha/index.m3u8", "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=200000\nlow/stream.m3u8\n"],
+      [
+        "/alpha/index.m3u8",
+        '#EXTM3U\n#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="cc",NAME="English",URI="subs/en.m3u8"\n#EXT-X-STREAM-INF:BANDWIDTH=200000,SUBTITLES="cc"\nlow/stream.m3u8\n',
+      ],
+      ["/alpha/subs/en.m3u8", "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6,\nen.vtt\n"],
+      ["/alpha/subs/en.vtt", "WEBVTT\n\n00:00.000 --> 00:06.000\nHello\n"],
       ["/alpha/low/stream.m3u8", "#EXTM3U\n#EXT-X-TARGETDURATION:3\n#EXTINF:3,\nsegment-0.ts\n"],
       ["/alpha/low/segment-0.ts", clip],
     ]);
@@ -873,6 +878,35 @@ describe("an HLS channel for a receiver", () => {
     const stream = await playlist(main.stream!);
     expect(stream.segments[0]!.url.startsWith(`${lan}/r/`)).toBe(true);
     expect(Buffer.from(await (await fetch(stream.segments[0]!.url)).arrayBuffer())).toEqual(clip);
+    expect(main.subtitles).toMatch(new RegExp(`^${lan}/r/[\\w-]+/hsubs-[0-9a-z]{1,12}$`));
+    const subtitles = await playlist(main.subtitles!);
+    expect(subtitles.status).toBe(200);
+    expect(subtitles.text).not.toContain(origin);
+    const line = await fetch(subtitles.segments[0]!.url);
+    expect(line.status).toBe(200);
+    expect(await line.text()).toContain("Hello");
+    expect(await playback.failure(opened.sessionId)).toBeNull();
+    // Subtitle failure must preserve an existing video failure, and never create one.
+    routes.delete("/alpha/subs/en.vtt");
+    expect((await fetch(subtitles.segments[0]!.url)).status).toBe(404);
+    expect(await playback.failure(opened.sessionId)).toBeNull();
+    routes.delete("/alpha/low/segment-0.ts");
+    expect((await fetch(stream.segments[0]!.url)).status).toBe(404);
+    const videoFailure = await playback.failure(opened.sessionId);
+    expect(videoFailure).toMatchObject({ kind: "unavailable", status: 404 });
+    expect((await fetch(subtitles.segments[0]!.url)).status).toBe(404);
+    expect(await playback.failure(opened.sessionId)).toEqual(videoFailure);
+    routes.set("/alpha/subs/en.vtt", "WEBVTT\n");
+    expect((await fetch(subtitles.segments[0]!.url)).status).toBe(200);
+    expect(await playback.failure(opened.sessionId)).toEqual(videoFailure);
+    const route = new URL(main.subtitles!);
+    for (const path of [
+      route.pathname.replace("/hsubs-", "/hsubs--"),
+      route.pathname + "1234567890123",
+      route.pathname.replace(/\/r\/[^/]+\//, "/r/wrong-token/"),
+    ]) {
+      expect((await fetch(new URL(path, lan))).status).toBe(410);
+    }
     // Every request the receiver made went out with the header the channel asks for.
     for (const request of asked.filter((each) => each.path.startsWith("/alpha/"))) {
       expect(request.userAgent).toBe("Player/1.0");

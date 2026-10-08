@@ -2,6 +2,7 @@
 // must leave pictures moving, both during discovery and after a manual pick. Healthy languages
 // remain reachable. A subsequent video stall must still reconnect, not inherit a subtitle 404.
 //   node test/e2e/live-subtitle-errors-app.ts <electron> [-- app arguments]
+import { spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type ServerResponse } from "node:http";
@@ -20,6 +21,9 @@ const modes = [
   "segment404",
   "segment-stall",
   "later-video-stall",
+  "live-six-off",
+  "live-six-remembered",
+  "live-aborts",
 ] as const;
 const only = process.env["MR_STREAMER_SUBTITLE_ERRORS_ONLY"];
 const watched = Number(process.env["MR_STREAMER_SUBTITLE_ERRORS_SECONDS"] ?? 35);
@@ -29,9 +33,66 @@ const requests: {
   at: number;
   status: number | "held";
   closedAt?: number;
+  completed?: boolean;
 }[] = [];
 const held = new Set<ServerResponse>();
 const started = Date.now();
+const liveStarts = new Map<string, number>();
+const slowVideo = new Set<string>();
+const live = (mode: string) => mode.startsWith("live-");
+// Six-second segments with continuous timestamps, owned by this throwaway test directory.
+const clips = mkdtempSync(join(tmpdir(), "mr-streamer-live-six-"));
+const encoded = spawnSync("ffmpeg", [
+  "-hide_banner",
+  "-loglevel",
+  "error",
+  "-f",
+  "lavfi",
+  "-i",
+  "testsrc2=size=128x72:rate=25",
+  "-t",
+  "24",
+  "-an",
+  "-c:v",
+  "libx264",
+  "-threads",
+  "1",
+  "-g",
+  "150",
+  "-keyint_min",
+  "150",
+  "-sc_threshold",
+  "0",
+  "-f",
+  "hls",
+  "-hls_time",
+  "6",
+  "-hls_list_size",
+  "0",
+  "-hls_segment_filename",
+  join(clips, "video-%d.mpegts"),
+  join(clips, "video.m3u8"),
+]);
+if (encoded.status !== 0) throw new Error(`Six-second fixture encoding failed: ${encoded.stderr}`);
+const livePlaylist = (mode: string, language?: string) => {
+  const first = Math.floor((Date.now() - (liveStarts.get(mode) ?? Date.now())) / 6000);
+  return [
+    "#EXTM3U",
+    "#EXT-X-VERSION:3",
+    "#EXT-X-TARGETDURATION:6",
+    `#EXT-X-MEDIA-SEQUENCE:${first}`,
+    `#EXT-X-DISCONTINUITY-SEQUENCE:${Math.floor(first / 4)}`,
+    ...Array.from({ length: 5 }, (_, at) => {
+      const index = first + at;
+      return [
+        ...(index > 0 && index % 4 === 0 ? ["#EXT-X-DISCONTINUITY"] : []),
+        "#EXTINF:6.000,",
+        language ? `${language}-${index}.vtt` : `video-${index}.mpegts`,
+      ];
+    }).flat(),
+    "",
+  ].join("\n");
+};
 const video = [
   "#EXTM3U",
   "#EXT-X-VERSION:3",
@@ -84,6 +145,9 @@ const server = createServer((request, response) => {
       status,
     };
     requests.push(entry);
+    response.on("finish", () => {
+      entry.completed = true;
+    });
     response.on("close", () => {
       entry.closedAt = (Date.now() - started) / 1000;
     });
@@ -119,25 +183,43 @@ const server = createServer((request, response) => {
     return;
   }
   let body: string | Buffer | null = null;
-  if (file === "master.m3u8") body = master;
-  else if (file === "video.m3u8") body = video;
-  else if (/^(en|de|fr)\.m3u8$/.test(file)) body = subtitlePlaylist(file.slice(0, 2));
+  if (file === "master.m3u8") {
+    if (live(mode) && !liveStarts.has(mode)) liveStarts.set(mode, Date.now());
+    body = master;
+  } else if (file === "video.m3u8") body = live(mode) ? livePlaylist(mode) : video;
+  else if (/^(en|de|fr)\.m3u8$/.test(file))
+    body = live(mode) ? livePlaylist(mode, file.slice(0, 2)) : subtitlePlaylist(file.slice(0, 2));
   else if (/^(en|de|fr)\.vtt$/.test(file))
     body = `WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:126000,LOCAL:00:00:00.000\n\n00:00:00.000 --> 00:01:36.000\nHealthy ${file.slice(0, 2)}\n`;
+  else if (/^(en|de|fr)-\d+\.vtt$/.test(file)) {
+    const index = Number(file.match(/-(\d+)/)?.[1]);
+    const at = (index % 4) * 6;
+    body = `WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:126000,LOCAL:00:00:00.000\n\n00:00:${String(at).padStart(2, "0")}.000 --> 00:00:${String(at + 6).padStart(2, "0")}.000\nHealthy ${file.slice(0, 2)}\n`;
+  } else if (clip && live(mode))
+    body = readFileSync(join(clips, `video-${Number(clip[1]) % 4}.mpegts`));
   else if (clip)
     body = readFileSync(
       join(import.meta.dirname, `../fixtures/hls/video-${Number(clip[1]) % 4}.mpegts`),
     );
   note(body === null ? 404 : 200);
-  response
-    .writeHead(body === null ? 404 : 200, {
-      "Content-Type": file.endsWith("m3u8")
-        ? "application/vnd.apple.mpegurl"
-        : file.endsWith("vtt")
-          ? "text/vtt"
-          : "video/mp2t",
-    })
-    .end(body);
+  const answer = () =>
+    response
+      .writeHead(body === null ? 404 : 200, {
+        "Content-Type": file.endsWith("m3u8")
+          ? "application/vnd.apple.mpegurl"
+          : file.endsWith("vtt")
+            ? "text/vtt"
+            : "video/mp2t",
+      })
+      .end(body);
+  // The video playlist loses the initial playlist race. The first video fragment takes six
+  // seconds even though the subtitle rendition is healthy and ready on localhost.
+  if (live(mode) && file === "video.m3u8") setTimeout(answer, 300);
+  else if (live(mode) && clip && !slowVideo.has(mode)) {
+    slowVideo.add(mode);
+    setTimeout(answer, 6000);
+  } else if (mode === "live-aborts" && /^(en|de|fr)-\d+\.vtt$/.test(file)) setTimeout(answer, 1200);
+  else answer();
 });
 await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -161,6 +243,7 @@ const sample = () =>
   page!.evaluate<{
     time: number;
     width: number;
+    frames: number;
     cc: string;
     line: string;
     failure: string;
@@ -168,7 +251,7 @@ const sample = () =>
   const video = document.querySelector('video');
   const watch = document.querySelector('[data-view="watch"]');
   const cc = watch?.querySelector('[aria-label^="Subtitles"]');
-  return { time: video?.currentTime ?? -1, width: video?.videoWidth ?? 0,
+  return { time: video?.currentTime ?? -1, width: video?.videoWidth ?? 0, frames: video?.getVideoPlaybackQuality().totalVideoFrames ?? 0,
     cc: !cc ? 'absent' : cc.getAttribute('aria-pressed') === 'true' ? 'on' : 'off',
     line: document.querySelector('[data-subtitle-text]')?.textContent ?? '',
     failure: /No stream right now|HTTP 404|HTTP 503|Reconnecting|Keeps dropping|Waiting for data/.exec(watch?.textContent ?? '')?.[0] ?? '' };
@@ -180,6 +263,12 @@ try {
   for (const mode of modes) {
     if (only && !only.split(",").includes(mode)) continue;
     const from = requests.length;
+    if (mode === "live-six-remembered") {
+      await page.evaluate(
+        `window.mrStreamer.invoke('preferences.update', { subtitleLanguage: 'en' })`,
+      );
+    }
+    const tuningAt = Date.now();
     await click(`document.querySelector('[aria-label="Search"]')`);
     await delay(300);
     await page.send("Input.insertText", { text: `TEST | Subtitle ${mode}` });
@@ -189,17 +278,68 @@ try {
       const now = await sample();
       return now.width > 0 && now.time > 0.3;
     }, 30_000);
+    const startup = await sample();
+    const startupMs = Date.now() - tuningAt;
+    if (live(mode)) {
+      await waitFor(async () => (await sample()).cc !== "absent", 25_000);
+      const available = await sample();
+      if (mode === "live-six-remembered")
+        await waitFor(
+          async () => (await sample()).cc === "on" && (await sample()).line.includes("Healthy en"),
+          20_000,
+        );
+      const remembered = await sample();
+      await pick("English");
+      await waitFor(async () => (await sample()).line.includes("Healthy en"), 15_000);
+      if (mode === "live-aborts") {
+        // Switch and Off while subtitle requests can be in flight. Repeated picks are public
+        // actions, and request completion/abort evidence below records what actually happened.
+        await key(page, "c", 67);
+        await delay(700);
+        await pick("English");
+        await pick("Deutsch");
+        await delay(300);
+        await key(page, "c", 67);
+        await delay(300);
+        await pick("English");
+        await waitFor(async () => (await sample()).line.includes("Healthy en"), 20_000);
+      }
+      await delay(12_000);
+      const final = await sample();
+      const mine = requests.slice(from).filter((entry) => entry.mode === mode);
+      const abortedVideo = mine.filter((entry) => /^video-/.test(entry.file) && !entry.completed);
+      const masters = mine.filter((entry) => entry.file === "master.m3u8").length;
+      const ok =
+        startup.frames > 0 &&
+        available.cc !== "absent" &&
+        (mode !== "live-six-remembered" || remembered.cc === "on") &&
+        final.cc === "on" &&
+        final.line.includes("Healthy en") &&
+        !final.failure &&
+        masters === 1 &&
+        abortedVideo.length === 0 &&
+        final.frames > startup.frames;
+      console.log(
+        `${ok ? "PASS" : "FAIL"} ${mode}: startup ${(startupMs / 1000).toFixed(1)}s to picture, ${startup.frames} decoded startup frames, availability ${available.cc}, remembered ${remembered.cc}, final ${JSON.stringify(final)}, ${masters} masters, ${abortedVideo.length} unfinished video requests`,
+      );
+      console.log(JSON.stringify({ mode, startup, available, remembered, final, requests: mine }));
+      failed ||= !ok;
+      await key(page, "c", 67);
+      await key(page, "Escape", 27);
+      continue;
+    }
     await waitFor(
       () => Promise.resolve(requests.slice(from).some((request) => request.file === "fr.m3u8")),
       15_000,
     );
-    await delay(5500);
+    await delay(1500);
     const automatic = await sample();
     await pick("Français");
-    await delay(5500);
+    if (mode === "healthy") await delay(500);
+    else await waitFor(async () => (await sample()).cc === "off", 25_000);
     const explicit = await sample();
     if (mode === "playlist-stall") {
-      // A viewer who changes their mind need not wait out even the five-second deadline.
+      // Changing the choice cancels subtitle fragments; playlists keep hls.js network deadlines.
       await pick("Français");
       await delay(500);
       await key(page, "c", 67);
@@ -239,15 +379,15 @@ try {
           last.time > observations[0]!.time + watched - 3;
     const cancelled = mine
       .filter((request) => /^fr\./.test(request.file) && request.status === "held")
-      .every((request) => request.closedAt !== undefined && request.closedAt - request.at < 5.8);
+      .every((request) => request.closedAt !== undefined && request.closedAt - request.at < 21);
     const ok =
       cancelled &&
       videoOkay &&
       automatic.cc === "off" &&
       explicit.cc === (mode === "healthy" ? "on" : "off") &&
       english.cc === "on" &&
-      subtitles <= (mode === "later-video-stall" ? 24 : 12) &&
-      bad <= (mode === "later-video-stall" ? 10 : 4);
+      subtitles <= (mode === "later-video-stall" ? 36 : 24) &&
+      bad <= (mode === "later-video-stall" ? 15 : 10);
     console.log(
       `${ok ? "PASS" : "FAIL"} ${mode}: discovery CC ${automatic.cc}, picked CC ${explicit.cc}, English "${english.line}", video ${observations[0]!.time.toFixed(1)} -> ${last.time.toFixed(1)}, ${masters} masters, ${subtitles} subtitle requests (${bad} French), errors [${errors}]`,
     );
@@ -272,6 +412,7 @@ try {
   server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await delay(1000);
+  rmSync(clips, { recursive: true, force: true });
   rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
 }
 process.exit(failed ? 1 : 0);

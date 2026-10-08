@@ -40,6 +40,7 @@ async function open(id = "one") {
       { name: "Deutsch", lang: "de" },
     ],
   });
+  player.element.dispatchEvent(new Event("playing"));
   await wait();
   return stream;
 }
@@ -51,6 +52,7 @@ beforeEach(() => {
 afterEach(() => {
   player.reset();
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 it("hides HLS renditions that have only an empty WebVTT segment", async () => {
   const stream = await open();
@@ -127,7 +129,7 @@ it("bounds stalled discovery to three probes per burst, retries later, and cance
   });
   await wait();
   const before = stream.subtitlesLoaded.length;
-  await playingFor(10_100);
+  await playingFor(30_100);
   expect(stream.subtitleTrack).toBe(-1);
   expect(stream.subtitlesLoaded.length - before).toBeLessThanOrEqual(2);
   const atRest = stream.subtitlesLoaded.length;
@@ -215,4 +217,75 @@ it("keeps all HLS languages reachable while a remembered language is on", async 
   stream.subtitleLines([{ start: 0, end: 60, text: "Hello" }]);
   await wait();
   expect(player.state().subtitle?.label).toBe("English");
+});
+
+it("waits for picture before discovery, permits a six-second reload, and retries a timed-out language", async () => {
+  vi.useFakeTimers();
+  ipc.prefer({ subtitleLanguage: "en" });
+  // happy-dom fires playing from play() without decoding. Hold that event for this slow start.
+  vi.spyOn(player.element, "play").mockResolvedValue();
+  ipc.always("playback.open", {
+    sessionId: "slow",
+    channel: { subscriptionId: SUBSCRIPTION, id: "slow" },
+    format: "hls",
+    url: "http://127.0.0.1/fixture",
+  });
+  player.play(channel("slow"));
+  await wait();
+  const stream = streams.latest();
+  stream.variant({ subtitles: [{ name: "English", lang: "en" }] });
+  await vi.advanceTimersByTimeAsync(6000);
+  expect(stream.subtitleTrack).toBe(-1);
+  expect(player.state().subtitle).toBeNull();
+  player.element.dispatchEvent(new Event("playing"));
+  player.element.currentTime = 1;
+  stream.subtitlePlaylist(6);
+  await playingFor(6000);
+  expect(stream.subtitleTrack).toBe(0);
+  stream.subtitleDeferred();
+  expect(stream.subtitleTrack).toBe(0);
+  await playingFor(11_100);
+  await playingFor(64_000);
+  expect(stream.subtitlesLoaded.length).toBeGreaterThan(3);
+  stream.subtitleLines([{ start: 0, end: 200, text: "Recovered" }], "English");
+  await wait();
+  expect(player.state().subtitle?.label).toBe("English");
+  stream.subtitleDeferred(true);
+  await playingFor(18_000);
+  expect(player.state().subtitle?.label).toBe("English");
+  expect(ipc.argsOf("playback.open")).toHaveLength(1);
+});
+it("ignores internal abort notices on Off, language switches and replaced probes", async () => {
+  const stream = await open();
+  stream.subtitleLines([{ start: 0, end: 60, text: "Hello" }], "English");
+  await wait();
+  player.setSubtitle(player.state().tracks!.subtitles[0]!);
+  stream.subtitleAborted("Deutsch");
+  expect(player.state().subtitle?.label).toBe("English");
+  player.setSubtitle(player.state().tracks!.subtitles[1]!);
+  stream.subtitleAborted("English");
+  expect(player.state().subtitle?.label).toBe("Deutsch");
+  player.toggleSubtitles();
+  stream.subtitleAborted("Deutsch");
+  expect(player.state().subtitle).toBeNull();
+  expect(stream.loading).toBe(true);
+  expect(ipc.argsOf("playback.open")).toHaveLength(1);
+});
+
+it("keeps a selected language through one nonfatal failure, but bounds repeated unreadable data", async () => {
+  vi.useFakeTimers();
+  const stream = await open();
+  stream.subtitleLines([{ start: 0, end: 60, text: "Hello" }]);
+  await wait();
+  player.setSubtitle(player.state().tracks!.subtitles[0]!);
+  stream.error("subtitle-segment", false);
+  stream.subtitleUnreadable();
+  expect(player.state().subtitle?.label).toBe("English");
+  stream.subtitleLines([{ start: 0, end: 60, text: "Recovered" }]);
+  await playingFor(16_000);
+  expect(player.state().subtitle?.label).toBe("English");
+  stream.subtitleUnreadable();
+  await playingFor(16_000);
+  expect(player.state().subtitle).toBeNull();
+  expect(ipc.argsOf("playback.open")).toHaveLength(1);
 });
