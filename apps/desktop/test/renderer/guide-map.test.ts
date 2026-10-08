@@ -7,7 +7,7 @@ import { ipc } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   GuideChannelPage,
   GuideStatus,
@@ -77,8 +77,15 @@ const OPTIONS: GuideChannelPage = {
   ],
 };
 
-/** Lets the screen take in what was just answered, and a search its pause after typing. */
-const settled = (ms = 20) => act(() => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+/** Flushes React while waiting for the requested list, mapping or keyboard focus. */
+const ready = (check: () => void) =>
+  vi.waitFor(
+    async () => {
+      await act(async () => {});
+      check();
+    },
+    { interval: 10 },
+  );
 
 /** The sheet, opened from Holiday house's Map, with its first channels and their guide's answered. */
 async function sheet(pages: { channels?: MapChannelPage; options?: GuideChannelPage } = {}) {
@@ -100,6 +107,7 @@ async function sheet(pages: { channels?: MapChannelPage; options?: GuideChannelP
     stopSync();
     act(() => root.unmount());
     container.remove();
+    client.clear();
   };
   const dialog = () => document.body.querySelector('[role="dialog"]');
   const lists = () => [...(dialog()?.querySelectorAll('[role="listbox"]') ?? [])];
@@ -112,30 +120,39 @@ async function sheet(pages: { channels?: MapChannelPage; options?: GuideChannelP
     await act(async () => {
       target?.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
     });
-    await settled();
   };
   const click = async (element: Element | null | undefined) => {
     await act(async () => (element as HTMLElement | null | undefined)?.click());
-    await settled();
   };
   const type = async (field: Element | null | undefined, value: string) => {
+    const method =
+      field === dialog()?.querySelector("input") ? "guide.mapChannels" : "guide.mapOptions";
+    const asked = ipc.argsOf(method).length;
     const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
     await act(async () => {
       setValue?.call(field, value);
       field?.dispatchEvent(new Event("input", { bubbles: true }));
     });
-    // A search waits for typing to pause, and its answer comes after.
-    await settled(200);
-    await settled();
+    await ready(() => {
+      expect(ipc.argsOf(method)).toHaveLength(asked + 1);
+      expect(ipc.argsOf(method).at(-1)).toMatchObject({ query: value.trim() });
+    });
   };
 
   const channels = ipc.hold("guide.mapChannels");
   const options = ipc.hold("guide.mapOptions");
   await click(container.querySelector('[aria-label="Map channels of Holiday house"]'));
+  await ready(() => expect(ipc.argsOf("guide.mapChannels")).toHaveLength(1));
   channels.resolve(pages.channels ?? WITHOUT);
-  await settled();
+  await ready(() => {
+    expect(rows(lists()[0]).length).toBeGreaterThan(0);
+    expect(ipc.argsOf("guide.mapOptions")).toHaveLength(1);
+  });
   options.resolve(pages.options ?? OPTIONS);
-  await settled();
+  await ready(() => {
+    expect(rows(lists()[1])).toHaveLength((pages.options ?? OPTIONS).channels.length + 1);
+    expect(document.activeElement).toBe(lists()[0]);
+  });
   return {
     dialog,
     press,
@@ -212,8 +229,9 @@ describe("mapping channels to a guide's by hand", () => {
     readAgain(sport);
 
     await click(button("Map", optionList()?.querySelectorAll('[role="option"]')[3]));
+    await ready(() => expect(ipc.argsOf("guide.map")).toHaveLength(1));
     mapped.resolve(sport);
-    await settled();
+    await ready(() => expect(channels()[0]).toBe("> 12Canal Nord Sportmapped · canalnordsport.ex"));
 
     expect(ipc.argsOf("guide.map")).toEqual([
       {
@@ -232,8 +250,9 @@ describe("mapping channels to a guide's by hand", () => {
     const restored = ipc.hold("guide.map");
     readAgain(channel("12", "Canal Nord Sport"));
     await click(button("Restore"));
+    await ready(() => expect(ipc.argsOf("guide.map")).toHaveLength(2));
     restored.resolve(channel("12", "Canal Nord Sport"));
-    await settled();
+    await ready(() => expect(channels()[0]).toBe("> 12Canal Nord Sportno id match"));
 
     expect(ipc.argsOf("guide.map")[1]).toMatchObject({ channelId: "12", guideId: null });
     expect(ipc.argsOf("guide.mapChannels")).toHaveLength(3);
@@ -262,13 +281,14 @@ describe("mapping channels to a guide's by hand", () => {
     const first = page();
 
     await click(button("Map", optionList()?.querySelectorAll('[role="option"]')[1]));
+    await ready(() => expect(ipc.argsOf("guide.map")).toHaveLength(1));
     mapped.resolve(channel("1", "Channel 1", "canalnord.ex"));
     without.shift();
-    await settled();
+    await ready(() => expect(ipc.argsOf("guide.mapChannels")).toHaveLength(2));
     // The page that was read is asked for again, and answered as the list is by now.
     expect(ipc.argsOf("guide.mapChannels").map((each) => each.offset)).toEqual([0, 0]);
     first(0);
-    await settled();
+    await ready(() => expect(channels()[0]).toBe("> 2Channel 2no id match"));
 
     // The channel has programmes now and left; the keyboard is on the one that took its place.
     expect(dialog()?.textContent).toContain("Channels · 249");
@@ -283,10 +303,14 @@ describe("mapping channels to a guide's by hand", () => {
       if (list) list.scrollTop = 112 * 40;
       list?.dispatchEvent(new Event("scroll"));
     });
-    await settled();
+    await ready(() =>
+      expect(ipc.argsOf("guide.mapChannels").at(-1)).toMatchObject({ offset: 120 }),
+    );
     expect(ipc.argsOf("guide.mapChannels").at(-1)).toMatchObject({ offset: 120 });
     second(120);
-    await settled();
+    await ready(() =>
+      expect(channels().some((row) => row.startsWith("122Channel 122"))).toBe(true),
+    );
 
     // No channel is left out between the pages, and none shows twice.
     const numbers = channels().map((row) => Number.parseInt(row, 10));
@@ -302,12 +326,18 @@ describe("mapping channels to a guide's by hand", () => {
 
     await press(channelList(), "ArrowDown");
 
+    await ready(() =>
+      expect(ipc.argsOf("guide.mapOptions").at(-1)).toMatchObject({ query: "Canal Nord HD" }),
+    );
+    await ready(() => expect(options()).toHaveLength(OPTIONS.channels.length + 1));
     expect(channels()[1]).toBe("> 14Canal Nord HDno id match");
     expect(ipc.argsOf("guide.mapOptions").at(-1)).toMatchObject({ query: "Canal Nord HD" });
     // Enter goes on to that channel's guide channels, and Down into them.
     await press(channelList(), "Enter");
+    await ready(() => expect(document.activeElement).toBe(fields()[1]));
     expect(document.activeElement).toBe(fields()[1]);
     await press(fields()[1], "ArrowDown");
+    await ready(() => expect(document.activeElement).toBe(optionList()));
     expect(document.activeElement).toBe(optionList());
     await press(optionList(), "ArrowDown");
     expect(options()[1]).toBe("> Canal Nordcanalnord.exMap");
@@ -319,8 +349,12 @@ describe("mapping channels to a guide's by hand", () => {
       channels: WITHOUT.channels.map((each) => (each.id === hd.id ? hd : each)),
     });
     await press(optionList(), "Enter");
+    await ready(() => expect(ipc.argsOf("guide.map")).toHaveLength(1));
     mapped.resolve(hd);
-    await settled();
+    await ready(() => {
+      expect(channels()[1]).toBe("> 14Canal Nord HDmapped · canalnord.ex");
+      expect(document.activeElement).toBe(channelList());
+    });
 
     expect(ipc.argsOf("guide.map")).toEqual([
       { subscriptionId: holiday.id, channelId: "14", guideId: "canalnord.ex", revision: "7.2" },
@@ -348,11 +382,15 @@ describe("mapping channels to a guide's by hand", () => {
       query: "nord hd",
       offset: 0,
     });
+    await ready(() => expect(channels()).toEqual(["> 14Canal Nord HDno id match"]));
     expect(channels()).toEqual(["> 14Canal Nord HDno id match"]);
 
     ipc.hold("guide.mapOptions").resolve({ total: 1, channels: OPTIONS.channels.slice(0, 1) });
     await type(fields()[1], "canalnord.ex");
     expect(ipc.argsOf("guide.mapOptions").at(-1)).toMatchObject({ query: "canalnord.ex" });
+    await ready(() =>
+      expect(options()).toEqual(["> Automatic · no id matchCurrent", "Canal Nordcanalnord.exMap"]),
+    );
     expect(options()).toEqual(["> Automatic · no id matchCurrent", "Canal Nordcanalnord.exMap"]);
 
     const select = dialog()?.querySelector("select");
@@ -361,7 +399,10 @@ describe("mapping channels to a guide's by hand", () => {
       if (select) select.value = "mapped";
       select?.dispatchEvent(new Event("change", { bubbles: true }));
     });
-    await settled();
+    await ready(() => {
+      expect(ipc.argsOf("guide.mapChannels").at(-1)).toMatchObject({ filter: "mapped" });
+      expect(dialog()?.textContent).toContain("No channel matches.");
+    });
     expect(ipc.argsOf("guide.mapChannels").at(-1)).toMatchObject({ filter: "mapped" });
     expect(dialog()?.textContent).toContain("No channel matches.");
   });
@@ -373,6 +414,7 @@ describe("mapping channels to a guide's by hand", () => {
 
     await click(button("Map", optionList()?.querySelectorAll('[role="option"]')[1]));
 
+    await ready(() => expect(alert()).toBe("The guide changed meanwhile, so nothing was changed."));
     expect(alert()).toBe("The guide changed meanwhile, so nothing was changed.");
     expect(ipc.argsOf("guide.mapChannels").length).toBeGreaterThan(asked);
   });
@@ -386,7 +428,7 @@ describe("mapping channels to a guide's by hand", () => {
     });
 
     await act(async () => ipc.emit("guide.updated", null));
-    await settled();
+    await ready(() => expect(channels()).toEqual(["> 14Canal Nord HDno id match"]));
 
     expect(channels()).toEqual(["> 14Canal Nord HDno id match"]);
   });
@@ -409,8 +451,9 @@ describe("mapping channels to a guide's by hand", () => {
     const cleared = ipc.hold("guide.map");
     ipc.hold("guide.mapChannels").resolve({ total: 0, channels: [], revision: "7.2" });
     await click(button("Restore"));
+    await ready(() => expect(ipc.argsOf("guide.map")).toHaveLength(1));
     cleared.resolve(null);
-    await settled();
+    await ready(() => expect(channels()).toEqual([]));
     expect(ipc.argsOf("guide.map")).toEqual([
       { subscriptionId: holiday.id, channelId: "77", guideId: null, revision: "7.2" },
     ]);
@@ -418,6 +461,7 @@ describe("mapping channels to a guide's by hand", () => {
     expect(channels()).toEqual([]);
 
     await click(button("Done"));
+    await ready(() => expect(dialog()).toBeNull());
     expect(dialog()).toBeNull();
   });
 });

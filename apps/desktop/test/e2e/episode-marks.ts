@@ -209,15 +209,19 @@ try {
     await waitFor(() => page.evaluate<boolean>(`${ITEMS}.length === 2`), 10_000);
     const offered = await page.evaluate<string[]>(`${ITEMS}.map((each) => each.innerText.trim())`);
     if (offered.join() !== "Mark watched,Mark unwatched") problems.push(`it offers ${offered}`);
-    // Down until Mark watched has the highlight, however the menu opened.
-    const highlighted = () =>
-      page.evaluate<string>(
-        `document.querySelector('[role="menuitem"][data-highlighted]')?.innerText.trim() ?? ""`,
-      );
-    for (let presses = 0; presses < 3 && (await highlighted()) !== "Mark watched"; presses++) {
-      await key(page, "ArrowDown", 40);
-      await delay(100);
-    }
+    // The menu can be drawn before its opening focus transfer has finished.
+    await waitFor(
+      () => page.evaluate<boolean>(`document.activeElement?.getAttribute("role") === "menuitem"`),
+      10_000,
+    );
+    if ((await focused(page)) !== "Mark watched") await key(page, "ArrowDown", 40);
+    await waitFor(
+      () =>
+        page.evaluate<boolean>(
+          `document.activeElement?.getAttribute("role") === "menuitem" && document.activeElement.innerText.trim() === "Mark watched"`,
+        ),
+      10_000,
+    );
     await enter(page);
     await waitFor(() => checked(page, "S1 E1"), 15_000).catch(() => {
       problems.push("the row got no check");

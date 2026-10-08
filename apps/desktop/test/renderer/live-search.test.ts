@@ -6,7 +6,7 @@ import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ListingMatch, Programme } from "@mrstreamer/contracts/guide";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
@@ -56,10 +56,20 @@ Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
 });
 
 let unmount = () => {};
-afterEach(() => unmount());
+afterEach(() => {
+  unmount();
+  player.reset();
+});
 
-/** Lets the page take in what just happened, and a search's pause in typing pass. */
-const settled = (ms = 20) => act(() => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+/** Flushes React while waiting for an IPC call or the rows it renders. */
+const ready = (check: () => void) =>
+  vi.waitFor(
+    async () => {
+      await act(async () => {});
+      check();
+    },
+    { interval: 10 },
+  );
 
 /** Live TV on `list`, with the catalogue and the favourites at hand. */
 async function guidePage(list: ChannelList = { kind: "all" }) {
@@ -115,8 +125,13 @@ async function guidePage(list: ChannelList = { kind: "all" }) {
   unmount = () => {
     act(() => root.unmount());
     container.remove();
+    client.clear();
   };
-  await settled();
+  await ready(() =>
+    expect(container.querySelectorAll("[data-index]")).toHaveLength(
+      list.kind === "favourites" ? FAVOURITES.length : CHANNELS.length,
+    ),
+  );
 
   const field = () => {
     const input = container.querySelector("input");
@@ -167,13 +182,18 @@ async function guidePage(list: ChannelList = { kind: "all" }) {
 async function searched(
   page: Awaited<ReturnType<typeof guidePage>>,
   text: string,
+  rows: string[],
   matches: Record<string, ListingMatch> = {},
 ) {
+  const asked = ipc.argsOf("guide.searchList").length;
   const answer = ipc.hold("guide.searchList");
   await page.type(text);
-  await settled(150);
-  answer.resolve(found(matches));
-  await settled();
+  await ready(() => {
+    expect(ipc.argsOf("guide.searchList")).toHaveLength(asked + 1);
+    expect(ipc.argsOf("guide.searchList").at(-1)).toMatchObject({ query: text });
+  });
+  await act(async () => answer.resolve(found(matches)));
+  await ready(() => expect(page.rows()).toEqual(rows));
 }
 
 const later = (title: string): ListingMatch => ({
@@ -187,7 +207,9 @@ describe("searching the list Live TV shows", () => {
     const answer = ipc.hold("guide.searchList");
 
     await page.type("News");
-    await settled(150);
+    await ready(() =>
+      expect(ipc.argsOf("guide.searchList").at(-1)).toMatchObject({ query: "News" }),
+    );
 
     // The names are at hand, yet the rows wait for the programmes: they change once.
     expect(page.rows()).toHaveLength(CHANNELS.length);
@@ -200,7 +222,7 @@ describe("searching the list Live TV shows", () => {
         "4": later("Newsnight"),
       }),
     );
-    await settled();
+    await ready(() => expect(page.rows()).toEqual(["BBC One", "ITV1", "BBC News", "Euronews"]));
 
     expect(page.rows()).toEqual(["BBC One", "ITV1", "BBC News", "Euronews"]);
     expect(page.text()).toContain("4 channels · 4 streams");
@@ -217,15 +239,17 @@ describe("searching the list Live TV shows", () => {
     const page = await guidePage();
     const answer = ipc.hold("guide.searchList");
     await page.type("comedy");
-    await settled(150);
+    await ready(() =>
+      expect(ipc.argsOf("guide.searchList").at(-1)).toMatchObject({ query: "comedy" }),
+    );
     answer.reject({ kind: "unexpected", detail: "No guide." });
-    await settled();
+    await ready(() => expect(page.rows()).toEqual(["Dave"]));
     expect(page.rows()).toEqual(["Dave"]);
 
-    await searched(page, "EEN");
+    await searched(page, "EEN", ["Één"]);
     await expect.poll(page.rows).toEqual(["Één"]);
 
-    await searched(page, "bbc news");
+    await searched(page, "bbc news", ["BBC News"]);
     expect(page.rows()).toEqual(["BBC News"]);
   });
 
@@ -235,10 +259,10 @@ describe("searching the list Live TV shows", () => {
     await page.press("/");
     expect(document.activeElement).toBe(page.field());
     // In the field a digit is text, not a channel number.
-    await searched(page, "4");
+    await searched(page, "4", ["Channel 4"]);
     expect(page.rows()).toEqual(["Channel 4"]);
 
-    await searched(page, "bbc");
+    await searched(page, "bbc", ["BBC One", "BBC News"]);
     await page.press("ArrowDown");
     expect(document.activeElement).not.toBe(page.field());
     await page.press("ArrowDown");
@@ -260,7 +284,7 @@ describe("searching the list Live TV shows", () => {
   it("clears and leaves the field on Escape there, and watches the first channel found on Enter twice", async () => {
     const page = await guidePage();
     await page.press("/");
-    await searched(page, "itv");
+    await searched(page, "itv", ["ITV1"]);
 
     await page.press("Escape");
     expect(page.field().value).toBe("");
@@ -268,7 +292,7 @@ describe("searching the list Live TV shows", () => {
     expect(useUi.getState().view).toBe("live");
 
     await page.press("/");
-    await searched(page, "euro");
+    await searched(page, "euro", ["Euronews"]);
     await page.press("Enter");
     expect(useUi.getState().watching).toBe(false);
     await page.press("Enter");
@@ -279,22 +303,24 @@ describe("searching the list Live TV shows", () => {
     const page = await guidePage({ kind: "favourites" });
     expect(page.field().placeholder).toBe("Search Favourites");
 
-    await searched(page, "bbc");
+    await searched(page, "bbc", ["BBC News", "BBC One"]);
     expect(page.rows()).toEqual(["BBC News", "BBC One"]);
     expect(ipc.argsOf("guide.searchList").at(-1)).toMatchObject({
       query: "bbc",
       channels: FAVOURITES,
     });
 
-    await searched(page, "dave");
+    await searched(page, "dave", []);
     expect(page.rows()).toEqual([]);
     expect(page.text()).toContain("Nothing in Favourites for dave.");
     expect(useUi.getState().searchFrom).toBe("dave");
 
+    const asked = ipc.argsOf("guide.searchList").length;
     const everywhere = ipc.hold("guide.searchList");
     await page.click("Search all channels");
+    await ready(() => expect(ipc.argsOf("guide.searchList")).toHaveLength(asked + 1));
     everywhere.resolve({});
-    await settled();
+    await ready(() => expect(page.rows()).toEqual(["Dave"]));
     expect(useUi.getState().list).toEqual({ kind: "all" });
     expect(page.field().value).toBe("dave");
     expect(page.rows()).toEqual(["Dave"]);
@@ -318,17 +344,20 @@ describe("searching the list Live TV shows", () => {
       title,
       description,
     });
-    await searched(page, "ten", { "2": { now: false, later: { start, title: "News at Ten" } } });
+    await searched(page, "ten", ["ITV1"], {
+      "2": { now: false, later: { start, title: "News at Ten" } },
+    });
     expect(page.rows()).toEqual(["ITV1"]);
 
     const day = ipc.hold("guide.schedule");
     await page.press("ArrowRight");
+    await ready(() => expect(ipc.argsOf("guide.schedule")).toHaveLength(1));
     day.resolve([
       at(start - 2 * HOUR, "Emmerdale", "On now."),
       at(start - HOUR, "Trigger Point", "Not what was searched for."),
       at(start, "News at Ten", "The day's news."),
     ]);
-    await settled();
+    await ready(() => expect(page.row("ITV1")?.textContent).toContain("The day's news."));
 
     expect(ipc.argsOf("guide.schedule")).toEqual([
       { channel: { subscriptionId: SUBSCRIPTION, id: "2" } },
