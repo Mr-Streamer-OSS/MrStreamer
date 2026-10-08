@@ -197,7 +197,8 @@ function Pages({
     const by = moved.current;
     moved.current = null;
     const root = body.current;
-    if (by === "pointer") root?.focus();
+    // A taller page first reaches past the window: focus must not scroll the document to it.
+    if (by === "pointer") root?.focus({ preventScroll: true });
     if (by !== "keyboard") return;
     const target =
       (page === null && left.current
@@ -205,7 +206,7 @@ function Pages({
         : null) ??
       root?.querySelector<HTMLElement>("[data-item][aria-pressed=true]") ??
       root?.querySelector<HTMLElement>("[data-item]:not([data-back])");
-    target?.focus();
+    target?.focus({ preventScroll: true });
   }, [page]);
 
   const pickLook = (next: SubtitleLook) => {

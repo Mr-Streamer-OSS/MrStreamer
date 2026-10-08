@@ -251,6 +251,8 @@ export const ipcInputs = {
   "subtitles.saved": () => type({ sessionId: "string > 0" }),
   "subtitles.timing": () =>
     type({ sessionId: "string > 0", timing: SubtitleTiming, "selection?": "0 < string <= 64" }),
+  "subtitles.show": () => type({ sessionId: "string > 0", "selection?": "0 < string <= 64" }),
+  "subtitles.hide": () => type({ sessionId: "string > 0" }),
   "subtitles.forget": () => type({ sessionId: "string > 0" }),
   "subtitles.cancel": () => type({ sessionId: "string > 0" }),
   "playback.openTitle": () => type({ title: TitleRef, decoders: decoders() }),
@@ -506,6 +508,13 @@ export interface IpcOutputs {
   /** What is saved for the session's exact file, read from this computer only. */
   "subtitles.saved": SavedSubtitle | null;
   "subtitles.timing": SavedSubtitle;
+  /**
+   * The viewer chose a saved result of the session's exact file: the selected one, or a cached one
+   * named by its `selection`. It is the file's selected result again and shows when the file opens.
+   */
+  "subtitles.show": null;
+  /** The viewer chose Off or a file track. The selected result keeps its cues and timing, not shown. */
+  "subtitles.hide": null;
   "subtitles.forget": null;
   /** Aborts the session's pending search and download. */
   "subtitles.cancel": null;
@@ -662,6 +671,11 @@ export interface IpcEvents {
   "watchlist.changed": null;
   /** The update moved on, for example a download's progress. */
   "updates.changed": UpdateStatus;
+  /**
+   * The provider answered an open title session with another file than the one it opened. What
+   * was saved for the old file is gone, and that session has no saved or online subtitles left.
+   */
+  "playback.fileReplaced": { readonly sessionId: string };
   /** Where playback goes changed, or what the receiver plays did, or the receivers found. */
   "output.changed": OutputStatus;
   /**

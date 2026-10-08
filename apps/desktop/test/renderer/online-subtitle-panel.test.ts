@@ -75,6 +75,8 @@ async function opened(tracks: readonly SubtitleTrack[] = []) {
     quota: { service: "opensubtitles", remaining: 3, resetAt: "tomorrow" },
   });
   ipc.always("subtitles.cancel", null);
+  ipc.always("subtitles.show", null);
+  ipc.always("subtitles.hide", null);
   ipc.always("playback.openTitle", {
     sessionId: "movie",
     title: { kind: "movie", subscriptionId: SUBSCRIPTION, id: "4k" },
@@ -192,7 +194,105 @@ describe("subtitle choices while the picture plays", () => {
         each.textContent?.includes(" fps"),
       ),
     ).toHaveLength(6);
+
+    // A preset stores its exact ratio. The field reads it rounded, and reading it changes nothing.
+    const drift = container!.querySelector<HTMLInputElement>("#subtitle-speed")!;
+    await act(async () => {
+      button("25 → 23.976 fps").click();
+      await settle();
+    });
+    expect(ipc.argsOf("subtitles.timing").at(-1)?.timing.speed).toBe(25 / 23.976);
+    expect(drift.value).toBe("1.04271");
+    const writes = ipc.argsOf("subtitles.timing").length;
+    await act(async () => drift.focus());
+    expect(drift.value).toBe("1.04271");
+    await act(async () => drift.blur());
+    expect(ipc.argsOf("subtitles.timing")).toHaveLength(writes);
+    expect(titlePlayer.state().savedSubtitle?.timing.speed).toBe(25 / 23.976);
+    await act(async () => drift.focus());
+    for (const text of ["1.0", "1.", "1.04"]) {
+      await act(async () => {
+        setValue.call(drift, text);
+        drift.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      expect(drift.value).toBe(text);
+    }
+    expect(ipc.argsOf("subtitles.timing").at(-1)?.timing.speed).toBe(1.04);
   });
+
+  it("names the region of a result's language, and takes a replaced file's saved result away", async () => {
+    await opened();
+    ipc.always("subtitles.search", {
+      results: [
+        { ...results[1]!, id: "brazil", language: "pt-BR", release: "Harbour.BR" },
+        { ...results[1]!, id: "portugal", language: "pt-PT", release: "Harbour.PT" },
+      ],
+      failures: [],
+    });
+    titlePlayer.acceptDownloaded("movie", {
+      ...saved,
+      subtitle: { ...saved.subtitle!, language: "pt-BR" },
+    });
+    await render(createElement(SubtitlePanel, { open: true, onClose: () => {} }));
+    await act(async () => {
+      button("Search subtitles").click();
+      await settle();
+    });
+    expect(button("Harbour.BR").textContent).toContain("Português (Brasil)");
+    expect(button("Harbour.PT").textContent).toContain("Português (Portugal)");
+    expect(button("Night.Harbour.Cinema").textContent).toContain(
+      "Português (Brasil) · Saved for this version",
+    );
+
+    await act(async () => {
+      ipc.emit("playback.fileReplaced", { sessionId: "movie" });
+      await settle();
+    });
+    expect(container?.textContent).not.toContain("Saved for this version");
+    expect(container?.textContent).not.toContain("Harbour.BR");
+    expect(button("Search subtitles").disabled).toBe(true);
+    expect(button("Off").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it.each(["Cancel", "closing the panel"] as const)(
+    "tells main what still shows after %s ends a download main may have saved",
+    async (how) => {
+      await opened();
+      titlePlayer.acceptDownloaded("movie", saved);
+      const panel = (open: boolean) =>
+        createElement(
+          QueryClientProvider,
+          { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
+          createElement(SubtitlePanel, { open, onClose: () => {} }),
+        );
+      await render(createElement(SubtitlePanel, { open: true, onClose: () => {} }));
+      await act(async () => {
+        button("Search subtitles").click();
+        await settle();
+      });
+      const held = ipc.hold("subtitles.choose");
+      await act(async () => {
+        button("Night.Harbour.TV").click();
+        await vi.waitFor(() => expect(ipc.argsOf("subtitles.choose")).toHaveLength(1));
+      });
+      await act(async () => {
+        if (how === "Cancel") button("Cancel").click();
+        else root!.render(panel(false));
+        await settle();
+      });
+      await titlePlayer.downloadedEditsSaved();
+      const told = ipc.methods().filter((method) => /^subtitles\.(cancel|show|hide)$/.test(method));
+      expect(told).toEqual(["subtitles.cancel", "subtitles.show"]);
+      expect(ipc.argsOf("subtitles.show")).toEqual([
+        { sessionId: "movie", selection: "opaque-result" },
+      ]);
+      held.resolve({ saved: { ...saved, selection: "late-result" }, quota: null });
+      await act(async () => {
+        await settle();
+      });
+      expect(titlePlayer.state().savedSubtitle).toEqual(saved);
+    },
+  );
 
   it.each(
     (["Off", "file track", "C off", "C without a track", "saved result"] as const).flatMap(
@@ -234,6 +334,30 @@ describe("subtitle choices while the picture plays", () => {
     );
     expect(container?.querySelector('[role="alert"]')).toBeNull();
     expect(ipc.argsOf("subtitles.cancel")).toEqual([{ sessionId: "movie" }]);
+    // Main may have saved the download before the cancel reached it, so it hears the choice that
+    // stands, after the cancel: the held saved result by its key, or that nothing of it shows.
+    await titlePlayer.downloadedEditsSaved();
+    const told = ipc
+      .methods()
+      .filter((method) => /^subtitles\.(cancel|show|hide|timing)$/.test(method));
+    if (choice === "saved result") {
+      ipc.always("subtitles.timing", saved);
+      await titlePlayer.setDownloadedTiming({ offset: 1, speed: 25 / 23.976 });
+      expect(told).toEqual(["subtitles.cancel", "subtitles.show"]);
+      expect(ipc.argsOf("subtitles.show")).toEqual([
+        { sessionId: "movie", selection: "opaque-result" },
+      ]);
+      expect(ipc.argsOf("subtitles.timing")).toEqual([
+        {
+          sessionId: "movie",
+          timing: { offset: 1, speed: 25 / 23.976 },
+          selection: "opaque-result",
+        },
+      ]);
+    } else {
+      expect(told).toEqual(["subtitles.cancel", "subtitles.hide"]);
+      expect(ipc.argsOf("subtitles.hide")).toEqual([{ sessionId: "movie" }]);
+    }
     expect(container?.textContent).not.toContain("Downloading");
     expect(container?.textContent).not.toContain("Late release");
     expect(container?.textContent).not.toContain("3 service downloads remain");

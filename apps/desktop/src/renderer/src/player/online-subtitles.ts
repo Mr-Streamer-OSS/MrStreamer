@@ -48,6 +48,12 @@ export const onlineSubtitles = {
     void call("subtitles.cancel", { sessionId }).catch(() => {});
     store.setState({ ...empty, sessionId });
   },
+  /** Cancel, and the panel closing: no new choice follows, so what shows stays the choice. */
+  dismissPending(): void {
+    const discarded = store.getState().pending === "download";
+    onlineSubtitles.cancelPending();
+    if (discarded) titlePlayer.keepSubtitleChoice();
+  },
   async search(languages?: readonly string[]): Promise<void> {
     const { sessionId } = store.getState();
     if (!sessionId) return;

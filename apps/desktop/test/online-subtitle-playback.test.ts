@@ -6,12 +6,12 @@ import { OnDemand } from "../src/main/services/ondemand.ts";
 import { Playback } from "../src/main/services/playback.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { OnlineSubtitles } from "../src/main/services/online-subtitles.ts";
-import { fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+import { collect, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 const hasTools =
   spawnSync("ffmpeg", ["-version"]).status === 0 && spawnSync("ffprobe", ["-version"]).status === 0;
 
 describe.skipIf(!hasTools)("saved subtitles of the actual playback session", () => {
-  it("restores the exact file without a service request and rejects an observed replacement", async () => {
+  it("restores the exact file without a service request, keeps Off for it, and says which session's file was replaced", async () => {
     const provider = await fakeProvider({ titles: 1, maxConnections: 2, slotReleaseMs: 0 });
     const request = fetch;
     let serviceRequests = 0;
@@ -72,21 +72,30 @@ describe.skipIf(!hasTools)("saved subtitles of the actual playback session", () 
       expect(chosen.saved.subtitle?.release).toBe("Cinema cut");
       await subtitles.timing(first.sessionId, { offset: -2, speed: 25 / 24 });
       expect(serviceRequests).toBe(2);
+      await subtitles.hide(first.sessionId);
       await playback.close(first.sessionId);
       await expect(subtitles.saved(first.sessionId)).rejects.toBeDefined();
       const second = await open();
       expect(await subtitles.saved(second.sessionId)).toMatchObject({
+        shown: false,
         timing: { offset: -2, speed: 25 / 24 },
         subtitle: { release: "Cinema cut" },
       });
+      await subtitles.show(second.sessionId, chosen.saved.selection);
+      expect(await subtitles.saved(second.sessionId)).not.toHaveProperty("shown");
       expect(serviceRequests).toBe(2);
+      const replaced = await collect(runtime, playback.fileReplaced);
       const before = await request(`${second.url}?start=0`);
       await before.arrayBuffer();
+      expect(replaced).toEqual([]);
       provider.replaceMovieFile(movie.id, "title-mpeg4-mp3.avi");
       const answer = await request(`${second.url}?start=0`);
       expect(answer.ok).toBe(true);
       await answer.arrayBuffer();
+      await vi.waitFor(() => expect(replaced).toEqual([second.sessionId]));
       await expect(subtitles.saved(second.sessionId)).rejects.toBeDefined();
+      await expect(subtitles.show(second.sessionId, chosen.saved.selection)).rejects.toBeDefined();
+      await subtitles.hide(second.sessionId);
       await playback.close(second.sessionId);
       const replacement = await open();
       expect(await subtitles.saved(replacement.sessionId)).toBeNull();

@@ -60,6 +60,62 @@ describe("saved exact-file subtitles", () => {
     });
   });
 
+  it("keeps a result the viewer turned off, with its cues and timing, until it is chosen again", async () => {
+    const dir = await tempDir();
+    const layer = () => savedSubtitlesLayer.pipe(Layer.provide(databaseLayer(dir)));
+    const first = runtimeFor(layer());
+    const saved = await promised(first, SavedSubtitles);
+    // A row from before the mark existed has no key and no mark, and shows.
+    await saved.remember(file, subtitle);
+    expect(await saved.read(file)).toEqual({ timing: { offset: 0, speed: 1 }, subtitle });
+    await saved.hide(file);
+    await saved.timing(file, { offset: 2, speed: 1 });
+    await saved.hide({ ...file, id: "hd" });
+    await first.dispose();
+
+    const restored = await promised(runtimeFor(layer()), SavedSubtitles);
+    expect(await restored.read(file)).toEqual({
+      shown: false,
+      timing: { offset: 2, speed: 1 },
+      subtitle,
+    });
+    expect(await restored.read({ ...file, id: "hd" })).toBeNull();
+    for (const other of [
+      { ...file, account: "another" },
+      { ...file, sourceStamp: "changed-source" },
+      { ...file, listingKey: "replacement" },
+    ])
+      expect(await restored.read(other)).toBeNull();
+    await restored.show(file);
+    expect(await restored.read(file)).toEqual({ timing: { offset: 2, speed: 1 }, subtitle });
+
+    // A download replaces the selection and shows; the result before it stays cached by its key.
+    const next = { ...subtitle, release: "Another release" };
+    await restored.remember(file, subtitle, "first");
+    await restored.timing(file, { offset: 1, speed: 25 / 23.976 }, "first");
+    await restored.hide(file);
+    await restored.remember(file, next, "second");
+    expect(await restored.read(file)).toEqual({
+      selection: "second",
+      timing: { offset: 0, speed: 1 },
+      subtitle: next,
+    });
+    await restored.hide(file);
+    await restored.show(file, "first");
+    expect(await restored.read(file)).toEqual({
+      selection: "first",
+      timing: { offset: 1, speed: 25 / 23.976 },
+      subtitle,
+    });
+    expect(await restored.result(file, "second")).toEqual({
+      selection: "second",
+      timing: { offset: 0, speed: 1 },
+      subtitle: next,
+    });
+    await expect(restored.show(file, "never-saved")).rejects.toBeDefined();
+    expect((await restored.read(file))?.selection).toBe("first");
+  });
+
   it.each(["listingKey", "sourceStamp"] as const)(
     "a changed %s clears obsolete results without letting an old forget erase its replacement",
     async (changed) => {

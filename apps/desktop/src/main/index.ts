@@ -456,6 +456,7 @@ async function start(): Promise<void> {
   forward(viewing.changes, "viewing.changed", (sequence) => ({ sequence }));
   forward(watchlist.changes, "watchlist.changed", () => null);
   forward(updates.changes, "updates.changed", (status) => status);
+  forward(playback.fileReplaced, "playback.fileReplaced", (sessionId) => ({ sessionId }));
   // A receiver plays from this computer, so it stays awake while one does. The display may sleep.
   let awake: number | null = null;
   runtime.runFork(
@@ -614,6 +615,9 @@ async function start(): Promise<void> {
       "subtitles.saved": ({ sessionId }) => onlineSubtitles.saved(sessionId),
       "subtitles.timing": ({ sessionId, timing, selection }) =>
         onlineSubtitles.timing(sessionId, timing, selection),
+      "subtitles.show": ({ sessionId, selection }) =>
+        Effect.as(onlineSubtitles.show(sessionId, selection), null),
+      "subtitles.hide": ({ sessionId }) => Effect.as(onlineSubtitles.hide(sessionId), null),
       "subtitles.forget": ({ sessionId }) => Effect.as(onlineSubtitles.forget(sessionId), null),
       "subtitles.cancel": ({ sessionId }) => Effect.as(onlineSubtitles.cancel(sessionId), null),
       "playback.openTitle": ({ title, decoders }) =>

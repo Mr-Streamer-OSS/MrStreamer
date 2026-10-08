@@ -183,6 +183,80 @@ describe("online subtitles of the playing exact file", () => {
     },
   );
 
+  it("keeps Off for the exact file until a saved result is chosen or downloaded, whatever session asks", async () => {
+    const dir = await tempDir();
+    const first = await setup(dir);
+    await first.service.configure({ ...preferences, service: "subdl" }, credentials);
+    const found = await first.service.search("playing-4k");
+    const chosen = await first.service.choose("playing-4k", found.results[0]!.id);
+    await first.service.timing("playing-4k", { offset: -3, speed: 25 / 23.976 });
+    await first.service.hide("playing-4k");
+    // A session that plays no current exact file has nothing to hide, and nothing to show.
+    await first.service.hide("closed-session");
+    await expect(first.service.show("closed-session")).rejects.toBeDefined();
+    await first.runtime.dispose();
+
+    const second = await setup(dir);
+    expect(await second.service.saved("playing-4k")).toEqual({
+      ...chosen.saved,
+      shown: false,
+      timing: { offset: -3, speed: 25 / 23.976 },
+    });
+    await second.service.show("playing-4k", chosen.saved.selection);
+    expect(await second.service.saved("playing-4k")).toEqual({
+      ...chosen.saved,
+      timing: { offset: -3, speed: 25 / 23.976 },
+    });
+    await second.service.hide("playing-4k");
+    // Choosing it from a search again is an explicit choice too, and costs no download.
+    const again = await second.service.search("playing-4k");
+    expect((await second.service.choose("playing-4k", again.results[0]!.id)).saved).toEqual({
+      ...chosen.saved,
+      timing: { offset: -3, speed: 25 / 23.976 },
+    });
+    expect(second.calls.some((url) => url.startsWith("https://dl.subdl.com/"))).toBe(false);
+    expect(await second.storage.read({ ...file, sourceStamp: "another-list" })).toBeNull();
+  });
+
+  it.each(["Off or a file track", "the saved result it still held"] as const)(
+    "follows the window's choice of %s when a download was saved before the window heard of it",
+    async (choice) => {
+      const state = await setup();
+      await state.service.configure({ ...preferences, service: "subdl" }, credentials);
+      const found = await state.service.search("playing-4k");
+      const held = await state.service.choose("playing-4k", found.results[0]!.id);
+      await state.service.timing("playing-4k", { offset: -3, speed: 1 }, held.saved.selection);
+      // Main saved this one and answered. The window had turned away and dropped the answer,
+      // so its cancel comes too late and its choice follows.
+      const late = await state.service.choose("playing-4k", found.results[1]!.id);
+      await state.service.cancel("playing-4k");
+      const downloads = state.calls.length;
+      if (choice === "Off or a file track") {
+        await state.service.hide("playing-4k");
+        state.next();
+        expect(await state.service.saved("next-file")).toEqual({ ...late.saved, shown: false });
+      } else {
+        await state.service.show("playing-4k", held.saved.selection);
+        // The held result is the selection again, so its corrections are accepted and kept.
+        await state.service.timing(
+          "playing-4k",
+          { offset: -2.9, speed: 25 / 23.976 },
+          held.saved.selection,
+        );
+        state.next();
+        expect(await state.service.saved("next-file")).toEqual({
+          ...held.saved,
+          timing: { offset: -2.9, speed: 25 / 23.976 },
+        });
+        expect((await state.storage.result(file, late.saved.selection!))?.subtitle).toEqual(
+          late.saved.subtitle,
+        );
+      }
+      expect(state.calls).toHaveLength(downloads);
+      await state.runtime.dispose();
+    },
+  );
+
   it("a later chosen result cancels the held download without replacing the saved current result", async () => {
     const state = await setup();
     await state.service.configure({ ...preferences, service: "subdl" }, credentials);

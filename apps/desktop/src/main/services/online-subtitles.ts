@@ -56,6 +56,10 @@ export class OnlineSubtitles extends Context.Service<
       timing: SubtitleTiming,
       selection?: string,
     ): Effect.Effect<SavedSubtitle, Failed>;
+    /** The viewer chose a saved result: by its opaque key, or the selected one without a key. */
+    show(sessionId: string, selection?: string): Effect.Effect<void, Failed>;
+    /** The viewer chose Off or a file track. A session without a current exact file has nothing to hide. */
+    hide(sessionId: string): Effect.Effect<void, Failed>;
     forget(sessionId: string): Effect.Effect<void, Failed>;
     cancel(sessionId: string): Effect.Effect<void>;
   }
@@ -274,6 +278,14 @@ function make(deps: Parameters<typeof subtitleServiceClient>[0]) {
           const session = yield* current(id);
           yield* storage.timing(session.file, SubtitleTiming.assert(timing), selection);
           return (yield* storage.read(session.file))!;
+        }),
+      show: (id: string, selection?: string) =>
+        Effect.flatMap(current(id), (session) => storage.show(session.file, selection)),
+      hide: (id: string) =>
+        Effect.gen(function* () {
+          const session = yield* sessions.resolve(id);
+          if (session && !session.signal.aborted && (yield* session.standing))
+            yield* storage.hide(session.file);
         }),
       forget: (id: string) =>
         Effect.gen(function* () {

@@ -166,9 +166,14 @@ export interface TitlePlayerState {
    * or without it. Null once it shows as the file has it.
    */
   readonly subtitleStatus: SubtitleStatus;
-  /** Main-owned local playback session. Receivers have no online subtitle session. */
+  /**
+   * Main-owned local playback session. Receivers have no online subtitle session, and neither
+   * has a session whose file the provider replaced while it played.
+   */
   readonly subtitleSessionId: string | null;
+  /** The open file's saved result as main gave it. Its `shown` is main's word from then. */
   readonly savedSubtitle: SavedSubtitle | null;
+  /** The saved result shows now. Main is told each time a choice here changes that. */
   readonly downloadedOn: boolean;
   readonly speed: Speed;
   /**
@@ -321,6 +326,20 @@ onLiveStart(() => {
 });
 // What comes after the open episode follows the record: one marked or played since is passed over.
 listen("viewing.changed", () => void refreshNext());
+// Main found another file behind the open title and forgot what was saved for the old one: its
+// downloaded text leaves the picture and the panel too. An older session's word, or a receiver's,
+// names no session open here. The file's own tracks say so themselves, through their feed.
+listen("playback.fileReplaced", ({ sessionId }) => {
+  if (!session || session.id !== sessionId) return;
+  subtitleChoices?.();
+  subtitleChoice++;
+  lastWasDownloaded = false;
+  if (store.getState().downloadedOn) {
+    clearSubtitles(video);
+    setSubtitleDelay(video, 0);
+  }
+  store.setState({ subtitleSessionId: null, savedSubtitle: null, downloadedOn: false });
+});
 
 /**
  * Asks the record how the episodes of the open one's series stand now, in its own subscription,
@@ -984,18 +1003,44 @@ function paintDownloaded(): void {
   showDownloadedSubtitle(video, saved.subtitle);
 }
 
+/**
+ * What main saved for the open file. A result the viewer last turned off there, for Off or a file
+ * track, is listed and stays off: only the choice of it, or a download, shows it again.
+ */
 async function restoreDownloaded(): Promise<void> {
   const current = session;
   const choice = subtitleChoice;
   if (!current) return;
   const saved = await call("subtitles.saved", { sessionId: current.id }).catch(() => null);
-  if (session !== current || receiver) return;
+  if (session !== current || receiver || store.getState().subtitleSessionId !== current.id) return;
   if (choice !== subtitleChoice) {
     if (!store.getState().savedSubtitle) store.setState({ savedSubtitle: saved });
     return;
   }
-  if (saved?.subtitle) titlePlayer.acceptDownloaded(current.id, saved);
+  if (saved?.subtitle && saved.shown !== false) titlePlayer.acceptDownloaded(current.id, saved);
   else store.setState({ savedSubtitle: saved });
+}
+
+/**
+ * Tells main what the open file shows after a choice made here: its saved result, or none of it.
+ * In order with timing edits and before the next download, so main's selection is the viewer's
+ * last choice even when main saved a download this window had already turned away from.
+ */
+function keepSubtitleChoice(): void {
+  const current = session;
+  if (!current || receiver) return;
+  const { downloadedOn, savedSubtitle } = store.getState();
+  const selection = savedSubtitle?.selection;
+  subtitleSaving = subtitleSaving
+    .then(() =>
+      downloadedOn
+        ? call("subtitles.show", { sessionId: current.id, ...(selection ? { selection } : {}) })
+        : call("subtitles.hide", { sessionId: current.id }),
+    )
+    .then(
+      () => {},
+      () => {},
+    );
 }
 
 outputs.subscribe(outputChanged);
@@ -1242,6 +1287,7 @@ export const titlePlayer = {
     subtitleChoices?.();
     store.setState({ subtitle: track, downloadedOn: false });
     if (downloadedOn) setSubtitleDelay(video, 0);
+    keepSubtitleChoice();
     if (track) lastSubtitle = track;
     rememberSubtitles(track);
     // Turning subtitles off is instant, and stays off; showing others needs a new run.
@@ -1270,11 +1316,14 @@ export const titlePlayer = {
     const next =
       lastSubtitle ?? subtitles.find((track) => !shows || shows.includes(track.format)) ?? null;
     if (next) titlePlayer.setSubtitle(next);
+    // Nothing to turn on: a download this key cancelled is not shown either.
+    else keepSubtitleChoice();
   },
 
   /** Accepts a main-owned saved result only for the session whose request produced it. */
   acceptDownloaded(sessionId: string, saved: SavedSubtitle): boolean {
     if (!session || session.id !== sessionId || receiver) return false;
+    if (store.getState().subtitleSessionId !== sessionId) return false;
     subtitleChoice++;
     lastWasDownloaded = saved.subtitle !== null;
     store.setState({
@@ -1317,7 +1366,14 @@ export const titlePlayer = {
     store.setState({ downloadedOn: true, subtitle: null, subtitleStatus: null });
     engine?.hideSubtitles();
     paintDownloaded();
+    keepSubtitleChoice();
   },
+
+  /**
+   * A download was cancelled without another choice. Main may have saved it already, so it hears
+   * what the picture still shows.
+   */
+  keepSubtitleChoice,
 
   /** Saves edits in order. An old response cannot move another file's subtitles. */
   async setDownloadedTiming(timing: SubtitleTiming): Promise<void> {

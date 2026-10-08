@@ -36,8 +36,11 @@ function at(position: number) {
   player.element.currentTime = position;
   player.element.dispatchEvent(new Event("seeked"));
 }
-async function open() {
+async function open(preferred: Parameters<typeof ipc.prefer>[0] = {}) {
   ipc.reset();
+  ipc.prefer(preferred);
+  ipc.always("subtitles.show", null);
+  ipc.always("subtitles.hide", null);
   const restore = ipc.hold("subtitles.saved");
   const pictureCalls: string[] = [];
   vi.stubGlobal("fetch", async (input: string) => {
@@ -148,6 +151,87 @@ describe("a downloaded subtitle on the movie picture", () => {
     await settle();
     expect(titlePlayer.state().savedSubtitle).toEqual(newer);
     expect(titlePlayer.state().downloadedOn).toBe(true);
+  });
+
+  it("opens with a result the viewer turned off listed but not showing, and tells main each choice made here", async () => {
+    const { restore } = await open();
+    const kept = { ...saved, selection: "kept-result" };
+    restore.resolve({ ...kept, shown: false });
+    await settle();
+    expect(titlePlayer.state().downloadedOn).toBe(false);
+    expect(titlePlayer.state().savedSubtitle?.subtitle).toEqual(saved.subtitle);
+    at(103);
+    expect(shown()).toBe("");
+    expect(ipc.methods().filter((method) => /^subtitles\.(show|hide)$/.test(method))).toEqual([]);
+
+    titlePlayer.showDownloaded();
+    expect(shown()).toBe("Welcome.");
+    titlePlayer.setSubtitle(english);
+    titlePlayer.toggleSubtitles();
+    await titlePlayer.downloadedEditsSaved();
+    expect(ipc.methods().filter((method) => /^subtitles\.(show|hide)$/.test(method))).toEqual([
+      "subtitles.show",
+      "subtitles.hide",
+      "subtitles.hide",
+    ]);
+    expect(ipc.argsOf("subtitles.show")).toEqual([
+      { sessionId: "local-movie", selection: "kept-result" },
+    ]);
+    expect(ipc.argsOf("subtitles.hide")[0]).toEqual({ sessionId: "local-movie" });
+    expect(titlePlayer.state().savedSubtitle?.subtitle).toEqual(saved.subtitle);
+  });
+
+  it("shows a saved result on open even when the subtitle language is Off", async () => {
+    const { restore } = await open({ subtitleLanguage: "off" });
+    restore.resolve(saved);
+    await settle();
+    expect(titlePlayer.state().downloadedOn).toBe(true);
+    at(103);
+    expect(shown()).toBe("Welcome.");
+    expect(ipc.argsOf("preferences.update")).toEqual([]);
+  });
+
+  it("drops the downloaded result when main says this session's file was replaced, and only then", async () => {
+    const { pictureCalls, restore } = await open();
+    titlePlayer.acceptDownloaded("local-movie", saved);
+    at(103);
+    expect(shown()).toBe("Welcome.");
+    ipc.emit("playback.fileReplaced", { sessionId: "an-earlier-session" });
+    expect(shown()).toBe("Welcome.");
+    expect(titlePlayer.state().savedSubtitle).toEqual(saved);
+
+    ipc.emit("playback.fileReplaced", { sessionId: "local-movie" });
+    expect(shown()).toBe("");
+    expect(titlePlayer.state()).toMatchObject({
+      savedSubtitle: null,
+      downloadedOn: false,
+      subtitleSessionId: null,
+      now: { name: "Night Harbour" },
+    });
+    // The picture goes on as it was, and nothing late brings the old text back.
+    expect(pictureCalls).toHaveLength(1);
+    expect(titlePlayer.acceptDownloaded("local-movie", saved)).toBe(false);
+    restore.resolve(saved);
+    await settle();
+    titlePlayer.toggleSubtitles();
+    titlePlayer.seek(300);
+    await settle();
+    at(103);
+    expect(shown()).toBe("");
+    expect(titlePlayer.state().savedSubtitle).toBeNull();
+    expect(pictureCalls.length).toBeGreaterThan(1);
+  });
+
+  it("keeps a shown file track when the file is replaced, and only takes the saved result off the list", async () => {
+    const { pictureCalls, restore } = await open();
+    titlePlayer.setSubtitle(english);
+    restore.resolve(saved);
+    await settle();
+    expect(titlePlayer.state().savedSubtitle).toEqual(saved);
+    const runs = pictureCalls.length;
+    ipc.emit("playback.fileReplaced", { sessionId: "local-movie" });
+    expect(titlePlayer.state()).toMatchObject({ subtitle: english, savedSubtitle: null });
+    expect(pictureCalls).toHaveLength(runs);
   });
 
   it("reports a failed timing write once and lets the next correction save", async () => {

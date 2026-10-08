@@ -61,6 +61,13 @@ export class SavedSubtitles extends Context.Service<
       timing: SubtitleTiming,
       selection?: string,
     ): Effect.Effect<void, Failed>;
+    /**
+     * Makes a saved result the file's selected and shown one: the selected row when `selection`
+     * names it, else the cached result of that key with its own timing. Fails when neither holds it.
+     */
+    show(file: SubtitleFile, selection?: string): Effect.Effect<void, Failed>;
+    /** Keeps the selected result, its key and timing, but not shown when the file opens again. */
+    hide(file: SubtitleFile): Effect.Effect<void, Failed>;
     /** Forgets a removed file or one playback has observed being replaced. */
     forget(file: SubtitleFile): Effect.Effect<void, Failed>;
   }
@@ -114,14 +121,24 @@ export const savedSubtitlesLayer = Layer.effect(
           return null;
         }
       };
+      /** A result as the cache keeps it: cues, timing and key. Whether it shows is the selection's. */
+      const result = (saved: Stored): SavedSubtitle => ({
+        timing: saved.timing,
+        subtitle: saved.subtitle,
+        ...(saved.resultKey ? { selection: saved.resultKey } : {}),
+      });
       const visible = (saved: Stored | null): SavedSubtitle | null =>
-        saved
-          ? {
-              timing: saved.timing,
-              subtitle: saved.subtitle,
-              ...(saved.resultKey ? { selection: saved.resultKey } : {}),
-            }
-          : null;
+        saved ? { ...result(saved), ...(saved.shown === false ? { shown: false } : {}) } : null;
+      const cachedResult = (file: SubtitleFile, key: string): SavedSubtitle | null => {
+        const row = cached.get(...identity(file), key);
+        if (!row) return null;
+        try {
+          const parsed = SavedSubtitle(JSON.parse(String(row.saved)));
+          return parsed instanceof type.errors ? null : parsed;
+        } catch {
+          return null;
+        }
+      };
       const save = (file: SubtitleFile, saved: Stored) => {
         const checked = Stored.assert(saved);
         transaction(db, () => {
@@ -132,7 +149,7 @@ export const savedSubtitlesLayer = Layer.effect(
             rememberResult.run(
               ...identity(file),
               checked.resultKey,
-              JSON.stringify(visible(checked)),
+              JSON.stringify(result(checked)),
             );
             pruneResults.run(...identity(file));
           }
@@ -140,17 +157,7 @@ export const savedSubtitlesLayer = Layer.effect(
       };
       return {
         read: (file: SubtitleFile) => attempt(() => visible(read(file))),
-        result: (file: SubtitleFile, key: string) =>
-          attempt(() => {
-            const row = cached.get(...identity(file), key);
-            if (!row) return null;
-            try {
-              const parsed = SavedSubtitle(JSON.parse(String(row.saved)));
-              return parsed instanceof type.errors ? null : parsed;
-            } catch {
-              return null;
-            }
-          }),
+        result: (file: SubtitleFile, key: string) => attempt(() => cachedResult(file, key)),
         remember: (
           file: SubtitleFile,
           subtitle: DownloadedSubtitle,
@@ -177,6 +184,26 @@ export const savedSubtitlesLayer = Layer.effect(
               throw new Error("The selected subtitle changed before its timing was saved.");
             save(file, { ...previous, timing, subtitle: previous?.subtitle ?? null });
           }),
+        show: (file: SubtitleFile, selection?: string) =>
+          attempt(() => {
+            const previous = read(file);
+            if (previous?.subtitle && previous.resultKey === selection) {
+              // Only `false` is stored: a row without the mark shows.
+              const { shown, ...row } = previous;
+              if (shown === false) save(file, row);
+              return;
+            }
+            const held = selection ? cachedResult(file, selection) : null;
+            if (!selection || !held?.subtitle)
+              throw new Error("That subtitle is no longer saved for this file.");
+            save(file, { timing: held.timing, subtitle: held.subtitle, resultKey: selection });
+          }),
+        hide: (file: SubtitleFile) =>
+          attempt(() => {
+            const previous = read(file);
+            if (previous?.subtitle && previous.shown !== false)
+              save(file, { ...previous, shown: false });
+          }),
         forget: (file: SubtitleFile) =>
           attempt(() => {
             transaction(db, () => {
@@ -197,6 +224,8 @@ function closed(detail: string): SavedSubtitles["Service"] {
     result: () => fail,
     remember: () => fail,
     timing: () => fail,
+    show: () => fail,
+    hide: () => fail,
     forget: () => fail,
   };
 }

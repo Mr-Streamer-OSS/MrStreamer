@@ -12,28 +12,32 @@ import { titlePlayer, useTitlePlayer } from "../../player/title-player.ts";
 const FPS = [23.976, 24, 25] as const;
 
 // Keep an unfinished decimal, such as "-" or "0.", while the viewer types. Only valid
-// values change playback; leaving the field restores the last accepted value.
+// values change playback; leaving the field restores the last accepted value. The field reads
+// `digits` decimals at most: a preset's exact ratio stays stored until the viewer types another.
 function TimingField({
   id,
   value,
   min,
   max,
+  digits,
   onChange,
 }: {
   id: string;
   value: number;
   min: number;
   max: number;
+  digits: number;
   onChange: (value: number) => void;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
+  const shown = String(Number(value.toFixed(digits)));
   return (
     <Input
       id={id}
       inputMode="decimal"
-      value={draft ?? String(value)}
+      value={draft ?? shown}
       className="w-28"
-      onFocus={() => setDraft(String(value))}
+      onFocus={() => setDraft(shown)}
       onBlur={() => setDraft(null)}
       onChange={(event) => {
         const text = event.currentTarget.value;
@@ -73,6 +77,7 @@ export function SubtitleTimingControls() {
           id="subtitle-offset"
           min={-600}
           max={600}
+          digits={3}
           value={timing.offset}
           onChange={(offset) => change({ ...timing, offset })}
         />
@@ -93,6 +98,7 @@ export function SubtitleTimingControls() {
           id="subtitle-speed"
           min={0.9}
           max={1.1}
+          digits={5}
           value={timing.speed}
           onChange={(speed) => change({ ...timing, speed })}
         />

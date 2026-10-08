@@ -63,10 +63,12 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PubSub from "effect/PubSub";
 import { VerifiedFiles } from "../platform/verified-files.ts";
 import { SavedSubtitles, type SubtitleFile } from "../platform/saved-subtitles.ts";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
+import * as Stream from "effect/Stream";
 import { createCleanStart } from "../playback/clean-start.ts";
 import { ffmpegArguments, planConversion, type Conversion } from "../playback/convert.ts";
 import { createInspector, type Inspection, type StreamLayout } from "../playback/inspect.ts";
@@ -668,6 +670,11 @@ export class Playback extends Context.Service<
     ): Effect.Effect<TitleSession, Failed>;
     /** The current local title only, with no provider address or request headers. */
     subtitleContext(sessionId: string): Effect.Effect<SubtitlePlayback | null, Failed>;
+    /**
+     * Ids of title sessions the provider answered with another file than the one they opened, as
+     * playback's own reads find out. What was saved for the old file is already forgotten then.
+     */
+    readonly fileReplaced: Stream.Stream<string>;
     /** Closes a stream and its provider connection. Unknown or already closed ids are ignored. */
     close(sessionId: string): Effect.Effect<void>;
     /** Closes every open stream, for example when the window closes. */
@@ -737,6 +744,7 @@ function make(deps: PlaybackDeps) {
     // The app provides storage; standalone playback ports can run without a database.
     const verifiedFiles = Option.getOrNull(yield* Effect.serviceOption(VerifiedFiles));
     const savedSubtitles = Option.getOrNull(yield* Effect.serviceOption(SavedSubtitles));
+    const replaced = yield* PubSub.unbounded<string>();
     const scope = yield* Effect.scope;
     const sessions = new Map<string, Session>();
     /** When channel streams failed, by upstream address, for `FAILED_STREAM_MS`. */
@@ -1258,8 +1266,9 @@ function make(deps: PlaybackDeps) {
      * Notes what an upstream answer says of the session's file. Once it is another file than the
      * session knew, nothing kept of the old one stays: not its parts, its subtitles or its index,
      * nor what ffprobe read of it for the next time the title opens, and a feed that gave the
-     * player the old file's subtitles says they are gone. Playback goes on with what the provider
-     * sends, as it always did. Null when the answer doesn't say what it holds.
+     * player the old file's subtitles says they are gone. The window hears which session it was
+     * (`fileReplaced`), for what it still shows of that file's saved subtitles. Playback goes on
+     * with what the provider sends, as it always did. Null when the answer doesn't say what it holds.
      */
     function observe(session: TitleSessionState, answer: Response, ranged: boolean): Held | null {
       const held = session.identity.observe(answer, ranged);
@@ -1288,6 +1297,7 @@ function make(deps: PlaybackDeps) {
           );
         }
         session.feed?.changed();
+        PubSub.publishUnsafe(replaced, session.id);
       }
       // A receiver holds a playlist of the file as it was read when the title opened: its length,
       // its tracks and where its segments start. Of another file none of that holds, whether the
@@ -3522,6 +3532,8 @@ function make(deps: PlaybackDeps) {
             signal: AbortSignal.any([session.closed.signal, session.subtitleFileChanged.signal]),
           };
         }),
+
+      fileReplaced: Stream.fromPubSub(replaced),
 
       begin: Effect.sync(() => ++turns),
 

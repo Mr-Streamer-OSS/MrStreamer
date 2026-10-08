@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import type { SubtitleServiceFailure } from "@mrstreamer/contracts/online-subtitles";
 import { TITLE_LANGUAGES } from "@mrstreamer/core/ondemand/languages";
-import { languageName } from "@mrstreamer/core/ondemand/tracks";
+import { languageName, regionalLanguageName } from "@mrstreamer/core/ondemand/tracks";
 import { Button } from "../../components/ui/button.tsx";
 import { onlineSubtitles, useOnlineSubtitles } from "../../player/online-subtitles.ts";
 import { titlePlayer, useTitlePlayer } from "../../player/title-player.ts";
@@ -38,7 +38,7 @@ export function SubtitlePanel({ open, onClose }: { open: boolean; onClose: () =>
     const previous = document.activeElement;
     root.current?.querySelector<HTMLElement>("[aria-pressed=true]")?.focus();
     return () => {
-      onlineSubtitles.cancelPending();
+      onlineSubtitles.dismissPending();
       if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
     };
   }, [open]);
@@ -78,7 +78,7 @@ export function SubtitlePanel({ open, onClose }: { open: boolean; onClose: () =>
         <Choice chosen={downloadedOn} onChoose={() => titlePlayer.showDownloaded()}>
           <span className="block break-words">{saved.subtitle.release || "Saved subtitle"}</span>
           <span className="block text-xs">
-            {languageName(saved.subtitle.language)} · Saved for this version
+            {regionalLanguageName(saved.subtitle.language)} · Saved for this version
           </span>
         </Choice>
       )}
@@ -145,7 +145,7 @@ export function SubtitlePanel({ open, onClose }: { open: boolean; onClose: () =>
         {search.pending && (
           <div role="status" className="mt-3 flex items-center gap-3 text-sm">
             <span>{search.pending === "search" ? "Searching" : "Downloading"}</span>
-            <Button size="sm" variant="secondary" onClick={() => onlineSubtitles.cancelPending()}>
+            <Button size="sm" variant="secondary" onClick={() => onlineSubtitles.dismissPending()}>
               Cancel
             </Button>
           </div>
@@ -177,7 +177,7 @@ export function SubtitlePanel({ open, onClose }: { open: boolean; onClose: () =>
               </span>
               <span className="mt-1 block text-xs">
                 {result.service === "subdl" ? "SubDL" : "OpenSubtitles"} ·{" "}
-                {languageName(result.language)}
+                {regionalLanguageName(result.language)}
                 {result.hearingImpaired ? " · Hearing impaired" : ""}
                 {result.downloads !== null
                   ? ` · ${result.downloads.toLocaleString()} downloads`

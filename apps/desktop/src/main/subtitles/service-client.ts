@@ -272,7 +272,7 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
         ? query.kind === "movie"
           ? { tmdb_id: String(query.tmdbId) }
           : { parent_tmdb_id: String(query.tmdbId) }
-        : { query: query.title!.toLowerCase() }),
+        : { query: query.title!.trim().toLowerCase() }),
       ...(query.kind === "movie"
         ? query.year !== undefined
           ? { year: String(query.year) }

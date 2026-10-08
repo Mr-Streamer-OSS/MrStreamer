@@ -500,6 +500,8 @@ describe("explicit title search fallback", () => {
       year: "2019",
     });
     expect(calls[1]!.search).toBe("?languages=en&query=night+harbour&type=movie&year=2019");
+    await client.openSearch(keys.opensubtitles, { ...query, title: "  Night Harbour  " }, signal());
+    expect(calls[2]!.search).toBe(calls[1]!.search);
     for (const url of calls) {
       expect(url.searchParams.has("tmdb_id")).toBe(false);
       expect(url.searchParams.has("file_name")).toBe(false);
