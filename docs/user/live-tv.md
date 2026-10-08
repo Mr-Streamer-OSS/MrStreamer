@@ -38,9 +38,9 @@ Programme information comes from your provider. Many providers only cover some c
 
 ## Watching
 
-While watching, the channel list opens over the left of the picture with the list button, Enter or the left arrow. Click a channel to switch; its title switches to another category. Clicking the picture shows the controls, and a double click toggles full screen. Scroll over the picture to switch channel, once per gesture.
+While watching, the channel list opens over the left of the picture with the list button, Enter or the left arrow. Click a channel to switch; its title switches to another category. Clicking the picture shows the controls, and a double click toggles full screen. From 0.0.9, scroll over the picture to switch channel, once per gesture.
 
-The bar keeps Channels, Favourite, Stop or Watch, CC when available, volume, full screen and **More**. More holds channel up, channel down, the previous channel, Sound, Quality, Playback, Play on and Mini player.
+From 0.0.9, the bar keeps Channels, Favourite, Stop or Watch, CC when available, volume, full screen and **More**. More holds channel up, channel down, the previous channel, Sound, Quality, Playback, Play on and Mini player. In 0.0.8, these actions have their own buttons in the bar.
 
 - **Sound**, in More, shows when a channel has more than one sound track. Picking another starts the channel again with it, which takes a moment. An HLS channel, as most of a playlist's are, switches without starting again.
 - **CC** lists the channel's subtitles: DVB subtitles, teletext subtitle pages and closed captions, and on an HLS channel the subtitles its stream offers. C turns the last ones you picked on and off.
