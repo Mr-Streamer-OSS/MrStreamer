@@ -89,27 +89,47 @@ export function createCaptionCopy(onChannels: (channels: readonly number[]) => v
   }
 
   return {
+    /**
+     * Filters the next chunk of the stream. Never writes into `chunk` or into anything it
+     * returned before; what it returns may share memory with `chunk`.
+     */
     push(chunk: Uint8Array): Uint8Array {
       const data = carry.length ? concat([carry, chunk]) : chunk;
       const end = data.length - (data.length % PACKET);
-      carry = data.slice(end);
+      // Owned, so a later write to the chunk can't reach it.
+      carry = new Uint8Array(data.subarray(end));
       const out: Uint8Array[] = [];
+      // `data[run, offset)` is unchanged input not in `out` yet.
+      let run = 0;
+      const flush = (to: number) => {
+        if (to > run) out.push(data.subarray(run, to));
+        run = to;
+      };
       for (let offset = 0; offset < end; offset += PACKET) {
-        const packet = data.slice(offset, offset + PACKET);
-        if (packet[0] !== SYNC) {
-          out.push(packet);
-          continue;
-        }
-        const pid = ((packet[1]! & 0x1f) << 8) | packet[2]!;
-        const start = (packet[1]! & 0x40) !== 0;
-        if (pid === 0 && start) programPid = patProgram(packet) ?? programPid;
-        else if (pid === programPid && start) {
+        if (data[offset] !== SYNC) continue;
+        const pid = ((data[offset + 1]! & 0x1f) << 8) | data[offset + 2]!;
+        const start = (data[offset + 1]! & 0x40) !== 0;
+        if (pid === 0 && start) {
+          programPid = patProgram(data.subarray(offset, offset + PACKET)) ?? programPid;
+        } else if (pid === programPid && start) {
+          const packet = data.subarray(offset, offset + PACKET);
           video = tableVideo(packet) ?? video;
-          if (present) addCaptionStream(packet);
+          if (present) {
+            // The program table goes out as a copy of our own with the caption stream listed.
+            const patched = new Uint8Array(packet);
+            addCaptionStream(patched);
+            flush(offset);
+            out.push(patched);
+            run = offset + PACKET;
+          }
         } else if (video && pid === video.pid) {
-          const payload = payloadOf(packet);
+          const payload = payloadOf(data, offset);
           if (start) {
-            out.push(...captionPackets());
+            const captions = captionPackets();
+            if (captions.length > 0) {
+              flush(offset);
+              out.push(...captions);
+            }
             const pts = payload ? pesTime(payload) : null;
             picture =
               pts === null || !payload
@@ -119,18 +139,19 @@ export function createCaptionCopy(onChannels: (channels: readonly number[]) => v
             picture.parts.push(payload);
           }
         }
-        out.push(packet);
       }
+      flush(end);
       return concat(out);
     },
   };
 }
 
-function payloadOf(packet: Uint8Array): Uint8Array | null {
-  const adaptation = (packet[3]! >> 4) & 0x03;
+/** The payload of the transport packet at `offset`, after any adaptation field. */
+function payloadOf(data: Uint8Array, offset = 0): Uint8Array | null {
+  const adaptation = (data[offset + 3]! >> 4) & 0x03;
   if (adaptation === 0 || adaptation === 2) return null;
-  const start = adaptation === 3 ? 5 + packet[4]! : 4;
-  return start < PACKET ? packet.subarray(start) : null;
+  const start = adaptation === 3 ? 5 + data[offset + 4]! : 4;
+  return start < PACKET ? data.subarray(offset + start, offset + PACKET) : null;
 }
 
 /** The PMT pid of the first program in a PAT packet. */
@@ -263,7 +284,9 @@ function crc32(bytes: Uint8Array): number {
   return crc >>> 0;
 }
 
+/** The parts joined in one new array; a sole part is returned as it is, never copied. */
 function concat(parts: readonly Uint8Array[]): Uint8Array {
+  if (parts.length === 1) return parts[0]!;
   const joined = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
   let at = 0;
   for (const part of parts) {
