@@ -59,6 +59,8 @@ export interface Stream {
   subtitlePlaylist(seconds: number): void;
   /** A parser may defer a fragment without an error, including after IMSC fallback. */
   subtitleDeferred(afterSuccess?: boolean): void;
+  /** hls.js rejects queued VTT when its picture timestamp domain has not arrived. */
+  subtitleDiscontinuityMismatch(): void;
   /** The place in its list of the sound track selected, or -1. */
   readonly audioTrack: number;
   /** The place in its list of the subtitle rendition selected, or -1 for none. */
@@ -194,6 +196,15 @@ export function standIn(real: typeof Hls) {
         ...(afterSuccess
           ? { error: new Error("WebVTT failed before successful IMSC fallback") }
           : {}),
+      });
+    }
+
+    subtitleDiscontinuityMismatch(): void {
+      this.#tell(Events.SUBTITLE_FRAG_PROCESSED, {
+        success: false,
+        frag: this.#nextSegment(this.#subtitle),
+        part: null,
+        error: new Error("Subtitle discontinuity domain does not match main"),
       });
     }
 

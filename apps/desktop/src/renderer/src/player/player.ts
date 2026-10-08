@@ -447,7 +447,10 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
     subtitleLanguage,
     store.getState().tracks?.subtitles.filter((track) => provenSubtitles.has(subtitleKey(track))),
   );
-  restartSubtitles();
+  // An unavailable rendition turns off for this stream, while the channel's choice survives.
+  // Explicit Off and a different channel clear that intent before another stream opens.
+  if (!store.getState().subtitle && !subtitlesOff && lastSubtitle) choose(lastSubtitle);
+  else restartSubtitles();
   let failure = await startFailure(engine);
   // Some "live" channels are raw audio (AAC radio) rather than MPEG-TS. Chromium plays those itself.
   if (failure?.kind === "wrong-container" && mine === selection) {

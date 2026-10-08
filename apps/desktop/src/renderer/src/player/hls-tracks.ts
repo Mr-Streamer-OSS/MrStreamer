@@ -451,7 +451,9 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
     if (!data.success) {
       if ((readUntil.get(id) ?? 0) >= start + duration) return;
       if (data.error) {
-        failed.add(id);
+        // hls.js can reject queued VTT before the matching picture timestamp arrives.
+        if (data.error.message !== "Subtitle discontinuity domain does not match main")
+          failed.add(id);
         if (!retrySelection(id)) abandon(id);
       }
       return;

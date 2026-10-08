@@ -361,3 +361,89 @@ it("preserves a selected language through an outage that reconnects within its a
   expect(player.state().subtitle?.label).toBe("English");
   expect(player.state().phase.kind).toBe("playing");
 });
+
+/** The selected rendition's 17s allowance expires before the picture fails at +27s. */
+async function expiredSelection() {
+  player.setAudible(true);
+  const stream = await open();
+  ipc.always("playback.failure", null);
+  ipc.always("playback.playing", null);
+  stream.subtitleLines([{ start: 0, end: 600, text: "Hello" }]);
+  await wait();
+  player.setSubtitle(player.state().tracks!.subtitles[0]!);
+  stream.subtitlePlaylist(6);
+  for (const _ of [0, 6, 12]) {
+    stream.error("subtitle-segment", true, "English");
+    await playingFor(6000);
+  }
+  expect(player.state().subtitle).toBeNull();
+  expect(player.state().phase.kind).toBe("playing");
+  return stream;
+}
+
+it.each(["restore", "off", "other language"] as const)(
+  "after a segment-only outage expires the choice, reconnect respects %s",
+  async (choice) => {
+    vi.useFakeTimers();
+    const first = await expiredSelection();
+    if (choice === "off") player.setSubtitle(null);
+    if (choice === "other language") player.setSubtitle(player.state().tracks!.subtitles[1]!);
+    await playingFor(9000);
+    first.error("video");
+    await wait();
+    expect(player.state().phase.kind).toBe("reconnecting");
+    await playingFor(6000);
+    const reopened = streams.latest();
+    reopened.variant({
+      subtitles: [
+        { name: "English", lang: "en", default: true },
+        { name: "Deutsch", lang: "de" },
+      ],
+    });
+    player.element.dispatchEvent(new Event("playing"));
+    await wait();
+    reopened.subtitleLines([{ start: 0, end: 600, text: "Back" }], "English");
+    reopened.subtitleLines([{ start: 0, end: 600, text: "Zurück" }], "Deutsch");
+    await wait();
+    expect(player.state().subtitle?.label ?? null).toBe(
+      choice === "off" ? null : choice === "other language" ? "Deutsch" : "English",
+    );
+    expect(player.state().phase.kind).toBe("playing");
+    expect(ipc.argsOf("playback.open")).toHaveLength(2);
+  },
+);
+
+it("a channel change clears an expired subtitle choice and the old outage", async () => {
+  vi.useFakeTimers();
+  const first = await expiredSelection();
+  const second = await open("two");
+  first.error("video");
+  second.subtitleLines([{ start: 0, end: 600, text: "Another channel" }]);
+  await wait();
+  await playingFor(6000);
+  expect(player.state().channel?.id).toBe("two");
+  expect(player.state().subtitle).toBeNull();
+  expect(player.state().phase.kind).toBe("playing");
+  expect(ipc.argsOf("playback.open")).toHaveLength(2);
+});
+
+it.each(["timestamp domain", "malformed"] as const)(
+  "discovery distinguishes %s rejection from a failed rendition",
+  async (failure) => {
+    vi.useFakeTimers();
+    const stream = await open();
+    if (failure === "timestamp domain") stream.subtitleDiscontinuityMismatch();
+    else stream.subtitleUnreadable();
+    await wait();
+    stream.subtitleLines([{ start: 0, end: 600, text: "Hallo" }], "Deutsch");
+    await wait();
+    const before = stream.subtitlesLoaded.filter((name) => name === "English").length;
+    await playingFor(70_000);
+    const after = stream.subtitlesLoaded.filter((name) => name === "English").length;
+    if (failure === "timestamp domain") expect(after).toBeGreaterThan(before);
+    else expect(after).toBe(before);
+    expect(player.state().subtitle).toBeNull();
+    expect(player.state().phase.kind).toBe("playing");
+    expect(ipc.argsOf("playback.open")).toHaveLength(1);
+  },
+);

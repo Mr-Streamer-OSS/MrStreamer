@@ -31,6 +31,7 @@ const modes = [
   "live-empty-delayed",
   "live-early-subtitles",
   "live-imsc",
+  "live-segment-outage",
 ] as const;
 const only = process.env["MR_STREAMER_SUBTITLE_ERRORS_ONLY"];
 const watched = Number(process.env["MR_STREAMER_SUBTITLE_ERRORS_SECONDS"] ?? 35);
@@ -47,6 +48,7 @@ const started = Date.now();
 const liveStarts = new Map<string, number>();
 const slowVideo = new Set<string>();
 const failSelected = new Map<string, number>();
+const endedOutage = new Set<string>();
 const live = (mode: string) => mode.startsWith("live-");
 // Six-second segments with continuous timestamps, owned by this throwaway test directory.
 const clips = mkdtempSync(join(tmpdir(), "mr-streamer-live-six-"));
@@ -89,7 +91,26 @@ encode(clips, 24);
 const continuousClips = mkdtempSync(join(tmpdir(), "mr-streamer-imsc-"));
 if (!only || only.split(",").includes("live-imsc")) encode(continuousClips, 72);
 const livePlaylist = (mode: string, language?: string) => {
-  const first = Math.floor((Date.now() - (liveStarts.get(mode) ?? Date.now())) / 6000);
+  const elapsed = Math.floor((Date.now() - (liveStarts.get(mode) ?? Date.now())) / 6000);
+  // Preserve the independent review's original single-clip, per-segment discontinuity fixture.
+  if (mode === "live-segment-outage") {
+    const last = elapsed + 3;
+    const first = Math.max(0, last - 5);
+    return [
+      "#EXTM3U",
+      "#EXT-X-VERSION:3",
+      "#EXT-X-TARGETDURATION:6",
+      `#EXT-X-MEDIA-SEQUENCE:${first}`,
+      `#EXT-X-DISCONTINUITY-SEQUENCE:${first}`,
+      ...Array.from({ length: last - first + 1 }, (_, at) => [
+        ...(at > 0 ? ["#EXT-X-DISCONTINUITY"] : []),
+        "#EXTINF:6.000,",
+        language ? `${language}-${first + at}.vtt` : `video-${first + at}.mpegts`,
+      ]).flat(),
+      "",
+    ].join("\n");
+  }
+  const first = elapsed;
   return [
     "#EXTM3U",
     "#EXT-X-VERSION:3",
@@ -187,6 +208,17 @@ const server = createServer((request, response) => {
     note(status);
     return response.writeHead(status).end();
   }
+  // Fail subtitles first, then picture segments, to exercise expiry before a real reconnect.
+  if (
+    mode === "live-segment-outage" &&
+    !endedOutage.has(mode) &&
+    Date.now() - (liveStarts.get(mode) ?? Date.now()) >=
+      (file.startsWith("video-") ? 40_000 : 20_000) &&
+    (/^video-\d+\.mpegts$/.test(file) || /^(en|de|fr)-\d+\.vtt$/.test(file))
+  ) {
+    note(503);
+    return response.writeHead(503).end();
+  }
   const failures = failSelected.get(mode) ?? 0;
   if (failures > 0 && /^en-\d+\.vtt$/.test(file)) {
     failSelected.set(mode, failures - 1);
@@ -216,7 +248,7 @@ const server = createServer((request, response) => {
     body = `WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:126000,LOCAL:00:00:00.000\n\n00:00:00.000 --> 00:01:36.000\nHealthy ${file.slice(0, 2)}\n`;
   else if (/^(en|de|fr)-\d+\.vtt$/.test(file)) {
     const index = Number(file.match(/-(\d+)/)?.[1]);
-    const at = (index % 4) * 6;
+    const at = mode === "live-segment-outage" ? 0 : (index % 4) * 6;
     body = `WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:126000,LOCAL:00:00:00.000\n\n00:00:${String(at).padStart(2, "0")}.000 --> 00:00:${String(at + 6).padStart(2, "0")}.000\nHealthy ${file.slice(0, 2)}\n`;
     if (mode === "live-empty-delayed" && Date.now() - liveStarts.get(mode)! < 17_000)
       body = "WEBVTT\n";
@@ -234,7 +266,7 @@ const server = createServer((request, response) => {
     body = readFileSync(
       join(
         mode === "live-imsc" ? continuousClips : clips,
-        `video-${Number(clip[1]) % (mode === "live-imsc" ? 12 : 4)}.mpegts`,
+        `video-${mode === "live-segment-outage" ? 0 : Number(clip[1]) % (mode === "live-imsc" ? 12 : 4)}.mpegts`,
       ),
     );
   else if (clip)
@@ -254,9 +286,9 @@ const server = createServer((request, response) => {
       .end(body);
   // The video playlist loses the initial playlist race. The first video fragment takes six
   // seconds even though the subtitle rendition is healthy and ready on localhost.
-  if (live(mode) && file === "video.m3u8")
+  if (live(mode) && mode !== "live-segment-outage" && file === "video.m3u8")
     setTimeout(answer, mode === "live-early-subtitles" ? 1500 : 300);
-  else if (live(mode) && clip && !slowVideo.has(mode)) {
+  else if (live(mode) && mode !== "live-segment-outage" && clip && !slowVideo.has(mode)) {
     slowVideo.add(mode);
     setTimeout(answer, mode === "live-early-subtitles" ? 7000 : 6000);
   } else if (["live-dead-playlist", "live-dead-segment"].includes(mode) && clip)
@@ -374,6 +406,63 @@ try {
       await pick("English");
       await waitFor(async () => (await sample()).line.includes("Healthy en"), 15_000);
       const selectedObservations = [await sample()];
+      if (mode === "live-segment-outage") {
+        let offAt: number | null = null;
+        let reconnectAt: number | null = null;
+        // 40s picture outage + a 6s segment boundary + hls.js's 1/2/4/8/8/8s backoff.
+        for (let second = 0; second < 90; second++) {
+          await delay(1000);
+          const now = await sample();
+          selectedObservations.push(now);
+          if (offAt === null && now.cc === "off") offAt = now.at;
+          if (now.failure === "Reconnecting") {
+            reconnectAt = now.at;
+            endedOutage.add(mode);
+            break;
+          }
+        }
+        await waitFor(async () => {
+          const now = await sample();
+          selectedObservations.push(now);
+          return now.width > 0 && now.time > 1 && !now.failure;
+        }, 25_000);
+        await delay(6000);
+        const final = await sample();
+        const mine = requests.slice(from).filter((entry) => entry.mode === mode);
+        const masters = mine.filter((entry) => entry.file === "master.m3u8").length;
+        const failures = mine.filter((entry) => entry.status === 503);
+        const subtitleFailure = failures.find((entry) => /^en-/.test(entry.file));
+        const ok =
+          offAt !== null &&
+          reconnectAt !== null &&
+          subtitleFailure !== undefined &&
+          offAt - subtitleFailure.at >= 16 &&
+          reconnectAt - offAt >= 3 &&
+          masters === 2 &&
+          final.cc === "on" &&
+          final.line.includes("Healthy en") &&
+          !final.failure &&
+          mine
+            .filter((entry) => entry.file.endsWith(".m3u8"))
+            .every((entry) => entry.status === 200);
+        console.log(
+          `${ok ? "PASS" : "FAIL"} ${mode}: subtitle unavailable ${offAt}, picture reconnect ${reconnectAt}, ${masters} masters, final ${JSON.stringify(final)}`,
+        );
+        console.log(
+          JSON.stringify({
+            mode,
+            offAt,
+            reconnectAt,
+            final,
+            observations: selectedObservations,
+            requests: mine,
+          }),
+        );
+        failed ||= !ok;
+        if (final.cc === "on") await key(page, "c", 67);
+        await key(page, "Escape", 27);
+        continue;
+      }
       if (["live-selected404", "live-selected503"].includes(mode)) {
         // Fail after selection and healthy cues, then let the real controller recover.
         failSelected.set(mode, mode === "live-selected404" ? 1 : 3);
