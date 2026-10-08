@@ -96,6 +96,29 @@ async function mount(title = film) {
 }
 
 describe("the movie version menu", () => {
+  it("announces listed hints and locally read tracks separately", async () => {
+    await mount({
+      ...film,
+      versions: film.versions.map((version) =>
+        version.subscriptionId === SUBSCRIPTION && ["first", "second"].includes(version.id)
+          ? { ...version, tags: ["4K", "NL"] }
+          : version,
+      ),
+    });
+    const listed = radios().find((item) => item.textContent?.includes("Harbour 4K (NL)"));
+    expect(listed?.getAttribute("aria-label")).toContain("as listed");
+    const group = document.querySelector<HTMLElement>('[role="menuitem"][aria-expanded]');
+    expect(group?.getAttribute("aria-label")).toContain("as listed");
+    await act(async () => group?.click());
+    await settle();
+    const read = radios().find((item) => item.textContent?.includes("release A"));
+    const unread = radios().find((item) => item.textContent?.includes("release B"));
+    expect(read?.getAttribute("aria-label")).toContain("Tracks read locally");
+    expect(read?.getAttribute("aria-label")).not.toContain("as listed");
+    expect(unread?.getAttribute("aria-label")).toContain("as listed");
+    expect(unread?.getAttribute("aria-label")).not.toContain("Tracks read locally");
+  });
+
   it("shows one quality-first list with provider names and preserves unfamiliar hints", async () => {
     await mount();
     const choices = [...document.querySelectorAll('[role="menuitem"], [role="menuitemradio"]')].map(

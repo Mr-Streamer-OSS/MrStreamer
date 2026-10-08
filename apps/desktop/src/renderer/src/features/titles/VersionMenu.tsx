@@ -90,7 +90,13 @@ export function VersionMenu({
           "flex w-full items-start gap-2 px-2 py-2 text-white/70 outline-none data-checked:text-white data-highlighted:bg-white/10",
           ordinal !== undefined && "pl-6",
         )}
-        aria-label={[describe(group, version), metadata].filter(Boolean).join(" · ")}
+        aria-label={[
+          describe(group, version),
+          metadata,
+          observed ? "Tracks read locally" : "as listed",
+        ]
+          .filter(Boolean)
+          .join(" · ")}
       >
         <span className="mt-1 grid size-1.5 flex-none">
           <Menu.RadioItemIndicator className="size-1.5 rounded-full bg-white" />
@@ -101,7 +107,11 @@ export function VersionMenu({
             <span className={cn("min-w-0 flex-1", observed && "text-white")}>
               {observed ?? group.label}
               {observed && (
-                <Check aria-label="Tracks read locally" className="ml-1 inline size-3" />
+                <Check
+                  aria-hidden
+                  aria-label="Tracks read locally"
+                  className="ml-1 inline size-3"
+                />
               )}
             </span>
             <span className="flex-none text-[0.8125rem]">{names(group.subscriptionId)}</span>
@@ -171,7 +181,7 @@ export function VersionMenu({
                     <Menu.Item
                       closeOnClick={false}
                       aria-expanded={expanded.has(group.key)}
-                      aria-label={`${[group.quality, group.label].filter(Boolean).join(" · ")}, ${group.versions.length} versions, ${names(group.subscriptionId)}`}
+                      aria-label={`${[group.quality, group.label, "as listed"].filter(Boolean).join(" · ")}, ${group.versions.length} versions, ${names(group.subscriptionId)}`}
                       onClick={() => expand(group.key, !expanded.has(group.key))}
                       onKeyDown={(event) => {
                         if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
