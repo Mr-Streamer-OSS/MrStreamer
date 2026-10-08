@@ -76,7 +76,7 @@ jobs:
       - name: Multimedia tools
         run: bash apps/desktop/scripts/ci-ffmpeg.sh "$RUNNER_TEMP/ffmpeg-packages"
       - name: Test
-        run: pnpm test --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/multimedia-results.json"
+        run: pnpm test --reporter=default --reporter=github-actions --reporter=json --outputFile.json="$RUNNER_TEMP/multimedia-results.json"
       - name: Require multimedia coverage
         if: always()
         run: node apps/desktop/scripts/ci-multimedia-results.ts "$RUNNER_TEMP/multimedia-results.json"

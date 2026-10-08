@@ -17,7 +17,14 @@ const path = process.argv[2];
 if (!path) throw new Error("Pass the Vitest JSON report path.");
 const input: unknown = JSON.parse(readFileSync(path, "utf8"));
 const report = Report.assert(input);
-const required = ["titles", "playback", "receiver", "output", "playlist-playback"];
+const required = [
+  "titles",
+  "playback",
+  "receiver",
+  "output",
+  "playlist-playback",
+  "title-filter-playback",
+];
 for (const name of required) {
   const file = report.testResults.find((file) =>
     file.name.replaceAll("\\", "/").endsWith(`/apps/desktop/test/${name}.test.ts`),
