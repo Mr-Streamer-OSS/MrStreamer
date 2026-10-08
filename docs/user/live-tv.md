@@ -53,7 +53,7 @@ From 0.0.9, the bar keeps Channels, Favourite, Stop or Watch, CC when available,
 
 The languages you pick carry over to other channels, and to movies and series. A channel in another language starts with subtitles in yours when it has them. Subtitles a stream marks as its own default don't come on by themselves.
 
-Live CC shows only tracks whose data has arrived. A teletext page that sends only filler, an empty DVB page or an HLS rendition without cues stays hidden, and C does nothing until a track is available. Once proven, a track stays available until you change channel. Your saved language or Off choice applies when data first arrives. After ten seconds of playback, late availability flashes "Subtitles available · C" once if subtitles stay off. HLS discovery checks a few subtitle segments at a time while CC is off, without opening another channel connection.
+Live CC appears once subtitle data arrives. A teletext page that sends only filler or an empty DVB page stays hidden. An HLS channel needs at least one subtitle cue before CC appears, then lists all its declared text languages. Some may be empty; a rendition that fails to load turns off without stopping the picture. C does nothing while CC is hidden. Proven tracks stay available until you change channel. Your saved language or Off choice applies when that language is proven. After more than ten seconds of playback, late availability flashes "Subtitles available · C" once in Watch if subtitles stay off. HLS discovery checks a few subtitle segments at a time while CC is off, without opening another channel connection. Receiver playback keeps the declared tracks and the reminder that live subtitles play on this computer only.
 
 ### Quality
 

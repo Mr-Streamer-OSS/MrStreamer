@@ -12,7 +12,7 @@ import { pesReader } from "@mrstreamer/core/subtitles/transport";
 import { player, usePlayer } from "../../src/renderer/src/player/player.ts";
 import { TrackMenus, type TrackMenu } from "../../src/renderer/src/features/watch/TrackMenus.tsx";
 import { subtitleLayer } from "../../src/renderer/src/player/subtitles.ts";
-import { Flash } from "../../src/renderer/src/features/watch/Flash.tsx";
+import { Flash, LiveSubtitleHint } from "../../src/renderer/src/features/watch/Flash.tsx";
 import type { Engine } from "../../src/renderer/src/player/engine.ts";
 
 const engines = vi.hoisted(() => ({
@@ -123,6 +123,7 @@ function Controls() {
       onAudio: player.setAudio,
       onSubtitle: player.setSubtitle,
     }),
+    createElement(LiveSubtitleHint),
     createElement(Flash),
   );
 }
@@ -300,4 +301,127 @@ it("observes subtitle data that precedes the program-table answer", async () => 
   listed.resolve(tracks);
   await settle();
   expect(player.state().tracks?.subtitles.map((track) => track.page)).toEqual([888]);
+});
+
+it("does not retain a preview hint for another channel or a later Flash view", async () => {
+  const stream = await open("preview");
+  stream.elapsed = 15_000;
+  stream.packet(0x300, working, 15);
+  await settle();
+  // Opening Watch on the already proven preview is silent too.
+  const controls = await mount();
+  expect(controls.textContent).not.toContain("Subtitles available");
+  await act(async () => {
+    await open("without", { ...tracks, subtitles: [] });
+  });
+  expect(controls.textContent).not.toContain("Subtitles available");
+});
+it("removes the current hint on a channel switch", async () => {
+  const stream = await open();
+  const controls = await mount();
+  stream.elapsed = 11_000;
+  await act(async () => {
+    stream.packet(0x300, working, 11);
+    await settle();
+  });
+  expect(controls.textContent).toContain("Subtitles available · C");
+  await act(async () => {
+    await open("other", { ...tracks, subtitles: [] });
+  });
+  expect(controls.textContent).not.toContain("Subtitles available");
+});
+it("keeps receiver declarations available without observing or requesting subtitle data", async () => {
+  const media = {
+    generation: 1,
+    sessionId: "receiver",
+    item: { kind: "channel" as const, channel: { subscriptionId: SUBSCRIPTION, id: "tv" } },
+    state: "playing" as const,
+    position: 0,
+    at: Date.now(),
+    duration: null,
+    subtitles: false,
+  };
+  ipc.always("playback.tracks", tracks);
+  const tv = { id: "tv", kind: "cast" as const, name: "TV" };
+  ipc.emit("output.changed", {
+    offers: ["cast"],
+    airplayRoutes: null,
+    scanning: false,
+    receivers: [tv],
+    output: {
+      kind: "receiver",
+      receiver: tv,
+      volume: { level: 0.5, muted: false },
+      media,
+      failure: null,
+    },
+  });
+  player.adopt(channel("tv"), media);
+  await settle();
+  expect(player.onReceiver()).toBe(true);
+  expect(player.state().tracks?.subtitles).toEqual(tracks.subtitles);
+  expect(player.state().subtitleAvailability).toBeNull();
+  expect(ipc.argsOf("playback.open")).toEqual([]);
+  ipc.emit("output.changed", {
+    offers: ["cast"],
+    airplayRoutes: null,
+    scanning: false,
+    receivers: [],
+    output: { kind: "local" },
+  });
+});
+
+it("counts played time across reconnects before announcing first proof", async () => {
+  const first = await open();
+  const controls = await mount();
+  first.elapsed = 9000;
+  const second = await open();
+  second.elapsed = 2000;
+  await act(async () => {
+    second.packet(0x300, working, 2);
+    await settle();
+  });
+  expect(controls.textContent).toContain("Subtitles available · C");
+});
+it("does not count another channel's playing time toward the late hint", async () => {
+  const first = await open("first");
+  const controls = await mount();
+  first.elapsed = 60_000;
+  const second = await open("second");
+  second.elapsed = 1000;
+  await act(async () => {
+    second.packet(0x300, working, 1);
+    await settle();
+  });
+  expect(controls.textContent).not.toContain("Subtitles available");
+});
+it("C chooses a current track when the previous stream's PID is absent", async () => {
+  const caption = { ...tracks.subtitles[0]!, format: "captions" as const, page: 1 };
+  await open("captions", { ...tracks, subtitles: [caption] });
+  player.setSubtitle(caption);
+  player.setSubtitle(null);
+  const replacement = { ...caption, id: caption.id + 1 };
+  await open("captions", { ...tracks, subtitles: [replacement] });
+  player.toggleSubtitles();
+  expect(player.state().subtitle?.id).toBe(replacement.id);
+});
+
+it("announces availability only once even when page data keeps arriving", async () => {
+  const stream = await open();
+  const controls = await mount();
+  stream.elapsed = 11_000;
+  await act(async () => {
+    stream.packet(0x300, working, 11);
+    await settle();
+  });
+  expect(controls.textContent).toContain("Subtitles available · C");
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 1600));
+  });
+  expect(controls.textContent).not.toContain("Subtitles available");
+  await act(async () => {
+    stream.packet(0x300, working, 13);
+    await settle();
+  });
+  expect(controls.textContent).not.toContain("Subtitles available");
 });

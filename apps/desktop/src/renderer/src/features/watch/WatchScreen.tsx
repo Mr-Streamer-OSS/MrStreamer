@@ -42,7 +42,7 @@ import {
   type ListEntry,
 } from "../live/lists.ts";
 import { ChannelOverlay } from "./ChannelOverlay.tsx";
-import { Flash, flash, flashNote } from "./Flash.tsx";
+import { Flash, flash, flashNote, LiveSubtitleHint } from "./Flash.tsx";
 import { useFullscreen, useWake } from "./layout.ts";
 import { MINI_NEEDS_PICTURE, MiniControls } from "./MiniPlayer.tsx";
 import { NowPlayingBar } from "./NowPlaying.tsx";
@@ -433,6 +433,7 @@ export function WatchScreen() {
           )}
         </MiniControls>
         <NumberEntry onChannel={(target) => player.play(target)} />
+        <LiveSubtitleHint />
         <Flash />
         <PlaybackAnnouncement channel={channel} />
       </div>
@@ -509,6 +510,7 @@ export function WatchScreen() {
         onMenu={setMenu}
       />
       <NumberEntry onChannel={(target) => player.play(target)} />
+      <LiveSubtitleHint />
       <Flash />
       <ConnectingNote />
       <PlaybackAnnouncement channel={channel} />

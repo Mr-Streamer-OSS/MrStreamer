@@ -11,7 +11,8 @@
 // Captions the viewer chose are listed from the start of such a stream, though its picture tells
 // of them only at their first line.
 //
-// Subtitles show only when the viewer's choice says so. hls.js would turn on the ones a stream
+// Cues prove subtitle availability while Off, through bounded discovery. Subtitles show only
+// when the viewer's choice says so. hls.js would turn on the ones a stream
 // marks as its default, so whatever it selects by itself is put back to what was asked for. Its
 // lines come as events, not on text tracks of its own: the player puts them on the element's
 // subtitle track, which carries the viewer's timing and look.
@@ -19,7 +20,7 @@
 // A rendition is loaded once hls.js has read a segment of it, which it says for every segment,
 // lines or none. Waiting for a first line instead would never end on the renditions broadcasters
 // keep up without subtitling anything: their segments are a WebVTT header and nothing more.
-import Hls, { type MediaPlaylist } from "hls.js";
+import Hls, { type ErrorData, type MediaPlaylist } from "hls.js";
 import type { ChannelTracks, SubtitleTrack } from "@mrstreamer/contracts/playback";
 import { renditionAudio, renditionSubtitles } from "@mrstreamer/core/ondemand/tracks";
 import type { Cue } from "@mrstreamer/core/subtitles/webvtt";
@@ -28,6 +29,10 @@ import type { Cue } from "@mrstreamer/core/subtitles/webvtt";
 const CAPTIONS_ID = -1;
 /** Lines that ended this long ago are let go. */
 const KEEP_BEHIND_S = 5;
+/** Discovery borrows the subtitle controller for one segment at a time. */
+const PROBES_PER_BURST = 3;
+const PROBE_TIMEOUT_MS = 5000;
+const PROBE_REST_MS = 30_000;
 
 /** The sound a stream starts with, as `playback.open` takes it for the streams it serves. */
 export interface SoundChoice {
@@ -61,6 +66,8 @@ export interface EngineTracks {
    * after. A segment without a line counts. One that can't be had or read doesn't.
    */
   onSubtitleLoaded(listener: () => void): void;
+  /** The chosen rendition could not be read. The picture continues with subtitles off. */
+  onSubtitleUnavailable(listener: (track: SubtitleTrack) => void): void;
   /**
    * Observes actual cues, including while CC is off. Discovery uses this engine's subtitle
    * controller only, at most three single-segment probes per burst, thirty seconds apart.
@@ -94,6 +101,9 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
   let lineListener: ((line: Cue) => void) | null = null;
   let loadedListener: (() => void) | null = null;
   let availableListener: ((track: SubtitleTrack) => void) | null = null;
+  let unavailableListener: ((track: SubtitleTrack) => void) | null = null;
+  /** Failed renditions are not sampled again during this stream. A viewer may retry a pick. */
+  const failed = new Set<number>();
   const proven = new Set<string>();
   const triedAt = new Map<number, number>();
   let preferredLanguage: string | null = null;
@@ -101,6 +111,7 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
   let probesInBurst = 0;
   let probeTimer: ReturnType<typeof setTimeout> | null = null;
   let nextProbe: ReturnType<typeof setTimeout> | null = null;
+  let selectionTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** The tracks as the viewer chooses them, in hls.js's order, captions last. */
   function listed(): ChannelTracks {
@@ -166,7 +177,7 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
   function finishProbe(): void {
     stopProbe();
     if (released || nextProbe) return;
-    const delay = probesInBurst >= 3 ? 30_000 : 0;
+    const delay = probesInBurst >= PROBES_PER_BURST ? PROBE_REST_MS : 0;
     nextProbe = setTimeout(() => {
       nextProbe = null;
       if (delay > 0) probesInBurst = 0;
@@ -185,12 +196,12 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
       wanted?.format === "text"
     )
       return;
-    if (probesInBurst >= 3) {
+    if (probesInBurst >= PROBES_PER_BURST) {
       finishProbe();
       return;
     }
     const candidates = listed().subtitles.filter(
-      (track) => track.format === "text" && !proven.has(keyOf(track)),
+      (track) => track.format === "text" && !proven.has(keyOf(track)) && !failed.has(track.id),
     );
     candidates.sort(
       (a, b) =>
@@ -203,8 +214,47 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
     triedAt.set(track.id, Date.now());
     probesInBurst++;
     // A playlist or segment that stalls cannot hold discovery or fetch indefinitely.
-    probeTimer = setTimeout(finishProbe, 5000);
+    probeTimer = setTimeout(() => abandon(track.id), PROBE_TIMEOUT_MS);
     assert();
+  }
+
+  /** Drops only the failed rendition. stopLoad cancels even its pending playlist request. */
+  function abandon(id: number): void {
+    if (released) return;
+    failed.add(id);
+    const selected = wanted?.format === "text" && wanted.id === id ? wanted : null;
+    if (selected) {
+      wanted = null;
+      if (selectionTimer) clearTimeout(selectionTimer);
+      selectionTimer = null;
+    }
+    if (probing === id) finishProbe();
+    assert();
+    // hls.js's error controller runs first and may already have stopped every loader. Restart
+    // after the subtitle choice is cleared, so its fatal escalation cannot stop good video.
+    hls.stopLoad();
+    hls.startLoad(-1);
+    if (selected) unavailableListener?.(selected);
+    discover();
+  }
+
+  /** Handles subtitle errors after hls.js's controllers, before the engine's fatal handler. */
+  function subtitleError(data: ErrorData): boolean {
+    if (released) return false;
+    const subtitle =
+      data.context?.type === "subtitleTrack" ||
+      data.frag?.type === "subtitle" ||
+      data.parent === "subtitle" ||
+      data.details === Hls.ErrorDetails.SUBTITLE_LOAD_ERROR ||
+      data.details === Hls.ErrorDetails.SUBTITLE_TRACK_LOAD_TIMEOUT;
+    if (!subtitle || data.details === Hls.ErrorDetails.FRAG_GAP) return false;
+    const index = data.frag?.level ?? data.context?.id;
+    const id = index == null ? undefined : renditionIds(hls.subtitleTracks)[index];
+    if (id !== undefined) abandon(id);
+    else if (data.fatal) {
+      hls.startLoad(-1);
+    }
+    return true;
   }
 
   function prove(key: string): void {
@@ -305,7 +355,14 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
     const id = renditionIds(hls.subtitleTracks)[data.frag.level];
     if (id === undefined) return;
     if (probing === id) finishProbe();
-    if (!data.success) return;
+    if (!data.success) {
+      abandon(id);
+      return;
+    }
+    if (wanted?.id === id && selectionTimer) {
+      clearTimeout(selectionTimer);
+      selectionTimer = null;
+    }
     const { start, duration } = data.part ?? data.frag;
     readUntil.set(id, Math.max(readUntil.get(id) ?? 0, start + duration));
     if (wanted?.id === id) loadedListener?.();
@@ -320,7 +377,18 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
       if (!released && index !== -1) hls.audioTrack = index;
     },
     setSubtitle(track) {
+      if (released) return;
+      // Switching away must cancel a pending playlist too, which setting subtitleTrack alone
+      // does not abort in hls.js. Video loading resumes with the new choice below.
+      const cancelLoading =
+        selectionTimer !== null || (probing !== null && track?.format === "text");
+      if (cancelLoading) hls.stopLoad();
+      if (selectionTimer) clearTimeout(selectionTimer);
+      selectionTimer = null;
       wanted = track;
+      if (track?.format === "text" && (readUntil.get(track.id) ?? 0) <= video.currentTime) {
+        selectionTimer = setTimeout(() => abandon(track.id), PROBE_TIMEOUT_MS);
+      }
       if (track?.format === "text") stopProbe();
       // Captions chosen before this stream's picture told of them, as when the channel opens
       // again with them: listed all the same, or the player would take the choice for gone.
@@ -329,6 +397,7 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
         tell();
       }
       assert();
+      if (cancelLoading) hls.startLoad(-1);
       discover();
       if (!track || released) return;
       for (const line of lines.get(keyOf(track))?.values() ?? []) {
@@ -344,6 +413,9 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
     onSubtitleLoaded(listener) {
       loadedListener = listener;
     },
+    onSubtitleUnavailable(listener) {
+      unavailableListener = listener;
+    },
     onSubtitleAvailable(listener, language, known) {
       availableListener = listener;
       preferredLanguage = language ?? null;
@@ -357,10 +429,13 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
 
   return {
     handle,
+    subtitleError,
     release(): void {
       released = true;
       if (probeTimer) clearTimeout(probeTimer);
       if (nextProbe) clearTimeout(nextProbe);
+      if (selectionTimer) clearTimeout(selectionTimer);
+      unavailableListener = null;
       probeTimer = nextProbe = null;
       availableListener = null;
       changeListener = null;

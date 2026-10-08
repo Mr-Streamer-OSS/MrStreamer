@@ -1025,6 +1025,9 @@ function make(deps: PlaybackDeps) {
       request: IncomingMessage,
       response: ServerResponse,
     ): Promise<void> {
+      // Subtitle playlists and their children share the bounded address registry, but carry a
+      // separate proxy route marker. Their HTTP status must never become the video's failure.
+      const subtitle = id?.startsWith("subs-") ?? false;
       const started = performance.now();
       const report = (outcome: "ok" | StreamFailure["kind"]) =>
         diagnostics.record({
@@ -1049,7 +1052,7 @@ function make(deps: PlaybackDeps) {
 
       try {
         if (id !== null) {
-          const address = addresses.addressOf(id);
+          const address = addresses.addressOf(subtitle ? id.slice(5) : id);
           if (!address) {
             response.writeHead(410).end();
             return;
@@ -1064,10 +1067,10 @@ function make(deps: PlaybackDeps) {
             response.destroy();
           } else if (!opened) {
             const failure = upstream.ok ? noStream : upstream.failure;
-            session.failure = failure;
+            if (!subtitle) session.failure = failure;
             response.writeHead("status" in failure ? failure.status : 502).end();
           } else if (opened.playlist) {
-            await sendPlaylist(session, addresses, opened, response);
+            await sendPlaylist(session, addresses, opened, response, subtitle);
           } else {
             await passOn(opened, response);
           }
@@ -1117,7 +1120,7 @@ function make(deps: PlaybackDeps) {
         session.failure = failure;
         response.writeHead("status" in failure ? failure.status : 502).end();
       } catch (cause) {
-        if (!signal.aborted) {
+        if (!signal.aborted && !subtitle) {
           session.failure = {
             kind: "network",
             detail: cause instanceof Error ? cause.message : String(cause),
@@ -1133,6 +1136,7 @@ function make(deps: PlaybackDeps) {
       addresses: ReturnType<typeof hlsAddresses>,
       opened: Started,
       response: ServerResponse,
+      subtitle = false,
     ): Promise<void> {
       const parts = [...opened.parts];
       let size = parts.reduce((sum, part) => sum + part.byteLength, 0);
@@ -1144,10 +1148,20 @@ function make(deps: PlaybackDeps) {
       const text = Buffer.concat(parts).toString("utf8");
       // A multivariant playlist's variants and renditions stay for the session.
       const pin = isMultivariant(text);
-      const playlist = rewritePlaylist(text, opened.url, (target) =>
-        session.proxied(addresses.idOf(target, pin)),
+      const subtitleUrls = new Set(
+        text.split(/\r?\n/).flatMap((line) => {
+          if (!line.startsWith("#EXT-X-MEDIA:") || !/[,:]TYPE=SUBTITLES(?:,|$)/.test(line))
+            return [];
+          const uri = /URI="([^"]*)"/.exec(line)?.[1];
+          const url = uri ? URL.parse(uri, opened.url) : null;
+          return url ? [url.href] : [];
+        }),
       );
-      session.failure = null;
+      const playlist = rewritePlaylist(text, opened.url, (target) => {
+        const marker = subtitle || subtitleUrls.has(target) ? "subs-" : "";
+        return session.proxied(`${marker}${addresses.idOf(target, pin)}`);
+      });
+      if (!subtitle) session.failure = null;
       response.writeHead(200, { "Content-Type": "application/vnd.apple.mpegurl" });
       response.end(playlist);
     }

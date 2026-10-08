@@ -58,7 +58,6 @@ import { channelSubtitle } from "@mrstreamer/core/ondemand/tracks";
 import { subtitleDecoder, type SubtitleDecoder } from "@mrstreamer/core/subtitles/decoder";
 import { teletextPagePresent } from "@mrstreamer/core/subtitles/teletext";
 import { dvbPagePresent } from "@mrstreamer/core/subtitles/dvb";
-import { flash } from "../features/watch/Flash.tsx";
 import type { Cue } from "@mrstreamer/core/subtitles/webvtt";
 import { appError } from "../lib/errors.ts";
 import { call } from "../lib/ipc.ts";
@@ -177,7 +176,7 @@ export interface PlayerState {
   readonly audible: boolean;
   /** The viewer pressed Stop, so previews don't start the stream again on their own. */
   readonly stopped: boolean;
-  /** The channel's sound and subtitle tracks, once its stream started. */
+  /** Sound and available subtitle choices. HLS keeps its declared languages after first proof. */
   readonly tracks: ChannelTracks | null;
   /** The sound track chosen, by id; null plays the channel's own choice. */
   readonly audioId: number | null;
@@ -186,9 +185,11 @@ export interface PlayerState {
   /**
    * The chosen subtitles of an HLS stream are still loading: its engine hasn't read them where
    * the stream plays. Whether they say anything there doesn't matter, and subtitles that can't be
-   * had stay loading.
+   * had turn off without stopping the picture.
    */
   readonly subtitleLoading: boolean;
+  /** First subtitle proof in this channel session, for the visible Watch view to announce. */
+  readonly subtitleAvailability: { readonly played: number; readonly selected: boolean } | null;
   /**
    * Which of the channel's streams plays, once it started, and those that failed first. A channel
    * that failed here keeps what its last try got to: the streams the provider didn't deliver, and
@@ -216,6 +217,7 @@ const store = createStore<PlayerState>(() => ({
   audioId: null,
   subtitle: null,
   subtitleLoading: false,
+  subtitleAvailability: null,
   stream: null,
   waiting: false,
   fellBack: null,
@@ -259,8 +261,11 @@ let lastSubtitle: SubtitleTrack | null = null;
 /** Declared tracks belong to this stream; proof belongs to the channel until it changes. */
 let declaredTracks: ChannelTracks | null = null;
 const provenSubtitles = new Set<string>();
+/** Explicit Off suppresses later language autoselection on this channel. */
 let subtitlesOff = false;
-let availabilityAnnounced = false;
+/** Time played across streams of this channel, including reconnects. */
+let channelPlayed = 0;
+/** Preference answers apply only to the latest track list of this selection. */
 let tracksRevision = 0;
 /** A bounded packet sample lets first-proof autoselection decode the data that proved it. */
 let recentSubtitlePackets: { pid: number; data: Uint8Array; at: number }[] = [];
@@ -305,6 +310,7 @@ function cancelZap(): void {
  */
 function release(): void {
   if (!current) return;
+  if (sameOwned(tuned, store.getState().channel)) channelPlayed += current.engine.played();
   current.engine.destroy();
   clearSubtitles(video);
   void call("playback.close", { sessionId: current.sessionId }).catch(() => {});
@@ -427,6 +433,11 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
   engine.tracks?.onChange((tracks) => engineTracks(mine, tracks));
   engine.tracks?.onLine((line) => showLine(mine, line));
   engine.tracks?.onSubtitleLoaded(() => subtitlesLoaded(mine));
+  engine.tracks?.onSubtitleUnavailable((track) => {
+    const subtitle = store.getState().subtitle;
+    if (mine !== selection || !subtitle || subtitleKey(subtitle) !== subtitleKey(track)) return;
+    choose(null);
+  });
   engine.tracks?.onSubtitleAvailable(
     (track) => {
       if (mine !== selection) return;
@@ -434,7 +445,7 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
       if (declaredTracks) void applyTracks(mine, declaredTracks);
     },
     subtitleLanguage,
-    store.getState().tracks?.subtitles,
+    store.getState().tracks?.subtitles.filter((track) => provenSubtitles.has(subtitleKey(track))),
   );
   restartSubtitles();
   let failure = await startFailure(engine);
@@ -486,6 +497,8 @@ async function startOnReceiver(channel: LiveChannel): Promise<void> {
   quiet = false;
   if (first) tune(channel);
   release();
+  declaredTracks = null;
+  recentSubtitlePackets = [];
   onReceiver = { load: null, started: false, played: 0, since: null };
   store.setState({
     channel,
@@ -720,13 +733,14 @@ function tune(channel: LiveChannel): void {
     audioId: null,
     subtitle: null,
     subtitleLoading: false,
+    subtitleAvailability: null,
     fellBack: null,
   });
   lastSubtitle = null;
   declaredTracks = null;
   provenSubtitles.clear();
   subtitlesOff = false;
-  availabilityAnnounced = false;
+  channelPlayed = 0;
   tracksRevision++;
   recentSubtitlePackets = [];
   shown = null;
@@ -782,9 +796,15 @@ async function applyTracks(mine: number, tracks: ChannelTracks): Promise<void> {
     }
     for (const packet of recentSubtitlePackets) observeSubtitles(packet.pid, packet.data);
   }
+  const proven = tracks.subtitles.filter((track) => provenSubtitles.has(subtitleKey(track)));
   const available = {
     ...tracks,
-    subtitles: tracks.subtitles.filter((track) => provenSubtitles.has(subtitleKey(track))),
+    subtitles: onReceiver
+      ? tracks.subtitles
+      : tracks.subtitles.filter(
+          (track) =>
+            proven.includes(track) || (track.format === "text" && provenSubtitles.size > 0),
+        ),
   };
   const revision = ++tracksRevision;
   store.setState({ tracks: available });
@@ -792,14 +812,19 @@ async function applyTracks(mine: number, tracks: ChannelTracks): Promise<void> {
   const wanted = (await call("preferences.get").catch(() => null))?.subtitleLanguage ?? null;
   if (mine !== selection || revision !== tracksRevision) return;
   if (!chosen()) {
-    const match = channelSubtitle(available, wanted);
+    const match = channelSubtitle(
+      onReceiver ? available : { ...tracks, subtitles: proven },
+      wanted,
+    );
     if (match) choose(match);
   }
-  if (!availabilityAnnounced && available.subtitles.length > 0) {
-    availabilityAnnounced = true;
-    if (!store.getState().subtitle && (current?.engine.played() ?? 0) >= 10_000) {
-      flash("Subtitles available · C");
-    }
+  if (!onReceiver && !store.getState().subtitleAvailability && proven.length > 0) {
+    store.setState({
+      subtitleAvailability: {
+        played: channelPlayed + (current?.engine.played() ?? 0),
+        selected: store.getState().subtitle !== null,
+      },
+    });
   }
 }
 
@@ -1103,7 +1128,7 @@ export const player = {
     tuned = null;
     provenSubtitles.clear();
     declaredTracks = null;
-    store.setState({ channel: null, previous: null, stopped: false });
+    store.setState({ channel: null, previous: null, stopped: false, subtitleAvailability: null });
   },
 
   /**
@@ -1184,7 +1209,12 @@ export const player = {
   toggleSubtitles(): void {
     const { subtitle, tracks } = store.getState();
     if (subtitle) return player.setSubtitle(null);
-    const next = lastSubtitle ?? tracks?.subtitles[0] ?? null;
+    const next =
+      tracks?.subtitles.find(
+        (track) => lastSubtitle && subtitleKey(track) === subtitleKey(lastSubtitle),
+      ) ??
+      tracks?.subtitles[0] ??
+      null;
     if (next) player.setSubtitle(next);
   },
 

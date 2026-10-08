@@ -188,7 +188,7 @@ function hlsEngine(video: HTMLVideoElement, url: string, sound: SoundChoice): En
     hls.destroy();
   });
   hls.on(Hls.Events.ERROR, (_event, data) => {
-    if (!data.fatal) return;
+    if (tracks.subtitleError(data) || !data.fatal) return;
     if (data.type === Hls.ErrorTypes.NETWORK_ERROR)
       return life.fail({ kind: "network", detail: data.details });
     const unsupported =

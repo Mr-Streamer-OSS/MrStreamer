@@ -65,7 +65,10 @@ it("discovers working renditions with CC off, retains all proven choices and dra
   expect(stream.subtitleTrack).toBe(0);
   stream.subtitleLines([{ start: 0, end: 10, text: "Hello" }]);
   await wait();
-  expect(player.state().tracks?.subtitles.map((track) => track.label)).toEqual(["English"]);
+  expect(player.state().tracks?.subtitles.map((track) => track.label)).toEqual([
+    "English",
+    "Deutsch",
+  ]);
   expect(player.state().subtitle).toBeNull();
   expect(stream.subtitleTrack).toBe(1);
   stream.subtitleLines([{ start: 0, end: 10, text: "Hallo" }]);
@@ -159,11 +162,57 @@ it("accepts later cues without reopening and forgets proof on a different channe
   await wait();
   first.subtitleLines([{ start: 1, end: 3, text: "Later" }], "English");
   await wait();
-  expect(player.state().tracks?.subtitles.map((track) => track.label)).toEqual(["English"]);
+  expect(player.state().tracks?.subtitles.map((track) => track.label)).toEqual([
+    "English",
+    "Deutsch",
+  ]);
   expect(ipc.argsOf("playback.open")).toHaveLength(1);
   await open("second");
   first.subtitleLines([{ start: 1, end: 3, text: "Cancelled" }], "Deutsch");
   await wait();
   expect(player.state().tracks?.subtitles).toEqual([]);
   expect(player.state().subtitle).toBeNull();
+});
+
+it.each(["subtitle-playlist", "subtitle-segment"] as const)(
+  "abandons a failed %s probe and keeps another declared language reachable",
+  async (kind) => {
+    vi.useFakeTimers();
+    const stream = await open();
+    stream.error(kind);
+    await wait();
+    expect(stream.loading).toBe(true);
+    expect(stream.subtitleTrack).toBe(1);
+    stream.subtitleLines([{ start: 0, end: 60, text: "Hallo" }]);
+    await wait();
+    expect(player.state().tracks?.subtitles.map((track) => track.label)).toEqual([
+      "English",
+      "Deutsch",
+    ]);
+    player.setSubtitle(player.state().tracks!.subtitles[0]!);
+    stream.error(kind);
+    await wait();
+    expect(player.state().subtitle).toBeNull();
+    expect(player.state().subtitleLoading).toBe(false);
+    player.setSubtitle(player.state().tracks!.subtitles[1]!);
+    expect(player.state().subtitle?.label).toBe("Deutsch");
+    await playingFor(2000);
+    expect(player.state().phase.kind).toBe("playing");
+    expect(ipc.argsOf("playback.open")).toHaveLength(1);
+  },
+);
+it("keeps all HLS languages reachable while a remembered language is on", async () => {
+  ipc.prefer({ subtitleLanguage: "de" });
+  const stream = await open();
+  stream.subtitleLines([{ start: 0, end: 60, text: "Hallo" }]);
+  await wait();
+  expect(player.state().subtitle?.label).toBe("Deutsch");
+  expect(player.state().tracks?.subtitles.map((track) => track.label)).toEqual([
+    "English",
+    "Deutsch",
+  ]);
+  player.setSubtitle(player.state().tracks!.subtitles[0]!);
+  stream.subtitleLines([{ start: 0, end: 60, text: "Hello" }]);
+  await wait();
+  expect(player.state().subtitle?.label).toBe("English");
 });
