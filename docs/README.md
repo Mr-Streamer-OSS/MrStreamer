@@ -17,6 +17,7 @@ Start with the [contribution policy](../CONTRIBUTING.md).
 
 - [Development](./contributing/development.md): setup, running the app, installers, notices and artwork
 - [Testing](./contributing/testing.md): the suite, the fake provider, a real provider and measurements
+- [Agent workflows](./contributing/agent-workflows.md): stack integration and player/website verification
 - [Architecture](./contributing/architecture.md)
 - [Playback evaluation](./contributing/playback-evaluation.md): why playback works the way it does
 - [Marketing artwork](./contributing/marketing-artwork.md): the app captures the website shows, and how to take them

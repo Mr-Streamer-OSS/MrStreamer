@@ -2,6 +2,8 @@
 
 Desktop IPTV player, docs indexed in `docs/README.md`. The [GitHub project](https://github.com/orgs/Mr-Streamer-OSS/projects/1) is the planning authority.
 
+For coding-agent work, read [agent workflows](docs/contributing/agent-workflows.md). Use the available stack task skills for their methods and [verify-mrstreamer](.cursor/skills/verify-mrstreamer/SKILL.md) for player and website launch, control and runtime proof. For player or website changes, follow its relevant feature-map entry; keep that entry current when the changed behavior or entry points make it stale. Reviewers inspect the recorded proof and run focused verification when needed. Questions stay read-only.
+
 - Read its README and your card through `gh api graphql`. `gh project item-list` drains the shared rate limit.
 - When Wout asks you to implement something specific, first search the project for a matching card and use it. If none matches, scope the request first, then create a draft card with its scope and acceptance, the project README's next release and Status Planned before implementing.
 - Without a specific request, take a card that has a Release version, has its implementation prerequisites satisfied and isn't Blocked, Done or archived.

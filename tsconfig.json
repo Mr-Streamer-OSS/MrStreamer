@@ -4,5 +4,5 @@
     "lib": ["ES2024"],
     "types": ["node"]
   },
-  "include": ["vitest.config.ts", "scripts", "test"]
+  "include": ["vitest.config.ts", "scripts", "test", ".cursor/skills/verify-mrstreamer/scripts"]
 }

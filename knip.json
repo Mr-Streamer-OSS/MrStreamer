@@ -2,7 +2,12 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "workspaces": {
     ".": {
-      "entry": ["scripts/*.ts", "test/**/*.test.ts"]
+      "ignoreDependencies": ["electron"],
+      "entry": [
+        "scripts/*.ts",
+        "test/**/*.test.ts",
+        ".cursor/skills/verify-mrstreamer/scripts/*.ts"
+      ]
     },
     "apps/desktop": {
       "entry": ["scripts/*.{ts,mjs}", "test/e2e/*.ts"]

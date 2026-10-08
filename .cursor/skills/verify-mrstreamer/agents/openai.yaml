@@ -1,0 +1,4 @@
+interface:
+  display_name: "Verify MR Streamer"
+  short_description: "Prove player and website behavior in isolated sessions"
+  default_prompt: "Use $verify-mrstreamer to verify the changed player and website paths and retain runtime evidence."
