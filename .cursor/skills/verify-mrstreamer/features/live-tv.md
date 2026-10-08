@@ -14,6 +14,8 @@ Preconditions: `pnpm build`, a display and the fake provider's `h264-aac.mpegts`
 
 For converted codecs, titles and subtitle rendering use `apps/desktop/test/e2e/packaged-app.ts`; recovery uses `live-recovery-app.ts`; favourites use `favourite-order.ts`; external guide settings use `guide-source.ts`. Follow their documented executable arguments and capture the affected entry point, not only global search.
 
+For subtitle availability and subtitle-only outages, use `apps/desktop/test/e2e/live-subtitle-errors-app.ts`. Select cases with `MR_STREAMER_SUBTITLE_ERRORS_ONLY`; use `live-six-off` and `live-six-remembered` for discovery, and `live-segment-outage` to observe subtitle expiry followed by a video reconnect. Require actual subtitle cues before the CC control appears, advancing picture during subtitle failure, restoration of the chosen language on reconnect and explicit Off remaining off. The fixture remains synthetic; actual-provider and native-platform acceptance stay separate.
+
 Source: `docs/user/live-tv.md`, `apps/desktop/src/renderer/src/player/`, `apps/desktop/test/e2e/packaged-app.ts`.
 
 ## Gotchas
