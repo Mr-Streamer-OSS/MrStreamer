@@ -30,7 +30,7 @@ describe("title names", () => {
     ["Series (MULTi)", "Series", ["MULTI"], null],
     ["Movie (2019) (NL)", "Movie", ["NL"], 2019],
     ["Hamlet - 2024", "Hamlet", [], 2024],
-    ["Hellboy [720p HD]", "Hellboy", ["720p"], null],
+    ["Hellboy [720p HD]", "Hellboy", ["720p", "HD"], null],
     // A bare year is often part of the title, and a title can be only a year.
     ["Wonder Woman 1984 (NL)", "Wonder Woman 1984", ["NL"], null],
     ["2012 (NL)", "2012", ["NL"], null],

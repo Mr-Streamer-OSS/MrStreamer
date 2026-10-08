@@ -74,6 +74,7 @@ import { type } from "arktype";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { attempt, Database, transaction, unavailable } from "./database.ts";
+import { prepareVerifiedFiles, VERIFIED_FILES_TABLE } from "./verified-files.ts";
 import { WATCHLIST_TABLES } from "./watchlist-store.ts";
 
 const SCHEMA = `
@@ -363,6 +364,7 @@ export const viewingStoreLayer: Layer.Layer<ViewingStore, never, Database> = Lay
 /** Makes the record's tables, brings older ones up to date, and rebuilds the state when due. */
 function prepare(db: DatabaseSync): void {
   db.exec(SCHEMA);
+  prepareVerifiedFiles(db);
   // Records from before movies and series lack the payload column, and later ones the time a
   // title left Continue watching. Checked and added under the write lock, since two copies of the
   // app can start at once.
@@ -837,7 +839,7 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
         places.delete(account);
         deleteForGood(
           db,
-          ["events", "state", "titles", ...MARK_TABLES, ...WATCHLIST_TABLES],
+          ["events", "state", "titles", ...MARK_TABLES, ...WATCHLIST_TABLES, VERIFIED_FILES_TABLE],
           account,
         );
       }),

@@ -62,6 +62,8 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import { VerifiedFiles } from "../platform/verified-files.ts";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import { createCleanStart } from "../playback/clean-start.ts";
@@ -420,6 +422,13 @@ interface TitleSessionState extends SessionBase {
   readonly headers: Headers;
   /** Probe reuse belongs to this file and saved source, including its request headers. */
   readonly probeKey: string;
+  /** Durable track-fact identity, supplied only after resolving a current listed file. */
+  readonly verified: {
+    readonly account: string;
+    readonly sourceStamp: string;
+    readonly fileKey: string;
+    readonly listingKey: string;
+  } | null;
   /** What the file holds, as ffprobe read it when the title opened. */
   probe: TitleProbe | null;
   /**
@@ -594,6 +603,7 @@ export interface Asked {
   readonly revision?: number | undefined;
   /** Main-only headers returned with this exact provider file. */
   readonly headers?: Readonly<Record<string, string>> | undefined;
+  readonly listingKey?: string | undefined;
 }
 
 export class Playback extends Context.Service<
@@ -712,6 +722,8 @@ function make(deps: PlaybackDeps) {
   return Effect.gen(function* () {
     const subscriptions = yield* Subscriptions;
     const diagnostics = yield* Diagnostics;
+    // The app provides storage; standalone playback ports can run without a database.
+    const verifiedFiles = Option.getOrNull(yield* Effect.serviceOption(VerifiedFiles));
     const scope = yield* Effect.scope;
     const sessions = new Map<string, Session>();
     /** When channel streams failed, by upstream address, for `FAILED_STREAM_MS`. */
@@ -1227,6 +1239,13 @@ function make(deps: PlaybackDeps) {
       if (held?.other) {
         session.kept = fileKept();
         probes.delete(session.probeKey);
+        if (session.verified && verifiedFiles) {
+          Effect.runSync(
+            verifiedFiles
+              .forget(session.verified.account, session.title, session.verified.fileKey)
+              .pipe(Effect.ignore),
+          );
+        }
         session.feed?.changed();
       }
       // A receiver holds a playlist of the file as it was read when the title opened: its length,
@@ -3340,6 +3359,24 @@ function make(deps: PlaybackDeps) {
           title,
           upstreamUrl,
           headers,
+          verified: asked.listingKey
+            ? {
+                account: source.key,
+                sourceStamp: source.fileRevision,
+                listingKey: asked.listingKey,
+                fileKey: createHash("sha256")
+                  .update(
+                    JSON.stringify([
+                      source.fileRevision,
+                      title.kind,
+                      title.id,
+                      upstreamUrl,
+                      [...headers],
+                    ]),
+                  )
+                  .digest("hex"),
+              }
+            : null,
           probeKey: createHash("sha256")
             .update(
               JSON.stringify([
@@ -3395,6 +3432,20 @@ function make(deps: PlaybackDeps) {
           Effect.tapError(() => Scope.close(forked, Exit.void)),
         );
         yield* standing;
+        if (verifiedFiles && session.verified && probes.get(session.probeKey) === probe) {
+          const { account, sourceStamp, fileKey, listingKey } = session.verified;
+          yield* verifiedFiles
+            .remember(account, sourceStamp, {
+              kind: title.kind,
+              id: title.id,
+              ...(title.kind === "episode" ? { seriesId: title.seriesId } : {}),
+              fileKey,
+              listingKey,
+              audio: audioTracks(probe.audio).map((track) => track.language),
+              subtitles: subtitleTracks(probe.subtitles).map((track) => track.language),
+            })
+            .pipe(Effect.ignore);
+        }
         return { session, probe, standing };
       });
 

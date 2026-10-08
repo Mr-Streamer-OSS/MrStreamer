@@ -70,6 +70,8 @@ export interface Title {
 export interface TitleMatches {
   readonly titles: readonly Title[];
   readonly total: number;
+  /** Before current-content filters, for the matched-of-all count. */
+  readonly unfiltered?: number;
 }
 
 /** At most twelve related titles from saved subscriptions' already loaded lists. */
@@ -212,6 +214,7 @@ export interface MetadataProgress {
 export interface TitlePage {
   readonly total: number;
   readonly titles: readonly Title[];
+  readonly unfiltered?: number;
 }
 
 /**

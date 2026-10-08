@@ -1,3 +1,4 @@
+import { listedFileKey } from "@mrstreamer/core/ondemand/files";
 // Movies and series: the catalogue lives in a worker thread (see ../ondemand/catalogue-worker.ts),
 // details come from the provider and TMDB when a title opens, never before, TMDB's episodes when
 // their season opens, and playback asks here which file to stream. A title's details don't wait
@@ -43,6 +44,9 @@ import {
 } from "@mrstreamer/core/metadata/tmdb";
 import { movieDetails, seasonEpisodes, seriesDetails } from "@mrstreamer/core/ondemand/details";
 import { DEFAULT_TITLE_LANGUAGE } from "@mrstreamer/core/ondemand/languages";
+import { titleName } from "@mrstreamer/core/ondemand/names";
+import { qualityHint } from "@mrstreamer/core/ondemand/filters";
+import type { FilterOptions, TitleFilters } from "@mrstreamer/contracts/title-filters";
 import type { SavedTitle, TitleFacts } from "@mrstreamer/core/ondemand/watchlist";
 import type { ProviderDetails } from "@mrstreamer/core/provider";
 import * as Clock from "effect/Clock";
@@ -51,11 +55,13 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import type {
   CatalogueOwner,
+  KnownFile,
   SavedQuery,
   WorkerCalls,
   WorkerEvent,
@@ -64,6 +70,7 @@ import type {
   WorkerSetup,
   WorkerStatus,
 } from "../ondemand/protocol.ts";
+import { VerifiedFiles } from "../platform/verified-files.ts";
 import { Settings } from "./preferences.ts";
 import {
   Subscriptions,
@@ -114,6 +121,7 @@ export interface CollectionQuery {
   readonly sort?: CollectionSort | undefined;
   readonly offset: number;
   readonly limit: number;
+  readonly filters?: TitleFilters;
 }
 
 /** Where a movie or episode streams from. Contains the login, so it stays in the main process. */
@@ -123,6 +131,8 @@ export interface TitleFile {
   readonly headers?: Readonly<Record<string, string>>;
   /** The login the address was made under: `SavedSubscription.revision`. */
   readonly revision: number;
+  /** The cached provider row this exact file was resolved from. */
+  readonly listingKey: string;
 }
 
 export class OnDemand extends Context.Service<
@@ -151,7 +161,12 @@ export class OnDemand extends Context.Service<
       Failed
     >;
     /** Movies or series matching `query`: the best SEARCH_PAGE, and how many match. */
-    searchKind(kind: TitleKind, query: string): Effect.Effect<TitleMatches, Failed>;
+    searchKind(
+      kind: TitleKind,
+      query: string,
+      filters?: TitleFilters,
+    ): Effect.Effect<TitleMatches, Failed>;
+    filterOptions(kind: TitleKind): Effect.Effect<FilterOptions, Failed>;
     /**
      * A version's details, for when the viewer opens it: the provider's, with TMDB's once it has
      * answered. They come as soon as the provider answers; `detailsChanged` says when TMDB's
@@ -227,12 +242,15 @@ interface Downloaded {
   readonly raw: ProviderDetails;
   readonly lists: number;
   readonly title: Title;
+  readonly version: OwnedId;
+  readonly sourceRevision: number;
 }
 
 function make(deps: OnDemandDeps) {
   return Effect.gen(function* () {
     const subscriptions = yield* Subscriptions;
     const settings = yield* Settings;
+    const verifiedFiles = Option.getOrNull(yield* Effect.serviceOption(VerifiedFiles));
     /** The language whose versions titles show and play first. */
     const language = Effect.map(
       settings.get,
@@ -610,8 +628,81 @@ function make(deps: OnDemandDeps) {
     /** Asks the provider about a title the lists show. */
     const download = (source: Source, kind: TitleKind, id: string, title: Title) => {
       const lists = listsOf(source.id);
-      return Effect.map(providerDetails(source, kind, id), (raw) => ({ raw, lists, title }));
+      return Effect.map(providerDetails(source, kind, id), (raw) => ({
+        raw,
+        lists,
+        title,
+        version: { subscriptionId: source.id, id },
+        sourceRevision: source.revision,
+      }));
     };
+
+    /** No provider reads: cached episode listings must still belong to the saved source and lists. */
+    const knownFiles = (kind: TitleKind) =>
+      Effect.gen(function* () {
+        if (!verifiedFiles) return [];
+        const files: KnownFile[] = [];
+        for (const source of yield* listed) {
+          const known = yield* verifiedFiles
+            .read(source.key, source.fileRevision)
+            .pipe(Effect.orElseSucceed(() => []));
+          if (kind === "movie") {
+            for (const file of known)
+              if (file.kind === "movie")
+                files.push({
+                  subscriptionId: source.id,
+                  kind: "movie",
+                  id: file.id,
+                  listingKey: file.listingKey,
+                  tracks: { audio: file.audio, subtitles: file.subtitles },
+                });
+            continue;
+          }
+          const episodes = new Map(
+            known.filter((file) => file.kind === "episode").map((file) => [file.id, file]),
+          );
+          const seen = new Set<string>();
+          for (const held of details.values()) {
+            if (
+              held.title.kind !== "series" ||
+              held.version.subscriptionId !== source.id ||
+              held.sourceRevision !== source.revision ||
+              held.lists !== listsOf(source.id)
+            )
+              continue;
+            const tags =
+              held.title.versions.find(
+                (version) => version.subscriptionId === source.id && version.id === held.version.id,
+              )?.tags ?? [];
+            for (const episode of held.raw.episodes) {
+              if (seen.has(episode.id)) continue;
+              seen.add(episode.id);
+              const listingKey = listedFileKey("episode", episode);
+              const found = episodes.get(episode.id);
+              const tracks =
+                found?.seriesId === held.version.id && found.listingKey === listingKey
+                  ? { audio: found.audio, subtitles: found.subtitles }
+                  : undefined;
+              const named = titleName(episode.name).tags;
+              // Explicit episode quality takes precedence over the series' provider label.
+              const hints =
+                qualityHint(named) === "unknown"
+                  ? [...tags, ...named]
+                  : [...tags.filter((tag) => qualityHint([tag]) === "unknown"), ...named];
+              files.push({
+                subscriptionId: source.id,
+                kind: "episode",
+                id: episode.id,
+                seriesId: held.version.id,
+                listingKey,
+                tags: hints,
+                ...(tracks ? { tracks } : {}),
+              });
+            }
+          }
+        }
+        return files;
+      });
 
     /**
      * Details kept from an earlier open, asked again after the lists were refreshed, as the
@@ -711,7 +802,7 @@ function make(deps: OnDemandDeps) {
         }),
       tiles: (kind: TitleKind, of: "genres" | "services") =>
         loaded((owners, language) => call("tiles", { owners, language, kind, of })),
-      collection: ({ kind, id, sort, offset, limit }: CollectionQuery) =>
+      collection: ({ kind, id, sort, offset, limit, filters }: CollectionQuery) =>
         loaded((owners, language) =>
           Effect.gen(function* () {
             // Titles for adults only once the viewer asked for them.
@@ -726,15 +817,36 @@ function make(deps: OnDemandDeps) {
               offset,
               limit,
               ...(sort ? { sort } : {}),
+              ...(filters ? { filters, files: yield* knownFiles(kind) } : {}),
             });
           }),
         ),
       search: (query: string) =>
         loaded((owners, language) => call("search", { owners, language, query })),
-      searchKind: (kind: TitleKind, query: string) =>
+      searchKind: (kind: TitleKind, query: string, filters?: TitleFilters) =>
         loaded((owners, language) =>
-          call("searchKind", { owners, language, kind, query, limit: SEARCH_PAGE }),
+          Effect.gen(function* () {
+            return yield* call("searchKind", {
+              owners,
+              language,
+              kind,
+              query,
+              limit: SEARCH_PAGE,
+              ...(filters ? { filters, files: yield* knownFiles(kind) } : {}),
+            });
+          }),
         ),
+      filterOptions: (kind: TitleKind) =>
+        Effect.gen(function* () {
+          const saved = yield* listed;
+          return yield* call("filterOptions", {
+            owners: saved.map(ownerOf),
+            language: yield* language,
+            kind,
+            files: yield* knownFiles(kind),
+            adults: (yield* settings.get).adultTitles ?? false,
+          });
+        }),
 
       details: (kind: TitleKind, version: OwnedId) =>
         Effect.map(detailsOf(kind, version), (found) => found.shown),
@@ -808,14 +920,15 @@ function make(deps: OnDemandDeps) {
           const source = yield* subscriptions.sourceOf(title.subscriptionId);
           const missing = new Failed({ error: { kind: "title-not-found", titleId: title.id } });
           if (title.kind === "movie") {
-            const container = yield* call("container", { ...ownerOf(source), id: title.id });
-            if (!container) return yield* missing;
+            const listed = yield* call("container", { ...ownerOf(source), id: title.id });
+            if (!listed) return yield* missing;
             const file = yield* Effect.tryPromise({
-              try: (signal) => source.provider.titleFile("movie", title.id, container, signal),
+              try: (signal) =>
+                source.provider.titleFile("movie", title.id, listed.container, signal),
               catch: failedWith,
             });
             if (!(yield* subscriptions.stands(source))) return yield* switched;
-            return { ...file, revision: source.revision };
+            return { ...file, revision: source.revision, listingKey: listed.listingKey };
           }
           const series = yield* detailsOf("series", {
             subscriptionId: title.subscriptionId,
@@ -829,7 +942,11 @@ function make(deps: OnDemandDeps) {
             catch: failedWith,
           });
           if (!(yield* subscriptions.stands(source))) return yield* switched;
-          return { ...file, revision: source.revision };
+          return {
+            ...file,
+            revision: source.revision,
+            listingKey: listedFileKey("episode", episode),
+          };
         }),
 
       forget: (subscription: SavedSubscription) =>

@@ -77,6 +77,17 @@ function markOf(tag: string) {
   return { mark, language, subtitles, named };
 }
 
+/** Name hints only. A Dutch mark can mean subtitles; it never proves Dutch audio. */
+export function languageHints(tags: readonly string[]): readonly string[] {
+  const hints = new Set<string>();
+  for (const tag of tags) {
+    const { mark, language } = markOf(tag);
+    if (MULTI.has(mark)) hints.add("multi");
+    else if (language) hints.add(language.code);
+  }
+  return hints.size ? [...hints] : ["unknown"];
+}
+
 /**
  * How well a version suits a language, from its name's marks:
  * - 4 in that language

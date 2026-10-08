@@ -28,6 +28,7 @@ import {
 } from "@mrstreamer/contracts/subscription";
 import type { TitleFilter, Viewing } from "@mrstreamer/contracts/viewing";
 import type { WatchlistSort } from "@mrstreamer/contracts/watchlist";
+import type { TitleFilters } from "@mrstreamer/contracts/title-filters";
 import { player } from "../player/player.ts";
 import { hostOf } from "./format.ts";
 import { call, listen } from "./ipc.ts";
@@ -249,13 +250,42 @@ export const queries = {
     sort: CollectionSort | undefined,
     offset: number,
     limit: number,
-  ) =>
-    queryOptions({
-      queryKey: ["ondemand", "collection", kind, id, sort ?? null, offset, limit],
+    filters?: TitleFilters,
+  ) => {
+    const chosen = filters && Object.keys(filters).length ? filters : undefined;
+    return queryOptions({
+      queryKey: [
+        "ondemand",
+        "collection",
+        kind,
+        id,
+        sort ?? null,
+        offset,
+        limit,
+        ...(chosen ? [chosen] : []),
+      ],
       queryFn: () =>
-        call("ondemand.collection", { kind, id, offset, limit, ...(sort ? { sort } : {}) }),
+        call("ondemand.collection", {
+          kind,
+          id,
+          offset,
+          limit,
+          ...(sort ? { sort } : {}),
+          ...(chosen ? { filters: chosen } : {}),
+        }),
       staleTime: Infinity,
-      placeholderData: (previous) => previous,
+      // Keep a sort/page transition smooth, without presenting old matches under new filters.
+      placeholderData: (previous, previousQuery) =>
+        JSON.stringify(previousQuery?.queryKey[7] ?? null) === JSON.stringify(chosen ?? null)
+          ? previous
+          : undefined,
+    });
+  },
+  /** Name hints and tracks already read on this device, for the current kind only. */
+  titleFilterOptions: (kind: TitleKind) =>
+    queryOptions({
+      queryKey: ["ondemand", "filterOptions", kind],
+      queryFn: () => call("ondemand.filterOptions", { kind }),
     }),
   titleSearch: (query: string) =>
     queryOptions({
@@ -265,13 +295,20 @@ export const queries = {
       enabled: query.trim().length > 0,
     }),
   /** Movies or series only, for the field in their tab bar. */
-  titleSearchIn: (kind: TitleKind, query: string) =>
-    queryOptions({
-      queryKey: ["ondemand", "searchKind", kind, query],
-      queryFn: () => call("ondemand.searchKind", { kind, query }),
+  titleSearchIn: (kind: TitleKind, query: string, filters?: TitleFilters) => {
+    const chosen = filters && Object.keys(filters).length ? filters : undefined;
+    return queryOptions({
+      queryKey: ["ondemand", "searchKind", kind, query, ...(chosen ? [chosen] : [])],
+      queryFn: () =>
+        call("ondemand.searchKind", { kind, query, ...(chosen ? { filters: chosen } : {}) }),
       staleTime: Infinity,
       enabled: query.trim().length > 0,
-    }),
+      placeholderData: (previous, previousQuery) =>
+        JSON.stringify(previousQuery?.queryKey[4] ?? null) === JSON.stringify(chosen ?? null)
+          ? previous
+          : undefined,
+    });
+  },
   /** Titles from the lists, by any of their versions; asks the provider nothing. */
   titles: (kind: TitleKind, versions: readonly OwnedId[]) =>
     queryOptions({

@@ -77,6 +77,7 @@ interface Versions {
   readonly picked: OwnedId | null;
   /** The version Automatic plays, which its line in the menu names. */
   readonly automatic: OwnedId;
+  readonly onPick: (version: OwnedId | null) => void;
 }
 
 export function DetailsView({ target }: { target: DetailsTarget }) {
@@ -91,7 +92,18 @@ export function DetailsView({ target }: { target: DetailsTarget }) {
   });
   // A pick is kept by the subscription of the version picked.
   const picks = useSubscriptionPreferences();
-  const picked = title ? pickedVersion(title, picks) : null;
+  const remembered = title ? pickedVersion(title, picks) : null;
+  const [chosenHere, setChosenHere] = useState<OwnedId | null | undefined>(undefined);
+  // A filtered or 4K tile asks for a particular real version. A later menu choice in this
+  // sheet can still replace it and is remembered by the usual subscription preference owner.
+  const picked =
+    chosenHere === undefined
+      ? target.asked
+        ? null
+        : remembered
+      : chosenHere && versions.some((version) => sameOwned(version, chosenHere))
+        ? chosenHere
+        : null;
   const automatic = title
     ? automaticVersion(title, progress.data ?? [], target, target.asked)
     : ownedId(target);
@@ -129,7 +141,7 @@ export function DetailsView({ target }: { target: DetailsTarget }) {
       {details.data && ready ? (
         <Content
           details={details.data}
-          versions={{ title, playing, picked, automatic }}
+          versions={{ title, playing, picked, automatic, onPick: setChosenHere }}
           switching={details.isPlaceholderData}
           saving={saving}
         />
@@ -161,6 +173,7 @@ export function DetailsView({ target }: { target: DetailsTarget }) {
                   title={title}
                   picked={picked}
                   automatic={automatic}
+                  onPick={setChosenHere}
                   trigger={<Button variant="secondary" />}
                 >
                   Other versions
@@ -512,7 +525,12 @@ function Actions({
             {primaryLabel}
           </Button>
           {several && (
-            <VersionMenu title={title} picked={versions.picked} automatic={automatic}>
+            <VersionMenu
+              title={title}
+              picked={versions.picked}
+              automatic={automatic}
+              onPick={versions.onPick}
+            >
               <ChevronDown />
             </VersionMenu>
           )}
@@ -583,6 +601,7 @@ function VersionMenu({
   title,
   picked,
   automatic,
+  onPick,
   trigger,
   children,
 }: {
@@ -590,6 +609,7 @@ function VersionMenu({
   picked: OwnedId | null;
   /** The version Automatic plays, which its line names. */
   automatic: OwnedId;
+  onPick: (version: OwnedId | null) => void;
   /** The button that opens it, when not the arrow joined to Play. */
   trigger?: ReactElement<Record<string, unknown>>;
   children: ReactNode;
@@ -618,9 +638,12 @@ function VersionMenu({
           <Menu.Popup className="max-h-[60vh] w-max min-w-[18rem] max-w-[26rem] overflow-y-auto rounded-2xl bg-popover p-2 text-[0.9375rem] shadow-2xl ring-1 ring-white/12 outline-none transition-[opacity,scale] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
             <Menu.RadioGroup
               value={picked ? ownedKey(picked) : AUTOMATIC}
-              onValueChange={(value: string) =>
-                pick(title, title.versions.find((version) => ownedKey(version) === value) ?? null)
-              }
+              onValueChange={(value: string) => {
+                const chosen =
+                  title.versions.find((version) => ownedKey(version) === value) ?? null;
+                onPick(chosen);
+                pick(title, chosen);
+              }}
             >
               <VersionItem value={AUTOMATIC}>
                 Automatic

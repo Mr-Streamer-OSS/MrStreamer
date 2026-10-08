@@ -5,9 +5,9 @@
 // Genres and services come from TMDB, so they fill in as its metadata arrives.
 //   The field at the end of the tabs searches this kind only, by any of a title's names, and
 // shows what it finds in place of the tab; Escape clears it. ⌘K searches everything for the same.
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Play, Search } from "lucide-react";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { create } from "zustand";
 import {
   type CollectionId,
@@ -18,6 +18,7 @@ import {
   type TitleKind,
 } from "@mrstreamer/contracts/ondemand";
 import { ownedId, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
+import type { TitleFilters } from "@mrstreamer/contracts/title-filters";
 import { isMac, isTyping } from "../../app/platform.ts";
 import { openDetails, openView, useUi } from "../../app/ui-store.ts";
 import { Sorts } from "../../components/Sorts.tsx";
@@ -40,6 +41,7 @@ import { useDebounced } from "../../lib/use-debounced.ts";
 import { useFit } from "../../lib/use-fit.ts";
 import { cn } from "../../lib/utils.ts";
 import { CollectionGrid, TitleGrid, useCollection } from "./CollectionGrid.tsx";
+import { FilterEmpty, TitleFilterBar, type TitleFilterControls } from "./TitleFilters.tsx";
 
 type Tab = "for-you" | "new" | "genres" | "services" | "4k" | "adult" | "all";
 
@@ -72,6 +74,27 @@ const POSTER_REM = 8.5;
 const STILL_REM = 13;
 
 export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean }) {
+  const [filterState, setFilterState] = useState<{ kind: TitleKind; filters: TitleFilters }>({
+    kind,
+    filters: {},
+  });
+  if (filterState.kind !== kind) setFilterState({ kind, filters: {} });
+  const filters = filterState.kind === kind ? filterState.filters : {};
+  const onFilters = (next: TitleFilters) => setFilterState({ kind, filters: next });
+  const client = useQueryClient();
+  useEffect(() => {
+    if (!active) return;
+    // Returning from details/playback can add current episode hints or locally read tracks.
+    // Read the cache again without downloading a catalogue or opening another file.
+    void client.invalidateQueries({ queryKey: queries.titleFilterOptions(kind).queryKey });
+    void client.invalidateQueries({
+      queryKey: ["ondemand"],
+      predicate: (query) =>
+        query.queryKey[2] === kind &&
+        ((query.queryKey[1] === "collection" && query.queryKey.length > 7) ||
+          (query.queryKey[1] === "searchKind" && query.queryKey.length > 4)),
+    });
+  }, [active, kind, client]);
   const place = usePlace((state) => state[kind]);
   const go = (next: Partial<Place>) =>
     usePlace.setState((state) => ({ [kind]: { ...state[kind], ...next } }));
@@ -154,6 +177,8 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
           sort={place.collectionSort}
           onSort={(collectionSort) => go({ collectionSort })}
           active={active}
+          filters={filters}
+          onFilters={onFilters}
         />
       ) : (
         <>
@@ -199,7 +224,13 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
               Loading {kind === "movie" ? "movies" : "series"}…
             </p>
           ) : searching ? (
-            <SearchResults kind={kind} query={place.query.trim()} active={active} />
+            <SearchResults
+              kind={kind}
+              query={place.query.trim()}
+              active={active}
+              filters={filters}
+              onFilters={onFilters}
+            />
           ) : tab === "for-you" || tab === "new" ? (
             <Rows kind={kind} tab={tab} onOpen={open} />
           ) : tab === "genres" || tab === "services" ? (
@@ -214,6 +245,8 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
                 id={tab}
                 {...(tab === "all" ? { sort: place.sort } : {})}
                 active={active}
+                filters={filters}
+                onFilters={onFilters}
               />
             </div>
           )}
@@ -262,21 +295,31 @@ function SearchResults({
   kind,
   query,
   active,
+  filters,
+  onFilters,
 }: {
   kind: TitleKind;
   query: string;
   active: boolean;
-}) {
+} & TitleFilterControls) {
   const debounced = useDebounced(query, 120);
   const found = useQuery({
-    ...queries.titleSearchIn(kind, debounced),
-    placeholderData: keepPreviousData,
+    ...queries.titleSearchIn(kind, debounced, filters),
   });
   const titles = found.data?.titles ?? [];
   const total = found.data?.total ?? 0;
   const noun = kind === "series" ? "series" : total === 1 ? "movie" : "movies";
   return (
     <div className="flex min-h-0 flex-1 flex-col pl-10">
+      <TitleFilterBar
+        kind={kind}
+        filters={filters}
+        onFilters={onFilters}
+        total={found.data && !found.isPlaceholderData ? total : null}
+        unfiltered={
+          found.data && !found.isPlaceholderData ? (found.data.unfiltered ?? total) : null
+        }
+      />
       {found.error ? (
         <p className="text-sm text-destructive">{describeError(appError(found.error))}</p>
       ) : (
@@ -290,7 +333,22 @@ function SearchResults({
           </p>
         )
       )}
-      <TitleGrid key={debounced} titles={titles} active={active} caption={searchCaption} />
+      {total === 0 && found.data && Object.keys(filters).length > 0 ? (
+        <FilterEmpty filters={filters} />
+      ) : (
+        <div
+          inert={found.isPlaceholderData || debounced !== query ? true : undefined}
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          <TitleGrid
+            key={`${debounced}:${JSON.stringify(filters)}`}
+            titles={titles}
+            active={active && !found.isPlaceholderData && debounced === query}
+            caption={searchCaption}
+            asked={Object.keys(filters).length > 0}
+          />
+        </div>
+      )}
       <p className="flex-none py-4 text-[0.8125rem] text-muted-foreground">
         {kind === "series" ? "Channels, movies" : "Channels, series"} and programmes for “{query}”{" "}
         <button
@@ -326,14 +384,16 @@ function Collection({
   sort,
   onSort,
   active,
+  filters,
+  onFilters,
 }: {
   kind: TitleKind;
   id: CollectionId;
   sort: CollectionSort | null;
   onSort: (sort: CollectionSort) => void;
   active: boolean;
-}) {
-  const listed = useCollection(kind, id, sort ?? undefined);
+} & TitleFilterControls) {
+  const listed = useCollection(kind, id, sort ?? undefined, filters);
   return (
     <div className="flex min-h-0 flex-1 flex-col pt-2 pl-10">
       <div className="mb-3 flex items-baseline gap-3">
@@ -343,7 +403,14 @@ function Collection({
         </span>
       </div>
       <Sorts options={SORTS} value={sort} onChange={onSort} />
-      <CollectionGrid kind={kind} id={id} {...(sort ? { sort } : {})} active={active} />
+      <CollectionGrid
+        kind={kind}
+        id={id}
+        {...(sort ? { sort } : {})}
+        active={active}
+        filters={filters}
+        onFilters={onFilters}
+      />
     </div>
   );
 }

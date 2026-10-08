@@ -23,6 +23,13 @@ import {
   type IndexedCatalogue,
 } from "@mrstreamer/core/ondemand/catalogue";
 import type { CollectionId, Title, TitleKind } from "@mrstreamer/contracts/ondemand";
+import { listedFileKey } from "@mrstreamer/core/ondemand/files";
+import {
+  filterOptions,
+  filterTitles,
+  type FilterFiles,
+  type FilterFile,
+} from "@mrstreamer/core/ondemand/filters";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
 import { adultIn } from "@mrstreamer/core/adult";
 import type { OnDemandCatalogue, ProviderTitle } from "@mrstreamer/core/provider";
@@ -45,6 +52,7 @@ import { providerFor } from "../providers/account.ts";
 import { metadataStore, type Wanted } from "./metadata.ts";
 import type {
   CatalogueOwner,
+  KnownFile,
   WorkerCalls,
   WorkerEvent,
   WorkerRequest,
@@ -384,6 +392,55 @@ function shownOf(members: readonly Loaded[], language: string): Shown {
   return shown;
 }
 
+/** Last-read tracks count only while their exact file remains in these owners' current lists. */
+function filterFiles(found: Shown, kind: TitleKind, known: readonly KnownFile[]): FilterFiles {
+  const result = new Map<string, FilterFile[]>();
+  const members = new Map(found.members.map((member) => [member.subscriptionId, member]));
+  const movies = new Map(
+    found.members.flatMap((member) =>
+      member.catalogue.movies.map(
+        (movie) =>
+          [ownedKey({ subscriptionId: member.subscriptionId, id: movie.id }), movie] as const,
+      ),
+    ),
+  );
+  const series = new Map(
+    found.members.flatMap((member) =>
+      member.catalogue.series.map(
+        (title) =>
+          [ownedKey({ subscriptionId: member.subscriptionId, id: title.id }), title] as const,
+      ),
+    ),
+  );
+  const titles = kindOf(found.index, kind).byId;
+  for (const file of known) {
+    if (!members.has(file.subscriptionId)) continue;
+    const key = ownedKey({
+      subscriptionId: file.subscriptionId,
+      id: file.kind === "movie" ? file.id : (file.seriesId ?? ""),
+    });
+    if (kind === "movie") {
+      if (file.kind !== "movie") continue;
+      const listed = movies.get(key);
+      if (!listed || listedFileKey("movie", listed) !== file.listingKey) continue;
+    } else {
+      if (file.kind !== "episode" || !file.seriesId || !file.tags) continue;
+      const listed = series.get(key);
+      if (!listed || (listed.episodeFiles && !listed.episodeFiles.includes(file.id))) continue;
+    }
+    const title = titles.get(key);
+    const version = title?.versions.find((version) => ownedKey(version) === key);
+    if (!version) continue;
+    const files = result.get(key) ?? [];
+    files.push({
+      tags: file.tags ?? version.tags,
+      ...(file.tracks ? { tracks: file.tracks } : {}),
+    });
+    result.set(key, files);
+  }
+  return result;
+}
+
 /** The collections of a kind as a viewer of `language` sees them, with the metadata so far. */
 function collectionsOf(found: Shown, kind: TitleKind): Collections {
   const key = `${kind}|${metadataVersion}`;
@@ -554,14 +611,24 @@ const handlers: {
       search(index, kind, query, aliases).map((title) => named(title, language));
     return { movies: matches("movie"), series: matches("series") };
   },
-  searchKind: async ({ language, kind, query, limit, owners }) => {
+  searchKind: async ({ language, kind, query, limit, owners, filters, files = [] }) => {
     speaking(language);
-    const { index } = await catalogueOf(owners, language);
-    const matches = search(index, kind, query, aliases, Infinity);
+    const found = await catalogueOf(owners, language);
+    const unfiltered = search(found.index, kind, query, aliases, Infinity);
+    const matches = filters
+      ? filterTitles(unfiltered, filters, filterFiles(found, kind, files))
+      : unfiltered;
     return {
       titles: matches.slice(0, limit).map((title) => named(title, language)),
       total: matches.length,
+      ...(filters ? { unfiltered: unfiltered.length } : {}),
     };
+  },
+  filterOptions: async ({ owners, language, kind, files, adults }) => {
+    const found = await catalogueOf(owners, language);
+    const made = collectionsOf(found, kind);
+    const titles = [...made.list("all"), ...(adults ? made.list("adult") : [])];
+    return filterOptions(titles, filterFiles(found, kind, files));
   },
   rows: async ({ language, kind, tab, like, owners }) => {
     speaking(language);
@@ -627,14 +694,19 @@ const handlers: {
           artworkUrl: service.artwork,
         }));
   },
-  collection: async ({ language, kind, id, sort, offset, limit, owners }) => {
+  collection: async ({ language, kind, id, sort, offset, limit, owners, filters, files = [] }) => {
     speaking(language);
-    const made = collectionsOf(await catalogueOf(owners, language, true), kind);
-    const titles = made.list(id, sort);
+    const found = await catalogueOf(owners, language, true);
+    const made = collectionsOf(found, kind);
+    const unfiltered = made.list(id, sort);
+    const titles = filters
+      ? filterTitles(unfiltered, filters, filterFiles(found, kind, files))
+      : unfiltered;
     return {
       name: made.name(id) ?? "",
       total: titles.length,
       titles: titles.slice(offset, offset + limit),
+      ...(filters ? { unfiltered: unfiltered.length } : {}),
     };
   },
   saved: async ({ language, adults: shown, members, sort, offset, limit, owners }) => {
@@ -695,7 +767,10 @@ const handlers: {
   },
   container: async ({ id, ...owner }) => {
     const found = await current(owner);
-    return found?.catalogue.movies.find((movie) => movie.id === id)?.container ?? null;
+    const movie = found?.catalogue.movies.find((movie) => movie.id === id);
+    return movie?.container
+      ? { container: movie.container, listingKey: listedFileKey("movie", movie) }
+      : null;
   },
   forget: async (owner) => {
     const { subscriptionId } = owner;

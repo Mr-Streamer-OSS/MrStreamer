@@ -16,6 +16,7 @@ import type {
   TitleMatches,
 } from "@mrstreamer/contracts/ondemand";
 import type { OwnedId } from "@mrstreamer/contracts/subscription";
+import type { FilterOptions, TitleFilters } from "@mrstreamer/contracts/title-filters";
 import type { WatchlistPage, WatchlistSort } from "@mrstreamer/contracts/watchlist";
 import type { SavedMember, SavedTitle, TitleFacts } from "@mrstreamer/core/ondemand/watchlist";
 import type { OnDemandCatalogue } from "@mrstreamer/core/provider";
@@ -44,6 +45,25 @@ export interface CatalogueOwner {
 /** The subscriptions whose lists make the catalogue a call asks about, in their order. */
 interface Owners {
   readonly owners: readonly CatalogueOwner[];
+}
+
+/** Main validates current episode details; the worker validates movie rows against its lists. */
+export interface KnownFile {
+  readonly subscriptionId: string;
+  readonly kind: "movie" | "episode";
+  readonly id: string;
+  readonly seriesId?: string;
+  readonly listingKey: string;
+  readonly tracks?: {
+    readonly audio: readonly (string | null)[];
+    readonly subtitles: readonly (string | null)[];
+  };
+  readonly tags?: readonly string[];
+}
+
+interface FilterQuery {
+  readonly filters?: TitleFilters;
+  readonly files?: readonly KnownFile[];
 }
 
 /** A subscription's loaded lists: their size and age; null counts when nothing is loaded for it. */
@@ -103,8 +123,18 @@ export interface WorkerCalls {
   };
   /** Movies or series matching `query`, the best `limit` of them, and how many match. */
   searchKind: {
-    args: Owners & { language: string; kind: TitleKind; query: string; limit: number };
+    args: Owners &
+      FilterQuery & { language: string; kind: TitleKind; query: string; limit: number };
     result: TitleMatches;
+  };
+  filterOptions: {
+    args: Owners & {
+      language: string;
+      kind: TitleKind;
+      files: readonly KnownFile[];
+      adults: boolean;
+    };
+    result: FilterOptions;
   };
   /** A tab's rows; For you starts with titles like `like`, a version of one watched lately. */
   rows: {
@@ -128,14 +158,15 @@ export interface WorkerCalls {
   };
   /** One page of a collection. */
   collection: {
-    args: Owners & {
-      language: string;
-      kind: TitleKind;
-      id: CollectionId;
-      sort?: CollectionSort;
-      offset: number;
-      limit: number;
-    };
+    args: Owners &
+      FilterQuery & {
+        language: string;
+        kind: TitleKind;
+        id: CollectionId;
+        sort?: CollectionSort;
+        offset: number;
+        limit: number;
+      };
     result: CollectionPage;
   };
   /**
@@ -157,7 +188,10 @@ export interface WorkerCalls {
     result: readonly TitleFacts[] | null;
   };
   /** The file type a movie streams as, or null when its subscription's lists don't have it. */
-  container: { args: CatalogueOwner & { id: string }; result: string | null };
+  container: {
+    args: CatalogueOwner & { id: string };
+    result: { container: string; listingKey: string } | null;
+  };
   /** Forgets a subscription's lists and removes their cache, for when the subscription goes. */
   forget: { args: CatalogueOwner; result: null };
   /** Writes pending lists and answers once all cache writes finish, for a clean shutdown. */

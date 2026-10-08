@@ -23,6 +23,14 @@ The field at the end of the tabs searches movies on Movies and series on Series.
 
 ⌘K (Ctrl K on Windows and Linux) searches movies and series along with channels and programmes. Opened from Movies or Series, it starts with what the field searched for; so does **Search everything** under the results.
 
+## Filtering the current list
+
+From 0.0.9, **Quality** and **Language** filter an open movie or series grid and its search results. They are hints from the provider's names. **Unknown** means no hint, and **MULTI** means a mark for several languages. **More…** offers the other languages. The count shows matches out of the current list; **Reset** clears the filters. Switching between Movies and Series clears them too. ⌘K's search stays unfiltered.
+
+**Verified** appears after a file has been read on this computer. It filters by sound or subtitle languages found in that exact file, without opening or probing any files to filter. Quality, language and verified choices must match one file together. A series matches when one of its known episodes has such a file; this does not promise the same tracks on every episode. After a restart, reopen a series' details before its saved episode observations count again.
+
+Opening a filtered poster picks the matching version. The arrow beside **Play** still lets you choose another.
+
 ## Language
 
 Settings > General has three languages for movies and series:

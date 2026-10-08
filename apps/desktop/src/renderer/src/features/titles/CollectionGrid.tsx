@@ -13,6 +13,7 @@ import type {
   TitleKind,
 } from "@mrstreamer/contracts/ondemand";
 import { ownedId } from "@mrstreamer/contracts/subscription";
+import type { TitleFilters } from "@mrstreamer/contracts/title-filters";
 import { hasModifier, isTyping } from "../../app/platform.ts";
 import { openDetails, useUi } from "../../app/ui-store.ts";
 import { Artwork } from "../../components/TitleArt.tsx";
@@ -21,6 +22,7 @@ import { useKeyboardMode } from "../../lib/input-mode.ts";
 import { queries, useSourceOf } from "../../lib/queries.ts";
 import { useRem } from "../../lib/use-rem.ts";
 import { cn } from "../../lib/utils.ts";
+import { FilterEmpty, TitleFilterBar, type TitleFilterControls } from "./TitleFilters.tsx";
 
 /** Titles asked for together as rows come into view. */
 export const PAGE = 120;
@@ -64,16 +66,22 @@ export function usePages(listKey: string): {
  * A collection's titles, fetched a page at a time as the grid asks. `titleAt` answers for loaded
  * positions; `load` asks for the pages around the positions in view.
  */
-export function useCollection(kind: TitleKind, id: CollectionId, sort?: CollectionSort) {
-  const { pages, load } = usePages(`${kind}:${id}:${sort ?? ""}`);
+export function useCollection(
+  kind: TitleKind,
+  id: CollectionId,
+  sort?: CollectionSort,
+  filters?: TitleFilters,
+) {
+  const { pages, load } = usePages(`${kind}:${id}:${sort ?? ""}:${JSON.stringify(filters ?? {})}`);
   const loaded = useQueries({
-    queries: pages.map((page) => queries.collection(kind, id, sort, page * PAGE, PAGE)),
+    queries: pages.map((page) => queries.collection(kind, id, sort, page * PAGE, PAGE, filters)),
   });
   const byPage = new Map(pages.map((page, index) => [page, loaded[index]?.data]));
   const first = byPage.get(0);
   return {
     name: first?.name ?? null,
     total: first ? first.total : null,
+    unfiltered: first ? (first.unfiltered ?? first.total) : null,
     titleAt: (index: number) => byPage.get(Math.floor(index / PAGE))?.titles[index % PAGE],
     load,
     error: loaded.find((each) => each.error)?.error ?? null,
@@ -86,39 +94,60 @@ export function CollectionGrid({
   id,
   sort,
   active,
+  filters,
+  onFilters,
 }: {
   kind: TitleKind;
   id: CollectionId;
   sort?: CollectionSort;
   active: boolean;
-}) {
-  const listed = useCollection(kind, id, sort);
-  if (listed.error) {
-    return <p className="text-sm text-destructive">{describeError(appError(listed.error))}</p>;
-  }
-  if (listed.total === 0) {
-    return <p className="text-[0.9375rem] text-muted-foreground">Nothing here yet.</p>;
-  }
+} & Partial<TitleFilterControls>) {
+  const listed = useCollection(kind, id, sort, filters);
   // Each poster is the version the grid lists, as the 4K tab's are their 4K versions.
   const open = (title: Title) =>
-    openDetails({ kind: title.kind, ...ownedId(title), asked: id === "4k" });
+    openDetails({
+      kind: title.kind,
+      ...ownedId(title),
+      asked: id === "4k" || (!!filters && Object.keys(filters).length > 0),
+    });
   return (
-    <Grid
-      key={`${kind}:${id}:${sort ?? ""}`}
-      total={listed.total ?? 0}
-      itemAt={listed.titleAt}
-      onVisible={listed.load}
-      active={active}
-      onOpen={open}
-      tile={(title, selected) => (
-        <GridPoster
-          title={title}
-          caption={describe(title)}
-          selected={selected}
-          onOpen={() => open(title)}
+    <>
+      {filters && onFilters && (
+        <TitleFilterBar
+          kind={kind}
+          filters={filters}
+          onFilters={onFilters}
+          total={listed.total}
+          unfiltered={listed.unfiltered}
         />
       )}
-    />
+      {listed.error ? (
+        <p className="text-sm text-destructive">{describeError(appError(listed.error))}</p>
+      ) : listed.total === 0 ? (
+        filters && Object.keys(filters).length > 0 ? (
+          <FilterEmpty filters={filters} />
+        ) : (
+          <p className="text-[0.9375rem] text-muted-foreground">Nothing here yet.</p>
+        )
+      ) : (
+        <Grid
+          key={`${kind}:${id}:${sort ?? ""}:${JSON.stringify(filters ?? {})}`}
+          total={listed.total ?? 0}
+          itemAt={listed.titleAt}
+          onVisible={listed.load}
+          active={active}
+          onOpen={open}
+          tile={(title, selected) => (
+            <GridPoster
+              title={title}
+              caption={describe(title)}
+              selected={selected}
+              onOpen={() => open(title)}
+            />
+          )}
+        />
+      )}
+    </>
   );
 }
 
@@ -136,12 +165,15 @@ export function TitleGrid({
   titles,
   active,
   caption = describe,
+  asked = false,
 }: {
   titles: readonly Title[];
   active: boolean;
   caption?: (title: Title) => string;
+  /** Filtered results open the matching version even when it is the usual primary version. */
+  asked?: boolean;
 }) {
-  const open = (title: Title) => openDetails({ kind: title.kind, ...ownedId(title) });
+  const open = (title: Title) => openDetails({ kind: title.kind, ...ownedId(title), asked });
   return (
     <Grid
       total={titles.length}

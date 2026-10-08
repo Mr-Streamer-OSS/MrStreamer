@@ -9,7 +9,7 @@ const LANGUAGE = /\s*[([]\s*([A-Za-z]{2,5}(?:[\s-][A-Za-z]{2,7})?)\s*[)\]]\s*$/;
 /** A trailing "(2023)", or "- 2023" after the title. */
 const YEAR = /\s*(?:\(\s*((?:19|20)\d{2})\s*\)|\s[-–]\s((?:19|20)\d{2}))\s*$/;
 /** Quality markers as whole words. */
-const QUALITY = /(?<![\p{L}\p{N}])(4K|UHD|HDR|HEVC|H\.?265|\d{3,4}p)(?![\p{L}\p{N}])/giu;
+const QUALITY = /(?<![\p{L}\p{N}])(4K|UHD|FHD|HD|SD|HDR|HEVC|H\.?265|\d{3,4}p)(?![\p{L}\p{N}])/giu;
 /** "S02E03", "S2 E3", with what follows it. */
 const EPISODE_NUMBER = /\bS(\d{1,3})\s?E(\d{1,4})\b\s*[-:–]?\s*/i;
 
