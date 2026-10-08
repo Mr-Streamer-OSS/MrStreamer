@@ -83,8 +83,19 @@ async function opened(
   unmount = () => act(() => root.unmount());
   await act(async () => listed.resolve([title]));
   await act(async () => progress.resolve(played));
-  // The details are asked for once React Query has passed both answers on.
-  await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+  // Wait for the public request and rendered answer, rather than guessing React Query's timing.
+  await expect
+    .poll(async () => {
+      await act(() => new Promise((resolve) => setTimeout(resolve, 10)));
+      return ipc.argsOf("ondemand.details").at(-1);
+    })
+    .toBeDefined();
+  await expect
+    .poll(async () => {
+      await act(() => new Promise((resolve) => setTimeout(resolve, 10)));
+      return document.body.textContent?.includes("Loading…");
+    })
+    .toBe(false);
   const requested = ipc.argsOf("ondemand.details").at(-1);
   // Asked of the subscription that lists the film, and of no other.
   expect(requested?.version.subscriptionId ?? SUBSCRIPTION).toBe(SUBSCRIPTION);
@@ -92,6 +103,16 @@ async function opened(
 }
 
 describe("a film's details", () => {
+  it.each(["4K", "HD"])("keeps the Play line minimal for a single %s file", async (quality) => {
+    const version = { subscriptionId: SUBSCRIPTION, id: "plain", tags: [quality] };
+    expect(
+      await opened("plain", defaultSubscriptionPreferences, {
+        title: { ...film, id: "plain", tags: [quality], versions: [version] },
+      }),
+    ).toBe("plain");
+    expect(document.body.textContent).toContain(quality);
+    expect(document.body.textContent).not.toContain("Standard");
+  });
   it("names the selected same-hint file by the menu's source order even when ranked newest first", async () => {
     const versions = [
       {
@@ -116,7 +137,7 @@ describe("a film's details", () => {
         title: { ...film, id: "newer", tags: ["4K"], versions },
       }),
     ).toBe("newer");
-    expect(document.body.textContent).toContain("4K · Standard · Version 2");
+    expect(document.body.textContent).toContain("4K · Version 2");
     await act(async () =>
       document.querySelector<HTMLButtonElement>('[aria-label="Versions"]')?.click(),
     );

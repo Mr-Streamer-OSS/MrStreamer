@@ -184,12 +184,15 @@ describe("the movie version menu", () => {
     expect(document.activeElement).toBe(page.container.querySelector('[aria-label="Versions"]'));
   });
 
-  it("labels a series observation as read episodes instead of promising every episode's tracks", async () => {
+  it("counts read files and collapses repeated track languages without promising every episode's tracks", async () => {
     await mount({
       ...film,
       kind: "series",
       versions: [
-        { ...film.versions[1]!, observed: { files: 1, audio: ["en"], subtitles: ["nl"] } },
+        {
+          ...film.versions[1]!,
+          observed: { files: 2, audio: ["en", "eng"], subtitles: ["nl", "nld"] },
+        },
         film.versions[2]!,
       ],
     });
@@ -198,10 +201,10 @@ describe("the movie version menu", () => {
     );
     await settle();
     expect(radios().find((item) => item.textContent?.includes("release A"))?.textContent).toContain(
-      "Read 1 episode · English sound · Nederlands subtitles",
+      "Read 2 files · English sound · Nederlands subtitles",
     );
     expect(
       radios().find((item) => item.textContent?.includes("release B"))?.textContent,
-    ).not.toContain("Read 1 episode");
+    ).not.toContain("Read 2 files");
   });
 });

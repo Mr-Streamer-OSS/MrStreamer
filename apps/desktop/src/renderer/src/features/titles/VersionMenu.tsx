@@ -18,11 +18,11 @@ function observedLabel(version: TitleVersion, kind: Title["kind"]): string | nul
   if (!version.observed) return null;
   const name = (code: string | null) => languageName(code) ?? "Unknown";
   const { audio, subtitles, files } = version.observed;
-  const sound = audio.length ? `${audio.map(name).join(", ")} sound` : "No sound";
+  const sound = audio.length ? `${[...new Set(audio.map(name))].join(", ")} sound` : "No sound";
   const captions = subtitles.length
-    ? `${subtitles.map(name).join(", ")} subtitles`
+    ? `${[...new Set(subtitles.map(name))].join(", ")} subtitles`
     : "No subtitles";
-  const read = kind === "series" ? `Read ${files} ${files === 1 ? "episode" : "episodes"} · ` : "";
+  const read = kind === "series" ? `Read ${files} ${files === 1 ? "file" : "files"} · ` : "";
   return `${read}${sound} · ${captions}`;
 }
 

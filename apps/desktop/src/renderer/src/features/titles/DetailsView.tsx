@@ -556,7 +556,7 @@ function Actions({
           </Button>
         )}
       </div>
-      {/* What plays: "English sound · 4K", and whose it is once several subscriptions list the
+      {/* What plays: "4K · English sound", and whose it is once several subscriptions list the
           title. A version without marks says nothing more. */}
       {said && (several || said.label !== "Standard" || said.source) && (
         <div className="mt-3 text-[0.8125rem] text-muted-foreground">
@@ -590,7 +590,11 @@ function useVersionNames(
         (version, at) =>
           [
             ownedKey(version),
-            [group.quality, group.label, group.versions.length > 1 ? `Version ${at + 1}` : null]
+            [
+              group.quality,
+              group.quality && group.label === "Standard" ? null : group.label,
+              group.versions.length > 1 ? `Version ${at + 1}` : null,
+            ]
               .filter(Boolean)
               .join(" · "),
           ] as const,

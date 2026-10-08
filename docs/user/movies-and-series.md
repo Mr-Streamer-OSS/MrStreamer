@@ -60,7 +60,7 @@ A poster opens its details over the list, which stays where it was: the artwork,
 
 From 0.0.9, **Versions** lists quality first, then language and subscription. These are hints from the provider's name until you open a file. Equal hints within one subscription show a version count: expand it to choose each exact file by its original label, file type and added date where listed. Files in an expanded group get a version number in the provider’s list order. Matching names never make different files interchangeable.
 
-A tick names tracks actually read on this computer. A file with no subtitles says **No subtitles** only after it was read; another file with the same hints makes no such claim. A series observation says how many read episodes it describes, rather than promising the tracks of every episode. Opening the menu reads no files. Changing or replacing a source clears obsolete observations, and series observations require its current episode details to have been opened here.
+A tick names tracks actually read on this computer. A file with no subtitles says **No subtitles** only after it was read; another file with the same hints makes no such claim. A series observation says how many exact files it has read, including alternate files of one episode, rather than promising the tracks of every episode. Opening the menu reads no files. Changing or replacing a source clears obsolete observations, and series observations require its current episode details to have been opened here.
 
 ## Marking episodes
 
