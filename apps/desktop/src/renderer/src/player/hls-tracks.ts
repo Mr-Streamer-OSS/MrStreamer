@@ -370,7 +370,7 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
   hls.on(Hls.Events.SUBTITLE_TRACK_LOADED, (_event, data) => {
     const id = renditionIds(hls.subtitleTracks)[data.id];
     if (released || id === undefined) return;
-    cadence.set(id, data.details.targetduration);
+    cadence.set(id, data.details.live ? data.details.targetduration : 0);
     if (probing === id) armProbe();
     if (wanted?.id === id && selectionTimer) armSelection();
   });

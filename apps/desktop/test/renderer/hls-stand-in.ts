@@ -181,7 +181,7 @@ export function standIn(real: typeof Hls) {
     subtitlePlaylist(seconds: number): void {
       this.#tell(Events.SUBTITLE_TRACK_LOADED, {
         id: this.#subtitle,
-        details: { targetduration: seconds },
+        details: { targetduration: seconds, live: true },
       });
     }
     subtitleDeferred(afterSuccess = false): void {
