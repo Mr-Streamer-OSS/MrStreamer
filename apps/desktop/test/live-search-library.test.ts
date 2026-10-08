@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type } from "arktype";
+import type { LiveSearchGroups } from "@mrstreamer/contracts/library";
+import { ownedKey } from "@mrstreamer/contracts/subscription";
 import * as Layer from "effect/Layer";
 import { expect, it } from "vitest";
 import {
@@ -12,6 +14,11 @@ import { Library } from "../src/main/services/library.ts";
 import { Settings } from "../src/main/services/preferences.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { fakeProvider, promised, runtimeFor, tempDir, testSecrets, userAgent } from "./support.ts";
+
+const stampsOf = (groups: LiveSearchGroups) =>
+  Object.fromEntries(
+    groups.flatMap(({ key, copies }) => copies.map((id, order) => [id, { key, order }] as const)),
+  );
 
 async function started(dataDir: string) {
   const runtime = runtimeFor(
@@ -64,6 +71,20 @@ it("search keeps every provider/category/quality copy and reconstructs safe meta
   }
   const ordinary = await library.channels({});
   expect(ordinary).toHaveLength(8);
+  const decisions = await library.searchGroups();
+  const stamps = stampsOf(decisions);
+  expect(Object.keys(stamps).toSorted()).toEqual(ordinary.map(ownedKey).toSorted());
+  expect(
+    Object.values(stamps).every((stamp) => Object.keys(stamp).toSorted().join() === "key,order"),
+  ).toBe(true);
+  const stamped = ordinary.map((channel) => ({
+    ...channel,
+    searchGroup: stamps[ownedKey(channel)]!,
+  }));
+  expect(searchResultGroups(stamped).map((group) => [group.copies.length, group.streams])).toEqual([
+    [4, 6],
+    [4, 4],
+  ]);
   const results = await library.channels({ query: "VRT" });
   expect(results).toHaveLength(8);
   expect(searchResultGroups(results).map((group) => [group.copies.length, group.streams])).toEqual([
@@ -78,7 +99,7 @@ it("search keeps every provider/category/quality copy and reconstructs safe meta
   const qualityGroup = searchResultGroups(sdMatches).find(
     (group) => group.copies[0]?.title === "VRT 1",
   )!;
-  const grouped = await library.channels({ grouped: true });
+  const grouped = stamped;
   const ordinaryGroup = indexLiveSearch(grouped).groups.find(
     (group) => group.copies[0]?.title === "VRT 1",
   )!;
@@ -97,6 +118,9 @@ it("search keeps every provider/category/quality copy and reconstructs safe meta
     expect(copy).not.toHaveProperty("searchIdentity");
   }
   expect(grouped.map(({ searchGroup: _group, ...copy }) => copy)).toEqual(ordinary);
+  expect(grouped.map((channel) => channel.searchGroup)).toEqual(
+    ordinary.map((channel) => stamps[ownedKey(channel)]),
+  );
   for (const response of [grouped, results, qualityMatches, sdMatches, programmeMatches]) {
     for (const copy of response) {
       expect(copy.searchGroup).toEqual({ key: expect.any(String), order: expect.any(Number) });
@@ -117,7 +141,55 @@ it("search keeps every provider/category/quality copy and reconstructs safe meta
   const restart = await started(dataDir);
   expect(await restart.library.channels({ query: "VRT" })).toEqual(results);
   expect(await restart.library.channels({})).toEqual(ordinary);
+  expect(await restart.library.searchGroups()).toEqual(decisions);
   expect((await restart.library.status()).map((status) => status.subscriptionId)).toEqual(ids);
+});
+
+it("catalogue stamps change after a hidden guide conflict without fetching on reads", async () => {
+  const providers = [await fakeProvider(), await fakeProvider(), await fakeProvider()];
+  let conflict = false;
+  const fetched = [0, 0, 0];
+  for (const [index, provider] of providers.entries()) {
+    const category = provider.catalogue.categories.find((each) => each.name.startsWith("BE |"))!;
+    provider.serveChannels((channels) => {
+      fetched[index]!++;
+      return [
+        {
+          ...channels[0]!,
+          name: "BE | VRT 1 FHD",
+          categoryId: category.id,
+          guideId: index === 1 ? "" : index === 2 && conflict ? "een.be" : "VRT1.be",
+          adult: false,
+        },
+      ];
+    });
+  }
+  const { library, subscriptions } = await started(await tempDir());
+  const ids: string[] = [];
+  for (const provider of providers) {
+    const saved = await subscriptions.add({
+      server: provider.url,
+      username: "demo",
+      password: "demo",
+    });
+    ids.push(saved.id);
+    await library.refresh(saved.id);
+  }
+  const subset = await library.channels({
+    channels: ids.slice(0, 2).map((subscriptionId) => ({ subscriptionId, id: "1000" })),
+  });
+  expect(subset).toHaveLength(2);
+  const before = stampsOf(await library.searchGroups());
+  expect(new Set(subset.map((copy) => before[ownedKey(copy)]?.key)).size).toBe(1);
+  conflict = true;
+  await library.refresh(ids[2]!);
+  const decisions = await library.searchGroups();
+  expect(decisions).toEqual([]);
+  const after = stampsOf(decisions);
+  expect(new Set(subset.map((copy) => after[ownedKey(copy)]?.key ?? ownedKey(copy))).size).toBe(2);
+  expect(await library.channels({ channels: subset })).toEqual(subset);
+  expect(await library.searchGroups()).toEqual(decisions);
+  expect(fetched).toEqual([1, 1, 2]);
 });
 
 it("palette responses retain full-catalogue ambiguity when the query excludes a conflicting copy", async () => {
@@ -151,10 +223,14 @@ it("palette responses retain full-catalogue ambiguity when the query excludes a 
   expect(new Set(partial.map((copy) => copy.searchGroup?.key)).size).toBe(2);
   const list = await library.channels({
     channels: partial.map(({ subscriptionId, id }) => ({ subscriptionId, id })),
-    grouped: true,
   });
+  const stamps = stampsOf(await library.searchGroups());
+  const grouped = list.map((copy) => ({
+    ...copy,
+    searchGroup: stamps[ownedKey(copy)] ?? { key: ownedKey(copy), order: 0 },
+  }));
   // A list can hide the conflicting guide, but it cannot turn that absence into identity.
-  expect(indexLiveSearch(list).groups).toHaveLength(2);
-  expect(list.map((copy) => copy.searchGroup)).toEqual(partial.map((copy) => copy.searchGroup));
+  expect(indexLiveSearch(grouped).groups).toHaveLength(2);
+  expect(grouped.map((copy) => copy.searchGroup)).toEqual(partial.map((copy) => copy.searchGroup));
   expect(list.every((copy) => !Object.hasOwn(copy, "searchIdentity"))).toBe(true);
 });

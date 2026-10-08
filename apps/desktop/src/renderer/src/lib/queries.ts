@@ -150,11 +150,18 @@ export const queries = {
       staleTime: LISTINGS_REFRESH_MS,
       enabled: query.trim().length > 0,
     }),
-  /** The list's full-catalogue display groups, read only while searching it. */
-  groupedChannels: (list: Omit<IpcInput<"guide.searchList">, "query" | "until">) =>
+  /** Full-catalogue display stamps, shared by every list and read only while searching. */
+  searchGroups: () =>
     queryOptions({
-      queryKey: ["library", "groupedChannels", list],
-      queryFn: () => call("library.channels", { ...list, grouped: true }),
+      queryKey: ["library", "searchGroups"],
+      queryFn: async () => {
+        const groups = await call("library.searchGroups");
+        return Object.fromEntries(
+          groups.flatMap(({ key, copies }) =>
+            copies.map((id, order) => [id, { key, order }] as const),
+          ),
+        );
+      },
       staleTime: Infinity,
     }),
   /**
@@ -560,6 +567,9 @@ export async function rememberCategory(
 /** Refetches library data whenever the main process reports a new catalogue. */
 export function syncLibraryUpdates(client: QueryClient): () => void {
   return listen("library.updated", () => {
+    // Invalidation alone reuses an in-flight first read with no cached data. Its old decision
+    // must not become fresh after a catalogue update.
+    void client.cancelQueries({ queryKey: queries.searchGroups().queryKey, exact: true });
     void client.invalidateQueries({ queryKey: ["library"] });
     void client.invalidateQueries({ queryKey: ["playlist"] });
     // Favourites and history show by channel, and a new catalogue can join a channel's streams.

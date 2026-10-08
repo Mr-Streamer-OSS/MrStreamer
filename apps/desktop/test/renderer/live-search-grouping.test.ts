@@ -5,17 +5,17 @@ import { act, createElement, Fragment } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defaultSubscriptionPreferences } from "@mrstreamer/contracts/preferences";
-import { ownedKey } from "@mrstreamer/contracts/subscription";
+import { ownedId, ownedKey } from "@mrstreamer/contracts/subscription";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { ListingMatch, Programme } from "@mrstreamer/contracts/guide";
 import { normalizeCatalogue } from "@mrstreamer/core/catalogue/normalize";
 import { indexLiveSearch } from "@mrstreamer/core/catalogue/search";
 import { liveChannels } from "@mrstreamer/core/catalogue/variants";
-import { useUi } from "../../src/renderer/src/app/ui-store.ts";
+import { useUi, type ChannelList } from "../../src/renderer/src/app/ui-store.ts";
 import { GuidePage } from "../../src/renderer/src/features/live/GuidePage.tsx";
 import { SearchPalette } from "../../src/renderer/src/features/search/SearchPalette.tsx";
 import { WatchScreen } from "../../src/renderer/src/features/watch/WatchScreen.tsx";
-import { queries } from "../../src/renderer/src/lib/queries.ts";
+import { queries, syncLibraryUpdates, syncViewing } from "../../src/renderer/src/lib/queries.ts";
 import { player } from "../../src/renderer/src/player/player.ts";
 
 const GREEN = "3f6c1b5e-2a47-4d0e-9c1f-7b8a5d2e4f11";
@@ -50,6 +50,8 @@ const green: readonly LiveChannel[] = catalogue.map((channel) => ({
   subscriptionId: GREEN,
 }));
 const all = [...blue, ...green];
+const plain = (channels: readonly LiveChannel[]) =>
+  channels.map(({ searchIdentity: _identity, searchGroup: _group, ...channel }) => channel);
 const responses = (channels: readonly LiveChannel[]) => {
   const stamps = new Map(
     indexLiveSearch(channels).groups.flatMap((group) =>
@@ -61,6 +63,10 @@ const responses = (channels: readonly LiveChannel[]) => {
     searchGroup: stamps.get(ownedKey(channel))!,
   }));
 };
+const stamps = (channels: readonly LiveChannel[]) =>
+  indexLiveSearch(channels)
+    .groups.filter((group) => group.copies.length > 1)
+    .map((group) => ({ key: group.key, copies: group.copies.map(ownedKey) }));
 const programme = (title: string): Programme => ({
   start: Date.now() - 1000,
   stop: Date.now() + 3600000,
@@ -92,13 +98,14 @@ async function page(
   query = "VRT",
   realPlayback = false,
   listed: readonly LiveChannel[] = responses(all),
+  list: ChannelList = { kind: "all" },
 ) {
   ipc.reset();
   const watch = vi.spyOn(player, "watch");
   if (!realPlayback) watch.mockImplementation(() => {});
   useUi.setState({
     view: "live",
-    list: { kind: "all" },
+    list,
     watching: false,
     playingTitle: false,
     searchOpen: kind === "palette",
@@ -107,13 +114,16 @@ async function page(
     searchFrom: query,
   });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const stopLibrary = syncLibraryUpdates(client);
+  const stopViewing = syncViewing(client);
   client.setQueryData(queries.subscriptions().queryKey, [
     { ...SAVED, name: "Blue" },
     { ...SAVED, id: GREEN, name: "Green" },
   ]);
   if (kind === "guide") {
-    client.setQueryData(queries.channels(null).queryKey, listed);
-    client.setQueryData(queries.groupedChannels({}).queryKey, responses(listed));
+    client.setQueryData(queries.channels(null).queryKey, plain(listed));
+    client.setQueryData(queries.channelsOf(listed).queryKey, plain(listed));
+    ipc.always("library.searchGroups", stamps(all));
   }
   client.setQueryData(
     queries.categories().queryKey,
@@ -132,8 +142,8 @@ async function page(
     { subscriptionId: GREEN, channelCount: 4, fetchedAt: 1, failure: null, failedAt: null },
   ]);
   client.setQueryData(queries.viewing().queryKey, {
-    favourites: [green[1]!],
-    recent: [],
+    favourites: list.kind === "favourites" ? listed : [green[1]!],
+    recent: list.kind === "recent" ? listed : [],
     continueWatching: [],
     marked: [],
     sequence: 1,
@@ -178,6 +188,8 @@ async function page(
     ),
   );
   unmount = () => {
+    stopLibrary();
+    stopViewing();
     act(() => root.unmount());
     container.remove();
     client.clear();
@@ -198,8 +210,7 @@ async function page(
       (button) => button.getAttribute("aria-label") === label,
     )!;
   const click = (target: HTMLElement) => act(async () => target.click());
-  const search = async (text: string, matches: Record<string, ListingMatch> = {}) => {
-    const answer = ipc.hold("guide.searchList");
+  const type = async (text: string) => {
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
         field(),
@@ -207,14 +218,290 @@ async function page(
       );
       field().dispatchEvent(new Event("input", { bubbles: true }));
     });
+  };
+  const search = async (text: string, matches: Record<string, ListingMatch> = {}) => {
+    const answer = ipc.hold("guide.searchList");
+    await type(text);
     await settled(150);
     answer.resolve(matches);
     await settled();
   };
-  return { client, watch, field, press, rows, button, click, search, scope };
+  return { client, watch, field, press, rows, button, click, type, search, scope };
 }
 
 describe("real search components with two subscriptions", () => {
+  it("does not accept a first stamp answer made obsolete by a catalogue update", async () => {
+    const p = await page("guide");
+    const old = ipc.hold("library.searchGroups");
+    await p.search("VRT");
+    const current = all.map((channel) =>
+      channel.subscriptionId === GREEN && channel.title === "VRT 1"
+        ? { ...channel, searchIdentity: { ...channel.searchIdentity!, guideId: "different.be" } }
+        : channel,
+    );
+    const listed = ipc.hold("library.channels");
+    const fresh = ipc.hold("library.searchGroups");
+    await act(async () =>
+      ipc.emit("library.updated", {
+        subscriptionId: GREEN,
+        channelCount: current.length,
+        fetchedAt: 2,
+        failure: null,
+        failedAt: null,
+      }),
+    );
+    listed.resolve(plain(current));
+    old.resolve(stamps(all));
+    await settled();
+    expect(p.rows().every((row) => !row.hasAttribute("aria-label"))).toBe(true);
+    fresh.resolve(stamps(current));
+    await settled();
+    expect(p.rows()).toHaveLength(3);
+    expect(
+      p.rows().filter((row) => row.getAttribute("aria-label")?.startsWith("VRT 1,")),
+    ).toHaveLength(2);
+  });
+
+  it("starts cold catalogue stamps during typing but waits for both authoritative stamps and programmes", async () => {
+    const p = await page("guide");
+    const groups = ipc.hold("library.searchGroups");
+    const programmes = ipc.hold("guide.searchList");
+    await p.type("V");
+    await settled();
+    expect(ipc.argsOf("library.searchGroups")).toEqual([undefined]);
+    expect(ipc.argsOf("guide.searchList")).toEqual([]);
+    await p.type("VRT");
+    await settled(150);
+    expect(p.rows()).toHaveLength(8);
+    programmes.resolve({});
+    await settled();
+    expect(p.rows().every((row) => !row.hasAttribute("aria-label"))).toBe(true);
+    groups.resolve(stamps(all));
+    await settled();
+    expect(p.rows()).toHaveLength(2);
+    expect(ipc.argsOf("library.channels")).toEqual([]);
+    expect(ipc.argsOf("library.searchGroups")).toHaveLength(1);
+    expect(ipc.argsOf("guide.searchList")).toEqual([{ query: "VRT", until: expect.any(Number) }]);
+  });
+
+  it("keeps Search all channels filtered without a second grouping read", async () => {
+    const p = await page("guide", "", false, [blue[2]!], { kind: "favourites" });
+    await act(async () => p.client.setQueryData(queries.channels(null).queryKey, plain(all)));
+    await p.search("VRT 1");
+    expect(p.rows()).toHaveLength(0);
+    const programmes = ipc.hold("guide.searchList");
+    const searchAll = [...p.scope().querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent === "Search all channels",
+    )!;
+    await p.click(searchAll);
+    await settled();
+    expect(p.field().value).toBe("VRT 1");
+    expect(p.rows()).toHaveLength(1);
+    expect(p.rows()[0]!.getAttribute("aria-label")).toMatch(/^VRT 1,/);
+    expect(ipc.argsOf("library.searchGroups")).toHaveLength(1);
+    programmes.resolve({});
+    await settled();
+    expect(p.rows()).toHaveLength(1);
+  });
+
+  it("keeps a recent list filtered when another channel is watched", async () => {
+    const p = await page("guide", "", false, [blue[2]!], { kind: "recent" });
+    await p.search("Canvas");
+    const viewing = p.client.getQueryData(queries.viewing().queryKey)!;
+    const changed = ipc.hold("viewing.get");
+    const listed = ipc.hold("library.channels");
+    await act(async () => ipc.emit("viewing.changed", { sequence: viewing.sequence + 1 }));
+    changed.resolve({ ...viewing, recent: [blue[0]!, blue[2]!], sequence: viewing.sequence + 1 });
+    await settled();
+    listed.resolve(plain([blue[0]!, blue[2]!]));
+    await settled();
+    expect(p.field().value).toBe("Canvas");
+    expect(p.rows()).toHaveLength(1);
+    expect(p.rows()[0]!.getAttribute("aria-label")).toMatch(/^VRT Canvas,/);
+    expect(ipc.argsOf("library.searchGroups")).toHaveLength(1);
+  });
+
+  it("keeps a subset apart while a hidden full-catalogue conflict is awaiting fresh stamps", async () => {
+    const unguided = {
+      ...green[0]!,
+      searchIdentity: { ...green[0]!.searchIdentity!, guideId: null },
+    };
+    const subset = [blue[0]!, unguided];
+    const hidden: LiveChannel = {
+      ...blue[0]!,
+      id: "hidden",
+      searchIdentity: {
+        ...blue[0]!.searchIdentity!,
+        guideId: "other.be",
+      },
+    };
+    const p = await page("guide", "", false, subset, { kind: "favourites" });
+    ipc.always("library.searchGroups", stamps(subset));
+    await p.search("VRT");
+    expect(p.rows()).toHaveLength(1);
+    const listed = ipc.hold("library.channels");
+    const groups = ipc.hold("library.searchGroups");
+    await act(async () =>
+      ipc.emit("library.updated", {
+        subscriptionId: SUBSCRIPTION,
+        channelCount: 3,
+        fetchedAt: 2,
+        failure: null,
+        failedAt: null,
+      }),
+    );
+    listed.resolve(plain(subset));
+    await settled();
+    expect(p.rows()).toHaveLength(2);
+    expect(p.button("Show copies")).toBeUndefined();
+    groups.resolve(stamps([...subset, hidden]));
+    await settled();
+    expect(p.rows()).toHaveLength(2);
+    expect(p.button("Show copies")).toBeUndefined();
+  });
+
+  it("ignores a late programme answer for a category the viewer left", async () => {
+    const category = { subscriptionId: SUBSCRIPTION, id: "0" };
+    const p = await page("guide");
+    await act(async () => {
+      p.client.setQueryData(queries.channels(category).queryKey, plain([blue[0]!]));
+      useUi.setState({ list: { kind: "category", category } });
+    });
+    const old = ipc.hold("guide.searchList");
+    await p.type("news");
+    await settled(150);
+    await act(async () => useUi.setState({ list: { kind: "all" } }));
+    await p.search("Canvas");
+    expect(p.rows()).toHaveLength(1);
+    old.resolve({ [ownedKey(blue[0]!)]: { now: true, later: null } });
+    await settled();
+    expect(p.field().value).toBe("Canvas");
+    expect(p.rows()).toHaveLength(1);
+    expect(p.rows()[0]!.getAttribute("aria-label")).toMatch(/^VRT Canvas,/);
+  });
+
+  it("falls back to current singletons when the first stamp read fails", async () => {
+    const p = await page("guide");
+    const groups = ipc.hold("library.searchGroups");
+    await p.search("Canvas");
+    groups.reject({ kind: "unexpected", detail: "Unavailable" });
+    await settled();
+    expect(p.rows()).toHaveLength(4);
+    expect(p.rows().every((row) => row.getAttribute("aria-label")?.startsWith("VRT Canvas,"))).toBe(
+      true,
+    );
+    expect(p.button("Show copies")).toBeUndefined();
+    expect(p.scope().textContent).toContain("4 channels · 4 streams");
+  });
+
+  it("clears immediately while stamps are held and ignores their late arrival", async () => {
+    const p = await page("guide");
+    const groups = ipc.hold("library.searchGroups");
+    await p.search("Canvas");
+    await p.type("");
+    expect(p.rows()).toHaveLength(8);
+    expect(p.rows().every((row) => !row.hasAttribute("aria-label"))).toBe(true);
+    groups.resolve(stamps(all));
+    await settled();
+    expect(p.rows()).toHaveLength(8);
+    await p.search("Canvas");
+    expect(p.rows()).toHaveLength(1);
+    expect(ipc.argsOf("library.searchGroups")).toHaveLength(1);
+  });
+
+  it("keeps removed copies out and newly matching channels playable while grouping refreshes", async () => {
+    const p = await page("guide");
+    await p.search("VRT");
+    const added: LiveChannel = {
+      ...plain([blue[0]!])[0]!,
+      id: "extra",
+      title: "VRT Extra",
+      name: "VRT Extra",
+      variants: [{ id: "extra", name: "VRT Extra", quality: null, tags: [] }],
+    };
+    const current = [...blue, added];
+    const listed = ipc.hold("library.channels");
+    const groups = ipc.hold("library.searchGroups");
+    await act(async () =>
+      ipc.emit("library.updated", {
+        subscriptionId: SUBSCRIPTION,
+        channelCount: current.length,
+        fetchedAt: 2,
+        failure: null,
+        failedAt: null,
+      }),
+    );
+    listed.resolve(plain(current));
+    await settled();
+    expect(p.rows()).toHaveLength(5);
+    expect(p.scope().textContent).toContain("5 channels · 6 streams");
+    expect(p.rows().some((row) => row.getAttribute("aria-label")?.includes("Green"))).toBe(false);
+    for (const row of p.rows()) await p.click(row);
+    expect(p.watch.mock.calls.map(([channel]) => ownedKey(channel))).toEqual(current.map(ownedKey));
+    groups.resolve(stamps(current));
+    await settled();
+    expect(p.rows()).toHaveLength(3);
+    expect(p.scope().textContent).toContain("3 channels · 6 streams");
+  });
+
+  it("rejects stale joins after the same owned channels acquire conflicting guide metadata", async () => {
+    const p = await page("guide");
+    await p.search("VRT");
+    await p.search("");
+    const current = all.map((channel) =>
+      channel.subscriptionId === GREEN && channel.title === "VRT 1"
+        ? { ...channel, searchIdentity: { ...channel.searchIdentity!, guideId: "different.be" } }
+        : channel,
+    );
+    const listed = ipc.hold("library.channels");
+    await act(async () =>
+      ipc.emit("library.updated", {
+        subscriptionId: GREEN,
+        channelCount: current.length,
+        fetchedAt: 2,
+        failure: null,
+        failedAt: null,
+      }),
+    );
+    listed.resolve(plain(current));
+    await settled();
+    const groups = ipc.hold("library.searchGroups");
+    await p.search("VRT");
+    expect(p.rows()).toHaveLength(8);
+    expect(p.button("Show copies")).toBeUndefined();
+    groups.resolve(stamps(current));
+    await settled();
+    expect(p.rows()).toHaveLength(3);
+    expect(
+      p.rows().filter((row) => row.getAttribute("aria-label")?.startsWith("VRT 1,")),
+    ).toHaveLength(2);
+  });
+
+  it("retains the name filter when removing a favourite changes its list", async () => {
+    const favourites = [blue[0]!, blue[2]!, green[2]!];
+    const p = await page("guide", "", false, favourites, { kind: "favourites" });
+    await p.search("Canvas");
+    expect(p.rows()).toHaveLength(1);
+    const viewing = p.client.getQueryData(queries.viewing().queryKey)!;
+    const remaining = favourites.slice(0, 2);
+    const changed = ipc.hold("viewing.setFavourite");
+    const listed = ipc.hold("library.channels");
+    await p.click(p.button("Show copies", p.rows()[0]));
+    await p.click(p.button("Remove from favourites", p.rows()[2]));
+    changed.resolve({
+      ...viewing,
+      favourites: remaining.map(ownedId),
+      sequence: viewing.sequence + 1,
+    });
+    await settled();
+    listed.resolve(plain(remaining));
+    await settled();
+    expect(p.field().value).toBe("Canvas");
+    expect(p.rows()).toHaveLength(1);
+    expect(p.rows()[0]!.getAttribute("aria-label")).toMatch(/^VRT Canvas,/);
+    expect(ipc.argsOf("library.searchGroups")).toHaveLength(1);
+  });
+
   it("hands keyboard input to the lists without leaving Space on a stale channel row", async () => {
     const p = await page("guide");
     await p.search("VRT");
@@ -332,12 +619,12 @@ describe("real search components with two subscriptions", () => {
     const p = await page("guide");
     expect(p.rows()).toHaveLength(8);
     expect(ipc.argsOf("library.channels")).toEqual([]);
-    p.client.removeQueries({ queryKey: queries.groupedChannels({}).queryKey, exact: true });
-    const groups = ipc.hold("library.channels");
+    const groups = ipc.hold("library.searchGroups");
     await p.search("VRT");
-    expect(ipc.argsOf("library.channels")).toEqual([{ grouped: true }]);
+    expect(ipc.argsOf("library.channels")).toEqual([]);
+    expect(ipc.argsOf("library.searchGroups")).toEqual([undefined]);
     expect(p.rows()).toHaveLength(8);
-    groups.resolve(responses(all));
+    groups.resolve(stamps(all));
     await settled();
     expect(p.rows().map((row) => row.getAttribute("aria-label")?.split(",")[0])).toEqual([
       "VRT 1",

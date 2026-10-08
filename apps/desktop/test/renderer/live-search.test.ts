@@ -78,14 +78,7 @@ async function guidePage(list: ChannelList = { kind: "all" }) {
     },
   ]);
   client.setQueryData(queries.channels(null).queryKey, CHANNELS);
-  client.setQueryData(queries.groupedChannels({}).queryKey, CHANNELS);
-  client.setQueryData(queries.groupedChannels({ category: own("uk") }).queryKey, CHANNELS);
-  client.setQueryData(
-    queries.groupedChannels({
-      channels: FAVOURITES.map(({ subscriptionId, id }) => ({ subscriptionId, id })),
-    }).queryKey,
-    FAVOURITES.flatMap(({ id }) => byId.get(id) ?? []),
-  );
+  ipc.always("library.searchGroups", []);
   client.setQueryData(queries.channels(own("uk")).queryKey, CHANNELS);
   client.setQueryData(
     queries.channelsOf(FAVOURITES).queryKey,

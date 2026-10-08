@@ -91,8 +91,7 @@ async function favouritesPage(count: number, list: ChannelList = { kind: "favour
   ]);
   client.setQueryData(queries.channels(null).queryKey, channels);
   client.setQueryData(queries.channelsOf(favourites).queryKey, channels);
-  client.setQueryData(queries.groupedChannels({ channels: shown.map(own) }).queryKey, channels);
-  client.setQueryData(queries.groupedChannels({}).queryKey, channels);
+  ipc.always("library.searchGroups", []);
   client.setQueryData(
     ["library", "status"],
     [{ subscriptionId: "one", channelCount: count, fetchedAt: 1, failure: null, failedAt: null }],

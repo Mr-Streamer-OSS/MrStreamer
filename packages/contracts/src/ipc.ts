@@ -17,7 +17,7 @@ import {
   type Programme,
   type ProgrammeMatch,
 } from "./guide.ts";
-import type { CatalogueStatus, Category, LiveChannel } from "./library.ts";
+import type { CatalogueStatus, Category, LiveChannel, LiveSearchGroups } from "./library.ts";
 import type { ThirdPartyNotice } from "./licences.ts";
 import {
   COLLECTION_SORTS,
@@ -115,12 +115,13 @@ export const ipcInputs = {
     type({ subscriptionId: "string > 0", patch: SubscriptionPreferences.partial() }),
   "library.status": none,
   "library.categories": none,
+  /** Display-only full-catalogue joins. Unlisted owned channel keys stand alone. */
+  "library.searchGroups": none,
   "library.channels": () =>
     type({
       "category?": owned(),
       "query?": "string",
       "channels?": owned().array(),
-      "grouped?": "boolean",
     }),
   "library.channel": () => type({ channel: owned() }),
   /** Fetches one subscription's channels again. */
@@ -401,6 +402,7 @@ export interface IpcOutputs {
    * order, the subscriptions in theirs.
    */
   "library.channels": readonly LiveChannel[];
+  "library.searchGroups": LiveSearchGroups;
   "library.channel": LiveChannel;
   "library.refresh": CatalogueStatus;
   /** Now and next per channel, by its `ownedKey`, for the channels the guide covers. */
