@@ -40,7 +40,7 @@ export function createCleanStart(pid: number, codec: Codec) {
   function renumber(packet: Uint8Array): Uint8Array {
     if (((packet[3]! >> 4) & 0x01) === 0) return packet;
     counter = (counter + 1) & 0x0f;
-    const copy = packet.slice();
+    const copy = new Uint8Array(packet);
     copy[3] = (copy[3]! & 0xf0) | counter;
     return copy;
   }
@@ -81,22 +81,45 @@ export function createCleanStart(pid: number, codec: Codec) {
     out.push(renumber(packet));
   }
 
+  /**
+   * The whole packets in `data[from, to)` once the stream passes unchanged: one copy of our own
+   * with the video counters renumbered, as `renumber` does packet by packet.
+   */
+  function renumberRun(data: Uint8Array, from: number, to: number): Uint8Array {
+    const copy = new Uint8Array(data.subarray(from, to));
+    for (let at = 0; at < copy.length; at += PACKET) {
+      if ((((copy[at + 1]! & 0x1f) << 8) | copy[at + 2]!) !== pid) continue;
+      if (((copy[at + 3]! >> 4) & 0x01) === 0) continue;
+      counter = (counter + 1) & 0x0f;
+      copy[at + 3] = (copy[at + 3]! & 0xf0) | counter;
+    }
+    return copy;
+  }
+
   return {
-    /** Filters the next chunk of the stream. */
+    /**
+     * Filters the next chunk of the stream. Never writes into `chunk` or into anything it
+     * returned before; what it returns may share memory with `chunk` until the stream passes
+     * unchanged, and is its own copy after.
+     */
     push(chunk: Uint8Array): Uint8Array {
       const data = carry.length ? concat([carry, chunk]) : chunk;
       // Providers send whole packets, but a chunk can still start mid-packet.
       let offset = 0;
       while (offset < data.length && data[offset] !== 0x47) offset++;
       const out: Uint8Array[] = [];
-      for (; offset + PACKET <= data.length; offset += PACKET) {
+      // Until the stream passes unchanged, packet by packet.
+      for (; offset + PACKET <= data.length && state.kind !== "passing"; offset += PACKET) {
         const packet = data.subarray(offset, offset + PACKET);
         const packetPid = ((packet[1]! & 0x1f) << 8) | packet[2]!;
         if (packetPid !== pid) out.push(packet);
-        else if (state.kind === "passing") out.push(renumber(packet));
         else video(packet, out);
       }
-      carry = data.subarray(offset).slice();
+      // After, the rest of the whole packets is one run.
+      const end = offset + Math.floor((data.length - offset) / PACKET) * PACKET;
+      if (end > offset) out.push(renumberRun(data, offset, end));
+      // Owned, so a later write to the chunk can't reach it.
+      carry = new Uint8Array(data.subarray(end));
       return concat(out);
     },
   };
