@@ -1306,7 +1306,10 @@ export const titlePlayer = {
     void run(position, 0, pausedByViewer());
   },
 
-  /** C: subtitles off, or back on: the ones chosen last in this title, else the first. */
+  /**
+   * C: subtitles off, or back on: the ones chosen last in this title, else the file's first
+   * track, else the result saved for this file, though it was last turned off.
+   */
   toggleSubtitles(): void {
     if (!receiver && session) subtitleChoices?.();
     const { subtitle, subtitles, shows, downloadedOn, savedSubtitle } = store.getState();
@@ -1321,6 +1324,7 @@ export const titlePlayer = {
     const next =
       lastSubtitle ?? subtitles.find((track) => !shows || shows.includes(track.format)) ?? null;
     if (next) titlePlayer.setSubtitle(next);
+    else if (!receiver && savedSubtitle?.subtitle) titlePlayer.showDownloaded();
     // Nothing to turn on: a download this key cancelled is not shown either.
     else keepSubtitleChoice();
   },

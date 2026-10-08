@@ -25,16 +25,26 @@ import {
 } from "../subtitles/service-client.ts";
 import { SubtitleAccounts } from "./subtitle-accounts.ts";
 
-/** Main's playback and catalogue adapters agree on a currently listed exact file. */
-export interface SubtitleSession {
+/** The exact file a local session plays: same session, account and file, none observed replaced. */
+export interface PlayingFile {
   readonly file: SubtitleFile;
   readonly signal: AbortSignal;
-  readonly query: SubtitleQuery | null;
   readonly standing: Effect.Effect<boolean, Failed>;
+}
+/** Main's playback and catalogue adapters agree on a currently listed exact file. */
+export interface SubtitleSession extends PlayingFile {
+  readonly query: SubtitleQuery | null;
 }
 export class SubtitleSessions extends Context.Service<
   SubtitleSessions,
-  { resolve(sessionId: string): Effect.Effect<SubtitleSession | null, Failed> }
+  {
+    resolve(sessionId: string): Effect.Effect<SubtitleSession | null, Failed>;
+    /**
+     * What playback alone knows, without asking the catalogue whether the file is still listed.
+     * Enough to turn the file's saved result off; never to search, save, show or time one.
+     */
+    playing(sessionId: string): Effect.Effect<PlayingFile | null, Failed>;
+  }
 >()("mrstreamer/SubtitleSessions") {}
 
 export class OnlineSubtitles extends Context.Service<
@@ -58,7 +68,11 @@ export class OnlineSubtitles extends Context.Service<
     ): Effect.Effect<SavedSubtitle, Failed>;
     /** The viewer chose a saved result: by its opaque key, or the selected one without a key. */
     show(sessionId: string, selection?: string): Effect.Effect<void, Failed>;
-    /** The viewer chose Off or a file track. A session without a current exact file has nothing to hide. */
+    /**
+     * The viewer chose Off or a file track. Kept for the exact file the session still plays, also
+     * when the catalogue can't say just now that it is listed. A session that plays none has
+     * nothing to hide.
+     */
     hide(sessionId: string): Effect.Effect<void, Failed>;
     forget(sessionId: string): Effect.Effect<void, Failed>;
     cancel(sessionId: string): Effect.Effect<void>;
@@ -283,7 +297,7 @@ function make(deps: Parameters<typeof subtitleServiceClient>[0]) {
         Effect.flatMap(current(id), (session) => storage.show(session.file, selection)),
       hide: (id: string) =>
         Effect.gen(function* () {
-          const session = yield* sessions.resolve(id);
+          const session = yield* sessions.playing(id);
           if (session && !session.signal.aborted && (yield* session.standing))
             yield* storage.hide(session.file);
         }),

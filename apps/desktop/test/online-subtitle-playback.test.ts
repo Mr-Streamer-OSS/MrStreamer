@@ -47,8 +47,8 @@ function serveSubdl() {
 }
 
 /** The real main services over a fake provider's lists, with SubDL set up and nothing asked yet. */
-async function started() {
-  const provider = await fakeProvider({ titles: 1, maxConnections: 2, slotReleaseMs: 0 });
+async function started(listed = 1) {
+  const provider = await fakeProvider({ titles: listed, maxConnections: 2, slotReleaseMs: 0 });
   const service = serveSubdl();
   const runtime = runtimeFor(
     mainLayer({ ...testConfig(await tempDir()), ffmpeg: "ffmpeg", ffprobe: "ffprobe" }),
@@ -68,6 +68,47 @@ async function started() {
     { subdl: { apiKey: "fixture-key" } },
   );
   return { provider, service, runtime, titles, playback, subtitles, subscriptionId: saved.id };
+}
+
+/** S1 E2 of the fixture series, opened as the window opens it. */
+function secondEpisode({
+  provider,
+  titles,
+  playback,
+  subscriptionId,
+}: Awaited<ReturnType<typeof started>>) {
+  const series = provider.titles.series.find((each) => each.name === "TEST | Formats (NL)")!;
+  const episode = series.seasons[0]![1]!;
+  const ref = {
+    kind: "episode" as const,
+    subscriptionId,
+    id: String(episode.id),
+    seriesId: String(series.id),
+    season: 1,
+    episode: 2,
+  };
+  /** The provider lists another file under the episode's id from now on. */
+  const relist = () =>
+    provider.serveTitles((all) => ({
+      ...all,
+      series: all.series.map((each) =>
+        each.id === series.id
+          ? {
+              ...each,
+              seasons: each.seasons.map((season) =>
+                season.map((file) =>
+                  file.id === episode.id ? { ...file, container: "mkv" } : file,
+                ),
+              ),
+            }
+          : each,
+      ),
+    }));
+  const open = async () => {
+    const file = await titles.file(ref);
+    return playback.openTitle(ref, file.url, ["h264", "aac"], file);
+  };
+  return { open, relist };
 }
 
 describe.skipIf(!hasTools)("saved subtitles of the actual playback session", () => {
@@ -127,23 +168,10 @@ describe.skipIf(!hasTools)("saved subtitles of the actual playback session", () 
   }, 30_000);
 
   it("keeps an episode's saved result, timing and search through a refresh that lists it unchanged, and ends them when its listing changed", async () => {
-    const { provider, service, runtime, titles, playback, subtitles, subscriptionId } =
-      await started();
+    const all = await started();
+    const { provider, service, runtime, titles, playback, subtitles, subscriptionId } = all;
+    const { open, relist } = secondEpisode(all);
     try {
-      const series = provider.titles.series.find((each) => each.name === "TEST | Formats (NL)")!;
-      const episode = series.seasons[0]![1]!;
-      const ref = {
-        kind: "episode" as const,
-        subscriptionId,
-        id: String(episode.id),
-        seriesId: String(series.id),
-        season: 1,
-        episode: 2,
-      };
-      const open = async () => {
-        const file = await titles.file(ref);
-        return playback.openTitle(ref, file.url, ["h264", "aac"], file);
-      };
       const playing = await open();
       const found = await subtitles.search(playing.sessionId);
       const chosen = await subtitles.choose(playing.sessionId, found.results[0]!.id);
@@ -167,21 +195,7 @@ describe.skipIf(!hasTools)("saved subtitles of the actual playback session", () 
       expect(provider.detailRequests()).toBe(asked + 1);
 
       // Now the provider lists another file under the episode's id: same session, other listing.
-      provider.serveTitles((all) => ({
-        ...all,
-        series: all.series.map((each) =>
-          each.id === series.id
-            ? {
-                ...each,
-                seasons: each.seasons.map((season) =>
-                  season.map((file) =>
-                    file.id === episode.id ? { ...file, container: "mkv" } : file,
-                  ),
-                ),
-              }
-            : each,
-        ),
-      }));
+      relist();
       await titles.refresh(subscriptionId);
       await expect(subtitles.saved(playing.sessionId)).rejects.toBeDefined();
       await expect(
@@ -200,4 +214,96 @@ describe.skipIf(!hasTools)("saved subtitles of the actual playback session", () 
       vi.restoreAllMocks();
     }
   }, 30_000);
+
+  it("keeps Off for the playing episode while the provider gives no answer after a refresh, and nothing that needs its listing", async () => {
+    const all = await started();
+    const { provider, service, runtime, titles, playback, subtitles, subscriptionId } = all;
+    const { open } = secondEpisode(all);
+    try {
+      const playing = await open();
+      const found = await subtitles.search(playing.sessionId);
+      const { saved } = await subtitles.choose(playing.sessionId, found.results[0]!.id);
+      await subtitles.timing(playing.sessionId, { offset: 1.5, speed: 1 }, saved.selection);
+
+      await titles.refresh(subscriptionId);
+      provider.failDetails(503);
+      await expect(subtitles.saved(playing.sessionId)).rejects.toBeDefined();
+      await expect(
+        subtitles.timing(playing.sessionId, { offset: 2, speed: 1 }, saved.selection),
+      ).rejects.toBeDefined();
+      await expect(subtitles.search(playing.sessionId)).rejects.toBeDefined();
+      await expect(subtitles.show(playing.sessionId, saved.selection)).rejects.toBeDefined();
+      // Playback still holds the exact file: the viewer's Off for it needs no listing.
+      await subtitles.hide(playing.sessionId);
+      expect(service.requests()).toBe(2);
+
+      provider.failDetails(null);
+      expect(await subtitles.saved(playing.sessionId)).toMatchObject({
+        shown: false,
+        timing: { offset: 1.5, speed: 1 },
+        subtitle: { release: "Cinema cut" },
+      });
+      await playback.close(playing.sessionId);
+      // The closed session's Off reaches nothing: the file's next session chose the result again.
+      const again = await open();
+      await subtitles.show(again.sessionId, saved.selection);
+      await subtitles.hide(playing.sessionId);
+      expect(await subtitles.saved(again.sessionId)).not.toHaveProperty("shown");
+    } finally {
+      await runtime.dispose();
+      vi.restoreAllMocks();
+    }
+  }, 30_000);
+
+  it("keeps a playing episode's rights after 200 other titles' details were read, asking the provider whether it still lists the file", async () => {
+    const all = await started(210);
+    const { provider, service, runtime, titles, playback, subtitles, subscriptionId } = all;
+    const { open, relist } = secondEpisode(all);
+    /** As many other details as are kept at once: the series' own are kept no longer. */
+    const readOthers = async () => {
+      for (const movie of provider.titles.movies.slice(0, 200))
+        await titles.details("movie", { subscriptionId, id: String(movie.id) });
+    };
+    try {
+      const playing = await open();
+      const found = await subtitles.search(playing.sessionId);
+      const { saved } = await subtitles.choose(playing.sessionId, found.results[0]!.id);
+
+      await readOthers();
+      const asked = provider.detailRequests();
+      await subtitles.timing(playing.sessionId, { offset: 1.5, speed: 1 }, saved.selection);
+      await subtitles.hide(playing.sessionId);
+      expect(await subtitles.saved(playing.sessionId)).toMatchObject({
+        shown: false,
+        timing: { offset: 1.5, speed: 1 },
+        subtitle: { release: "Cinema cut" },
+      });
+      await subtitles.show(playing.sessionId, saved.selection);
+      expect((await subtitles.search(playing.sessionId)).results).toHaveLength(1);
+      // Its series was asked for once, and kept again.
+      expect(provider.detailRequests()).toBe(asked + 1);
+
+      // Not kept again, and the provider has no answer: nothing is taken for listed.
+      await readOthers();
+      provider.failDetails(503);
+      await expect(subtitles.saved(playing.sessionId)).rejects.toBeDefined();
+      await expect(subtitles.search(playing.sessionId)).rejects.toBeDefined();
+      // It answers again, with another file under the episode's id.
+      provider.failDetails(null);
+      relist();
+      await expect(subtitles.saved(playing.sessionId)).rejects.toBeDefined();
+      await expect(
+        subtitles.timing(playing.sessionId, { offset: 2, speed: 1 }, saved.selection),
+      ).rejects.toBeDefined();
+      await expect(subtitles.search(playing.sessionId)).rejects.toBeDefined();
+      await expect(subtitles.show(playing.sessionId, saved.selection)).rejects.toBeDefined();
+      await playback.close(playing.sessionId);
+      const relisted = await open();
+      expect(await subtitles.saved(relisted.sessionId)).toBeNull();
+      expect(service.requests()).toBe(3);
+    } finally {
+      await runtime.dispose();
+      vi.restoreAllMocks();
+    }
+  }, 60_000);
 });

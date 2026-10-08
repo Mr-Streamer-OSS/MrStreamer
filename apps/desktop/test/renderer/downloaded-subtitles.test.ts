@@ -36,7 +36,10 @@ function at(position: number) {
   player.element.currentTime = position;
   player.element.dispatchEvent(new Event("seeked"));
 }
-async function open(preferred: Parameters<typeof ipc.prefer>[0] = {}) {
+async function open(
+  preferred: Parameters<typeof ipc.prefer>[0] = {},
+  subtitles: readonly SubtitleTrack[] = [english],
+) {
   ipc.reset();
   ipc.prefer(preferred);
   ipc.always("subtitles.show", null);
@@ -53,7 +56,7 @@ async function open(preferred: Parameters<typeof ipc.prefer>[0] = {}) {
     url: "http://127.0.0.1/title/local-movie.mp4",
     duration: 600,
     audio: [],
-    subtitles: [english],
+    subtitles,
   });
   void titlePlayer.open(
     {
@@ -200,6 +203,36 @@ describe("a downloaded subtitle on the movie picture", () => {
     ]);
     expect(ipc.argsOf("subtitles.hide")[0]).toEqual({ sessionId: "local-movie" });
     expect(titlePlayer.state().savedSubtitle?.subtitle).toEqual(saved.subtitle);
+  });
+
+  it("C shows a reopened file's saved result that was last turned off when the file has no track of its own, and a file track first", async () => {
+    const hidden = { ...saved, selection: "kept-result", shown: false };
+    const bare = await open({ subtitleLanguage: "nl" }, []);
+    bare.restore.resolve(hidden);
+    await settle();
+    expect(titlePlayer.state().downloadedOn).toBe(false);
+    titlePlayer.toggleSubtitles();
+    at(103);
+    expect(shown()).toBe("Welcome.");
+    titlePlayer.toggleSubtitles();
+    expect(shown()).toBe("");
+    await titlePlayer.downloadedEditsSaved();
+    expect(ipc.methods().filter((method) => /^subtitles\.(show|hide)$/.test(method))).toEqual([
+      "subtitles.show",
+      "subtitles.hide",
+    ]);
+    expect(ipc.argsOf("subtitles.show")).toEqual([
+      { sessionId: "local-movie", selection: "kept-result" },
+    ]);
+    expect(ipc.argsOf("preferences.update")).toEqual([]);
+    titlePlayer.close();
+
+    const tracked = await open({ subtitleLanguage: "off" });
+    tracked.restore.resolve(hidden);
+    await settle();
+    titlePlayer.toggleSubtitles();
+    expect(titlePlayer.state()).toMatchObject({ subtitle: english, downloadedOn: false });
+    expect(ipc.argsOf("preferences.update")).toEqual([]);
   });
 
   it("shows a saved result on open even when the subtitle language is Off", async () => {

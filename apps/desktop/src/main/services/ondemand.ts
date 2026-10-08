@@ -144,8 +144,9 @@ export class OnDemand extends Context.Service<
     /**
      * Current exact-file identity for subtitle search, or null once the catalogue no longer lists
      * that file as `listingKey`. Reads the loaded lists and the details kept from opening the
-     * title. An episode's series is asked of the provider again, once, after its lists were
-     * refreshed: the same listing keeps its identity, another one or no answer gives null.
+     * title. An episode's still listed series is asked of the provider again, once, after its
+     * lists were refreshed or its details were no longer kept: the same listing keeps its
+     * identity, another one or no answer gives null.
      */
     subtitleQuery(
       title: TitleRef,
@@ -1016,13 +1017,18 @@ function make(deps: OnDemandDeps) {
               entry.version.id === ref.seriesId &&
               entry.sourceRevision === source.revision,
           );
-          const [cacheKey, kept] =
-            cached.find(([, entry]) => entry.lists === listsOf(source.id)) ?? cached[0] ?? [];
-          if (!cacheKey || !kept) return null;
-          // The lists were refreshed since these details were read: the provider says whether it
-          // still lists this file. Without its answer the old listing isn't taken for current.
-          const held = yield* renewed(source, "series", ref.seriesId, kept);
-          if (held.lists !== listsOf(source.id)) return null;
+          const found = cached.find(([, entry]) => entry.lists === listsOf(source.id)) ?? cached[0];
+          const cacheKey = found?.[0] ?? aboutKey(source, yield* language, "series", ref.seriesId);
+          const kept = found?.[1];
+          // The lists were refreshed since these details were read, or other titles' details took
+          // their place: the provider says whether it still lists this file. Without its answer no
+          // listing is taken for current.
+          const held = kept
+            ? yield* renewed(source, "series", ref.seriesId, kept)
+            : yield* download(source, "series", ref.seriesId, title).pipe(
+                Effect.orElseSucceed(() => null),
+              );
+          if (!held || held.lists !== listsOf(source.id)) return null;
           if (held !== kept) {
             if (!(yield* subscriptions.stands(source))) return null;
             keep(details, cacheKey, held, DETAILS_KEPT);

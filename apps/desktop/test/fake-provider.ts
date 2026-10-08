@@ -185,6 +185,8 @@ export interface FakeProvider {
    * still answer.
    */
   failTitles(status: number | "login" | null): void;
+  /** Makes requests for a movie's or series' details answer with this HTTP status, or restores them. */
+  failDetails(status: number | null): void;
   /** Makes the movie and series categories answer an empty list, as a busy panel does, or not. */
   emptyTitleCategories(empty: boolean): void;
   /**
@@ -264,6 +266,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
       .map((episode) => [String(episode.id), episode]),
   );
   let titleFailure: number | "login" | null = null;
+  let detailFailure: number | null = null;
   let titleCategoriesEmpty = false;
   let selectTitles = (all: FakeTitles): FakeTitles => all;
   let fileCount = 0;
@@ -418,7 +421,10 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
         })),
       );
     }
-    if (action === "get_vod_info" || action === "get_series_info") detailCount++;
+    if (action === "get_vod_info" || action === "get_series_info") {
+      detailCount++;
+      if (detailFailure !== null) return void response.writeHead(detailFailure).end();
+    }
     if (action === "get_vod_info") {
       const movie = movieFiles.get(url.searchParams.get("vod_id") ?? "");
       if (!movie) return json(response, { info: [], movie_data: [] });
@@ -669,6 +675,9 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     titleListRequests: () => titleListCount,
     failTitles(status) {
       titleFailure = status;
+    },
+    failDetails(status) {
+      detailFailure = status;
     },
     emptyTitleCategories(empty) {
       titleCategoriesEmpty = empty;

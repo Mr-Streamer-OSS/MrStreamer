@@ -117,6 +117,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
       const playback = yield* Playback;
       const catalogue = yield* OnDemand;
       return {
+        playing: (id: string) => playback.subtitleContext(id),
         resolve: (id: string) =>
           Effect.gen(function* () {
             const session = yield* playback.subtitleContext(id);

@@ -61,22 +61,24 @@ async function setup(savedDir?: string) {
     if (url.startsWith("https://dl.subdl.com/")) return new Response(srt);
     throw new Error("Unexpected fixture request");
   };
+  const playing = (id: string) =>
+    Effect.sync(() =>
+      active && id === sessionId
+        ? { file, signal: controller.signal, standing: Effect.sync(() => active) }
+        : null,
+    );
   const layer = OnlineSubtitles.layer({ userAgent: "fixture", fetch: fetcher }).pipe(
     Layer.provideMerge(
       Layer.mergeAll(
         SubtitleAccounts.layer(dir, testSecrets),
         savedSubtitlesLayer.pipe(Layer.provide(databaseLayer(dir))),
         Layer.succeed(SubtitleSessions, {
+          playing,
           resolve: (id) =>
-            Effect.sync((): SubtitleSession | null =>
-              active && id === sessionId
-                ? {
-                    file,
-                    signal: controller.signal,
-                    query: { kind: "movie", tmdbId: 12, languages: [] },
-                    standing: Effect.sync(() => active),
-                  }
-                : null,
+            Effect.map(
+              playing(id),
+              (session): SubtitleSession | null =>
+                session && { ...session, query: { kind: "movie", tmdbId: 12, languages: [] } },
             ),
         }),
       ),
