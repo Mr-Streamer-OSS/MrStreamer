@@ -13,8 +13,8 @@
 #
 # The key is a hash of everything the executable is built from: the sources, the Info.plist, this
 # script, which holds the target and flags, and the compiler and SDK that build it. A cache of
-# vendor/airplay/<target> under that key holds only this unsigned output; release signatures are
-# made on the copy in the app and never reach it.
+# vendor/airplay/<target> under that key holds only this output, with the linker's ad hoc signature;
+# release signatures are made on the copy in the app and never reach it.
 set -euo pipefail
 
 key=false

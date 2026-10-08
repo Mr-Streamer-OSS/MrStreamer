@@ -69,16 +69,55 @@ describe("timing a Mac release step", () => {
     );
     expect(table).toContain("| Runner total | | 63.0 | |");
     expect(table).toContain("| Apple total | | 1389.0 | |");
+    expect(table).toContain("| Unattributed | | 0.0 | |");
   });
 
-  it("lets the phase before a marker that never printed run on, and says so", () => {
-    // A notarizer that stops printing its debug lines leaves the signing phase to cover its work.
+  it("tables an unobserved phase's neighbour as unknown time, not as work of its own kind", () => {
+    // A notarizer that stops printing its debug lines leaves the signing phase covering Apple's
+    // wait and the disk image's creation. Nothing says how much of the 854 seconds was the runner's.
     const quiet = slow.filter((line) => !/electron-notarize/.test(line.text));
     const phases = timePhases(1_000_000, quiet);
+    const table = phaseTable("t", phases);
 
     expect(phases.find((phase) => phase.name === "App notary round trip")?.seconds).toBeNull();
-    expect(seconds(phases)["Sign"]).toBe(854);
-    expect(phaseTable("t", phases)).toContain("| App notary round trip | Apple | not observed |");
+    expect(phases.find((phase) => phase.name === "Sign")).toMatchObject({
+      seconds: 854,
+      covers: [
+        "Check and zip the app",
+        "App notary round trip",
+        "Staple the app",
+        "Create the DMG and ZIP",
+      ],
+    });
+    expect(table).toContain("| App notary round trip | Apple | not observed |");
+    expect(table).toContain(
+      "| Sign | unknown | 854.0 | also covers Check and zip the app, App notary round trip, Staple the app, Create the DMG and ZIP |",
+    );
+    // Only what was seen is counted, and the rest is said to be missing from the totals.
+    expect(table).toContain("| Unattributed | | 854.0 | |");
+    expect(table).toMatch(/\| Runner total \| \| 14\.0 \| at least/);
+    expect(table).toMatch(/\| Apple total \| \| 584\.0 \| at least/);
+  });
+
+  it("does not hand the wait on Apple to the phase before a lost upload marker", () => {
+    const noUpload = slow.filter((line) => !/attempting to upload/.test(line.text));
+    const phases = timePhases(1_000_000, noUpload);
+
+    expect(phases.find((phase) => phase.name === "Check and zip the app")).toMatchObject({
+      seconds: 801,
+      covers: ["App notary round trip"],
+    });
+    expect(phaseTable("t", phases)).toContain("| Unattributed | | 801.0 | |");
+  });
+
+  it("covers a phase whose marker is lost at the end of a build that finished", () => {
+    const noStaple = slow.filter((line) => !/^Stapling /.test(line.text));
+    const phases = timePhases(1_000_000, noStaple);
+
+    expect(phases.find((phase) => phase.name === "DMG notary round trip")).toMatchObject({
+      seconds: 584,
+      covers: ["Staple the DMG and update its checksum"],
+    });
   });
 
   it("reports the phase a failed build stopped in as unfinished", () => {
