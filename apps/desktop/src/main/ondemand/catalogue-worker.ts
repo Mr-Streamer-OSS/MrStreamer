@@ -385,6 +385,13 @@ function statusOf(found: Loaded | null): WorkerStatus {
 async function refresh(args: WorkerCalls["refresh"]["args"]): Promise<null> {
   const { subscriptionId, revision } = args;
   const under = refreshing.get(subscriptionId);
+  // Playlist reads can finish out of order. Older lists must leave newer work and results alone.
+  if (
+    (under && under.revision > revision) ||
+    (fetched.get(subscriptionId)?.revision ?? -1) > revision
+  ) {
+    throw new AppFailure({ kind: "unexpected", detail: "Stopped." });
+  }
   if (under?.revision === revision) return under.done;
   // This subscription's, under the login it had before. Another subscription's goes on.
   under?.abort.abort();

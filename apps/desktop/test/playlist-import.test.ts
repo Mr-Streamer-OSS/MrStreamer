@@ -363,6 +363,50 @@ describe("saved M3U movie mapping", () => {
     }
   }, 15_000);
 
+  it.each([true, false])(
+    "keeps the newer saved mapping when concurrent playlist reads finish newer first, already loaded=%s",
+    async (loaded) => {
+      const app = await started(await tempDir());
+      const provider = await host();
+      provider.set(provider.list().replace(' tmdb-id="42"', ""));
+      const saved = await app.subscriptions.add(login(provider.link));
+      await app.subscriptions.mapPlaylist(saved.id, films, "movie");
+      if (loaded) await app.roster.refreshPlaylist(saved.id);
+      else await app.subscriptions.playlistGroups(saved.id, "", 0, 10);
+      const before = provider.requests();
+      const first = provider.hold();
+      const older = Promise.allSettled([app.titles.refresh(saved.id)]);
+      await first.arrived;
+      const work: Promise<unknown>[] = [older];
+      let second: ReturnType<typeof provider.hold> | undefined;
+      try {
+        await app.subscriptions.mapPlaylist(saved.id, films, "skip");
+        second = provider.hold();
+        const newer = Promise.allSettled([app.roster.refreshPlaylist(saved.id)]);
+        work.push(newer);
+        await second.arrived;
+        // Release both actual provider reads in one turn, with the newer revision first.
+        second.release();
+        first.release();
+        expect(await newer).toMatchObject([{ status: "fulfilled" }]);
+        expect(await older).toMatchObject([{ status: "rejected" }]);
+        expect((await app.titles.status()).lists[0]).toMatchObject({ movies: 0, failure: null });
+        expect(await app.titles.isStale(saved.id, "12 hours")).toBe(false);
+        expect(await app.library.channels({})).toHaveLength(1);
+        expect((await app.library.status())[0]).toMatchObject({ failure: null });
+        expect(
+          (await app.titles.collection({ kind: "movie", id: "all", offset: 0, limit: 20 })).titles,
+        ).toEqual([]);
+        expect(provider.requests() - before).toBe(2);
+      } finally {
+        second?.release();
+        first.release();
+        await Promise.allSettled(work);
+      }
+    },
+    15_000,
+  );
+
   it.each([false, true])(
     "keeps the later supplied title snapshot at the same source revision, already loaded=%s",
     async (loaded) => {
