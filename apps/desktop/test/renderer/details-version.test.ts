@@ -112,7 +112,7 @@ describe("a film's details", () => {
     ).toBe("hd");
   });
 
-  it("play the version the viewer picked for the film, wherever they were opened", async () => {
+  it("play the remembered version on an ordinary unasked open", async () => {
     const picked = { ...defaultSubscriptionPreferences, titleVersions: { "movie:603": "hd" } };
     expect(await opened("4k", picked)).toBe("hd");
   });

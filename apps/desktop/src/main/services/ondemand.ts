@@ -538,7 +538,7 @@ function make(deps: OnDemandDeps) {
         if (!title) return yield* new Failed({ error: { kind: "title-not-found", titleId: id } });
         yield* askAbout(source, cacheKey, { subscriptionId, kind, id }, title);
         const downloaded = kept
-          ? yield* renewed(source, kind, id, kept)
+          ? yield* renewed(source, kind, id, { ...kept, title })
           : yield* download(source, kind, id, title);
         details.delete(cacheKey);
         // Kept again only for the subscription it was asked for, with the login it had.

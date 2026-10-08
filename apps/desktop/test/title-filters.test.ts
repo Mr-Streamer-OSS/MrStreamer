@@ -7,6 +7,56 @@ import { Settings } from "../src/main/services/preferences.ts";
 import { fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 
 describe("current movie and series filters", { timeout: 20000 }, () => {
+  it("uses the refreshed series name for episode hints when its details reopen", async () => {
+    const provider = await fakeProvider({ titles: 2 });
+    const seed = provider.titles.series[0]!;
+    let series = [{ ...seed, name: "Hint sample 4K (NL)" }];
+    provider.serveTitles((all) => ({ ...all, movies: [], series }));
+    const runtime = runtimeFor(mainLayer(testConfig(await tempDir())));
+    try {
+      const subscriptions = await promised(runtime, Subscriptions);
+      const titles = await promised(runtime, OnDemand);
+      const saved = await subscriptions.add({
+        server: provider.url,
+        username: "demo",
+        password: "demo",
+      });
+      const target = { subscriptionId: saved.id, id: String(seed.id) };
+      await titles.refresh(saved.id);
+      await titles.details("series", target);
+      expect(await titles.filterOptions("series")).toMatchObject({
+        qualities: ["4k"],
+        languages: ["nl"],
+      });
+      series = [{ ...seed, name: "Hint sample HD (EN)" }];
+      await titles.refresh(saved.id);
+      await titles.details("series", target);
+      const before = [
+        provider.titleListRequests(),
+        provider.detailRequests(),
+        provider.fileRequests(),
+      ];
+      expect(await titles.filterOptions("series")).toMatchObject({
+        qualities: ["hd"],
+        languages: ["en"],
+      });
+      expect(await titles.searchKind("series", "hint", { language: "nl" })).toMatchObject({
+        total: 0,
+      });
+      expect(
+        await titles.searchKind("series", "hint", { quality: "hd", language: "en" }),
+      ).toMatchObject({
+        total: 1,
+      });
+      expect([
+        provider.titleListRequests(),
+        provider.detailRequests(),
+        provider.fileRequests(),
+      ]).toEqual(before);
+    } finally {
+      await runtime.dispose();
+    }
+  });
   it("filters all 4K versions while retaining every menu alternative and excluding matching HD files", async () => {
     const provider = await fakeProvider({ titles: 1 });
     const seed = provider.titles.movies[0]!;
