@@ -26,11 +26,19 @@ describe("title names", () => {
     ["Escape from New York (NL)", "Escape from New York", ["NL"], null],
     ["UNABOMBER (MULTI)", "Unabomber", ["MULTI"], null],
     ["Avatar: The Way of Water 4K (MULTI)", "Avatar: The Way of Water", ["MULTI", "4K"], null],
+    ["SD Gundam Force (EN)", "SD Gundam Force", ["EN"], null],
+    ["The HD Experience", "The HD Experience", [], null],
+    ["Movie Full HD (NL)", "Movie", ["NL", "FHD"], null],
+    ["Movie FULL-HD", "Movie", ["FHD"], null],
+    ["Movie (Full HD)", "Movie", ["FHD"], null],
+    ["Movie (VO)", "Movie", ["VO"], null],
+    ["Movie (MULTISUB)", "Movie", ["MULTISUB"], null],
+    ["Movie SD", "Movie", ["SD"], null],
     ["Some Film (NL AUDIO)", "Some Film", ["NL AUDIO"], null],
     ["Series (MULTi)", "Series", ["MULTI"], null],
     ["Movie (2019) (NL)", "Movie", ["NL"], 2019],
     ["Hamlet - 2024", "Hamlet", [], 2024],
-    ["Hellboy [720p HD]", "Hellboy", ["720p"], null],
+    ["Hellboy [720p HD]", "Hellboy", ["720p", "HD"], null],
     // A bare year is often part of the title, and a title can be only a year.
     ["Wonder Woman 1984 (NL)", "Wonder Woman 1984", ["NL"], null],
     ["2012 (NL)", "2012", ["NL"], null],
@@ -160,6 +168,42 @@ describe("one title per film", () => {
         .map((title) => title.id);
     expect(shown("en")).toEqual(["14", "13", "11"]);
     expect(shown("nl")).toEqual(["14", "13", "12", "11"]);
+  });
+
+  it("keeps original and multiple-subtitle versions in unfiltered curated lists", () => {
+    const films = {
+      ...catalogue,
+      movies: [
+        movie("vo", "Amelie (VO)", "100", 1),
+        movie("subs", "Parasite (MULTI SUB)", "101", 1),
+        movie("plain", "Parasite", "101", 2),
+        movie("english", "Heat (EN)", "102", 1),
+      ],
+    };
+    const titles = indexOf(films, "en").movies.titles;
+    const shown = collections({
+      kind: "movie",
+      titles,
+      language: "en",
+      names: () => null,
+      metadata: () => ({
+        genres: [18],
+        language: "fr",
+        popularity: 1,
+        rating: 8,
+        votes: 1000,
+        collection: null,
+        backdrop: null,
+      }),
+      services: [],
+      now: 0,
+    });
+    expect(shown.list("popular", "title").map((title) => title.id)).toEqual([
+      "vo",
+      "english",
+      "subs",
+    ]);
+    expect(titles.find((title) => title.tmdbId === "101")?.id).toBe("subs");
   });
 
   it("keeps a film when one of its versions is for adults", () => {

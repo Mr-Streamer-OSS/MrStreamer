@@ -3,6 +3,7 @@
 // Add a method by giving it an input schema in `ipcInputs` and a result type in `IpcOutputs`.
 // The main process refuses to start unless every method has a handler (see src/main/ipc.ts).
 import { type } from "arktype";
+import { TitleFilters, type FilterOptions } from "./title-filters.ts";
 import type { Result } from "./errors.ts";
 import type { DiagnosticsPreview } from "./diagnostics.ts";
 import {
@@ -191,7 +192,9 @@ export const ipcInputs = {
   "ondemand.refresh": () => type({ subscriptionId: "string > 0" }),
   "ondemand.search": () => type({ query: "string" }),
   /** Movies or series only, for the field in their tab bar. */
-  "ondemand.searchKind": () => type({ kind: titleKind(), query: "string" }),
+  "ondemand.searchKind": () =>
+    type({ kind: titleKind(), query: "string", "filters?": TitleFilters }),
+  "ondemand.filterOptions": () => type({ kind: titleKind() }),
   /** `like` names a title by one of its versions. */
   "ondemand.rows": () =>
     type({ kind: titleKind(), tab: type.enumerated(...ROW_TABS), "like?": owned() }),
@@ -201,6 +204,7 @@ export const ipcInputs = {
       kind: titleKind(),
       id: type("string").narrow(isCollectionId),
       "sort?": type.enumerated(...COLLECTION_SORTS),
+      "filters?": TitleFilters,
       offset: "number.integer >= 0",
       limit: "1 <= number.integer <= 500",
     }),
@@ -451,6 +455,7 @@ export interface IpcOutputs {
   /** Movies and series whose name matches, best first, without titles for adults. */
   "ondemand.search": { readonly movies: readonly Title[]; readonly series: readonly Title[] };
   "ondemand.searchKind": TitleMatches;
+  "ondemand.filterOptions": FilterOptions;
   /** A title's details, asked for when the viewer opens it: the provider's and TMDB's. */
   "ondemand.details": TitleDetails;
   "ondemand.related": RelatedTitles;

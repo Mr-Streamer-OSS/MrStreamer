@@ -33,6 +33,7 @@ The folder contains:
 - your favourites, the channels you watched, your progress in movies and episodes, and the episodes you marked watched or unwatched, each with its series, its season and episode number and when you marked it, and for a series you marked an episode of, the season and episode numbers it listed when you marked or last opened it
 - your watchlist: for each movie or series you saved, and each subscription you saved it from, its name, year and kind, whether the provider marks it for adults, when you saved it, its TMDB id, and the numbers that provider lists its versions under
 - copies of each provider's channel list, programme guide, and movie and series lists
+- from 0.0.9, the sound and subtitle languages read from exact movie and episode files on this computer, with listing fingerprints and random playback session ids, without playable addresses or request headers
 - for a subscription you gave a programme guide from another address: that address, the copy of the guide downloaded from it, and the reason its latest download failed, if it did. The address can hold a key, so it is encrypted like a password. Its server's address is not encrypted.
 - the channels you mapped to a guide channel by hand: for each, the number your provider lists the channel under, its name, and the guide channel's id
 - information from TMDB about your providers' movies and series

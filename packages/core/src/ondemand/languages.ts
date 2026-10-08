@@ -51,8 +51,10 @@ export const DEFAULT_TITLE_LANGUAGE: TitleLanguage = "en";
 
 const WORD_END = /[\s-]/;
 
-/** Marks a version carries for every language at once. */
+/** Provider conventions used by existing catalogue suitability ranking. */
 const MULTI = new Set(["MULTI", "MULTI AUDIO", "MULTISUB", "MULTI SUB", "VO"]);
+/** Only these name marks hint at several audio languages in a filter. */
+const MULTI_AUDIO = new Set(["MULTI", "MULTI AUDIO"]);
 const LANGUAGE_MARKS = new Map<string, (typeof TITLE_LANGUAGES)[number]>(
   TITLE_LANGUAGES.flatMap((language) => language.marks.map((mark) => [mark, language] as const)),
 );
@@ -75,6 +77,17 @@ function markOf(tag: string) {
   const named = SUBTITLED.test(rest);
   const subtitles = named || (language?.subtitled === true && !DUBBED.test(rest));
   return { mark, language, subtitles, named };
+}
+
+/** Name hints only. A Dutch mark can mean subtitles; it never proves Dutch audio. */
+export function languageHints(tags: readonly string[]): readonly string[] {
+  const hints = new Set<string>();
+  for (const tag of tags) {
+    const { mark, language } = markOf(tag);
+    if (MULTI_AUDIO.has(mark)) hints.add("multi");
+    else if (language) hints.add(language.code);
+  }
+  return hints.size ? [...hints] : ["unknown"];
 }
 
 /**

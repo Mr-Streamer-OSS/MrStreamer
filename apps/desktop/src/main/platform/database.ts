@@ -1,6 +1,6 @@
 // mrstreamer.db, the one SQLite database: opened once and shared by what keeps its tables there,
-// the viewing record (viewing-store.ts) and the watchlist (watchlist-store.ts). Each makes and
-// reads only its own tables, and every change is one transaction. If the file can't open, both
+// viewing, the watchlist and verified file tracks. Each makes and
+// reads only its own tables, and every change is one transaction. If the file can't open, they
 // report failures and the rest of the app carries on.
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";

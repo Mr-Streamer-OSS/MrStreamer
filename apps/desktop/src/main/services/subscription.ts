@@ -121,6 +121,8 @@ export interface SavedSubscription {
    * under an earlier one doesn't count for this one. A new name leaves it as it is.
    */
   readonly revision: number;
+  /** Opaque saved-secret fingerprint. Stable across restarts, unlike revision. */
+  readonly fileRevision: string;
   /**
    * The account: the server and username, or a playlist's fingerprint. Its caches and its viewing
    * record are kept under it, where other releases find them.
@@ -489,6 +491,7 @@ function make(deps: SubscriptionDeps) {
     const publicOf = (subscription: Saved): SavedSubscription => ({
       id: subscription.id,
       revision: subscription.revision,
+      fileRevision: createHash("sha256").update(sealedOf(subscription.stored)).digest("hex"),
       key: keyOf(subscription.stored),
       kind: subscription.stored.kind,
       ...(subscription.stored.kind === "m3u"

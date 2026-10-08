@@ -556,7 +556,9 @@ async function start(): Promise<void> {
             : yield* onDemand.refresh(subscriptionId);
         }),
       "ondemand.search": ({ query }) => onDemand.search(query),
-      "ondemand.searchKind": ({ kind, query }) => onDemand.searchKind(kind, query),
+      "ondemand.searchKind": ({ kind, query, filters }) =>
+        onDemand.searchKind(kind, query, filters),
+      "ondemand.filterOptions": ({ kind }) => onDemand.filterOptions(kind),
       "ondemand.details": ({ kind, version }) =>
         Effect.tap(onDemand.details(kind, version), (details) =>
           // What a series lists now says where its marks have it go on, on Home as in the sheet.
@@ -606,8 +608,13 @@ async function start(): Promise<void> {
           // What plays goes first, whichever subscription it is of, so no provider sees a
           // connection beside the one about to open.
           yield* playback.closeAll;
-          const { url, revision, headers } = yield* onDemand.file(title);
-          return yield* playback.openTitle(title, url, decoders, { turn, revision, headers });
+          const { url, revision, headers, listingKey } = yield* onDemand.file(title);
+          return yield* playback.openTitle(title, url, decoders, {
+            turn,
+            revision,
+            headers,
+            listingKey,
+          });
         }),
       "playback.close": ({ sessionId }) => Effect.as(playback.close(sessionId), null),
       "playback.closeAll": () => Effect.andThen(playback.begin, Effect.as(playback.closeAll, null)),
@@ -669,8 +676,13 @@ async function start(): Promise<void> {
       "output.openTitle": ({ title, since }) =>
         Effect.gen(function* () {
           const turn = yield* playback.begin;
-          const { url, revision, headers } = yield* onDemand.file(title);
-          return yield* output.openTitle(title, url, since, { turn, revision, headers });
+          const { url, revision, headers, listingKey } = yield* onDemand.file(title);
+          return yield* output.openTitle(title, url, since, {
+            turn,
+            revision,
+            headers,
+            listingKey,
+          });
         }),
       "output.playTitle": ({
         sessionId,
