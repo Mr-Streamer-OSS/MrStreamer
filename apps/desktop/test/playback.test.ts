@@ -654,7 +654,7 @@ describe("one stream across several subscriptions", () => {
       subscriptionId: a.subscriptionId,
       id: String(movie.id),
     } as const;
-    const address = source.provider.titleFile("movie", title.id, movie.container);
+    const address = (await source.provider.titleFile("movie", title.id, movie.container)).url;
     const session = await playback.open(b, LINUX);
     const playing = await firstBytes(session.url);
 

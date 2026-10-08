@@ -45,6 +45,7 @@ import {
   type TitleSession,
 } from "./playback.ts";
 import { Preferences, SubscriptionPreferences } from "./preferences.ts";
+import { PlaylistMode, type PlaylistGroupPage, type PlaylistOmissionPage } from "./playlist.ts";
 import type { OwnedId, SubscriptionSummary } from "./subscription.ts";
 import type { UpdateStatus } from "./updates.ts";
 import type { EpisodeMark, SeriesViewing, TitleProgress, Viewing } from "./viewing.ts";
@@ -76,6 +77,21 @@ export type LoginInput = IpcInput<"subscription.add">;
 /** Input schema for every IPC method. The main process validates each call before handling it. */
 export const ipcInputs = {
   "subscription.list": none,
+  "playlist.groups": () =>
+    type({
+      subscriptionId: "string > 0",
+      query: "string <= 512",
+      offset: "number.integer >= 0",
+      limit: "0 < number.integer <= 100",
+    }),
+  "playlist.omissions": () =>
+    type({
+      subscriptionId: "string > 0",
+      offset: "number.integer >= 0",
+      limit: "0 < number.integer <= 100",
+    }),
+  "playlist.map": () =>
+    type({ subscriptionId: "string > 0", group: "string <= 512", mode: PlaylistMode }),
   "subscription.add": loginInput,
   /**
    * Changes what a saved subscription is called, and its password or playlist link when `secret`
@@ -353,6 +369,9 @@ export const ipcInputs = {
 export interface IpcOutputs {
   /** Every saved subscription, in the order they were added. */
   "subscription.list": readonly SubscriptionSummary[];
+  "playlist.groups": PlaylistGroupPage;
+  "playlist.omissions": PlaylistOmissionPage;
+  "playlist.map": SubscriptionSummary;
   /**
    * Checks the login with the provider and saves it beside the others. What plays goes on. A
    * login of an account that is saved already gives that subscription its password or link anew.

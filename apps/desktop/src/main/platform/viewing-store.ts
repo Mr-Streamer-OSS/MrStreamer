@@ -159,6 +159,7 @@ const TitlePayload = type("string.json.parse").pipe(
 const Listing = type({
   number: "number.integer >= 0",
   episodes: "(number.integer >= 0)[]",
+  "files?": "string[]",
 }).array();
 const EpisodeTitle = type({
   kind: "'episode'",

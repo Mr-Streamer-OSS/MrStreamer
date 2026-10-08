@@ -25,11 +25,19 @@ import { createHash, randomUUID } from "node:crypto";
 import { readdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { type } from "arktype";
+import {
+  PlaylistMapping,
+  type PlaylistMode,
+  type PlaylistGroupPage,
+  type PlaylistOmissionPage,
+} from "@mrstreamer/contracts/playlist";
+import { mapPlaylistGroup, playlistGroupId, safeName } from "@mrstreamer/core/playlist/import";
 import type { LoginInput } from "@mrstreamer/contracts/ipc";
 import type { AccountStatus, SubscriptionSummary } from "@mrstreamer/contracts/subscription";
 import { diagnosed } from "@mrstreamer/core/diagnostics";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
 import type { Provider, ProviderOptions } from "@mrstreamer/core/provider";
+import type { ImportedPlaylist } from "@mrstreamer/core/playlist/catalogue";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -76,6 +84,7 @@ const StoredSubscription = type({
    */
   key: "string",
   sealedLink: "string",
+  "mapping?": PlaylistMapping,
   account: AccountRecord,
 });
 type StoredSubscription = typeof StoredSubscription.infer;
@@ -118,6 +127,9 @@ export interface SavedSubscription {
    */
   readonly key: string;
   readonly kind: "xtream" | "m3u";
+  readonly playlistMapped?: boolean;
+  /** Persistent fingerprint of import settings. Used to detect caches from before a change. */
+  readonly importRevision?: string;
   /**
    * The folder its lists and what the viewer left it at are kept in: the data folder itself for
    * the original, where every release keeps them, and its own for one added beside it.
@@ -132,6 +144,12 @@ export interface Source extends SavedSubscription {
   readonly provider: Provider;
   /** The login or link itself, for a worker thread that builds its own copy of the provider. */
   readonly account: ProviderAccount;
+}
+
+/** One source revision and one shared playlist read, including its failure, for both lists. */
+export interface PlaylistRefresh {
+  readonly source: Source;
+  readonly read: Effect.Effect<ImportedPlaylist, Failed>;
 }
 
 /**
@@ -214,6 +232,22 @@ export class Subscriptions extends Context.Service<
       subscriptionId: string,
       erase?: Effect.Effect<void, Failed>,
     ): Effect.Effect<void, Failed>;
+    playlistGroups(
+      subscriptionId: string,
+      query: string,
+      offset: number,
+      limit: number,
+    ): Effect.Effect<PlaylistGroupPage, Failed>;
+    playlistOmissions(
+      subscriptionId: string,
+      offset: number,
+      limit: number,
+    ): Effect.Effect<PlaylistOmissionPage, Failed>;
+    mapPlaylist(
+      subscriptionId: string,
+      group: string,
+      mode: PlaylistMode,
+    ): Effect.Effect<SubscriptionSummary, Failed>;
     /** Every saved subscription as services know it, in the order added. */
     readonly saved: Effect.Effect<readonly SavedSubscription[]>;
     /** Those of them whose password or link is at hand, with the provider behind each. */
@@ -260,7 +294,7 @@ function make(deps: SubscriptionDeps) {
       const account: ProviderAccount =
         stored.kind === "xtream"
           ? { kind: "xtream", server: stored.server, username: stored.username, password: secret }
-          : { kind: "m3u", link: secret };
+          : { kind: "m3u", link: secret, ...(stored.mapping ? { mapping: stored.mapping } : {}) };
       return { provider: providerFor(account, deps.providerOptions), account };
     }
 
@@ -457,6 +491,14 @@ function make(deps: SubscriptionDeps) {
       revision: subscription.revision,
       key: keyOf(subscription.stored),
       kind: subscription.stored.kind,
+      ...(subscription.stored.kind === "m3u"
+        ? {
+            playlistMapped: !!subscription.stored.mapping,
+            importRevision: createHash("sha256")
+              .update(JSON.stringify(subscription.stored.mapping ?? null))
+              .digest("hex"),
+          }
+        : {}),
       dir: subscription.original ? deps.dataDir : folderOf(subscription.id),
       original: subscription.original,
     });
@@ -528,6 +570,13 @@ function make(deps: SubscriptionDeps) {
                 if (!previous) return yield* noSubscription;
                 if (previous.revision !== before.revision) return summary(previous);
               }
+              const kept: StoredSubscription =
+                stored.kind === "m3u" && previous?.stored.kind === "m3u"
+                  ? {
+                      ...stored,
+                      ...(previous.stored.mapping ? { mapping: previous.stored.mapping } : {}),
+                    }
+                  : stored;
               return yield* save(
                 {
                   id: previous?.id ?? randomUUID(),
@@ -535,8 +584,11 @@ function make(deps: SubscriptionDeps) {
                   original: previous ? previous.original : roster.length === 0,
                   name: name ?? previous?.name ?? null,
                   revision: ++revisions,
-                  stored,
-                  provider: { provider, account },
+                  stored: kept,
+                  provider:
+                    kept.kind === "m3u" && account.kind === "m3u"
+                      ? connected(kept, account.link)
+                      : { provider, account },
                 },
                 previous,
               );
@@ -626,6 +678,105 @@ function make(deps: SubscriptionDeps) {
           }),
         ),
 
+      playlistGroups: (subscriptionId: string, query: string, offset: number, limit: number) =>
+        Effect.gen(function* () {
+          const source = yield* find(subscriptionId);
+          const importer = source.provider?.provider.playlistImport;
+          if (!importer) return yield* noSubscription;
+          const imported = yield* Effect.tryPromise({
+            try: (signal) => importer(signal),
+            catch: failedWith,
+          });
+          const modes = new Map(
+            source.stored.kind === "m3u"
+              ? source.stored.mapping?.groups.map((each) => [each.group, each.mode])
+              : [],
+          );
+          const wanted = query.toLocaleLowerCase();
+          const all = [...imported.groups].filter(([group]) =>
+            safeName(group || "Ungrouped")
+              .toLocaleLowerCase()
+              .includes(wanted),
+          );
+          return {
+            status: imported.status,
+            total: all.length,
+            groups: all.slice(offset, offset + Math.min(100, limit)).map(([group, samples]) => ({
+              group: playlistGroupId(group),
+              name: safeName(group || "Ungrouped"),
+              mode: imported.status.explicit
+                ? (modes.get(playlistGroupId(group)) ?? null)
+                : ("live" as const),
+              entries: samples.length,
+              samples: samples.slice(0, 5),
+            })),
+          };
+        }),
+
+      playlistOmissions: (subscriptionId: string, offset: number, limit: number) =>
+        Effect.gen(function* () {
+          const source = yield* find(subscriptionId);
+          const importer = source.provider?.provider.playlistImport;
+          if (!importer) return yield* noSubscription;
+          const imported = yield* Effect.tryPromise({
+            try: (signal) => importer(signal),
+            catch: failedWith,
+          });
+          return {
+            total: imported.omissions.length,
+            entries: imported.omissions.slice(offset, offset + Math.min(100, limit)),
+          };
+        }),
+
+      mapPlaylist: (subscriptionId: string, group: string, mode: PlaylistMode) =>
+        Effect.gen(function* () {
+          const before = yield* find(subscriptionId);
+          const importer = before.provider?.provider.playlistImport;
+          if (!importer || before.stored.kind !== "m3u") return yield* noSubscription;
+          const imported = yield* Effect.tryPromise({
+            try: (signal) => importer(signal),
+            catch: failedWith,
+          });
+          if (![...imported.groups.keys()].some((each) => playlistGroupId(each) === group))
+            return yield* new Failed({
+              error: { kind: "unexpected", detail: "This playlist group no longer exists." },
+            });
+          return yield* change(subscriptionId, (latest) => {
+            if (
+              latest.revision !== before.revision ||
+              latest.stored.kind !== "m3u" ||
+              !latest.provider ||
+              latest.provider.account.kind !== "m3u"
+            )
+              return Effect.fail(
+                new Failed({
+                  error: {
+                    kind: "unexpected",
+                    detail: "The playlist changed. Open mapping again.",
+                  },
+                }),
+              );
+            const mapping = mapPlaylistGroup(
+              latest.stored.mapping,
+              [...imported.groups.keys()].map(playlistGroupId),
+              group,
+              mode,
+            );
+            if (mapping.groups.length > 10_000)
+              return Effect.fail(
+                new Failed({
+                  error: {
+                    kind: "unexpected",
+                    detail: "Playlist mapping exceeds 10,000 saved groups.",
+                  },
+                }),
+              );
+            const stored = { ...latest.stored, mapping };
+            const provider = connected(stored, latest.provider.account.link);
+            return save({ ...latest, stored, provider, revision: ++revisions }, latest);
+          });
+        }),
+
       saved: Effect.map(load, (roster) => roster.map(publicOf)),
 
       sources: Effect.map(load, (roster) => roster.flatMap((each) => sourceOf(each) ?? [])),
@@ -657,6 +808,7 @@ function summary({ id, name, stored, provider }: Saved): SubscriptionSummary {
     username: stored.kind === "xtream" ? stored.username : "",
     account: stored.account,
     needsSecret: provider === null,
+    ...(stored.kind === "m3u" ? { playlistMapped: !!stored.mapping } : {}),
   };
 }
 

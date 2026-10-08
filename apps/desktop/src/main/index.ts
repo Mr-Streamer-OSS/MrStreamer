@@ -22,6 +22,7 @@ import { streamsToPlay } from "@mrstreamer/core/catalogue/variants";
 import { Diagnostics } from "@mrstreamer/core/diagnostics";
 import { Failed } from "@mrstreamer/core/failure";
 import { Guide } from "@mrstreamer/core/guide/service";
+import { seriesEpisodeSeasons } from "@mrstreamer/core/ondemand/details";
 import { discovery, metadataFileFor } from "@mrstreamer/core/updates/feed";
 import { ViewingRecord } from "@mrstreamer/core/viewing/service";
 import * as Effect from "effect/Effect";
@@ -493,6 +494,12 @@ async function start(): Promise<void> {
     (effect) => runtime.runPromiseExit(effect),
     {
       "subscription.list": () => subscriptions.list,
+      "playlist.groups": ({ subscriptionId, query, offset, limit }) =>
+        subscriptions.playlistGroups(subscriptionId, query, offset, limit),
+      "playlist.omissions": ({ subscriptionId, offset, limit }) =>
+        subscriptions.playlistOmissions(subscriptionId, offset, limit),
+      "playlist.map": ({ subscriptionId, group, mode }) =>
+        roster.mapPlaylist(subscriptionId, group, mode),
       "subscription.add": (login) => roster.add(login),
       "subscription.update": ({ subscriptionId, ...change }) =>
         roster.update(subscriptionId, change),
@@ -506,7 +513,13 @@ async function start(): Promise<void> {
       "library.categories": () => library.categories,
       "library.channels": (filter) => library.channels(filter),
       "library.channel": ({ channel }) => library.channel(channel),
-      "library.refresh": ({ subscriptionId }) => library.refresh(subscriptionId),
+      "library.refresh": ({ subscriptionId }) =>
+        Effect.gen(function* () {
+          const source = yield* subscriptions.sourceOf(subscriptionId);
+          return source.kind === "m3u"
+            ? (yield* roster.refreshPlaylist(subscriptionId)).catalogue
+            : yield* library.refresh(subscriptionId);
+        }),
       "guide.listings": ({ channels }) => guide.listings(channels),
       "guide.schedule": ({ channel }) => guide.schedule(channel),
       "guide.search": ({ query }) => guide.search(query),
@@ -534,14 +547,20 @@ async function start(): Promise<void> {
       "guide.mapChannels": (query) => guide.mapChannels(query),
       "guide.mapOptions": (query) => guide.mapOptions(query),
       "ondemand.status": () => onDemand.status,
-      "ondemand.refresh": ({ subscriptionId }) => onDemand.refresh(subscriptionId),
+      "ondemand.refresh": ({ subscriptionId }) =>
+        Effect.gen(function* () {
+          const source = yield* subscriptions.sourceOf(subscriptionId);
+          return source.kind === "m3u"
+            ? (yield* roster.refreshPlaylist(subscriptionId)).titles
+            : yield* onDemand.refresh(subscriptionId);
+        }),
       "ondemand.search": ({ query }) => onDemand.search(query),
       "ondemand.searchKind": ({ kind, query }) => onDemand.searchKind(kind, query),
       "ondemand.details": ({ kind, version }) =>
         Effect.tap(onDemand.details(kind, version), (details) =>
           // What a series lists now says where its marks have it go on, on Home as in the sheet.
           details.kind === "series"
-            ? Effect.ignore(viewing.relist(randomUUID(), version, details.seasons))
+            ? Effect.ignore(viewing.relist(randomUUID(), version, seriesEpisodeSeasons(details)))
             : Effect.void,
         ),
       "ondemand.season": ({ series, season }) => onDemand.season(series, season),
@@ -585,8 +604,8 @@ async function start(): Promise<void> {
           // What plays goes first, whichever subscription it is of, so no provider sees a
           // connection beside the one about to open.
           yield* playback.closeAll;
-          const { url, revision } = yield* onDemand.file(title);
-          return yield* playback.openTitle(title, url, decoders, { turn, revision });
+          const { url, revision, headers } = yield* onDemand.file(title);
+          return yield* playback.openTitle(title, url, decoders, { turn, revision, headers });
         }),
       "playback.close": ({ sessionId }) => Effect.as(playback.close(sessionId), null),
       "playback.closeAll": () => Effect.andThen(playback.begin, Effect.as(playback.closeAll, null)),
@@ -648,8 +667,8 @@ async function start(): Promise<void> {
       "output.openTitle": ({ title, since }) =>
         Effect.gen(function* () {
           const turn = yield* playback.begin;
-          const { url, revision } = yield* onDemand.file(title);
-          return yield* output.openTitle(title, url, since, { turn, revision });
+          const { url, revision, headers } = yield* onDemand.file(title);
+          return yield* output.openTitle(title, url, since, { turn, revision, headers });
         }),
       "output.playTitle": ({
         sessionId,

@@ -1,8 +1,19 @@
-// A playlist's entries as a live catalogue, with where each channel streams from. Names, guide ids
-// and groups stay exactly as the playlist wrote them: the catalogue module reads quality and
+// A playlist's entries as a live catalogue, with where each channel streams from. Mapped entries
+// have bounded, address-stripped names, guide ids and groups; the catalogue module reads quality and
 // annotations such as "(720p)" or "[Geo-blocked]" from the names, as it does for every provider.
 import type { StreamFormat } from "@mrstreamer/contracts/playback";
-import type { LiveCatalogue, ProviderCategory, ProviderChannel } from "../provider.ts";
+import type {
+  LiveCatalogue,
+  OnDemandCatalogue,
+  ProviderDetails,
+  ProviderCategory,
+  ProviderChannel,
+} from "../provider.ts";
+import type {
+  PlaylistImportStatus,
+  PlaylistOmission,
+  PlaylistSample,
+} from "@mrstreamer/contracts/playlist";
 import type { PlaylistEntry } from "./m3u.ts";
 
 /** Where a channel streams from. The address can hold a login, so it stays in the main process. */
@@ -85,4 +96,19 @@ function unusedId(taken: ReadonlyMap<string, unknown>, base: string, name: strin
   for (let count = 2; ; count++) {
     if (!taken.has(`${named}|${count}`)) return `${named}|${count}`;
   }
+}
+
+export interface PlaylistFile extends PlaylistStream {
+  readonly container: string;
+  readonly kind: "movie" | "episode";
+}
+
+export interface ImportedPlaylist {
+  readonly live: PlaylistCatalogue;
+  readonly catalogue: OnDemandCatalogue;
+  readonly files: ReadonlyMap<string, PlaylistFile>;
+  readonly details: ReadonlyMap<string, ProviderDetails>;
+  readonly groups: ReadonlyMap<string, readonly PlaylistSample[]>;
+  readonly omissions: readonly PlaylistOmission[];
+  readonly status: PlaylistImportStatus;
 }

@@ -13,7 +13,7 @@ export interface AccountStatus {
 }
 
 export interface SubscriptionSummary {
-  /** An Xtream Codes login, or an M3U playlist link without one, which has live TV only. */
+  /** An Xtream Codes login, or an M3U playlist link without one, which defaults to Live TV until mapped. */
   readonly kind: "xtream" | "m3u";
   /**
    * Identifies the saved subscription on this device: made up when it is added, and kept through
@@ -38,6 +38,15 @@ export interface SubscriptionSummary {
    * says which to ask for.
    */
   readonly needsSecret: boolean;
+  /** Explicit M3U group mapping enables movie and series navigation. */
+  readonly playlistMapped?: boolean;
+}
+
+/** Xtream and explicitly mapped playlists support titles, even if every group is Live or Skip. */
+export function hasTitles(
+  subscription: Pick<SubscriptionSummary, "kind" | "playlistMapped">,
+): boolean {
+  return subscription.kind === "xtream" || subscription.playlistMapped === true;
 }
 
 /**

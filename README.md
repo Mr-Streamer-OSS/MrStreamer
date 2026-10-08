@@ -21,7 +21,7 @@ A clean, fast, open-source IPTV player for macOS, Windows and Linux. Bring your 
   <thead><tr><th></th><th>Xtream Codes login</th><th>M3U playlist</th></tr></thead>
   <tbody>
     <tr><th>Live TV with a guide</th><td>Yes</td><td>Yes, guide from the playlist or an XMLTV address</td></tr>
-    <tr><th>Movies and series</th><td>Yes</td><td>No</td></tr>
+    <tr><th>Movies and series</th><td>Yes</td><td>From 0.0.9, supported files after mapping groups in Settings</td></tr>
     <tr><th>Sound and subtitle tracks</th><td colspan="2">Every track the provider sends</td></tr>
     <tr><th>Streams at once</th><td colspan="2">One, across every subscription</td></tr>
     <tr><th>Recording, downloads</th><td colspan="2">No</td></tr>
@@ -52,7 +52,7 @@ The pictures come from a test provider with made-up titles and public-domain foo
 
 ## What you need
 
-An IPTV subscription with Xtream Codes access: a server address, username and password, or an M3U link that contains them. An M3U playlist link without a login brings live TV only. You can add [several](docs/user/subscriptions.md), and their channels, movies and series show together.
+An IPTV subscription with Xtream Codes access: a server address, username and password, or an M3U link that contains them. An M3U playlist link starts with live TV. Version 0.0.9 can also import movies and episodes after you [map its groups](docs/user/subscriptions.md#mapping-mixed-playlists). You can add [several](docs/user/subscriptions.md), and their channels, movies and series show together.
 
 Mr. Streamer supplies no channels, playlists or subscriptions. It has no ads, your login and what you watched stay on your computer, and it's free and open source.
 
@@ -79,7 +79,7 @@ On Windows, the [Microsoft Store](https://apps.microsoft.com/detail/9N45GG76ZP4T
 <details>
 <summary><strong>First steps</strong></summary>
 
-1. Enter your provider's server address, username and password, or paste the M3U link your provider sent. Mr. Streamer checks the login and loads your channels; movies and series follow. A playlist link without a login loads its channels only. An address without `http://` or `https://` connects encrypted when the server allows it; otherwise Mr. Streamer asks before sending your login unencrypted.
+1. Enter your provider's server address, username and password, or paste the M3U link your provider sent. Mr. Streamer checks the login and loads your channels; movies and series follow. A playlist link starts with channels. In 0.0.9, map its groups in Settings to import movies and series too. An address without `http://` or `https://` connects encrypted when the server allows it; otherwise Mr. Streamer asks before sending your login unencrypted.
 2. **Live TV** lists every channel with what's on now and next. Click one to watch; the list opens over the picture to switch.
 3. **Movies** and **Series** open on For you. A poster opens its details; **Play** or **Resume** starts it.
 4. In Settings (⌘, or Ctrl ,), **General** sets the languages for titles, sound and subtitles, and your update channel; **Subscriptions** shows your accounts, refreshes their lists and adds another one, whose channels, movies and series show beside the first's.
@@ -91,7 +91,7 @@ Mr. Streamer looks for updates after it starts and every four hours. When one is
 <details>
 <summary><strong>Limits</strong></summary>
 
-- One stream at a time, across every subscription you add: Xtream Codes access, or an M3U playlist for live TV.
+- One stream at a time, across every subscription you add: Xtream Codes access, or an M3U playlist. Mixed-playlist movie and series import needs 0.0.9 and explicit group mapping.
 - No recording or downloads. [Playing on a TV](docs/user/playback.md#playing-on-a-tv) uses AirPlay on macOS and Google Cast on Windows; the Linux builds play on the computer only.
 - Surround sound that needs converting plays as stereo, and converting a picture uses much more of your computer's processor than playing it as it is.
 - Choosing another sound track on a live channel starts the channel again for a moment.

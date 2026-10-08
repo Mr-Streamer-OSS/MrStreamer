@@ -30,7 +30,8 @@ import type {
   TitleDetails,
 } from "@mrstreamer/contracts/ondemand";
 import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
-import type { TitleProgress } from "@mrstreamer/contracts/viewing";
+import type { EpisodeMark, TitleProgress } from "@mrstreamer/contracts/viewing";
+import { episodeFileVersion } from "@mrstreamer/core/ondemand/details";
 import { versionLabels } from "@mrstreamer/core/ondemand/languages";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import { continuation, episodeStates } from "@mrstreamer/core/viewing/episodes";
@@ -752,7 +753,9 @@ function Episodes({ details }: { details: SeriesDetails }) {
       <div>
         {episodes.map((episode) => {
           const state = stateOf?.(episode);
-          const current = sameOwned(target?.episode, episode);
+          const current =
+            target?.episode &&
+            sameOwned(target.episode, episodeFileVersion(episode, target.episode.id));
           const partly = state?.kind === "partial" ? state.progress : undefined;
           const saving = marks.busy && marks.change?.episode.id === episode.id;
           const facts = [
@@ -775,7 +778,12 @@ function Episodes({ details }: { details: SeriesDetails }) {
             >
               <button
                 onMouseDown={(event) => event.preventDefault()}
-                onClick={() => playTitle(episodeNow(details, episode), resumePoint(partly))}
+                onClick={() =>
+                  playTitle(
+                    episodeNow(details, episodeFileVersion(episode, partly?.title.id)),
+                    resumePoint(partly),
+                  )
+                }
                 className="grid w-full min-w-0 grid-cols-[2.5rem_12.5rem_minmax(0,1fr)] items-start gap-4 text-left"
               >
                 <span className="text-center text-lg text-muted-foreground tabular-nums">
@@ -818,7 +826,15 @@ function Episodes({ details }: { details: SeriesDetails }) {
                   )}
                 </span>
               </button>
-              <span className="flex w-8 flex-col items-center gap-1.5 text-muted-foreground">
+              <span className="flex min-w-8 flex-col items-center gap-1.5 text-muted-foreground">
+                {episode.versions && episode.versions.length > 1 && (
+                  <EpisodeVersionMenu
+                    episode={episode}
+                    details={details}
+                    progress={standing?.progress ?? []}
+                    marks={standing?.marks ?? []}
+                  />
+                )}
                 {/* While a mark is stored the row claims neither state. */}
                 {saving ? (
                   <CircleDashed className="size-4 opacity-50" aria-hidden />
@@ -834,5 +850,67 @@ function Episodes({ details }: { details: SeriesDetails }) {
         })}
       </div>
     </section>
+  );
+}
+
+/** Every imported episode file remains selectable, with progress owned by that exact id. */
+function EpisodeVersionMenu({
+  episode,
+  details,
+  progress,
+  marks,
+}: {
+  episode: Episode;
+  details: SeriesDetails;
+  progress: readonly TitleProgress[];
+  marks: readonly EpisodeMark[];
+}) {
+  const versions = episode.versions ?? [];
+  const labels = versionLabels(versions, details.title.originalLanguage);
+  return (
+    <Menu.Root>
+      <Menu.Trigger
+        render={
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={`Versions for ${episodeLabel(episode.season, episode.number)}`}
+          />
+        }
+      >
+        {versions.length} versions
+      </Menu.Trigger>
+      <Menu.Portal>
+        <Menu.Positioner side="bottom" align="end" sideOffset={8} className="z-[60]">
+          <Menu.Popup className="max-h-[60vh] min-w-60 overflow-y-auto bg-black p-2 text-white ring-1 ring-white/15">
+            {versions.map((version, index) => (
+              <Menu.Item
+                key={version.id}
+                title={version.name}
+                className="block w-full px-2 py-2 text-left text-sm outline-none data-highlighted:bg-white/10"
+                onClick={() => {
+                  const state = episodeStates(
+                    progress,
+                    marks,
+                  )({
+                    ...episode,
+                    id: version.id,
+                    versions: [version],
+                    exactVersion: true,
+                  });
+                  const own = state.kind === "partial" ? state.progress : undefined;
+                  playTitle(
+                    episodeNow(details, episodeFileVersion(episode, version.id)),
+                    resumePoint(own),
+                  );
+                }}
+              >
+                Play {labels[index]}
+              </Menu.Item>
+            ))}
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
   );
 }

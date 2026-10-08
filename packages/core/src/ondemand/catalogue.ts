@@ -181,6 +181,7 @@ function indexKind(
         subscriptionId,
         id: item.id,
         tags: name.tags,
+        ...(item.episodeFiles ? { episodeFiles: item.episodeFiles } : {}),
       })),
     };
     titles.push(title);

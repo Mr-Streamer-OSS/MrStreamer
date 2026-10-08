@@ -101,7 +101,7 @@ async function casting(options: { fetchMs?: number; checkpointMs?: number } = {}
   const own = (id: string) => ({ subscriptionId: source!.id, id });
   const movie = provider.titles.movies.find((each) => each.name.startsWith(MOVIE))!;
   const title: TitleRef = { kind: "movie", ...own(String(movie.id)) };
-  const file = source!.provider.titleFile("movie", title.id, movie.container);
+  const file = (await source!.provider.titleFile("movie", title.id, movie.container)).url;
   /** The second episode of the series the provider lists first, an MP4, and where its file is. */
   const episode: EpisodeRef = {
     kind: "episode",
@@ -110,7 +110,7 @@ async function casting(options: { fetchMs?: number; checkpointMs?: number } = {}
     season: 1,
     episode: 2,
   };
-  const episodeFile = source!.provider.titleFile("episode", episode.id, "mp4");
+  const episodeFile = (await source!.provider.titleFile("episode", episode.id, "mp4")).url;
   /** A channel that streams without end. */
   const channel = own(
     String(provider.catalogue.channels.find((each) => !each.offline && !each.fixture)!.streamId),

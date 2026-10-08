@@ -86,6 +86,8 @@ const ProviderTitle = type({
   adult: "boolean",
   container: "string | null",
   "tmdbId?": "string | null",
+  "metadata?": "'lazy'",
+  "episodeFiles?": "string[]",
 });
 /** Version 1 came before TMDB ids: still shown, but refreshed as soon as the app can. */
 const CachedCatalogue = type({
@@ -93,6 +95,7 @@ const CachedCatalogue = type({
   /** Which subscription produced it. */
   key: "string",
   fetchedAt: "number",
+  "importRevision?": "string",
   movieCategories: Category.array(),
   movies: ProviderTitle.array(),
   seriesCategories: Category.array(),
@@ -104,6 +107,7 @@ interface Loaded {
   /** The subscription whose titles these are. */
   readonly subscriptionId: string;
   readonly fetchedAt: number;
+  readonly importRevision?: string;
   readonly catalogue: OnDemandCatalogue;
   readonly movies: number;
   readonly series: number;
@@ -150,7 +154,7 @@ function wanted(): Wanted[] {
     ] as const) {
       const isAdult = adultIn(categories);
       for (const title of titles) {
-        if (!title.tmdbId || (!adults && isAdult(title))) continue;
+        if (title.metadata === "lazy" || !title.tmdbId || (!adults && isAdult(title))) continue;
         const key = `${kind}:${title.tmdbId}`;
         const addedAt = title.addedAt ?? 0;
         if ((found.get(key)?.addedAt ?? -1) < addedAt) {
@@ -162,10 +166,16 @@ function wanted(): Wanted[] {
   return [...found.values()];
 }
 
-function remember(subscriptionId: string, fetchedAt: number, catalogue: OnDemandCatalogue): Loaded {
+function remember(
+  subscriptionId: string,
+  fetchedAt: number,
+  catalogue: OnDemandCatalogue,
+  importRevision?: string,
+): Loaded {
   const kept: Loaded = {
     subscriptionId,
     fetchedAt,
+    ...(importRevision ? { importRevision } : {}),
     catalogue,
     movies: catalogue.movies.length,
     series: catalogue.series.length,
@@ -260,6 +270,7 @@ function save(): Promise<void> {
           version: 2,
           key: owner.key,
           fetchedAt,
+          ...(kept.importRevision ? { importRevision: kept.importRevision } : {}),
           ...catalogue,
         });
         await removeFile(legacyCachePath(owner));
@@ -299,7 +310,7 @@ function current(owner: CatalogueOwner): Promise<Loaded | null> {
     if (file?.key !== key || readings.get(subscriptionId) !== token) return null;
     return (
       loaded.get(subscriptionId) ??
-      remember(subscriptionId, file.version === 2 ? file.fetchedAt : 0, file)
+      remember(subscriptionId, file.version === 2 ? file.fetchedAt : 0, file, file.importRevision)
     );
   })();
   reading.set(subscriptionId, done);
@@ -367,24 +378,32 @@ function statusOf(found: Loaded | null): WorkerStatus {
     movies: found?.movies ?? 0,
     series: found?.series ?? 0,
     fetchedAt: found?.fetchedAt ?? null,
+    ...(found?.importRevision ? { importRevision: found.importRevision } : {}),
   };
 }
 
 async function refresh(args: WorkerCalls["refresh"]["args"]): Promise<null> {
   const { subscriptionId, revision } = args;
   const under = refreshing.get(subscriptionId);
+  // Playlist reads can finish out of order. Older lists must leave newer work and results alone.
+  if (
+    (under && under.revision > revision) ||
+    (fetched.get(subscriptionId)?.revision ?? -1) > revision
+  ) {
+    throw new AppFailure({ kind: "unexpected", detail: "Stopped." });
+  }
   if (under?.revision === revision) return under.done;
   // This subscription's, under the login it had before. Another subscription's goes on.
   under?.abort.abort();
   const abort = new AbortController();
   const done = (async () => {
     const provider = providerFor(args.account, { userAgent: setup.userAgent });
-    const catalogue = await provider.onDemandCatalogue(abort.signal);
+    const catalogue = args.catalogue ?? (await provider.onDemandCatalogue(abort.signal));
     const before = await current(args);
     // An empty list doesn't replace one that had titles, unless it comes twice in a row, as for
     // channels: panels answer an overloaded request with an empty list, and one list can fail
     // while the other arrives.
-    for (const list of ["movies", "series"] as const) {
+    for (const list of args.account.kind === "m3u" ? [] : (["movies", "series"] as const)) {
       const mark = `${subscriptionId}:${list}`;
       const lost = catalogue[list].length === 0 && (before?.[list] ?? 0) > 0;
       if (!lost || emptyBefore.has(mark)) {
@@ -406,11 +425,11 @@ async function refresh(args: WorkerCalls["refresh"]["args"]): Promise<null> {
     const kept: OnDemandCatalogue = {
       ...catalogue,
       movieCategories:
-        catalogue.movieCategories.length > 0 || !before
+        args.account.kind === "m3u" || catalogue.movieCategories.length > 0 || !before
           ? catalogue.movieCategories
           : before.catalogue.movieCategories,
       seriesCategories:
-        catalogue.seriesCategories.length > 0 || !before
+        args.account.kind === "m3u" || catalogue.seriesCategories.length > 0 || !before
           ? catalogue.seriesCategories
           : before.catalogue.seriesCategories,
     };
@@ -441,7 +460,7 @@ async function finishRefresh({
   if (aside?.revision !== revision) return statusOf(await current(owner));
   fetched.delete(subscriptionId);
   if (!keep) return statusOf(await current(owner));
-  const kept = remember(subscriptionId, Date.now(), aside.catalogue);
+  const kept = remember(subscriptionId, Date.now(), aside.catalogue, owner.importRevision);
   // Written after answering, so the lists show without waiting for the disk. Quitting writes
   // them first; a write it cuts short all the same leaves the previous lists for the next start,
   // which refreshes them when due.

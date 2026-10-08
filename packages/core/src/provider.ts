@@ -53,6 +53,10 @@ export interface ProviderTitle {
    * film in several language versions shares it.
    */
   readonly tmdbId?: string | null;
+  /** Playlist metadata is requested when details open, never for the whole import. */
+  readonly metadata?: "lazy";
+  /** Mapped series' current exact files. No URLs, headers or guessed episode identities. */
+  readonly episodeFiles?: readonly string[];
 }
 
 /** Movies and series as the provider delivers them, each with its own categories. */
@@ -83,6 +87,8 @@ export interface ProviderDetails {
   }[];
   /** Series only, in any order; empty for movies. */
   readonly episodes: readonly ProviderEpisode[];
+  /** M3U episodes follow playlist order. Xtream keeps its established numeric ordering. */
+  readonly episodeOrder?: "source";
   /** Movies only: the file type, when the details name it. */
   readonly container: string | null;
 }
@@ -149,7 +155,23 @@ export interface Provider {
    * Upstream file location of a movie or an episode, with its file type. Contains credentials, so
    * it stays in the main process.
    */
-  titleFile(kind: "movie" | "episode", id: string, container: string): string;
+  titleFile(
+    kind: "movie" | "episode",
+    id: string,
+    container: string,
+    signal?: AbortSignal,
+  ): Promise<ProviderFile>;
+  /** Main-only import snapshot; bounded Settings inspection uses the last read, refresh asks afresh. */
+  playlistImport?(
+    signal?: AbortSignal,
+    fresh?: boolean,
+  ): Promise<import("./playlist/catalogue.ts").ImportedPlaylist>;
+}
+
+export interface ProviderFile {
+  readonly url: string;
+  readonly container: string;
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 /** Options every adapter shares. `fetch` is injectable so tests can run against a local server. */

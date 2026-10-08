@@ -106,6 +106,8 @@ export type SeriesSeasons = readonly {
     readonly id: string;
     readonly season: number;
     readonly number: number;
+    readonly exactVersion?: true;
+    readonly versions?: readonly { readonly id: string }[];
   }[];
 }[];
 
@@ -374,11 +376,23 @@ function markOf({ season, episode, watched, at, revision }: StoredMark): Episode
   return { season, episode, watched, at, revision };
 }
 
-/** The episodes a series version lists by their numbers alone: two files of one are one episode. */
+/** Logical episodes in source order, with current exact files for playlist progress. */
 function listingOf(seasons: SeriesSeasons): SeriesListing {
   return seasons.map((season) => ({
     number: season.number,
     episodes: [...new Set(season.episodes.map((each) => each.number))],
+    ...(season.episodes.some((episode) => episode.exactVersion)
+      ? {
+          files: [
+            ...new Set(
+              season.episodes.flatMap((episode) => [
+                episode.id,
+                ...(episode.versions?.map((file) => file.id) ?? []),
+              ]),
+            ),
+          ],
+        }
+      : {}),
   }));
 }
 

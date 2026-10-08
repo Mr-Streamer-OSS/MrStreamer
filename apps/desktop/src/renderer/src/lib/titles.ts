@@ -292,6 +292,8 @@ export function useContinueWatching(limit = CONTINUE_LIMIT): {
       ];
     }
     const own = `${key}|${ref.subscriptionId}`;
+    const exactFiles = title.versions.find((each) => sameOwned(each, version))?.episodeFiles;
+    const obsolete = exactFiles !== undefined && !exactFiles.includes(ref.id);
     const mark = marked.get(own)?.mark;
     if (mark) {
       if (progress.since <= mark.at) return [];
@@ -303,10 +305,11 @@ export function useContinueWatching(limit = CONTINUE_LIMIT): {
         title,
         version,
         progress: null,
-        line: progress.finished
-          ? "Next episode"
-          : `${episodeLabel(ref.season, ref.episode)} · ${timeLeftOf(progress) ?? ""}`,
-        done: progress.finished ? null : progress.position / progress.duration,
+        line:
+          progress.finished || obsolete
+            ? "Next episode"
+            : `${episodeLabel(ref.season, ref.episode)} · ${timeLeftOf(progress) ?? ""}`,
+        done: progress.finished || obsolete ? null : progress.position / progress.duration,
         artworkUrl,
         at,
       },

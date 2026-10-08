@@ -733,6 +733,9 @@ describe("a series' episodes", () => {
       [shown, 1],
       ["20", 2],
     ]);
+    expect(
+      series.seasons.flatMap((season) => season.episodes).every((episode) => !episode.versions),
+    ).toBe(true);
   });
 });
 

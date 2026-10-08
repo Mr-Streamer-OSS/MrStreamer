@@ -41,6 +41,16 @@ export const queries = {
   /** Every saved subscription, in the order added. Changed only by what Settings does to them. */
   subscriptions: () =>
     queryOptions({ queryKey: ["subscriptions"], queryFn: () => call("subscription.list") }),
+  playlistGroups: (subscriptionId: string, query: string, offset: number, limit: number) =>
+    queryOptions({
+      queryKey: ["playlist", subscriptionId, "groups", query, offset, limit],
+      queryFn: () => call("playlist.groups", { subscriptionId, query, offset, limit }),
+    }),
+  playlistOmissions: (subscriptionId: string, offset: number, limit: number) =>
+    queryOptions({
+      queryKey: ["playlist", subscriptionId, "omissions", offset, limit],
+      queryFn: () => call("playlist.omissions", { subscriptionId, offset, limit }),
+    }),
   preferences: () =>
     queryOptions({
       queryKey: ["preferences"],
@@ -537,6 +547,7 @@ export async function rememberCategory(
 export function syncLibraryUpdates(client: QueryClient): () => void {
   return listen("library.updated", () => {
     void client.invalidateQueries({ queryKey: ["library"] });
+    void client.invalidateQueries({ queryKey: ["playlist"] });
     // Favourites and history show by channel, and a new catalogue can join a channel's streams.
     void client.invalidateQueries({ queryKey: queries.viewing().queryKey });
   });

@@ -117,6 +117,35 @@ async function withTwo() {
 }
 
 describe("the saved subscriptions", { timeout: 30_000 }, () => {
+  it("loads an Xtream subscription's channels, guide and titles in order", async () => {
+    const provider = await fakeProvider();
+    const app = await started(await tempDir());
+    const channels = provider.hold("channels");
+    const guide = provider.hold("guide");
+    try {
+      const saved = await app.roster.add(login(provider));
+      await channels.arrived;
+      expect(provider.guideRequests()).toBe(0);
+      expect((await app.onDemand.status()).lists[0]?.fetchedAt).toBeNull();
+      channels.release();
+      await guide.arrived;
+      expect((await app.library.status())[0]).toMatchObject({
+        subscriptionId: saved.id,
+        fetchedAt: expect.any(Number),
+      });
+      expect((await app.onDemand.status()).lists[0]?.fetchedAt).toBeNull();
+      guide.release();
+      await vi.waitFor(
+        async () =>
+          expect((await app.onDemand.status()).lists[0]?.fetchedAt).toEqual(expect.any(Number)),
+        { timeout: 10_000 },
+      );
+    } finally {
+      channels.release();
+      guide.release();
+    }
+  });
+
   it("adds one beside another while a channel plays, and its lists join the others'", async () => {
     const { roster, library, onDemand, playback, first, second, a } = await withOne();
     const session = await playback.open({ subscriptionId: a, id: live(first) }, DECODERS);

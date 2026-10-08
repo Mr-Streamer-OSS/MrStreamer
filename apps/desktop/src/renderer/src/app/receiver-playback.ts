@@ -8,6 +8,7 @@
 // it by then, and never what it played when they were asked.
 import type { QueryClient } from "@tanstack/react-query";
 import { seriesOf } from "@mrstreamer/contracts/ondemand";
+import { episodeFileVersion } from "@mrstreamer/core/ondemand/details";
 import type { RemoteMedia } from "@mrstreamer/contracts/output";
 import { ownedId } from "@mrstreamer/contracts/subscription";
 import { call } from "../lib/ipc.ts";
@@ -69,9 +70,19 @@ export async function showReceiverPlayback(
       series.kind === "series"
         ? series.seasons
             .flatMap((season) => season.episodes)
-            .find((each) => each.season === ref.season && each.number === ref.episode)
+            .find(
+              (each) =>
+                each.season === ref.season &&
+                each.number === ref.episode &&
+                (!series.exactVersions ||
+                  each.id === ref.id ||
+                  each.versions?.some((version) => version.id === ref.id)),
+            )
         : undefined;
-    now = series.kind === "series" && episode ? episodeNow(series, episode) : null;
+    now =
+      series.kind === "series" && episode
+        ? episodeNow(series, episodeFileVersion(episode, ref.id))
+        : null;
   }
   const media = latest();
   if (!now || !media) return;

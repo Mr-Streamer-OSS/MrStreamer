@@ -195,7 +195,15 @@ export function goesOn(
     number,
     episodes: episodes.map((episode) => ({ season: number, number: episode })),
   }));
-  const found = continuation({ seasons }, played, marks);
+  const files = listing.some((season) => season.files !== undefined)
+    ? new Set(listing.flatMap((season) => season.files ?? []))
+    : null;
+  // Exact playlist files also identify a source-ordered listing, including specials in place.
+  const found = continuation(
+    { seasons, ...(files ? { episodeOrder: "source" as const } : {}) },
+    files ? played.filter((entry) => files.has(entry.title.id)) : played,
+    marks,
+  );
   if (!found || found.replay) return null;
   const { episode, resume } = found;
   return {

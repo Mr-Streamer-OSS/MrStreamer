@@ -1,6 +1,6 @@
 # Subscriptions
 
-Mr. Streamer plays the subscriptions you add: Xtream Codes access, with a server address, username and password, or an M3U playlist link for live TV. You can add several, and everything from all of them shows together. There is no subscription to switch to: Home, Live TV, Movies, Series and search always show every one.
+Mr. Streamer plays the subscriptions you add: Xtream Codes access, with a server address, username and password, or an M3U playlist link. Playlists start with live TV; from 0.0.9, explicit group mapping also imports movies and series. You can add several, and everything from all of them shows together. There is no subscription to switch to: Home, Live TV, Movies, Series and search always show every one.
 
 ## Adding one
 
@@ -11,6 +11,20 @@ The first one is added on the Connect screen. Every next one in Settings (⌘, o
 - **Add** checks the login with the provider first. Nothing is saved when the provider rejects it.
 
 Its channels join the lists first, then its guide, movies and series. What you're watching plays on meanwhile. The same account can't be added twice: adding it again updates the one you have.
+
+## Mapping mixed playlists
+
+From version 0.0.9, open a playlist subscription in Settings and choose **Map** beside **Groups**. Choose each group's use: **Live TV**, **Movies**, **Series** or **Skip**. Picks apply immediately. A playlist without mapping keeps its original live-only behaviour.
+
+Explicit mapping accepts up to 100,000 entries, 64 MiB of unpacked text and 10,000 groups. A larger playlist still loads and plays as unmapped Live TV. Expanding its Settings row, opening its mapping or making its first pick explains the mapping limit and saves no choice. Once a playlist is mapped, a refresh over a limit fails and keeps its previous lists.
+
+Movies and series need supported finite files. HLS movie and episode addresses with a path ending in `.m3u` or `.m3u8`, or `m3u8` in the query, are left out with a reason; HLS remains supported for Live TV.
+
+Once you map a group, new groups wait for your choice. An entry in groups with different choices stays out. **Left out** shows every omitted entry's name, groups and reason, in pages. Stream addresses are never shown there.
+
+Series entries need one clear episode token, such as `S01E02` or `1x02`, with a series name before it. Season zero is supported. Ranges, multiple episode numbers and uncertain names stay out with an explanation. Episodes follow the playlist's order, even across seasons. When it lists several files for one episode, the episode menu lets you pick the exact file.
+
+Movie and episode progress belongs to the exact source file, including its entry's attributes and stream headers. Reordering keeps that progress; replacing a file, rotating its source address or changing an attribute such as its logo address creates a new version which starts from the beginning. After a restart, the app needs to read the playlist to recover playable addresses. A failed refresh keeps the previous lists; a successful empty import clears them.
 
 ## Everything together
 

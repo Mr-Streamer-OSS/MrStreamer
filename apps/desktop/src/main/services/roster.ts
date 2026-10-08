@@ -5,12 +5,16 @@
 // plays on, and the others' lists stay as they are.
 import { Guide } from "@mrstreamer/core/guide/service";
 import type { LoginInput } from "@mrstreamer/contracts/ipc";
+import type { CatalogueStatus } from "@mrstreamer/contracts/library";
+import type { OnDemandStatus } from "@mrstreamer/contracts/ondemand";
+import { Failed, failedWith } from "@mrstreamer/core/failure";
+import type { PlaylistMode } from "@mrstreamer/contracts/playlist";
 import type { SubscriptionSummary } from "@mrstreamer/contracts/subscription";
-import type { Failed } from "@mrstreamer/core/failure";
 import { ViewingRecord } from "@mrstreamer/core/viewing/service";
 import * as Context from "effect/Context";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Result from "effect/Result";
 import * as Layer from "effect/Layer";
 import { Library } from "./library.ts";
 import { OnDemand } from "./ondemand.ts";
@@ -40,6 +44,14 @@ export class Roster extends Context.Service<
     update(
       subscriptionId: string,
       change: { readonly name?: string | null | undefined; readonly secret?: string | undefined },
+    ): Effect.Effect<SubscriptionSummary, Failed>;
+    refreshPlaylist(
+      subscriptionId: string,
+    ): Effect.Effect<{ catalogue: CatalogueStatus; titles: OnDemandStatus }, Failed>;
+    mapPlaylist(
+      subscriptionId: string,
+      group: string,
+      mode: PlaylistMode,
     ): Effect.Effect<SubscriptionSummary, Failed>;
     /**
      * Removes a subscription with what was loaded from it. What plays from it stops first, here
@@ -87,6 +99,32 @@ function make() {
         }
       });
 
+    const refreshPlaylist = (subscriptionId: string) =>
+      Effect.gen(function* () {
+        const source = yield* subscriptions.sourceOf(subscriptionId);
+        const importer = source.provider.playlistImport;
+        if (source.kind !== "m3u" || !importer)
+          return yield* new Failed({
+            error: { kind: "unexpected", detail: "This subscription is not a playlist." },
+          });
+        const read = yield* Effect.cached(
+          Effect.tryPromise({ try: (signal) => importer(signal, true), catch: failedWith }),
+        );
+        const playlist = { source, read };
+        const result = yield* Effect.all(
+          {
+            catalogue: library.refresh(subscriptionId, playlist),
+            titles: onDemand.refresh(subscriptionId, playlist),
+          },
+          { concurrency: "unbounded", mode: "result" },
+        );
+        // Both owners record the shared failure before it returns. A busy semaphore still receives
+        // the same parsed snapshot when its turn comes.
+        if (Result.isFailure(result.catalogue)) return yield* result.catalogue.failure;
+        if (Result.isFailure(result.titles)) return yield* result.titles.failure;
+        return { catalogue: result.catalogue.success, titles: result.titles.success };
+      });
+
     /**
      * Fetches the lists of a subscription saved or stored anew just now, in the background: all
      * of them, however lately they were loaded, since none was fetched under this login.
@@ -96,11 +134,16 @@ function make() {
         Effect.gen(function* () {
           const source = (yield* subscriptions.sources).find((each) => each.id === subscriptionId);
           if (!source) return;
-          yield* library.refresh(source.id).pipe(warned("[roster] channel refresh failed"));
-          yield* guide.refresh(source.id).pipe(warned("[guide] refresh failed"));
-          yield* onDemand
-            .refresh(source.id)
-            .pipe(warned("[roster] movie and series refresh failed"));
+          if (source.kind === "m3u") {
+            yield* refreshPlaylist(source.id).pipe(warned("[roster] playlist refresh failed"));
+            yield* guide.refresh(source.id).pipe(warned("[guide] refresh failed"));
+          } else {
+            yield* library.refresh(source.id).pipe(warned("[roster] channel refresh failed"));
+            yield* guide.refresh(source.id).pipe(warned("[guide] refresh failed"));
+            yield* onDemand
+              .refresh(source.id)
+              .pipe(warned("[roster] movie and series refresh failed"));
+          }
         }),
         scope,
       );
@@ -114,6 +157,13 @@ function make() {
       ) =>
         Effect.tap(subscriptions.update(subscriptionId, change), () =>
           change.secret === undefined ? Effect.void : load(subscriptionId),
+        ),
+
+      refreshPlaylist,
+
+      mapPlaylist: (subscriptionId: string, group: string, mode: PlaylistMode) =>
+        Effect.tap(subscriptions.mapPlaylist(subscriptionId, group, mode), () =>
+          load(subscriptionId),
         ),
 
       remove: (subscriptionId: string, eraseViewing: boolean) =>
@@ -150,12 +200,18 @@ function make() {
             Effect.gen(function* () {
               yield* Effect.gen(function* () {
                 yield* subscriptions.recheck(source.id);
-                if (yield* library.isStale(source.id, LISTS_MAX_AGE)) {
+                if (source.kind === "m3u") {
+                  if (
+                    (yield* library.isStale(source.id, LISTS_MAX_AGE)) ||
+                    (yield* onDemand.isStale(source.id, LISTS_MAX_AGE))
+                  )
+                    yield* refreshPlaylist(source.id);
+                } else if (yield* library.isStale(source.id, LISTS_MAX_AGE)) {
                   yield* library.refresh(source.id);
                 }
               }).pipe(warned("[startup] background refresh failed"));
               yield* guideOf(source);
-              yield* titlesOf(source);
+              if (source.kind !== "m3u") yield* titlesOf(source);
             }),
           { concurrency: SUBSCRIPTIONS_AT_ONCE, discard: true },
         ),

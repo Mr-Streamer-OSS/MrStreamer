@@ -4,7 +4,7 @@
 // for TMDB: what it says joins them once it arrives, and `detailsChanged` says so.
 // A title, version or episode a call names says which subscription lists it, and one of a
 // subscription that isn't saved finds nothing. The lists are those of every saved subscription
-// that has movies and series, shown as one catalogue: a playlist has live TV only and adds none.
+// that has movies and series, shown as one catalogue: an unmapped playlist adds none.
 // Each subscription's lists are fetched, kept and reported on their own, so one that can't be
 // reached keeps what it loaded and holds no other back.
 import { join } from "node:path";
@@ -28,7 +28,7 @@ import type {
   TitleMatches,
   TitleRef,
 } from "@mrstreamer/contracts/ondemand";
-import type { OwnedId } from "@mrstreamer/contracts/subscription";
+import { hasTitles, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type { WatchlistPage } from "@mrstreamer/contracts/watchlist";
 import { diagnosed } from "@mrstreamer/core/diagnostics";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
@@ -63,7 +63,13 @@ import type {
   WorkerStatus,
 } from "../ondemand/protocol.ts";
 import { Settings } from "./preferences.ts";
-import { Subscriptions, type SavedSubscription, type Source } from "./subscription.ts";
+import {
+  Subscriptions,
+  sameSource,
+  type SavedSubscription,
+  type Source,
+  type PlaylistRefresh,
+} from "./subscription.ts";
 
 /** How many titles' details stay in memory. Opening one again then asks no one. */
 const DETAILS_KEPT = 200;
@@ -112,6 +118,7 @@ export interface CollectionQuery {
 export interface TitleFile {
   readonly url: string;
   readonly container: string;
+  readonly headers?: Readonly<Record<string, string>>;
   /** The login the address was made under: `SavedSubscription.revision`. */
   readonly revision: number;
 }
@@ -123,12 +130,16 @@ export class OnDemand extends Context.Service<
     /**
      * Fetches a subscription's two lists. Concurrent calls for one subscription share a fetch,
      * and a few subscriptions fetch at a time. Lists that arrive after the subscription's login
-     * changed are dropped: it fails, and those from before stay.
+     * changed are dropped: it fails, and those from before stay. A supplied playlist snapshot
+     * waits for an earlier refresh to finish, so its lists are accepted separately.
      */
-    refresh(subscriptionId: string): Effect.Effect<OnDemandStatus, Failed>;
+    refresh(
+      subscriptionId: string,
+      playlist?: PlaylistRefresh,
+    ): Effect.Effect<OnDemandStatus, Failed>;
     /**
      * Whether a subscription's lists should be fetched again: missing, or older than `maxAge`.
-     * Never for one without movies and series, as a playlist is.
+     * Never for an unmapped playlist, which has Live TV only.
      */
     isStale(subscriptionId: string, maxAge: Duration.Input): Effect.Effect<boolean>;
     search(
@@ -262,6 +273,15 @@ function make(deps: OnDemandDeps) {
     );
     /** Why each subscription's latest refresh failed, by its id, until one succeeds. */
     const failures = new Map<string, { readonly error: AppError; readonly at: number }>();
+    /** Owns a refresh through acceptance, including the wait for a title-fetch slot. */
+    const refreshing = new Map<
+      string,
+      {
+        readonly source: Source;
+        readonly token: object;
+        readonly fiber: Fiber.Fiber<void, Failed>;
+      }
+    >();
     /** Counts restarts of the worker. */
     let generation = 0;
     /**
@@ -296,16 +316,15 @@ function make(deps: OnDemandDeps) {
       });
 
     /** Whose lists a call to the worker is about. */
-    const ownerOf = ({ id, key, dir }: SavedSubscription): CatalogueOwner => ({
+    const ownerOf = ({ id, key, dir, importRevision }: SavedSubscription): CatalogueOwner => ({
       subscriptionId: id,
       key,
       dir,
+      ...(importRevision ? { importRevision } : {}),
     });
 
-    /** The saved subscriptions with movies and series, in their order: every one but a playlist. */
-    const listed = Effect.map(subscriptions.saved, (saved) =>
-      saved.filter((each) => each.kind === "xtream"),
-    );
+    /** The saved subscriptions with movies and series, in their order: Xtream and explicitly mapped playlists. */
+    const listed = Effect.map(subscriptions.saved, (saved) => saved.filter(hasTitles));
 
     /**
      * Each of those with what the worker holds of its lists, telling the worker whether the
@@ -342,7 +361,7 @@ function make(deps: OnDemandDeps) {
     const publishStatus = Effect.flatMap(status, (current) => PubSub.publish(updates, current));
 
     /** Fetches `source`'s lists, and tells the UI how it ended. */
-    const refreshOf = (source: Source) =>
+    const fetchAndStore = (source: Source, playlist?: PlaylistRefresh) =>
       Effect.gen(function* () {
         // A refresh cut short by restarting the worker, as for a new key, isn't a failure to show.
         const started = generation;
@@ -355,7 +374,15 @@ function make(deps: OnDemandDeps) {
         const stands = subscriptions.stands(source);
         // The worker fetches the lists and sets them aside; it keeps them only once told to.
         const fetched = Effect.gen(function* () {
-          yield* call("refresh", { ...owner, account });
+          const catalogue = playlist
+            ? (yield* playlist.read).catalogue
+            : source.kind === "m3u"
+              ? yield* Effect.tryPromise({
+                  try: (signal) => source.provider.onDemandCatalogue(signal),
+                  catch: failedWith,
+                })
+              : undefined;
+          yield* call("refresh", { ...owner, account, ...(catalogue ? { catalogue } : {}) });
           const keep = yield* stands;
           yield* call("finishRefresh", { ...owner, keep });
           if (!keep) return yield* switched;
@@ -378,6 +405,34 @@ function make(deps: OnDemandDeps) {
             }),
           ),
         );
+      });
+
+    /** Queries join the active refresh; a distinct supplied snapshot waits for its own acceptance. */
+    const refreshOf = (source: Source, playlist?: PlaylistRefresh): Effect.Effect<void, Failed> =>
+      Effect.gen(function* () {
+        const under = refreshing.get(source.id);
+        if (playlist && under && sameSource(source, under.source)) {
+          yield* Fiber.await(under.fiber);
+          if (!(yield* subscriptions.stands(source))) return yield* switched;
+          return yield* refreshOf(source, playlist);
+        }
+        let running = under && sameSource(source, under.source) ? under : null;
+        if (!running) {
+          const token = {};
+          const fiber = yield* Effect.forkIn(
+            fetchAndStore(source, playlist).pipe(
+              Effect.ensuring(
+                Effect.sync(() => {
+                  if (refreshing.get(source.id)?.token === token) refreshing.delete(source.id);
+                }),
+              ),
+            ),
+            scope,
+          );
+          running = { source, token, fiber };
+          refreshing.set(source.id, running);
+        }
+        return yield* Fiber.join(running.fiber);
       });
 
     /**
@@ -444,12 +499,12 @@ function make(deps: OnDemandDeps) {
       Effect.gen(function* () {
         const source = yield* subscriptions.sourceOf(subscriptionId);
         const viewer = yield* language;
-        const cacheKey = `${source.id}|${viewer}|${kind}|${id}`;
+        const cacheKey = `${source.id}|${source.revision}|${viewer}|${kind}|${id}`;
         const [listed] = yield* loaded((owners, language) =>
           call("byIds", { owners, language, kind, versions: [{ subscriptionId, id }] }),
         );
         const kept = details.get(cacheKey);
-        const title = listed ?? kept?.title;
+        const title = listed ?? (source.kind === "m3u" ? undefined : kept?.title);
         if (!title) return yield* new Failed({ error: { kind: "title-not-found", titleId: id } });
         yield* askAbout(source, cacheKey, { subscriptionId, kind, id }, title);
         const downloaded = kept
@@ -457,7 +512,8 @@ function make(deps: OnDemandDeps) {
           : yield* download(source, kind, id, title);
         details.delete(cacheKey);
         // Kept again only for the subscription it was asked for, with the login it had.
-        if (yield* subscriptions.stands(source)) keep(details, cacheKey, downloaded, DETAILS_KEPT);
+        if (!(yield* subscriptions.stands(source))) return yield* switched;
+        keep(details, cacheKey, downloaded, DETAILS_KEPT);
         if (asking.has(cacheKey)) late.add(cacheKey);
         const about = abouts.get(cacheKey) ?? null;
         const { raw } = downloaded;
@@ -593,11 +649,11 @@ function make(deps: OnDemandDeps) {
     return {
       status,
 
-      refresh: (subscriptionId: string) =>
+      refresh: (subscriptionId: string, playlist?: PlaylistRefresh) =>
         Effect.gen(function* () {
-          const source = yield* subscriptions.sourceOf(subscriptionId);
-          // A playlist has live TV only: nothing is asked of it.
-          if (source.kind === "xtream") yield* refreshOf(source);
+          const source = playlist?.source ?? (yield* subscriptions.sourceOf(subscriptionId));
+          // Unmapped playlists retain Live-only behavior.
+          if (hasTitles(source)) yield* refreshOf(source, playlist);
           return yield* status;
         }),
 
@@ -608,7 +664,11 @@ function make(deps: OnDemandDeps) {
           if (!worked) return false;
           const { fetchedAt } = worked.worked;
           const now = yield* Clock.currentTimeMillis;
-          return fetchedAt === null || now - fetchedAt > Duration.toMillis(maxAge);
+          return (
+            fetchedAt === null ||
+            worked.worked.importRevision !== worked.subscription.importRevision ||
+            now - fetchedAt > Duration.toMillis(maxAge)
+          );
         }),
 
       rows: (kind: TitleKind, tab: RowTab, like?: OwnedId) =>
@@ -716,11 +776,12 @@ function make(deps: OnDemandDeps) {
           if (title.kind === "movie") {
             const container = yield* call("container", { ...ownerOf(source), id: title.id });
             if (!container) return yield* missing;
-            return {
-              url: source.provider.titleFile("movie", title.id, container),
-              container,
-              revision: source.revision,
-            };
+            const file = yield* Effect.tryPromise({
+              try: (signal) => source.provider.titleFile("movie", title.id, container, signal),
+              catch: failedWith,
+            });
+            if (!(yield* subscriptions.stands(source))) return yield* switched;
+            return { ...file, revision: source.revision };
           }
           const series = yield* detailsOf("series", {
             subscriptionId: title.subscriptionId,
@@ -728,11 +789,13 @@ function make(deps: OnDemandDeps) {
           });
           const episode = series.raw.episodes.find((each) => each.id === title.id);
           if (!episode) return yield* missing;
-          return {
-            url: source.provider.titleFile("episode", title.id, episode.container),
-            container: episode.container,
-            revision: source.revision,
-          };
+          const file = yield* Effect.tryPromise({
+            try: (signal) =>
+              source.provider.titleFile("episode", title.id, episode.container, signal),
+            catch: failedWith,
+          });
+          if (!(yield* subscriptions.stands(source))) return yield* switched;
+          return { ...file, revision: source.revision };
         }),
 
       forget: (subscription: SavedSubscription) =>
@@ -745,8 +808,8 @@ function make(deps: OnDemandDeps) {
             for (const key of kept.keys()) if (key.startsWith(`${id}|`)) kept.delete(key);
           }
           for (const key of late) if (key.startsWith(`${id}|`)) late.delete(key);
-          // A playlist has no lists to forget.
-          if (subscription.kind !== "xtream") return;
+          // Mapped playlists keep title lists too.
+
           yield* call("forget", ownerOf(subscription)).pipe(Effect.ignore);
           yield* publishStatus;
         }),
