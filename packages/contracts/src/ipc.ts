@@ -496,15 +496,20 @@ export interface IpcOutputs {
   "ondemand.collection": CollectionPage;
   /** Opens a stream for a channel and closes any stream that was open before. */
   "playback.open": StreamSession;
-  /** Opens a movie or episode, and closes any stream that was open before. */
+  /** Online subtitle preferences and which services have saved accounts, never the secrets. */
   "subtitles.settings": OnlineSubtitleSettings;
   "subtitles.configure": OnlineSubtitleSettings;
+  /** Asks the enabled services for the title a local session plays. Downloads nothing. */
   "subtitles.search": OnlineSubtitleSearch;
+  /** Downloads a search result, or reuses its cached copy, and saves it for that exact file. */
   "subtitles.choose": OnlineSubtitleChoice;
+  /** What is saved for the session's exact file, read from this computer only. */
   "subtitles.saved": SavedSubtitle | null;
   "subtitles.timing": SavedSubtitle;
   "subtitles.forget": null;
+  /** Aborts the session's pending search and download. */
   "subtitles.cancel": null;
+  /** Opens a movie or episode, and closes any stream that was open before. */
   "playback.openTitle": TitleSession;
   "playback.close": null;
   /** Closes every stream, including a title still reading its file before its session is known. */
