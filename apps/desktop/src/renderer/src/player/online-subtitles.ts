@@ -6,7 +6,7 @@ import type {
   SubtitleQuota,
 } from "@mrstreamer/contracts/online-subtitles";
 import { call } from "../lib/ipc.ts";
-import { titlePlayer } from "./title-player.ts";
+import { onSubtitleChoice, titlePlayer } from "./title-player.ts";
 
 interface SearchState {
   readonly sessionId: string | null;
@@ -103,3 +103,5 @@ export const onlineSubtitles = {
     if (next) void onlineSubtitles.choose(next.id);
   },
 };
+
+onSubtitleChoice(() => onlineSubtitles.cancelPending());

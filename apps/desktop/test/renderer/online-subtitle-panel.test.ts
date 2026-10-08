@@ -5,6 +5,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SavedSubtitle } from "@mrstreamer/contracts/online-subtitles";
+import type { SubtitleTrack } from "@mrstreamer/contracts/playback";
 import { SubtitlePanel } from "../../src/renderer/src/features/titles/SubtitlePanel.tsx";
 import { PlaybackChoices } from "../../src/renderer/src/features/watch/PlaybackMenu.tsx";
 import { onlineSubtitles } from "../../src/renderer/src/player/online-subtitles.ts";
@@ -38,6 +39,15 @@ const results = [
     downloads: null,
   },
 ];
+const english: SubtitleTrack = {
+  id: 3,
+  page: null,
+  format: "text",
+  language: "en",
+  label: "English",
+  forced: false,
+  default: false,
+};
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
@@ -48,7 +58,7 @@ function button(text: string) {
   if (!found) throw new Error(`Missing button: ${text}`);
   return found;
 }
-async function opened() {
+async function opened(tracks: readonly SubtitleTrack[] = []) {
   ipc.reset();
   onlineSubtitles.bind(null);
   vi.stubGlobal("fetch", async () => new Response(new ReadableStream()));
@@ -71,7 +81,7 @@ async function opened() {
     url: "http://127.0.0.1/title/movie.mp4",
     duration: 600,
     audio: [],
-    subtitles: [],
+    subtitles: tracks,
   });
   void titlePlayer.open(
     {
@@ -182,5 +192,58 @@ describe("subtitle choices while the picture plays", () => {
         each.textContent?.includes(" fps"),
       ),
     ).toHaveLength(6);
+  });
+
+  it.each(
+    (["Off", "file track", "C off", "C without a track", "saved result"] as const).flatMap(
+      (choice) => (["success", "failure"] as const).map((reply) => ({ choice, reply })),
+    ),
+  )("keeps $choice when a pending download returns $reply", async ({ choice, reply }) => {
+    await opened(choice === "C without a track" ? [] : [english]);
+    if (choice === "C off" || choice === "saved result")
+      titlePlayer.acceptDownloaded("movie", saved);
+    await render(createElement(SubtitlePanel, { open: true, onClose: () => {} }));
+    await act(async () => {
+      button("Search subtitles").click();
+      await settle();
+    });
+    const held = ipc.hold("subtitles.choose");
+    await act(async () => {
+      button("Night.Harbour.TV").click();
+      await vi.waitFor(() => expect(ipc.argsOf("subtitles.choose")).toHaveLength(1));
+    });
+    await act(async () => {
+      if (choice === "Off") button("Off").click();
+      else if (choice === "file track") button("English").click();
+      else if (choice === "saved result") button("Night.Harbour.Cinema").click();
+      else titlePlayer.toggleSubtitles();
+    });
+    await act(async () => {
+      if (reply === "success")
+        held.resolve({
+          saved: { ...saved, subtitle: { ...saved.subtitle!, release: "Late release" } },
+          quota: { service: "opensubtitles", remaining: 3, resetAt: null },
+        });
+      else held.reject({ kind: "unexpected", detail: "The download was cancelled." });
+      await settle();
+    });
+    expect(titlePlayer.state().downloadedOn).toBe(choice === "saved result");
+    expect(titlePlayer.state().subtitle).toEqual(choice === "file track" ? english : null);
+    expect(titlePlayer.state().savedSubtitle).toEqual(
+      choice === "C off" || choice === "saved result" ? saved : null,
+    );
+    expect(container?.querySelector('[role="alert"]')).toBeNull();
+    expect(ipc.argsOf("subtitles.cancel")).toEqual([{ sessionId: "movie" }]);
+    expect(container?.textContent).not.toContain("Downloading");
+    expect(container?.textContent).not.toContain("Late release");
+    expect(container?.textContent).not.toContain("3 service downloads remain");
+    expect(ipc.argsOf("preferences.update")).toEqual(
+      choice === "Off" || choice === "C off"
+        ? [{ subtitleLanguage: "off" }]
+        : choice === "file track"
+          ? [{ subtitleLanguage: "en" }]
+          : [],
+    );
+    expect(ipc.argsOf("output.command")).toEqual([]);
   });
 });

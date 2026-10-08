@@ -224,6 +224,12 @@ export function useTitlePlayer<T>(selector: (state: TitlePlayerState) => T): T {
   return useStore(store, selector);
 }
 
+let subtitleChoices: (() => void) | null = null;
+/** Local choices synchronously cancel any online subtitle request they supersede. */
+export function onSubtitleChoice(listener: () => void): void {
+  subtitleChoices = listener;
+}
+
 const video = player.element;
 /** The open session: its id and the address runs play from. */
 let session: { readonly id: string; readonly url: string } | null = null;
@@ -1233,6 +1239,7 @@ export const titlePlayer = {
       return;
     }
     if ((track && !SHOWN_SUBTITLES.has(track.format)) || !session) return;
+    subtitleChoices?.();
     store.setState({ subtitle: track, downloadedOn: false });
     if (downloadedOn) setSubtitleDelay(video, 0);
     if (track) lastSubtitle = track;
@@ -1250,6 +1257,7 @@ export const titlePlayer = {
 
   /** C: subtitles off, or back on: the ones chosen last in this title, else the first. */
   toggleSubtitles(): void {
+    if (!receiver && session) subtitleChoices?.();
     const { subtitle, subtitles, shows, downloadedOn, savedSubtitle } = store.getState();
     if (downloadedOn) return titlePlayer.setSubtitle(null);
     if (!receiver && lastWasDownloaded && savedSubtitle?.subtitle && !subtitle)
@@ -1303,6 +1311,7 @@ export const titlePlayer = {
 
   showDownloaded(): void {
     if (!session || receiver || !store.getState().savedSubtitle?.subtitle) return;
+    subtitleChoices?.();
     subtitleChoice++;
     lastWasDownloaded = true;
     store.setState({ downloadedOn: true, subtitle: null, subtitleStatus: null });
