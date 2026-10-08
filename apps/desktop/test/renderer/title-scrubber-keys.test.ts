@@ -2,11 +2,13 @@
 // A press on the Position scrubber leaves the keys with the player: Space still pauses and Escape
 // still leaves, whether the pointer let go before or after the frame in which the thumb is
 // focused, and whether or not the press moved the title. It takes focus from nothing else, and a
-// thumb the keyboard reached keeps its focus and its arrow keys.
+// thumb the keyboard reached keeps its focus and its arrow keys. A finger is the same, tapping or
+// dragging.
 //
 // happy-dom lays nothing out and its events are untrusted, so the test says where the scrubber
-// is and sends the pointer events to the control that would capture them. Focus by Tab is
-// `focus()` here. Trusted input is the native check's.
+// is and sends the pointer events to the control that would capture them. A finger's events are
+// sent in the order a browser sends them: each pointer event, then its touch event. Focus by Tab
+// is `focus()` here. Trusted input, and a real touchscreen, are the native check's.
 import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
@@ -120,14 +122,31 @@ function control(): HTMLElement {
   return element;
 }
 
-const pointer = (type: "pointerdown" | "pointerup", second: number) =>
+const pointer = (
+  type: "pointerdown" | "pointermove" | "pointerup",
+  second: number,
+  pointerType: "mouse" | "touch" = "mouse",
+) =>
   control().dispatchEvent(
     new PointerEvent(type, {
       bubbles: true,
       button: 0,
+      buttons: type === "pointerup" ? 0 : 1,
       pointerId: 1,
+      pointerType,
       clientX: second,
       clientY: 12,
+    }),
+  );
+
+/** The touch event a finger at `second` sends after its pointer event, to where it came down. */
+const touch = (type: "touchstart" | "touchmove" | "touchend", second: number) =>
+  control().dispatchEvent(
+    new TouchEvent(type, {
+      bubbles: true,
+      changedTouches: [
+        new Touch({ identifier: 0, target: control(), clientX: second, clientY: 12 }),
+      ],
     }),
   );
 
@@ -177,6 +196,45 @@ describe("the title player's keys after a press on the scrubber", () => {
     await act(async () => void pointer("pointerdown", 0));
     await settle();
     await act(async () => void pointer("pointerup", 0));
+
+    await key(" ");
+    expect(button("Play")).not.toBeNull();
+  });
+});
+
+describe("the title player's keys after a finger on the scrubber", () => {
+  it("pause after a tap let go before the next frame", async () => {
+    await watching();
+    await act(async () => {
+      pointer("pointerdown", 240, "touch");
+      touch("touchstart", 240);
+      pointer("pointerup", 240, "touch");
+      touch("touchend", 240);
+    });
+    await settle();
+    await started();
+    expect(thumb()!.value).toBe("240");
+
+    await key(" ");
+    expect(button("Play")).not.toBeNull();
+  });
+
+  it("pause after a drag, which moved the title to where the finger left", async () => {
+    await watching();
+    await act(async () => {
+      pointer("pointerdown", 100, "touch");
+      touch("touchstart", 100);
+    });
+    await settle();
+    await act(async () => {
+      pointer("pointermove", 240, "touch");
+      touch("touchmove", 240);
+      pointer("pointerup", 240, "touch");
+      touch("touchend", 240);
+    });
+    await settle();
+    await started();
+    expect(thumb()!.value).toBe("240");
 
     await key(" ");
     expect(button("Play")).not.toBeNull();

@@ -15,6 +15,11 @@ function blurThumb(control: HTMLElement): void {
  * first, as that focus arrives. Focus the keyboard gave the thumb stays, and so does focus that
  * went elsewhere during the press.
  *
+ * A finger sends a touch event after each pointer event, and Base UI answers both: the touch one
+ * moves the slider and focuses the thumb at once, the pointer one would focus it again a frame
+ * later, unseen here when the thumb has focus by then. So a finger's press is left to Base UI's
+ * touch handling alone, and its focus is there when the finger lifts.
+ *
  * The press is this control's own: it is forgotten when the control goes, as is the focus Base UI
  * still owed it.
  */
@@ -36,6 +41,7 @@ export function SliderControl({ className, children }: { className: string; chil
         if (event.button !== 0 || event.defaultPrevented) return;
         // A thumb that has focus already is sent none.
         press.current = event.currentTarget.contains(document.activeElement) ? "focused" : "down";
+        if (event.pointerType === "touch") event.preventBaseUIHandler();
       }}
       onPointerUp={release}
       onPointerCancel={release}
