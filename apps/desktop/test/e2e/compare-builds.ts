@@ -14,8 +14,12 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { compareMeasurements, positiveCount } from "../../scripts/measurement.ts";
-import { connect, delay, launch, observe } from "./app.ts";
+import {
+  compareMeasurements,
+  positiveCount,
+  validateMeasurement,
+} from "../../scripts/measurement.ts";
+import { connect, delay, launch, observeAcrossLoad } from "./app.ts";
 
 const { values: options, positionals } = parseArgs({
   options: {
@@ -44,13 +48,15 @@ mkdirSync(folder, { recursive: true });
 const started = performance.now();
 const runs: { baseline: unknown[]; candidate: unknown[] } = { baseline: [], candidate: [] };
 const rawFiles: string[] = [];
+const warmups: { executable: string; elapsedMs: number; navigationObserved: boolean }[] = [];
 try {
   if (offline) {
     runs.baseline.push(JSON.parse(readFileSync(options["baseline-json"]!, "utf8")));
     runs.candidate.push(JSON.parse(readFileSync(options["candidate-json"]!, "utf8")));
     rawFiles.push(resolve(options["baseline-json"]!), resolve(options["candidate-json"]!));
   } else {
-    for (const executable of [baseline!, candidate!]) await warmUp(executable);
+    for (const executable of [baseline!, candidate!])
+      warmups.push({ executable, ...(await warmUp(executable)) });
     for (let round = 0; round < rounds; round++) {
       const order =
         round % 2 === 0
@@ -93,6 +99,16 @@ try {
         rounds: runs.baseline.length,
         elapsedMs: performance.now() - started,
         rawFiles,
+        warmups,
+        environments: {
+          baseline: runs.baseline.map((run) => validateMeasurement(run).environment),
+          candidate: runs.candidate.map((run) => validateMeasurement(run).environment),
+        },
+        sameBuildHash: [...runs.baseline, ...runs.candidate].every(
+          (run) =>
+            validateMeasurement(run).environment.buildSha256 ===
+            validateMeasurement(runs.baseline[0]).environment.buildSha256,
+        ),
         comparison,
       },
       null,
@@ -127,6 +143,7 @@ try {
         status: "invalid-instrumentation",
         elapsedMs: performance.now() - started,
         rawFiles,
+        warmups,
         error: String(error),
       },
       null,
@@ -138,14 +155,19 @@ try {
   console.log(`Retained comparison: ${folder}`);
 }
 
-async function warmUp(executable: string): Promise<void> {
+async function warmUp(executable: string) {
   const profile = mkdtempSync(join(tmpdir(), "mr-streamer-warm-"));
   const port = 20000 + Math.floor(Math.random() * 20000);
+  const started = performance.now();
   const app = launch(executable, appArgs, { port, profile });
   try {
     const page = await connect(port);
     try {
-      await observe(page, `!!document.querySelector('form button[type="submit"]')`);
+      return await observeAcrossLoad(
+        page,
+        `!!document.querySelector('form button[type="submit"]')`,
+        started,
+      );
     } finally {
       page.close();
     }

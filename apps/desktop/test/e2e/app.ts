@@ -281,6 +281,29 @@ export function observe(
   );
 }
 
+/** Observe initial loading only, with one rearm for either exact initial-navigation CDP error.
+ * There is deliberately no action argument: user actions must never run twice. */
+export async function observeAcrossLoad(page: Page, condition: string, started: number) {
+  let navigationObserved = false;
+  for (;;) {
+    try {
+      await observe(page, condition);
+      return { elapsedMs: performance.now() - started, navigationObserved };
+    } catch (error) {
+      if (
+        navigationObserved ||
+        !(error instanceof Error) ||
+        ![
+          '{"code":-32000,"message":"Execution context was destroyed."}',
+          '{"code":-32000,"message":"Inspected target navigated or closed"}',
+        ].includes(error.message)
+      )
+        throw error;
+      navigationObserved = true;
+    }
+  }
+}
+
 /** Known short delays distinguish timer scheduling from observation error, on this renderer. */
 export async function calibrate(page: Page) {
   const samples: {

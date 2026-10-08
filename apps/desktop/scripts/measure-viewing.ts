@@ -3,8 +3,8 @@
 // after a change to the rules. Then how long a long list of favourites takes to put in another
 // order, and to rebuild afterwards. Uses a temporary database the size of years of heavy use.
 //
-//   node scripts/measure-viewing.ts [--events 100000]
-import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
+//   node scripts/measure-viewing.ts [--events 100000] [--subscriptions 1] [--json results.json]
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -20,7 +20,14 @@ import {
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
-import { environment, median, metric, positiveCount, saveMeasurement } from "./measurement.ts";
+import {
+  environment,
+  median,
+  metric,
+  positiveCount,
+  prepareMeasurementOutput,
+  saveMeasurement,
+} from "./measurement.ts";
 import { databaseLayer } from "../src/main/platform/database.ts";
 import { viewingStoreLayer } from "../src/main/platform/viewing-store.ts";
 
@@ -42,12 +49,15 @@ const { values } = parseArgs({
 });
 const events = positiveCount(values.events, "events", 1000000);
 const SUBSCRIPTIONS = positiveCount(values.subscriptions, "subscriptions", 4);
+const output =
+  values.json ?? join(process.cwd(), ".local/measurements", `viewing-${Date.now()}.json`);
+prepareMeasurementOutput(output);
 const subscriptions = Array.from({ length: SUBSCRIPTIONS }, (_, index) => `measure-${index}`);
 const runtimes: { dispose(): Promise<void> }[] = [];
 const dataDir = await mkdtemp(join(tmpdir(), "mr-streamer-viewing-"));
 const database = join(dataDir, "mrstreamer.db");
 
-/** Assign synthetic channel ids to independent subscriptions, including colliding local ids. */
+/** Spread events across subscriptions, allowing the same local channel id in several owners. */
 const own = (id: string, owner = Number(id.match(/\d+$/)?.[0] ?? 0)): OwnedId => ({
   subscriptionId: subscriptions[owner % SUBSCRIPTIONS]!,
   id,
@@ -203,9 +213,6 @@ try {
   console.log(`order of ${count} favourites, reversed: ${written(reversed)}`);
   console.log(`start with rebuild after the orders: ${rebuildOrdered.toFixed(1)} ms`);
   console.log(`rebuilt order matches: ${JSON.stringify(reordered) === JSON.stringify(ordered)}`);
-  const output =
-    values.json ?? join(process.cwd(), ".local/measurements", `viewing-${Date.now()}.json`);
-  await mkdir(join(process.cwd(), ".local/measurements"), { recursive: true });
   saveMeasurement(output, {
     schemaVersion: 1,
     tool: "viewing",
@@ -254,4 +261,12 @@ try {
 } finally {
   await Promise.all(runtimes.map((runtime) => runtime.dispose()));
   await rm(dataDir, { recursive: true, force: true });
+  await writeFile(
+    `${output}.cleanup.json`,
+    JSON.stringify(
+      { dataDir, runtimesDisposed: true, dataDirRemoved: !(await stat(dataDir).catch(() => null)) },
+      null,
+      2,
+    ),
+  );
 }

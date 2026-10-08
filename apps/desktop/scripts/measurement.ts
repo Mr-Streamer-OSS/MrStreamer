@@ -2,9 +2,19 @@
 // exceeded performance budgets remain warnings and never turn a sample into zero.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  accessSync,
+  closeSync,
+  constants,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { cpus, loadavg, platform, release } from "node:os";
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { type } from "arktype";
 
 const Metric = type({
@@ -31,6 +41,12 @@ const Result = type({
     node: "string",
     electron: "string",
     ffmpeg: "string",
+    "fixtureFfmpeg?": "string",
+    "playerFfmpeg?": "string",
+    "appVersion?": "string",
+    "buildHashScope?": "string",
+    "revisionScope?": "string",
+    "sourceStateScope?": "string",
     revision: "string",
     sourceDirty: "boolean",
     buildMode: "string",
@@ -72,6 +88,28 @@ export function environment(
     }
   };
   const main = options.appDirectory ? resolve(options.appDirectory, "out/main/index.js") : "";
+  const builtCheckout = !!main && existsSync(main);
+  const buildMode = builtCheckout
+    ? "built-checkout"
+    : options.executable
+      ? "packaged"
+      : "node-source";
+  const fixtureFfmpeg =
+    command(process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg", ["-version"]).split("\n")[0] ??
+    "unavailable";
+  const resources = options.executable
+    ? platform() === "darwin"
+      ? resolve(dirname(options.executable), "../Resources")
+      : join(dirname(options.executable), "resources")
+    : "";
+  const bundled = join(resources, "ffmpeg", platform() === "win32" ? "ffmpeg.exe" : "ffmpeg");
+  const playerFfmpeg = !options.executable
+    ? "not-used"
+    : process.env["MR_STREAMER_FFMPEG"] || builtCheckout
+      ? fixtureFfmpeg
+      : existsSync(bundled)
+        ? (command(bundled, ["-version"]).split("\n")[0] ?? "unavailable")
+        : "unavailable";
   return {
     recordedAt: new Date().toISOString(),
     platform: `${platform()} ${release()}`,
@@ -80,13 +118,35 @@ export function environment(
     loadAverage: loadavg(),
     node: process.version,
     electron: options.electron ?? "not-used",
-    ffmpeg:
-      command(process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg", ["-version"]).split("\n")[0] ??
-      "unavailable",
-    revision: options.revision ?? command("git", ["rev-parse", "HEAD"]),
+    // Compatibility alias: this has always measured the fixture encoder, not the player bundle.
+    ffmpeg: fixtureFfmpeg,
+    fixtureFfmpeg,
+    playerFfmpeg,
+    appVersion: builtCheckout
+      ? String(
+          (
+            JSON.parse(readFileSync(resolve(options.appDirectory!, "package.json"), "utf8")) as {
+              version: string;
+            }
+          ).version,
+        )
+      : "unavailable",
+    revision:
+      options.revision ??
+      (buildMode === "packaged" ? "unavailable" : command("git", ["rev-parse", "HEAD"])),
+    revisionScope: options.revision
+      ? "explicit measured build"
+      : buildMode === "packaged"
+        ? "unavailable"
+        : "measuring checkout HEAD; rebuild required",
     sourceDirty: command("git", ["status", "--porcelain"]) !== "",
-    buildMode:
-      main && existsSync(main) ? "built-checkout" : options.executable ? "packaged" : "node-source",
+    sourceStateScope: "measuring checkout, not packaged source",
+    buildMode,
+    buildHashScope: builtCheckout
+      ? "out/main/index.js only"
+      : options.executable
+        ? "executable only"
+        : "not-applicable",
     buildSha256:
       main && existsSync(main)
         ? createHash("sha256").update(readFileSync(main)).digest("hex")
@@ -144,9 +204,32 @@ export function validateMeasurement(input: unknown): Measurement {
     throw new Error("Instrumentation requires complete metric sets");
   for (const [name, unit] of Object.entries(expected))
     if (result.metrics[name]?.unit !== unit) throw new Error(`Incorrect metric unit: ${name}`);
+  const subscriptions = positiveCount(String(result.workload["subscriptions"]), "subscriptions", 4);
   if (result.tool === "app") {
     const runs = positiveCount(String(result.workload["runs"]), "runs", 20);
-    positiveCount(String(result.workload["subscriptions"]), "subscriptions", 4);
+    for (const name of ["time to picture", "channel switch"]) {
+      const pictures =
+        result.observations?.filter((observation) => observation["name"] === name) ?? [];
+      if (pictures.length !== runs)
+        throw new Error(`Incomplete moving picture observations: ${name}`);
+      for (const picture of pictures) {
+        const previous = picture["previousTime"],
+          current = picture["currentTime"],
+          width = picture["videoWidth"];
+        if (
+          typeof previous !== "number" ||
+          typeof current !== "number" ||
+          typeof width !== "number" ||
+          !Number.isFinite(previous) ||
+          !Number.isFinite(current) ||
+          !Number.isFinite(width) ||
+          previous < 0 ||
+          current <= previous ||
+          width <= 0
+        )
+          throw new Error(`Invalid moving picture observation: ${name}`);
+      }
+    }
     for (const [name, measure] of Object.entries(result.metrics)) {
       const count =
         name === "installed size (MB)" || name === "streams opened, Home to Watch (count)"
@@ -166,17 +249,95 @@ export function validateMeasurement(input: unknown): Measurement {
       )
         throw new Error("Invalid renderer calibration");
   }
+  if (result.tool === "guide" || result.tool === "viewing") {
+    const counts = result.tool === "guide" ? GUIDE_SAMPLE_COUNTS : VIEWING_SAMPLE_COUNTS;
+    for (const [name, measure] of Object.entries(result.metrics)) {
+      const expectedCount =
+        name === "download and index per subscription" ? subscriptions : counts[name];
+      if (measure.samples.length !== expectedCount) throw new Error(`Incomplete samples: ${name}`);
+    }
+  }
+  if (result.tool === "guide") {
+    const channels = positiveCount(
+      String(result.workload["guideChannels"]),
+      "guideChannels",
+      50000,
+    );
+    const programmes = positiveCount(
+      String(result.workload["programmesPerChannel"]),
+      "programmesPerChannel",
+      500000,
+    );
+    if (result.workload["source"] === "synthetic" && channels * programmes > 500000)
+      throw new Error("Generated guide exceeds 500000 total programmes per subscription");
+    positiveCount(
+      String(result.workload["documentBytes"]),
+      "documentBytes",
+      Number.MAX_SAFE_INTEGER,
+    );
+    if (
+      result.workload["screenChannels"] !== 60 ||
+      result.workload["channelsPerSubscription"] !== 13000
+    )
+      throw new Error("Invalid guide workload");
+    positiveCount(String(result.workload["mappedChannels"]), "mappedChannels", 300);
+    for (const [name, limit] of Object.entries(GUIDE_BUDGETS)) {
+      const budget = result.metrics[name]!.budget;
+      if (budget?.limit !== limit || budget.basis !== "max")
+        throw new Error(`Incorrect guide budget: ${name}`);
+    }
+    if (result.metrics["download and index"]!.budget)
+      throw new Error("Aggregate guide refresh has no per-subscription budget");
+  }
+  if (result.tool === "viewing") {
+    const events = positiveCount(String(result.workload["inputEvents"]), "inputEvents", 1000000);
+    const recorded = positiveCount(
+      String(result.workload["recordedEvents"]),
+      "recordedEvents",
+      events + 2000,
+    );
+    if (
+      recorded < 1000 ||
+      result.workload["samples"] !== 1000 ||
+      result.workload["moves"] !== 200 ||
+      result.workload["orderedFavourites"] !== 1000 ||
+      result.workload["channelsPerSubscription"] !== 13000 ||
+      result.workload["seed"] !== 9
+    )
+      throw new Error("Invalid viewing workload");
+  }
   const requiredChecks =
     result.tool === "app"
       ? ["completeMetrics", "movingPicture"]
       : result.tool === "guide"
-        ? ["searchReturnsProgrammes", "listSearchReturnsChannels", "mappingsAvailable"]
+        ? result.workload["source"] === "local-file"
+          ? ["localDocumentLoaded"]
+          : ["searchReturnsProgrammes", "listSearchReturnsChannels", "mappingsAvailable"]
         : ["rebuiltListsMatch", "rebuiltOrderMatches"];
   for (const check of requiredChecks)
     if (result.checks[check] !== true) throw new Error(`Invalid instrumentation: ${check}`);
   for (const values of [result.workload, result.conditions])
     if (Object.values(values).some((value) => typeof value === "number" && !Number.isFinite(value)))
       throw new Error("Non-finite measurement metadata");
+  if (
+    !Number.isInteger(result.environment.logicalCpus) ||
+    result.environment.logicalCpus < 1 ||
+    result.environment.loadAverage.length !== 3 ||
+    result.environment.loadAverage.some((value) => !Number.isFinite(value) || value < 0)
+  )
+    throw new Error("Invalid environment metadata");
+  if (
+    result.environment.fixtureFfmpeg !== undefined &&
+    result.environment.fixtureFfmpeg !== result.environment.ffmpeg
+  )
+    throw new Error("Fixture FFmpeg alias mismatch");
+  for (const observation of result.observations ?? [])
+    if (
+      Object.values(observation).some(
+        (value) => typeof value === "number" && !Number.isFinite(value),
+      )
+    )
+      throw new Error("Non-finite observation metadata");
   if (result.tool === "app" && !(Number(result.conditions["timingResolutionMs"]) > 0))
     throw new Error("Missing timing resolution");
   for (const [name, measure] of Object.entries(result.metrics)) {
@@ -198,6 +359,26 @@ export function validateMeasurement(input: unknown): Measurement {
   return result;
 }
 
+/** Prepare the requested destination before creating a fixture, profile or expensive workload. */
+export function prepareMeasurementOutput(path: string): void {
+  const directory = dirname(resolve(path));
+  try {
+    mkdirSync(directory, { recursive: true });
+    accessSync(directory, constants.W_OK);
+    if (existsSync(path)) {
+      accessSync(path, constants.W_OK);
+      const descriptor = openSync(path, "r+");
+      closeSync(descriptor);
+    } else {
+      const descriptor = openSync(path, "wx");
+      closeSync(descriptor);
+      unlinkSync(path);
+    }
+  } catch (error) {
+    throw new Error(`Measurement destination is not writable: ${path}`, { cause: error });
+  }
+}
+
 export function saveMeasurement(path: string | undefined, result: Measurement): void {
   validateMeasurement(result);
   if (path) writeFileSync(path, `${JSON.stringify(result, null, 2)}\n`);
@@ -216,6 +397,17 @@ export function compareMeasurements(baseline: unknown[], candidate: unknown[]) {
       JSON.stringify(Object.keys(run.metrics).sort()) !== JSON.stringify(names)
     )
       throw new Error("Comparison requires identical metric sets and tools");
+    for (const field of [
+      "platform",
+      "cpu",
+      "logicalCpus",
+      "node",
+      "electron",
+      "ffmpeg",
+      "buildMode",
+    ] as const)
+      if (run.environment[field] !== first.environment[field])
+        throw new Error(`Comparison requires identical environment: ${field}`);
     for (const name of names) {
       if (run.metrics[name]!.unit !== first.metrics[name]!.unit)
         throw new Error(`Comparison requires identical units: ${name}`);
@@ -247,6 +439,12 @@ export function compareMeasurements(baseline: unknown[], candidate: unknown[]) {
     const absoluteDelta = candidateMedian - baselineMedian;
     const relativeDelta = baselineMedian === 0 ? null : absoluteDelta / baselineMedian;
     const noise = unit === "ms" ? noiseMs : unit === "MB" ? 10 : 0;
+    // Observed separation is conservative with few samples. Report all ranges, including outliers.
+    const observedRangeGap = Math.min(...b) - Math.max(...a);
+    const withinBuildSpread = Math.max(
+      Math.max(...a) - Math.min(...a),
+      Math.max(...b) - Math.min(...b),
+    );
     const spread = (values: number[]) => ({
       min: Math.min(...values),
       max: Math.max(...values),
@@ -262,8 +460,17 @@ export function compareMeasurements(baseline: unknown[], candidate: unknown[]) {
       baselineSpread: spread(a),
       candidateSpread: spread(b),
       noise,
+      observationFloor: noise,
+      observedRangeGap,
+      withinBuildSpread,
+      insufficientSamples: a.length < 3 || b.length < 3,
+      warningPolicy:
+        unit === "count"
+          ? "exact median increase"
+          : "observed ranges separated beyond observation floor and median +10%",
       outcome:
-        absoluteDelta > noise && (relativeDelta === null || relativeDelta > 0.1)
+        (unit === "count" ? absoluteDelta > 0 : observedRangeGap > noise) &&
+        (relativeDelta === null || relativeDelta > 0.1)
           ? "warning"
           : "pass",
     };
@@ -295,6 +502,7 @@ export function electronVersion(executable: string): string {
 
 const GUIDE_METRICS = {
   "download and index": "ms",
+  "download and index per subscription": "ms",
   "longest stall while downloading": "ms",
   "read from disk after a restart": "ms",
   "longest stall while reading": "ms",
@@ -321,3 +529,40 @@ const VIEWING_METRICS = {
   "events reverse favourites": "count",
   "rebuild ordered favourites": "ms",
 } as const;
+
+const GUIDE_SAMPLE_COUNTS: Record<string, number> = {
+  "download and index": 1,
+  "longest stall while downloading": 1,
+  "read from disk after a restart": 1,
+  "longest stall while reading": 1,
+  "now and next for 60 channels": 100,
+  "search news": 1,
+  "list search news": 20,
+  "mapping list": 20,
+  "mapping list searched": 20,
+  "guide channels searched": 20,
+  "now and next channels mapped": 100,
+  "memory held by guide": 1,
+};
+const GUIDE_BUDGETS = {
+  "download and index per subscription": 3000,
+  "longest stall while downloading": 50,
+  "longest stall while reading": 50,
+  "now and next for 60 channels": 5,
+  "now and next channels mapped": 5,
+  "memory held by guide": 80,
+};
+const VIEWING_SAMPLE_COUNTS: Record<string, number> = {
+  watch: 1000,
+  favourite: 1000,
+  start: 1,
+  "start with rebuild": 1,
+  "database size": 1,
+  "one favourite to end": 200,
+  "events one favourite to end": 200,
+  "last favourite to front": 1,
+  "events last favourite to front": 1,
+  "reverse favourites": 1,
+  "events reverse favourites": 1,
+  "rebuild ordered favourites": 1,
+};

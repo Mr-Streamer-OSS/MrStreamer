@@ -5,12 +5,12 @@
 // of the guide's channels, and now and next with a few hundred of them mapped.
 //
 //   node --expose-gc scripts/measure-guide.ts [--file guide.xml]
-//       [--guide-channels 1300] [--programmes 70]
+//       [--guide-channels 1300] [--programmes 70] [--subscriptions 1] [--json results.json]
 //
 // The last two size the generated guide, as for one near the limits a guide is read under
 // (`GUIDE_LIMITS`). The file stays local: provider guides are not committed.
 import { createReadStream } from "node:fs";
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { monitorEventLoopDelay } from "node:perf_hooks";
@@ -26,6 +26,7 @@ import {
   environment,
   metric,
   positiveCount,
+  prepareMeasurementOutput,
   saveMeasurement,
   type Measurement,
 } from "./measurement.ts";
@@ -48,6 +49,11 @@ const { values } = parseArgs({
 const GUIDE_CHANNELS = positiveCount(values["guide-channels"], "guide-channels", 50000);
 const PROGRAMMES_PER_CHANNEL = positiveCount(values.programmes, "programmes", 500000);
 const SUBSCRIPTIONS = positiveCount(values.subscriptions, "subscriptions", 4);
+if (!values.file && GUIDE_CHANNELS * PROGRAMMES_PER_CHANNEL > 500000)
+  throw new Error("Generated guide exceeds 500000 total programmes per subscription");
+const output =
+  values.json ?? join(process.cwd(), ".local/measurements", `guide-${Date.now()}.json`);
+prepareMeasurementOutput(output);
 const gc = (globalThis as { gc?: () => void }).gc;
 if (!gc) throw new Error("Guide memory instrumentation requires --expose-gc");
 const now = Date.now();
@@ -150,8 +156,13 @@ try {
     );
     return {
       refresh: async () => {
-        for (const subscription of subscriptions)
+        const samples: number[] = [];
+        for (const subscription of subscriptions) {
+          const started = performance.now();
           await runtime.runPromise(guide.refresh(subscription));
+          samples.push(performance.now() - started);
+        }
+        return samples;
       },
       listings: (asked: readonly LiveChannel[]) => runtime.runPromise(guide.listings(asked)),
       search: (query: string) => runtime.runPromise(guide.search(query)),
@@ -183,15 +194,27 @@ try {
   await new Promise((resolve) => setTimeout(resolve, 10));
   stalls.reset();
   let started = performance.now();
-  const guide = await create();
-  await guide.refresh();
+  let guide: Awaited<ReturnType<typeof create>> | undefined = await create();
+  const subscriptionDownloadSamples = await guide.refresh();
   const downloadMs = performance.now() - started;
   await new Promise((resolve) => setTimeout(resolve, 10));
   stalls.disable();
   const downloadStall = stalls.max / 1e6;
 
   gc();
-  const heapMb = Math.max(0, (process.memoryUsage().heapUsed - heapBefore) / 1e6);
+  const heapMb = (process.memoryUsage().heapUsed - heapBefore) / 1e6;
+  if (heapMb < 0) throw new Error("Negative retained guide heap delta");
+
+  // Close and release the old service before opening a fresh service on its persisted stores.
+  // This is the same process with warm OS caches, not a fresh-process restart.
+  const retiredGuide = new WeakRef(guide);
+  await Promise.all(runtimes.splice(0).map((runtime) => runtime.dispose()));
+  guide = undefined;
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  gc();
+  const retiredGuideCollected = retiredGuide.deref() === undefined;
+  if (!retiredGuideCollected)
+    throw new Error("Old guide wrapper is still retained before cached reads");
 
   stalls.reset();
   stalls.enable();
@@ -279,7 +302,8 @@ try {
   }
 
   const metrics: Measurement["metrics"] = {
-    "download and index": metric("ms", [downloadMs], 3000),
+    "download and index": metric("ms", [downloadMs]),
+    "download and index per subscription": metric("ms", subscriptionDownloadSamples, 3000),
     "longest stall while downloading": metric("ms", [downloadStall], 50),
     "read from disk after a restart": metric("ms", [diskMs]),
     "longest stall while reading": metric("ms", [diskStall], 50),
@@ -292,9 +316,6 @@ try {
     "now and next channels mapped": metric("ms", mappedListingsSamples, 5),
     "memory held by guide": metric("MB", [heapMb], 80),
   };
-  const output =
-    values.json ?? join(process.cwd(), ".local/measurements", `guide-${Date.now()}.json`);
-  await mkdir(join(process.cwd(), ".local/measurements"), { recursive: true });
   saveMeasurement(output, {
     schemaVersion: 1,
     tool: "guide",
@@ -310,17 +331,24 @@ try {
       mappedChannels: byHand.length,
     },
     conditions: {
-      warmup: "fresh guide then restarted service; mapping options warmed once",
+      warmup:
+        "fresh guide disposed and collected before fresh service in same process; mapping options warmed once",
+      downloadBudgetScope: "one refresh per subscription; aggregate unbudgeted",
+      heapBudgetScope: "all subscriptions loaded in first service, aggregate retained heap delta",
+      cachedReadScope: "fresh service in same process; OS cache warm; GC before phase",
       cache: "fresh temporary stores then disk reads",
       garbageCollection: true,
       eventLoopResolutionMs: 5,
     },
+    observations: [{ name: "cached-read preparation", retiredGuideCollected }],
     metrics,
-    checks: {
-      searchReturnsProgrammes: matches.length > 0,
-      listSearchReturnsChannels: found > 0,
-      mappingsAvailable: unmatched.total > 0,
-    },
+    checks: values.file
+      ? { localDocumentLoaded: guideIds.length > 0 }
+      : {
+          searchReturnsProgrammes: matches.length > 0,
+          listSearchReturnsChannels: found > 0,
+          mappingsAvailable: unmatched.total > 0,
+        },
   });
   for (const [name, value] of Object.entries(metrics)) {
     console.log(
@@ -380,4 +408,12 @@ try {
   stalls.disable();
   await Promise.all(runtimes.map((runtime) => runtime.dispose()));
   await rm(dataDir, { recursive: true, force: true });
+  await writeFile(
+    `${output}.cleanup.json`,
+    JSON.stringify(
+      { dataDir, runtimesDisposed: true, dataDirRemoved: !(await stat(dataDir).catch(() => null)) },
+      null,
+      2,
+    ),
+  );
 }

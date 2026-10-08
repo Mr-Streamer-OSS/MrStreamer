@@ -3,12 +3,12 @@
 // channel, and a series of 520 episodes. Prints medians to compare builds, and how many streams
 // each tune, switch and return to Watch opens at the provider; see docs/contributing/testing.md.
 //
-//   node test/e2e/measure-app.ts [--json results.json] <app executable> [-- extra app arguments]
+//   node test/e2e/measure-app.ts [--runs 3] [--subscriptions 1] [--revision sha] [--json results.json] <app executable> [-- extra app arguments]
 //
 // Raw samples default to .local/measurements; --json chooses a path. Needs ffmpeg on PATH
 // (or MR_STREAMER_FFMPEG). On macOS pass --use-mock-keychain.
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, readdirSync, rmSync, statSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
@@ -22,6 +22,7 @@ import {
   launch,
   login,
   observe,
+  observeAcrossLoad,
   waitFor,
   type Page,
 } from "./app.ts";
@@ -32,6 +33,7 @@ import {
   median,
   metric,
   positiveCount,
+  prepareMeasurementOutput,
   saveMeasurement,
 } from "../../scripts/measurement.ts";
 
@@ -46,7 +48,9 @@ const { values: options, positionals } = parseArgs({
 });
 const [executable, ...rest] = positionals;
 if (!executable) {
-  throw new Error("Usage: node test/e2e/measure-app.ts [--json file] <app executable> [-- args]");
+  throw new Error(
+    "Usage: node test/e2e/measure-app.ts [--runs 3] [--subscriptions 1] [--revision sha] [--json file] <app executable> [-- args]",
+  );
 }
 
 const ffmpeg = process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg";
@@ -54,6 +58,8 @@ const RUNS = positiveCount(options.runs, "runs", 20);
 const SUBSCRIPTIONS = positiveCount(options.subscriptions, "subscriptions", 4);
 const TEST_CHANNELS = ["H.264 + AAC", "H.264 + MP2", "H.264 + MP3", "H.264 + AC-3"];
 
+const output = options.json ?? join(process.cwd(), ".local/measurements", `app-${Date.now()}.json`);
+prepareMeasurementOutput(output);
 const providers: Awaited<ReturnType<typeof startFakeProvider>>[] = [];
 for (let index = 0; index < SUBSCRIPTIONS; index++)
   providers.push(
@@ -96,8 +102,7 @@ const results = new Map<keyof typeof APP_METRICS, number[]>();
 const record = (name: keyof typeof APP_METRICS, value: number) =>
   results.set(name, [...(results.get(name) ?? []), value]);
 const observations: { [key: string]: number | string | boolean }[] = [];
-const output = options.json ?? join(process.cwd(), ".local/measurements", `app-${Date.now()}.json`);
-mkdirSync(dirname(output), { recursive: true });
+
 const profile = mkdtempSync(join(tmpdir(), "mr-streamer-measure-"));
 let app: ChildProcess | null = null;
 let activePage: Page | undefined;
@@ -142,6 +147,17 @@ try {
   );
   await delay(5000);
   calibration = await calibrate(page);
+
+  const warmupStarted = performance.now();
+  await clickText(page, "Live TV");
+  await waitFor(() => rowsShown(page));
+  await clickText(page, "TEST | Formats and failures");
+  await waitFor(() => rowsShown(page));
+  await movingWarmup(page, "warmup tune", rowClick(TEST_CHANNELS[0]!));
+  await movingWarmup(page, "warmup switch", () => key(page, "ArrowDown", 40));
+  await key(page, "Escape", 27);
+  await waitFor(() => page.evaluate<boolean>(`!document.querySelector('[data-view="watch"]')`));
+  observations.push({ name: "playback warmup", elapsedMs: performance.now() - warmupStarted });
 
   for (let run = 0; run < RUNS; run++) {
     await clickText(page, "Home");
@@ -209,28 +225,13 @@ try {
     app = launch(executable, rest, { port, profile });
     page = await connect(port, "page", 5);
     activePage = page;
-    // The target URL can change before Electron finishes replacing its blank-page context.
-    // Reattach once across that initial navigation; keep the original launch clock running.
-    let navigationObserved = false;
-    for (;;) {
-      try {
-        await observe(
-          page,
-          `!!document.querySelector("section h1") && !document.body.innerText.includes("Loading channels")`,
-        );
-        break;
-      } catch (error) {
-        if (
-          navigationObserved ||
-          !(error instanceof Error) ||
-          !error.message.includes('"message":"Execution context was destroyed."')
-        )
-          throw error;
-        navigationObserved = true;
-      }
-    }
-    observations.push({ name: "cold start", initialNavigationObserved: navigationObserved });
-    record("cold start to Home", performance.now() - started);
+    const loaded = await observeAcrossLoad(
+      page,
+      `!!document.querySelector("section h1") && !document.body.innerText.includes("Loading channels")`,
+      started,
+    );
+    observations.push({ name: "cold start", initialNavigationObserved: loaded.navigationObserved });
+    record("cold start to Home", loaded.elapsedMs);
     await openLongSeries(page);
     page.close();
     await quit(app);
@@ -267,14 +268,32 @@ try {
       runs: RUNS,
     },
     conditions: {
-      warmup: "login and guide download before measured interactions",
+      warmup: "login, guide download, one unmeasured tune and switch at measured workload",
+      installedSizeScope:
+        rest.at(-1) && existsSync(join(rest.at(-1)!, "out/main/index.js"))
+          ? "electron-runtime-folder only; unpackaged, excludes app output"
+          : "installed app bundle or folder",
+      sizeUnit: "decimal MB; 1000000 bytes",
       cache: "fresh profile then disk catalogue and guide for cold process starts",
       timingResolutionMs: 5,
     },
     calibration,
     observations,
     metrics,
-    checks: { completeMetrics: true, movingPicture: true },
+    checks: {
+      completeMetrics: true,
+      movingPicture: ["time to picture", "channel switch"].every((name) => {
+        const pictures = observations.filter((observation) => observation["name"] === name);
+        return (
+          pictures.length === RUNS &&
+          pictures.every(
+            (picture) =>
+              Number(picture["currentTime"]) > Number(picture["previousTime"]) &&
+              Number(picture["videoWidth"]) > 0,
+          )
+        );
+      }),
+    },
   });
   console.log(`Raw measurement: ${output}`);
 } catch (error) {
@@ -297,7 +316,12 @@ try {
           seriesSeasons: 20,
         },
         conditions: {
-          warmup: "login and guide download before measured interactions",
+          warmup: "login, guide download, one unmeasured tune and switch at measured workload",
+          installedSizeScope:
+            rest.at(-1) && existsSync(join(rest.at(-1)!, "out/main/index.js"))
+              ? "electron-runtime-folder only; unpackaged, excludes app output"
+              : "installed app bundle or folder",
+          sizeUnit: "decimal MB; 1000000 bytes",
           cache: "fresh profile then disk catalogue and guide for cold process starts",
           timingResolutionMs: 5,
         },
@@ -338,6 +362,20 @@ try {
   await Promise.all(providers.map((provider) => provider.close()));
   await delay(1000);
   rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
+  writeFileSync(
+    `${output}.cleanup.json`,
+    JSON.stringify(
+      {
+        profile,
+        appExited: !app || app.exitCode !== null || app.signalCode !== null,
+        profileRemoved: !existsSync(profile),
+        providerServersClosed: true,
+        activeProviderStreamCounters: providers.map((provider) => provider.activeStreams()),
+      },
+      null,
+      2,
+    ),
+  );
 }
 
 function streamRequests() {
@@ -381,6 +419,25 @@ async function timed(
   }
 }
 
+/** Exercise the actual encoder and player before measuring, retaining cost and movement. */
+async function movingWarmup(page: Page, name: string, act: string | (() => Promise<unknown>)) {
+  await page.evaluate(
+    `window.__source = document.querySelector("video")?.currentSrc ?? ""; window.__movingTime = null`,
+  );
+  const [elapsedMs] = await Promise.all([
+    observe(page, FRESH_PICTURE, typeof act === "string" ? act : ""),
+    typeof act === "string" ? Promise.resolve() : act(),
+  ]);
+  observations.push({
+    name,
+    elapsedMs,
+    ...(await page.evaluate<{ previousTime: number; currentTime: number; videoWidth: number }>(
+      `({ previousTime: window.__previousMovingTime, currentTime: window.__movingTime, videoWidth: document.querySelector("video").videoWidth })`,
+    )),
+    streamsOpened: streamRequests(),
+  });
+}
+
 /**
  * Opens the long series from All series, the newest first, and times in the window when its name
  * shows and when the first season's 26 episodes do.
@@ -404,9 +461,11 @@ async function openLongSeries(page: Page): Promise<void> {
     page,
     `[...(${dialog}?.querySelectorAll("button") ?? [])].filter((row) => Number.isInteger(Number(row.firstElementChild?.textContent.trim())) && Number(row.firstElementChild?.textContent.trim()) > 0).length >= 26`,
   );
-  await page.evaluate(`${poster}.click()`);
-  record("long series details, name shown", await title);
-  record("long series details, episodes shown", await episodes);
+  // Attach handlers for both observers before dispatching the click or awaiting anything else.
+  const pending = Promise.all([title, episodes, page.evaluate(`${poster}.click()`)]);
+  const [titleMs, episodesMs] = await pending;
+  record("long series details, name shown", titleMs);
+  record("long series details, episodes shown", episodesMs);
   await key(page, "Escape", 27);
 }
 
@@ -450,7 +509,7 @@ async function quit(child: ChildProcess): Promise<void> {
   }
 }
 
-/** The size of the installed app: the .app bundle on macOS, its folder elsewhere. */
+/** Bundle/folder bytes; for a checkout this is runtime-only, recorded in installedSizeScope. */
 function installedSize(file: string): number {
   const folder = process.platform === "darwin" ? dirname(dirname(dirname(file))) : dirname(file);
   const bytes = sizeOf(folder);
