@@ -1,5 +1,5 @@
 // Official API contracts: subdl.com/api-doc and opensubtitles.stoplight.io/docs/opensubtitles-api.
-// Only TMDB identity and requested languages leave main. Keys, tokens and download addresses
+// Search sends TMDB identity or title/year and requested languages. Keys, tokens and download addresses
 // stay here. Searching never asks for a download, and failed credentials are never retried.
 import { createInflateRaw } from "node:zlib";
 import type {
@@ -13,7 +13,9 @@ import { type } from "arktype";
 import { Unzip, type UnzipDecoder, type UnzipFile } from "fflate";
 
 export type SubtitleQuery = {
-  readonly tmdbId: number;
+  readonly tmdbId?: number;
+  readonly title?: string;
+  readonly year?: number;
   readonly languages: readonly string[];
 } & (
   | { readonly kind: "movie" }
@@ -48,7 +50,9 @@ export class SubtitleRequestFailure extends Error {
 
 const SubDLReply = type({
   status: "boolean",
-  "results?": type({ tmdb_id: "number", type: "'movie' | 'tv'" }).array().atMostLength(100),
+  "results?": type({ "tmdb_id?": "number | null", type: "'movie' | 'tv'" })
+    .array()
+    .atMostLength(100),
   "subtitles?": type({
     "language?": "string <= 64",
     "lang?": "string <= 64",
@@ -106,11 +110,15 @@ const OpenDownload = type({
   reset_time_utc: "string <= 128",
 });
 const Query = type({
-  tmdbId: "number.integer > 0",
+  "tmdbId?": "number.integer > 0",
+  "title?": "0 < string <= 512",
+  "year?": "1800 <= number.integer <= 3000",
   languages: "string[] <= 10",
   kind: "'movie'",
 }).or({
-  tmdbId: "number.integer > 0",
+  "tmdbId?": "number.integer > 0",
+  "title?": "0 < string <= 512",
+  "year?": "1800 <= number.integer <= 3000",
   languages: "string[] <= 10",
   kind: "'episode'",
   season: "number.integer >= 0",
@@ -156,7 +164,10 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
     const url = new URL("https://api.subdl.com/api/v1/subtitles");
     url.search = new URLSearchParams({
       api_key: credentials.apiKey,
-      tmdb_id: String(query.tmdbId),
+      ...(query.tmdbId !== undefined
+        ? { tmdb_id: String(query.tmdbId) }
+        : { film_name: query.title! }),
+      ...(query.year !== undefined ? { year: String(query.year) } : {}),
       type: query.kind === "movie" ? "movie" : "tv",
       languages: query.languages.join(",").toUpperCase(),
       subs_per_page: "30",
@@ -174,8 +185,8 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
     if (!reply.status) throw new SubtitleRequestFailure("unavailable");
     // SubDL may broaden an unsuccessful match. Do not import another title's results.
     if (
-      reply.results?.[0]?.tmdb_id !== query.tmdbId ||
-      reply.results[0].type !== (query.kind === "movie" ? "movie" : "tv")
+      (query.tmdbId !== undefined && reply.results?.[0]?.tmdb_id !== query.tmdbId) ||
+      reply.results?.[0]?.type !== (query.kind === "movie" ? "movie" : "tv")
     )
       return [];
     const results: SubtitleCandidate[] = [];
@@ -224,13 +235,16 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
     url.search = new URLSearchParams({
       type: query.kind,
       languages: query.languages.join(","),
+      ...(query.tmdbId !== undefined
+        ? query.kind === "movie"
+          ? { tmdb_id: String(query.tmdbId) }
+          : { parent_tmdb_id: String(query.tmdbId) }
+        : { query: query.title! }),
       ...(query.kind === "movie"
-        ? { tmdb_id: String(query.tmdbId) }
-        : {
-            parent_tmdb_id: String(query.tmdbId),
-            season_number: String(query.season),
-            episode_number: String(query.episode),
-          }),
+        ? query.year !== undefined
+          ? { year: String(query.year) }
+          : {}
+        : { season_number: String(query.season), episode_number: String(query.episode) }),
     }).toString();
     const reply = OpenReply.assert(
       await api(
@@ -247,8 +261,8 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
         if (
           !query.languages.includes(sub.language) ||
           (query.kind === "movie"
-            ? title.tmdb_id !== query.tmdbId
-            : title.parent_tmdb_id !== query.tmdbId ||
+            ? query.tmdbId !== undefined && title.tmdb_id !== query.tmdbId
+            : (query.tmdbId !== undefined && title.parent_tmdb_id !== query.tmdbId) ||
               title.season_number !== query.season ||
               title.episode_number !== query.episode)
         )
@@ -373,6 +387,8 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
 
 function checkedQuery(input: SubtitleQuery): SubtitleQuery {
   const query = Query.assert(input);
+  if (query.tmdbId === undefined && !query.title?.trim())
+    throw new SubtitleRequestFailure("unsupported");
   const languages = [...new Set(query.languages.map((value) => value.trim().toLowerCase()))].sort();
   if (!languages.length || languages.some((value) => !/^[a-z]{2,3}(?:-[a-z]{2,3})?$/.test(value)))
     throw new SubtitleRequestFailure("unsupported");

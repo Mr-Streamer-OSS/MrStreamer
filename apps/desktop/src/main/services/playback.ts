@@ -64,6 +64,7 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { VerifiedFiles } from "../platform/verified-files.ts";
+import { SavedSubtitles, type SubtitleFile } from "../platform/saved-subtitles.ts";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import { createCleanStart } from "../playback/clean-start.ts";
@@ -414,7 +415,16 @@ interface LiveSession extends SessionBase {
   captions: readonly number[];
 }
 
+/** Main-only handle. Closing or replacing the exact file cancels subtitle work. */
+export interface SubtitlePlayback {
+  readonly title: TitleRef;
+  readonly file: SubtitleFile;
+  readonly signal: AbortSignal;
+  readonly standing: Effect.Effect<boolean, Failed>;
+}
+
 interface TitleSessionState extends SessionBase {
+  readonly subtitleFileChanged: AbortController;
   readonly kind: "title";
   readonly title: TitleRef;
   readonly upstreamUrl: string;
@@ -656,6 +666,8 @@ export class Playback extends Context.Service<
       decoders: readonly Codec[],
       asked?: Asked,
     ): Effect.Effect<TitleSession, Failed>;
+    /** The current local title only, with no provider address or request headers. */
+    subtitleContext(sessionId: string): Effect.Effect<SubtitlePlayback | null, Failed>;
     /** Closes a stream and its provider connection. Unknown or already closed ids are ignored. */
     close(sessionId: string): Effect.Effect<void>;
     /** Closes every open stream, for example when the window closes. */
@@ -724,6 +736,7 @@ function make(deps: PlaybackDeps) {
     const diagnostics = yield* Diagnostics;
     // The app provides storage; standalone playback ports can run without a database.
     const verifiedFiles = Option.getOrNull(yield* Effect.serviceOption(VerifiedFiles));
+    const savedSubtitles = Option.getOrNull(yield* Effect.serviceOption(SavedSubtitles));
     const scope = yield* Effect.scope;
     const sessions = new Map<string, Session>();
     /** When channel streams failed, by upstream address, for `FAILED_STREAM_MS`. */
@@ -1251,6 +1264,20 @@ function make(deps: PlaybackDeps) {
     function observe(session: TitleSessionState, answer: Response, ranged: boolean): Held | null {
       const held = session.identity.observe(answer, ranged);
       if (held?.other) {
+        session.subtitleFileChanged.abort();
+        if (savedSubtitles && session.verified) {
+          Effect.runSync(
+            savedSubtitles
+              .forget({
+                account: session.verified.account,
+                sourceStamp: session.verified.sourceStamp,
+                listingKey: session.verified.listingKey,
+                kind: session.title.kind,
+                id: session.title.id,
+              })
+              .pipe(Effect.ignore),
+          );
+        }
         session.kept = fileKept();
         probes.delete(session.probeKey);
         if (session.verified && verifiedFiles) {
@@ -3368,6 +3395,7 @@ function make(deps: PlaybackDeps) {
         const headers = new Headers(asked.headers);
         const session: TitleSessionState = {
           kind: "title",
+          subtitleFileChanged: new AbortController(),
           id,
           token: randomBytes(18).toString("base64url"),
           title,
@@ -3456,6 +3484,45 @@ function make(deps: PlaybackDeps) {
       });
 
     return {
+      subtitleContext: (sessionId: string) =>
+        Effect.gen(function* () {
+          const session = sessions.get(sessionId);
+          if (
+            !session ||
+            session.kind !== "title" ||
+            session.lan ||
+            !session.verified ||
+            session.closed.signal.aborted ||
+            session.identity.generation !== session.probed
+          )
+            return null;
+          const file: SubtitleFile = {
+            account: session.verified.account,
+            sourceStamp: session.verified.sourceStamp,
+            listingKey: session.verified.listingKey,
+            kind: session.title.kind,
+            id: session.title.id,
+          };
+          const standing = Effect.gen(function* () {
+            if (
+              sessions.get(sessionId) !== session ||
+              session.closed.signal.aborted ||
+              session.subtitleFileChanged.signal.aborted ||
+              session.identity.generation !== session.probed
+            )
+              return false;
+            const source = yield* subscriptions.sourceOf(session.title.subscriptionId);
+            return source.key === file.account && source.fileRevision === file.sourceStamp;
+          });
+          if (!(yield* standing)) return null;
+          return {
+            title: session.title,
+            file,
+            standing,
+            signal: AbortSignal.any([session.closed.signal, session.subtitleFileChanged.signal]),
+          };
+        }),
+
       begin: Effect.sync(() => ++turns),
 
       passed: (turn: number) => Effect.sync(() => turn !== turns),

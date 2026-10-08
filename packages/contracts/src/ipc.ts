@@ -3,6 +3,15 @@
 // Add a method by giving it an input schema in `ipcInputs` and a result type in `IpcOutputs`.
 // The main process refuses to start unless every method has a handler (see src/main/ipc.ts).
 import { type } from "arktype";
+import {
+  OnlineSubtitlePreferences,
+  SubtitleCredentialInput,
+  SubtitleTiming,
+  type OnlineSubtitleSettings,
+  type OnlineSubtitleSearch,
+  type OnlineSubtitleChoice,
+  type SavedSubtitle,
+} from "./online-subtitles.ts";
 import { TitleFilters, type FilterOptions } from "./title-filters.ts";
 import type { Result } from "./errors.ts";
 import type { DiagnosticsPreview } from "./diagnostics.ts";
@@ -234,6 +243,16 @@ export const ipcInputs = {
        */
       "preview?": "boolean",
     }),
+  "subtitles.settings": none,
+  "subtitles.configure": () =>
+    type({ preferences: OnlineSubtitlePreferences, "credentials?": SubtitleCredentialInput }),
+  "subtitles.search": () => type({ sessionId: "string > 0", "languages?": "string[] <= 10" }),
+  "subtitles.choose": () => type({ sessionId: "string > 0", resultId: "string > 0" }),
+  "subtitles.saved": () => type({ sessionId: "string > 0" }),
+  "subtitles.timing": () =>
+    type({ sessionId: "string > 0", timing: SubtitleTiming, "selection?": "0 < string <= 64" }),
+  "subtitles.forget": () => type({ sessionId: "string > 0" }),
+  "subtitles.cancel": () => type({ sessionId: "string > 0" }),
   "playback.openTitle": () => type({ title: TitleRef, decoders: decoders() }),
   "playback.close": () => type({ sessionId: "string" }),
   "playback.closeAll": none,
@@ -478,6 +497,14 @@ export interface IpcOutputs {
   /** Opens a stream for a channel and closes any stream that was open before. */
   "playback.open": StreamSession;
   /** Opens a movie or episode, and closes any stream that was open before. */
+  "subtitles.settings": OnlineSubtitleSettings;
+  "subtitles.configure": OnlineSubtitleSettings;
+  "subtitles.search": OnlineSubtitleSearch;
+  "subtitles.choose": OnlineSubtitleChoice;
+  "subtitles.saved": SavedSubtitle | null;
+  "subtitles.timing": SavedSubtitle;
+  "subtitles.forget": null;
+  "subtitles.cancel": null;
   "playback.openTitle": TitleSession;
   "playback.close": null;
   /** Closes every stream, including a title still reading its file before its session is known. */

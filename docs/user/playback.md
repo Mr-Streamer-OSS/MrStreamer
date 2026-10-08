@@ -38,6 +38,20 @@ Providers keep movies and episodes as files, mostly MKV and MP4 and a few AVI. M
 
 A movie starts about a second after you choose it. Skipping into what's already loaded is instant; skipping further away starts it again from there, which takes about a second too. With subtitles on, the picture starts as soon as without them, and the subtitles already on screen at that moment follow as soon as Mr. Streamer has read them: "Subtitles loading" shows at the top right meanwhile.
 
+## Online subtitles, from 0.0.9
+
+Online search starts off. In Settings > General > Online subtitles, set up SubDL with your own API key, or OpenSubtitles with your API key, username and password, or both. Choose saved languages and enable search. Saving these settings makes no service request.
+
+For a movie or episode playing on this computer, open **CC** and choose **Search subtitles**. Opening CC alone does not search. You can pick another search language in the panel. File tracks stay above the results, which show the release, service, language, hearing-impaired flag and download count when provided. If one service fails, the other service's results remain usable. Choose a result to download it and show it while the picture continues. The panel stays open to try another result. **Escape** or CC closes it; closing while a request runs cancels that request.
+
+A search sends the known TMDB identity, or the title and year when no identity is known, with episode coordinates and languages. Text searches can return another release or cut, so check it against the picture. Provider logins, playable addresses and file request headers are never sent. OpenSubtitles logs in when you download, and that download may consume its allowance. The panel shows only an allowance reported by the service, without assuming a daily limit.
+
+Downloaded SRT and WebVTT text is kept on this computer for the exact movie or episode version. The last selected result restores when you reopen that file. Up to eight recent downloaded results per exact file keep their own timing, so switching back to one makes no new download. **Forget downloaded subtitles** removes all saved results and timing for that file. Removing its subscription also removes them. Replacing the listed file or a replacement observed during playback prevents an old correction from carrying over.
+
+In **Playback > Subtitle timing**, downloaded text has 0.1-second and 1-second steps, a typed offset up to ten minutes either way, a drift ratio, and all six frame-rate conversions between 23.976, 24 and 25 fps. The labels run from subtitle FPS to video FPS. **Reset timing** restores zero offset and normal drift for the selected result. **Try the next result** switches an already fetched search result and keeps the menu open. **G** and **H** shift 0.1 seconds; **Shift+G** and **Shift+H** shift one second. Each selected result remembers its own correction. File-track timing retains its 30-second limit; picture subtitles have no timing control.
+
+Downloaded subtitles and their timing play on this computer only. A receiver keeps the file's supported subtitle tracks. Returning to this computer restores its saved download.
+
 ## Playing on a TV
 
 Mr. Streamer sends what you watch to a TV on your network: with AirPlay on macOS, and with Google Cast on Windows. The Linux builds play on the computer only. The TV fetches the stream from your computer, so the computer has to stay on and on the same network for as long as the TV plays. Mr. Streamer keeps it awake meanwhile.

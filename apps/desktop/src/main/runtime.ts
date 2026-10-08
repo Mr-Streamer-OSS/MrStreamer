@@ -31,6 +31,7 @@ import { appNotices, Licences } from "./services/licences.ts";
 import { Playback } from "./services/playback.ts";
 import { Settings } from "./services/preferences.ts";
 import { SubtitleAccounts } from "./services/subtitle-accounts.ts";
+import { OnlineSubtitles, SubtitleSessions } from "./services/online-subtitles.ts";
 import { Roster } from "./services/roster.ts";
 import { Subscriptions } from "./services/subscription.ts";
 import { Updates, type UpdatesConfig } from "./services/updates.ts";
@@ -72,7 +73,8 @@ export type MainServices =
   | Licences
   | VerifiedFiles
   | SavedSubtitles
-  | SubtitleAccounts;
+  | SubtitleAccounts
+  | OnlineSubtitles;
 
 /** Every main-process service, with the app's adapters for their ports. */
 export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
@@ -108,6 +110,60 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
     Licences.layer(appNotices()),
     SubtitleAccounts.layer(dataDir, config.secrets),
   ).pipe(Layer.provideMerge(Layer.mergeAll(accounts, verifiedFiles, savedSubtitles)));
+
+  const subtitleSessions = Layer.effect(
+    SubtitleSessions,
+    Effect.gen(function* () {
+      const playback = yield* Playback;
+      const catalogue = yield* OnDemand;
+      return {
+        resolve: (id: string) =>
+          Effect.gen(function* () {
+            const session = yield* playback.subtitleContext(id);
+            if (!session) return null;
+            const identity = yield* catalogue.subtitleQuery(session.title, session.file.listingKey);
+            if (!identity) return null;
+            const tmdbId = Number(identity.tmdbId);
+            const match =
+              Number.isSafeInteger(tmdbId) && tmdbId > 0
+                ? { tmdbId }
+                : {
+                    title: identity.title.slice(0, 512),
+                    ...(identity.year !== null ? { year: identity.year } : {}),
+                  };
+            const query =
+              session.title.kind === "movie"
+                ? { kind: "movie" as const, ...match, languages: [] }
+                : identity.season !== undefined &&
+                    identity.episode !== undefined &&
+                    identity.episode > 0
+                  ? {
+                      kind: "episode" as const,
+                      ...match,
+                      season: identity.season,
+                      episode: identity.episode,
+                      languages: [],
+                    }
+                  : null;
+            return {
+              ...session,
+              query,
+              standing: Effect.flatMap(session.standing, (stands) =>
+                stands
+                  ? Effect.map(
+                      catalogue.subtitleQuery(session.title, session.file.listingKey),
+                      Boolean,
+                    )
+                  : Effect.succeed(false),
+              ),
+            };
+          }),
+      };
+    }),
+  ).pipe(Layer.provide(services));
+  const onlineSubtitles = OnlineSubtitles.layer({ userAgent: config.userAgent }).pipe(
+    Layer.provide(Layer.mergeAll(services, subtitleSessions)),
+  );
 
   const guide = Guide.layer.pipe(
     Layer.provide(
@@ -204,7 +260,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
   const watchlist = Watchlist.layer.pipe(Layer.provide(stores));
   const output = Output.layer(config.output ?? { adapters: [] }).pipe(Layer.provide(viewing));
   return Roster.layer.pipe(
-    Layer.provideMerge(Layer.mergeAll(guide, viewing, watchlist, output)),
+    Layer.provideMerge(Layer.mergeAll(guide, viewing, watchlist, output, onlineSubtitles)),
     Layer.provideMerge(services),
     Layer.provideMerge(diagnosticsLogLayer(dataDir)),
   );

@@ -353,3 +353,51 @@ describe("online subtitle service ports", () => {
     expect(request).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("explicit title search fallback", () => {
+  it("uses the title and year without guessing a TMDB id or sending a provider file name", async () => {
+    const calls: URL[] = [];
+    const client = subtitleServiceClient({
+      userAgent: "fixture",
+      fetch: async (input) => {
+        const url = new URL(String(input));
+        calls.push(url);
+        if (url.hostname === "api.subdl.com")
+          return json({
+            status: true,
+            results: [{ type: "movie" }],
+            subtitles: [
+              { language: "EN", url: "/subtitle/fallback.srt", release_name: "Night.Harbour" },
+            ],
+          });
+        return json({
+          data: [
+            {
+              attributes: {
+                language: "en",
+                release: "Night.Harbour",
+                feature_details: {},
+                files: [{ file_id: 7, file_name: "harbour.srt" }],
+              },
+            },
+          ],
+        });
+      },
+    });
+    const query = { kind: "movie" as const, title: "Night Harbour", year: 2019, languages: ["en"] };
+    expect(await client.subdlSearch(keys.subdl, query, signal())).toHaveLength(1);
+    expect(await client.openSearch(keys.opensubtitles, query, signal())).toHaveLength(1);
+    expect(Object.fromEntries(calls[0]!.searchParams)).toMatchObject({
+      film_name: "Night Harbour",
+      year: "2019",
+    });
+    expect(Object.fromEntries(calls[1]!.searchParams)).toMatchObject({
+      query: "Night Harbour",
+      year: "2019",
+    });
+    for (const url of calls) {
+      expect(url.searchParams.has("tmdb_id")).toBe(false);
+      expect(url.searchParams.has("file_name")).toBe(false);
+    }
+  });
+});

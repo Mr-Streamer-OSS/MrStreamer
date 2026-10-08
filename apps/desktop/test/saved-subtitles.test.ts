@@ -51,11 +51,11 @@ describe("saved exact-file subtitles", () => {
     ])
       expect(await restored.read(other)).toBeNull();
 
-    // Trying another result preserves this file's correction.
+    // An unkeyed different result starts on time.
     const next = { ...subtitle, service: "opensubtitles" as const, release: "Another release" };
     await restored.remember(file, next);
     expect(await restored.read(file)).toEqual({
-      timing: { offset: -480.1, speed: 24 / 25 },
+      timing: { offset: 0, speed: 1 },
       subtitle: next,
     });
   });
@@ -95,5 +95,32 @@ describe("saved exact-file subtitles", () => {
     const restarted = await promised(runtimeFor(layer()), SavedSubtitles);
     expect(await restarted.read(file)).toBeNull();
     expect((await restarted.read(other))?.subtitle).toEqual(subtitle);
+  });
+});
+
+describe("bounded downloaded-result cache", () => {
+  it("retains eight recent results, restores each correction and erases every cached result with its account", async () => {
+    const dir = await tempDir();
+    const runtime = runtimeFor(
+      Layer.mergeAll(savedSubtitlesLayer, viewingStoreLayer, watchlistStoreLayer).pipe(
+        Layer.provide(databaseLayer(dir)),
+      ),
+    );
+    const saved = await promised(runtime, SavedSubtitles);
+    for (let index = 0; index < 9; index++) {
+      await saved.remember(file, { ...subtitle, release: `Cut ${index}` }, `result-${index}`);
+      await saved.timing(file, { offset: index, speed: 1 });
+    }
+    expect(await saved.result(file, "result-0")).toBeNull();
+    expect((await saved.result(file, "result-1"))?.timing.offset).toBe(1);
+    const cached = (await saved.result(file, "result-1"))!;
+    await saved.remember(file, cached.subtitle!, "result-1", cached.timing);
+    await saved.remember(file, subtitle, "new-result");
+    expect(await saved.result(file, "result-2")).toBeNull();
+    expect((await saved.result(file, "result-1"))?.timing.offset).toBe(1);
+    await (await promised(runtime, ViewingStore)).erase(file.account);
+    expect(await saved.result(file, "result-1")).toBeNull();
+    expect(await saved.read(file)).toBeNull();
+    await runtime.dispose();
   });
 });

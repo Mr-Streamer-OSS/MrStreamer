@@ -141,6 +141,20 @@ export class OnDemand extends Context.Service<
   OnDemand,
   {
     readonly status: Effect.Effect<OnDemandStatus>;
+    /** Current exact-file identity for subtitle search. Reads only loaded lists/details. */
+    subtitleQuery(
+      title: TitleRef,
+      listingKey: string,
+    ): Effect.Effect<
+      {
+        readonly tmdbId: string | null;
+        readonly title: string;
+        readonly year: number | null;
+        readonly season?: number;
+        readonly episode?: number;
+      } | null,
+      Failed
+    >;
     /**
      * Fetches a subscription's two lists. Concurrent calls for one subscription share a fetch,
      * and a few subscriptions fetch at a time. Lists that arrive after the subscription's login
@@ -970,6 +984,43 @@ function make(deps: OnDemandDeps) {
             subscriptionId: of.id,
             entries,
           });
+        }),
+
+      subtitleQuery: (ref: TitleRef, listingKey: string) =>
+        Effect.gen(function* () {
+          const source = yield* subscriptions.sourceOf(ref.subscriptionId);
+          const kind = ref.kind === "movie" ? "movie" : "series";
+          const version = {
+            subscriptionId: ref.subscriptionId,
+            id: ref.kind === "movie" ? ref.id : ref.seriesId,
+          };
+          const [title] = yield* loaded((owners, language) =>
+            call("byIds", { owners, language, kind, versions: [version] }),
+          );
+          if (!title) return null;
+          if (ref.kind === "movie") {
+            const current = yield* call("container", { ...ownerOf(source), id: ref.id });
+            return current?.listingKey === listingKey
+              ? { tmdbId: title.tmdbId, title: title.title, year: title.year }
+              : null;
+          }
+          const held = [...details.values()].find(
+            (entry) =>
+              entry.title.kind === "series" &&
+              entry.version.subscriptionId === source.id &&
+              entry.version.id === ref.seriesId &&
+              entry.sourceRevision === source.revision &&
+              entry.lists === listsOf(source.id),
+          );
+          const episode = held?.raw.episodes.find((entry) => entry.id === ref.id);
+          if (!episode || listedFileKey("episode", episode) !== listingKey) return null;
+          return {
+            tmdbId: title.tmdbId,
+            title: title.title,
+            year: title.year,
+            season: episode.season,
+            episode: episode.number,
+          };
         }),
 
       file: (title: TitleRef) =>

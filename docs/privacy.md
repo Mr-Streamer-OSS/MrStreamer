@@ -33,6 +33,7 @@ The folder contains:
 - your favourites, the channels you watched, your progress in movies and episodes, and the episodes you marked watched or unwatched, each with its series, its season and episode number and when you marked it, and for a series you marked an episode of, the season and episode numbers it listed when you marked or last opened it
 - your watchlist: for each movie or series you saved, and each subscription you saved it from, its name, year and kind, whether the provider marks it for adults, when you saved it, its TMDB id, and the numbers that provider lists its versions under
 - copies of each provider's channel list, programme guide, and movie and series lists
+- from 0.0.9, opt-in subtitle-service settings and encrypted SubDL API keys or OpenSubtitles API keys, usernames and passwords, plus downloaded subtitle text and timing for exact movie and episode versions. Up to eight recent results are cached per exact file. Service addresses and account secrets are not stored with those cues.
 - from 0.0.9, the sound and subtitle languages read from exact movie and episode files on this computer, with listing fingerprints and random playback session ids, without playable addresses or request headers
 - for a subscription you gave a programme guide from another address: that address, the copy of the guide downloaded from it, and the reason its latest download failed, if it did. The address can hold a key, so it is encrypted like a password. Its server's address is not encrypted.
 - the channels you mapped to a guide channel by hand: for each, the number your provider lists the channel under, its name, and the guide channel's id
@@ -52,6 +53,14 @@ Settings > About offers a diagnostics export when you ask for it. You can inspec
 Mr. Streamer connects to the server address you enter, for each subscription you add. It does so to check your login (when you add it, each time the app starts, and when you open Settings > Subscriptions), to load the channel, movie and series lists and the programme guide, to show a title's details, and to play. Every request includes your username and password for that provider, because these providers require it. Your provider can see your IP address, the app version, and what you open and watch from it, and when. Your provider's privacy policy applies to that data.
 
 With several subscriptions, each provider receives only its own login and the requests for its own channels and titles. Mr. Streamer puts their lists together on your computer, and tells no provider about another, or what you watch from it.
+
+### Online subtitle services, from 0.0.9
+
+Online subtitle search is off until you enable it in Settings. Saving settings or opening the subtitle panel makes no request to either service. When you explicitly search, the services you selected and set up receive the movie or series TMDB identity, or its title and year when no identity is known, with the season and episode for an episode, and your requested languages. They also receive your IP address, app identification and their own API key. No provider login, playable stream address or file request headers are sent.
+
+Choosing a result downloads its subtitle from that service. OpenSubtitles receives your username and password over HTTPS for that download login. Its returned token stays in memory for the request and is not stored. A download can consume the service's allowance. SubDL uses your API key for search; its subtitle download receives no OpenSubtitles login. Their own privacy policies apply: [SubDL](https://subdl.com/privacy-policy) and [OpenSubtitles](https://www.opensubtitles.com/en/privacy-policy).
+
+Downloaded cues and corrections stay on this computer. You can forget them for a file in its subtitle panel. Removing a subscription removes its saved subtitle data; removing a service account from Settings removes its saved credentials. Turning search off cancels online requests and prevents new searches or downloads, while locally saved subtitles remain playable.
 
 ### Unencrypted connections
 

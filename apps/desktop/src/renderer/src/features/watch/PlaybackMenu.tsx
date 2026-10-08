@@ -28,6 +28,8 @@ import {
 } from "../../player/subtitles.ts";
 import { SPEEDS, titlePlayer, type Speed } from "../../player/title-player.ts";
 import { flash } from "./Flash.tsx";
+import { SubtitleTimingControls } from "../titles/SubtitleTimingControls.tsx";
+import { onlineSubtitles, useOnlineSubtitles } from "../../player/online-subtitles.ts";
 import { Choice, Menu, MenuNote } from "./TrackMenus.tsx";
 
 type Page = "speed" | "timing" | "look";
@@ -74,6 +76,7 @@ interface PlaybackProps {
   subtitle: SubtitleTrack | null;
   /** A receiver on the network plays: these settings are this computer's, listed and not set. */
   hereOnly?: boolean;
+  downloadedTiming?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
@@ -83,16 +86,18 @@ function pagesFor(
   speed: PlaybackProps["speed"],
   subtitles: readonly SubtitleTrack[],
   subtitle: SubtitleTrack | null,
+  downloadedTiming = false,
 ) {
   return [
     speed !== undefined && ("speed" as const),
-    subtitle && isText(subtitle) && ("timing" as const),
-    subtitles.length > 0 && ("look" as const),
+    (downloadedTiming || (subtitle && isText(subtitle))) && ("timing" as const),
+    (downloadedTiming || subtitles.length > 0) && ("look" as const),
   ].filter((page) => page !== false && page !== null);
 }
 
 export function PlaybackMenu(props: PlaybackProps) {
-  if (pagesFor(props.speed, props.subtitles, props.subtitle).length === 0) return null;
+  if (pagesFor(props.speed, props.subtitles, props.subtitle, props.downloadedTiming).length === 0)
+    return null;
   return (
     <Menu
       label="Playback"
@@ -111,9 +116,10 @@ export function PlaybackChoices({
   subtitles,
   subtitle,
   hereOnly = false,
+  downloadedTiming = false,
   onOpenChange,
 }: Omit<PlaybackProps, "open">) {
-  const pages = pagesFor(speed, subtitles, subtitle);
+  const pages = pagesFor(speed, subtitles, subtitle, downloadedTiming);
   if (pages.length === 0) return null;
   if (hereOnly) {
     return (
@@ -139,6 +145,7 @@ export function PlaybackChoices({
   }
   return (
     <Pages
+      downloadedTiming={downloadedTiming}
       pages={pages}
       speed={speed?.value ?? null}
       onSpeed={(next) => {
@@ -146,23 +153,27 @@ export function PlaybackChoices({
         onOpenChange(false);
       }}
       // The text settings count while text shows, or could: picture subtitles have their own.
-      text={subtitle ? isText(subtitle) : subtitles.some(isText)}
+      text={downloadedTiming || (subtitle ? isText(subtitle) : subtitles.some(isText))}
     />
   );
 }
 
 /** The menu's first page and the one opened from it. Mounted each time the menu opens. */
 function Pages({
+  downloadedTiming,
   pages,
   speed,
   onSpeed,
   text,
 }: {
+  downloadedTiming: boolean;
   pages: readonly Page[];
   speed: Speed | null;
   onSpeed: (speed: Speed) => void;
   text: boolean;
 }) {
+  const results = useOnlineSubtitles((state) => state.results);
+  const pending = useOnlineSubtitles((state) => state.pending);
   const [opened, setOpened] = useState<Page | null>(null);
   const page = opened && pages.includes(opened) ? opened : null;
   /** The page left last, whose row takes focus back on the first page. */
@@ -204,6 +215,7 @@ function Pages({
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const target = event.target instanceof HTMLElement ? event.target : null;
+    if (target?.closest("input, textarea, select")) return;
     const opens = target?.dataset["page"];
     if (target?.getAttribute("role") === "radio") {
       if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
@@ -268,13 +280,28 @@ function Pages({
       ) : page === "timing" ? (
         <>
           <Back label="Subtitle timing" value={delayLabel(delay)} onBack={(by) => go(null, by)} />
-          <Item onClick={() => setSubtitleDelay(player.element, delay - TIMING_STEP_S)}>
-            Earlier
-          </Item>
-          <Item onClick={() => setSubtitleDelay(player.element, delay + TIMING_STEP_S)}>Later</Item>
-          <Item disabled={delay === 0} onClick={() => setSubtitleDelay(player.element, 0)}>
-            Reset
-          </Item>
+          {downloadedTiming ? (
+            <>
+              <SubtitleTimingControls />
+              {results.length > 1 && (
+                <Item disabled={pending !== null} onClick={() => onlineSubtitles.tryNext()}>
+                  Try the next result
+                </Item>
+              )}
+            </>
+          ) : (
+            <>
+              <Item onClick={() => setSubtitleDelay(player.element, delay - TIMING_STEP_S)}>
+                Earlier
+              </Item>
+              <Item onClick={() => setSubtitleDelay(player.element, delay + TIMING_STEP_S)}>
+                Later
+              </Item>
+              <Item disabled={delay === 0} onClick={() => setSubtitleDelay(player.element, 0)}>
+                Reset
+              </Item>
+            </>
+          )}
         </>
       ) : (
         <>

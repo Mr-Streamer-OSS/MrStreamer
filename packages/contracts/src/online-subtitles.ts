@@ -33,6 +33,16 @@ export interface SubtitleCredentials {
   } | null;
 }
 
+/** Input only. Settings responses expose presence, never the saved secrets. */
+export const SubtitleCredentialInput = type({
+  "subdl?": type({ apiKey: "0 < string <= 4096" }).or("null"),
+  "opensubtitles?": type({
+    apiKey: "0 < string <= 4096",
+    username: "0 < string <= 512",
+    password: "0 < string <= 4096",
+  }).or("null"),
+});
+
 export interface OnlineSubtitleResult {
   /** Opaque main-owned search result. Choosing it explicitly may consume a service download. */
   readonly id: string;
@@ -54,6 +64,18 @@ export interface OnlineSubtitleSearch {
   }[];
 }
 
+/** Actual service allowance, when its download response reports one. */
+export interface SubtitleQuota {
+  readonly service: SubtitleService;
+  readonly remaining: number;
+  readonly resetAt: string | null;
+}
+
+export interface OnlineSubtitleChoice {
+  readonly saved: SavedSubtitle;
+  readonly quota: SubtitleQuota | null;
+}
+
 export const DownloadedSubtitle = type({
   service: "'subdl' | 'opensubtitles'",
   language: "string <= 64",
@@ -71,6 +93,8 @@ export const DownloadedSubtitle = type({
 export type DownloadedSubtitle = typeof DownloadedSubtitle.infer;
 
 export const SavedSubtitle = type({
+  /** Opaque cached-result identity. Timing writes name the result they edit. */
+  "selection?": "0 < string <= 64",
   timing: SubtitleTiming,
   subtitle: DownloadedSubtitle.or("null"),
 });
