@@ -58,6 +58,10 @@ A poster opens its details over the list, which stays where it was: the artwork,
 - **Save** puts the movie, or the whole series, on your [watchlist](#watchlist). The button then reads **Saved**, and pressing it again takes the title off.
 - **Remove from Continue watching** takes the title off Home's row, every version of it, and the button goes. How far you got stays, so **Resume** carries on. The title comes back to the row when you play it again.
 
+From 0.0.9, **Versions** lists quality first, then language and subscription. These are hints from the provider's name until you open a file. Equal hints within one subscription show a version count: expand it to choose each exact file by its original label, file type and added date where listed. Files in an expanded group get a version number in the provider’s list order. Matching names never make different files interchangeable.
+
+A tick names tracks actually read on this computer. A file with no subtitles says **No subtitles** only after it was read; another file with the same hints makes no such claim. A series observation says how many read episodes it describes, rather than promising the tracks of every episode. Opening the menu reads no files. Changing or replacing a source clears obsolete observations, and series observations require its current episode details to have been opened here.
+
 ## Marking episodes
 
 The three dots at the end of an episode's row open **Mark watched** and **Mark unwatched**. They are for an episode you saw somewhere else, or one that played to its end after you fell asleep. Tab reaches the dots after the row, and Enter or Space opens them. Marking plays nothing, and whatever is playing carries on as it was.

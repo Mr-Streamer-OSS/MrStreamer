@@ -564,8 +564,21 @@ it.each([
           ...(episode.id === "1-2"
             ? {
                 versions: [
-                  { id: "1-2", name: "Part 1.2 HD", tags: ["HD"], duration: 2700 },
-                  { id: "alternate", name: "Part 1.2 4K", tags: ["4K"], duration: 2800 },
+                  {
+                    id: "1-2",
+                    name: "Part 1.2 HD",
+                    tags: ["HD"],
+                    duration: 2700,
+                    container: "mp4",
+                  },
+                  {
+                    id: "alternate",
+                    name: "Part 1.2 4K",
+                    tags: ["4K"],
+                    duration: 2800,
+                    container: "mkv",
+                    observed: { files: 1, audio: ["en"], subtitles: ["nl"] },
+                  },
                 ],
               }
             : {}),
@@ -589,16 +602,25 @@ it.each([
     );
     expect(trigger?.textContent).toBe("2 versions");
     await act(async () => trigger?.click());
-    await until(() =>
-      expect(items().map((each) => each.textContent)).toEqual(["Play HD", "Play 4K"]),
-    );
+    const files = () => [...document.body.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
+    await until(() => expect(files()).toHaveLength(2));
+    expect(files().map((file) => file.getAttribute("aria-label")?.split(" · ")[0])).toEqual([
+      "4K",
+      "HD",
+    ]);
+    expect(files()[0]?.textContent).toContain("Part 1.2 4K · MKV");
+    expect(files()[0]?.textContent).toContain("English sound · Dutch subtitles");
+    expect(files()[0]?.querySelector('[aria-label="Tracks read locally"]')).not.toBeNull();
+    expect(files()[1]?.textContent).toContain("Part 1.2 HD · MP4");
+    expect(files()[1]?.querySelector('[aria-label="Tracks read locally"]')).toBeNull();
     await act(async () =>
-      items()
-        .find((each) => each.textContent === `Play ${label}`)
+      files()
+        .find((file) => file.getAttribute("aria-label")?.startsWith(label + " · "))
         ?.click(),
     );
     await until(() => expect(ipc.argsOf("playback.openTitle")[0]?.title.id).toBe(id));
     expect(titlePlayer.state().position).toBe(position);
+    expect(ipc.argsOf("subscription.updatePreferences")).toHaveLength(0);
     expect(ipc.argsOf("playback.openTitle")[0]?.title).toMatchObject({
       kind: "episode",
       seriesId: "harbour",

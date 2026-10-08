@@ -17,6 +17,7 @@ import type {
   CollectionRow,
   CollectionSort,
   CollectionTile,
+  Episode,
   EpisodeDetails,
   MetadataProgress,
   OnDemandStatus,
@@ -30,6 +31,7 @@ import type {
   TitleMatches,
   TitleRef,
 } from "@mrstreamer/contracts/ondemand";
+import { ownedKey } from "@mrstreamer/contracts/subscription";
 import { hasTitles, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type { WatchlistPage } from "@mrstreamer/contracts/watchlist";
 import { diagnosed } from "@mrstreamer/core/diagnostics";
@@ -704,6 +706,30 @@ function make(deps: OnDemandDeps) {
         return files;
       });
 
+    /** Decorates exact alternate files only from already validated local episode observations. */
+    const observedEpisodes = <E extends Episode>(episodes: readonly E[]) =>
+      Effect.gen(function* () {
+        const files = new Map(
+          (yield* knownFiles("series")).map((file) => [ownedKey(file), file.tracks]),
+        );
+        return episodes.map((episode) => ({
+          ...episode,
+          ...(episode.versions
+            ? {
+                versions: episode.versions.map((version) => {
+                  const tracks = files.get(
+                    ownedKey({
+                      subscriptionId: episode.subscriptionId,
+                      id: version.id,
+                    }),
+                  );
+                  return tracks ? { ...version, observed: { files: 1, ...tracks } } : version;
+                }),
+              }
+            : {}),
+        }));
+      });
+
     /**
      * Details kept from an earlier open, asked again after the lists were refreshed, as the
      * provider may list new episodes; if that fails, the old ones stand.
@@ -849,7 +875,21 @@ function make(deps: OnDemandDeps) {
         }),
 
       details: (kind: TitleKind, version: OwnedId) =>
-        Effect.map(detailsOf(kind, version), (found) => found.shown),
+        Effect.gen(function* () {
+          const { shown } = yield* detailsOf(kind, version);
+          if (shown.kind !== "series") return shown;
+          const episodes = yield* observedEpisodes(
+            shown.seasons.flatMap((season) => season.episodes),
+          );
+          const byId = new Map(episodes.map((episode) => [episode.id, episode]));
+          return {
+            ...shown,
+            seasons: shown.seasons.map((season) => ({
+              ...season,
+              episodes: season.episodes.map((episode) => byId.get(episode.id) ?? episode),
+            })),
+          };
+        }),
 
       season: (series: OwnedId, number: number) =>
         Effect.gen(function* () {
@@ -882,14 +922,24 @@ function make(deps: OnDemandDeps) {
               if (named(season, answers)) break;
             }
           }
-          return seasonEpisodes(season, answers);
+          return yield* observedEpisodes(seasonEpisodes(season, answers));
         }),
 
       titles: (kind: TitleKind, versions: readonly OwnedId[]) =>
         versions.length === 0
           ? Effect.succeed([])
           : // Versions of a subscription that isn't saved are in no lists, whatever their ids.
-            loaded((owners, language) => call("byIds", { owners, language, kind, versions })),
+            loaded((owners, language) =>
+              Effect.gen(function* () {
+                return yield* call("byIds", {
+                  owners,
+                  language,
+                  kind,
+                  versions,
+                  files: yield* knownFiles(kind),
+                });
+              }),
+            ),
 
       saved: (saved: readonly SavedSubscription[], query: SavedQuery) =>
         Effect.gen(function* () {

@@ -16,10 +16,9 @@
 // on with and shows none as watched or not. The title from the lists heads the sheet at once; the
 // rest follows when the provider answers, and TMDB's details when they arrive.
 import { Dialog } from "@base-ui/react/dialog";
-import { Menu } from "@base-ui/react/menu";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Check, ChevronDown, CircleDashed, Play, RotateCcw } from "lucide-react";
-import { useState, type ReactElement, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type {
   Episode,
   EpisodeDetails,
@@ -58,7 +57,6 @@ import {
   timeLeftOf,
   playTitle,
   useInContinueWatching,
-  usePickVersion,
   useRemoveFromContinue,
 } from "../../lib/titles.ts";
 import { cn } from "../../lib/utils.ts";
@@ -66,6 +64,7 @@ import { useSaveToggle, type SaveToggle } from "../../lib/watchlist.ts";
 import { SaveButton, SaveError } from "../watchlist/SaveButton.tsx";
 import { EpisodeMenu, MarkNotice, useEpisodeMarks } from "./EpisodeMarks.tsx";
 import { RelatedTitles } from "./RelatedTitles.tsx";
+import { VersionMenu } from "./VersionMenu.tsx";
 
 const close = () => useUi.setState({ details: null });
 
@@ -599,108 +598,6 @@ function useVersionNames(
   };
 }
 
-/** The menu's value for Automatic. A version's is its `ownedKey`, which always holds a colon. */
-const AUTOMATIC = "automatic";
-
-/**
- * The arrow beside Play: Automatic, or one version, remembered for the title. Each version says
- * what it sounds like, and at the right whose it is when they come from several subscriptions.
- */
-function VersionMenu({
-  title,
-  picked,
-  automatic,
-  onPick,
-  trigger,
-  children,
-}: {
-  title: Title;
-  picked: OwnedId | null;
-  /** The version Automatic plays, which its line names. */
-  automatic: OwnedId;
-  onPick: (version: OwnedId | null) => void;
-  /** The button that opens it, when not the arrow joined to Play. */
-  trigger?: ReactElement<Record<string, unknown>>;
-  children: ReactNode;
-}) {
-  const pick = usePickVersion();
-  const named = useVersionNames(title);
-  const plays = named(automatic);
-  return (
-    <Menu.Root>
-      <Menu.Trigger
-        render={
-          trigger ?? (
-            <Button
-              variant="primary"
-              size="lg"
-              aria-label="Versions"
-              className="rounded-l-none border-l border-black/20 px-3"
-            />
-          )
-        }
-      >
-        {children}
-      </Menu.Trigger>
-      <Menu.Portal>
-        <Menu.Positioner side="bottom" align="start" sideOffset={8} className="z-[60]">
-          <Menu.Popup className="max-h-[60vh] w-max min-w-[18rem] max-w-[26rem] overflow-y-auto rounded-2xl bg-popover p-2 text-[0.9375rem] shadow-2xl ring-1 ring-white/12 outline-none transition-[opacity,scale] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
-            <Menu.RadioGroup
-              value={picked ? ownedKey(picked) : AUTOMATIC}
-              onValueChange={(value: string) => {
-                const chosen =
-                  title.versions.find((version) => ownedKey(version) === value) ?? null;
-                onPick(chosen);
-                pick(title, chosen);
-              }}
-            >
-              <VersionItem value={AUTOMATIC}>
-                Automatic
-                {plays && (
-                  <span className="text-muted-foreground">
-                    {" · "}
-                    {[plays.label, plays.source].filter(Boolean).join(", ")}
-                  </span>
-                )}
-              </VersionItem>
-              {title.versions.map((version) => {
-                const said = named(version);
-                return (
-                  <VersionItem key={ownedKey(version)} value={ownedKey(version)}>
-                    <span className="flex items-baseline gap-4">
-                      <span className="min-w-0 flex-1">{said?.label}</span>
-                      {said?.source && (
-                        <span className="flex-none text-[0.8125rem] text-muted-foreground">
-                          {said.source}
-                        </span>
-                      )}
-                    </span>
-                  </VersionItem>
-                );
-              })}
-            </Menu.RadioGroup>
-          </Menu.Popup>
-        </Menu.Positioner>
-      </Menu.Portal>
-    </Menu.Root>
-  );
-}
-
-function VersionItem({ value, children }: { value: string; children: ReactNode }) {
-  return (
-    <Menu.RadioItem
-      value={value}
-      closeOnClick
-      className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-foreground/80 outline-none data-checked:text-white data-highlighted:bg-white/6"
-    >
-      <span className="grid size-1.5 flex-none">
-        <Menu.RadioItemIndicator className="size-1.5 rounded-full bg-white" />
-      </span>
-      <span className="min-w-0 flex-1">{children}</span>
-    </Menu.RadioItem>
-  );
-}
-
 /** Guest stars an episode's row names. */
 const GUESTS_SHOWN = 2;
 
@@ -899,52 +796,44 @@ function EpisodeVersionMenu({
   progress: readonly TitleProgress[];
   marks: readonly EpisodeMark[];
 }) {
-  const versions = episode.versions ?? [];
-  const labels = versionLabels(versions, details.title.originalLanguage);
   return (
-    <Menu.Root>
-      <Menu.Trigger
-        render={
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label={`Versions for ${episodeLabel(episode.season, episode.number)}`}
-          />
-        }
-      >
-        {versions.length} versions
-      </Menu.Trigger>
-      <Menu.Portal>
-        <Menu.Positioner side="bottom" align="end" sideOffset={8} className="z-[60]">
-          <Menu.Popup className="max-h-[60vh] min-w-60 overflow-y-auto bg-black p-2 text-white ring-1 ring-white/15">
-            {versions.map((version, index) => (
-              <Menu.Item
-                key={version.id}
-                title={version.name}
-                className="block w-full px-2 py-2 text-left text-sm outline-none data-highlighted:bg-white/10"
-                onClick={() => {
-                  const state = episodeStates(
-                    progress,
-                    marks,
-                  )({
-                    ...episode,
-                    id: version.id,
-                    versions: [version],
-                    exactVersion: true,
-                  });
-                  const own = state.kind === "partial" ? state.progress : undefined;
-                  playTitle(
-                    episodeNow(details, episodeFileVersion(episode, version.id)),
-                    resumePoint(own),
-                  );
-                }}
-              >
-                Play {labels[index]}
-              </Menu.Item>
-            ))}
-          </Menu.Popup>
-        </Menu.Positioner>
-      </Menu.Portal>
-    </Menu.Root>
+    <VersionMenu
+      title={{
+        ...details.title,
+        versions: (episode.versions ?? []).map((version) => ({
+          ...version,
+          subscriptionId: episode.subscriptionId,
+        })),
+      }}
+      picked={null}
+      remember={false}
+      trigger={
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-label={`Versions for ${episodeLabel(episode.season, episode.number)}`}
+        />
+      }
+      onPick={(version) => {
+        if (!version) return;
+        const state = episodeStates(
+          progress,
+          marks,
+        )({
+          ...episode,
+          id: version.id,
+          ...(episode.versions
+            ? { versions: episode.versions.filter((file) => file.id === version.id) }
+            : {}),
+          exactVersion: true,
+        });
+        playTitle(
+          episodeNow(details, episodeFileVersion(episode, version.id)),
+          resumePoint(state.kind === "partial" ? state.progress : undefined),
+        );
+      }}
+    >
+      {episode.versions?.length} versions
+    </VersionMenu>
   );
 }

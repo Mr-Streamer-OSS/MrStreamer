@@ -91,7 +91,18 @@ describe.skipIf(!hasTools)("playback produces verified filter facts", { timeout:
   it("writes only successful observed tracks, adopts cached probes under a new session id and keeps facts across restart", async () => {
     const app = await connected();
     expect((await app.titles.filterOptions("movie")).verified).toEqual([]);
+    const unread = await app.titles.titles("movie", [app.ref]);
+    expect(
+      unread[0]?.versions.find((version) => version.id === app.ref.id)?.observed,
+    ).toBeUndefined();
     const first = await app.open();
+    const fileRequests = app.provider.fileRequests();
+    const listed = await app.titles.titles("movie", [app.ref]);
+    expect(listed[0]?.versions.find((version) => version.id === app.ref.id)).toMatchObject({
+      name: app.movie.name,
+      observed: { files: 1, audio: [null], subtitles: ["en", "nl", "fr"] },
+    });
+    expect(app.provider.fileRequests()).toBe(fileRequests);
     expect(await app.facts()).toEqual([
       expect.objectContaining({
         id: app.ref.id,

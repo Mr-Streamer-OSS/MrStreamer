@@ -258,7 +258,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
         {
           id: "70001",
           versions: expect.arrayContaining([
-            { subscriptionId: source.id, id: "70002", tags: ["EN", "HD"] },
+            expect.objectContaining({ subscriptionId: source.id, id: "70002", tags: ["EN", "HD"] }),
           ]),
         },
       ],

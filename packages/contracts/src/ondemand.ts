@@ -87,6 +87,20 @@ export interface TitleVersion {
   readonly id: string;
   /** Markers from its name: "NL", "MULTI", "4K". */
   readonly tags: readonly string[];
+  /** Original provider label, when the current catalogue supplies it. */
+  readonly name?: string;
+  /** Listed file type for a movie; null for a series. No file is opened to learn it. */
+  readonly container?: string | null;
+  /** When this version was added or changed, in epoch milliseconds, when listed. */
+  readonly addedAt?: number | null;
+  /** Its position in this subscription's original list. */
+  readonly listedOrder?: number;
+  /** Current files opened on this device. Series facts describe only those read episodes. */
+  readonly observed?: {
+    readonly files: number;
+    readonly audio: readonly (string | null)[];
+    readonly subtitles: readonly (string | null)[];
+  };
   /** Exact episode files of a mapped series, for showing progress without opening its details. */
   readonly episodeFiles?: readonly string[];
 }
@@ -158,7 +172,10 @@ export interface Episode {
   readonly exactVersion?: true;
 }
 
-export interface EpisodeVersion {
+export interface EpisodeVersion extends Pick<
+  TitleVersion,
+  "container" | "addedAt" | "listedOrder" | "observed"
+> {
   readonly id: string;
   readonly name: string;
   readonly tags: readonly string[];

@@ -599,10 +599,32 @@ const handlers: {
   },
   refresh,
   finishRefresh,
-  byIds: async ({ language, kind, versions, owners }) => {
+  byIds: async ({ language, kind, versions, owners, files }) => {
     speaking(language);
-    const { index } = await catalogueOf(owners, language);
-    return byIds(index, kind, versions).map((title) => named(title, language));
+    const found = await catalogueOf(owners, language);
+    const observed = files ? filterFiles(found, kind, files) : null;
+    return byIds(found.index, kind, versions).map((title) => {
+      const shown = named(title, language);
+      if (!observed) return shown;
+      return {
+        ...shown,
+        versions: shown.versions.map((version) => {
+          const read = observed
+            .get(ownedKey(version))
+            ?.flatMap((file) => (file.tracks ? [file.tracks] : []));
+          return read?.length
+            ? {
+                ...version,
+                observed: {
+                  files: read.length,
+                  audio: [...new Set(read.flatMap((file) => file.audio))],
+                  subtitles: [...new Set(read.flatMap((file) => file.subtitles))],
+                },
+              }
+            : version;
+        }),
+      };
+    });
   },
   search: async ({ language, query, owners }) => {
     speaking(language);

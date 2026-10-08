@@ -282,7 +282,7 @@ it.each(["filter", "4k tab", "normal list"] as const)(
     );
     await page.until(() => expect(document.querySelector('[role="menuitemradio"]')).not.toBeNull());
     const hd = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) =>
-      item.textContent?.includes("1080p"),
+      item.textContent?.includes("FHD"),
     );
     expect(hd).toBeDefined();
     await act(async () => hd!.click());

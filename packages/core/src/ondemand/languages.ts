@@ -131,6 +131,31 @@ const MULTI_NAMES: Readonly<Record<string, string>> = {
   VO: "Original sound",
 };
 
+/** A provider hint keeps unfamiliar words and never claims a file's observed tracks. */
+export function versionHint(tags: readonly string[], madeIn: string | null) {
+  let named = false;
+  let asListed = false;
+  const parts = tags.map((tag) => {
+    const { mark, language, subtitles, named: explicit } = markOf(tag);
+    const multi = MULTI_NAMES[mark];
+    if (multi) {
+      named = true;
+      return multi;
+    }
+    if (!language) {
+      asListed = true;
+      return tag;
+    }
+    named = true;
+    if (subtitles && (explicit || madeIn !== language.code)) {
+      const original = (madeIn && languageName(madeIn)) || "Original";
+      return `${original} sound, ${language.name} subtitles`;
+    }
+    return `${language.name} sound`;
+  });
+  return { label: parts.join(" · ") || "Standard", named, asListed };
+}
+
 /**
  * What each version sounds like, and what it subtitles, from its marks as the provider wrote them
  * and `madeIn`, the language TMDB says the title was made in: "English sound, Nederlands
@@ -145,20 +170,7 @@ export function versionLabels(
   versions: readonly { readonly tags: readonly string[] }[],
   madeIn: string | null,
 ): string[] {
-  const labels = versions.map(({ tags }) => {
-    const parts = tags.map((tag) => {
-      const { mark, language, subtitles, named } = markOf(tag);
-      const multi = MULTI_NAMES[mark];
-      if (multi) return multi;
-      if (!language) return tag;
-      if (subtitles && (named || madeIn !== language.code)) {
-        const original = (madeIn && languageName(madeIn)) || "Original";
-        return `${original} sound, ${language.name} subtitles`;
-      }
-      return `${language.name} sound`;
-    });
-    return parts.join(" · ") || "Standard";
-  });
+  const labels = versions.map(({ tags }) => versionHint(tags, madeIn).label);
   const seen = new Map<string, number>();
   return labels.map((label) => {
     const count = (seen.get(label) ?? 0) + 1;

@@ -123,6 +123,20 @@ describe("one title per film", () => {
       title.versions.map((version) => version.id),
     ]);
 
+  it("keeps each version's original label, file type and added date beside its own id", () => {
+    const title = byIds(indexOf(catalogue, "en"), "movie", [
+      { subscriptionId: SUBSCRIPTION, id: "1" },
+    ])[0];
+    expect(
+      title?.versions.map(({ id, name, container, addedAt }) => ({ id, name, container, addedAt })),
+    ).toEqual([
+      { id: "2", name: "Speak No Evil (MULTI)", container: "mkv", addedAt: 2 },
+      { id: "1", name: "Speak No Evil (NL)", container: "mkv", addedAt: 3 },
+      { id: "3", name: "Speak No Evil 2024 (DE)", container: "mkv", addedAt: 4 },
+    ]);
+    expect(title?.versions.every((version) => version.observed === undefined)).toBe(true);
+  });
+
   it("gathers the versions sharing a TMDB id, the one suiting the language first", () => {
     expect(listed("en")).toEqual([
       ["2", ["2", "1", "3"]],

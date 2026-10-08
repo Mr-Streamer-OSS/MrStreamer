@@ -14,6 +14,7 @@ import { Subscriptions } from "../src/main/services/subscription.ts";
 import { Library } from "../src/main/services/library.ts";
 import { OnDemand } from "../src/main/services/ondemand.ts";
 import { Roster } from "../src/main/services/roster.ts";
+import { VerifiedFiles } from "../src/main/platform/verified-files.ts";
 import { Watchlist } from "../src/main/services/watchlist.ts";
 import { promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 
@@ -914,6 +915,42 @@ it("imports series files, resumes the selected exact version after reorder/start
   ]);
   const first = order[0]!;
   const alternate = first.versions![1]!;
+  expect(alternate).toMatchObject({ name: "Show S02E03 4K", container: "mp4", listedOrder: 3 });
+  expect(alternate.observed).toBeUndefined();
+  const exactFile = await app.titles.file({
+    kind: "episode",
+    subscriptionId: saved.id,
+    id: alternate.id,
+    seriesId: series.id,
+    season: 2,
+    episode: 3,
+  });
+  const [source] = await app.subscriptions.saved();
+  if (!source) throw new Error("Expected source");
+  const files = await promised(app.runtime, VerifiedFiles);
+  await files.remember(source.key, source.fileRevision, {
+    kind: "episode",
+    id: alternate.id,
+    seriesId: series.id,
+    fileKey: "observed-alternate",
+    listingKey: exactFile.listingKey,
+    audio: ["en"],
+    subtitles: ["nl"],
+  });
+  const reads = provider.requests();
+  const observed = await app.titles.details("series", series);
+  if (observed.kind !== "series") throw new Error("Expected series");
+  const observedVersions = seriesEpisodeOrder(observed)[0]!.versions!;
+  expect(observedVersions[0]?.observed).toBeUndefined();
+  expect(observedVersions[1]?.observed).toEqual({ files: 1, audio: ["en"], subtitles: ["nl"] });
+  const season = await app.titles.season(series, 2);
+  expect(season[0]?.versions?.[1]?.observed).toEqual({
+    files: 1,
+    audio: ["en"],
+    subtitles: ["nl"],
+  });
+  expect(provider.requests()).toBe(reads);
+
   expect((await app.titles.titles("series", [series]))[0]?.versions[0]?.episodeFiles).toContain(
     alternate.id,
   );
