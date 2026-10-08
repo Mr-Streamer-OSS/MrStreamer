@@ -139,10 +139,15 @@ function make() {
             yield* guide.refresh(source.id).pipe(warned("[guide] refresh failed"));
           } else {
             yield* library.refresh(source.id).pipe(warned("[roster] channel refresh failed"));
-            yield* guide.refresh(source.id).pipe(warned("[guide] refresh failed"));
-            yield* onDemand
-              .refresh(source.id)
-              .pipe(warned("[roster] movie and series refresh failed"));
+            yield* Effect.all(
+              [
+                guide.refresh(source.id).pipe(warned("[guide] refresh failed")),
+                onDemand
+                  .refresh(source.id)
+                  .pipe(warned("[roster] movie and series refresh failed")),
+              ],
+              { concurrency: "unbounded", discard: true },
+            );
           }
         }),
         scope,
@@ -210,8 +215,11 @@ function make() {
                   yield* library.refresh(source.id);
                 }
               }).pipe(warned("[startup] background refresh failed"));
-              yield* guideOf(source);
-              if (source.kind !== "m3u") yield* titlesOf(source);
+              // Guide and title owners keep their own limits; neither waits for the other's I/O.
+              yield* Effect.all(
+                source.kind === "m3u" ? [guideOf(source)] : [guideOf(source), titlesOf(source)],
+                { concurrency: "unbounded", discard: true },
+              );
             }),
           { concurrency: SUBSCRIPTIONS_AT_ONCE, discard: true },
         ),

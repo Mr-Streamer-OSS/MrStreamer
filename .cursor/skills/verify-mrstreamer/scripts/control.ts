@@ -14,7 +14,13 @@ import { startFakeTmdb } from "../../../../apps/desktop/test/fake-tmdb.ts";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
 const desktop = join(root, "apps/desktop");
-const scenarios = ["subscriptions", "live-tv", "titles", "watchlist"] as const;
+const scenarios = [
+  "subscriptions",
+  "background-refresh",
+  "live-tv",
+  "titles",
+  "watchlist",
+] as const;
 type Scenario = (typeof scenarios)[number];
 const [command, selected] = process.argv.slice(2);
 if (command === "--help" || !command) {
@@ -82,6 +88,7 @@ async function run(scenario: Scenario) {
   const observed: Record<string, unknown> = {};
   let profile: string | undefined;
   let provider: Awaited<ReturnType<typeof startFakeProvider>> | undefined;
+  let releaseGuide: (() => void) | undefined;
   let tmdb: Awaited<ReturnType<typeof startFakeTmdb>> | undefined;
   let app: ChildProcess | undefined;
   let page: Page | undefined;
@@ -90,6 +97,7 @@ async function run(scenario: Scenario) {
   try {
     profile = await mkdtemp(join(tmpdir(), "mrstreamer-verify-"));
     provider = await startFakeProvider({ channels: 60, titles: 30, live: true });
+    if (scenario === "background-refresh") releaseGuide = provider.hold("guide").release;
     tmdb = await startFakeTmdb();
     const port = await freePort();
     const args = [
@@ -211,7 +219,46 @@ async function run(scenario: Scenario) {
       ),
     );
     await capture("connected");
-    if (scenario === "subscriptions") {
+    if (scenario === "background-refresh") {
+      await click("Stay on Live TV while the guide waits", button("button", "Watch"));
+      await wait(() => exists("document.querySelector('[data-view=watch]')"));
+      // Status reads readiness without fetching. Home may already have requested missing lists.
+      await wait(() =>
+        livePage.evaluate<boolean>(`(async () => {
+          const status = await window.mrStreamer.invoke('ondemand.status');
+          return status.ok && status.value.lists.length === 1 &&
+            status.value.lists[0].fetchedAt !== null;
+        })()`),
+      );
+      observed["titlesReadyBeforeGuideRelease"] = true;
+      observed["titleListRequests"] = provider.titleListRequests();
+      observed["fileRequests"] = provider.fileRequests();
+      observed["detailRequests"] = provider.detailRequests();
+      if (
+        provider.titleListRequests() !== 4 ||
+        provider.fileRequests() !== 0 ||
+        provider.detailRequests() !== 0
+      )
+        throw new Error("Background refresh fetched duplicate lists or eager title files/details.");
+      await wait(() =>
+        livePage.evaluate<boolean>(`(() => {
+          const video = document.querySelector('video');
+          return !!video && !video.paused && video.currentTime >= 1 &&
+            video.videoWidth > 0 && video.webkitAudioDecodedByteCount > 0;
+        })()`),
+      );
+      observed["playingWithGuideHeld"] = true;
+      await capture("titles-ready-guide-held");
+      releaseGuide?.();
+      releaseGuide = undefined;
+      await wait(() =>
+        livePage.evaluate<boolean>(`(async () => {
+          const status = await window.mrStreamer.invoke('guide.status');
+          return status.ok && status.value.some(guide => guide.availability === 'available');
+        })()`),
+      );
+      observed["guideReadyAfterRelease"] = true;
+    } else if (scenario === "subscriptions") {
       await click("Open Settings", "document.querySelector('button[aria-label=Settings]')");
       await click("Open Subscriptions", button("nav button", "Subscriptions"));
       await wait(() =>
@@ -330,6 +377,7 @@ async function run(scenario: Scenario) {
         await writeFile(join(evidence, "failure.png"), Buffer.from(shot.result["data"], "base64"));
     }
   } finally {
+    releaseGuide?.();
     const cleanupErrors: string[] = [];
     const clean = async (operation: () => Promise<unknown>) => {
       try {

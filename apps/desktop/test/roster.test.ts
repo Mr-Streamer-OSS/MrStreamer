@@ -8,6 +8,7 @@ import { ViewingRecord } from "@mrstreamer/core/viewing/service";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as TestClock from "effect/testing/TestClock";
 import { describe, expect, it, vi } from "vitest";
 import { mainLayer } from "../src/main/runtime.ts";
 import { Library } from "../src/main/services/library.ts";
@@ -23,9 +24,21 @@ import { fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./suppo
 const DECODERS: readonly Codec[] = ["h264", "aac"];
 
 /** The app's services on `dataDir`, as a start of the app has them. */
-async function started(dataDir: string) {
-  const runtime = runtimeFor(mainLayer(testConfig(dataDir)));
+async function started(dataDir: string, now?: number) {
+  const services = mainLayer(testConfig(dataDir));
+  const runtime = runtimeFor(
+    now === undefined
+      ? services
+      : services.pipe(
+          Layer.provideMerge(
+            Layer.effectDiscard(TestClock.setTime(now)).pipe(
+              Layer.provideMerge(TestClock.layer({ warningDelay: "1 day" })),
+            ),
+          ),
+        ),
+  );
   return {
+    runtime,
     /**
      * Removes a subscription with its record, as Settings does with the box ticked, on these
      * services, and has the removal wait until `release`. `queued` waits before its turn among
@@ -117,7 +130,7 @@ async function withTwo() {
 }
 
 describe("the saved subscriptions", { timeout: 30_000 }, () => {
-  it("loads an Xtream subscription's channels, guide and titles in order", async () => {
+  it("loads titles beside a held guide once an Xtream subscription's channels are ready", async () => {
     const provider = await fakeProvider();
     const app = await started(await tempDir());
     const channels = provider.hold("channels");
@@ -133,13 +146,14 @@ describe("the saved subscriptions", { timeout: 30_000 }, () => {
         subscriptionId: saved.id,
         fetchedAt: expect.any(Number),
       });
-      expect((await app.onDemand.status()).lists[0]?.fetchedAt).toBeNull();
-      guide.release();
       await vi.waitFor(
         async () =>
           expect((await app.onDemand.status()).lists[0]?.fetchedAt).toEqual(expect.any(Number)),
         { timeout: 10_000 },
       );
+      expect(provider.titleListRequests()).toBe(4);
+      expect(provider.fileRequests()).toBe(0);
+      expect(provider.detailRequests()).toBe(0);
     } finally {
       channels.release();
       guide.release();
@@ -174,6 +188,68 @@ describe("the saved subscriptions", { timeout: 30_000 }, () => {
     expect(await playback.playing(session.sessionId)).not.toBeNull();
     stream.stop();
   });
+
+  it.each(["repair", "startup"] as const)(
+    "refreshes titles during %s while a guide waits, joins foreground reads and lets another subscription progress",
+    async (trigger) => {
+      const first = await fakeProvider();
+      const second = await fakeProvider({ second: true });
+      const dataDir = await tempDir();
+      let app = await started(dataDir);
+      const a = (await app.subscriptions.add(login(first))).id;
+      const b = (await app.subscriptions.add(login(second))).id;
+      const before = new Map<string, number>();
+      if (trigger === "startup") {
+        for (const id of [a, b]) {
+          await app.library.refresh(id);
+          await app.guide.refresh(id);
+          await app.onDemand.refresh(id);
+        }
+        for (const row of (await app.onDemand.status()).lists)
+          before.set(row.subscriptionId, row.fetchedAt ?? 0);
+        await app.runtime.dispose();
+        app = await started(dataDir, Date.now() + 13 * 60 * 60 * 1000);
+      }
+      const guide = first.hold("guide");
+      const titles = first.hold("titles");
+      let refreshing: Promise<void> | undefined;
+      try {
+        if (trigger === "repair") {
+          await app.roster.update(a, { secret: "demo" });
+          await app.roster.update(b, { secret: "demo" });
+        } else refreshing = app.roster.refreshDue();
+        await guide.arrived;
+        await titles.arrived;
+        // A foreground page joins the active refresh or reads its existing cache while the guide waits.
+        const page = app.onDemand.collection({ kind: "movie", id: "all", offset: 0, limit: 10 });
+        titles.release();
+        await vi.waitFor(
+          async () => {
+            const rows = (await app.onDemand.status()).lists;
+            expect(rows).toMatchObject([
+              { subscriptionId: a, fetchedAt: expect.any(Number) },
+              { subscriptionId: b, fetchedAt: expect.any(Number) },
+            ]);
+            for (const row of rows)
+              expect(row.fetchedAt).toBeGreaterThan(before.get(row.subscriptionId) ?? 0);
+          },
+          { timeout: 10_000 },
+        );
+        expect((await page).total).toBeGreaterThan(0);
+        expect(first.titleListRequests()).toBe(trigger === "startup" ? 8 : 4);
+        expect(second.titleListRequests()).toBe(trigger === "startup" ? 8 : 4);
+        for (const provider of [first, second]) {
+          expect(provider.fileRequests()).toBe(0);
+          expect(provider.detailRequests()).toBe(0);
+          expect(provider.streamRequests()).toBe(0);
+        }
+      } finally {
+        titles.release();
+        guide.release();
+        await refreshing;
+      }
+    },
+  );
 
   it("removes one with what was loaded from it, and leaves the other playing", async () => {
     const app = await withTwo();

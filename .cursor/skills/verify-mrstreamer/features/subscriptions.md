@@ -14,6 +14,8 @@ Preconditions: built app and fixture media, ffmpeg/ffprobe, a display or Xvfb. R
 
 For playlist paths use `apps/desktop/test/e2e/playlist-app.ts`; for merged libraries, rename, refresh, removal and credential repair use `apps/desktop/test/e2e/multiple-subscriptions.ts`. Their executable/argument recipes are in `docs/contributing/testing.md`. Preserve before/after UI evidence for the changed path, including removal confirmation where relevant.
 
+Run `pnpm verify:desktop background-refresh` to connect through the real form, stay on Live TV while the fixture holds its guide, and observe movie/series readiness without opening Movies. Home also requests missing lists, so this scenario checks playback and request counts while the guide waits; the public Roster cases prove background scheduling. The proof requires one set of title-list requests, no title details or files, then a usable guide after release. Xtream guide and title refresh run beside each other once channels are ready, on add, secret repair and stale startup; their service owners retain cancellation and refresh joining. Public `roster.test.ts` also checks repair/startup, foreground joining and a second subscription progressing. This scenario uses a fresh source, so cached startup and installed-platform acceptance still need their own checks.
+
 Source: `docs/user/subscriptions.md`, `apps/desktop/src/renderer/src/features/settings/SubscriptionSection.tsx`, `apps/desktop/src/main/services/` and the named harnesses.
 
 ## Gotchas
