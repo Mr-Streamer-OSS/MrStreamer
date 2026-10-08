@@ -88,7 +88,7 @@ describe("the installers the build writes", () => {
     const request: typeof fetch = async (input, init) => {
       const address = String(input);
       asked.push(`${init?.method ?? "GET"} ${address}`);
-      if (address === FEED) {
+      if (address.split("?")[0] === FEED) {
         if (updates instanceof Error) throw updates;
         return typeof updates === "number"
           ? new Response(null, { status: updates })
@@ -108,8 +108,8 @@ describe("the installers the build writes", () => {
       version: "0.0.7",
       installers: ["dmg", "exe", "appImage", "deb"],
     });
-    expect(asked).toEqual([
-      `GET ${FEED}`,
+    expect(asked[0]).toBe(`GET ${FEED}`);
+    expect(asked.slice(1)).toEqual([
       `HEAD ${RELEASES}/download/v0.0.7/Mr-Streamer-0.0.7-mac-arm64.dmg`,
       `HEAD ${RELEASES}/download/v0.0.7/Mr-Streamer-0.0.7-win-x64-setup.exe`,
       `HEAD ${RELEASES}/download/v0.0.7/Mr-Streamer-0.0.7-linux-x86_64.AppImage`,
@@ -128,12 +128,34 @@ describe("the installers the build writes", () => {
     });
   });
 
+  it("uses fresh release history instead of a cached older feed, while checking actual files", async () => {
+    const { asked, request } = web(
+      feed("0.0.7"),
+      names("0.0.8").filter((name) => !name.endsWith(".deb")),
+    );
+    const published = "2026-10-07T18:00:00Z";
+    expect(await verifiedDownloads(request, { version: "0.0.8", published })).toEqual({
+      version: "0.0.8",
+      installers: ["dmg", "exe", "appImage"],
+    });
+    expect(asked).toHaveLength(4);
+    expect(asked.every((request) => request.startsWith(`HEAD ${RELEASES}/download/v0.0.8/`))).toBe(
+      true,
+    );
+  });
+
   it("leave out an installer that couldn't be asked for", async () => {
     const { request } = web(feed("0.0.8"), names("0.0.8"));
     const offline: typeof fetch = (input, init) =>
       String(input).endsWith(".dmg") ? Promise.reject(new Error("offline")) : request(input, init);
 
     expect((await verifiedDownloads(offline))?.installers).toEqual(["exe", "appImage", "deb"]);
+  });
+
+  it("offers no installers when complete history says every stable release was withdrawn", async () => {
+    const { asked, request } = web(feed("0.0.8"), names("0.0.8"));
+    expect(await verifiedDownloads(request, null)).toBeNull();
+    expect(asked).toEqual([]);
   });
 
   it.each<[string, unknown]>([
@@ -146,6 +168,7 @@ describe("the installers the build writes", () => {
     const { asked, request } = web(updates, names("0.0.8"));
 
     expect(await verifiedDownloads(request)).toBeNull();
-    expect(asked).toEqual([`GET ${FEED}`]);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]?.split("?")[0]).toBe(`GET ${FEED}`);
   });
 });

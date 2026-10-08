@@ -1,4 +1,4 @@
-// Every page counts its view. The home page also moves and keeps its download links current:
+// Every page counts its view. Home moves its window; home, download and about keep release links current:
 // - Each part comes in once as it scrolls into view, and the hero's window tips upright as the
 //   page scrolls. The reader starts all of it, nothing runs while the page sits still, and nothing
 //   is hidden waiting for this script: without it the page is whole and the window upright.
@@ -6,7 +6,7 @@
 // - One request for the update feed points the download links at a stable release published
 //   since the site was built (downloads.ts). Without an answer the built links stand.
 import { inject } from "@vercel/analytics";
-import { FEED, listedDownloads, showDownloads } from "./downloads.ts";
+import { FEED, showFeedDownloads } from "./downloads.ts";
 
 // Local development does not load the analytics script.
 if (import.meta.env.PROD) inject({ mode: "production" });
@@ -87,12 +87,11 @@ calm.addEventListener("change", () => {
 async function refreshDownloads(): Promise<void> {
   try {
     const response = await fetch(FEED, { signal: AbortSignal.timeout(8_000) });
-    const downloads = response.ok ? listedDownloads(await response.json()) : null;
-    if (downloads) showDownloads(document, downloads);
+    if (response.ok) showFeedDownloads(document, await response.json());
   } catch {
     // Offline, blocked or not a feed.
   }
 }
 
-// Only the home page links installers.
-if (document.querySelector("[data-installer]")) void refreshDownloads();
+// Home, download and about refresh through the same feed contract.
+if (document.querySelector("[data-installer], [data-release-version]")) void refreshDownloads();

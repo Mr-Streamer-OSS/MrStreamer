@@ -42,7 +42,7 @@ A movie starts about a second after you choose it. Skipping into what's already 
 
 Mr. Streamer sends what you watch to a TV on your network: with AirPlay on macOS, and with Google Cast on Windows. The Linux builds play on the computer only. The TV fetches the stream from your computer, so the computer has to stay on and on the same network for as long as the TV plays. Mr. Streamer keeps it awake meanwhile.
 
-For Live TV, open **More > Play on**. Movies and episodes keep the TV button beside the volume. **O** opens the chooser from either player. On Windows, pick a Cast device from the list. On macOS, **AirPlay** in Play on opens Apple's list; a title's TV button and **O** open it directly. A TV may ask for a code the first time. What you watch plays on here until the TV answers, and **This computer** cancels.
+For Live TV in 0.0.8, use the TV button beside the volume. From 0.0.9, open **More > Play on** instead. Movies and episodes keep the TV button beside the volume. **O** opens the chooser from either player. On Windows, pick a Cast device from the list. On macOS, **AirPlay** in Play on opens Apple's list; a title's TV button and **O** open it directly. A TV may ask for a code the first time. What you watch plays on here until the TV answers, and **This computer** cancels.
 
 While the TV plays:
 

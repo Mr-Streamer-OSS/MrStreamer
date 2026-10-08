@@ -592,6 +592,8 @@ jobs:
       id-token: write
 
   finalize:
+    # marketing-deploy.yml reads this job name to confirm a published stable release.
+    # Update its trigger query too if this name changes.
     name: Record the stable version on main
     needs: publish
     if: inputs.channel == 'stable'

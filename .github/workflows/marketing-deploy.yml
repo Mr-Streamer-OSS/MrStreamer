@@ -1,5 +1,5 @@
 # Publishes the website, apps/marketing, to mrstreamer.app on Vercel: after a push to main that
-# changes what the page is built from, or by hand from main. apps/marketing/README.md has the
+# changes site inputs, after a recorded stable promotion, or by hand from main. README.md has the
 # setup, the first publication and how to turn it off.
 #
 # Off until the repository variable MARKETING_DEPLOY_ENABLED is "true": until then a run builds,
@@ -9,7 +9,8 @@
 #
 # - Only main publishes: no pull request event starts this workflow, so no fork's code runs near
 #   the token.
-# - The build job has no secrets. It builds main as it is when the job starts, checks the package
+# - The build job has no owner secrets. A read-only workflow token fetches release history.
+#   It builds main as it is when the job starts, checks the package
 #   (apps/marketing/scripts/package-vercel.ts) and hands over only .vercel/output.
 # - The publish job checks out nothing: it holds that package and the token, and runs the pinned
 #   Vercel CLI on it.
@@ -29,6 +30,11 @@ on:
       - apps/marketing/**
       - docs/assets/**
       - docs/privacy.md
+      - docs/about.md
+      - docs/security.md
+      - docs/user/**
+      - packages/contracts/src/update-feed.ts
+      - packages/contracts/src/version.ts
       - apps/desktop/assets/brand/mark.svg
       - package.json
       - pnpm-workspace.yaml
@@ -36,28 +42,68 @@ on:
       - .github/workflows/marketing.yml
       - .github/workflows/marketing-deploy.yml
   workflow_dispatch:
+  # GITHUB_TOKEN release publications do not start a release event workflow. A completed run
+  # does start workflow_run; the gate below admits only a recorded stable promotion on main.
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
   actions: read
 
-# Runs from main take turns, and none is cancelled halfway. GitHub keeps one run waiting per
-# group, so a run started by hand from another branch, which builds nothing, gets a group of its
-# own: it can't take the place of a run from main that is waiting to publish.
+# Runs from main take turns without replacing pending publications, as release.yml does.
+# Nightly workflow_run events can reach this queue before the trigger gate rejects them.
+# Non-main manual runs get a group of their own and cannot delay a main publication.
 concurrency:
   group: marketing-production-${{ github.ref }}
   cancel-in-progress: false
+  queue: max
 
 env:
   MARKETING_INPUTS: >-
-    apps/marketing docs/assets docs/privacy.md apps/desktop/assets/brand/mark.svg package.json pnpm-workspace.yaml
+    apps/marketing docs/assets docs/privacy.md docs/about.md docs/security.md docs/user apps/desktop/assets/brand/mark.svg package.json pnpm-workspace.yaml
     pnpm-lock.yaml .github/workflows/marketing.yml .github/workflows/marketing-deploy.yml
+    packages/contracts/src/update-feed.ts packages/contracts/src/version.ts
 
 jobs:
+  trigger:
+    name: Check publication trigger
+    if: >-
+      github.ref == 'refs/heads/main' && (github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.event == 'workflow_dispatch' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      allowed: ${{ steps.trigger.outputs.allowed }}
+    steps:
+      # No checkout or artifacts from the triggering workflow. GitHub's job records prove the
+      # stable-only recording job succeeded; nightly runs and dry runs never pass this gate.
+      # A later Store upload failure does not undo the release or block this rebuild.
+      - id: trigger
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_RUN: ${{ github.event.workflow_run.id }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != workflow_run ]; then
+            echo "allowed=true" >> "$GITHUB_OUTPUT"
+          else
+            stable=$(gh api --paginate "repos/$GH_REPO/actions/runs/$RELEASE_RUN/jobs?per_page=100" \
+              --jq '.jobs[] | select(.name | endswith("Record the stable version on main")) | select(.conclusion == "success") | .id')
+            if [ -n "$stable" ]; then
+              echo "allowed=true" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
   build:
     name: Build and check
+    needs: trigger
     # A run started by hand from another branch does nothing.
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && needs.trigger.outputs.allowed == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
@@ -77,6 +123,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile --filter mrstreamer-marketing...
       - name: Build and check the package
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: pnpm --filter mrstreamer-marketing build
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

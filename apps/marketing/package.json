@@ -2,7 +2,7 @@
   "name": "mrstreamer-marketing",
   "private": true,
   "type": "module",
-  "description": "The website at mrstreamer.app: static pages, built from the app captures and privacy policy in docs.",
+  "description": "The website at mrstreamer.app: static pages, built from app captures, Markdown guides and GitHub releases.",
   "license": "GPL-3.0-only",
   "scripts": {
     "dev": "node scripts/prepare-assets.ts && vite",
