@@ -7,7 +7,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SavedSubtitle } from "@mrstreamer/contracts/online-subtitles";
 import type { SubtitleTrack } from "@mrstreamer/contracts/playback";
 import { SubtitlePanel } from "../../src/renderer/src/features/titles/SubtitlePanel.tsx";
-import { PlaybackChoices } from "../../src/renderer/src/features/watch/PlaybackMenu.tsx";
+import {
+  PlaybackChoices,
+  PlaybackMenu,
+} from "../../src/renderer/src/features/watch/PlaybackMenu.tsx";
 import { onlineSubtitles } from "../../src/renderer/src/player/online-subtitles.ts";
 import { titlePlayer } from "../../src/renderer/src/player/title-player.ts";
 
@@ -220,6 +223,62 @@ describe("subtitle choices while the picture plays", () => {
     expect(ipc.argsOf("subtitles.timing").at(-1)?.timing.speed).toBe(1.04);
   });
 
+  it("opens the timing page from the keyboard on its first offset step, walks its buttons, and leaves drift alone", async () => {
+    await opened();
+    titlePlayer.acceptDownloaded("movie", saved);
+    ipc.always("subtitles.timing", saved);
+    await render(
+      createElement(PlaybackMenu, {
+        speed: { value: 1, onChange: () => {} },
+        subtitles: [],
+        subtitle: null,
+        downloadedTiming: true,
+        open: true,
+        onOpenChange: () => {},
+      }),
+    );
+    const press = async (key: string) => {
+      await act(async () => {
+        const target = document.activeElement!;
+        const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+        target.dispatchEvent(event);
+        // happy-dom does not perform a button's native Enter activation.
+        if (key === "Enter" && !event.defaultPrevented && target instanceof HTMLButtonElement)
+          target.click();
+        await settle();
+      });
+    };
+    await act(async () => button("Subtitle timing").focus());
+    await press("Enter");
+    expect(document.activeElement?.textContent).toBe("-1 s");
+    expect(ipc.argsOf("subtitles.timing")).toEqual([]);
+    await press("Enter");
+    expect(ipc.argsOf("subtitles.timing").map(({ timing }) => timing)).toEqual([
+      { offset: -1, speed: 1 },
+    ]);
+    const walked: string[] = [];
+    for (let step = 0; step < 11; step++) {
+      await press("ArrowDown");
+      walked.push(document.activeElement?.textContent ?? "");
+    }
+    expect(walked).toEqual([
+      "-0.1 s",
+      "+0.1 s",
+      "+1 s",
+      "23.976 → 24 fps",
+      "23.976 → 25 fps",
+      "24 → 23.976 fps",
+      "24 → 25 fps",
+      "25 → 23.976 fps",
+      "25 → 24 fps",
+      "Reset timing",
+      "Subtitle timing−1.0 s",
+    ]);
+    await press("Backspace");
+    expect(document.activeElement?.textContent).toContain("Subtitle timing");
+    expect(titlePlayer.state().savedSubtitle?.timing).toEqual({ offset: -1, speed: 1 });
+  });
+
   it("names the region of a result's language, and takes a replaced file's saved result away", async () => {
     await opened();
     ipc.always("subtitles.search", {
@@ -361,8 +420,10 @@ describe("subtitle choices while the picture plays", () => {
     expect(container?.textContent).not.toContain("Downloading");
     expect(container?.textContent).not.toContain("Late release");
     expect(container?.textContent).not.toContain("3 service downloads remain");
+    // With nothing saved held yet, Off or a file track is the viewer's language for other titles
+    // too. Turning a held saved result off is this file's alone.
     expect(ipc.argsOf("preferences.update")).toEqual(
-      choice === "Off" || choice === "C off"
+      choice === "Off"
         ? [{ subtitleLanguage: "off" }]
         : choice === "file track"
           ? [{ subtitleLanguage: "en" }]

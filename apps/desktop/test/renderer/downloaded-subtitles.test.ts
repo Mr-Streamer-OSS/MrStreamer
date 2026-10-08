@@ -140,6 +140,27 @@ describe("a downloaded subtitle on the movie picture", () => {
       expect(shown()).toBe("");
       titlePlayer.showDownloaded();
       expect(shown()).toBe("Welcome.");
+      // Chosen before anything saved was held: an ordinary choice, remembered for other titles.
+      expect(ipc.argsOf("preferences.update")).toEqual([
+        { subtitleLanguage: choice === "Off" ? "off" : "en" },
+      ]);
+    },
+  );
+
+  it.each(["shows", "is listed but off"])(
+    "leaves the subtitle language for other titles alone when Off or a file track is chosen while a saved result %s",
+    async (state) => {
+      const { restore } = await open({ subtitleLanguage: "nl" });
+      restore.resolve({ ...saved, selection: "kept-result", shown: state === "shows" });
+      await settle();
+      expect(titlePlayer.state().downloadedOn).toBe(state === "shows");
+      titlePlayer.setSubtitle(null);
+      titlePlayer.setSubtitle(english);
+      titlePlayer.toggleSubtitles();
+      await titlePlayer.downloadedEditsSaved();
+      expect(titlePlayer.state()).toMatchObject({ subtitle: null, downloadedOn: false });
+      expect(ipc.argsOf("subtitles.hide")).toHaveLength(3);
+      expect(ipc.argsOf("preferences.update")).toEqual([]);
     },
   );
 

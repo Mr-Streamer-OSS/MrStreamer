@@ -1265,9 +1265,13 @@ export const titlePlayer = {
     void run(position, 0, pausedByViewer());
   },
 
-  /** Shows another subtitle track, or none, and remembers the choice. */
+  /**
+   * Shows another subtitle track, or none, and remembers the choice: as the language for the next
+   * titles, or, while this file has a saved result, for this file alone. Main's mark on that
+   * result then says it stays off here, and the language chosen for other titles is left as it is.
+   */
   setSubtitle(track: SubtitleTrack | null): void {
-    const { position, shows, downloadedOn } = store.getState();
+    const { position, shows, downloadedOn, savedSubtitle } = store.getState();
     subtitleChoice++;
     if (track) lastWasDownloaded = false;
     if (receiver) {
@@ -1289,7 +1293,8 @@ export const titlePlayer = {
     if (downloadedOn) setSubtitleDelay(video, 0);
     keepSubtitleChoice();
     if (track) lastSubtitle = track;
-    rememberSubtitles(track);
+    // A result still downloading is none held yet: turning away from it is an ordinary choice.
+    if (!savedSubtitle?.subtitle) rememberSubtitles(track);
     // Turning subtitles off is instant, and stays off; showing others needs a new run.
     if (!track) {
       store.setState({ subtitleStatus: null });

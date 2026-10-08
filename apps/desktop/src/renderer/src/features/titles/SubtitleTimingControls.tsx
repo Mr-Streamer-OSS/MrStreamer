@@ -50,6 +50,11 @@ function TimingField({
   );
 }
 
+/**
+ * The page's buttons are the Playback menu's items (`data-item`) in reading order, so its keys
+ * walk them and a page opened by the keyboard starts on the first offset step, never on a drift
+ * preset below it. The two fields are reached with Tab and keep their own edit keys.
+ */
 export function SubtitleTimingControls() {
   const timing = useTitlePlayer((state) => state.savedSubtitle?.timing ?? DEFAULT_SUBTITLE_TIMING);
   const [error, setError] = useState<string | null>(null);
@@ -84,7 +89,7 @@ export function SubtitleTimingControls() {
       </div>
       <div className="flex gap-2">
         {[-1, -0.1, 0.1, 1].map((step) => (
-          <Button key={step} size="sm" variant="secondary" onClick={() => shift(step)}>
+          <Button key={step} data-item size="sm" variant="secondary" onClick={() => shift(step)}>
             {step > 0 ? "+" : ""}
             {step} s
           </Button>
@@ -117,7 +122,12 @@ export function SubtitleTimingControls() {
           )),
         )}
       </div>
-      <Button size="sm" variant="secondary" onClick={() => change(DEFAULT_SUBTITLE_TIMING)}>
+      <Button
+        data-item
+        size="sm"
+        variant="secondary"
+        onClick={() => change(DEFAULT_SUBTITLE_TIMING)}
+      >
         Reset timing
       </Button>
       {error && <p role="alert">{error}</p>}
