@@ -6,7 +6,8 @@
 // The main process picks which of a channel's streams plays: the quality chosen for it, else
 // Automatic, which may pass a stream that doesn't start. Once one plays, the controller asks which.
 //
-// A channel's sound and subtitle tracks come from its program table once the stream starts.
+// A channel's sound and subtitle tracks come from its program table once the stream starts, and
+// again whenever the main process says they changed, as when captions begin in its pictures.
 // Another sound track opens the stream again with it; subtitles are decoded here from the
 // stream's private data, timed on the element's clock, and shown over the picture.
 //
@@ -60,7 +61,7 @@ import { teletextPagePresent } from "@mrstreamer/core/subtitles/teletext";
 import { dvbPagePresent } from "@mrstreamer/core/subtitles/dvb";
 import type { Cue } from "@mrstreamer/core/subtitles/webvtt";
 import { appError } from "../lib/errors.ts";
-import { call } from "../lib/ipc.ts";
+import { call, listen } from "../lib/ipc.ts";
 import { decoders } from "./decoders.ts";
 import {
   createEngine,
@@ -96,8 +97,6 @@ export const STABLE_PLAYBACK_MS = 30_000;
  */
 const ZAP_SETTLE_MS = 350;
 const VOLUME_SAVE_DELAY_MS = 400;
-/** Captions show up in the tracks only once the pictures carry them; asked again after this. */
-const TRACKS_AGAIN_MS = 5000;
 
 export type PlaybackProblem =
   /** The provider has no stream for the channel right now: it answered 404 or 410. */
@@ -267,6 +266,8 @@ let subtitlesOff = false;
 let channelPlayed = 0;
 /** Preference answers apply only to the latest track list of this selection. */
 let tracksRevision = 0;
+/** Counts the reads of the main process's tracks: only the answer to the last one applies. */
+let tracksAsked = 0;
 /** A bounded packet sample lets first-proof autoselection decode the data that proved it. */
 let recentSubtitlePackets: { pid: number; data: Uint8Array; at: number }[] = [];
 const subtitleKey = (track: Pick<SubtitleTrack, "id" | "page" | "format">) =>
@@ -470,10 +471,8 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
   store.setState({ phase: { kind: "playing", engine: engine.name } });
   void loadStream(mine, session.sessionId);
   // An engine that reads the stream's tracks tells them itself; the main process reads the rest.
-  if (!engine.tracks) {
-    void loadTracks(mine, session.sessionId);
-    setTimeout(() => void loadTracks(mine, session.sessionId), TRACKS_AGAIN_MS);
-  }
+  // It says when they change (`playback.tracksChanged`), as captions begin whenever they do.
+  if (!engine.tracks) void loadTracks(mine, session.sessionId);
   void call("viewing.recordWatch", {
     commandId: crypto.randomUUID(),
     channel: ownedId(channel),
@@ -761,11 +760,26 @@ async function loadStream(mine: number, sessionId: string): Promise<void> {
   store.setState(fellBack ? { stream, fellBack } : { stream });
 }
 
-/** Reads the stream's tracks from the main process. */
+/**
+ * Reads the stream's tracks from the main process. An answer that arrives after a later read's
+ * is dropped: it is the older list.
+ */
 async function loadTracks(mine: number, sessionId: string): Promise<void> {
+  const asked = ++tracksAsked;
   const tracks = await call("playback.tracks", { sessionId }).catch(() => null);
-  if (mine === selection && tracks) await applyTracks(mine, tracks);
+  if (mine === selection && asked === tracksAsked && tracks) await applyTracks(mine, tracks);
 }
+
+/**
+ * The main process found another caption channel in a stream's pictures. Only the stream that
+ * plays here counts: one closed since is nobody's, an HLS engine tells its own tracks, and what
+ * was found before a stream plays is in the tracks read when it does.
+ */
+listen("playback.tracksChanged", ({ sessionId }) => {
+  if (current?.sessionId !== sessionId || current.engine.tracks) return;
+  if (store.getState().phase.kind !== "playing") return;
+  void loadTracks(selection, sessionId);
+});
 
 /**
  * Takes the stream's tracks as its engine tells them, now and whenever they change. What the

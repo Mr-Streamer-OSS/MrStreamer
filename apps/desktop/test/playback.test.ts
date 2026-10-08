@@ -9,6 +9,7 @@ import { pesReader } from "@mrstreamer/core/subtitles/transport";
 import { PLAYLIST_CHANNELS, startFakePlaylist } from "./fake-playlist.ts";
 import { fixture, type FakeProvider } from "./fake-provider.ts";
 import {
+  collect,
   fakeProvider,
   holdableFetch,
   promised,
@@ -29,7 +30,8 @@ const hasFfmpeg = spawnSync(FFMPEG, ["-version"]).status === 0;
 
 /**
  * Playback on a connected fake provider. `open` takes a channel of the connected subscription by
- * the provider's id; `service` is playback itself. `dispose` ends it, as quitting the app does.
+ * the provider's id; `service` is playback itself, and `tracksChanged` the session ids it said
+ * that of so far. `dispose` ends it, as quitting the app does.
  */
 async function connectedPlayback(options: { slotReleaseMs?: number; ffmpeg?: boolean } = {}) {
   const provider = await fakeProvider({
@@ -54,6 +56,7 @@ async function connectedPlayback(options: { slotReleaseMs?: number; ffmpeg?: boo
     password: "demo",
   });
   const service = await promised(runtime, Playback);
+  const tracksChanged = await collect(runtime, service.tracksChanged);
   const playback = {
     ...service,
     open: (
@@ -63,7 +66,7 @@ async function connectedPlayback(options: { slotReleaseMs?: number; ffmpeg?: boo
     ) => service.open({ subscriptionId, id: channelId }, decoders, options),
     dispose: () => runtime.dispose(),
   };
-  return { provider, playback, service, subscriptionId };
+  return { provider, playback, service, subscriptionId, tracksChanged };
 }
 
 /** Ids of channels that stream without end. */
@@ -356,6 +359,27 @@ describe("playback", () => {
         expect.objectContaining({ id: 0x1ff0, page: 1, format: "captions", label: "Captions" }),
       ],
       playing: 0x101,
+    });
+    await playback.dispose();
+  });
+
+  it("says a channel's tracks changed once captions turn up in its pictures", async () => {
+    const { provider, playback, tracksChanged } = await connectedPlayback();
+    // A channel without captions says nothing.
+    const plain = await playback.open(channelNamed(provider, "TEST | H.264 + AAC"), LINUX);
+    await fetch(plain.url).then((response) => response.arrayBuffer());
+    expect(tracksChanged).toEqual([]);
+
+    const session = await playback.open(
+      channelNamed(provider, "TEST | Subtitles and two sound tracks"),
+      LINUX,
+    );
+    await fetch(session.url).then((response) => response.arrayBuffer());
+
+    await vi.waitFor(() => expect(tracksChanged).toEqual([session.sessionId]));
+    expect((await playback.tracks(session.sessionId))?.subtitles.at(-1)).toMatchObject({
+      format: "captions",
+      page: 1,
     });
     await playback.dispose();
   });

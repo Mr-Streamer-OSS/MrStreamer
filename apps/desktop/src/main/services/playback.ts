@@ -675,6 +675,12 @@ export class Playback extends Context.Service<
      * playback's own reads find out. What was saved for the old file is already forgotten then.
      */
     readonly fileReplaced: Stream.Stream<string>;
+    /**
+     * Ids of channel sessions whose `tracks` changed since their stream started: a caption channel
+     * was found in its pictures. Never of a closed session, nor for a stream the player has asked
+     * for again since.
+     */
+    readonly tracksChanged: Stream.Stream<string>;
     /** Closes a stream and its provider connection. Unknown or already closed ids are ignored. */
     close(sessionId: string): Effect.Effect<void>;
     /** Closes every open stream, for example when the window closes. */
@@ -745,6 +751,7 @@ function make(deps: PlaybackDeps) {
     const verifiedFiles = Option.getOrNull(yield* Effect.serviceOption(VerifiedFiles));
     const savedSubtitles = Option.getOrNull(yield* Effect.serviceOption(SavedSubtitles));
     const replaced = yield* PubSub.unbounded<string>();
+    const tracksChanged = yield* PubSub.unbounded<string>();
     const scope = yield* Effect.scope;
     const sessions = new Map<string, Session>();
     /** When channel streams failed, by upstream address, for `FAILED_STREAM_MS`. */
@@ -939,10 +946,14 @@ function make(deps: PlaybackDeps) {
         layout && chosen && chosen !== layout.audio[0] && !conversion
           ? filtered(cleaned, createAudioChoice(layout.programPid, chosen.pid))
           : cleaned;
-      // Captions inside the pictures get a stream of their own, after any conversion.
+      // Captions inside the pictures get a stream of their own, after any conversion. They can
+      // start at any time, so whoever lists the tracks hears of each channel found. A stream
+      // the player asked for again, or closed, has no say any more: the captions are the new one's.
       const captionCopy = () =>
         createCaptionCopy((channels) => {
+          if (signal.aborted) return;
           session.captions = channels;
+          PubSub.publishUnsafe(tracksChanged, session.id);
         });
       const chunks = conversion ? chosenFirst : filtered(chosenFirst, captionCopy());
       const delivery = !conversion ? "direct" : session.repair ? "repaired" : "converted";
@@ -3534,6 +3545,7 @@ function make(deps: PlaybackDeps) {
         }),
 
       fileReplaced: Stream.fromPubSub(replaced),
+      tracksChanged: Stream.fromPubSub(tracksChanged),
 
       begin: Effect.sync(() => ++turns),
 
