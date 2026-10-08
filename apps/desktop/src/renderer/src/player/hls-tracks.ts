@@ -110,12 +110,15 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
   let selectionStartedAt = 0;
   const proven = new Set<string>();
   const triedAt = new Map<number, number>();
+  /** Real failures end discovery for this stream. A manual choice may still retry them. */
+  const failed = new Set<number>();
   let preferredLanguage: string | null = null;
   let probing: number | null = null;
   let probesInBurst = 0;
   let probeTimer: ReturnType<typeof setTimeout> | null = null;
   let nextProbe: ReturnType<typeof setTimeout> | null = null;
   let selectionTimer: ReturnType<typeof setTimeout> | null = null;
+  let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** The tracks as the viewer chooses them, in hls.js's order, captions last. */
   function listed(): ChannelTracks {
@@ -160,7 +163,9 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
     if (released) return;
     const index =
       wanted?.format === "text"
-        ? wantedIndex()
+        ? recoveryTimer
+          ? -1
+          : wantedIndex()
         : probing === null
           ? -1
           : renditionIds(hls.subtitleTracks).indexOf(probing);
@@ -206,7 +211,7 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
       return;
     }
     const candidates = listed().subtitles.filter(
-      (track) => track.format === "text" && !proven.has(keyOf(track)),
+      (track) => track.format === "text" && !proven.has(keyOf(track)) && !failed.has(track.id),
     );
     candidates.sort(
       (a, b) =>
@@ -251,7 +256,7 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
     );
   }
 
-  /** Give a selected rendition time to recover from one nonfatal failure. */
+  /** Give a selected rendition time to recover without changing the viewer's choice. */
   function retrySelection(id: number): boolean {
     if (wanted?.format !== "text" || wanted.id !== id) return false;
     if (!selectionTimer) {
@@ -259,6 +264,25 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
       armSelection();
     }
     return true;
+  }
+
+  /** Fatal subtitle errors have stopped every loader. Pause the rendition for one reload. */
+  function recoverSelection(id: number): void {
+    if (!recoveryTimer) {
+      recoveryTimer = setTimeout(
+        () => {
+          recoveryTimer = null;
+          assert();
+        },
+        Math.max(
+          1000,
+          (hls.subtitleTracks[wantedIndex()]?.details?.targetduration || cadence.get(id) || 5) *
+            1000,
+        ),
+      );
+    }
+    assert();
+    hls.startLoad(-1);
   }
 
   /** Deselect only subtitles. hls.js owns cancellation and the network request deadlines. */
@@ -269,6 +293,8 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
       wanted = null;
       if (selectionTimer) clearTimeout(selectionTimer);
       selectionTimer = null;
+      if (recoveryTimer) clearTimeout(recoveryTimer);
+      recoveryTimer = null;
     }
     if (probing === id) finishProbe();
     assert();
@@ -296,7 +322,10 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
     const index = data.frag?.level ?? data.context?.id;
     const id = index == null ? undefined : renditionIds(hls.subtitleTracks)[index];
     if (id !== undefined) {
-      if (data.fatal || !retrySelection(id)) abandon(id, data.fatal);
+      failed.add(id);
+      if (retrySelection(id)) {
+        if (data.fatal) recoverSelection(id);
+      } else abandon(id, data.fatal);
     } else if (data.fatal) {
       hls.startLoad(-1);
     }
@@ -421,7 +450,10 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
     // timestamp arrives. Only an actual error abandons the track; the deadline bounds no data.
     if (!data.success) {
       if ((readUntil.get(id) ?? 0) >= start + duration) return;
-      if (!retrySelection(id) && data.error) abandon(id);
+      if (data.error) {
+        failed.add(id);
+        if (!retrySelection(id)) abandon(id);
+      }
       return;
     }
     if (probing === id) finishProbe();
@@ -445,6 +477,8 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
       if (released) return;
       if (selectionTimer) clearTimeout(selectionTimer);
       selectionTimer = null;
+      if (recoveryTimer) clearTimeout(recoveryTimer);
+      recoveryTimer = null;
       wanted = track;
       selectionStartedAt = Date.now();
       if (track?.format === "text" && (readUntil.get(track.id) ?? 0) <= video.currentTime)
@@ -495,6 +529,7 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
       if (probeTimer) clearTimeout(probeTimer);
       if (nextProbe) clearTimeout(nextProbe);
       if (selectionTimer) clearTimeout(selectionTimer);
+      if (recoveryTimer) clearTimeout(recoveryTimer);
       unavailableListener = null;
       probeTimer = nextProbe = null;
       availableListener = null;

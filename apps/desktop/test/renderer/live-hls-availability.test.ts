@@ -194,6 +194,8 @@ it.each(["subtitle-playlist", "subtitle-segment"] as const)(
     player.setSubtitle(player.state().tracks!.subtitles[0]!);
     stream.error(kind);
     await wait();
+    expect(player.state().subtitle?.label).toBe("English");
+    await playingFor(16_000);
     expect(player.state().subtitle).toBeNull();
     expect(player.state().subtitleLoading).toBe(false);
     player.setSubtitle(player.state().tracks!.subtitles[1]!);
@@ -288,4 +290,74 @@ it("keeps a selected language through one nonfatal failure, but bounds repeated 
   await playingFor(16_000);
   expect(player.state().subtitle).toBeNull();
   expect(ipc.argsOf("playback.open")).toHaveLength(1);
+});
+
+it("ends real failed discovery for the stream, while a manual pick may retry it", async () => {
+  vi.useFakeTimers();
+  const stream = await open();
+  stream.error("subtitle-segment");
+  await wait();
+  stream.subtitleLines([{ start: 0, end: 200, text: "Hallo" }]);
+  await wait();
+  const loaded = stream.subtitlesLoaded.length;
+  await playingFor(70_000);
+  expect(stream.subtitlesLoaded).toHaveLength(loaded);
+  expect(player.state().subtitle).toBeNull();
+  expect(player.state().phase.kind).toBe("playing");
+  player.setSubtitle(player.state().tracks!.subtitles[0]!);
+  expect(stream.subtitleTrack).toBe(0);
+  stream.subtitleLines([{ start: 70, end: 90, text: "Manual retry" }]);
+  expect(player.state().subtitle?.label).toBe("English");
+});
+
+it("keeps a selected language through a real fatal 404 and cancels recovery on Off", async () => {
+  vi.useFakeTimers();
+  const stream = await open();
+  stream.subtitleLines([{ start: 0, end: 60, text: "Hello" }]);
+  await wait();
+  player.setSubtitle(player.state().tracks!.subtitles[0]!);
+  stream.subtitlePlaylist(6);
+  stream.error("subtitle-segment");
+  expect(player.state().subtitle?.label).toBe("English");
+  expect(stream.subtitleTrack).toBe(-1);
+  expect(stream.loading).toBe(true);
+  await playingFor(5900);
+  expect(stream.subtitleTrack).toBe(-1);
+  await playingFor(100);
+  expect(stream.subtitleTrack).toBe(0);
+  stream.subtitleLines([{ start: 6, end: 200, text: "Recovered" }]);
+  await playingFor(18_000);
+  expect(player.state().subtitle?.label).toBe("English");
+  stream.error("subtitle-segment");
+  player.toggleSubtitles();
+  await playingFor(7000);
+  expect(player.state().subtitle).toBeNull();
+  expect(stream.subtitleTrack).not.toBe(0);
+  expect(ipc.argsOf("playback.open")).toHaveLength(1);
+});
+
+it("preserves a selected language through an outage that reconnects within its allowance", async () => {
+  vi.useFakeTimers();
+  player.setAudible(true);
+  const stream = await open();
+  stream.subtitleLines([{ start: 0, end: 60, text: "Hello" }]);
+  await wait();
+  player.setSubtitle(player.state().tracks!.subtitles[0]!);
+  stream.subtitlePlaylist(6);
+  stream.error("subtitle-segment");
+  await playingFor(2000);
+  ipc.always("playback.failure", null);
+  ipc.always("playback.playing", null);
+  stream.error("video");
+  await wait();
+  expect(player.state().phase.kind).toBe("reconnecting");
+  expect(player.state().subtitle?.label).toBe("English");
+  await playingFor(6000);
+  const reopened = streams.latest();
+  reopened.variant({ subtitles: [{ name: "English", lang: "en", default: true }] });
+  player.element.dispatchEvent(new Event("playing"));
+  await wait();
+  reopened.subtitleLines([{ start: 0, end: 200, text: "Back" }]);
+  expect(player.state().subtitle?.label).toBe("English");
+  expect(player.state().phase.kind).toBe("playing");
 });
