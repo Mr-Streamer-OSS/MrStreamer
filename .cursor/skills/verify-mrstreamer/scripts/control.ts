@@ -222,7 +222,7 @@ async function run(scenario: Scenario) {
     if (scenario === "background-refresh") {
       await click("Stay on Live TV while the guide waits", button("button", "Watch"));
       await wait(() => exists("document.querySelector('[data-view=watch]')"));
-      // Status only observes the background owner. Opening Movies would fetch missing lists itself.
+      // Status reads readiness without fetching. Home may already have requested missing lists.
       await wait(() =>
         livePage.evaluate<boolean>(`(async () => {
           const status = await window.mrStreamer.invoke('ondemand.status');
