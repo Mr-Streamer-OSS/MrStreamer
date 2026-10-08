@@ -66,6 +66,7 @@ export interface TableOrder {
 export function ChannelTable({
   channels,
   searchRows = null,
+  searchFocus = 0,
   categories,
   expandedCopies = new Set<string>(),
   onToggleCopies,
@@ -83,6 +84,8 @@ export function ChannelTable({
 }: {
   channels: readonly LiveChannel[];
   searchRows?: readonly SearchChannelRow[] | null;
+  /** Changes when a result-navigation key explicitly asks the selected row to take focus. */
+  searchFocus?: number;
   categories?: ReadonlyMap<string, Category>;
   expandedCopies?: ReadonlySet<string>;
   onToggleCopies?: (key: string) => void;
@@ -108,6 +111,20 @@ export function ChannelTable({
   onToggleFavourite: (channel: LiveChannel) => void;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
+  const asked = useRef(searchFocus);
+  // Selection can show because Tab enabled keyboard mode. Only navigation or focus already
+  // owned by a result row moves DOM focus; disclosure buttons keep their own Tab position.
+  useLayoutEffect(() => {
+    const requested = asked.current !== searchFocus;
+    asked.current = searchFocus;
+    const focused = document.activeElement;
+    const ownsFocus =
+      focused?.hasAttribute("data-search-row") && scroller.current?.contains(focused);
+    if (!searchRows || selected === null || (!requested && !ownsFocus)) return;
+    scroller.current
+      ?.querySelector<HTMLElement>(`[data-index="${selected}"] [data-search-row]`)
+      ?.focus({ preventScroll: true });
+  }, [selected, searchRows, searchFocus]);
   const rem = useRem();
   const now = useNow();
   const sourceOf = useSourceOf();
@@ -193,6 +210,7 @@ export function ChannelTable({
                     ? subscriptionName(channel.subscriptionId)
                     : sourceOf(channel)
                 }
+                subscription={subscriptionName(channel.subscriptionId)}
                 searchRow={searchRows?.[item.index] ?? null}
                 category={
                   channel.categoryIds
@@ -248,6 +266,7 @@ export function ChannelTable({
 function ChannelRow({
   channel,
   source,
+  subscription,
   searchRow,
   category,
   copiesOpen,
@@ -269,6 +288,7 @@ function ChannelRow({
   channel: LiveChannel;
   /** The subscription it is from, by name, where another's channel is called the same. */
   source: string | null;
+  subscription: string | null;
   searchRow: SearchChannelRow | null;
   category: Category | null;
   copiesOpen: boolean;
@@ -297,7 +317,7 @@ function ChannelRow({
     ? `${subscriptionCount} ${subscriptionCount === 1 ? "subscription" : "subscriptions"} · ${searchQualities(searchRow.group.copies)}`
     : null;
   const copySummary = searchRow?.copy
-    ? [source, category?.group, category?.title, searchQualities([channel])]
+    ? [searchQualities([channel]), source, category?.group, category?.title]
         .filter(Boolean)
         .join(" · ")
     : null;
@@ -320,10 +340,6 @@ function ChannelRow({
         : row.current?.querySelector<HTMLElement>(`[data-move="${part}"]`);
     if (target && document.activeElement !== target) target.focus({ preventScroll: true });
   }, [part, asked, locked]);
-  useLayoutEffect(() => {
-    if (searchRow && selected && document.activeElement?.tagName !== "INPUT")
-      row.current?.focus({ preventScroll: true });
-  }, [searchRow?.key, selected]);
   return (
     <div className="pb-1">
       <div
@@ -344,6 +360,7 @@ function ChannelRow({
             }
           : {
               role: "button",
+              "data-search-row": searchRow ? "" : undefined,
               tabIndex: searchRow && selected ? 0 : -1,
               onClick: onWatch,
               onFocus: searchRow
@@ -358,11 +375,11 @@ function ChannelRow({
                     grouped
                       ? `${searchRow.group.streams} ${searchRow.group.streams === 1 ? "stream" : "streams"}`
                       : null,
-                    searchRow?.copy ? source : null,
-                    searchRow?.copy ? category?.group : null,
-                    searchRow?.copy ? category?.title : null,
-                    searchRow?.copy ? channel.number : null,
-                    searchRow?.copy ? searchQualities([channel]) : null,
+                    !grouped ? subscription : null,
+                    !grouped ? category?.group : null,
+                    !grouped ? category?.title : null,
+                    !grouped ? channel.number : null,
+                    !grouped ? searchQualities([channel]) : null,
                     match?.now ? current?.title : later?.title,
                   ]
                     .filter((part) => part != null && part !== "")

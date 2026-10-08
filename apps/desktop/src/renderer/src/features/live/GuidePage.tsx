@@ -112,6 +112,7 @@ export function GuidePage({ active }: { active: boolean }) {
   const order = useFavouriteOrder(active && ordered, ordered ? listed : undefined);
   const { draft } = order;
   // The rows are the list's, or what a search found of them, or the favourites as arranged.
+  const [searchFocus, setSearchFocus] = useState(0);
   const [expandedCopies, setExpandedCopies] = useState<ReadonlySet<string>>(new Set());
   const searchRows = useMemo(
     () => (search.groups ? searchChannelRows(search.groups, expandedCopies, search.matches) : null),
@@ -124,6 +125,11 @@ export function GuidePage({ active }: { active: boolean }) {
   const toggleCopies = (key: string) => {
     const index = searchRows?.findIndex((row) => row.group.key === key && !row.copy) ?? -1;
     if (index >= 0) setChosen({ index, channel: rows[index] ?? null, searchKey: key });
+    if (
+      expandedCopies.has(key) &&
+      searchRows?.[index]?.group.copies.some((copy) => ownedKey(copy) === expandedKey)
+    )
+      setExpandedKey(null);
     setExpandedCopies((current) => {
       const next = new Set(current);
       if (next.has(key)) next.delete(key);
@@ -287,12 +293,14 @@ export function GuidePage({ active }: { active: boolean }) {
       const channel = now.rows[now.selected];
       const step = (value: number, delta: number, length: number) =>
         Math.min(Math.max(value + delta, 0), Math.max(length - 1, 0));
-      const select = (index: number) =>
+      const select = (index: number) => {
         setChosen({
           index,
           channel: now.rows[index] ?? null,
           searchKey: now.searchRows?.[index]?.key,
         });
+        setSearchFocus((asked) => asked + 1);
+      };
 
       if (/^[0-9]$/.test(event.key)) {
         numberEntry.type(event.key);
@@ -334,6 +342,7 @@ export function GuidePage({ active }: { active: boolean }) {
           break;
         }
         case "ArrowRight":
+          setSearchFocus((asked) => asked + 1);
           if (now.focus === "lists") setFocus("channels");
           else if (
             now.searchRows?.[now.selected] &&
@@ -489,12 +498,7 @@ export function GuidePage({ active }: { active: boolean }) {
                         onLeave={() => {
                           setFocus("channels");
                           showSelection();
-                          if (searchRows)
-                            page.current
-                              ?.querySelector<HTMLElement>(
-                                `[data-index="${selected}"] [role="button"]`,
-                              )
-                              ?.focus({ preventScroll: true });
+                          setSearchFocus((asked) => asked + 1);
                         }}
                       />
                     )}
@@ -544,6 +548,7 @@ export function GuidePage({ active }: { active: boolean }) {
                 key={`${key}\n${search.query}`}
                 channels={rows}
                 searchRows={searchRows}
+                searchFocus={searchFocus}
                 expandedCopies={expandedCopies}
                 onToggleCopies={toggleCopies}
                 onSelectSearch={(index) =>

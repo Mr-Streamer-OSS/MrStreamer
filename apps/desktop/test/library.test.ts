@@ -168,7 +168,9 @@ describe("live library", () => {
       },
     ]);
     const canonical = found.map(({ searchGroup: _group, ...channel }) => channel);
-    expect(await library.channel(own(sd))).toEqual(canonical[0]);
+    const { searchIdentity, ...playbackChannel } = await library.channel(own(sd));
+    expect(searchIdentity).toBeDefined();
+    expect(playbackChannel).toEqual(canonical[0]);
     expect(await library.channels({ channels: [sd, hd, fhd].map(own) })).toEqual(found);
   });
 
@@ -266,7 +268,9 @@ describe("live library", () => {
         ({ searchIdentity: _identity, searchGroup: _group, ...channel }) => channel,
       ),
     );
-    expect(loaded.every((channel) => channel.searchIdentity?.guideId == null)).toBe(true);
+    const canonical = await Promise.all(loaded.map((channel) => restarted.channel(channel)));
+    expect(canonical.every((channel) => channel.searchIdentity?.guideId == null)).toBe(true);
+    expect(loaded.every((channel) => !Object.hasOwn(channel, "searchIdentity"))).toBe(true);
     expect(await restarted.isStale(60 * 60 * 1000)).toBe(true);
     expect(await library.isStale(60 * 60 * 1000)).toBe(false);
   });

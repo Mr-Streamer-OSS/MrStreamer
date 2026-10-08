@@ -389,6 +389,11 @@ function LiveResultRow({
         aria-label={[
           channel.title,
           category,
+          grouped
+            ? `${subscriptionCount} ${subscriptionCount === 1 ? "subscription" : "subscriptions"}`
+            : null,
+          grouped ? `${group.streams} ${group.streams === 1 ? "stream" : "streams"}` : null,
+          grouped ? searchQualities(group.copies) : null,
           !grouped ? nameOf(channel.subscriptionId) : null,
           !grouped ? channel.number : null,
           !grouped ? searchQualities([channel]) : null,

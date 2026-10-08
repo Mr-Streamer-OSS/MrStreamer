@@ -50,10 +50,17 @@ const green: readonly LiveChannel[] = catalogue.map((channel) => ({
   subscriptionId: GREEN,
 }));
 const all = [...blue, ...green];
-const responses = (channels: readonly LiveChannel[]) =>
-  indexLiveSearch(channels).groups.flatMap((group) =>
-    group.copies.map((copy, order) => ({ ...copy, searchGroup: { key: group.key, order } })),
+const responses = (channels: readonly LiveChannel[]) => {
+  const stamps = new Map(
+    indexLiveSearch(channels).groups.flatMap((group) =>
+      group.copies.map((copy, order) => [ownedKey(copy), { key: group.key, order }] as const),
+    ),
   );
+  return channels.map(({ searchIdentity: _identity, ...channel }) => ({
+    ...channel,
+    searchGroup: stamps.get(ownedKey(channel))!,
+  }));
+};
 const programme = (title: string): Programme => ({
   start: Date.now() - 1000,
   stop: Date.now() + 3600000,
@@ -80,7 +87,12 @@ afterEach(() => {
 });
 const settled = (ms = 30) => act(() => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
-async function page(kind: "guide" | "palette", query = "VRT", realPlayback = false) {
+async function page(
+  kind: "guide" | "palette",
+  query = "VRT",
+  realPlayback = false,
+  listed: readonly LiveChannel[] = responses(all),
+) {
   ipc.reset();
   const watch = vi.spyOn(player, "watch");
   if (!realPlayback) watch.mockImplementation(() => {});
@@ -99,18 +111,19 @@ async function page(kind: "guide" | "palette", query = "VRT", realPlayback = fal
     { ...SAVED, name: "Blue" },
     { ...SAVED, id: GREEN, name: "Green" },
   ]);
-  if (kind === "guide") client.setQueryData(queries.channels(null).queryKey, all);
-  client.setQueryData(queries.categories().queryKey, [
-    {
+  if (kind === "guide") client.setQueryData(queries.channels(null).queryKey, listed);
+  client.setQueryData(
+    queries.categories().queryKey,
+    ["0", "1"].map((id) => ({
       subscriptionId: SUBSCRIPTION,
-      id: "0",
-      name: "BE | VLAANDEREN",
+      id,
+      name: id === "0" ? "BE | VLAANDEREN" : "BE | GENERAL",
       group: "Belgium",
-      title: "Vlaanderen",
-      members: [{ subscriptionId: SUBSCRIPTION, id: "0" }],
+      title: id === "0" ? "Vlaanderen" : "General",
+      members: [SUBSCRIPTION, GREEN].map((subscriptionId) => ({ subscriptionId, id })),
       channelCount: all.length,
-    },
-  ]);
+    })),
+  );
   client.setQueryData(queries.libraryStatus().queryKey, [
     { subscriptionId: SUBSCRIPTION, channelCount: 4, fetchedAt: 1, failure: null, failedAt: null },
     { subscriptionId: GREEN, channelCount: 4, fetchedAt: 1, failure: null, failedAt: null },
@@ -210,7 +223,9 @@ describe("real search components with two subscriptions", () => {
     expect(p.watch).not.toHaveBeenCalled();
     await p.press("ArrowRight");
     await p.press(" ");
-    expect(p.watch).toHaveBeenLastCalledWith(green[1]);
+    expect(p.watch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ subscriptionId: green[1]!.subscriptionId, id: green[1]!.id }),
+    );
   });
 
   it("keeps focus on a different group's button when reached from the selected row", async () => {
@@ -222,6 +237,79 @@ describe("real search components with two subscriptions", () => {
     expect(document.activeElement).toBe(copies);
     await p.click(copies);
     expect(p.rows()).toHaveLength(6);
+    expect(document.activeElement).toBe(copies);
+    expect(copies.getAttribute("aria-label")).toBe("Hide copies");
+    await p.press("Enter", copies);
+    expect(p.watch).not.toHaveBeenCalled();
+    await p.click(copies);
+    expect(p.rows()).toHaveLength(2);
+    expect(document.activeElement).toBe(copies);
+  });
+
+  it("keeps Tab on unrelated controls when pointer use changes to keyboard use", async () => {
+    const p = await page("guide");
+    await p.search("VRT");
+    const other = [...p.scope().querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) =>
+        !button.closest("[data-index]") && button.getAttribute("aria-label") !== "Clear search",
+    )!;
+    await act(async () => {
+      window.dispatchEvent(new MouseEvent("mousemove", { movementX: 3, movementY: 3 }));
+      other.focus();
+    });
+    await p.press("Tab", other);
+    expect(document.activeElement).toBe(other);
+    await p.press("ArrowDown", p.field());
+    expect(document.activeElement).toBe(p.rows()[0]);
+    await p.press("ArrowDown");
+    expect(document.activeElement).toBe(p.rows()[1]);
+  });
+
+  it("closes hidden copy schedules with the copies before Left hands focus to lists", async () => {
+    const p = await page("guide");
+    await p.search("VRT");
+    await p.press("ArrowDown", p.field());
+    await p.press("ArrowRight");
+    await p.press("ArrowDown");
+    const schedule = ipc.hold("guide.schedule");
+    await p.press("ArrowRight");
+    schedule.resolve([later]);
+    await settled();
+    expect(ipc.argsOf("guide.schedule").at(-1)).toEqual({
+      channel: { subscriptionId: SUBSCRIPTION, id: "1" },
+    });
+    expect(p.rows()[1]!.parentElement?.textContent).toContain("Evening news");
+    await p.press("ArrowDown");
+    await p.press("ArrowLeft");
+    expect(p.rows()).toHaveLength(2);
+    expect(document.activeElement).toBe(p.rows()[0]);
+    await p.press("ArrowLeft");
+    expect(p.rows()).not.toContain(document.activeElement);
+    await p.press("ArrowRight");
+    await p.press("ArrowRight");
+    expect(p.rows()).toHaveLength(6);
+    expect(p.rows()[1]!.parentElement?.textContent).not.toContain("Evening news");
+    await p.click(p.button("Later programmes", p.rows()[1]));
+    await settled();
+    expect(p.rows()[1]!.parentElement?.textContent).toContain("Evening news");
+  });
+
+  it("announces each single Guide result's owned source, category, number, quality and matched programme", async () => {
+    const listed = responses(all).filter((channel) =>
+      [ownedKey(green[1]!), ownedKey(blue[2]!)].includes(ownedKey(channel)),
+    );
+    const p = await page("guide", "VRT", false, listed);
+    await p.search("news", {
+      [ownedKey(green[1]!)]: { now: true, later: null },
+      [ownedKey(blue[2]!)]: { now: false, later: { title: later.title, start: later.start } },
+    });
+    expect(p.rows()).toHaveLength(2);
+    await expect
+      .poll(() => p.rows()[1]!.getAttribute("aria-label"))
+      .toBe("VRT 1, Green, Belgium, General, 12, SD, Green guide 3");
+    expect(p.rows()[0]!.getAttribute("aria-label")).toBe(
+      "VRT Canvas, Blue, Belgium, Vlaanderen, 13, FHD, Evening news",
+    );
   });
 
   it("selects the playing channel's collapsed group even when a different copy represents it", async () => {
@@ -232,7 +320,9 @@ describe("real search components with two subscriptions", () => {
     expect(document.activeElement).toBe(p.rows()[1]);
     expect(p.rows()[1]?.textContent).toContain("VRT Canvas");
     await p.press("Enter");
-    expect(p.watch.mock.calls.at(-1)?.[0].title).toBe("VRT Canvas");
+    expect(p.watch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ subscriptionId: SUBSCRIPTION, id: "4" }),
+    );
   });
 
   it("GuidePage preserves ordinary lists, counts groups, chooses a favourite, expands exact copies and returns focus on Left", async () => {
@@ -248,7 +338,9 @@ describe("real search components with two subscriptions", () => {
     expect(p.rows()[0]!.getAttribute("aria-label")).toContain("6 streams");
     p.field().blur();
     await p.press("Enter", window);
-    expect(p.watch).toHaveBeenLastCalledWith(green[1]);
+    expect(p.watch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ subscriptionId: green[1]!.subscriptionId, id: green[1]!.id }),
+    );
     await act(async () => useUi.setState({ watching: false }));
     await p.press("ArrowRight", window);
     expect(p.rows()).toHaveLength(6);
@@ -256,6 +348,12 @@ describe("real search components with two subscriptions", () => {
     expect(p.rows()[1]!.textContent).toContain("FHD · HD");
     expect(p.rows()[1]!.textContent).toContain("Blue");
     expect(p.rows()[1]!.textContent).toContain("Belgium · Vlaanderen");
+    const summary = p.rows()[1]!.querySelector<HTMLElement>("span[title] span[title]")!;
+    expect(summary.textContent).toBe("FHD · HD · Blue · Belgium · Vlaanderen");
+    expect(summary.title).toBe("FHD · HD · Blue · Belgium · Vlaanderen");
+    expect(p.rows()[2]!.querySelector("span[title] span[title]")?.textContent).toBe(
+      "SD · Blue · Belgium · General",
+    );
     expect(p.rows()[1]!.getAttribute("aria-label")).toContain("Belgium, Vlaanderen, 10");
     await expect
       .poll(async () => {
@@ -265,7 +363,9 @@ describe("real search components with two subscriptions", () => {
       .toContain("Green guide 1");
     await p.press("ArrowDown", window);
     await p.press("Enter", window);
-    expect(p.watch).toHaveBeenLastCalledWith(blue[0]);
+    expect(p.watch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ subscriptionId: blue[0]!.subscriptionId, id: blue[0]!.id }),
+    );
     expect(p.watch.mock.calls.at(-1)![0].variants.map((variant) => variant.id)).toEqual(["1", "2"]);
     await act(async () => useUi.setState({ watching: false }));
     await p.click(p.button("Add to favourites", p.rows()[1]));
@@ -289,7 +389,9 @@ describe("real search components with two subscriptions", () => {
     await p.press("ArrowDown", window);
     await p.press("ArrowDown", window);
     await p.press("Enter");
-    expect(p.watch).toHaveBeenLastCalledWith(blue[2]);
+    expect(p.watch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ subscriptionId: blue[2]!.subscriptionId, id: blue[2]!.id }),
+    );
   });
 
   it("GuidePage commits a typed channel number from a focused search row", async () => {
@@ -299,7 +401,9 @@ describe("real search components with two subscriptions", () => {
     await p.press("1");
     await p.press("3");
     await p.press("Enter");
-    expect(p.watch).toHaveBeenLastCalledWith(blue[2]);
+    expect(p.watch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ subscriptionId: blue[2]!.subscriptionId, id: blue[2]!.id }),
+    );
   });
 
   it("GuidePage keeps the actual matching copy's programme and schedule while retaining the entire group", async () => {
@@ -332,8 +436,16 @@ describe("real search components with two subscriptions", () => {
     expect(p.rows()).toHaveLength(2);
     expect(p.scope().textContent).toContain("2 channels · 10 streams");
     expect(ipc.argsOf("library.channels")).toEqual([]);
+    expect(p.rows()[0]!.getAttribute("aria-label")).toContain(
+      "2 subscriptions, 6 streams, FHD · HD · SD",
+    );
+    expect(p.rows()[1]!.getAttribute("aria-label")).toContain(
+      "2 subscriptions, 4 streams, FHD · HD",
+    );
     await p.press("Enter", p.field());
-    expect(p.watch).toHaveBeenLastCalledWith(expect.objectContaining(green[1]!));
+    expect(p.watch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ subscriptionId: green[1]!.subscriptionId, id: green[1]!.id }),
+    );
     // Keep this mounted popup's input available for the keyboard path after playback closes it.
     await act(async () => useUi.setState({ watching: false, searchOpen: true }));
     await settled();
@@ -342,7 +454,9 @@ describe("real search components with two subscriptions", () => {
     expect(p.rows()[1]!.textContent).toContain("Belgium · Vlaanderen · Blue · 10 · FHD · HD");
     await p.press("ArrowDown", p.field());
     await p.press("Enter", p.field());
-    expect(p.watch).toHaveBeenLastCalledWith(expect.objectContaining(blue[0]!));
+    expect(p.watch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ subscriptionId: blue[0]!.subscriptionId, id: blue[0]!.id }),
+    );
     await act(async () => useUi.setState({ watching: false, searchOpen: true }));
     await settled();
     await p.press("ArrowRight", p.field());
@@ -363,7 +477,7 @@ describe("real search components with two subscriptions", () => {
     await p.press("ArrowRight", window);
     await p.click(p.rows()[3]!);
     await settled();
-    expect(player.state().channel).toBe(green[0]);
+    expect(player.state().channel).toMatchObject({ subscriptionId: GREEN, id: "1" });
     expect(ipc.argsOf("playback.open").at(-1)).toMatchObject({
       channel: { subscriptionId: GREEN, id: "1" },
     });
@@ -457,7 +571,9 @@ describe("real search components with two subscriptions", () => {
     expect(rows[0]!.textContent).toContain("On now");
     expect(rows[1]!.textContent).toContain("Evening news");
     await p.press("Enter", p.field());
-    expect(p.watch).toHaveBeenLastCalledWith(green[1]);
+    expect(p.watch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ subscriptionId: green[1]!.subscriptionId, id: green[1]!.id }),
+    );
   });
 
   it("SearchPalette retains programme matches beyond the twenty channel-name results", async () => {

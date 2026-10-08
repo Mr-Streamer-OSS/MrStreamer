@@ -172,9 +172,10 @@ export class Library extends Context.Service<
     readonly categories: Effect.Effect<readonly Category[], Failed>;
     /**
      * All channels in a category, the best matches for a query across every catalogue, or the
-     * given channels in that order; without any of those, every channel. Search responses carry
-     * their full-catalogue display group and all its real copies. Ids with a query return their
-     * search companions. A channel's id may be any of its streams'; a channel shows once.
+     * given channels in that order; without any of those, every channel. Every response carries
+     * its full-catalogue display group. Search responses retain all its real copies. Ids with a
+     * query return their search companions. A channel's id may be any of its streams'; a channel
+     * shows once.
      */
     channels(filter: ChannelFilter): Effect.Effect<readonly LiveChannel[], Failed>;
     /**
@@ -757,7 +758,7 @@ const stampedSearchResponses = new WeakMap<
   }
 >();
 
-/** List subsets carry full-catalogue grouping without changing canonical playback channels. */
+/** List subsets carry full-catalogue grouping. Identity stays on canonical playback channels. */
 function stampSearchGroups(
   channels: readonly LiveChannel[],
   all: readonly LiveChannel[],
@@ -777,7 +778,7 @@ function stampSearchGroups(
   }
   let response = cache.responses.get(channels);
   if (!response) {
-    response = channels.map((channel) => ({
+    response = channels.map(({ searchIdentity: _identity, ...channel }) => ({
       ...channel,
       searchGroup: cache.stamps.get(ownedKey(channel)) ?? { key: ownedKey(channel), order: 0 },
     }));

@@ -5,7 +5,6 @@ import * as Layer from "effect/Layer";
 import { expect, it } from "vitest";
 import {
   automaticSearchCopy,
-  groupLiveSearch,
   indexLiveSearch,
   searchResultGroups,
 } from "@mrstreamer/core/catalogue/search";
@@ -67,7 +66,7 @@ it("search keeps every provider/category/quality copy and reconstructs safe meta
   expect(ordinary).toHaveLength(8);
   const results = await library.channels({ query: "VRT" });
   expect(results).toHaveLength(8);
-  expect(groupLiveSearch(results).map((group) => [group.copies.length, group.streams])).toEqual([
+  expect(searchResultGroups(results).map((group) => [group.copies.length, group.streams])).toEqual([
     [4, 6],
     [4, 4],
   ]);
@@ -90,10 +89,19 @@ it("search keeps every provider/category/quality copy and reconstructs safe meta
     channels: [{ subscriptionId: ids[1]!, id: "1002" }],
   });
   expect(
-    groupLiveSearch(programmeMatches).map((group) => [group.copies.length, group.streams]),
+    searchResultGroups(programmeMatches).map((group) => [group.copies.length, group.streams]),
   ).toEqual([[4, 6]]);
-  for (const { searchGroup: _group, ...channel } of results)
-    expect(await library.channel(channel)).toEqual(channel);
+  for (const response of [ordinary, results, qualityMatches, sdMatches, programmeMatches]) {
+    for (const copy of response) {
+      expect(copy.searchGroup).toEqual({ key: expect.any(String), order: expect.any(Number) });
+      expect(copy).not.toHaveProperty("searchIdentity");
+    }
+  }
+  for (const { searchGroup: _group, ...channel } of results) {
+    const { searchIdentity, ...canonical } = await library.channel(channel);
+    expect(searchIdentity).toBeDefined();
+    expect(canonical).toEqual(channel);
+  }
   const cached = type({
     version: "4",
     channels: type({ "searchIdentity?": "undefined", "searchGroup?": "undefined" }).array(),
@@ -141,4 +149,5 @@ it("palette responses retain full-catalogue ambiguity when the query excludes a 
   // A list can hide the conflicting guide, but it cannot turn that absence into identity.
   expect(indexLiveSearch(list).groups).toHaveLength(2);
   expect(list.map((copy) => copy.searchGroup)).toEqual(partial.map((copy) => copy.searchGroup));
+  expect(list.every((copy) => !Object.hasOwn(copy, "searchIdentity"))).toBe(true);
 });
