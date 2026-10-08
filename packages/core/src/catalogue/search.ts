@@ -22,11 +22,15 @@ export function indexLiveSearch(channels: readonly LiveChannel[]): LiveSearchInd
   const groups = channels.some((channel) => channel.searchGroup !== undefined)
     ? searchResultGroups(channels)
     : groupLiveSearch(channels);
+  let byCopy: LiveSearchIndex["byCopy"] | undefined;
   return {
     groups,
-    byCopy: new Map(
-      groups.flatMap((group) => group.copies.map((copy) => [ownedKey(copy), group] as const)),
-    ),
+    get byCopy() {
+      // Catalogue stamps read groups only. Matching builds this lookup on its first use.
+      return (byCopy ??= new Map(
+        groups.flatMap((group) => group.copies.map((copy) => [ownedKey(copy), group] as const)),
+      ));
+    },
   };
 }
 
@@ -150,12 +154,21 @@ export function groupLiveSearch(channels: readonly LiveChannel[]): readonly Live
   return [...guides.values(), ...alone]
     .map((copies): LiveSearchGroup => {
       copies.sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
-      const streams = new Set(
-        copies.flatMap((channel) =>
-          channel.variants.map((variant) => JSON.stringify([channel.subscriptionId, variant.id])),
-        ),
-      );
-      return { key: ownedKey(copies[0]!), copies, streams: streams.size };
+      let streams: number | undefined;
+      return {
+        key: ownedKey(copies[0]!),
+        copies,
+        get streams() {
+          // Catalogue stamps need membership only. Count streams when a display reads it.
+          return (streams ??= new Set(
+            copies.flatMap((channel) =>
+              channel.variants.map((variant) =>
+                JSON.stringify([channel.subscriptionId, variant.id]),
+              ),
+            ),
+          ).size);
+        },
+      };
     })
     .sort((a, b) => (order.get(a.copies[0]!) ?? 0) - (order.get(b.copies[0]!) ?? 0));
 }
