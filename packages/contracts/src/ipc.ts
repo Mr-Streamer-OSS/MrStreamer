@@ -676,6 +676,11 @@ export interface IpcEvents {
    * was saved for the old file is gone, and that session has no saved or online subtitles left.
    */
   "playback.fileReplaced": { readonly sessionId: string };
+  /**
+   * An open channel session's `playback.tracks` changed since its stream started: a caption
+   * channel was found in its pictures. Read them again to know which.
+   */
+  "playback.tracksChanged": { readonly sessionId: string };
   /** Where playback goes changed, or what the receiver plays did, or the receivers found. */
   "output.changed": OutputStatus;
   /**

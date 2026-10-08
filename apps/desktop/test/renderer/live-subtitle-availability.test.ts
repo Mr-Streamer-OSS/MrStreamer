@@ -7,7 +7,7 @@ import { act, createElement, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
-import type { ChannelTracks } from "@mrstreamer/contracts/playback";
+import type { ChannelTracks, SubtitleTrack } from "@mrstreamer/contracts/playback";
 import { pesReader } from "@mrstreamer/core/subtitles/transport";
 import { player, usePlayer } from "../../src/renderer/src/player/player.ts";
 import { TrackMenus, type TrackMenu } from "../../src/renderer/src/features/watch/TrackMenus.tsx";
@@ -83,6 +83,16 @@ const tracks: ChannelTracks = {
       forced: false,
     },
   ],
+};
+/** A caption channel, as the main process lists one it found in the pictures. */
+const captions: SubtitleTrack = {
+  id: 0x1ff0,
+  page: 1,
+  format: "captions",
+  language: null,
+  label: "Captions",
+  default: false,
+  forced: false,
 };
 const fixture = readFileSync(join(import.meta.dirname, "../fixtures/h264-subtitles.mpegts"));
 const reader = pesReader();
@@ -261,6 +271,76 @@ it("accepts already-observed captions and ignores private data after Stop", asyn
   stream.packet(0x300, working, 1);
   await settle();
   expect(player.state().phase.kind).toBe("idle");
+});
+it("lists captions that begin long after the stream started, on the same stream and off until chosen", async () => {
+  const stream = await open("late", { ...tracks, subtitles: [] });
+  const controls = await mount();
+  stream.elapsed = 20_000;
+  expect(controls.querySelector('[aria-label="Subtitles"]')).toBeNull();
+  ipc.always("playback.tracks", { ...tracks, subtitles: [captions] });
+  await act(async () => {
+    ipc.emit("playback.tracksChanged", { sessionId: "late" });
+    await settle();
+  });
+  expect(controls.querySelector('[aria-label="Subtitles"]')).not.toBeNull();
+  expect(player.state().subtitle).toBeNull();
+  player.setSubtitle(captions);
+  // A second caption channel joins the list without taking the choice.
+  ipc.always("playback.tracks", { ...tracks, subtitles: [captions, { ...captions, page: 3 }] });
+  await act(async () => {
+    ipc.emit("playback.tracksChanged", { sessionId: "late" });
+    await settle();
+  });
+  expect(player.state().tracks?.subtitles.map((track) => track.page)).toEqual([1, 3]);
+  expect(player.state().subtitle).toEqual(captions);
+  expect(ipc.argsOf("playback.open")).toHaveLength(1);
+  expect(stream.destroyed).toBe(false);
+});
+it("keeps subtitles off through later captions for a viewer who turned them off", async () => {
+  ipc.prefer({ subtitleLanguage: "nl" });
+  const stream = await open();
+  stream.packet(0x300, working, 1);
+  await settle();
+  expect(player.state().subtitle?.language).toBe("nl");
+  player.setSubtitle(null);
+  ipc.always("playback.tracks", { ...tracks, subtitles: [...tracks.subtitles, captions] });
+  ipc.emit("playback.tracksChanged", { sessionId: "one" });
+  await settle();
+  expect(player.state().tracks?.subtitles.map((track) => track.label)).toEqual([
+    "Nederlands",
+    "Captions",
+  ]);
+  expect(player.state().subtitle).toBeNull();
+});
+it("ignores a track change of a stream that closed, and after Stop", async () => {
+  await open("first", { ...tracks, subtitles: [] });
+  await open("second", { ...tracks, subtitles: [] });
+  const reads = ipc.argsOf("playback.tracks").length;
+  ipc.always("playback.tracks", { ...tracks, subtitles: [captions] });
+  ipc.emit("playback.tracksChanged", { sessionId: "first" });
+  await settle();
+  expect(ipc.argsOf("playback.tracks")).toHaveLength(reads);
+  expect(player.state().tracks?.subtitles).toEqual([]);
+  player.stop();
+  ipc.emit("playback.tracksChanged", { sessionId: "second" });
+  await settle();
+  expect(ipc.argsOf("playback.tracks")).toHaveLength(reads);
+});
+it("keeps captions found while the first track list was still on its way", async () => {
+  const atStart = ipc.hold("playback.tracks");
+  await open("race");
+  const controls = await mount();
+  const afterChange = ipc.hold("playback.tracks");
+  ipc.emit("playback.tracksChanged", { sessionId: "race" });
+  // The newer list arrives first; the one read at the start has no captions yet.
+  await act(async () => {
+    afterChange.resolve({ ...tracks, subtitles: [captions] });
+    await settle();
+    atStart.resolve({ ...tracks, subtitles: [] });
+    await settle();
+  });
+  expect(ipc.argsOf("playback.tracks")).toHaveLength(2);
+  expect(controls.querySelector('[aria-label="Subtitles"]')).not.toBeNull();
 });
 it("rejects a late preference answer and packet from a cancelled channel", async () => {
   const first = await open("first");
