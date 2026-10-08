@@ -413,6 +413,7 @@ function make(deps: OnDemandDeps) {
         const under = refreshing.get(source.id);
         if (playlist && under && sameSource(source, under.source)) {
           yield* Fiber.await(under.fiber);
+          if (!(yield* subscriptions.stands(source))) return yield* switched;
           return yield* refreshOf(source, playlist);
         }
         let running = under && sameSource(source, under.source) ? under : null;

@@ -144,7 +144,8 @@ export class Library extends Context.Service<
   {
     /**
      * Fetches a subscription's catalogue from its provider. Concurrent calls for one subscription
-     * share a fetch, and a few subscriptions fetch at a time.
+     * share a fetch, and a few subscriptions fetch at a time. A supplied mapped playlist snapshot
+     * waits for an earlier refresh to finish, so its catalogue is accepted separately.
      */
     refresh(
       subscriptionId: string,
@@ -306,6 +307,7 @@ function make(options: LibraryOptions) {
         // Unmapped Live has no titles to align and can keep joining the fetch already running.
         if (playlist && source.playlistMapped && under && sameSource(source, under.source)) {
           yield* Fiber.await(under.fiber);
+          if (!(yield* subscriptions.stands(source))) return yield* switched;
           return yield* refreshOf(source, playlist);
         }
         let running = under && sameSource(source, under.source) ? under : null;

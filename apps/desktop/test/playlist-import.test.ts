@@ -266,6 +266,103 @@ describe("saved M3U movie mapping", () => {
     }
   });
 
+  it("rejects a stale combined waiter without displacing the new mapping's refresh behind busy title slots", async () => {
+    const app = await started(await tempDir());
+    const [a, b, queued, target] = await Promise.all([host(), host(), host(), host()]);
+    const saved = [];
+    for (const provider of [a, b, queued, target]) {
+      provider.set(provider.list().replace(' tmdb-id="42"', ""));
+      const subscription = await app.subscriptions.add(login(provider.link));
+      await app.subscriptions.mapPlaylist(subscription.id, films, "movie");
+      saved.push(subscription);
+    }
+    const aId = saved[0]!.id;
+    const bId = saved[1]!.id;
+    const queuedId = saved[2]!.id;
+    const targetId = saved[3]!.id;
+    for (const id of [aId, bId, queuedId]) await app.titles.refresh(id);
+    // Keep the mapping pick on the cached import while the title slots are occupied.
+    await app.subscriptions.playlistGroups(targetId, "", 0, 10);
+    const heldA = a.hold();
+    const heldB = b.hold();
+    const heldQueued = queued.hold();
+    const blockedA = Promise.allSettled([app.titles.refresh(aId)]);
+    const blockedB = Promise.allSettled([app.titles.refresh(bId)]);
+    await Promise.all([heldA.arrived, heldB.arrived]);
+    const independent = Promise.allSettled([app.titles.refresh(targetId)]);
+    await app.titles.status();
+    const blockedQueued = Promise.allSettled([app.titles.refresh(queuedId)]);
+    await app.titles.status();
+    let staleFinished = false;
+    const stale = Promise.allSettled([app.roster.refreshPlaylist(targetId)]).then((results) => {
+      staleFinished = true;
+      return results;
+    });
+    const liveStatus = async () =>
+      (await app.library.status()).find((status) => status.subscriptionId === targetId);
+    const work: Promise<unknown>[] = [blockedA, blockedB, independent, blockedQueued, stale];
+    let heldIndependent: ReturnType<typeof target.hold> | undefined;
+    try {
+      await vi.waitFor(async () => expect((await liveStatus())?.channelCount).toBe(1));
+      await app.subscriptions.mapPlaylist(targetId, playlistGroupId("News"), "skip");
+      const before = target.requests();
+      const newer = Promise.allSettled([app.roster.refreshPlaylist(targetId)]);
+      work.push(newer);
+      await vi.waitFor(async () => expect(await liveStatus()).toMatchObject({ channelCount: 0 }));
+      heldIndependent = target.hold();
+      heldA.release();
+      await blockedA;
+      await heldIndependent.arrived;
+      heldIndependent.release();
+      await heldQueued.arrived;
+      expect(await independent).toMatchObject([
+        {
+          status: "rejected",
+          reason: { error: { detail: "The subscription changed while loading titles." } },
+        },
+      ]);
+      // The old combined call must reject while the newer owner is still waiting for a slot.
+      await vi.waitFor(() => expect(staleFinished).toBe(true));
+      expect(await stale).toMatchObject([
+        {
+          status: "rejected",
+          reason: { error: { detail: "The subscription changed while loading titles." } },
+        },
+      ]);
+      target.set(
+        target.list(
+          "changed",
+          `#EXTINF:-1 group-title="Films",New film\n${target.origin}/new.mp4\n`,
+        ),
+      );
+      const asked = app.titles.collection({ kind: "movie", id: "all", offset: 0, limit: 20 });
+      work.push(asked);
+      // The worker has answered the query's status read before releasing either remaining slot.
+      await app.titles.status();
+      heldB.release();
+      heldQueued.release();
+      expect(await newer).toMatchObject([{ status: "fulfilled" }]);
+      await asked;
+      const page = await app.titles.collection({ kind: "movie", id: "all", offset: 0, limit: 20 });
+      const own = page.titles.filter((title) => title.subscriptionId === targetId);
+      expect(own.map((title) => title.name)).toEqual(["Film"]);
+      expect(
+        await app.titles.file({ kind: "movie", subscriptionId: targetId, id: own[0]!.id }),
+      ).toMatchObject({ url: `${target.origin}/one.mp4` });
+      expect(target.requests() - before).toBe(2);
+      expect(await liveStatus()).toMatchObject({ channelCount: 0, failure: null });
+      expect(
+        (await app.titles.status()).lists.find((status) => status.subscriptionId === targetId),
+      ).toMatchObject({ movies: 1, failure: null });
+    } finally {
+      heldIndependent?.release();
+      heldA.release();
+      heldB.release();
+      heldQueued.release();
+      await Promise.allSettled(work);
+    }
+  }, 15_000);
+
   it.each([false, true])(
     "keeps the later supplied title snapshot at the same source revision, already loaded=%s",
     async (loaded) => {

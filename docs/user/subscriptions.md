@@ -18,7 +18,7 @@ From version 0.0.9, open a playlist subscription in Settings and choose **Map** 
 
 From 0.0.9, playlists are limited to 100,000 entries, 64 MiB of unpacked text and 10,000 groups, whether mapped or not. A playlist over a limit fails to load.
 
-Movies and series need supported finite files. HLS movie and episode addresses ending in `.m3u8` are left out with a reason; HLS remains supported for Live TV.
+Movies and series need supported finite files. HLS movie and episode addresses with a path ending in `.m3u` or `.m3u8`, or `m3u8` in the query, are left out with a reason; HLS remains supported for Live TV.
 
 Once you map a group, new groups wait for your choice. An entry in groups with different choices stays out. **Left out** shows every omitted entry's name, groups and reason, in pages. Stream addresses are never shown there.
 
