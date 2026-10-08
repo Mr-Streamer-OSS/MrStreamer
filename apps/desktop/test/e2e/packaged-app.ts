@@ -241,7 +241,7 @@ async function pictureSubtitles(page: Page): Promise<{ ok: boolean; detail: stri
     const menu = `document.querySelector('[aria-label^="Subtitles"]')`;
     await waitFor(() => page.evaluate<boolean>(`!!${menu}`), 10_000);
     await page.evaluate(`${menu}.click()`);
-    const track = `[...document.querySelectorAll("button")].find((b) => b.textContent.trim() === ${JSON.stringify(label)})`;
+    const track = `[...document.querySelectorAll('[role="dialog"][aria-label^="Subtitles"] button[data-item]')].find((b) => b.textContent.trim() === ${JSON.stringify(label)})`;
     await waitFor(() => page.evaluate<boolean>(`!!${track}`), 10_000);
     // Choosing closes the menu.
     await page.evaluate(`${track}.click()`);

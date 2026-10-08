@@ -1,7 +1,18 @@
-import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { parse } from "yaml";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { artifactName, STORE_ENVIRONMENT, STORE_NAME } from "../scripts/store-release.ts";
 
 // A stable run can build and publish two releases, a nightly of main first and then the stable
@@ -36,11 +47,13 @@ interface Job {
   readonly environment?: { readonly name: string };
   readonly concurrency?: Record<string, unknown>;
   readonly defaults?: { readonly run?: { readonly "working-directory"?: string } };
+  readonly outputs?: Record<string, string>;
   readonly strategy?: { readonly matrix?: { readonly include?: Record<string, string>[] } };
   readonly steps?: readonly Step[];
 }
 
 interface Step {
+  readonly name?: string;
   readonly id?: string;
   readonly if?: string;
   readonly uses?: string;
@@ -326,5 +339,218 @@ describe("the source archives of a release", () => {
     expect(publish?.needs).toContain("sources");
     expect(uploaded).toBe("release-sources-0.0.7");
     expect(uploaded).toMatch(new RegExp(`^${taken.replace("*", ".*")}$`));
+  });
+});
+
+// A release is only as good as the jobs it waits for, and a Store package only as slow as the ones
+// it needs. A dry run reads the same graph, so these read it for every run at once.
+describe("what each job of a release waits for", () => {
+  const { jobs } = read("build-release.yml");
+  const { publish, msix, package: unix, "package-windows": windows } = jobs;
+
+  const uploads = (name: string) =>
+    (jobs[name]?.steps ?? [])
+      .filter((step) => step.uses?.startsWith("actions/upload-artifact@"))
+      .map((step) => String(step.with?.["name"]));
+
+  it("publishes only after every job that makes a release file, the sources and the checks", () => {
+    const makers = Object.keys(jobs).filter((name) =>
+      uploads(name).some((artifact) => artifact.startsWith("release-")),
+    );
+
+    expect(makers.toSorted()).toEqual(["package", "package-windows", "sources"]);
+    expect([publish?.needs].flat().toSorted()).toEqual(["checks", ...makers].toSorted());
+    // A dry run builds all of it and publishes none.
+    expect(publish?.if).toBe("github.event_name != 'pull_request'");
+  });
+
+  it("starts the Store package once the Windows installer is built, whatever the other platforms do", () => {
+    expect([msix?.needs].flat().toSorted()).toEqual(["bundle", "package-windows"]);
+    expect(unix?.strategy?.matrix?.include?.map((leg) => leg["target"])).toEqual([
+      "mac-arm64",
+      "linux-x64",
+    ]);
+    expect(uploads("package-windows")).toEqual(["release-win-x64-${{ inputs.version }}"]);
+  });
+
+  it("hands the Store package the Windows ffmpeg under the key that job saved it with", () => {
+    const save = windows?.steps?.find((step) => step.id === "ffmpeg");
+    const restore = msix?.steps?.find((step) => step.uses?.startsWith("actions/cache/restore@"));
+    const key = windows?.steps?.find((step) => step.id === "ffmpeg-key");
+
+    expect(save?.uses).toMatch(/^actions\/cache@/);
+    expect(save?.with?.["key"]).toBe("${{ steps.ffmpeg-key.outputs.key }}");
+    expect(windows?.outputs?.["ffmpeg-key"]).toBe("${{ steps.ffmpeg-key.outputs.key }}");
+    expect(key?.run).toContain("hashFiles('apps/desktop/scripts/build-ffmpeg.sh')");
+    // The cache is saved when the job succeeds, so a cold build is there for the job that needs it.
+    expect(restore?.with).toEqual({
+      path: save?.with?.["path"],
+      key: "${{ needs.package-windows.outputs.ffmpeg-key }}",
+      "fail-on-cache-miss": true,
+    });
+  });
+});
+
+// The AirPlay helper compiles in every Mac build. Its cache holds the compiler's output and is
+// found by what the script says the output is built from; the Developer ID signature is made on
+// the copy inside the app, later.
+describe("the cached AirPlay helper of a Mac build", () => {
+  const steps = read("build-release.yml").jobs["package"]?.steps ?? [];
+  const find = (id: string) => steps.find((step) => step.id === id);
+  const build = steps.find((step) => step.name === "Build the AirPlay helper");
+  const { mac } = parse(readFileSync("apps/desktop/electron-builder.yml", "utf8")) as {
+    mac: { extraResources: { from: string; to: string }[] };
+  };
+
+  it("is found by the key the build script prints and rebuilt only on a miss", () => {
+    expect(find("airplay-key")?.run).toContain(
+      "scripts/build-airplay-helper.sh --key ${{ matrix.target }}",
+    );
+    expect(find("airplay")?.with?.["key"]).toBe("${{ steps.airplay-key.outputs.key }}");
+    expect(build?.if).toBe("runner.os == 'macOS' && steps.airplay.outputs.cache-hit != 'true'");
+    expect(steps.indexOf(build!)).toBeGreaterThan(steps.indexOf(find("airplay")!));
+  });
+
+  it("holds the folder electron-builder copies into the app to sign, and nothing it makes", () => {
+    // The copy in the app is signed; the cached original never is.
+    expect(find("airplay")?.with?.["path"]).toBe(
+      "apps/desktop/vendor/airplay/${{ matrix.target }}",
+    );
+    expect(mac.extraResources.map((resource) => resource.from)).toContain(
+      "vendor/airplay/mac-${arch}",
+    );
+  });
+});
+
+// This workflow runs from main on the commit a release names, and a stable release can name a
+// nightly tested before the AirPlay key and the phase timer existed. These run the Mac steps'
+// commands, as the runner's bash runs them, in a checkout with and without those scripts.
+describe("a Mac build of a commit from before the cache key and the phase timer", () => {
+  const steps = read("build-release.yml").jobs["package"]?.steps ?? [];
+  const keyStep = steps.find((step) => step.id === "airplay-key");
+  const buildStep = steps.find((step) => step.name === "Build for macOS, signed and notarized");
+  const matrix: Record<string, string> = { target: "mac-arm64", builder: "--mac --arm64" };
+  const secrets = Object.fromEntries(
+    [
+      "CSC_LINK",
+      "CSC_KEY_PASSWORD",
+      "APPLE_API_KEY_P8",
+      "APPLE_API_KEY_ID",
+      "APPLE_API_ISSUER",
+    ].map((name) => [name, "secret"]),
+  );
+
+  const root = mkdtempSync(join(tmpdir(), "release-steps-"));
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+  /** A checkout holding only the scripts given, with a pnpm and a node that log their calls. */
+  const checkout = (name: string, scripts: Record<string, string>) => {
+    const dir = join(root, name);
+    mkdirSync(join(dir, "scripts"), { recursive: true });
+    mkdirSync(join(dir, "bin"));
+    for (const [file, body] of Object.entries(scripts))
+      writeFileSync(join(dir, "scripts", file), body, { mode: 0o755 });
+    const tool = (name: string, exit: string) => {
+      writeFileSync(
+        join(dir, "bin", name),
+        `#!/bin/sh\necho "${name} $*" >> calls.log\ncat >/dev/null\n${exit}\n`,
+      );
+      chmodSync(join(dir, "bin", name), 0o755);
+    };
+    tool("pnpm", 'exit "${PNPM_EXIT:-0}"');
+    tool("node", "exit 0");
+    return dir;
+  };
+
+  /** Runs a step's commands in the checkout, as the runner's bash does. */
+  const run = (dir: string, step: Step | undefined, env: Record<string, string> = {}) => {
+    const command = String(step?.run).replace(
+      /\$\{\{ matrix\.(\w+) \}\}/g,
+      (_, name: string) => matrix[name] ?? "",
+    );
+    const { status } = spawnSync(
+      "bash",
+      ["--noprofile", "--norc", "-eo", "pipefail", "-c", command],
+      {
+        cwd: dir,
+        stdio: "ignore",
+        env: {
+          PATH: `${join(dir, "bin")}:${process.env["PATH"]}`,
+          GITHUB_OUTPUT: join(dir, "outputs"),
+          RUNNER_TEMP: dir,
+          VERSION: "0.0.9",
+          SHA: "0123456789abcdef",
+          ...env,
+        },
+      },
+    );
+    const read = (file: string) =>
+      existsSync(join(dir, file)) ? readFileSync(join(dir, file), "utf8") : "";
+    return {
+      status,
+      outputs: read("outputs"),
+      calls: read("calls.log").split("\n").filter(Boolean),
+    };
+  };
+
+  it("compiles the helper every time when its script names no --key", () => {
+    // The script of those commits took a target and nothing else.
+    const old = checkout("old-key", {
+      "build-airplay-helper.sh":
+        '#!/bin/sh\ncase ${1:?usage} in mac-arm64) ;; *) echo "Unknown target $1" >&2; exit 1 ;; esac\n',
+    });
+
+    expect(run(old, keyStep)).toMatchObject({ status: 0, outputs: "" });
+    // No key, so the cache is skipped and the build step's miss condition holds.
+    expect(steps.find((step) => step.id === "airplay")?.if).toContain(
+      "steps.airplay-key.outputs.key != ''",
+    );
+  });
+
+  it("keys the helper by what a script that names --key prints, and stops when that fails", () => {
+    const prints = checkout("key", {
+      "build-airplay-helper.sh": "#!/bin/sh\n# --key prints the inputs\necho abc123\n",
+    });
+    const fails = checkout("failing-key", {
+      "build-airplay-helper.sh":
+        "#!/bin/sh\n# --key prints the inputs\necho no swiftc >&2; exit 3\n",
+    });
+
+    expect(run(prints, keyStep)).toMatchObject({
+      status: 0,
+      outputs: "key=airplay-mac-arm64-abc123\n",
+    });
+    expect(run(fails, keyStep)).toMatchObject({ status: 3, outputs: "" });
+  });
+
+  it("builds and notarizes with the timer when the commit has one, and without it when not", () => {
+    const timed = run(checkout("timed", { "mac-release-phases.ts": "" }), buildStep, secrets);
+    const untimed = run(checkout("untimed", {}), buildStep, secrets);
+
+    expect(timed.status).toBe(0);
+    expect(timed.calls.toSorted()).toEqual([
+      "node scripts/mac-release-phases.ts Mac release phases, 0.0.9 from 0123456789ab",
+      "node scripts/notarize-dmg.ts dist/*.dmg",
+      "pnpm exec electron-builder --mac --arm64 --publish never",
+    ]);
+    expect(untimed).toMatchObject({
+      status: 0,
+      calls: [
+        "pnpm exec electron-builder --mac --arm64 --publish never",
+        "node scripts/notarize-dmg.ts dist/*.dmg",
+      ],
+    });
+  });
+
+  it("fails the step before notarizing when the build fails, timed or not", () => {
+    for (const [name, scripts] of [
+      ["timed-failure", { "mac-release-phases.ts": "" }],
+      ["untimed-failure", {}],
+    ] as const) {
+      const result = run(checkout(name, scripts), buildStep, { ...secrets, PNPM_EXIT: "7" });
+
+      expect(result.status).not.toBe(0);
+      expect(result.calls.join("\n")).not.toContain("notarize-dmg");
+    }
   });
 });
