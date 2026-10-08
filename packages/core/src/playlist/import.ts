@@ -27,8 +27,39 @@ export function playlistGroups(entry: PlaylistEntry): string[] {
   return groups.length ? [...new Set(groups)] : [""];
 }
 
-/** Mapped exact copies collapse. Address, headers and attributes identify each title version. */
+/** Unmapped Live uses the original catalogue without exact-title or mapping-report bookkeeping. */
 export function importPlaylist(
+  entries: readonly PlaylistEntry[],
+  mapping?: PlaylistMapping,
+): ImportedPlaylist {
+  if (mapping) return classifiedPlaylist(entries, mapping);
+  const live = playlistCatalogue(entries);
+  return {
+    live,
+    catalogue: { movieCategories: [], movies: [], seriesCategories: [], series: [] },
+    files: new Map<string, PlaylistFile>(),
+    details: new Map<string, ProviderDetails>(),
+    groups: new Map<string, readonly PlaylistSample[]>(),
+    omissions: [],
+    status: {
+      explicit: false,
+      groups: 0,
+      live: live.channels.length,
+      movies: 0,
+      series: 0,
+      episodes: 0,
+      omitted: 0,
+    },
+  };
+}
+
+/** Settings inspects an unmapped source under the same limits as its first explicit mapping. */
+export function inspectPlaylist(entries: readonly PlaylistEntry[]): ImportedPlaylist {
+  return classifiedPlaylist(entries);
+}
+
+/** Mapped exact copies collapse. Address, headers and attributes identify each title version. */
+function classifiedPlaylist(
   entries: readonly PlaylistEntry[],
   mapping?: PlaylistMapping,
 ): ImportedPlaylist {
@@ -87,10 +118,12 @@ export function importPlaylist(
     for (const group of names) {
       const samples = groups.get(group);
       if (samples) samples.push(report);
-      else groups.set(group, [report]);
+      else {
+        if (groups.size === 10_000)
+          throw new AppFailure({ kind: "unexpected", detail: "Playlist exceeds 10,000 groups." });
+        groups.set(group, [report]);
+      }
     }
-    if (groups.size > 10_000)
-      throw new AppFailure({ kind: "unexpected", detail: "Playlist exceeds 10,000 groups." });
     if (reason) {
       omissions.push({ ...report, reason });
       continue;

@@ -16,7 +16,7 @@ Its channels join the lists first, then its guide, movies and series. What you'r
 
 From version 0.0.9, open a playlist subscription in Settings and choose **Map** beside **Groups**. Choose each group's use: **Live TV**, **Movies**, **Series** or **Skip**. Picks apply immediately. A playlist without mapping keeps its original live-only behaviour.
 
-From 0.0.9, playlists are limited to 100,000 entries, 64 MiB of unpacked text and 10,000 groups, whether mapped or not. A playlist over a limit fails to load.
+Explicit mapping accepts up to 100,000 entries, 64 MiB of unpacked text and 10,000 groups. A larger playlist still loads and plays as unmapped Live TV. Opening its mapping or making its first pick fails with an explanation and saves no choice. Once a playlist is mapped, a refresh over a limit fails and keeps its previous lists.
 
 Movies and series need supported finite files. HLS movie and episode addresses with a path ending in `.m3u` or `.m3u8`, or `m3u8` in the query, are left out with a reason; HLS remains supported for Live TV.
 
@@ -24,7 +24,7 @@ Once you map a group, new groups wait for your choice. An entry in groups with d
 
 Series entries need one clear episode token, such as `S01E02` or `1x02`, with a series name before it. Season zero is supported. Ranges, multiple episode numbers and uncertain names stay out with an explanation. Episodes follow the playlist's order, even across seasons. When it lists several files for one episode, the episode menu lets you pick the exact file.
 
-Movie and episode progress belongs to the exact source file. Reordering keeps that progress; replacing a file or rotating its source address can create a new version which starts from the beginning. After a restart, the app needs to read the playlist to recover playable addresses. A failed refresh keeps the previous lists; a successful empty import clears them.
+Movie and episode progress belongs to the exact source file, including its entry's attributes and stream headers. Reordering keeps that progress; replacing a file, rotating its source address or changing an attribute such as its logo address creates a new version which starts from the beginning. After a restart, the app needs to read the playlist to recover playable addresses. A failed refresh keeps the previous lists; a successful empty import clears them.
 
 ## Everything together
 

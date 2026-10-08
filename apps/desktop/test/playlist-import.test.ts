@@ -81,6 +81,66 @@ const login = (link: string) => ({ server: link, username: "", password: "" });
 const films = playlistGroupId("Films");
 
 describe("saved M3U movie mapping", () => {
+  it.each(["entries", "bytes", "groups"] as const)(
+    "rejects the first mapping of an oversized %s source without saving a choice or losing Live after restart",
+    async (limit) => {
+      const provider = await host();
+      const row = `#EXTINF:-1 tvg-id="news" group-title="News",News\n${provider.origin}/live.ts\n`;
+      let body = `#EXTM3U\n${row}`;
+      if (limit === "entries") {
+        body += Array.from(
+          { length: 100_000 },
+          (_, at) => `#EXTINF:-1 group-title="Films",Film ${at}\nrtmp://example.test/${at}\n`,
+        ).join("");
+      } else if (limit === "bytes") {
+        const comment = "#" + "x".repeat(1022) + "\n";
+        body += comment.repeat(64 * 1024) + "\n";
+      } else {
+        const names = Array.from({ length: 10_000 }, (_, at) => `Group ${at}`).join(";");
+        body += `#EXTINF:-1 group-title="${names}",Other\n${provider.origin}/other.ts\n`;
+      }
+      provider.set(body);
+      const dir = await tempDir();
+      const app = await started(dir);
+      const saved = await app.subscriptions.add(login(provider.link));
+      const before = (await app.subscriptions.sources())[0]!;
+      const detail =
+        limit === "entries" ? "100,000" : limit === "bytes" ? "64 MiB" : "10,000 groups";
+      const failure = { error: { kind: "unexpected", detail: expect.stringContaining(detail) } };
+      // A first pick is checked even without opening the mapping report or loading Live first.
+      await expect(
+        app.subscriptions.mapPlaylist(saved.id, playlistGroupId("News"), "movie"),
+      ).rejects.toMatchObject(failure);
+      await app.roster.refreshPlaylist(saved.id);
+      const channels = await app.library.channels({});
+      expect(channels.some((channel) => channel.id === "news")).toBe(true);
+      await expect(app.subscriptions.playlistGroups(saved.id, "", 0, 20)).rejects.toMatchObject(
+        failure,
+      );
+      await expect(
+        app.subscriptions.mapPlaylist(saved.id, playlistGroupId("News"), "movie"),
+      ).rejects.toMatchObject(failure);
+      expect((await app.subscriptions.list())[0]?.playlistMapped).toBe(false);
+      expect(JSON.parse(await readFile(join(dir, "subscription.json"), "utf8"))).not.toHaveProperty(
+        "mapping",
+      );
+      expect(await app.subscriptions.stands(before)).toBe(true);
+      expect(
+        await (await app.subscriptions.sourceOf(saved.id)).provider.liveStream("news"),
+      ).toMatchObject({ url: `${provider.origin}/live.ts` });
+      await app.runtime.dispose();
+      const restarted = await started(dir);
+      expect((await restarted.subscriptions.list())[0]?.playlistMapped).toBe(false);
+      expect(await restarted.library.channels({})).toEqual(channels);
+      expect(
+        await (await restarted.subscriptions.sourceOf(saved.id)).provider.liveStream("news"),
+      ).toMatchObject({ url: `${provider.origin}/live.ts` });
+      await restarted.roster.refreshPlaylist(saved.id);
+      expect(await restarted.library.channels({})).toEqual(channels);
+    },
+    30_000,
+  );
+
   it.each(["independent", "combined"] as const)(
     "keeps unmapped Live lists after an empty or unconfirmed short %s refresh",
     async (mode) => {
