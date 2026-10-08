@@ -33,6 +33,7 @@ The folder contains:
 - your favourites, the channels you watched, your progress in movies and episodes, and the episodes you marked watched or unwatched, each with its series, its season and episode number and when you marked it, and for a series you marked an episode of, the season and episode numbers it listed when you marked or last opened it
 - your watchlist: for each movie or series you saved, and each subscription you saved it from, its name, year and kind, whether the provider marks it for adults, when you saved it, its TMDB id, and the numbers that provider lists its versions under
 - copies of each provider's channel list, programme guide, and movie and series lists
+- from 0.0.9, opt-in subtitle-service settings and encrypted SubDL API keys or OpenSubtitles API keys, usernames and passwords, plus downloaded subtitle text and timing for exact movie and episode versions. Up to eight recent results are cached per exact file. Service addresses and account secrets are not stored with those cues.
 - from 0.0.9, the sound and subtitle languages read from exact movie and episode files on this computer, with listing fingerprints and random playback session ids, without playable addresses or request headers
 - for a subscription you gave a programme guide from another address: that address, the copy of the guide downloaded from it, and the reason its latest download failed, if it did. The address can hold a key, so it is encrypted like a password. Its server's address is not encrypted.
 - the channels you mapped to a guide channel by hand: for each, the number your provider lists the channel under, its name, and the guide channel's id
@@ -52,6 +53,14 @@ Settings > About offers a diagnostics export when you ask for it. You can inspec
 Mr. Streamer connects to the server address you enter, for each subscription you add. It does so to check your login (when you add it, each time the app starts, and when you open Settings > Subscriptions), to load the channel, movie and series lists and the programme guide, to show a title's details, and to play. Every request includes your username and password for that provider, because these providers require it. Your provider can see your IP address, the app version, and what you open and watch from it, and when. Your provider's privacy policy applies to that data.
 
 With several subscriptions, each provider receives only its own login and the requests for its own channels and titles. Mr. Streamer puts their lists together on your computer, and tells no provider about another, or what you watch from it.
+
+### Online subtitle services, from 0.0.9
+
+Online subtitle search is off until you enable it in Settings. Saving settings or opening the subtitle panel makes no request to either service. When you explicitly search, the services you selected and set up receive the movie or series TMDB identity, or its title and year when no identity is known, with the season and episode for an episode, and your requested languages. They also receive your IP address, app identification and their own API key. No provider login, playable stream address or file request headers are sent.
+
+Choosing a result downloads its subtitle from that service. OpenSubtitles receives your username and password over HTTPS for that download login. Its returned token stays in memory for the request and is not stored. A download can consume the service's allowance. SubDL uses your API key for search; its subtitle download receives no OpenSubtitles login. Their own privacy policies apply.
+
+Downloaded cues and corrections stay on this computer. You can forget them for a file in its subtitle panel. When removing a subscription, tick **Also delete favourites, watchlist, history and progress** to remove its saved subtitle data too. Otherwise that data remains on this computer. Removing a service account from Settings removes its saved credentials. Turning search off cancels online requests and prevents new searches or downloads, while locally saved subtitles remain playable.
 
 ### Unencrypted connections
 
@@ -119,7 +128,7 @@ Our email and hosting providers process these messages and visits to our website
 
 ## Deleting your data
 
-- **Remove**, on a subscription in Settings > Subscriptions, deletes that subscription's login or playlist link, the id and the name the app kept for it, the copies of its provider's lists and guide, and a guide address you gave it with the copy of that guide and the channels you mapped. Your other subscriptions keep theirs. Tick **Also delete favourites, watchlist, history and progress** to delete that account's favourites, watchlist, watched channels, progress in movies and episodes and the episodes you marked as well. Otherwise they remain, and reappear if you add the same account again.
+- **Remove**, on a subscription in Settings > Subscriptions, deletes that subscription's login or playlist link, the id and the name the app kept for it, the copies of its provider's lists and guide, and a guide address you gave it with the copy of that guide and the channels you mapped. Your other subscriptions keep theirs. Tick **Also delete favourites, watchlist, history and progress** to delete that account's favourites, watchlist, watched channels, progress in movies and episodes, the episodes you marked, and saved subtitle cues and timing as well. Otherwise they remain on this computer. Your favourites, watchlist and viewing record reappear if you add the same account again.
 - **Use provider guide**, or **Use playlist guide**, in a subscription's Guide form deletes the guide address you gave it, the copy of that guide and the channels you mapped.
 - **Deleting the folder** listed above removes everything Mr. Streamer stores there. To also remove the password key, delete "Mr. Streamer Safe Storage" in Keychain Access on macOS, or the matching entry in your Linux keyring. The update folder can be deleted as well: `~/Library/Caches/mrstreamer-updater` on macOS, `%LOCALAPPDATA%\mrstreamer-updater` on Windows, or `~/.cache/mrstreamer-updater` on Linux.
 - **Uninstalling the app does not delete your data**, so a reinstall continues where you left off. The copy from the Microsoft Store is the exception: uninstalling it deletes its folder.

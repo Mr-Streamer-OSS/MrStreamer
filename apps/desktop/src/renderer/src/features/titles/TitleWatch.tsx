@@ -13,7 +13,16 @@
 // confirmed, the picture area says where it plays, and the controls stay: there is no picture to
 // clear. Going back leaves the receiver playing; only Play here, or quitting, ends it.
 import { Slider as SliderPrimitive } from "@base-ui/react/slider";
-import { Maximize, Minimize, Pause, Play, RotateCcw, RotateCw, SkipForward } from "lucide-react";
+import {
+  Captions,
+  Maximize,
+  Minimize,
+  Pause,
+  Play,
+  RotateCcw,
+  RotateCw,
+  SkipForward,
+} from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { SeriesDetails } from "@mrstreamer/contracts/ondemand";
 import { ownedId, sameOwned } from "@mrstreamer/contracts/subscription";
@@ -53,6 +62,7 @@ import {
 } from "../watch/Output.tsx";
 import { nudgeSubtitles, PlaybackMenu, stepSpeed } from "../watch/PlaybackMenu.tsx";
 import { TrackMenus, type TrackMenu } from "../watch/TrackMenus.tsx";
+import { SubtitlePanel } from "./SubtitlePanel.tsx";
 import { VolumeControl } from "../watch/VolumeControl.tsx";
 
 /** Controls fade out after this long without input. */
@@ -197,7 +207,22 @@ export function TitleWatch() {
         case "H":
           if (titlePlayer.onReceiver()) flash("Subtitle timing plays here only");
           else {
-            nudgeSubtitles(titlePlayer.state().subtitle, event.key.toLowerCase() === "g" ? -1 : 1);
+            const direction = event.key.toLowerCase() === "g" ? -1 : 1;
+            const state = titlePlayer.state();
+            if (state.downloadedOn && state.savedSubtitle) {
+              const timing = state.savedSubtitle.timing;
+              const offset =
+                Math.round(
+                  Math.max(
+                    -600,
+                    Math.min(600, timing.offset + direction * (event.shiftKey ? 1 : 0.1)),
+                  ) * 10,
+                ) / 10;
+              void titlePlayer
+                .setDownloadedTiming({ ...timing, offset })
+                .catch(() => flash("Subtitle timing could not be saved"));
+              flash(`Subtitle offset ${offset > 0 ? "+" : ""}${offset.toFixed(1)} s`);
+            } else nudgeSubtitles(state.subtitle, direction);
           }
           break;
         case "<":
@@ -464,9 +489,29 @@ function Tracks({ menu, onMenu }: { menu: TrackMenu; onMenu: (menu: TrackMenu) =
   const subtitleStatus = useTitlePlayer((state) => state.subtitleStatus);
   const speed = useTitlePlayer((state) => state.speed);
   const shows = useTitlePlayer((state) => state.shows);
+  const downloadedOn = useTitlePlayer((state) => state.downloadedOn);
+  const saved = useTitlePlayer((state) => state.savedSubtitle);
   return (
     <>
+      {shows === null && (
+        <>
+          <Tooltip label={downloadedOn || subtitle ? "Subtitles on" : "Subtitles"}>
+            <Button
+              variant="media"
+              size="icon"
+              aria-label="Subtitles"
+              aria-pressed={downloadedOn || subtitle !== null}
+              aria-expanded={menu === "subtitles"}
+              onClick={() => onMenu(menu === "subtitles" ? null : "subtitles")}
+            >
+              <Captions />
+            </Button>
+          </Tooltip>
+          <SubtitlePanel open={menu === "subtitles"} onClose={() => onMenu(null)} />
+        </>
+      )}
       <TrackMenus
+        showSubtitles={shows !== null}
         audio={audio}
         audioId={audioId}
         subtitles={subtitles}
@@ -486,6 +531,7 @@ function Tracks({ menu, onMenu }: { menu: TrackMenu; onMenu: (menu: TrackMenu) =
         onSubtitle={(track) => titlePlayer.setSubtitle(track)}
       />
       <PlaybackMenu
+        downloadedTiming={downloadedOn && saved?.subtitle !== null}
         speed={{ value: speed, onChange: (next) => titlePlayer.setSpeed(next) }}
         subtitles={subtitles}
         subtitle={subtitle}

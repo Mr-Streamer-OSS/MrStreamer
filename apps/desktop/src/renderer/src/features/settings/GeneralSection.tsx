@@ -28,6 +28,7 @@ import {
   useSubscriptionPreferences,
 } from "../../lib/queries.ts";
 import { UpdatesSection } from "../updates/UpdatesSection.tsx";
+import { OnlineSubtitlesSection } from "./OnlineSubtitlesSection.tsx";
 import { Row, Section, Select } from "./Rows.tsx";
 
 /** The Subtitles choice for only the subtitles a file marks as forced: no language stored. */
@@ -174,6 +175,7 @@ export function GeneralSection() {
           <p className="mt-3 text-sm text-destructive">{describeError(appError(update.error))}</p>
         )}
       </Section>
+      <OnlineSubtitlesSection />
       <UpdatesSection />
     </>
   );

@@ -48,6 +48,7 @@ import { OnDemand } from "./services/ondemand.ts";
 import { Output } from "./services/output.ts";
 import { Licences } from "./services/licences.ts";
 import { Playback } from "./services/playback.ts";
+import { OnlineSubtitles } from "./services/online-subtitles.ts";
 import { Settings } from "./services/preferences.ts";
 import { Roster } from "./services/roster.ts";
 import { Subscriptions } from "./services/subscription.ts";
@@ -384,6 +385,7 @@ async function start(): Promise<void> {
     library,
     onDemand,
     playback,
+    onlineSubtitles,
     output,
     updates,
     guide,
@@ -399,6 +401,7 @@ async function start(): Promise<void> {
       library: Library,
       onDemand: OnDemand,
       playback: Playback,
+      onlineSubtitles: OnlineSubtitles,
       output: Output,
       updates: Updates,
       guide: Guide,
@@ -453,6 +456,7 @@ async function start(): Promise<void> {
   forward(viewing.changes, "viewing.changed", (sequence) => ({ sequence }));
   forward(watchlist.changes, "watchlist.changed", () => null);
   forward(updates.changes, "updates.changed", (status) => status);
+  forward(playback.fileReplaced, "playback.fileReplaced", (sessionId) => ({ sessionId }));
   // A receiver plays from this computer, so it stays awake while one does. The display may sleep.
   let awake: number | null = null;
   runtime.runFork(
@@ -602,6 +606,20 @@ async function start(): Promise<void> {
             turn,
           });
         }),
+      "subtitles.settings": () => onlineSubtitles.settings,
+      "subtitles.configure": ({ preferences, credentials }) =>
+        onlineSubtitles.configure(preferences, credentials),
+      "subtitles.search": ({ sessionId, languages }) =>
+        onlineSubtitles.search(sessionId, languages),
+      "subtitles.choose": ({ sessionId, resultId }) => onlineSubtitles.choose(sessionId, resultId),
+      "subtitles.saved": ({ sessionId }) => onlineSubtitles.saved(sessionId),
+      "subtitles.timing": ({ sessionId, timing, selection }) =>
+        onlineSubtitles.timing(sessionId, timing, selection),
+      "subtitles.show": ({ sessionId, selection }) =>
+        Effect.as(onlineSubtitles.show(sessionId, selection), null),
+      "subtitles.hide": ({ sessionId }) => Effect.as(onlineSubtitles.hide(sessionId), null),
+      "subtitles.forget": ({ sessionId }) => Effect.as(onlineSubtitles.forget(sessionId), null),
+      "subtitles.cancel": ({ sessionId }) => Effect.as(onlineSubtitles.cancel(sessionId), null),
       "playback.openTitle": ({ title, decoders }) =>
         Effect.gen(function* () {
           const turn = yield* playback.begin;

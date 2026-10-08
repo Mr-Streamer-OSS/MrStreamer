@@ -11,6 +11,8 @@ describe("CI multimedia coverage", () => {
     ["missing", "playlist-playback"],
     ["pending", "title-filter-playback"],
     ["missing", "title-filter-playback"],
+    ["pending", "online-subtitle-playback"],
+    ["missing", "online-subtitle-playback"],
   ] as const)("requires the complete behavioral result set: %s %s", (state, affected) => {
     const dir = mkdtempSync(join(tmpdir(), "mrstreamer-ci-results-"));
     try {
@@ -21,6 +23,7 @@ describe("CI multimedia coverage", () => {
         "output",
         "playlist-playback",
         "title-filter-playback",
+        "online-subtitle-playback",
       ];
       const testResults = names
         .filter((name) => state !== "missing" || name !== affected)
@@ -42,9 +45,10 @@ describe("CI multimedia coverage", () => {
       );
       expect(run.error).toBeUndefined();
       expect(run.status === 0).toBe(state === "complete");
-      if (state === "complete")
+      if (state === "complete") {
         expect(run.stdout).toContain("title-filter-playback, 1 passed, no skips");
-      else {
+        expect(run.stdout).toContain("online-subtitle-playback, 1 passed, no skips");
+      } else {
         expect(run.stderr).toContain("Required multimedia tests");
         expect(run.stderr).toContain(affected);
       }

@@ -48,6 +48,24 @@ export function languageName(code: string | null | undefined): string | null {
   }
 }
 
+/**
+ * `languageName` that keeps a region the code names: "Português (Brasil)" for "pt-BR" beside
+ * "Português (Portugal)" for "pt-PT". Without a region it is `languageName`.
+ */
+export function regionalLanguageName(code: string | null | undefined): string | null {
+  const language = languageCode(code);
+  const plain = languageName(language);
+  if (!language || !plain) return plain;
+  try {
+    const { region } = new Intl.Locale(code!.trim());
+    const name =
+      region && new Intl.DisplayNames([language], { type: "language" }).of(`${language}-${region}`);
+    return name ? name.charAt(0).toLocaleUpperCase(language) + name.slice(1) : plain;
+  } catch {
+    return plain;
+  }
+}
+
 /** What a probe knows about a track, before it has a label. */
 export interface TrackFacts {
   readonly id: number;

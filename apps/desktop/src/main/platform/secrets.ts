@@ -1,7 +1,7 @@
 import { safeStorage } from "electron";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 
-/** Encrypts small secrets (the subscription password) before they are written to disk. */
+/** Encrypts subscription and subtitle-service secrets before they are written to disk. */
 export interface Secrets {
   seal(plain: string): string;
   open(sealed: string): string;

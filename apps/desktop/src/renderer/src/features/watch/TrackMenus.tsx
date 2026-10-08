@@ -21,6 +21,7 @@ export function TrackMenus({
   shows = null,
   hereOnly = null,
   showSound = true,
+  showSubtitles = true,
   open,
   onOpenChange,
   onAudio,
@@ -42,6 +43,7 @@ export function TrackMenus({
   hereOnly?: string | null;
   /** Live TV puts Sound in More; titles keep its button here. */
   showSound?: boolean;
+  showSubtitles?: boolean;
   open: TrackMenu;
   onOpenChange: (open: TrackMenu) => void;
   onAudio: (id: number) => void;
@@ -64,7 +66,7 @@ export function TrackMenus({
           />
         </Menu>
       )}
-      {subtitles.length > 0 && (
+      {showSubtitles && subtitles.length > 0 && (
         <Menu
           label={subtitle ? "Subtitles on" : "Subtitles"}
           on={subtitle !== null}
@@ -224,6 +226,8 @@ function chosenItem(popup: HTMLElement): HTMLElement | null {
 
 /** Live and title menus share arrow navigation. Initial Down selects the current usable choice. */
 function moveFocus(event: KeyboardEvent<HTMLDivElement>): void {
+  if (event.target instanceof HTMLElement && event.target.closest("input, textarea, select"))
+    return;
   const items = [
     ...event.currentTarget.querySelectorAll<HTMLElement>("[data-item]:not(:disabled)"),
   ];

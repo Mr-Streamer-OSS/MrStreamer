@@ -9,6 +9,7 @@
 // shows, after every seek and every new run. Text cues keep the times their file gave them and
 // show `delay` seconds later; pictures keep theirs. The look is CSS on the layer (styles.css), and
 // a scale when pictures are drawn; how high subtitles sit is CSS for both.
+import { SubtitleTiming, type DownloadedSubtitle } from "@mrstreamer/contracts/online-subtitles";
 import { createStore, useStore } from "zustand";
 import { DEFAULT_SUBTITLE_LOOK, type SubtitleLook } from "@mrstreamer/contracts/preferences";
 import {
@@ -33,11 +34,13 @@ const SCALES: Record<SubtitleLook["size"], number> = { small: 0.8, medium: 1, la
 interface SubtitleSettings {
   /** Seconds text subtitles show after the time their file gives; negative shows them earlier. */
   readonly delay: number;
+  readonly speed: number;
   readonly look: SubtitleLook;
 }
 
 const settings = createStore<SubtitleSettings>(() => ({
   delay: 0,
+  speed: 1,
   look: DEFAULT_SUBTITLE_LOOK,
 }));
 
@@ -198,8 +201,8 @@ export function addTextCue(
   end: number,
   text: string,
 ): VTTCue {
-  const { delay } = settings.getState();
-  const cue = new VTTCue(start + delay, end + delay, text);
+  const { delay, speed } = settings.getState();
+  const cue = new VTTCue(start * speed + delay, end * speed + delay, text);
   textTimes.set(cue, { start, end });
   subtitleTrack(video).addCue(cue);
   showText(video);
@@ -213,12 +216,35 @@ export function addTextCue(
  */
 export function setSubtitleDelay(video: HTMLVideoElement, delay: number): void {
   const rounded = Math.round(Math.min(TIMING_LIMIT_S, Math.max(-TIMING_LIMIT_S, delay)) * 10) / 10;
-  settings.setState({ delay: rounded });
+  applyTiming(video, rounded, 1);
+}
+
+/** Local downloaded text keeps its original clock, so timing edits never accumulate. */
+export function setDownloadedSubtitleTiming(video: HTMLVideoElement, timing: SubtitleTiming): void {
+  const valid = SubtitleTiming.assert(timing);
+  applyTiming(video, valid.offset, valid.speed);
+}
+
+function applyTiming(video: HTMLVideoElement, delay: number, speed: number): void {
+  settings.setState({ delay, speed });
   for (const cue of [...(subtitleTrack(video).cues ?? [])]) {
     const times = textTimes.get(cue);
     if (!times) continue;
-    cue.startTime = times.start + rounded;
-    cue.endTime = times.end + rounded;
+    cue.startTime = times.start * speed + delay;
+    cue.endTime = times.end * speed + delay;
+  }
+  showText(video);
+}
+
+/** Adds a downloaded file in one batch, including cues before the current position for back-seeking. */
+export function showDownloadedSubtitle(video: HTMLVideoElement, saved: DownloadedSubtitle): void {
+  clearSubtitles(video);
+  const track = subtitleTrack(video);
+  const { delay, speed } = settings.getState();
+  for (const { start, end, text } of saved.cues) {
+    const cue = new VTTCue(start * speed + delay, end * speed + delay, text);
+    textTimes.set(cue, { start, end });
+    track.addCue(cue);
   }
   showText(video);
 }

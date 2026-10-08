@@ -142,6 +142,26 @@ export class OnDemand extends Context.Service<
   {
     readonly status: Effect.Effect<OnDemandStatus>;
     /**
+     * Current exact-file identity for subtitle search, or null once the catalogue no longer lists
+     * that file as `listingKey`. Reads the loaded lists and the details kept from opening the
+     * title. An episode's still listed series is asked of the provider again, once, after its
+     * lists were refreshed or its details were no longer kept: the same listing keeps its
+     * identity, another one or no answer gives null.
+     */
+    subtitleQuery(
+      title: TitleRef,
+      listingKey: string,
+    ): Effect.Effect<
+      {
+        readonly tmdbId: string | null;
+        readonly title: string;
+        readonly year: number | null;
+        readonly season?: number;
+        readonly episode?: number;
+      } | null,
+      Failed
+    >;
+    /**
      * Fetches a subscription's two lists. Concurrent calls for one subscription share a fetch,
      * and a few subscriptions fetch at a time. Lists that arrive after the subscription's login
      * changed are dropped: it fails, and those from before stay. A supplied playlist snapshot
@@ -970,6 +990,58 @@ function make(deps: OnDemandDeps) {
             subscriptionId: of.id,
             entries,
           });
+        }),
+
+      subtitleQuery: (ref: TitleRef, listingKey: string) =>
+        Effect.gen(function* () {
+          const source = yield* subscriptions.sourceOf(ref.subscriptionId);
+          const kind = ref.kind === "movie" ? "movie" : "series";
+          const version = {
+            subscriptionId: ref.subscriptionId,
+            id: ref.kind === "movie" ? ref.id : ref.seriesId,
+          };
+          const [title] = yield* loaded((owners, language) =>
+            call("byIds", { owners, language, kind, versions: [version] }),
+          );
+          if (!title) return null;
+          if (ref.kind === "movie") {
+            const current = yield* call("container", { ...ownerOf(source), id: ref.id });
+            return current?.listingKey === listingKey
+              ? { tmdbId: title.tmdbId, title: title.title, year: title.year }
+              : null;
+          }
+          const cached = [...details].filter(
+            ([, entry]) =>
+              entry.title.kind === "series" &&
+              entry.version.subscriptionId === source.id &&
+              entry.version.id === ref.seriesId &&
+              entry.sourceRevision === source.revision,
+          );
+          const found = cached.find(([, entry]) => entry.lists === listsOf(source.id)) ?? cached[0];
+          const cacheKey = found?.[0] ?? aboutKey(source, yield* language, "series", ref.seriesId);
+          const kept = found?.[1];
+          // The lists were refreshed since these details were read, or other titles' details took
+          // their place: the provider says whether it still lists this file. Without its answer no
+          // listing is taken for current.
+          const held = kept
+            ? yield* renewed(source, "series", ref.seriesId, kept)
+            : yield* download(source, "series", ref.seriesId, title).pipe(
+                Effect.orElseSucceed(() => null),
+              );
+          if (!held || held.lists !== listsOf(source.id)) return null;
+          if (held !== kept) {
+            if (!(yield* subscriptions.stands(source))) return null;
+            keep(details, cacheKey, held, DETAILS_KEPT);
+          }
+          const episode = held.raw.episodes.find((entry) => entry.id === ref.id);
+          if (!episode || listedFileKey("episode", episode) !== listingKey) return null;
+          return {
+            tmdbId: title.tmdbId,
+            title: title.title,
+            year: title.year,
+            season: episode.season,
+            episode: episode.number,
+          };
         }),
 
       file: (title: TitleRef) =>

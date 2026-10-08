@@ -20,6 +20,7 @@ import { diagnosticsLogLayer } from "./platform/diagnostics-log.ts";
 import { guideStoreLayer } from "./platform/guide-store.ts";
 import type { Secrets } from "./platform/secrets.ts";
 import { VerifiedFiles, verifiedFilesLayer } from "./platform/verified-files.ts";
+import { SavedSubtitles, savedSubtitlesLayer } from "./platform/saved-subtitles.ts";
 import { viewingStoreLayer } from "./platform/viewing-store.ts";
 import { xmltvFetch } from "./providers/xmltv.ts";
 import { watchlistStoreLayer } from "./platform/watchlist-store.ts";
@@ -29,6 +30,8 @@ import { Output, type OutputDeps } from "./services/output.ts";
 import { appNotices, Licences } from "./services/licences.ts";
 import { Playback } from "./services/playback.ts";
 import { Settings } from "./services/preferences.ts";
+import { SubtitleAccounts } from "./services/subtitle-accounts.ts";
+import { OnlineSubtitles, SubtitleSessions } from "./services/online-subtitles.ts";
 import { Roster } from "./services/roster.ts";
 import { Subscriptions } from "./services/subscription.ts";
 import { Updates, type UpdatesConfig } from "./services/updates.ts";
@@ -68,7 +71,10 @@ export type MainServices =
   | ViewingRecord
   | Watchlist
   | Licences
-  | VerifiedFiles;
+  | VerifiedFiles
+  | SavedSubtitles
+  | SubtitleAccounts
+  | OnlineSubtitles;
 
 /** Every main-process service, with the app's adapters for their ports. */
 export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
@@ -84,6 +90,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
   );
   const database = databaseLayer(dataDir);
   const verifiedFiles = verifiedFilesLayer.pipe(Layer.provide(database));
+  const savedSubtitles = savedSubtitlesLayer.pipe(Layer.provide(database));
   const services = Layer.mergeAll(
     Library.layer(),
     OnDemand.layer({
@@ -101,7 +108,63 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
     }),
     Updates.layer({ dataDir, ...config.updates }),
     Licences.layer(appNotices()),
-  ).pipe(Layer.provideMerge(Layer.merge(accounts, verifiedFiles)));
+    SubtitleAccounts.layer(dataDir, config.secrets),
+  ).pipe(Layer.provideMerge(Layer.mergeAll(accounts, verifiedFiles, savedSubtitles)));
+
+  const subtitleSessions = Layer.effect(
+    SubtitleSessions,
+    Effect.gen(function* () {
+      const playback = yield* Playback;
+      const catalogue = yield* OnDemand;
+      return {
+        playing: (id: string) => playback.subtitleContext(id),
+        resolve: (id: string) =>
+          Effect.gen(function* () {
+            const session = yield* playback.subtitleContext(id);
+            if (!session) return null;
+            const identity = yield* catalogue.subtitleQuery(session.title, session.file.listingKey);
+            if (!identity) return null;
+            const tmdbId = Number(identity.tmdbId);
+            const match =
+              Number.isSafeInteger(tmdbId) && tmdbId > 0
+                ? { tmdbId }
+                : {
+                    title: identity.title.slice(0, 512),
+                    ...(identity.year !== null ? { year: identity.year } : {}),
+                  };
+            const query =
+              session.title.kind === "movie"
+                ? { kind: "movie" as const, ...match, languages: [] }
+                : identity.season !== undefined &&
+                    identity.episode !== undefined &&
+                    identity.episode > 0
+                  ? {
+                      kind: "episode" as const,
+                      ...match,
+                      season: identity.season,
+                      episode: identity.episode,
+                      languages: [],
+                    }
+                  : null;
+            return {
+              ...session,
+              query,
+              standing: Effect.flatMap(session.standing, (stands) =>
+                stands
+                  ? Effect.map(
+                      catalogue.subtitleQuery(session.title, session.file.listingKey),
+                      Boolean,
+                    )
+                  : Effect.succeed(false),
+              ),
+            };
+          }),
+      };
+    }),
+  ).pipe(Layer.provide(services));
+  const onlineSubtitles = OnlineSubtitles.layer({ userAgent: config.userAgent }).pipe(
+    Layer.provide(Layer.mergeAll(services, subtitleSessions)),
+  );
 
   const guide = Guide.layer.pipe(
     Layer.provide(
@@ -150,7 +213,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
       ),
     ),
   );
-  // One connection for viewing, saved titles and verified file tracks.
+  // One connection for viewing, saved titles, verified tracks and downloaded subtitle cues.
   const stores = Layer.mergeAll(viewingStoreLayer, watchlistStoreLayer).pipe(
     Layer.provide(database),
   );
@@ -198,7 +261,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
   const watchlist = Watchlist.layer.pipe(Layer.provide(stores));
   const output = Output.layer(config.output ?? { adapters: [] }).pipe(Layer.provide(viewing));
   return Roster.layer.pipe(
-    Layer.provideMerge(Layer.mergeAll(guide, viewing, watchlist, output)),
+    Layer.provideMerge(Layer.mergeAll(guide, viewing, watchlist, output, onlineSubtitles)),
     Layer.provideMerge(services),
     Layer.provideMerge(diagnosticsLogLayer(dataDir)),
   );

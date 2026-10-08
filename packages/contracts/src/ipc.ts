@@ -3,6 +3,15 @@
 // Add a method by giving it an input schema in `ipcInputs` and a result type in `IpcOutputs`.
 // The main process refuses to start unless every method has a handler (see src/main/ipc.ts).
 import { type } from "arktype";
+import {
+  OnlineSubtitlePreferences,
+  SubtitleCredentialInput,
+  SubtitleTiming,
+  type OnlineSubtitleSettings,
+  type OnlineSubtitleSearch,
+  type OnlineSubtitleChoice,
+  type SavedSubtitle,
+} from "./online-subtitles.ts";
 import { TitleFilters, type FilterOptions } from "./title-filters.ts";
 import type { Result } from "./errors.ts";
 import type { DiagnosticsPreview } from "./diagnostics.ts";
@@ -234,6 +243,18 @@ export const ipcInputs = {
        */
       "preview?": "boolean",
     }),
+  "subtitles.settings": none,
+  "subtitles.configure": () =>
+    type({ preferences: OnlineSubtitlePreferences, "credentials?": SubtitleCredentialInput }),
+  "subtitles.search": () => type({ sessionId: "string > 0", "languages?": "string[] <= 10" }),
+  "subtitles.choose": () => type({ sessionId: "string > 0", resultId: "string > 0" }),
+  "subtitles.saved": () => type({ sessionId: "string > 0" }),
+  "subtitles.timing": () =>
+    type({ sessionId: "string > 0", timing: SubtitleTiming, "selection?": "0 < string <= 64" }),
+  "subtitles.show": () => type({ sessionId: "string > 0", "selection?": "0 < string <= 64" }),
+  "subtitles.hide": () => type({ sessionId: "string > 0" }),
+  "subtitles.forget": () => type({ sessionId: "string > 0" }),
+  "subtitles.cancel": () => type({ sessionId: "string > 0" }),
   "playback.openTitle": () => type({ title: TitleRef, decoders: decoders() }),
   "playback.close": () => type({ sessionId: "string" }),
   "playback.closeAll": none,
@@ -477,6 +498,26 @@ export interface IpcOutputs {
   "ondemand.collection": CollectionPage;
   /** Opens a stream for a channel and closes any stream that was open before. */
   "playback.open": StreamSession;
+  /** Online subtitle preferences and which services have saved accounts, never the secrets. */
+  "subtitles.settings": OnlineSubtitleSettings;
+  "subtitles.configure": OnlineSubtitleSettings;
+  /** Asks the enabled services for the title a local session plays. Downloads nothing. */
+  "subtitles.search": OnlineSubtitleSearch;
+  /** Downloads a search result, or reuses its cached copy, and saves it for that exact file. */
+  "subtitles.choose": OnlineSubtitleChoice;
+  /** What is saved for the session's exact file, read from this computer only. */
+  "subtitles.saved": SavedSubtitle | null;
+  "subtitles.timing": SavedSubtitle;
+  /**
+   * The viewer chose a saved result of the session's exact file: the selected one, or a cached one
+   * named by its `selection`. It is the file's selected result again and shows when the file opens.
+   */
+  "subtitles.show": null;
+  /** The viewer chose Off or a file track. The selected result keeps its cues and timing, not shown. */
+  "subtitles.hide": null;
+  "subtitles.forget": null;
+  /** Aborts the session's pending search and download. */
+  "subtitles.cancel": null;
   /** Opens a movie or episode, and closes any stream that was open before. */
   "playback.openTitle": TitleSession;
   "playback.close": null;
@@ -630,6 +671,11 @@ export interface IpcEvents {
   "watchlist.changed": null;
   /** The update moved on, for example a download's progress. */
   "updates.changed": UpdateStatus;
+  /**
+   * The provider answered an open title session with another file than the one it opened. What
+   * was saved for the old file is gone, and that session has no saved or online subtitles left.
+   */
+  "playback.fileReplaced": { readonly sessionId: string };
   /** Where playback goes changed, or what the receiver plays did, or the receivers found. */
   "output.changed": OutputStatus;
   /**
