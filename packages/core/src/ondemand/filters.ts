@@ -37,7 +37,7 @@ function filesOf(version: TitleVersion, files: FilterFiles): readonly FilterFile
 
 function trackLanguages(file: FilterFile, kind: "audio" | "subtitles"): readonly string[] {
   const tracks = file.tracks?.[kind];
-  return tracks?.length ? tracks.map((code) => code ?? "unknown") : ["unknown"];
+  return tracks?.map((code) => code ?? "unknown") ?? [];
 }
 
 /** Keeps catalogue order and all choices, while making the matching real version the tile's id. */
@@ -45,17 +45,20 @@ export function filterTitles(
   titles: readonly Title[],
   filters: TitleFilters,
   files: FilterFiles,
+  eligible: (version: TitleVersion) => boolean = () => true,
 ): readonly Title[] {
   if (!filters.quality && !filters.language && !filters.verified) return titles;
   return titles.flatMap((title) => {
-    const match = title.versions.find((version) =>
-      filesOf(version, files).some(
-        (file) =>
-          (!filters.quality || qualityHint(file.tags) === filters.quality) &&
-          (!filters.language || languageHints(file.tags).includes(filters.language)) &&
-          (!filters.verified ||
-            trackLanguages(file, filters.verified.kind).includes(filters.verified.language)),
-      ),
+    const match = title.versions.find(
+      (version) =>
+        eligible(version) &&
+        filesOf(version, files).some(
+          (file) =>
+            (!filters.quality || qualityHint(file.tags) === filters.quality) &&
+            (!filters.language || languageHints(file.tags).includes(filters.language)) &&
+            (!filters.verified ||
+              trackLanguages(file, filters.verified.kind).includes(filters.verified.language)),
+        ),
     );
     return match
       ? [{ ...title, subscriptionId: match.subscriptionId, id: match.id, tags: match.tags }]

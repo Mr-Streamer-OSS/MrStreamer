@@ -52,7 +52,9 @@ export const DEFAULT_TITLE_LANGUAGE: TitleLanguage = "en";
 const WORD_END = /[\s-]/;
 
 /** Marks a version carries for every language at once. */
-const MULTI = new Set(["MULTI", "MULTI AUDIO", "MULTISUB", "MULTI SUB", "VO"]);
+const MULTI = new Set(["MULTI", "MULTI AUDIO"]);
+/** Original-version marks say nothing about multiple audio languages. */
+const ORIGINAL = new Set(["VO"]);
 const LANGUAGE_MARKS = new Map<string, (typeof TITLE_LANGUAGES)[number]>(
   TITLE_LANGUAGES.flatMap((language) => language.marks.map((mark) => [mark, language] as const)),
 );
@@ -105,6 +107,7 @@ export function suitability(tags: readonly string[], language: string): number {
     const { mark, language: marked, subtitles } = markOf(tag);
     if (marked?.code === language) return 4;
     if (MULTI.has(mark)) multi = true;
+    else if (ORIGINAL.has(mark)) subtitled = true;
     else if (marked && subtitles) subtitled = true;
     else if (marked) dubbed = true;
   }

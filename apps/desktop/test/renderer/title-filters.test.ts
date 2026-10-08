@@ -19,6 +19,30 @@ const options: FilterOptions = {
   verified: [],
   files: 0,
 };
+const film: Title = {
+  kind: "movie",
+  key: "movie:603",
+  subscriptionId: SUBSCRIPTION,
+  id: "4k",
+  name: "Night Harbour 4K (EN)",
+  title: "Night Harbour",
+  originalTitle: null,
+  originalLanguage: "en",
+  tags: ["4K", "EN"],
+  year: 2024,
+  posterUrl: null,
+  backdropUrl: null,
+  rating: null,
+  addedAt: null,
+  adult: false,
+  tmdbId: "603",
+  genres: [],
+  versions: [
+    { subscriptionId: SUBSCRIPTION, id: "4k", tags: ["4K", "EN"] },
+    { subscriptionId: SUBSCRIPTION, id: "hd", tags: ["1080p", "EN"] },
+  ],
+};
+
 let cleanup = () => {};
 afterEach(() => {
   cleanup();
@@ -74,82 +98,138 @@ async function mount() {
       (each) => each.textContent === label,
     );
     expect(button).toBeDefined();
-    await act(async () => button!.click());
+    await act(async () => {
+      // happy-dom omits mouse focus. Apply the browser default only when mousedown permits it.
+      const allowed = button!.dispatchEvent(
+        new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }),
+      );
+      if (allowed) button!.focus();
+      button!.click();
+    });
   };
   await render("movie");
+  await click("All movies");
   await until(() => expect(container.textContent).toContain("10 of 10"));
   return { client, container, group, click, render, until, showDetails };
 }
 
-it("opens the filtered exact version over an old remembered choice and still lets the menu choose another version", async () => {
+it("keeps grid arrows and Enter after a mouse click on an inline filter word", async () => {
   const page = await mount();
-  const film: Title = {
-    kind: "movie",
-    key: "movie:603",
-    subscriptionId: SUBSCRIPTION,
-    id: "4k",
-    name: "Night Harbour 4K (EN)",
-    title: "Night Harbour",
-    originalTitle: null,
-    originalLanguage: "en",
-    tags: ["4K", "EN"],
-    year: 2024,
-    posterUrl: null,
-    backdropUrl: null,
-    rating: null,
-    addedAt: null,
-    adult: false,
-    tmdbId: "603",
-    genres: [],
-    versions: [
-      { subscriptionId: SUBSCRIPTION, id: "4k", tags: ["4K", "EN"] },
-      { subscriptionId: SUBSCRIPTION, id: "hd", tags: ["1080p", "EN"] },
-    ],
+  const second: Title = {
+    ...film,
+    id: "second",
+    key: "movie:second",
+    versions: [{ subscriptionId: SUBSCRIPTION, id: "second", tags: ["4K", "EN"] }],
   };
-  const details: MovieDetails = {
-    kind: "movie",
-    title: film,
-    originalTitle: null,
-    plot: null,
-    genres: [],
-    cast: [],
-    directors: [],
-    releaseDate: null,
-    duration: null,
-    backdropUrl: null,
-  };
-  page.client.setQueryData(queries.subscriptionPreferences(SUBSCRIPTION).queryKey, {
-    ...defaultSubscriptionPreferences,
-    titleVersions: { "movie:603": "hd" },
+  ipc.always("ondemand.collection", {
+    name: "All",
+    titles: [film, second],
+    total: 2,
+    unfiltered: 10,
   });
-  ipc.always("ondemand.collection", { name: "All", titles: [film], total: 1, unfiltered: 10 });
-  ipc.always("ondemand.titles", [film]);
-  ipc.always("viewing.progress", []);
-  ipc.always("ondemand.details", details);
   await page.click("4K", "Quality");
-  await page.until(() => expect(page.container.textContent).toContain("1 of 10"));
+  await page.until(() => expect(page.container.textContent).toContain("2 of 10"));
   await act(async () => {
-    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }),
+    );
   });
-  const target = useUi.getState().details;
-  expect(target).toEqual({ kind: "movie", subscriptionId: SUBSCRIPTION, id: "4k", asked: true });
-  await page.showDetails(target!);
-  await page.until(() => expect(ipc.argsOf("ondemand.details").at(-1)?.version.id).toBe("4k"));
-  // Simply opening a matching tile does not rewrite the remembered preference.
-  expect(ipc.argsOf("subscription.updatePreferences")).toHaveLength(0);
-  await page.until(() => expect(document.querySelector('[aria-label="Versions"]')).not.toBeNull());
-  await act(async () =>
-    document.querySelector<HTMLButtonElement>('[aria-label="Versions"]')!.click(),
-  );
-  await page.until(() => expect(document.querySelector('[role="menuitemradio"]')).not.toBeNull());
-  const hd = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) =>
-    item.textContent?.includes("1080p"),
-  );
-  expect(hd).toBeDefined();
-  await act(async () => hd!.click());
-  await page.until(() => expect(ipc.argsOf("ondemand.details").at(-1)?.version.id).toBe("hd"));
+  await act(async () => {
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+  });
+  expect(useUi.getState().details).toEqual({
+    kind: "movie",
+    subscriptionId: SUBSCRIPTION,
+    id: "second",
+    asked: true,
+  });
 });
+
+it.each(["filter", "4k tab", "normal list"] as const)(
+  "opens the correct version over a remembered choice from %s and keeps menu alternatives",
+  async (entry) => {
+    const page = await mount();
+    const details: MovieDetails = {
+      kind: "movie",
+      title: film,
+      originalTitle: null,
+      plot: null,
+      genres: [],
+      cast: [],
+      directors: [],
+      releaseDate: null,
+      duration: null,
+      backdropUrl: null,
+    };
+    page.client.setQueryData(queries.subscriptionPreferences(SUBSCRIPTION).queryKey, {
+      ...defaultSubscriptionPreferences,
+      titleVersions: { "movie:603": "hd" },
+    });
+    ipc.always("ondemand.collection", { name: "All", titles: [film], total: 1, unfiltered: 10 });
+    ipc.always("ondemand.titles", [film]);
+    ipc.always("viewing.progress", []);
+    ipc.always("ondemand.details", details);
+    if (entry === "filter") await page.click("4K", "Quality");
+    else if (entry === "4k tab") await page.click("4K");
+    else await page.client.invalidateQueries({ queryKey: ["ondemand", "collection"] });
+    await page.until(() => expect(page.container.textContent).toContain("1 of 10"));
+    if (entry === "filter") {
+      const control = page
+        .group("Quality")
+        .querySelector<HTMLButtonElement>('[aria-pressed="true"]')!;
+      expect(document.activeElement).not.toBe(control);
+      await act(async () => {
+        control.focus();
+        control.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+        control.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      });
+      expect(useUi.getState().details).toBeNull();
+      // Leaving a keyboard-focused word returns the keys to the grid.
+      control.blur();
+    }
+    await act(async () => {
+      document.activeElement?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "End", bubbles: true }),
+      );
+      document.activeElement?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }),
+      );
+      document.activeElement?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      );
+    });
+    const target = useUi.getState().details;
+    expect(target).toEqual({
+      kind: "movie",
+      subscriptionId: SUBSCRIPTION,
+      id: "4k",
+      asked: entry !== "normal list",
+    });
+    await page.showDetails(target!);
+    await page.until(() =>
+      expect(ipc.argsOf("ondemand.details").at(-1)?.version.id).toBe(
+        entry === "normal list" ? "hd" : "4k",
+      ),
+    );
+    // Simply opening a matching tile does not rewrite the remembered preference.
+    expect(ipc.argsOf("subscription.updatePreferences")).toHaveLength(0);
+    await page.until(() =>
+      expect(document.querySelector('[aria-label="Versions"]')).not.toBeNull(),
+    );
+    await act(async () =>
+      document.querySelector<HTMLButtonElement>('[aria-label="Versions"]')!.click(),
+    );
+    await page.until(() => expect(document.querySelector('[role="menuitemradio"]')).not.toBeNull());
+    const hd = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) =>
+      item.textContent?.includes("1080p"),
+    );
+    expect(hd).toBeDefined();
+    await act(async () => hd!.click());
+    await page.until(() => expect(ipc.argsOf("ondemand.details").at(-1)?.version.id).toBe("hd"));
+  },
+);
 
 it("uses current-kind words, keeps Unknown and MULTI inline, resets between kinds and makes no file reads", async () => {
   const page = await mount();

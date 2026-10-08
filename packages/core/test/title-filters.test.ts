@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
 import { indexCatalogue } from "../src/ondemand/catalogue.ts";
 import { filterOptions, filterTitles, type FilterFiles } from "../src/ondemand/filters.ts";
+import { languageHints, suitability, versionLabels } from "../src/ondemand/languages.ts";
 import type { OnDemandCatalogue, ProviderTitle } from "../src/provider.ts";
 
 function row(id: string, name: string, tmdbId: string | null): ProviderTitle {
@@ -39,6 +40,18 @@ const tracks = (audio: readonly (string | null)[], subtitles: readonly (string |
 });
 
 describe("current-kind library filters", () => {
+  it("keeps original sound and multiple subtitle marks out of generic multiple-language hints", () => {
+    expect(languageHints(["VO"])).toEqual(["unknown"]);
+    expect(languageHints(["MULTISUB"])).toEqual(["unknown"]);
+    expect(languageHints(["MULTI SUB"])).toEqual(["unknown"]);
+    expect(languageHints(["MULTI AUDIO"])).toEqual(["multi"]);
+    expect(suitability(["VO"], "en")).toBe(2);
+    expect(suitability(["MULTISUB"], "en")).toBe(1);
+    expect(versionLabels([{ tags: ["VO"] }, { tags: ["MULTISUB"] }], "en")).toEqual([
+      "Original sound",
+      "Several subtitle languages",
+    ]);
+  });
   it("requires quality, name language and verified tracks on the same real movie version", () => {
     const files: FilterFiles = new Map([
       [key("en"), [{ tags: ["FHD", "EN"], tracks: tracks(["en"], ["nl"]) }]],
@@ -81,6 +94,23 @@ describe("current-kind library filters", () => {
         files,
       ).map((t) => t.id),
     ).toEqual(["nl"]);
+    expect(
+      filterTitles(
+        index.movies.titles,
+        { verified: { kind: "audio", language: "unknown" } },
+        files,
+      ).map((t) => t.id),
+    ).toEqual(["nl"]);
+    expect(
+      filterTitles(
+        index.movies.titles,
+        { verified: { kind: "subtitles", language: "unknown" } },
+        files,
+      ),
+    ).toEqual([]);
+    expect(filterOptions(index.movies.titles, files).verified).toEqual([
+      { kind: "audio", language: "unknown" },
+    ]);
   });
 
   it("does not combine one episode's hints with another episode's tracks", () => {

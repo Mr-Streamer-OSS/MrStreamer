@@ -700,7 +700,12 @@ const handlers: {
     const made = collectionsOf(found, kind);
     const unfiltered = made.list(id, sort);
     const titles = filters
-      ? filterTitles(unfiltered, filters, filterFiles(found, kind, files))
+      ? filterTitles(
+          unfiltered,
+          filters,
+          filterFiles(found, kind, files),
+          (version) => id !== "4k" || version.tags.some((tag) => tag === "4K" || tag === "UHD"),
+        )
       : unfiltered;
     return {
       name: made.name(id) ?? "",

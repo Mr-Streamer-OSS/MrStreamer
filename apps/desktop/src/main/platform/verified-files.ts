@@ -1,5 +1,5 @@
 // Last-read track languages, per exact provider file. Listing hints never enter this store.
-// Addresses, headers and secrets stay with playback; only opaque fingerprints reach disk.
+// Addresses, headers and secrets stay with playback; random session ids guard invalidation.
 import type { DatabaseSync } from "node:sqlite";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { Failed } from "@mrstreamer/core/failure";

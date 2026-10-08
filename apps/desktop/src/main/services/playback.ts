@@ -3364,17 +3364,9 @@ function make(deps: PlaybackDeps) {
                 account: source.key,
                 sourceStamp: source.fileRevision,
                 listingKey: asked.listingKey,
-                fileKey: createHash("sha256")
-                  .update(
-                    JSON.stringify([
-                      source.fileRevision,
-                      title.kind,
-                      title.id,
-                      upstreamUrl,
-                      [...headers],
-                    ]),
-                  )
-                  .digest("hex"),
+                // Only this session's successful write can be forgotten by its replacement.
+                // Address-derived probe keys stay in memory, including on cached-probe opens.
+                fileKey: id,
               }
             : null,
           probeKey: createHash("sha256")

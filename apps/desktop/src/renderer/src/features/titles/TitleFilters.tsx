@@ -140,7 +140,11 @@ export function TitleFilterBar({
           </span>
         )}
         {Object.keys(filters).length > 0 && (
-          <button onClick={() => onFilters({})} className="underline underline-offset-4">
+          <button
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => onFilters({})}
+            className="underline underline-offset-4"
+          >
             Reset
           </button>
         )}
@@ -189,6 +193,7 @@ function Words<V extends string>({
     <button
       key={choice.value ?? "any"}
       aria-pressed={choice.value === value}
+      onMouseDown={(event) => event.preventDefault()}
       onClick={(event) => {
         onChange(choice.value);
         const popup = event.currentTarget.closest("details");

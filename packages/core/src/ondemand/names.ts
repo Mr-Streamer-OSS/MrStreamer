@@ -5,11 +5,12 @@
 import { recase } from "../catalogue/normalize.ts";
 
 /** A trailing "(NL)", "(MULTI)", "(NL AUDIO)", "(DE-DUBBED)". */
-const LANGUAGE = /\s*[([]\s*([A-Za-z]{2,5}(?:[\s-][A-Za-z]{2,7})?)\s*[)\]]\s*$/;
+const LANGUAGE = /\s*[([]\s*(MULTISUB|[A-Za-z]{2,5}(?:[\s-][A-Za-z]{2,7})?)\s*[)\]]\s*$/i;
 /** A trailing "(2023)", or "- 2023" after the title. */
 const YEAR = /\s*(?:\(\s*((?:19|20)\d{2})\s*\)|\s[-–]\s((?:19|20)\d{2}))\s*$/;
-/** Quality markers as whole words. */
-const QUALITY = /(?<![\p{L}\p{N}])(4K|UHD|FHD|HD|SD|HDR|HEVC|H\.?265|\d{3,4}p)(?![\p{L}\p{N}])/giu;
+/** Full HD must precede HD. Bare HD/SD/FHD marks count only in provider suffixes. */
+const QUALITY =
+  /(?<![\p{L}\p{N}])(FULL[\s-]?HD|4K|UHD|FHD|HD|SD|HDR|HEVC|H\.?265|\d{3,4}p)(?![\p{L}\p{N}])/giu;
 /** "S02E03", "S2 E3", with what follows it. */
 const EPISODE_NUMBER = /\bS(\d{1,3})\s?E(\d{1,4})\b\s*[-:–]?\s*/i;
 
@@ -35,16 +36,37 @@ export function titleName(raw: string, releaseDate: string | null = null): Title
     }
     const language = LANGUAGE.exec(text);
     if (language?.[1] && language.index > 0) {
-      tags.unshift(language[1].toUpperCase().replace(/\s+/, " "));
+      tags.unshift(
+        language[1]
+          .toUpperCase()
+          .replace(/\s+/, " ")
+          .replace(/^FULL[\s-]?HD$/, "FHD"),
+      );
       text = text.slice(0, language.index);
       changed = true;
     }
   }
-  text = text.replace(QUALITY, (tag: string) => {
+  const bracketed = [...text.matchAll(/[([]([^()[\]]*)[)\]]/g)].filter(
+    (match) => match[1]?.replace(QUALITY, "").trim() === "",
+  );
+  text = text.replace(QUALITY, (tag: string, _mark: string, offset: number) => {
     const normalized = tag
       .replace(/\./g, "")
       .toUpperCase()
+      .replace(/^FULL[\s-]?HD$/, "FHD")
       .replace(/(\d)P$/, "$1p");
+    if (["HD", "SD", "FHD"].includes(normalized)) {
+      const inBrackets = bracketed.some(
+        (match) => offset > match.index && offset < match.index + match[0].length,
+      );
+      const suffix =
+        offset > 0 &&
+        text
+          .slice(offset + tag.length)
+          .replace(QUALITY, "")
+          .replace(/[\s()[\]|:\-–]/g, "") === "";
+      if (!inBrackets && !suffix) return tag;
+    }
     if (!tags.includes(normalized)) tags.push(normalized);
     return " ";
   });
