@@ -1,11 +1,13 @@
 // Composition root: creates the window and wires the services to IPC.
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   app,
   autoUpdater,
   BrowserWindow,
+  dialog,
   Menu,
   powerSaveBlocker,
   safeStorage,
@@ -29,6 +31,7 @@ import { WINDOW_BAR } from "../shared/window-bar.ts";
 import { emit, registerIpc } from "./ipc.ts";
 import { miniPlayer, miniPlayerAvailable } from "./mini-player.ts";
 import { electronInstaller } from "./platform/installer.ts";
+import { diagnosticsExporter } from "./platform/diagnostics-export.ts";
 import { removeUnfinishedWrites } from "./platform/json-file.ts";
 import { keychainSecrets } from "./platform/secrets.ts";
 import type { ReceiverAdapter, ScreenRect } from "./receivers/adapter.ts";
@@ -79,6 +82,7 @@ if (storeCopy && !app.commandLine.hasSwitch("user-data-dir")) {
 }
 /** The app's page in the Microsoft Store, by the Store ID Partner Center gave it. */
 const STORE_PAGE = "ms-windows-store://pdp/?ProductId=9N45GG76ZP4T";
+const STORE_REVIEW = "ms-windows-store://review/?ProductId=9N45GG76ZP4T";
 
 /**
  * Chromium's own cache, mostly posters and backdrops, on disk at most this big; the oldest go
@@ -404,6 +408,30 @@ async function start(): Promise<void> {
     }),
   );
 
+  const exporter = diagnosticsExporter(dataDir, async () => {
+    const [saved, status] = await Promise.all([
+      runtime.runPromise(subscriptions.list),
+      runtime.runPromise(updates.status),
+    ]);
+    return {
+      version: app.getVersion(),
+      commit: __BUILD_COMMIT__,
+      platform: process.platform,
+      arch: process.arch,
+      distribution: status.distribution,
+      channel: status.channel,
+      subscriptions: {
+        xtream: saved.filter((entry) => entry.kind === "xtream").length,
+        m3u: saved.filter((entry) => entry.kind === "m3u").length,
+      },
+      acceleratedVideoDecodeDisabled: app.commandLine.hasSwitch("disable-accelerated-video-decode"),
+      checked: status.checked && {
+        at: status.checked.at,
+        failure: status.checked.failure?.kind ?? null,
+      },
+    };
+  });
+
   /** Sends each change to the window, while there is one. */
   const forward = <A, E extends IpcEvent>(
     changes: Stream.Stream<A>,
@@ -685,6 +713,52 @@ async function start(): Promise<void> {
       "updates.restart": () => Effect.as(updates.restart, null),
       "updates.dismiss": ({ version }) => updates.dismiss(version),
       "updates.openStore": () => Effect.as(updates.openStore, null),
+      "updates.rateStore": () =>
+        storeCopy
+          ? Effect.as(
+              Effect.tryPromise({
+                try: () => shell.openExternal(STORE_REVIEW),
+                catch: () =>
+                  new Failed({
+                    error: {
+                      kind: "unexpected",
+                      detail: "The Microsoft Store could not be opened.",
+                    },
+                  }),
+              }),
+              null,
+            )
+          : Effect.succeed(null),
+      "diagnostics.preview": () =>
+        Effect.tryPromise({
+          try: () => exporter.preview(),
+          catch: () =>
+            new Failed({ error: { kind: "unexpected", detail: "Diagnostics could not be read." } }),
+        }),
+      "diagnostics.save": ({ id }) =>
+        Effect.tryPromise({
+          try: async () => {
+            const text = exporter.textOf(id);
+            if (text === null) throw new Error("The preview has expired.");
+            if (!mainWindow) return false;
+            const selected = await dialog.showSaveDialog(mainWindow, {
+              title: "Save diagnostics",
+              defaultPath: `diagnostics-${app.getVersion()}-${new Date().toISOString().slice(0, 10)}.txt`,
+              filters: [{ name: "Text", extensions: ["txt"] }],
+              properties: ["showOverwriteConfirmation"],
+            });
+            if (selected.canceled || !selected.filePath) return false;
+            await writeFile(selected.filePath, text, "utf8");
+            return true;
+          },
+          catch: () =>
+            new Failed({
+              error: {
+                kind: "unexpected",
+                detail: "Diagnostics could not be saved. Try again.",
+              },
+            }),
+        }),
       "licences.list": () => licences.list,
       "licences.text": ({ id }) => licences.text(id),
       "window.miniPlayerAvailable": () => Effect.succeed(miniPlayerAvailable()),

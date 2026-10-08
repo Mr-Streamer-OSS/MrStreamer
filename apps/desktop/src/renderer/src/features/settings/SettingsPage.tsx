@@ -1,11 +1,14 @@
 import { useEffect, type ReactNode } from "react";
+import { useMutation } from "@tanstack/react-query";
 import { isTyping } from "../../app/platform.ts";
 import { useUi, type SettingsTab } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { WindowBar } from "../../components/WindowBar.tsx";
 import { cn } from "../../lib/utils.ts";
+import { call } from "../../lib/ipc.ts";
 import tmdbLogo from "../../assets/tmdb.svg";
 import { GeneralSection } from "./GeneralSection.tsx";
+import { DiagnosticsExport } from "./DiagnosticsExport.tsx";
 import { Licences } from "./Licences.tsx";
 import { SubscriptionSection } from "./SubscriptionSection.tsx";
 import { useUpdates } from "../updates/use-updates.ts";
@@ -86,14 +89,17 @@ export function SettingsPage() {
 
 /**
  * The installed version, where the project lives, the commit the build comes from, its licences,
- * the privacy policy and how to report a bug.
+ * the privacy policy, local diagnostics and how to report a bug or rate a Store copy.
  */
 function About() {
   const { status } = useUpdates();
+  const rating = useMutation({ mutationFn: () => call("updates.rateStore") });
   const rows: [string, ReactNode][] = [
     [
       "Version",
-      status ? `${status.version} · ${status.channel === "nightly" ? "Nightly" : "Stable"}` : "",
+      status
+        ? `${status.version} · ${status.channel === "nightly" ? "Nightly" : "Stable"}${status.distribution === "store" ? " · Microsoft Store" : ""}`
+        : "",
     ],
     ["Website", <Link href="https://mrstreamer.app">mrstreamer.app</Link>],
     [
@@ -126,12 +132,27 @@ function About() {
   return (
     <section>
       <Rows rows={rows} />
-      <Button
-        variant="secondary"
-        render={<a href={`${REPOSITORY_URL}/issues/new/choose`} target="_blank" rel="noreferrer" />}
-      >
-        Report a bug
-      </Button>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          variant="secondary"
+          render={
+            <a href={`${REPOSITORY_URL}/issues/new/choose`} target="_blank" rel="noreferrer" />
+          }
+        >
+          Report a bug
+        </Button>
+        <DiagnosticsExport />
+        {status?.distribution === "store" && (
+          <Button variant="secondary" disabled={rating.isPending} onClick={() => rating.mutate()}>
+            Rate in the Microsoft Store
+          </Button>
+        )}
+      </div>
+      {rating.isError && (
+        <p role="alert" className="mt-2 text-sm">
+          The Microsoft Store could not be opened.
+        </p>
+      )}
       {/* TMDB's terms ask for its logo and this notice; JustWatch supplies the streaming data. */}
       <div className="mt-12 text-[0.8125rem] text-muted-foreground">
         <a href="https://www.themoviedb.org" target="_blank" rel="noreferrer" aria-label="TMDB">
