@@ -24,6 +24,7 @@ const required = [
   "output",
   "playlist-playback",
   "title-filter-playback",
+  "online-subtitle-playback",
 ];
 for (const name of required) {
   const file = report.testResults.find((file) =>
