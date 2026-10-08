@@ -6,7 +6,7 @@ import type { TitleKind } from "@mrstreamer/contracts/ondemand";
 import type { OwnedId } from "@mrstreamer/contracts/subscription";
 import type { WatchlistPage, WatchlistSort } from "@mrstreamer/contracts/watchlist";
 import { ViewingRecord } from "@mrstreamer/core/viewing/service";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mainLayer } from "../src/main/runtime.ts";
 import { OnDemand } from "../src/main/services/ondemand.ts";
 import { Settings } from "../src/main/services/preferences.ts";
@@ -1059,12 +1059,18 @@ describe("the watchlist of several subscriptions", { timeout: 30_000 }, () => {
     const late = saving.save("movie", SHARED);
     late.catch(() => {});
     await held.arrived;
-    await expect
-      .poll(async () => {
-        const { lists } = await saving.onDemand.status();
-        return lists.find((each) => each.subscriptionId === b)?.fetchedAt ?? null;
-      })
-      .not.toBeNull();
+    // Observe the other list becoming available before testing the held-save race. Worker
+    // startup takes up to two seconds in the measured concurrent setup, before this test's body.
+    await vi.waitFor(
+      async () => {
+        const status = await saving.onDemand.status();
+        expect(
+          status.lists.find((each) => each.subscriptionId === b)?.fetchedAt ?? null,
+          JSON.stringify(status),
+        ).not.toBeNull();
+      },
+      { timeout: 5_000, interval: 50 },
+    );
     return { saving, a, b, late, release: () => held.release() };
   }
 
