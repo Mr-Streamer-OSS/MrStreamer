@@ -307,7 +307,7 @@ it.each(["filter", "4k tab", "normal list"] as const)(
     await page.until(() =>
       expect(
         document.querySelector('[role="menuitemradio"][aria-checked="true"]')?.textContent,
-      ).toContain("1080p"),
+      ).toContain("FHD"),
     );
   },
 );
