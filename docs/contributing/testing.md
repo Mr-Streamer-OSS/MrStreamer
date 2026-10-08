@@ -307,21 +307,47 @@ Streams come and go, so read a failure with that in mind. Of 400 channels picked
 
 ## App measurements
 
-`node apps/desktop/test/e2e/measure-app.ts [--json results.json] <app executable> [-- app arguments]` drives a built app against the fake provider at the size of a large subscription: 13,000 channels, about 2,000 with a guide, a continuous 720p stream that ffmpeg encodes as it plays, and a series of 20 seasons with 1 MB of details. It prints medians for cold start, time to picture, channel switch, opening the guide, search, opening the series after a start (its name, then its episodes) and the installed size, and counts the streams the provider sees opened for each tune, each switch and the return from Home to Watch. A pull request that may change speed records its numbers, against the build before it. It shares its DevTools client and login with the packaged-app test (`apps/desktop/test/e2e/app.ts`). `--json` also writes every run of every measure.
+`node apps/desktop/test/e2e/measure-app.ts [--runs 3] [--subscriptions 1] [--json results.json] <app executable> [-- app arguments]` drives a built app against synthetic subscriptions, each with 13,000 channels, about 2,000 with a guide, a continuous 720p stream encoded by ffmpeg and a 20-season series. `--subscriptions 2` exercises combined catalogues with colliding provider ids. Runs and subscriptions must be positive integers, bounded at 20 and 4 respectively.
 
-`node apps/desktop/test/e2e/compare-builds.ts [--rounds 3] <baseline> <candidate> [-- app arguments]` measures two builds on one machine, alternating which goes first each round, and prints each measure's median before and after with the change. A machine that drifts during the runs affects both builds alike, which is what makes shared machines usable. Run it by hand when a change may cost speed; releases don't, as it added a quarter of an hour to each. Changes over 10% get a warning when they are also beyond noise: more than 20 ms or 10 MB. Any extra stream opened gets one too. Measure a warning again, on the same machine, before calling it a regression.
+The existing measures retain their names and explicit units. Readiness checks run in the renderer, near DOM mutations, with a 5 ms probe for video clocks. A picture needs a new source, nonzero width and two advancing clock observations. Rows, programme search results, the series title and 26 episode rows must appear. Stream counts cover tuning, switching and Home to Watch across all synthetic providers.
+
+Every invocation calibrates known 5, 10, 20 and 50 ms delays three times with mutation observation and with the probe alone. Raw calibration distinguishes actual timer delay, observation error and setup overhead. Cold process starts include launching and attaching CDP, with a 5 ms attachment probe; they reuse the populated profile and disk cache. This is not an empty-profile first login or a cold OS cache.
+
+Without `--json`, raw results go to `.local/measurements/app-<time>.json`. Each result retains every sample, workload, cache/warmup conditions, host load/CPU/platform, Node/Electron/FFmpeg versions, source revision/dirty state and built main hash. Pass `--revision <sha>` for a supplied build whose revision differs from the measuring checkout. Built-checkout hashes identify the main bundle; packaged measurements hash the supplied executable. Neither hash alone identifies every renderer/resource file. The first measured picture also has a PNG and accessibility tree beside the JSON.
+
+`node apps/desktop/test/e2e/compare-builds.ts [--rounds 3] [--runs 3] [--subscriptions 1] [--output .local/measurements/comparison] <baseline> <candidate> [-- app arguments]` warms both builds once, then alternates their order. `--baseline-revision` and `--candidate-revision` record supplied build revisions. Keep baseline/candidate app arguments equivalent; separate packaged executables are the normal before/after use. For an unchanged checkout self comparison, pass the same Electron executable twice and the checkout app directory after `--`.
+
+Raw rounds and `comparison.json` remain in the output directory, including completed rounds after failure. The structured comparison reports sample counts, min/max spread, medians, absolute and relative deltas. A zero baseline has no relative percentage. Names, units, sample counts, workloads and conditions must match. Missing/empty/non-finite samples or failed readiness are invalid instrumentation and exit nonzero. Performance warnings exit zero. Warnings require a delta over 10% and the larger of 20 ms or twice the worst measured observation error; size uses 10 MB and every additional stream counts. Repeat warnings on the same host before calling them regressions.
+
+Recheck retained reports without launching apps:
+
+```sh
+node apps/desktop/test/e2e/compare-builds.ts --baseline-json .local/measurements/comparison/baseline-1.json --candidate-json .local/measurements/comparison/candidate-1.json --output .local/measurements/recheck
+```
 
 ## Guide budgets
 
-`node --expose-gc apps/desktop/scripts/measure-guide.ts` generates a guide the size of a large panel's (1,300 guide channels, 70 programmes each, 36 MB) for a 13,000-channel catalogue, streams it through the guide service and reports download and indexing time, the longest main-process stall, reading from disk after a restart, now and next for 60 channels, search, of everything and of a list of all 13,000 channels, and memory. `--file guide.xml` measures a real XMLTV file instead; keep provider files in `.local/`.
+`node --expose-gc apps/desktop/scripts/measure-guide.ts [--subscriptions 1] [--json results.json]` generates a 1,300-channel, 70-programme guide for each 13,000-channel subscription. It measures service refresh/indexing, event-loop delay with a 5 ms monitor, disk reload, a 60-channel screen shared across subscriptions, programme searches and manual mapping. `--file .local/guide.xml` uses a local XMLTV document. `--guide-channels` and `--programmes` must be positive integers within the guide limits. Memory measurement requires `--expose-gc`.
 
-The budgets: download and indexing under 3 s, no main-process stall over 50 ms, now and next for a screen of channels under 5 ms, and under 80 MB for the guide. The script also times what Settings asks to map channels by hand: a page of the 13,000 channels, a search of them, a search of the guide's channels, and now and next with 300 channels mapped.
+Raw operation samples, environment, document size and explicit budget outcomes go to `.local/measurements/guide-<time>.json` by default. Download/indexing must stay below 3,000 ms, event-loop delay below 50 ms, every measured screen listing below 5 ms, and retained guide heap below 80 MB. Exceeded budgets are warnings; empty search/mapping results or invalid samples fail instrumentation. Unbudgeted operations say `not-configured`.
 
-A guide is read under the limits in `packages/core/src/guide/limits.ts`: 512 MiB unpacked, 1 MiB for one channel or programme, 50,000 guide channels and 500,000 programmes still to come. One past any of them is refused whole. `--guide-channels` and `--programmes` size the generated guide, to measure one nearer the limits. Timings depend on the machine, so compare a change against the build before it on the same one. Lists stay virtualised at 13,000 channels, and going from Home to Watch opens no extra connection.
+The parser limits in `packages/core/src/guide/limits.ts` still apply. Provider guides stay in ignored `.local/`. Synthetic inputs are the release workload and comparison results depend on the machine.
 
 ## Viewing record
 
-`node apps/desktop/scripts/measure-viewing.ts [--events 100000]` fills a temporary database with that many events, mostly watches across 13,000 channels and some favourite changes, then reports how long a watch and a favourite take to commit, how long a start takes to open the database, and how long a start takes that rebuilds the lists from every event. Then it stars 1,000 channels more and puts them in another order three ways: one favourite sent to the end, the last one to the front, which removes and adds every other, and the whole list reversed. It reports how long each takes to commit and how many events it writes, and rebuilds once more to check the order holds.
+`node apps/desktop/scripts/measure-viewing.ts [--events 100000] [--subscriptions 1] [--json results.json]` fills a temporary database with deterministic synthetic history across the requested subscriptions. Events must be a positive integer no larger than 1,000,000. It retains 1,000 watch/favourite commit samples, database open/rebuild timings, 200 favourite moves, event counts and exact rebuild checks. Raw results default to `.local/measurements/viewing-<time>.json`. This tool has no absolute timing budgets; its structured conditions state that policy. A rebuild mismatch fails instrumentation.
+
+## Targeted release measurements
+
+On a release candidate, run the following serially on one host, alongside the installed functional checks. Retain each command's wall time and host load with its raw output. This bounded workload exercises two subscriptions with 10,000 viewing-history inputs once without running the full multi-build benchmark on every pull request:
+
+```sh
+node --expose-gc apps/desktop/scripts/measure-guide.ts --subscriptions 2
+node apps/desktop/scripts/measure-viewing.ts --events 10000 --subscriptions 2
+xvfb-run -a node apps/desktop/test/e2e/measure-app.ts --runs 1 --subscriptions 2 apps/desktop/node_modules/electron/dist/electron -- --no-sandbox "$PWD/apps/desktop"
+```
+
+Use the platform's normal display and mock keychain arguments on macOS. For changes to instrumentation, calibrate and self-compare the same unchanged build for at least two alternating rounds, with `--runs 1 --subscriptions 2`. For changes that may affect speed, run the normal repeated before/after comparison manually. CI's ordinary public-contract suite checks the result schema and CLI failure/warning behavior; full app comparisons remain outside the per-PR jobs. Report measured release-check cost from that host, rather than treating it as a fixed budget for other machines.
 
 ## CI
 

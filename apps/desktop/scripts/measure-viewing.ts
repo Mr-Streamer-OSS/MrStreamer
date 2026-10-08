@@ -4,7 +4,7 @@
 // order, and to rebuild afterwards. Uses a temporary database the size of years of heavy use.
 //
 //   node scripts/measure-viewing.ts [--events 100000]
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -20,6 +20,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
+import { environment, median, metric, positiveCount, saveMeasurement } from "./measurement.ts";
 import { databaseLayer } from "../src/main/platform/database.ts";
 import { viewingStoreLayer } from "../src/main/platform/viewing-store.ts";
 
@@ -32,25 +33,40 @@ const ORDERED = 1_000;
 /** How often one favourite is sent to the end, for a median. */
 const MOVES = 200;
 
-const { values } = parseArgs({ options: { events: { type: "string", default: "100000" } } });
-const events = Number(values.events);
+const { values } = parseArgs({
+  options: {
+    events: { type: "string", default: "100000" },
+    subscriptions: { type: "string", default: "1" },
+    json: { type: "string" },
+  },
+});
+const events = positiveCount(values.events, "events", 1000000);
+const SUBSCRIPTIONS = positiveCount(values.subscriptions, "subscriptions", 4);
+const subscriptions = Array.from({ length: SUBSCRIPTIONS }, (_, index) => `measure-${index}`);
+const runtimes: { dispose(): Promise<void> }[] = [];
 const dataDir = await mkdtemp(join(tmpdir(), "mr-streamer-viewing-"));
 const database = join(dataDir, "mrstreamer.db");
 
-/** The one subscription measured, which every channel is named with. */
-const SUBSCRIPTION = "measure";
-const own = (id: string): OwnedId => ({ subscriptionId: SUBSCRIPTION, id });
+/** Assign synthetic channel ids to independent subscriptions, including colliding local ids. */
+const own = (id: string, owner = Number(id.match(/\d+$/)?.[0] ?? 0)): OwnedId => ({
+  subscriptionId: subscriptions[owner % SUBSCRIPTIONS]!,
+  id,
+});
 
-/** The viewing record as the app runs it, for one account. Resolves once the database is open. */
+/** The viewing record as the app runs it. Resolves once the account database is open. */
 async function start() {
   const runtime = ManagedRuntime.make(
     ViewingRecord.layer.pipe(
       Layer.provide(
         Layer.mergeAll(
           Layer.succeed(ViewingAccount, {
-            owners: Effect.succeed([
-              { subscriptionId: SUBSCRIPTION, key: "measure", original: true },
-            ]),
+            owners: Effect.succeed(
+              subscriptions.map((subscriptionId, index) => ({
+                subscriptionId,
+                key: subscriptionId,
+                original: index === 0,
+              })),
+            ),
           }),
           Layer.succeed(ViewingChannels, { lookup: () => Effect.succeed(() => undefined) }),
           Layer.succeed(LegacyViewing, { take: Effect.succeed(null), drop: Effect.void }),
@@ -65,6 +81,7 @@ async function start() {
       ),
     ),
   );
+  runtimes.push(runtime);
   const viewing = await runtime.runPromise(
     Effect.gen(function* () {
       return yield* ViewingRecord;
@@ -77,19 +94,24 @@ async function start() {
 function spread(samples: number[]): string {
   const sorted = samples.toSorted((a, b) => a - b);
   const at = (share: number) =>
-    sorted[Math.min(sorted.length - 1, Math.floor(share * sorted.length))] ?? 0;
-  return `median ${at(0.5).toFixed(2)} ms, p99 ${at(0.99).toFixed(2)} ms`;
+    sorted[Math.min(sorted.length - 1, Math.floor(share * sorted.length))]!;
+  return `median ${median(samples).toFixed(2)} ms, p99 ${at(0.99).toFixed(2)} ms`;
 }
 
 try {
   // Mostly watches across the catalogue, with favourites changed now and then among a few.
   let { runtime, viewing } = await start();
-  const pick = (count: number) => String(Math.floor(Math.random() * count));
+  let seed = 9;
+  const random = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 2 ** 32;
+  };
+  const pick = (count: number) => String(Math.floor(random() * count));
   for (let index = 0; index < events; index++) {
     const command =
       index % 20 === 0
-        ? viewing.setFavourite(`fill-${index}`, own(pick(FAVOURITES * 2)), Math.random() < 0.5)
-        : viewing.recordWatch(`fill-${index}`, own(pick(CHANNELS)));
+        ? viewing.setFavourite(`fill-${index}`, own(pick(FAVOURITES * 2), index), random() < 0.5)
+        : viewing.recordWatch(`fill-${index}`, own(pick(CHANNELS), index));
     await runtime.runPromise(command);
   }
 
@@ -102,7 +124,7 @@ try {
     watch.push(performance.now() - started);
     started = performance.now();
     await runtime.runPromise(
-      viewing.setFavourite(`star-${index}`, own(pick(FAVOURITES * 2)), index % 2 === 0),
+      viewing.setFavourite(`star-${index}`, own(pick(FAVOURITES * 2), index), index % 2 === 0),
     );
     favourite.push(performance.now() - started);
   }
@@ -132,7 +154,7 @@ try {
   console.log(`start: ${open.toFixed(1)} ms`);
   console.log(`start with rebuild: ${rebuild.toFixed(1)} ms`);
   console.log(`rebuilt lists match: ${JSON.stringify(rebuilt) === JSON.stringify(state)}`);
-  console.log(`database: ${(size / 1024 / 1024).toFixed(1)} MB`);
+  console.log(`database: ${(size / 1e6).toFixed(1)} MB`);
 
   // A long list of favourites in another order: the least an order writes, the most, and all of
   // it turned around.
@@ -181,6 +203,55 @@ try {
   console.log(`order of ${count} favourites, reversed: ${written(reversed)}`);
   console.log(`start with rebuild after the orders: ${rebuildOrdered.toFixed(1)} ms`);
   console.log(`rebuilt order matches: ${JSON.stringify(reordered) === JSON.stringify(ordered)}`);
+  const output =
+    values.json ?? join(process.cwd(), ".local/measurements", `viewing-${Date.now()}.json`);
+  await mkdir(join(process.cwd(), ".local/measurements"), { recursive: true });
+  saveMeasurement(output, {
+    schemaVersion: 1,
+    tool: "viewing",
+    environment: environment(),
+    workload: {
+      subscriptions: SUBSCRIPTIONS,
+      channelsPerSubscription: CHANNELS,
+      inputEvents: events,
+      recordedEvents: state.sequence,
+      samples: SAMPLES,
+      orderedFavourites: ORDERED,
+      moves: MOVES,
+      seed: 9,
+    },
+    conditions: {
+      warmup: "history filled before commits; restart after measured commits",
+      cache: "fresh temporary database then persisted state then forced rebuild",
+      budgets: "none configured; descriptive timings",
+    },
+    metrics: {
+      watch: metric("ms", watch),
+      favourite: metric("ms", favourite),
+      start: metric("ms", [open]),
+      "start with rebuild": metric("ms", [rebuild]),
+      "database size": metric("MB", [size / 1e6]),
+      "one favourite to end": metric(
+        "ms",
+        toEnd.map((order) => order.ms),
+      ),
+      "events one favourite to end": metric(
+        "count",
+        toEnd.map((order) => order.events),
+      ),
+      "last favourite to front": metric("ms", [toFront.ms]),
+      "events last favourite to front": metric("count", [toFront.events]),
+      "reverse favourites": metric("ms", [reversed.ms]),
+      "events reverse favourites": metric("count", [reversed.events]),
+      "rebuild ordered favourites": metric("ms", [rebuildOrdered]),
+    },
+    checks: {
+      rebuiltListsMatch: JSON.stringify(rebuilt) === JSON.stringify(state),
+      rebuiltOrderMatches: JSON.stringify(reordered) === JSON.stringify(ordered),
+    },
+  });
+  console.log(`Raw measurement: ${output}`);
 } finally {
+  await Promise.all(runtimes.map((runtime) => runtime.dispose()));
   await rm(dataDir, { recursive: true, force: true });
 }

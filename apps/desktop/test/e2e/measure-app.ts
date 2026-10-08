@@ -5,18 +5,43 @@
 //
 //   node test/e2e/measure-app.ts [--json results.json] <app executable> [-- extra app arguments]
 //
-// `--json` also writes every run of every measure, for compare-builds.ts. Needs ffmpeg on PATH
+// Raw samples default to .local/measurements; --json chooses a path. Needs ffmpeg on PATH
 // (or MR_STREAMER_FFMPEG). On macOS pass --use-mock-keychain.
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, statSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { fakeGuide, startFakeProvider } from "../fake-provider.ts";
-import { connect, delay, key, launch, login, waitFor, type Page } from "./app.ts";
+import {
+  addSubscription,
+  calibrate,
+  connect,
+  delay,
+  key,
+  launch,
+  login,
+  observe,
+  waitFor,
+  type Page,
+} from "./app.ts";
+import {
+  APP_METRICS,
+  electronVersion,
+  environment,
+  median,
+  metric,
+  positiveCount,
+  saveMeasurement,
+} from "../../scripts/measurement.ts";
 
 const { values: options, positionals } = parseArgs({
-  options: { json: { type: "string" } },
+  options: {
+    json: { type: "string" },
+    runs: { type: "string", default: "3" },
+    subscriptions: { type: "string", default: "1" },
+    revision: { type: "string" },
+  },
   allowPositionals: true,
 });
 const [executable, ...rest] = positionals;
@@ -25,97 +50,130 @@ if (!executable) {
 }
 
 const ffmpeg = process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg";
-const RUNS = 3;
+const RUNS = positiveCount(options.runs, "runs", 20);
+const SUBSCRIPTIONS = positiveCount(options.subscriptions, "subscriptions", 4);
 const TEST_CHANNELS = ["H.264 + AAC", "H.264 + MP2", "H.264 + MP3", "H.264 + AC-3"];
 
-const provider = await startFakeProvider({
-  channels: 13_000,
-  maxConnections: 1,
-  longSeries: true,
-  // Every channel plays the same endless 720p programme, encoded as it goes.
-  streams: (_channel, out, signal) => {
-    const encoder = spawn(
-      ffmpeg,
-      [
-        ...["-hide_banner", "-loglevel", "error", "-re"],
-        ...["-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=25"],
-        ...["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000"],
-        ...["-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-g", "50"],
-        ...["-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-f", "mpegts", "pipe:1"],
-      ],
-      { stdio: ["ignore", "pipe", "ignore"] },
-    );
-    encoder.stdout.pipe(out);
-    signal.addEventListener("abort", () => encoder.kill("SIGKILL"), { once: true });
-  },
-});
-provider.serveGuide(
-  fakeGuide(
-    {
-      ...provider.catalogue,
-      channels: provider.catalogue.channels.filter((channel) => channel.streamId % 6 === 0),
-    },
-    Date.now(),
-  ),
-);
+const providers: Awaited<ReturnType<typeof startFakeProvider>>[] = [];
+for (let index = 0; index < SUBSCRIPTIONS; index++)
+  providers.push(
+    await startFakeProvider({
+      second: index > 0,
+      channels: 13_000,
+      maxConnections: 1,
+      longSeries: true,
+      // Every channel plays the same endless 720p programme, encoded as it goes.
+      streams: (_channel, out, signal) => {
+        const encoder = spawn(
+          ffmpeg,
+          [
+            ...["-hide_banner", "-loglevel", "error", "-re"],
+            ...["-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=25"],
+            ...["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000"],
+            ...["-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-g", "50"],
+            ...["-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-f", "mpegts", "pipe:1"],
+          ],
+          { stdio: ["ignore", "pipe", "ignore"] },
+        );
+        encoder.stdout.pipe(out);
+        signal.addEventListener("abort", () => encoder.kill("SIGKILL"), { once: true });
+      },
+    }),
+  );
+const provider = providers[0]!;
+for (const provider of providers)
+  provider.serveGuide(
+    fakeGuide(
+      {
+        ...provider.catalogue,
+        channels: provider.catalogue.channels.filter((channel) => channel.streamId % 6 === 0),
+      },
+      Date.now(),
+    ),
+  );
 
-const results = new Map<string, number[]>();
-const record = (name: string, value: number) =>
+const results = new Map<keyof typeof APP_METRICS, number[]>();
+const record = (name: keyof typeof APP_METRICS, value: number) =>
   results.set(name, [...(results.get(name) ?? []), value]);
+const observations: { [key: string]: number | string | boolean }[] = [];
+const output = options.json ?? join(process.cwd(), ".local/measurements", `app-${Date.now()}.json`);
+mkdirSync(dirname(output), { recursive: true });
 const profile = mkdtempSync(join(tmpdir(), "mr-streamer-measure-"));
 let app: ChildProcess | null = null;
+let activePage: Page | undefined;
+let electron = "unavailable";
+let calibration: Awaited<ReturnType<typeof calibrate>> = [];
+
+const ROWS_SHOWN = `!!document.querySelector("main h1") && document.querySelectorAll("main [role=button]").length > 5`;
+function rowsShown(page: Page): Promise<boolean> {
+  return page.evaluate<boolean>(ROWS_SHOWN);
+}
+
+// Require a new source and two advancing clock observations, rather than a decoded still frame.
+const FRESH_PICTURE = `(() => {
+  const video = document.querySelector("video");
+  if (!video || !video.currentSrc || video.currentSrc === window.__source || video.videoWidth <= 0 || video.currentTime <= 0.2) return false;
+  const previous = window.__movingTime;
+  window.__previousMovingTime = previous;
+  window.__movingTime = video.currentTime;
+  return previous !== null && previous !== undefined && video.currentTime > previous;
+})()`;
+function freshPicture(page: Page): Promise<boolean> {
+  return page.evaluate<boolean>(FRESH_PICTURE);
+}
 
 try {
   // First run: log in, let the catalogue and guide arrive, then tune, switch and browse.
   let port = randomPort();
   app = launch(executable, rest, { port, profile });
-  let page = await connect(port);
+  let page = await connect(port, "page", 5);
+  activePage = page;
+  electron = electronVersion(executable);
   await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
   await login(page, provider);
-  await waitFor(() => Promise.resolve(provider.guideRequests() > 0), 30_000);
+  for (const [index, extra] of providers.entries()) {
+    if (index > 0) await addSubscription(page, extra, `Measurement ${index + 1}`);
+  }
+  if (SUBSCRIPTIONS > 1) await clickText(page, "Back");
+  await clickText(page, "Home");
+  await waitFor(
+    () => Promise.resolve(providers.every((provider) => provider.guideRequests() > 0)),
+    30_000,
+  );
   await delay(5000);
+  calibration = await calibrate(page);
 
   for (let run = 0; run < RUNS; run++) {
     await clickText(page, "Home");
     await delay(1000);
-    await timed(
-      "guide open",
-      () => clickText(page, "Live TV"),
-      () => rowsShown(page),
-    );
+    await timed("guide open", page, buttonClick("Live TV"), ROWS_SHOWN);
     await clickText(page, "TEST | Formats and failures");
     await delay(1000);
     await timed(
       "guide list of 13,000",
-      () => clickText(page, "All channels"),
-      () => rowsShown(page),
+      page,
+      buttonClick("All channels"),
+      `document.querySelector("main h1")?.textContent === "All channels" && (${ROWS_SHOWN})`,
     );
   }
   await clickText(page, "TEST | Formats and failures");
   await waitFor(() => rowsShown(page));
-  for (const channel of TEST_CHANNELS.slice(0, RUNS)) {
-    const requests = provider.streamRequests();
-    await timed(
-      "time to picture",
-      () => clickRow(page, channel),
-      () => freshPicture(page),
-    );
+  for (let run = 0; run < RUNS; run++) {
+    const channel = TEST_CHANNELS[run % TEST_CHANNELS.length]!;
+    const requests = streamRequests();
+    await timed("time to picture", page, rowClick(channel), FRESH_PICTURE);
     await delay(1000);
-    record("streams opened per tune (count)", provider.streamRequests() - requests);
+    record("streams opened per tune (count)", streamRequests() - requests);
     await key(page, "Escape", 27);
     await waitFor(() => page.evaluate<boolean>(`!document.querySelector('[data-view="watch"]')`));
   }
-  await clickRow(page, TEST_CHANNELS[0]!);
+  await clickRow(page, TEST_CHANNELS[RUNS % TEST_CHANNELS.length]!);
   await waitFor(() => freshPicture(page));
   for (let run = 0; run < RUNS; run++) {
-    const requests = provider.streamRequests();
-    await timed(
-      "channel switch",
-      () => key(page, "ArrowDown", 40),
-      () => freshPicture(page),
-    );
+    const requests = streamRequests();
+    await timed("channel switch", page, () => key(page, "ArrowDown", 40), FRESH_PICTURE);
     await delay(1000);
-    record("streams opened per switch (count)", provider.streamRequests() - requests);
+    record("streams opened per switch (count)", streamRequests() - requests);
   }
   await key(page, "Escape", 27);
   await clickText(page, "Home");
@@ -125,8 +183,9 @@ try {
     await delay(500);
     await timed(
       "search, typed to programmes shown",
+      page,
       () => page.send("Input.insertText", { text: "news" }),
-      () => page.evaluate<boolean>(`document.body.innerText.includes("On now")`),
+      `document.querySelector('[role="dialog"]')?.innerText.includes("On now") && document.querySelectorAll('[role="dialog"] [data-index]').length > 0`,
     );
     await key(page, "Escape", 27);
     await delay(500);
@@ -134,11 +193,11 @@ try {
 
   // Home's muted preview plays by now. Watch takes over its stream.
   await delay(3000);
-  const requests = provider.streamRequests();
+  const requests = streamRequests();
   await clickText(page, "Watch");
   await waitFor(() => page.evaluate<boolean>(`!!document.querySelector('[data-view="watch"]')`));
   await delay(1000);
-  record("streams opened, Home to Watch (count)", provider.streamRequests() - requests);
+  record("streams opened, Home to Watch (count)", streamRequests() - requests);
   page.close();
   await quit(app);
 
@@ -148,11 +207,11 @@ try {
     port = randomPort();
     const started = performance.now();
     app = launch(executable, rest, { port, profile });
-    page = await connect(port);
-    await waitFor(() =>
-      page.evaluate<boolean>(
-        `!!document.querySelector("section h1") && !document.body.innerText.includes("Loading channels")`,
-      ),
+    page = await connect(port, "page", 5);
+    activePage = page;
+    await observe(
+      page,
+      `!!document.querySelector("section h1") && !document.body.innerText.includes("Loading channels")`,
     );
     record("cold start to Home", performance.now() - started);
     await openLongSeries(page);
@@ -163,23 +222,146 @@ try {
 
   record("installed size (MB)", installedSize(executable));
   report();
-  if (options.json) writeFileSync(options.json, JSON.stringify(Object.fromEntries(results)));
+  const metrics = Object.fromEntries(
+    Object.entries(APP_METRICS).map(([name, unit]) => {
+      const samples = results.get(name as keyof typeof APP_METRICS) ?? [];
+      const expected =
+        name === "installed size (MB)" || name === "streams opened, Home to Watch (count)"
+          ? 1
+          : RUNS;
+      if (samples.length !== expected) throw new Error(`Incomplete metric: ${name}`);
+      return [name, metric(unit, samples)];
+    }),
+  );
+  saveMeasurement(output, {
+    schemaVersion: 1,
+    tool: "app",
+    environment: environment({
+      ...(options.revision ? { revision: options.revision } : {}),
+      electron,
+      executable,
+      appDirectory: rest.at(-1) ?? "",
+    }),
+    workload: {
+      channelsPerSubscription: 13000,
+      subscriptions: SUBSCRIPTIONS,
+      seriesSeasons: 20,
+      stream: "720p25-h264-aac",
+      runs: RUNS,
+    },
+    conditions: {
+      warmup: "login and guide download before measured interactions",
+      cache: "fresh profile then disk catalogue and guide for cold process starts",
+      timingResolutionMs: 5,
+    },
+    calibration,
+    observations,
+    metrics,
+    checks: { completeMetrics: true, movingPicture: true },
+  });
+  console.log(`Raw measurement: ${output}`);
+} catch (error) {
+  writeFileSync(
+    output,
+    JSON.stringify(
+      {
+        status: "invalid-instrumentation",
+        environment: environment({
+          executable,
+          electron,
+          ...(options.revision ? { revision: options.revision } : {}),
+          appDirectory: rest.at(-1) ?? "",
+        }),
+        workload: {
+          runs: RUNS,
+          subscriptions: SUBSCRIPTIONS,
+          channelsPerSubscription: 13000,
+          stream: "720p25-h264-aac",
+          seriesSeasons: 20,
+        },
+        conditions: {
+          warmup: "login and guide download before measured interactions",
+          cache: "fresh profile then disk catalogue and guide for cold process starts",
+          timingResolutionMs: 5,
+        },
+        calibration,
+        observations,
+        partialSamples: Object.fromEntries(results),
+        error: String(error),
+      },
+      null,
+      2,
+    ),
+  );
+  if (activePage) {
+    try {
+      const capture = await activePage.send("Page.captureScreenshot", { format: "png" });
+      writeFileSync(
+        `${output}.failure.png`,
+        Buffer.from((capture.result as { data: string }).data, "base64"),
+      );
+      writeFileSync(
+        `${output}.failure.dom.json`,
+        JSON.stringify(
+          await activePage.evaluate(
+            `({ text: document.body.innerText, buttons: [...document.querySelectorAll('[role="dialog"] button')].map((row) => ({ text: row.innerText, first: row.firstElementChild?.textContent, label: row.getAttribute("aria-label") })) })`,
+          ),
+          null,
+          2,
+        ),
+      );
+    } catch {
+      /* The process may already have closed. Raw partial samples remain. */
+    }
+  }
+  throw error;
 } finally {
-  app?.kill("SIGKILL");
-  await provider.close();
+  activePage?.close();
+  if (app) await quit(app);
+  await Promise.all(providers.map((provider) => provider.close()));
   await delay(1000);
   rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
 }
 
+function streamRequests() {
+  return providers.reduce((total, provider) => total + provider.streamRequests(), 0);
+}
 async function timed(
-  name: string,
-  act: () => Promise<unknown>,
-  done: () => Promise<boolean>,
+  name: keyof typeof APP_METRICS,
+  page: Page,
+  act: string | (() => Promise<unknown>),
+  condition: string,
 ): Promise<void> {
-  const started = performance.now();
-  await act();
-  await waitFor(done, 60_000);
-  record(name, performance.now() - started);
+  if (condition === FRESH_PICTURE)
+    await page.evaluate(
+      `window.__source = document.querySelector("video")?.currentSrc ?? ""; window.__movingTime = null`,
+    );
+  const observation = observe(page, condition, typeof act === "string" ? act : "");
+  const [elapsed] = await Promise.all([
+    observation,
+    typeof act === "string" ? Promise.resolve() : act(),
+  ]);
+  record(name, elapsed);
+  if (condition === FRESH_PICTURE) {
+    observations.push({
+      name,
+      ...(await page.evaluate<{ previousTime: number; currentTime: number; videoWidth: number }>(
+        `({ previousTime: window.__previousMovingTime, currentTime: window.__movingTime, videoWidth: document.querySelector("video").videoWidth })`,
+      )),
+      streamsOpened: streamRequests(),
+    });
+    if (name === "time to picture" && results.get(name)?.length === 1) {
+      const capture = await page.send("Page.captureScreenshot", { format: "png" });
+      writeFileSync(
+        `${output}.picture.png`,
+        Buffer.from((capture.result as { data: string }).data, "base64"),
+      );
+      writeFileSync(
+        `${output}.picture.ax.json`,
+        JSON.stringify((await page.send("Accessibility.getFullAXTree")).result, null, 2),
+      );
+    }
+  }
 }
 
 /**
@@ -196,21 +378,18 @@ async function openLongSeries(page: Page): Promise<void> {
   const poster = `[...document.querySelectorAll("button[title]")].find((b) => b.title.includes("Long-running"))`;
   await waitFor(() => page.evaluate<boolean>(`!!${poster}`));
   await delay(1000);
-  const shown = await page.evaluate<{ title: number; episodes: number }>(`(async () => {
-    const started = performance.now();
-    const when = (check) => new Promise((resolve) => {
-      const poll = () => (check() ? resolve(performance.now() - started) : setTimeout(poll, 5));
-      poll();
-    });
-    ${poster}.click();
-    const dialog = () => document.querySelector('[role="dialog"]');
-    const title = await when(() => dialog()?.querySelector("h2")?.textContent.includes("Long-running"));
-    const episodes = await when(() => [...(dialog()?.querySelectorAll("button") ?? [])]
-      .filter((row) => /^\\d+$/.test(row.firstElementChild?.textContent.trim() ?? "")).length >= 26);
-    return { title, episodes };
-  })()`);
-  record("long series details, name shown", shown.title);
-  record("long series details, episodes shown", shown.episodes);
+  const dialog = `document.querySelector('[role="dialog"]')`;
+  const title = observe(
+    page,
+    `${dialog}?.querySelector("h2")?.textContent.includes("Long-running")`,
+  );
+  const episodes = observe(
+    page,
+    `[...(${dialog}?.querySelectorAll("button") ?? [])].filter((row) => Number.isInteger(Number(row.firstElementChild?.textContent.trim())) && Number(row.firstElementChild?.textContent.trim()) > 0).length >= 26`,
+  );
+  await page.evaluate(`${poster}.click()`);
+  record("long series details, name shown", await title);
+  record("long series details, episodes shown", await episodes);
   await key(page, "Escape", 27);
 }
 
@@ -218,56 +397,47 @@ async function openLongSeries(page: Page): Promise<void> {
  * Clicks the button that reads `text`, or else the first that starts with it: Home's Watch, not
  * the top bar's Watchlist.
  */
-function clickText(page: Page, text: string): Promise<unknown> {
-  return page.evaluate(`(() => {
+function buttonClick(text: string): string {
+  return `(() => {
     const reads = (element) => element.textContent.trim();
     const buttons = [...document.querySelectorAll("button, [role=button]")];
     const target = buttons.find((element) => reads(element) === ${JSON.stringify(text)})
       ?? buttons.find((element) => reads(element).startsWith(${JSON.stringify(text)}));
     if (!target) throw new Error("No button " + ${JSON.stringify(text)});
     target.click();
-  })()`);
+  })()`;
+}
+function clickText(page: Page, text: string): Promise<unknown> {
+  return page.evaluate(buttonClick(text));
 }
 
-function clickRow(page: Page, channel: string): Promise<unknown> {
-  return page.evaluate(`(() => {
+function rowClick(channel: string): string {
+  return `(() => {
     window.__source = document.querySelector("video")?.currentSrc ?? "";
     [...document.querySelectorAll("[role=button]")]
       .find((row) => row.textContent.includes(${JSON.stringify(channel)})).click();
-  })()`);
+  })()`;
 }
-
-/** Channel rows are on screen. */
-function rowsShown(page: Page): Promise<boolean> {
-  return page.evaluate<boolean>(`document.querySelectorAll("main [role=button]").length > 5`);
-}
-
-/** A new stream has started moving since the last click or key. */
-function freshPicture(page: Page): Promise<boolean> {
-  return page.evaluate<boolean>(`(() => {
-    const video = document.querySelector("video");
-    const fresh = video && video.currentSrc && video.currentSrc !== window.__source;
-    if (fresh && video.currentTime > 0.2 && video.videoWidth > 0) {
-      window.__source = video.currentSrc;
-      return true;
-    }
-    return false;
-  })()`);
+function clickRow(page: Page, channel: string): Promise<unknown> {
+  return page.evaluate(rowClick(channel));
 }
 
 async function quit(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
   const exited = new Promise((resolve) => child.once("exit", resolve));
   child.kill("SIGTERM");
   await Promise.race([exited, delay(10_000)]);
-  child.kill("SIGKILL");
-  await delay(1000);
+  if (child.exitCode === null && child.signalCode === null) {
+    child.kill("SIGKILL");
+    await exited;
+  }
 }
 
 /** The size of the installed app: the .app bundle on macOS, its folder elsewhere. */
 function installedSize(file: string): number {
   const folder = process.platform === "darwin" ? dirname(dirname(dirname(file))) : dirname(file);
   const bytes = sizeOf(folder);
-  return Math.round(bytes / 1024 / 1024);
+  return bytes / 1e6;
 }
 
 function sizeOf(path: string): number {
@@ -281,10 +451,6 @@ function sizeOf(path: string): number {
 }
 
 function report(): void {
-  const median = (values: number[]) => {
-    const sorted = values.toSorted((a, b) => a - b);
-    return sorted[Math.floor(sorted.length / 2)] ?? 0;
-  };
   console.log(`| Measure | Median | Runs |\n| --- | --- | --- |`);
   for (const [name, values] of results) {
     const unit = name.includes("(") ? "" : " ms";
