@@ -25,7 +25,7 @@ import { connect, delay, launch, observeAcrossLoad } from "./app.ts";
 
 const { values: options, positionals } = parseArgs({
   options: {
-    rounds: { type: "string", default: "3" },
+    rounds: { type: "string", default: String(MINIMUM_COMPARISON_SAMPLES) },
     runs: { type: "string", default: "3" },
     subscriptions: { type: "string", default: "1" },
     output: { type: "string" },
@@ -33,18 +33,22 @@ const { values: options, positionals } = parseArgs({
     "candidate-revision": { type: "string" },
     "baseline-json": { type: "string" },
     "candidate-json": { type: "string" },
+    help: { type: "boolean" },
   },
   allowPositionals: true,
 });
+const usage = `Usage: compare-builds.ts [--rounds ${MINIMUM_COMPARISON_SAMPLES}] [--runs 3] [--subscriptions 1] [--output folder] <baseline> <candidate> [-- args], or --baseline-json file --candidate-json file
+Defaults: ${MINIMUM_COMPARISON_SAMPLES} alternating rounds, 3 runs, 1 subscription. Offline mode rechecks one pair; fewer than ${MINIMUM_COMPARISON_SAMPLES} pooled samples per metric/side remains undersampled.`;
+if (options.help) {
+  console.log(usage);
+  process.exit(0);
+}
 const rounds = positiveCount(options.rounds, "rounds", 20);
 const samples = positiveCount(options.runs, "runs", 20);
 const subscriptions = positiveCount(options.subscriptions, "subscriptions", 4);
 const [baseline, candidate, ...appArgs] = positionals;
 const offline = options["baseline-json"] && options["candidate-json"];
-if (!offline && (!baseline || !candidate))
-  throw new Error(
-    "Usage: compare-builds.ts [--rounds n] [--runs n] [--subscriptions n] <baseline> <candidate> [-- args], or --baseline-json file --candidate-json file",
-  );
+if (!offline && (!baseline || !candidate)) throw new Error(usage);
 const folder = resolve(options.output ?? join(".local/measurements", `compare-${Date.now()}`));
 mkdirSync(folder, { recursive: true });
 const started = performance.now();
@@ -140,7 +144,7 @@ try {
   if (summary) appendFileSync(summary, `\n${verdict}\n${table}\n`);
   for (const measure of warnings)
     console.log(
-      `::warning title=Performance comparison::${measure.name}: +${shown(measure.absoluteDelta)} ${measure.unit}; repeat on the same host before calling it a regression`,
+      `::warning title=Performance comparison::${measure.name}: +${shown(measure.absoluteDelta)} ${measure.unit}${measure.insufficientSamples ? "; insufficient samples" : ""}; repeat on the same host before calling it a regression`,
     );
 } catch (error) {
   writeFileSync(
@@ -179,12 +183,14 @@ async function warmUp(executable: string) {
       page.close();
     }
   } finally {
-    const exited = once(app, "exit");
-    app.kill("SIGTERM");
-    await Promise.race([exited, delay(10_000)]);
-    if (app.exitCode === null) {
-      app.kill("SIGKILL");
-      await exited;
+    if (app.exitCode === null && app.signalCode === null) {
+      const exited = once(app, "exit");
+      app.kill("SIGTERM");
+      await Promise.race([exited, delay(10_000)]);
+      if (app.exitCode === null && app.signalCode === null) {
+        app.kill("SIGKILL");
+        await exited;
+      }
     }
     rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
   }

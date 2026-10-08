@@ -151,6 +151,9 @@ it("comparison CLI retains a warning verdict but exits nonzero for invalid instr
     });
     expect(valid.stdout).toContain("insufficient samples");
     expect(valid.stdout).toContain("1/1 (insufficient; minimum 5)");
+    expect(valid.stdout).toContain(
+      "::warning title=Performance comparison::time to picture: +40.0 ms; insufficient samples;",
+    );
     writeFileSync(after, JSON.stringify(report()));
     const inconclusive = spawnSync(process.execPath, args, { encoding: "utf8" });
     expect(inconclusive.status, inconclusive.stderr).toBe(0);

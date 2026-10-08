@@ -47,6 +47,7 @@ const { values: options, positionals } = parseArgs({
   allowPositionals: true,
 });
 const [executable, ...rest] = positionals;
+const appDirectory = rest.find((argument) => existsSync(join(argument, "out/main/index.js")));
 if (!executable) {
   throw new Error(
     "Usage: node test/e2e/measure-app.ts [--runs 3] [--subscriptions 1] [--revision sha] [--json file] <app executable> [-- args]",
@@ -258,7 +259,7 @@ try {
       ...(options.revision ? { revision: options.revision } : {}),
       electron,
       executable,
-      appDirectory: rest.at(-1) ?? "",
+      ...(appDirectory ? { appDirectory } : {}),
     }),
     workload: {
       channelsPerSubscription: 13000,
@@ -269,10 +270,9 @@ try {
     },
     conditions: {
       warmup: "login, guide download, one unmeasured tune and switch at measured workload",
-      installedSizeScope:
-        rest.at(-1) && existsSync(join(rest.at(-1)!, "out/main/index.js"))
-          ? "electron-runtime-folder only; unpackaged, excludes app output"
-          : "installed app bundle or folder",
+      installedSizeScope: appDirectory
+        ? "electron-runtime-folder only; unpackaged, excludes app output"
+        : "installed app bundle or folder",
       sizeUnit: "decimal MB; 1000000 bytes",
       cache: "fresh profile then disk catalogue and guide for cold process starts",
       timingResolutionMs: 5,
@@ -306,7 +306,7 @@ try {
           executable,
           electron,
           ...(options.revision ? { revision: options.revision } : {}),
-          appDirectory: rest.at(-1) ?? "",
+          ...(appDirectory ? { appDirectory } : {}),
         }),
         workload: {
           runs: RUNS,
@@ -317,10 +317,9 @@ try {
         },
         conditions: {
           warmup: "login, guide download, one unmeasured tune and switch at measured workload",
-          installedSizeScope:
-            rest.at(-1) && existsSync(join(rest.at(-1)!, "out/main/index.js"))
-              ? "electron-runtime-folder only; unpackaged, excludes app output"
-              : "installed app bundle or folder",
+          installedSizeScope: appDirectory
+            ? "electron-runtime-folder only; unpackaged, excludes app output"
+            : "installed app bundle or folder",
           sizeUnit: "decimal MB; 1000000 bytes",
           cache: "fresh profile then disk catalogue and guide for cold process starts",
           timingResolutionMs: 5,
