@@ -103,7 +103,7 @@ export interface ProviderEpisode {
   readonly duration: number | null;
   readonly stillUrl: string | null;
   readonly airDate: string | null;
-  /** Epoch seconds the file arrived, when the provider says. */
+  /** Epoch milliseconds the file arrived, when the provider says. */
   readonly addedAt: number | null;
   readonly container: string;
 }

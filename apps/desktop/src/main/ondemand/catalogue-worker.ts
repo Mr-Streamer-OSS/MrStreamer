@@ -173,6 +173,8 @@ interface Shown {
   /** What it was made of: the same lists in the same order make the same catalogue. */
   readonly members: readonly Loaded[];
   readonly index: IndexedCatalogue;
+  /** Current exact listed rows, built per kind only when local observations need validation. */
+  readonly fileListings: Map<TitleKind, ReadonlyMap<string, ProviderTitle>>;
   /** By kind and metadata version; built when first asked for. */
   readonly collections: Map<string, Collections>;
 }
@@ -387,7 +389,12 @@ function shownOf(members: readonly Loaded[], language: string): Shown {
     shown.members.length === members.length &&
     shown.members.every((each, at) => each === members[at]);
   if (!shown || !same) {
-    shown = { members, index: indexCatalogue(members, language), collections: new Map() };
+    shown = {
+      members,
+      index: indexCatalogue(members, language),
+      fileListings: new Map(),
+      collections: new Map(),
+    };
   }
   return shown;
 }
@@ -395,37 +402,32 @@ function shownOf(members: readonly Loaded[], language: string): Shown {
 /** Last-read tracks count only while their exact file remains in these owners' current lists. */
 function filterFiles(found: Shown, kind: TitleKind, known: readonly KnownFile[]): FilterFiles {
   const result = new Map<string, FilterFile[]>();
-  const members = new Map(found.members.map((member) => [member.subscriptionId, member]));
-  const movies = new Map(
-    found.members.flatMap((member) =>
-      member.catalogue.movies.map(
-        (movie) =>
-          [ownedKey({ subscriptionId: member.subscriptionId, id: movie.id }), movie] as const,
+  if (known.length === 0) return result;
+  let listings = found.fileListings.get(kind);
+  if (!listings) {
+    listings = new Map(
+      found.members.flatMap((member) =>
+        (kind === "movie" ? member.catalogue.movies : member.catalogue.series).map(
+          (file) =>
+            [ownedKey({ subscriptionId: member.subscriptionId, id: file.id }), file] as const,
+        ),
       ),
-    ),
-  );
-  const series = new Map(
-    found.members.flatMap((member) =>
-      member.catalogue.series.map(
-        (title) =>
-          [ownedKey({ subscriptionId: member.subscriptionId, id: title.id }), title] as const,
-      ),
-    ),
-  );
+    );
+    found.fileListings.set(kind, listings);
+  }
   const titles = kindOf(found.index, kind).byId;
   for (const file of known) {
-    if (!members.has(file.subscriptionId)) continue;
     const key = ownedKey({
       subscriptionId: file.subscriptionId,
       id: file.kind === "movie" ? file.id : (file.seriesId ?? ""),
     });
     if (kind === "movie") {
       if (file.kind !== "movie") continue;
-      const listed = movies.get(key);
+      const listed = listings.get(key);
       if (!listed || listedFileKey("movie", listed) !== file.listingKey) continue;
     } else {
       if (file.kind !== "episode" || !file.seriesId || !file.tags) continue;
-      const listed = series.get(key);
+      const listed = listings.get(key);
       if (!listed || (listed.episodeFiles && !listed.episodeFiles.includes(file.id))) continue;
     }
     const title = titles.get(key);
@@ -599,10 +601,44 @@ const handlers: {
   },
   refresh,
   finishRefresh,
-  byIds: async ({ language, kind, versions, owners }) => {
+  byIds: async ({ language, kind, versions, owners, files }) => {
     speaking(language);
-    const { index } = await catalogueOf(owners, language);
-    return byIds(index, kind, versions).map((title) => named(title, language));
+    const found = await catalogueOf(owners, language);
+    const selected = byIds(found.index, kind, versions).map((title) => named(title, language));
+    if (!files?.some((file) => file.tracks)) return selected;
+    const wanted = new Set(selected.flatMap((title) => title.versions.map(ownedKey)));
+    const read = files.filter(
+      (file) =>
+        file.tracks &&
+        wanted.has(
+          ownedKey({
+            subscriptionId: file.subscriptionId,
+            id: kind === "movie" ? file.id : (file.seriesId ?? ""),
+          }),
+        ),
+    );
+    if (read.length === 0) return selected;
+    const observed = filterFiles(found, kind, read);
+    return selected.map((shown) => {
+      return {
+        ...shown,
+        versions: shown.versions.map((version) => {
+          const read = observed
+            .get(ownedKey(version))
+            ?.flatMap((file) => (file.tracks ? [file.tracks] : []));
+          return read?.length
+            ? {
+                ...version,
+                observed: {
+                  files: read.length,
+                  audio: [...new Set(read.flatMap((file) => file.audio))],
+                  subtitles: [...new Set(read.flatMap((file) => file.subtitles))],
+                },
+              }
+            : version;
+        }),
+      };
+    });
   },
   search: async ({ language, query, owners }) => {
     speaking(language);

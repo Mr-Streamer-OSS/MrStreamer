@@ -114,7 +114,12 @@ export interface WorkerCalls {
   };
   /** Titles by any of their versions, each named with the subscription that lists it. */
   byIds: {
-    args: Owners & { language: string; kind: TitleKind; versions: readonly OwnedId[] };
+    args: Owners & {
+      language: string;
+      kind: TitleKind;
+      versions: readonly OwnedId[];
+      files?: readonly KnownFile[];
+    };
     result: readonly Title[];
   };
   search: {

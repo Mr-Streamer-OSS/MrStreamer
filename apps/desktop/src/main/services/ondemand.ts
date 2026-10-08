@@ -17,6 +17,7 @@ import type {
   CollectionRow,
   CollectionSort,
   CollectionTile,
+  Episode,
   EpisodeDetails,
   MetadataProgress,
   OnDemandStatus,
@@ -30,6 +31,7 @@ import type {
   TitleMatches,
   TitleRef,
 } from "@mrstreamer/contracts/ondemand";
+import { ownedKey } from "@mrstreamer/contracts/subscription";
 import { hasTitles, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type { WatchlistPage } from "@mrstreamer/contracts/watchlist";
 import { diagnosed } from "@mrstreamer/core/diagnostics";
@@ -638,7 +640,7 @@ function make(deps: OnDemandDeps) {
     };
 
     /** No provider reads: cached episode listings must still belong to the saved source and lists. */
-    const knownFiles = (kind: TitleKind) =>
+    const knownFiles = (kind: TitleKind, onlyRead = false) =>
       Effect.gen(function* () {
         if (!verifiedFiles) return [];
         const files: KnownFile[] = [];
@@ -661,6 +663,7 @@ function make(deps: OnDemandDeps) {
           const episodes = new Map(
             known.filter((file) => file.kind === "episode").map((file) => [file.id, file]),
           );
+          if (onlyRead && episodes.size === 0) continue;
           const seen = new Set<string>();
           for (const held of details.values()) {
             if (
@@ -670,23 +673,28 @@ function make(deps: OnDemandDeps) {
               held.lists !== listsOf(source.id)
             )
               continue;
-            const tags =
-              held.title.versions.find(
-                (version) => version.subscriptionId === source.id && version.id === held.version.id,
-              )?.tags ?? [];
+            const tags = onlyRead
+              ? []
+              : (held.title.versions.find(
+                  (version) =>
+                    version.subscriptionId === source.id && version.id === held.version.id,
+                )?.tags ?? []);
             for (const episode of held.raw.episodes) {
+              const found = episodes.get(episode.id);
+              if (onlyRead && found?.seriesId !== held.version.id) continue;
               if (seen.has(episode.id)) continue;
               seen.add(episode.id);
               const listingKey = listedFileKey("episode", episode);
-              const found = episodes.get(episode.id);
               const tracks =
                 found?.seriesId === held.version.id && found.listingKey === listingKey
                   ? { audio: found.audio, subtitles: found.subtitles }
                   : undefined;
-              const named = titleName(episode.name).tags;
-              // Explicit episode quality takes precedence over the series' provider label.
-              const hints =
-                qualityHint(named) === "unknown"
+              if (onlyRead && !tracks) continue;
+              const named = onlyRead ? [] : titleName(episode.name).tags;
+              // Read-only facts need no listing hints. Explicit episode quality otherwise wins.
+              const hints = onlyRead
+                ? []
+                : qualityHint(named) === "unknown"
                   ? [...tags, ...named]
                   : [...tags.filter((tag) => qualityHint([tag]) === "unknown"), ...named];
               files.push({
@@ -703,6 +711,30 @@ function make(deps: OnDemandDeps) {
         }
         return files;
       });
+
+    /** One read of validated observations decorates each season without joining rows by id. */
+    const episodeObserver = Effect.map(knownFiles("series", true), (known) => {
+      const files = new Map(known.map((file) => [ownedKey(file), file.tracks]));
+      return <E extends Episode>(episode: E) => ({
+        ...episode,
+        ...(episode.versions
+          ? {
+              versions: episode.versions.map((version) => {
+                const tracks = files.get(
+                  ownedKey({ subscriptionId: episode.subscriptionId, id: version.id }),
+                );
+                return tracks ? { ...version, observed: { files: 1, ...tracks } } : version;
+              }),
+            }
+          : {}),
+      });
+    });
+
+    /** Decorates exact alternate files only from already validated local episode observations. */
+    const observedEpisodes = <E extends Episode>(episodes: readonly E[]) =>
+      episodes.some((episode) => episode.versions)
+        ? Effect.map(episodeObserver, (observe) => episodes.map(observe))
+        : Effect.succeed(episodes);
 
     /**
      * Details kept from an earlier open, asked again after the lists were refreshed, as the
@@ -849,7 +881,22 @@ function make(deps: OnDemandDeps) {
         }),
 
       details: (kind: TitleKind, version: OwnedId) =>
-        Effect.map(detailsOf(kind, version), (found) => found.shown),
+        Effect.gen(function* () {
+          const { shown } = yield* detailsOf(kind, version);
+          if (
+            shown.kind !== "series" ||
+            !shown.seasons.some((season) => season.episodes.some((episode) => episode.versions))
+          )
+            return shown;
+          const observe = yield* episodeObserver;
+          return {
+            ...shown,
+            seasons: shown.seasons.map((season) => ({
+              ...season,
+              episodes: season.episodes.map(observe),
+            })),
+          };
+        }),
 
       season: (series: OwnedId, number: number) =>
         Effect.gen(function* () {
@@ -882,14 +929,24 @@ function make(deps: OnDemandDeps) {
               if (named(season, answers)) break;
             }
           }
-          return seasonEpisodes(season, answers);
+          return yield* observedEpisodes(seasonEpisodes(season, answers));
         }),
 
       titles: (kind: TitleKind, versions: readonly OwnedId[]) =>
         versions.length === 0
           ? Effect.succeed([])
           : // Versions of a subscription that isn't saved are in no lists, whatever their ids.
-            loaded((owners, language) => call("byIds", { owners, language, kind, versions })),
+            loaded((owners, language) =>
+              Effect.gen(function* () {
+                return yield* call("byIds", {
+                  owners,
+                  language,
+                  kind,
+                  versions,
+                  files: yield* knownFiles(kind, true),
+                });
+              }),
+            ),
 
       saved: (saved: readonly SavedSubscription[], query: SavedQuery) =>
         Effect.gen(function* () {

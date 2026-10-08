@@ -123,6 +123,20 @@ describe("one title per film", () => {
       title.versions.map((version) => version.id),
     ]);
 
+  it("keeps each version's original label, file type and added date beside its own id", () => {
+    const title = byIds(indexOf(catalogue, "en"), "movie", [
+      { subscriptionId: SUBSCRIPTION, id: "1" },
+    ])[0];
+    expect(
+      title?.versions.map(({ id, name, container, addedAt }) => ({ id, name, container, addedAt })),
+    ).toEqual([
+      { id: "2", name: "Speak No Evil (MULTI)", container: "mkv", addedAt: 2 },
+      { id: "1", name: "Speak No Evil (NL)", container: "mkv", addedAt: 3 },
+      { id: "3", name: "Speak No Evil 2024 (DE)", container: "mkv", addedAt: 4 },
+    ]);
+    expect(title?.versions.every((version) => version.observed === undefined)).toBe(true);
+  });
+
   it("gathers the versions sharing a TMDB id, the one suiting the language first", () => {
     expect(listed("en")).toEqual([
       ["2", ["2", "1", "3"]],
@@ -688,6 +702,7 @@ function seriesOf(
     addedAt?: number,
   ])[],
   language = "en",
+  sourceOrder = false,
 ) {
   return seriesDetails(
     {
@@ -734,6 +749,7 @@ function seriesOf(
         container: "mkv",
       })),
       container: null,
+      ...(sourceOrder ? { episodeOrder: "source" as const } : {}),
     },
     null,
     language,
@@ -741,6 +757,22 @@ function seriesOf(
 }
 
 describe("a series' episodes", () => {
+  it("keeps exact alternate file dates in the provider contract's milliseconds", () => {
+    const addedAt = Date.UTC(2024, 2, 5);
+    const series = seriesOf(
+      [
+        ["first", 1, 1, "Harbour S01E01 HD", addedAt],
+        ["second", 1, 1, "Harbour S01E01 4K", addedAt + 1000],
+      ],
+      "en",
+      true,
+    );
+    expect(series.seasons[0]?.episodes[0]?.versions?.map((file) => file.addedAt)).toEqual([
+      addedAt,
+      addedAt + 1000,
+    ]);
+  });
+
   it.each([
     [
       "the newest of two files",

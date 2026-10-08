@@ -71,6 +71,7 @@ export function indexCatalogue(
 /** A provider's row with its name read, and whether it is for adults. */
 interface Named {
   readonly item: ProviderTitle;
+  readonly listedOrder: number;
   readonly name: TitleName;
   readonly adult: boolean;
 }
@@ -93,10 +94,12 @@ function namedOf(catalogue: OnDemandCatalogue, kind: TitleKind): readonly Named[
     // The adult flag is a standard field; a category named for adults also counts.
     const isAdult = adultIn(categories);
     const seen = new Set<string>();
-    return raw.flatMap((item): Named[] => {
+    return raw.flatMap((item, listedOrder): Named[] => {
       if (seen.has(item.id)) return [];
       seen.add(item.id);
-      return [{ item, name: titleName(item.name, item.releaseDate), adult: isAdult(item) }];
+      return [
+        { item, listedOrder, name: titleName(item.name, item.releaseDate), adult: isAdult(item) },
+      ];
     });
   })());
 }
@@ -177,10 +180,14 @@ function indexKind(
       adult: versions.length === 1 && first.adult,
       tmdbId,
       genres: [],
-      versions: versions.map(({ subscriptionId, item, name }) => ({
+      versions: versions.map(({ subscriptionId, item, name, listedOrder }) => ({
         subscriptionId,
         id: item.id,
         tags: name.tags,
+        name: item.name,
+        container: item.container,
+        addedAt: item.addedAt,
+        listedOrder,
         ...(item.episodeFiles ? { episodeFiles: item.episodeFiles } : {}),
       })),
     };

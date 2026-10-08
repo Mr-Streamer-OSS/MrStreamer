@@ -39,6 +39,7 @@ export function seriesDetails(
   about: TitleAbout | null,
   language: string,
 ): SeriesDetails {
+  const listedOrder = new Map(details.episodes.map((episode, index) => [episode.id, index]));
   const files = new Map<string, ProviderEpisode[]>();
   for (const episode of details.episodes) {
     const key = `${episode.season}:${episode.number}`;
@@ -73,6 +74,9 @@ export function seriesDetails(
               name: file.name,
               tags: titleName(file.name).tags,
               duration: file.duration,
+              container: file.container,
+              addedAt: file.addedAt,
+              listedOrder: listedOrder.get(file.id) ?? 0,
             })),
           }
         : {}),
