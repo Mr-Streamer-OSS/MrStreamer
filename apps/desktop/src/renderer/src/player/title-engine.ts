@@ -27,6 +27,8 @@ const AHEAD_S = { stop: 60, resume: 40 } as const;
 const START_TIMEOUT_MS = 30_000;
 /** How long a run may send nothing at all. */
 const NOTHING_TIMEOUT_MS = 45_000;
+/** The proxy gets 30 s for subtitle recovery; allow its final answer another 5 s to arrive. */
+const SUBTITLE_WAIT_MS = 35_000;
 /** How often a run tells the proxy what it has buffered while its subtitles load. */
 const PROGRESS_MS = 500;
 /** A clock that stands still this long while playing, with nothing buffered, counts as broken. */
@@ -100,9 +102,14 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
   let endedListener: (() => void) | null = null;
   let status: SubtitleStatus = run.subtitle === null ? null : "loading";
   let statusListener: ((status: SubtitleStatus) => void) | null = null;
+  let subtitleWait: ReturnType<typeof setTimeout> | null = null;
   const say = (next: SubtitleStatus) => {
     if (status === next) return;
     status = next;
+    if (next !== "loading" && subtitleWait !== null) {
+      clearTimeout(subtitleWait);
+      subtitleWait = null;
+    }
     statusListener?.(next);
   };
   /** The title second from which a track shows again after it had nothing for the start. */
@@ -180,6 +187,8 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
   video.addEventListener("ended", onEnded);
   video.addEventListener("timeupdate", onTime);
   function stopWatching() {
+    if (subtitleWait !== null) clearTimeout(subtitleWait);
+    subtitleWait = null;
     clearInterval(watchdog);
     clearInterval(telling);
     video.removeEventListener("error", onError);
@@ -414,6 +423,15 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
   }
 
   if (run.subtitle !== null) {
+    subtitleWait = setTimeout(() => {
+      if (subtitlesSignal.aborted || status !== "loading") return;
+      // A silent feed cannot leave the note loading forever. Stop only this track's read;
+      // the picture and sound keep their own connection and failure handling.
+      subtitlesOff.abort();
+      clearSubtitles(video);
+      showsFrom = null;
+      say("unavailable");
+    }, SUBTITLE_WAIT_MS);
     readSubtitles(run.subtitle).catch(() => {
       // Turned off or stopped with the run: nothing to say.
       if (subtitlesSignal.aborted) return;
