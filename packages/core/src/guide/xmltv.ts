@@ -263,26 +263,29 @@ const TITLE = /<title(?:\s[^>]*)?>([\s\S]*?)<\/title>/;
 const DESCRIPTION = /<desc(?:\s[^>]*)?>([\s\S]*?)<\/desc>/;
 const DISPLAY_NAME = /<display-name(?:\s[^>]*)?>([\s\S]*?)<\/display-name>/;
 
-function attributesOf(text: string): Map<string, string> {
-  const values = new Map<string, string>();
+/** Decode only attributes the reader uses, without a temporary Map for every programme. */
+function attributesOf(text: string) {
+  const values: { channel?: string; start?: string; stop?: string; id?: string } = {};
   for (const match of text.matchAll(ATTRIBUTE)) {
-    values.set(match[1] ?? "", decode(match[2] ?? match[3] ?? ""));
+    const name = match[1];
+    if (name === "channel" || name === "start" || name === "stop" || name === "id")
+      values[name] = decode(match[2] ?? match[3] ?? "");
   }
   return values;
 }
 
 function programmeOf(attributes: string, body: string): XmltvProgramme | null {
   const values = attributesOf(attributes);
-  const channel = values.get("channel")?.trim();
-  const start = time(values.get("start"));
-  const stop = time(values.get("stop"));
+  const channel = values.channel?.trim();
+  const start = time(values.start);
+  const stop = time(values.stop);
   const title = text(TITLE.exec(body)?.[1]);
   if (!channel || start === null || !title || (stop !== null && stop <= start)) return null;
   return { channel, start, stop, title, description: text(DESCRIPTION.exec(body)?.[1]) };
 }
 
 function channelOf(attributes: string, body: string | null): XmltvChannel | null {
-  const id = attributesOf(attributes).get("id")?.trim();
+  const id = attributesOf(attributes).id?.trim();
   if (!id) return null;
   return { id, name: body === null ? null : text(DISPLAY_NAME.exec(body)?.[1]) };
 }
@@ -292,6 +295,8 @@ const CDATA = /<!\[CDATA\[([\s\S]*?)\]\]>/g;
 /** Element text: CDATA as written, everything else with references decoded and tags dropped. */
 function text(raw: string | undefined): string | null {
   if (raw === undefined) return null;
+  // Most guides send plain text. Keep its whitespace rules without scanning for absent markup.
+  if (!raw.includes("<") && !raw.includes("&")) return raw.replace(/\s+/g, " ").trim() || null;
   let result = "";
   let last = 0;
   for (const match of raw.matchAll(CDATA)) {

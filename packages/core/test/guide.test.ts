@@ -112,6 +112,25 @@ describe("indexing a guide", () => {
     size = 64 * 1024,
   ) => indexProgrammes(pieces(document, size), NOON, options);
 
+  it.each([
+    ["  News\t from\n abroad  ", "News from abroad"],
+    ["  News <b>from</b> &amp; <![CDATA[<abroad>]]>  ", "News from & <abroad>"],
+  ])("keeps text and the last used attribute when elements are split: %s", async (raw, shown) => {
+    const guide = await index(
+      tv(
+        '<channel ignored="unused" id="wrong" id="one&amp;only"><display-name>One</display-name></channel>',
+        `<programme stop='20261002140000 +0000' ignored='unused' channel='wrong' start='20261002130000 +0000' channel='one&amp;only'><title>${raw}</title><desc>${raw}</desc></programme>`,
+      ),
+      undefined,
+      7,
+    );
+    expect(guide.channels.get("one&only")?.name).toBe("One");
+    expect(guide.byChannel.get("one&only")).toEqual([
+      { start: NOON + HOUR, stop: NOON + 2 * HOUR, title: shown, description: shown },
+    ]);
+    expect(guide.byChannel.has("wrong")).toBe(false);
+  });
+
   it("lists every channel the guide names with its name, and by its id where it names none", async () => {
     const guide = await index(
       tv(
