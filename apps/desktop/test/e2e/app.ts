@@ -31,16 +31,24 @@ export type Page = Awaited<ReturnType<typeof connect>>;
  * A minimal DevTools protocol client for the app's window, or for its main process ("node") when
  * the app was started with `--inspect=<port>`.
  */
-export async function connect(port: number, kind: "page" | "node" = "page") {
+export async function connect(port: number, kind: "page" | "node" = "page", pollMs = 200) {
   let url: string | undefined;
-  for (let attempt = 0; attempt < 150 && !url; attempt++) {
-    await delay(200);
+  const until = performance.now() + 30000;
+  while (performance.now() < until && !url) {
+    await delay(pollMs);
     try {
       const targets = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()) as {
         type: string;
+        url: string;
         webSocketDebuggerUrl: string;
       }[];
-      url = targets.find((target) => target.type === kind)?.webSocketDebuggerUrl;
+      // Electron exposes its initial blank page before loading the app. Observing that page
+      // loses the pending measurement when navigation destroys its execution context.
+      url = targets.find(
+        (target) =>
+          target.type === kind &&
+          (kind === "node" || (target.url !== "" && target.url !== "about:blank")),
+      )?.webSocketDebuggerUrl;
     } catch {}
   }
   if (!url)
@@ -64,12 +72,19 @@ export async function connect(port: number, kind: "page" | "node" = "page") {
     if (message.id !== undefined) pending.get(message.id)?.(message);
     else if (message.method) listeners.get(message.method)?.(message.params);
   });
-  const send = (method: string, params: Record<string, unknown> = {}) =>
+  socket.addEventListener("close", () => {
+    for (const resolve of pending.values()) resolve({ error: "DevTools connection closed" });
+  });
+  const send = (method: string, params: Record<string, unknown> = {}, timeoutMs = 10_000) =>
     new Promise<{ result?: unknown; error?: unknown }>((resolve) => {
       const id = nextId++;
-      const timer = setTimeout(() => resolve({ error: `${method} timed out` }), 10_000);
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        resolve({ error: `${method} timed out` });
+      }, timeoutMs);
       pending.set(id, (message) => {
         clearTimeout(timer);
+        pending.delete(id);
         resolve(message);
       });
       socket.send(JSON.stringify({ id, method, params }));
@@ -80,14 +95,20 @@ export async function connect(port: number, kind: "page" | "node" = "page") {
     on(method: string, listener: (params: unknown) => void): void {
       listeners.set(method, listener);
     },
-    async evaluate<T>(expression: string): Promise<T> {
-      const reply = await send("Runtime.evaluate", {
-        expression,
-        awaitPromise: true,
-        returnByValue: true,
-      });
+    async evaluate<T>(expression: string, timeoutMs = 10_000): Promise<T> {
+      const reply = await send(
+        "Runtime.evaluate",
+        {
+          expression,
+          awaitPromise: true,
+          returnByValue: true,
+        },
+        timeoutMs,
+      );
       if (reply.error) throw new Error(JSON.stringify(reply.error));
-      return (reply.result as { result: { value: T } }).result.value;
+      const result = reply.result as { result: { value: T }; exceptionDetails?: unknown };
+      if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
+      return result.result.value;
     },
     close: () => socket.close(),
   };
@@ -225,4 +246,100 @@ export async function waitFor(check: () => Promise<boolean>, timeoutMs = 60_000)
 
 export function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Observe completion in the renderer, where DOM mutations occur. The bounded 5 ms probe also
+ * covers video clocks and other state that does not mutate the DOM. Always tears both down. */
+export function observe(
+  page: Page,
+  condition: string,
+  action = "",
+  mutations = true,
+): Promise<number> {
+  return page.evaluate<number>(
+    `new Promise((resolve, reject) => {
+    const started = performance.now();
+    const check = () => (${condition});
+    let timer, deadline, observer;
+    const cleanup = () => { clearInterval(timer); clearTimeout(deadline); observer?.disconnect(); };
+    const probe = () => {
+      try { if (check()) { cleanup(); resolve(performance.now() - started); } }
+      catch (error) { cleanup(); reject(error); }
+    };
+    timer = setInterval(probe, 5);
+    deadline = setTimeout(() => { cleanup(); reject(new Error("Renderer observation timed out")); }, 60000);
+    try {
+      if (${mutations}) {
+        observer = new MutationObserver(probe);
+        // The Document exists before its root element during a cold start.
+        observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
+      }
+      ${action}; probe();
+    } catch (error) { cleanup(); reject(error); }
+  })`,
+    65000,
+  );
+}
+
+/** Observe initial loading only, with one rearm for either exact initial-navigation CDP error.
+ * There is deliberately no action argument: user actions must never run twice. */
+export async function observeAcrossLoad(page: Page, condition: string, started: number) {
+  let navigationObserved = false;
+  for (;;) {
+    try {
+      await observe(page, condition);
+      return { elapsedMs: performance.now() - started, navigationObserved };
+    } catch (error) {
+      if (
+        navigationObserved ||
+        !(error instanceof Error) ||
+        ![
+          '{"code":-32000,"message":"Execution context was destroyed."}',
+          '{"code":-32000,"message":"Inspected target navigated or closed"}',
+        ].includes(error.message)
+      )
+        throw error;
+      navigationObserved = true;
+    }
+  }
+}
+
+/** Known short delays distinguish timer scheduling from observation error, on this renderer. */
+export async function calibrate(page: Page) {
+  const samples: {
+    method: string;
+    knownDelayMs: number;
+    actualDelayMs: number;
+    observationErrorMs: number;
+    overheadMs: number;
+  }[] = [];
+  for (const mutations of [true, false]) {
+    for (const knownDelayMs of [5, 10, 20, 50]) {
+      for (let run = 0; run < 3; run++) {
+        await page.evaluate(`(() => {
+          document.querySelector("#measurement-calibration")?.remove();
+          const marker = document.createElement("div"); marker.id = "measurement-calibration";
+          marker.hidden = true; document.documentElement.append(marker);
+        })()`);
+        const elapsed = await observe(
+          page,
+          `document.querySelector("#measurement-calibration").dataset.ready === "yes"`,
+          `window.__calibrationStarted = performance.now();
+           setTimeout(() => { window.__calibrationActual = performance.now() - window.__calibrationStarted;
+             document.querySelector("#measurement-calibration").dataset.ready = "yes"; }, ${knownDelayMs})`,
+          mutations,
+        );
+        const actualDelayMs = await page.evaluate<number>("window.__calibrationActual");
+        samples.push({
+          method: mutations ? "mutation-and-probe" : "probe-only",
+          knownDelayMs,
+          actualDelayMs,
+          observationErrorMs: Math.max(0, elapsed - actualDelayMs),
+          overheadMs: await observe(page, "true", "", mutations),
+        });
+      }
+    }
+  }
+  await page.evaluate('document.querySelector("#measurement-calibration").remove()');
+  return samples;
 }
