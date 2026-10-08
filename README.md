@@ -21,7 +21,7 @@ A clean, fast, open-source IPTV player for macOS, Windows and Linux. Bring your 
   <thead><tr><th></th><th>Xtream Codes login</th><th>M3U playlist</th></tr></thead>
   <tbody>
     <tr><th>Live TV with a guide</th><td>Yes</td><td>Yes, guide from the playlist or an XMLTV address</td></tr>
-    <tr><th>Movies and series</th><td>Yes</td><td>No</td></tr>
+    <tr><th>Movies and series</th><td>Yes</td><td>From 0.0.9, supported files after mapping groups in Settings</td></tr>
     <tr><th>Sound and subtitle tracks</th><td colspan="2">Every track the provider sends</td></tr>
     <tr><th>Streams at once</th><td colspan="2">One, across every subscription</td></tr>
     <tr><th>Recording, downloads</th><td colspan="2">No</td></tr>
