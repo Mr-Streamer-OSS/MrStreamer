@@ -71,8 +71,8 @@ export interface WorkerCalls {
   status: { args: Owners & { adults: boolean }; result: readonly WorkerStatus[] };
   /**
    * Fetches a subscription's two lists from its provider and, when they look complete, sets them
-   * aside for `finishRefresh`: nothing shows or is saved yet. `revision` is the login's: a fetch
-   * under another one is given up for this one.
+   * aside for `finishRefresh`: nothing shows or is saved yet. `revision` is the login's:
+   * a newer fetch replaces an older one; a fetch older than active or pending work is rejected.
    */
   refresh: {
     args: CatalogueOwner & {
