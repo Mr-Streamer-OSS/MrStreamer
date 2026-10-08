@@ -691,9 +691,9 @@ function make(deps: OnDemandDeps) {
                   : undefined;
               if (onlyRead && !tracks) continue;
               const named = onlyRead ? [] : titleName(episode.name).tags;
-              // Explicit episode quality takes precedence over the series' provider label.
+              // Read-only facts need no listing hints. Explicit episode quality otherwise wins.
               const hints = onlyRead
-                ? undefined
+                ? []
                 : qualityHint(named) === "unknown"
                   ? [...tags, ...named]
                   : [...tags.filter((tag) => qualityHint([tag]) === "unknown"), ...named];
@@ -703,7 +703,7 @@ function make(deps: OnDemandDeps) {
                 id: episode.id,
                 seriesId: held.version.id,
                 listingKey,
-                ...(hints ? { tags: hints } : {}),
+                tags: hints,
                 ...(tracks ? { tracks } : {}),
               });
             }

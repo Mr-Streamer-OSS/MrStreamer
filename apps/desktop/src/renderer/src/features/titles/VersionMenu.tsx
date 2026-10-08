@@ -134,7 +134,7 @@ export function VersionMenu({
       </Menu.Trigger>
       <Menu.Portal>
         <Menu.Positioner side="bottom" align="start" sideOffset={8} className="z-[60]">
-          <Menu.Popup className="max-h-[60vh] w-[min(34rem,calc(100vw-2rem))] overflow-y-auto bg-black p-2 text-[0.875rem] text-white ring-1 ring-white/15 outline-none">
+          <Menu.Popup className="max-h-[min(60vh,var(--available-height))] w-[min(34rem,calc(100vw-2rem))] overflow-y-auto bg-black p-2 text-[0.875rem] text-white ring-1 ring-white/15 outline-none">
             <Menu.RadioGroup
               value={picked ? ownedKey(picked) : AUTOMATIC}
               onValueChange={(value: string) => {

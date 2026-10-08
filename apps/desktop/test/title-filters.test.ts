@@ -349,18 +349,29 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
       fileKey: "episode-source",
       listingKey: file.listingKey,
       audio: ["en", null],
-      subtitles: [],
+      subtitles: ["nl"],
     });
     const before = [
       provider.titleListRequests(),
       provider.detailRequests(),
       provider.fileRequests(),
     ];
+    const observed = async () => {
+      const [title] = await app.titles.titles("series", [
+        { subscriptionId: source.id, id: first.seriesId },
+      ]);
+      return title?.versions.find(
+        (version) => version.subscriptionId === source.id && version.id === first.seriesId,
+      )?.observed;
+    };
+    const tracks = { files: 1, audio: ["en", null], subtitles: ["nl"] };
+    expect(await observed()).toEqual(tracks);
     expect(await app.titles.filterOptions("series")).toMatchObject({
       files: 1,
       verified: [
         { kind: "audio", language: "en" },
         { kind: "audio", language: "unknown" },
+        { kind: "subtitles", language: "nl" },
       ],
     });
     expect(
@@ -391,9 +402,11 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
     ]).toEqual(before);
     await app.runtime.dispose();
     app = await start();
+    expect(await observed()).toBeUndefined();
     expect(await app.titles.filterOptions("series")).toMatchObject({ files: 0, verified: [] });
     await app.titles.details("series", { subscriptionId: source.id, id: first.seriesId });
     expect(await app.titles.filterOptions("series")).toMatchObject({ files: 1 });
+    expect(await observed()).toEqual(tracks);
     series = series.map((listed) => ({
       ...listed,
       seasons: listed.seasons.map((episodes) =>
@@ -401,8 +414,10 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
       ),
     }));
     await app.titles.refresh(source.id);
+    expect(await observed()).toBeUndefined();
     expect(await app.titles.filterOptions("series")).toMatchObject({ files: 0, verified: [] });
     await app.titles.details("series", { subscriptionId: source.id, id: first.seriesId });
+    expect(await observed()).toBeUndefined();
     expect(
       (
         await app.titles.searchKind("series", "formats", {
