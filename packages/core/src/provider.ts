@@ -161,7 +161,7 @@ export interface Provider {
     container: string,
     signal?: AbortSignal,
   ): Promise<ProviderFile>;
-  /** Main-only bounded import snapshot; Settings inspects the last one, refresh asks afresh. */
+  /** Main-only import snapshot; bounded Settings inspection uses the last read, refresh asks afresh. */
   playlistImport?(
     signal?: AbortSignal,
     fresh?: boolean,

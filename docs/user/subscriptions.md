@@ -16,7 +16,7 @@ Its channels join the lists first, then its guide, movies and series. What you'r
 
 From version 0.0.9, open a playlist subscription in Settings and choose **Map** beside **Groups**. Choose each group's use: **Live TV**, **Movies**, **Series** or **Skip**. Picks apply immediately. A playlist without mapping keeps its original live-only behaviour.
 
-Explicit mapping accepts up to 100,000 entries, 64 MiB of unpacked text and 10,000 groups. A larger playlist still loads and plays as unmapped Live TV. Opening its mapping or making its first pick fails with an explanation and saves no choice. Once a playlist is mapped, a refresh over a limit fails and keeps its previous lists.
+Explicit mapping accepts up to 100,000 entries, 64 MiB of unpacked text and 10,000 groups. A larger playlist still loads and plays as unmapped Live TV. Expanding its Settings row, opening its mapping or making its first pick explains the mapping limit and saves no choice. Once a playlist is mapped, a refresh over a limit fails and keeps its previous lists.
 
 Movies and series need supported finite files. HLS movie and episode addresses with a path ending in `.m3u` or `.m3u8`, or `m3u8` in the query, are left out with a reason; HLS remains supported for Live TV.
 

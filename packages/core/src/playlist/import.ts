@@ -64,7 +64,10 @@ function classifiedPlaylist(
   mapping?: PlaylistMapping,
 ): ImportedPlaylist {
   if (entries.length > 100_000)
-    throw new AppFailure({ kind: "unexpected", detail: "Playlist exceeds 100,000 entries." });
+    throw new AppFailure({
+      kind: "unexpected",
+      detail: "Playlist exceeds the 100,000 entry mapping limit.",
+    });
   const unique = new Map<string, PlaylistEntry>();
   for (const entry of entries) {
     const exact = JSON.stringify([
@@ -120,7 +123,10 @@ function classifiedPlaylist(
       if (samples) samples.push(report);
       else {
         if (groups.size === 10_000)
-          throw new AppFailure({ kind: "unexpected", detail: "Playlist exceeds 10,000 groups." });
+          throw new AppFailure({
+            kind: "unexpected",
+            detail: "Playlist mapping supports at most 10,000 groups.",
+          });
         groups.set(group, [report]);
       }
     }

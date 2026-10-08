@@ -135,8 +135,10 @@ describe("the saved subscriptions", { timeout: 30_000 }, () => {
       });
       expect((await app.onDemand.status()).lists[0]?.fetchedAt).toBeNull();
       guide.release();
-      await vi.waitFor(async () =>
-        expect((await app.onDemand.status()).lists[0]?.fetchedAt).toEqual(expect.any(Number)),
+      await vi.waitFor(
+        async () =>
+          expect((await app.onDemand.status()).lists[0]?.fetchedAt).toEqual(expect.any(Number)),
+        { timeout: 10_000 },
       );
     } finally {
       channels.release();

@@ -32,6 +32,34 @@ interface PlaylistRead {
   inspect(): ImportedPlaylist;
 }
 
+/** Raw entries are retained only while a bounded mapping inspection can still use them. */
+function playlistRead(
+  snapshot: ImportedPlaylist,
+  entries?: readonly PlaylistEntry[],
+  limit?: AppFailure,
+): PlaylistRead {
+  let pending = entries;
+  let inspected = entries ? undefined : snapshot;
+  let failure = limit;
+  return {
+    snapshot,
+    inspect() {
+      if (failure) throw failure;
+      if (inspected) return inspected;
+      if (!pending) return snapshot;
+      try {
+        inspected = inspectPlaylist(pending);
+        return inspected;
+      } catch (cause) {
+        if (cause instanceof AppFailure) failure = cause;
+        throw cause;
+      } finally {
+        pending = undefined;
+      }
+    },
+  };
+}
+
 /**
  * Creates a provider for a playlist link. It reads the playlist as it downloads, so a long one is
  * never parsed in one go, and keeps the last successful read for exact stream versions.
@@ -114,7 +142,7 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
             if ((account.mapping || inspecting) && entries.length > 100_000)
               throw new AppFailure({
                 kind: "unexpected",
-                detail: "Playlist exceeds 100,000 entries.",
+                detail: "Playlist exceeds the 100,000 entry mapping limit.",
               });
           }
           if (reader.playlist === false) {
@@ -124,21 +152,27 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
         }
         for (const entry of reader.end()) entries.push(entry);
         if (!reader.playlist) throw notAPlaylist(account.link);
-        let inspected = inspecting && !account.mapping ? inspectPlaylist(entries) : null;
-        const snapshot = inspected ?? importPlaylist(entries, account.mapping);
-        last = {
+        const snapshot =
+          inspecting && !account.mapping
+            ? inspectPlaylist(entries)
+            : importPlaylist(entries, account.mapping);
+        const limit =
+          bytes > MAPPING_BYTES
+            ? new AppFailure({
+                kind: "unexpected",
+                detail: "Playlist exceeds the 64 MiB mapping limit.",
+              })
+            : entries.length > 100_000
+              ? new AppFailure({
+                  kind: "unexpected",
+                  detail: "Playlist exceeds the 100,000 entry mapping limit.",
+                })
+              : undefined;
+        last = playlistRead(
           snapshot,
-          inspect: account.mapping
-            ? () => snapshot
-            : () => {
-                if (bytes > MAPPING_BYTES)
-                  throw new AppFailure({
-                    kind: "unexpected",
-                    detail: "Playlist exceeds the 64 MiB mapping limit.",
-                  });
-                return (inspected ??= inspectPlaylist(entries));
-              },
-        };
+          account.mapping || inspecting || limit ? undefined : entries,
+          limit,
+        );
         titleAddresses = new Set([...snapshot.files.values()].map((file) => file.url));
         return last;
       } catch (cause) {

@@ -127,11 +127,24 @@ describe("explicit playlist mapping limits", () => {
     await expect(provider(playlist(10_001, true), true).playlistImport!()).rejects.toMatchObject({
       error: { kind: "unexpected", detail: expect.stringContaining("10,000 groups") },
     });
-    const live = provider(playlist(10_001, true));
+    const body = playlist(10_001, true);
+    let reads = 0;
+    const live = playlistProvider(
+      { link },
+      {
+        userAgent: "test",
+        fetch: async () => {
+          reads++;
+          return new Response(body);
+        },
+      },
+    );
     expect((await live.liveCatalogue()).categories).toHaveLength(10_001);
-    await expect(live.playlistImport!()).rejects.toMatchObject({
-      error: { kind: "unexpected", detail: expect.stringContaining("10,000 groups") },
-    });
+    for (let attempt = 0; attempt < 2; attempt++)
+      await expect(live.playlistImport!()).rejects.toMatchObject({
+        error: { kind: "unexpected", detail: expect.stringContaining("10,000 groups") },
+      });
+    expect(reads).toBe(1);
     expect(await live.liveStream("entry-10000")).toMatchObject({
       url: "https://example.test/10000.mp4",
     });
