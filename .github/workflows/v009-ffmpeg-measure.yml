@@ -28,7 +28,7 @@ jobs:
         run: |
           date +%s%3N > "$RUNNER_TEMP/tools-start"
           sources=$(find /etc/apt/sources.list.d -type f -exec sha256sum {} + | sha256sum | cut -d' ' -f1)
-          echo "key=v009-measure-${{ github.run_id }}-${{ matrix.sample }}-${ImageOS}-${ImageVersion}-$sources-${{ hashFiles('apps/desktop/scripts/ci-ffmpeg.sh') }}" >> "$GITHUB_OUTPUT"
+          echo "key=v009-measure-${{ github.run_id }}-${ImageOS}-${ImageVersion}-$sources-${{ hashFiles('apps/desktop/scripts/ci-ffmpeg.sh') }}" >> "$GITHUB_OUTPUT"
           printf 'mode=%s sample=%s ImageOS=%s ImageVersion=%s source=%s\n' '${{ matrix.mode }}' '${{ matrix.sample }}' "$ImageOS" "$ImageVersion" '${{ github.sha }}' > "$RUNNER_TEMP/measurement.txt"
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         if: matrix.mode == 'cold'
@@ -96,7 +96,7 @@ jobs:
         run: |
           date +%s%3N > "$RUNNER_TEMP/tools-start"
           sources=$(find /etc/apt/sources.list.d -type f -exec sha256sum {} + | sha256sum | cut -d' ' -f1)
-          echo "key=v009-measure-${{ github.run_id }}-${{ matrix.sample }}-${ImageOS}-${ImageVersion}-$sources-${{ hashFiles('apps/desktop/scripts/ci-ffmpeg.sh') }}" >> "$GITHUB_OUTPUT"
+          echo "key=v009-measure-${{ github.run_id }}-${ImageOS}-${ImageVersion}-$sources-${{ hashFiles('apps/desktop/scripts/ci-ffmpeg.sh') }}" >> "$GITHUB_OUTPUT"
           printf 'mode=warm sample=%s ImageOS=%s ImageVersion=%s source=%s\n' '${{ matrix.sample }}' "$ImageOS" "$ImageVersion" '${{ github.sha }}' > "$RUNNER_TEMP/measurement.txt"
       - id: packages
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
