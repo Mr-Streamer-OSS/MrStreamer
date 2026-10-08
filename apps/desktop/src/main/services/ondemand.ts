@@ -709,6 +709,7 @@ function make(deps: OnDemandDeps) {
     /** Decorates exact alternate files only from already validated local episode observations. */
     const observedEpisodes = <E extends Episode>(episodes: readonly E[]) =>
       Effect.gen(function* () {
+        if (!episodes.some((episode) => episode.versions)) return episodes;
         const files = new Map(
           (yield* knownFiles("series")).map((file) => [ownedKey(file), file.tracks]),
         );

@@ -3,7 +3,7 @@ import { Check, ChevronRight } from "lucide-react";
 import { Fragment, useState, type ReactElement, type ReactNode } from "react";
 import type { Title, TitleVersion } from "@mrstreamer/contracts/ondemand";
 import { ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
-import { languageCode } from "@mrstreamer/core/ondemand/tracks";
+import { languageName } from "@mrstreamer/core/ondemand/tracks";
 import { versionOptions, type VersionOptionGroup } from "@mrstreamer/core/ondemand/version-options";
 import { Button } from "../../components/ui/button.tsx";
 import { useSubscriptionNames, useSubscriptions } from "../../lib/queries.ts";
@@ -11,16 +11,12 @@ import { usePickVersion } from "../../lib/titles.ts";
 import { cn } from "../../lib/utils.ts";
 
 const AUTOMATIC = "automatic";
-const languageNames = new Intl.DisplayNames(["en"], { type: "language" });
 const addedDate = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 
 /** A current file's observed languages. Series summaries explicitly describe only read episodes. */
 function observedLabel(version: TitleVersion, kind: Title["kind"]): string | null {
   if (!version.observed) return null;
-  const name = (code: string | null) => {
-    const canonical = languageCode(code);
-    return canonical ? (languageNames.of(canonical) ?? canonical) : "Unknown";
-  };
+  const name = (code: string | null) => languageName(code) ?? "Unknown";
   const { audio, subtitles, files } = version.observed;
   const sound = audio.length ? `${audio.map(name).join(", ")} sound` : "No sound";
   const captions = subtitles.length
@@ -94,9 +90,7 @@ export function VersionMenu({
           "flex w-full items-start gap-2 px-2 py-2 text-white/70 outline-none data-checked:text-white data-highlighted:bg-white/10",
           ordinal !== undefined && "pl-6",
         )}
-        aria-label={[describe(group, version), ordinal !== undefined ? `Version ${ordinal}` : null]
-          .filter(Boolean)
-          .join(" · ")}
+        aria-label={[describe(group, version), metadata].filter(Boolean).join(" · ")}
       >
         <span className="mt-1 grid size-1.5 flex-none">
           <Menu.RadioItemIndicator className="size-1.5 rounded-full bg-white" />
@@ -188,10 +182,10 @@ export function VersionMenu({
                       }}
                       className="flex w-full items-baseline gap-2 px-2 py-2 text-white/70 outline-none data-highlighted:bg-white/10"
                     >
-                      <span className="w-1.5 flex-none text-white">
-                        {picked && group.versions.some((version) => sameOwned(version, picked))
-                          ? "●"
-                          : ""}
+                      <span className="grid size-1.5 flex-none">
+                        {picked && group.versions.some((version) => sameOwned(version, picked)) && (
+                          <span className="size-1.5 rounded-full bg-white" />
+                        )}
                       </span>
                       <span className="w-9 flex-none font-semibold">{group.quality}</span>
                       <span className="min-w-0 flex-1">

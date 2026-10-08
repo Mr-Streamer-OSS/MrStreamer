@@ -75,7 +75,7 @@ export function seriesDetails(
               tags: titleName(file.name).tags,
               duration: file.duration,
               container: file.container,
-              addedAt: file.addedAt === null ? null : file.addedAt * 1000,
+              addedAt: file.addedAt,
               listedOrder: listedOrder.get(file.id) ?? 0,
             })),
           }

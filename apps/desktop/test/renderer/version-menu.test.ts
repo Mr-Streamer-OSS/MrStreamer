@@ -124,6 +124,9 @@ describe("the movie version menu", () => {
     const second = radios().find((item) => item.textContent?.includes("release B"));
     expect(first?.textContent).toContain("MKV");
     expect(first?.textContent).toContain("2023");
+    expect(first?.getAttribute("aria-label")).toContain("Harbour UHD release A");
+    expect(first?.getAttribute("aria-label")).toContain("MKV");
+    expect(first?.getAttribute("aria-label")).toContain("2023");
     expect(first?.textContent).toContain("English sound · No subtitles");
     expect(first?.querySelector('[aria-label="Tracks read locally"]')).not.toBeNull();
     expect(second?.textContent).toContain("MP4");
@@ -195,7 +198,7 @@ describe("the movie version menu", () => {
     );
     await settle();
     expect(radios().find((item) => item.textContent?.includes("release A"))?.textContent).toContain(
-      "Read 1 episode · English sound · Dutch subtitles",
+      "Read 1 episode · English sound · Nederlands subtitles",
     );
     expect(
       radios().find((item) => item.textContent?.includes("release B"))?.textContent,

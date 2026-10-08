@@ -51,6 +51,18 @@ async function opened(
   { title = film, asked = false, played = [] as readonly TitleProgress[] } = {},
 ): Promise<string | undefined> {
   ipc.reset();
+  ipc.always("ondemand.details", {
+    kind: "movie",
+    title,
+    originalTitle: null,
+    plot: null,
+    genres: [],
+    cast: [],
+    directors: [],
+    releaseDate: null,
+    duration: null,
+    backdropUrl: null,
+  });
   const listed = ipc.hold("ondemand.titles");
   const progress = ipc.hold("viewing.progress");
   const client = new QueryClient();
@@ -80,6 +92,45 @@ async function opened(
 }
 
 describe("a film's details", () => {
+  it("names the selected same-hint file by the menu's source order even when ranked newest first", async () => {
+    const versions = [
+      {
+        subscriptionId: SUBSCRIPTION,
+        id: "newer",
+        tags: ["4K"],
+        name: "Night Harbour second release",
+        listedOrder: 1,
+        addedAt: 2,
+      },
+      {
+        subscriptionId: SUBSCRIPTION,
+        id: "older",
+        tags: ["UHD"],
+        name: "Night Harbour first release",
+        listedOrder: 0,
+        addedAt: 1,
+      },
+    ];
+    expect(
+      await opened("newer", defaultSubscriptionPreferences, {
+        title: { ...film, id: "newer", tags: ["4K"], versions },
+      }),
+    ).toBe("newer");
+    expect(document.body.textContent).toContain("4K · Standard · Version 2");
+    await act(async () =>
+      document.querySelector<HTMLButtonElement>('[aria-label="Versions"]')?.click(),
+    );
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    await act(async () =>
+      document.querySelector<HTMLElement>('[role="menuitem"][aria-expanded]')?.click(),
+    );
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    const newer = [...document.querySelectorAll('[role="menuitemradio"]')].find((row) =>
+      row.textContent?.includes("second release"),
+    );
+    expect(newer?.textContent).toContain("Version 2");
+  });
+
   it("play the 4K version when opened from the 4K tab", async () => {
     expect(await opened("4k")).toBe("4k");
   });

@@ -702,6 +702,7 @@ function seriesOf(
     addedAt?: number,
   ])[],
   language = "en",
+  sourceOrder = false,
 ) {
   return seriesDetails(
     {
@@ -748,6 +749,7 @@ function seriesOf(
         container: "mkv",
       })),
       container: null,
+      ...(sourceOrder ? { episodeOrder: "source" as const } : {}),
     },
     null,
     language,
@@ -755,6 +757,22 @@ function seriesOf(
 }
 
 describe("a series' episodes", () => {
+  it("keeps exact alternate file dates in the provider contract's milliseconds", () => {
+    const addedAt = Date.UTC(2024, 2, 5);
+    const series = seriesOf(
+      [
+        ["first", 1, 1, "Harbour S01E01 HD", addedAt],
+        ["second", 1, 1, "Harbour S01E01 4K", addedAt + 1000],
+      ],
+      "en",
+      true,
+    );
+    expect(series.seasons[0]?.episodes[0]?.versions?.map((file) => file.addedAt)).toEqual([
+      addedAt,
+      addedAt + 1000,
+    ]);
+  });
+
   it.each([
     [
       "the newest of two files",

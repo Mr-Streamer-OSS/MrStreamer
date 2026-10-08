@@ -31,7 +31,7 @@ import type {
 import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type { EpisodeMark, TitleProgress } from "@mrstreamer/contracts/viewing";
 import { episodeFileVersion } from "@mrstreamer/core/ondemand/details";
-import { versionLabels } from "@mrstreamer/core/ondemand/languages";
+import { versionOptions } from "@mrstreamer/core/ondemand/version-options";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import { continuation, episodeStates } from "@mrstreamer/core/viewing/episodes";
 import { openSubscription, useUi, type DetailsTarget } from "../../app/ui-store.ts";
@@ -576,7 +576,7 @@ function Actions({
 /**
  * What each version of `title` is called: what it sounds like and subtitles, and the name of its
  * subscription once the versions are of more than one. Versions that read the same are numbered
- * within their own subscription, whose name tells them apart from another's.
+ * by their source-list order, matching the menu, within their own subscription.
  */
 function useVersionNames(
   title: Title | null,
@@ -585,11 +585,17 @@ function useVersionNames(
   const all = title?.versions ?? [];
   const owners = [...new Set(all.map((version) => version.subscriptionId))];
   const labels = new Map(
-    owners.flatMap((subscriptionId) => {
-      const own = all.filter((version) => version.subscriptionId === subscriptionId);
-      const read = versionLabels(own, title?.originalLanguage ?? null);
-      return own.map((version, at) => [ownedKey(version), read[at] ?? "Standard"] as const);
-    }),
+    versionOptions(all, title?.originalLanguage ?? null, owners).flatMap((group) =>
+      group.versions.map(
+        (version, at) =>
+          [
+            ownedKey(version),
+            [group.quality, group.label, group.versions.length > 1 ? `Version ${at + 1}` : null]
+              .filter(Boolean)
+              .join(" · "),
+          ] as const,
+      ),
+    ),
   );
   return (version) => {
     const label = labels.get(ownedKey(version));
