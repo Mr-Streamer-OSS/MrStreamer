@@ -116,7 +116,12 @@ export const ipcInputs = {
   "library.status": none,
   "library.categories": none,
   "library.channels": () =>
-    type({ "category?": owned(), "query?": "string", "channels?": owned().array() }),
+    type({
+      "category?": owned(),
+      "query?": "string",
+      "channels?": owned().array(),
+      "grouped?": "boolean",
+    }),
   "library.channel": () => type({ channel: owned() }),
   /** Fetches one subscription's channels again. */
   "library.refresh": () => type({ subscriptionId: "string > 0" }),

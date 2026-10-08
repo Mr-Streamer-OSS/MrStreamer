@@ -95,6 +95,10 @@ export function useListSearch(
           : { channels: channels.map(ownedId) },
     [list, channels],
   );
+  const grouped = useQuery({
+    ...queries.groupedChannels(scope),
+    enabled: query !== "",
+  });
   const found = useQuery(queries.listSearch(scope, query, until));
   // The answer the rows are drawn from: the latest, kept while the next search is asked for.
   const [kept, keep] = useState(found.data);
@@ -102,7 +106,10 @@ export function useListSearch(
   if (answer !== kept) keep(answer);
 
   return useMemo(() => {
-    const words = answer ? searchWords(answer.query) : NO_WORDS;
+    // Ordinary lists stay cheap. A search waits for the full-catalogue grouping decision,
+    // including conflicts hidden by a favourite or category subset.
+    const words =
+      answer && (grouped.data || grouped.isError) ? searchWords(answer.query) : NO_WORDS;
     if (!answer || words.length === 0) {
       return { channels, query: "", words: NO_WORDS, matches: NO_MATCHES, groups: null };
     }
@@ -115,12 +122,12 @@ export function useListSearch(
     );
     return {
       channels: found,
-      groups: matchingSearchGroups(searchIndex(channels), found),
+      groups: matchingSearchGroups(searchIndex(grouped.data ?? channels), found),
       query,
       words,
       matches,
     };
-  }, [channels, answer]);
+  }, [channels, answer, grouped.data, grouped.isError]);
 }
 
 /** Each list's names as search compares them, worked out at its first search. */

@@ -150,6 +150,13 @@ export const queries = {
       staleTime: LISTINGS_REFRESH_MS,
       enabled: query.trim().length > 0,
     }),
+  /** The list's full-catalogue display groups, read only while searching it. */
+  groupedChannels: (list: Omit<IpcInput<"guide.searchList">, "query" | "until">) =>
+    queryOptions({
+      queryKey: ["library", "groupedChannels", list],
+      queryFn: () => call("library.channels", { ...list, grouped: true }),
+      staleTime: Infinity,
+    }),
   /**
    * What a search finds in the programmes of one list's channels, on now and later until
    * `until`: a category's, the given ones, or every channel, by each channel's `ownedKey`. The

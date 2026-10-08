@@ -78,7 +78,8 @@ it("search keeps every provider/category/quality copy and reconstructs safe meta
   const qualityGroup = searchResultGroups(sdMatches).find(
     (group) => group.copies[0]?.title === "VRT 1",
   )!;
-  const ordinaryGroup = indexLiveSearch(ordinary).groups.find(
+  const grouped = await library.channels({ grouped: true });
+  const ordinaryGroup = indexLiveSearch(grouped).groups.find(
     (group) => group.copies[0]?.title === "VRT 1",
   )!;
   expect(automaticSearchCopy(qualityGroup, new Set(), savedOrder)).toEqual(
@@ -91,7 +92,12 @@ it("search keeps every provider/category/quality copy and reconstructs safe meta
   expect(
     searchResultGroups(programmeMatches).map((group) => [group.copies.length, group.streams]),
   ).toEqual([[4, 6]]);
-  for (const response of [ordinary, results, qualityMatches, sdMatches, programmeMatches]) {
+  for (const copy of ordinary) {
+    expect(copy).not.toHaveProperty("searchGroup");
+    expect(copy).not.toHaveProperty("searchIdentity");
+  }
+  expect(grouped.map(({ searchGroup: _group, ...copy }) => copy)).toEqual(ordinary);
+  for (const response of [grouped, results, qualityMatches, sdMatches, programmeMatches]) {
     for (const copy of response) {
       expect(copy.searchGroup).toEqual({ key: expect.any(String), order: expect.any(Number) });
       expect(copy).not.toHaveProperty("searchIdentity");
@@ -145,6 +151,7 @@ it("palette responses retain full-catalogue ambiguity when the query excludes a 
   expect(new Set(partial.map((copy) => copy.searchGroup?.key)).size).toBe(2);
   const list = await library.channels({
     channels: partial.map(({ subscriptionId, id }) => ({ subscriptionId, id })),
+    grouped: true,
   });
   // A list can hide the conflicting guide, but it cannot turn that absence into identity.
   expect(indexLiveSearch(list).groups).toHaveLength(2);

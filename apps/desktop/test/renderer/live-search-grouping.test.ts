@@ -111,7 +111,10 @@ async function page(
     { ...SAVED, name: "Blue" },
     { ...SAVED, id: GREEN, name: "Green" },
   ]);
-  if (kind === "guide") client.setQueryData(queries.channels(null).queryKey, listed);
+  if (kind === "guide") {
+    client.setQueryData(queries.channels(null).queryKey, listed);
+    client.setQueryData(queries.groupedChannels({}).queryKey, responses(listed));
+  }
   client.setQueryData(
     queries.categories().queryKey,
     ["0", "1"].map((id) => ({
@@ -328,7 +331,14 @@ describe("real search components with two subscriptions", () => {
   it("GuidePage preserves ordinary lists, counts groups, chooses a favourite, expands exact copies and returns focus on Left", async () => {
     const p = await page("guide");
     expect(p.rows()).toHaveLength(8);
+    expect(ipc.argsOf("library.channels")).toEqual([]);
+    p.client.removeQueries({ queryKey: queries.groupedChannels({}).queryKey, exact: true });
+    const groups = ipc.hold("library.channels");
     await p.search("VRT");
+    expect(ipc.argsOf("library.channels")).toEqual([{ grouped: true }]);
+    expect(p.rows()).toHaveLength(8);
+    groups.resolve(responses(all));
+    await settled();
     expect(p.rows().map((row) => row.getAttribute("aria-label")?.split(",")[0])).toEqual([
       "VRT 1",
       "VRT Canvas",

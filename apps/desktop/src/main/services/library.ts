@@ -137,6 +137,8 @@ export interface ChannelFilter {
   readonly category?: OwnedId;
   readonly query?: string;
   readonly channels?: readonly OwnedId[];
+  /** Full-catalogue display groups, needed only while searching a list. */
+  readonly grouped?: boolean;
 }
 
 export interface LibraryOptions {
@@ -172,8 +174,8 @@ export class Library extends Context.Service<
     readonly categories: Effect.Effect<readonly Category[], Failed>;
     /**
      * All channels in a category, the best matches for a query across every catalogue, or the
-     * given channels in that order; without any of those, every channel. Every response carries
-     * its full-catalogue display group. Search responses retain all its real copies. Ids with a
+     * given channels in that order; without any of those, every channel. Grouped responses carry
+     * their full-catalogue display group. Search responses retain all its real copies. Ids with a
      * query return their search companions. A channel's id may be any of its streams'; a channel
      * shows once.
      */
@@ -478,6 +480,10 @@ function make(options: LibraryOptions) {
       channels: (filter: ChannelFilter) =>
         Effect.map(visible, ({ lists, search: searched }) => {
           const query = normalize(filter.query ?? "");
+          const response = (channels: readonly LiveChannel[]) =>
+            filter.grouped
+              ? stampSearchGroups(channels, searched.channels)
+              : plainChannels(channels);
           if (filter.channels) {
             // Those of a subscription that isn't saved are in no catalogue, whatever their ids.
             const byId = new Map(lists.members.map((each) => [each.subscriptionId, each.byId]));
@@ -491,14 +497,11 @@ function make(options: LibraryOptions) {
                   .flatMap((group) => group.copies),
                 searched.channels,
               );
-            return stampSearchGroups([...new Set(found)].map(lists.shown), searched.channels);
+            return response([...new Set(found)].map(lists.shown));
           }
           if (query) return search(searched.channels, searched.searchNames, query);
-          if (!filter.category) return stampSearchGroups(lists.channels, searched.channels);
-          return stampSearchGroups(
-            lists.byCategory.get(ownedKey(filter.category)) ?? [],
-            searched.channels,
-          );
+          if (!filter.category) return response(lists.channels);
+          return response(lists.byCategory.get(ownedKey(filter.category)) ?? []);
         }),
 
       channel: (channel: OwnedId) =>
@@ -747,6 +750,18 @@ function search(
     [...matched, ...copies.filter((channel) => !matchedKeys.has(ownedKey(channel)))],
     channels,
   );
+}
+
+const plainResponses = new WeakMap<readonly LiveChannel[], readonly LiveChannel[]>();
+
+/** Ordinary lists need neither display groups nor canonical grouping identities. */
+function plainChannels(channels: readonly LiveChannel[]): readonly LiveChannel[] {
+  let response = plainResponses.get(channels);
+  if (!response) {
+    response = channels.map(({ searchIdentity: _identity, ...channel }) => channel);
+    plainResponses.set(channels, response);
+  }
+  return response;
 }
 
 const searchIndexes = new WeakMap<readonly LiveChannel[], LiveSearchIndex>();

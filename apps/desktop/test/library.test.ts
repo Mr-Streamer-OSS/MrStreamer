@@ -171,7 +171,7 @@ describe("live library", () => {
     const { searchIdentity, ...playbackChannel } = await library.channel(own(sd));
     expect(searchIdentity).toBeDefined();
     expect(playbackChannel).toEqual(canonical[0]);
-    expect(await library.channels({ channels: [sd, hd, fhd].map(own) })).toEqual(found);
+    expect(await library.channels({ channels: [sd, hd, fhd].map(own) })).toEqual(canonical);
   });
 
   it("finds nothing by an id that names another subscription", async () => {
