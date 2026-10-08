@@ -148,6 +148,8 @@ export interface FakeProvider {
   readonly url: string;
   readonly catalogue: FakeCatalogue;
   readonly titles: FakeTitles;
+  /** Requests for the movie/series lists and their categories, including refused ones. */
+  titleListRequests(): number;
   /** How many requests for movie and episode files reached the provider, redirects included. */
   fileRequests(): number;
   /** How many bytes of movie and episode files the provider has sent. */
@@ -276,6 +278,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
   let filesOpen = 0;
   let mostFilesOpen = 0;
   let detailCount = 0;
+  let titleListCount = 0;
   let select = (all: readonly FakeChannel[]): readonly FakeChannel[] => all;
   let catalogueFailure: number | null = null;
   const channels = new Map(
@@ -328,6 +331,12 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
       return json(response, { user_info: { auth: 0 } });
     }
     const action = url.searchParams.get("action");
+    if (
+      ["get_vod_categories", "get_series_categories", "get_vod_streams", "get_series"].includes(
+        action ?? "",
+      )
+    )
+      titleListCount++;
     if (action === null) {
       const now = Math.floor(Date.now() / 1000);
       return json(response, {
@@ -657,6 +666,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
       partsWait = ms;
     },
     detailRequests: () => detailCount,
+    titleListRequests: () => titleListCount,
     failTitles(status) {
       titleFailure = status;
     },

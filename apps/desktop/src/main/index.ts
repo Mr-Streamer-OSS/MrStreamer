@@ -566,6 +566,7 @@ async function start(): Promise<void> {
       "ondemand.season": ({ series, season }) => onDemand.season(series, season),
       "ondemand.titles": ({ kind, versions }) => onDemand.titles(kind, versions),
       "ondemand.rows": ({ kind, tab, like }) => onDemand.rows(kind, tab, like),
+      "ondemand.related": ({ kind, version }) => onDemand.related(kind, version),
       "ondemand.tiles": ({ kind, of }) => onDemand.tiles(kind, of),
       "ondemand.collection": (query) => onDemand.collection(query),
       "playback.open": ({

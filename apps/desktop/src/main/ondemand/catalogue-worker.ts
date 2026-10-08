@@ -25,9 +25,14 @@ import {
 import type { CollectionId, Title, TitleKind } from "@mrstreamer/contracts/ondemand";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
 import { adultIn } from "@mrstreamer/core/adult";
-import type { OnDemandCatalogue } from "@mrstreamer/core/provider";
+import type { OnDemandCatalogue, ProviderTitle } from "@mrstreamer/core/provider";
 import { tmdb, tmdbImage } from "@mrstreamer/core/metadata/tmdb";
 import { collections, type Collections } from "@mrstreamer/core/ondemand/collections";
+import {
+  relatedProviderFacts,
+  relatedTitles,
+  type RelatedProviderFacts,
+} from "@mrstreamer/core/ondemand/related";
 import {
   entriesOf,
   factsOf,
@@ -115,6 +120,32 @@ interface Loaded {
 
 /** Each subscription's lists, by its id, once read from disk or fetched. */
 const loaded = new Map<string, Loaded>();
+/** Related facts follow raw list identity, so replacement or removal retains no stale snapshot. */
+const relatedFacts = new WeakMap<
+  readonly ProviderTitle[],
+  ReadonlyMap<string, RelatedProviderFacts>
+>();
+
+function relatedFactsOf(member: Loaded, kind: TitleKind, index: IndexedCatalogue) {
+  const rows = kind === "movie" ? member.catalogue.movies : member.catalogue.series;
+  let facts = relatedFacts.get(rows);
+  if (!facts) {
+    const names = new Map<string, string>();
+    for (const row of rows) {
+      const indexed = kindOf(index, kind).byId.get(
+        ownedKey({ subscriptionId: member.subscriptionId, id: row.id }),
+      );
+      // The index's display name belongs to its primary version, before TMDB naming.
+      if (indexed?.subscriptionId === member.subscriptionId && indexed.id === row.id) {
+        names.set(row.id, indexed.title);
+      }
+    }
+    facts = relatedProviderFacts(rows, names);
+    relatedFacts.set(rows, facts);
+  }
+  return facts;
+}
+
 /** The refreshes in flight, by subscription, shared by calls with the same login. */
 const refreshing = new Map<
   string,
@@ -338,6 +369,11 @@ async function catalogueOf(
   if (required && members.length === 0 && owners.length > 0) {
     throw new AppFailure({ kind: "unexpected", detail: "Movies and series haven't loaded yet." });
   }
+  return shownOf(members, language);
+}
+
+/** Builds an index from the lists supplied, without loading other libraries or metadata. */
+function shownOf(members: readonly Loaded[], language: string): Shown {
   const same =
     shown?.index.language === language &&
     shown.members.length === members.length &&
@@ -548,6 +584,30 @@ const handlers: {
       const name = made.name(id);
       if (titles.length === 0 || !name) return [];
       return [{ id, name, total: titles.length, titles: titles.slice(0, ROW_TITLES) }];
+    });
+  },
+  related: async ({ language, kind, version, owners, metadata: about }) => {
+    const members = owners.flatMap((owner) => {
+      const held = loaded.get(owner.subscriptionId);
+      return held && held.importRevision === owner.importRevision ? [held] : [];
+    });
+    const found = shownOf(members, language);
+    const titles = collectionsOf(found, kind).list("all");
+    const seed = titles.find((title) =>
+      title.versions.some((each) => ownedKey(each) === ownedKey(version)),
+    );
+    if (!seed) return { basis: null, titles: [] };
+    // Category ids belong to this provider. No category from another owner can match it.
+    const own = members.find((member) => member.subscriptionId === version.subscriptionId);
+    const providerTitles = own ? relatedFactsOf(own, kind, found.index) : undefined;
+    return relatedTitles({
+      opened: about ? { ...seed, genres: about.genres, originalLanguage: about.language } : seed,
+      version,
+      titles,
+      provider: (each) => {
+        if (each.subscriptionId !== version.subscriptionId) return null;
+        return providerTitles?.get(each.id) ?? null;
+      },
     });
   },
   tiles: async ({ language, kind, of, owners }) => {

@@ -19,6 +19,7 @@ import type {
   EpisodeDetails,
   MetadataProgress,
   OnDemandStatus,
+  RelatedTitles,
   RowTab,
   Season,
   Title,
@@ -34,6 +35,7 @@ import { diagnosed } from "@mrstreamer/core/diagnostics";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
 import {
   tmdb,
+  GENRES,
   TmdbError,
   type EpisodeAbout,
   type TitleAbout,
@@ -156,6 +158,8 @@ export class OnDemand extends Context.Service<
      * arrive later. Fails with `no-subscription` when the version's subscription isn't saved.
      */
     details(kind: TitleKind, version: OwnedId): Effect.Effect<TitleDetails, Failed>;
+    /** Related titles from lists already in memory. Never opens another library or file. */
+    related(kind: TitleKind, version: OwnedId): Effect.Effect<RelatedTitles, Failed>;
     /**
      * The episodes of season `season` of a series version, for when the viewer opens it: the
      * provider's, with TMDB's details.
@@ -489,6 +493,14 @@ function make(deps: OnDemandDeps) {
         return yield* run(made, yield* language);
       });
 
+    /** Details and lazy TMDB facts share the exact source revision and viewer language. */
+    const aboutKey = (
+      source: Pick<SavedSubscription, "id" | "revision">,
+      viewer: string,
+      kind: TitleKind,
+      id: string,
+    ) => `${source.id}|${source.revision}|${viewer}|${kind}|${id}`;
+
     /**
      * A version's details: downloaded when it first opens, then kept, and put together each time
      * with the title as the lists show it now, so its name and original language follow TMDB's
@@ -499,7 +511,7 @@ function make(deps: OnDemandDeps) {
       Effect.gen(function* () {
         const source = yield* subscriptions.sourceOf(subscriptionId);
         const viewer = yield* language;
-        const cacheKey = `${source.id}|${source.revision}|${viewer}|${kind}|${id}`;
+        const cacheKey = aboutKey(source, viewer, kind, id);
         const [listed] = yield* loaded((owners, language) =>
           call("byIds", { owners, language, kind, versions: [{ subscriptionId, id }] }),
         );
@@ -675,6 +687,28 @@ function make(deps: OnDemandDeps) {
         loaded((owners, language) =>
           call("rows", { owners, language, kind, tab, ...(like ? { like } : {}) }),
         ),
+      related: (kind: TitleKind, version: OwnedId) =>
+        Effect.gen(function* () {
+          const saved = yield* listed;
+          const source = saved.find((each) => each.id === version.subscriptionId);
+          if (!source) return { basis: null, titles: [] };
+          const viewer = yield* language;
+          const about = abouts.get(aboutKey(source, viewer, kind, version.id));
+          return yield* call("related", {
+            owners: saved.map(ownerOf),
+            language: viewer,
+            kind,
+            version,
+            ...(about
+              ? {
+                  metadata: {
+                    genres: [...new Set(about.genres.flatMap((id) => GENRES[id] ?? []))],
+                    language: about.language,
+                  },
+                }
+              : {}),
+          });
+        }),
       tiles: (kind: TitleKind, of: "genres" | "services") =>
         loaded((owners, language) => call("tiles", { owners, language, kind, of })),
       collection: ({ kind, id, sort, offset, limit }: CollectionQuery) =>
