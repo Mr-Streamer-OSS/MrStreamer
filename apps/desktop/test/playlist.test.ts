@@ -303,6 +303,43 @@ describe("playlist subscriptions", () => {
     ]);
   });
 
+  it("keeps subtitle HTTP failures separate from a later video failure", async () => {
+    const host = await playlistHost();
+    host.serve(
+      "/alpha/index.m3u8",
+      [
+        "#EXTM3U",
+        '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English",LANGUAGE="en",URI="lines.m3u8"',
+        '#EXT-X-STREAM-INF:BANDWIDTH=200000,SUBTITLES="subs"',
+        "low/stream.m3u8",
+      ].join("\n"),
+    );
+    const { subscriptions, playback } = await app(await tempDir());
+    await subscriptions.add(linkOnly(`${host.origin}/list.m3u`));
+    const session = await playback.open("Alpha.test@HD", ["h264", "aac"]);
+    const master = await (await fetch(session.url)).text();
+    const subtitles = /URI="([^"]+)"/.exec(master)![1]!;
+    const [video] = addresses(master);
+    expect((await fetch(subtitles)).status).toBe(404);
+    expect(await playback.failure(session.sessionId)).toBeNull();
+    host.serve("/alpha/lines.m3u8", "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nline.vtt\n");
+    const [line] = addresses(await (await fetch(subtitles)).text());
+    expect((await fetch(line!)).status).toBe(404);
+    expect(await playback.failure(session.sessionId)).toBeNull();
+    host.serve("/alpha/low/stream.m3u8", 503);
+    expect((await fetch(video!)).status).toBe(503);
+    expect(await playback.failure(session.sessionId)).toEqual({
+      kind: "provider-error",
+      status: 503,
+    });
+    // A successful subtitle playlist must not clear the picture's genuine failure either.
+    expect((await fetch(subtitles)).status).toBe(200);
+    expect(await playback.failure(session.sessionId)).toEqual({
+      kind: "provider-error",
+      status: 503,
+    });
+  });
+
   it("play a channel after a restart, reading the playlist again for its address", async () => {
     const host = await playlistHost();
     const dataDir = await tempDir();

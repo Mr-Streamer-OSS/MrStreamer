@@ -46,6 +46,21 @@ const SEGMENT_S = 6;
 /** One stream the player opened, for the test to play its part. */
 export interface Stream {
   readonly destroyed: boolean;
+  readonly loading: boolean;
+  /** Emits an error after the internal error controller may have stopped all loading. */
+  error(
+    target: "subtitle-playlist" | "subtitle-segment" | "video" | "audio",
+    fatal?: boolean,
+    of?: string,
+  ): void;
+  /** An internal subtitle-fragment abort caused by a choice change. */
+  subtitleAborted(of: string): void;
+  /** A parsed playlist supplies its segment cadence. */
+  subtitlePlaylist(seconds: number): void;
+  /** A parser may defer a fragment without an error, including after IMSC fallback. */
+  subtitleDeferred(afterSuccess?: boolean): void;
+  /** hls.js rejects queued VTT when its picture timestamp domain has not arrived. */
+  subtitleDiscontinuityMismatch(): void;
   /** The place in its list of the sound track selected, or -1. */
   readonly audioTrack: number;
   /** The place in its list of the subtitle rendition selected, or -1 for none. */
@@ -90,6 +105,7 @@ export function standIn(real: typeof Hls) {
     static ErrorDetails = real.ErrorDetails;
 
     destroyed = false;
+    loading = true;
     levels: never[] = [];
     currentLevel = -1;
     audioTracks: Listed[] = [];
@@ -120,6 +136,77 @@ export function standIn(real: typeof Hls) {
     }
 
     loadSource(): void {}
+    stopLoad(): void {
+      this.loading = false;
+    }
+    startLoad(): void {
+      this.loading = true;
+    }
+    error(
+      target: "subtitle-playlist" | "subtitle-segment" | "video" | "audio",
+      fatal = true,
+      of?: string,
+    ): void {
+      const index = of
+        ? this.subtitleTracks.findIndex((track) => track.name === of)
+        : this.#subtitle;
+      if (fatal) this.stopLoad();
+      this.#tell(Events.ERROR, {
+        fatal,
+        type: real.ErrorTypes.NETWORK_ERROR,
+        details:
+          target === "subtitle-playlist"
+            ? real.ErrorDetails.SUBTITLE_LOAD_ERROR
+            : real.ErrorDetails.FRAG_LOAD_ERROR,
+        context: target === "subtitle-playlist" ? { type: "subtitleTrack", id: index } : undefined,
+        frag:
+          target === "subtitle-segment"
+            ? { type: "subtitle", level: index }
+            : target === "video" || target === "audio"
+              ? { type: target === "video" ? "main" : "audio" }
+              : undefined,
+        error: new Error("Fixture request failed"),
+      });
+    }
+
+    subtitleAborted(of: string): void {
+      this.#tell(Events.ERROR, {
+        fatal: false,
+        type: real.ErrorTypes.NETWORK_ERROR,
+        details: real.ErrorDetails.INTERNAL_ABORTED,
+        frag: {
+          type: "subtitle",
+          level: this.subtitleTracks.findIndex((track) => track.name === of),
+        },
+      });
+    }
+    subtitlePlaylist(seconds: number): void {
+      this.#tell(Events.SUBTITLE_TRACK_LOADED, {
+        id: this.#subtitle,
+        details: { targetduration: seconds, live: true },
+      });
+    }
+    subtitleDeferred(afterSuccess = false): void {
+      const frag = this.#nextSegment(this.#subtitle);
+      if (afterSuccess) frag.start -= SEGMENT_S;
+      this.#tell(Events.SUBTITLE_FRAG_PROCESSED, {
+        success: false,
+        frag,
+        part: null,
+        ...(afterSuccess
+          ? { error: new Error("WebVTT failed before successful IMSC fallback") }
+          : {}),
+      });
+    }
+
+    subtitleDiscontinuityMismatch(): void {
+      this.#tell(Events.SUBTITLE_FRAG_PROCESSED, {
+        success: false,
+        frag: this.#nextSegment(this.#subtitle),
+        part: null,
+        error: new Error("Subtitle discontinuity domain does not match main"),
+      });
+    }
 
     attachMedia(media: HTMLMediaElement): void {
       this.#media = media;

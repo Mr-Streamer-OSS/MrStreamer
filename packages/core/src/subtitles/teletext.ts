@@ -42,21 +42,7 @@ export function teletextDecoder(page: number | null) {
 
   return {
     push(payload: Uint8Array, at: number): SubtitleChange | null {
-      // EBU data: a data identifier of 0x10 to 0x1f, then data units.
-      if (payload.length < 1 || payload[0]! < 0x10 || payload[0]! > 0x1f) return null;
-      for (let offset = 1; offset + 2 <= payload.length;) {
-        const id = payload[offset]!;
-        const length = payload[offset + 1]!;
-        // Non-subtitle and subtitle teletext data, each one teletext packet of 42 bytes.
-        if (
-          (id === 0x02 || id === 0x03) &&
-          length === 0x2c &&
-          offset + 2 + length <= payload.length
-        ) {
-          packet(payload.subarray(offset + 4, offset + 46).map(reverse));
-        }
-        offset += 2 + length;
-      }
+      for (const data of teletextPackets(payload)) packet(data);
       return show(at);
     },
   };
@@ -111,30 +97,60 @@ export function teletextDecoder(page: number | null) {
  * only what follows: a decoder that begins there shows what one that read the whole stream shows.
  */
 export function teletextErases(payload: Uint8Array, page: number): boolean {
-  if (payload.length < 1 || payload[0]! < 0x10 || payload[0]! > 0x1f) return false;
   const wanted = pageAddress(page);
+  for (const data of teletextPackets(payload)) {
+    const address = unham(data[0]!) | (unham(data[1]!) << 4);
+    const [units, tens, erase] = [unham(data[2]!), unham(data[3]!), unham(data[5]!)];
+    if (
+      address >= 0 &&
+      address >> 3 === 0 &&
+      units >= 0 &&
+      tens >= 0 &&
+      erase >= 0 &&
+      (address & 0x07 || 8) * 0x100 + (tens << 4) + units === wanted &&
+      (erase & 0x08) !== 0
+    )
+      return true;
+  }
+  return false;
+}
+
+/**
+ * A declared subtitle page is present once its valid header arrives, even while blank.
+ * Page FF is time filling, never proof. This reads addresses only, without decoding text.
+ */
+export function teletextPagePresent(payload: Uint8Array, page: number | null): boolean {
+  for (const data of teletextPackets(payload)) {
+    const address = unham(data[0]!) | (unham(data[1]!) << 4);
+    const units = unham(data[2]!);
+    const tens = unham(data[3]!);
+    const control = [5, 7, 8, 9].map((index) => unham(data[index]!));
+    if (
+      address < 0 ||
+      address >> 3 !== 0 ||
+      units < 0 ||
+      tens < 0 ||
+      control.some((bits) => bits < 0)
+    )
+      continue;
+    if (units === 15 && tens === 15) continue;
+    const received = (address & 0x07 || 8) * 0x100 + (tens << 4) + units;
+    if (page === null ? (control[1]! & 0x08) !== 0 : received === pageAddress(page)) return true;
+  }
+  return false;
+}
+
+/** Complete EBU teletext packets, with the transmitted bit order corrected. */
+function* teletextPackets(payload: Uint8Array): Generator<Uint8Array> {
+  if (payload.length < 1 || payload[0]! < 0x10 || payload[0]! > 0x1f) return;
   for (let offset = 1; offset + 2 <= payload.length;) {
     const id = payload[offset]!;
     const length = payload[offset + 1]!;
     if ((id === 0x02 || id === 0x03) && length === 0x2c && offset + 2 + length <= payload.length) {
-      const data = payload.subarray(offset + 4, offset + 46).map(reverse);
-      const address = unham(data[0]!) | (unham(data[1]!) << 4);
-      const [units, tens, erase] = [unham(data[2]!), unham(data[3]!), unham(data[5]!)];
-      if (
-        address >= 0 &&
-        address >> 3 === 0 &&
-        units >= 0 &&
-        tens >= 0 &&
-        erase >= 0 &&
-        (address & 0x07 || 8) * 0x100 + (tens << 4) + units === wanted &&
-        (erase & 0x08) !== 0
-      ) {
-        return true;
-      }
+      yield payload.subarray(offset + 4, offset + 46).map(reverse);
     }
     offset += 2 + length;
   }
-  return false;
 }
 
 /** Page 888 as its address: magazine 8, page 0x88. */

@@ -7,7 +7,7 @@ import { ipc, SUBSCRIPTION } from "./support.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { ChannelTracks, SubtitleTrack } from "@mrstreamer/contracts/playback";
-import { player } from "../../src/renderer/src/player/player.ts";
+import { player, rememberSubtitles } from "../../src/renderer/src/player/player.ts";
 import { addTextCue, subtitleLayer } from "../../src/renderer/src/player/subtitles.ts";
 
 const channel = (id: string): LiveChannel => ({
@@ -30,10 +30,10 @@ const tracksOfA: ChannelTracks = {
   subtitles: [
     {
       id: 301,
-      page: 888,
-      format: "teletext",
+      page: 1,
+      format: "captions",
       language: "nl",
-      label: "Nederlands · Teletext",
+      label: "Nederlands",
       forced: false,
       default: false,
     },
@@ -105,7 +105,7 @@ describe("stopping a channel", () => {
   it("takes its subtitles off the screen", async () => {
     await playing("a", tracksOfA);
     player.setSubtitle(tracksOfA.subtitles[0]!);
-    // The element's own engine passes no teletext here, so a row goes on the track as the
+    // The element's own engine passes no caption packets here, so a row goes on the track as the
     // decoder puts one: from the start, with no end yet.
     addTextCue(player.element, 0, Number.MAX_VALUE, "EERSTE RIJ");
     expect(subtitleLayer.textContent).toBe("EERSTE RIJ");
@@ -126,9 +126,9 @@ describe("picking subtitles", () => {
       forced: false,
       default: false,
     };
-    player.setSubtitle(tracksOfA.subtitles[0]!);
-    player.setSubtitle(captions);
-    player.setSubtitle(null);
+    rememberSubtitles(tracksOfA.subtitles[0]!);
+    rememberSubtitles(captions);
+    rememberSubtitles(null);
 
     expect(ipc.argsOf("preferences.update")).toEqual([
       { subtitleLanguage: "nl" },

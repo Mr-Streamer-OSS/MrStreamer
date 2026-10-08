@@ -4,12 +4,12 @@
 //
 // - Settings > Subscriptions says the playlist names no guide, without an error, also after its
 //   refresh button; finds the guide once the playlist names one; and drops it again.
-// - An HLS channel with two sound renditions and three subtitle renditions offers Sound in More and CC,
-//   plays its own sound, and shows no subtitles though the stream marks some as its default.
+// - An HLS channel offers its two sound tracks and declared subtitle languages after observed cues.
+//   It plays its own sound and keeps subtitles off despite the stream's default mark.
 // - Picking the other sound switches where the stream plays: the same stream goes on, now
 //   loading the other rendition's segments, with sound still decoded.
-// - Picking subtitles without a line in them stops saying Loading once hls.js has read them.
-//   Picking others shows that rendition's lines at their seconds; C turns them off, and on again
+// - An empty declared rendition stays selectable. Picking a working rendition shows
+//   its lines at their seconds; C turns them off, and on again
 //   with the lines hls.js had read before.
 // - A channel whose picture carries closed captions offers them under CC and shows them. After
 //   Stop and the same channel again they are still chosen, and show as the new stream brings them,
@@ -303,6 +303,8 @@ function asked(pattern: RegExp): number {
 async function listsTracks(page: Page): Promise<{ ok: boolean; detail: string }> {
   await play(page, PLAYLIST_CHANNELS.tracks.name);
   await waitFor(async () => (await playing(page)).sound > 0, 20_000).catch(() => {});
+  await waitFor(async () => (await playing(page)).cc !== "absent", 15_000);
+  await waitFor(async () => asked(/subtitles-fr\.vtt$/) > 0, 15_000);
   const sound = await choices(page, "Sound");
   const subtitles = await choices(page, "Subtitles");
   // Where "English line 3" of the stream's default subtitles would show.
@@ -315,7 +317,8 @@ async function listsTracks(page: Page): Promise<{ ok: boolean; detail: string }>
     now.cc === "off" &&
     now.lines.length === 0 &&
     now.sound > 0 &&
-    asked(/subtitles-/) === 0 &&
+    asked(/subtitles-.*\.vtt$/) > 0 &&
+    asked(/subtitles-.*\.vtt$/) <= 3 &&
     asked(/sound-es/) === 0;
   return {
     ok,
@@ -344,17 +347,14 @@ async function switchesSound(page: Page): Promise<{ ok: boolean; detail: string 
 }
 
 async function showsSubtitles(page: Page): Promise<{ ok: boolean; detail: string }> {
-  await choose(page, "Subtitles", "English");
   // "English line 3" shows from 4.25 to 5.75 s.
   await holdAt(page, 5);
+  await choose(page, "Subtitles", "English");
   await waitFor(async () => (await playing(page)).lines.length > 0, 15_000).catch(() => {});
   const english = await playing(page);
-  // "Français" has no line: its row says Loading until hls.js has read it, not until one comes.
-  await choose(page, "Subtitles", "Français");
   const row = async () =>
     (await choices(page, "Subtitles")).find((choice) => choice.startsWith("*")) ?? "";
-  await waitFor(async () => (await row()) === "*Français", 15_000).catch(() => {});
-  const silent = { row: await row(), ...(await playing(page)) };
+  const listed = await choices(page, "Subtitles");
   await choose(page, "Subtitles", "Deutsch");
   await waitFor(async () => (await playing(page)).lines.join().includes("Deutsche"), 15_000).catch(
     () => {},
@@ -376,9 +376,7 @@ async function showsSubtitles(page: Page): Promise<{ ok: boolean; detail: string
   const ok =
     english.lines.join() === "English line 3" &&
     english.cc === "on" &&
-    silent.row === "*Français" &&
-    silent.cc === "on" &&
-    silent.lines.length === 0 &&
+    listed.join() === "Off,*English,Deutsch,Français" &&
     asked(/subtitles-fr\.vtt$/) > 0 &&
     german.lines.join() === "Deutsche Zeile 3" &&
     off.cc === "off" &&
@@ -389,7 +387,7 @@ async function showsSubtitles(page: Page): Promise<{ ok: boolean; detail: string
     between.lines.length === 0;
   return {
     ok,
-    detail: `at 5 s "${english.lines}", without lines "${silent.row}" and ${silent.lines.length} lines, then "${german.lines}"; C: ${off.cc} with ${off.lines.length} lines, C: ${on.cc} "${on.row}" with "${on.lines}"; at 6 s ${between.lines.length} lines`,
+    detail: `at 5 s "${english.lines}", CC [${listed}] after reading the empty French rendition, then "${german.lines}"; C: ${off.cc} with ${off.lines.length} lines, C: ${on.cc} "${on.row}" with "${on.lines}"; at 6 s ${between.lines.length} lines`,
   };
 }
 
@@ -446,15 +444,21 @@ async function carriesOver(page: Page): Promise<{ ok: boolean; detail: string }>
   const now = await playing(page);
   const sound = await choices(page, "Sound");
   const subtitles = await choices(page, "Subtitles");
+  await choose(page, "Subtitles", "English");
+  await waitFor(async () => (await playing(page)).lines.join() === "English line 5", 15_000).catch(
+    () => {},
+  );
+  const switched = await playing(page);
   await resume(page);
   const ok =
     sound.join() === "English,*Español" &&
     subtitles.join() === "Off,English,*Deutsch,Français" &&
+    switched.lines.join() === "English line 5" &&
     now.lines.join() === "Deutsche Zeile 5" &&
     asked(/sound-en-\d+\.mpegts$/) === english;
   return {
     ok,
-    detail: `Sound [${sound}], CC [${subtitles}], at 9 s "${now.lines}", ${asked(/sound-en-\d+\.mpegts$/) - english} English segments loaded`,
+    detail: `Sound [${sound}], CC [${subtitles}], at 9 s "${now.lines}", then English "${switched.lines}", ${asked(/sound-en-\d+\.mpegts$/) - english} English segments loaded`,
   };
 }
 

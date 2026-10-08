@@ -2,8 +2,9 @@
 // later". It shows for a moment where a typed channel number does. A standing note shows in the
 // same place for as long as it holds, such as "Subtitles loading": what a key changed shows over
 // it for its moment, and then the note is back.
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { create } from "zustand";
+import { usePlayer } from "../../player/player.ts";
 
 const SHOWN_MS = 1500;
 
@@ -44,4 +45,21 @@ export function Flash() {
       {shown}
     </div>
   );
+}
+
+/** Watch owns the late hint. Proof observed before this view mounted stays silent. */
+export function LiveSubtitleHint() {
+  const available = usePlayer((state) => state.subtitleAvailability);
+  const seen = useRef(available);
+  useEffect(() => {
+    const previous = seen.current;
+    seen.current = available;
+    if (available === previous) return;
+    if (!available) {
+      if (useFlash.getState().text === "Subtitles available · C") useFlash.setState({ text: null });
+    } else if (!available.selected && available.played > 10_000) {
+      flash("Subtitles available · C");
+    }
+  }, [available]);
+  return null;
 }
