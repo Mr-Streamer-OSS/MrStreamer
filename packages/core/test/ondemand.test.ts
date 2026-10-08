@@ -170,6 +170,42 @@ describe("one title per film", () => {
     expect(shown("nl")).toEqual(["14", "13", "12", "11"]);
   });
 
+  it("keeps original and multiple-subtitle versions in unfiltered curated lists", () => {
+    const films = {
+      ...catalogue,
+      movies: [
+        movie("vo", "Amelie (VO)", "100", 1),
+        movie("subs", "Parasite (MULTI SUB)", "101", 1),
+        movie("plain", "Parasite", "101", 2),
+        movie("english", "Heat (EN)", "102", 1),
+      ],
+    };
+    const titles = indexOf(films, "en").movies.titles;
+    const shown = collections({
+      kind: "movie",
+      titles,
+      language: "en",
+      names: () => null,
+      metadata: () => ({
+        genres: [18],
+        language: "fr",
+        popularity: 1,
+        rating: 8,
+        votes: 1000,
+        collection: null,
+        backdrop: null,
+      }),
+      services: [],
+      now: 0,
+    });
+    expect(shown.list("popular", "title").map((title) => title.id)).toEqual([
+      "vo",
+      "english",
+      "subs",
+    ]);
+    expect(titles.find((title) => title.tmdbId === "101")?.id).toBe("subs");
+  });
+
   it("keeps a film when one of its versions is for adults", () => {
     const films = {
       ...catalogue,

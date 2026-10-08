@@ -51,10 +51,10 @@ export const DEFAULT_TITLE_LANGUAGE: TitleLanguage = "en";
 
 const WORD_END = /[\s-]/;
 
-/** Marks a version carries for every language at once. */
-const MULTI = new Set(["MULTI", "MULTI AUDIO"]);
-/** Original-version marks say nothing about multiple audio languages. */
-const ORIGINAL = new Set(["VO"]);
+/** Provider conventions used by existing catalogue suitability ranking. */
+const MULTI = new Set(["MULTI", "MULTI AUDIO", "MULTISUB", "MULTI SUB", "VO"]);
+/** Only these name marks hint at several audio languages in a filter. */
+const MULTI_AUDIO = new Set(["MULTI", "MULTI AUDIO"]);
 const LANGUAGE_MARKS = new Map<string, (typeof TITLE_LANGUAGES)[number]>(
   TITLE_LANGUAGES.flatMap((language) => language.marks.map((mark) => [mark, language] as const)),
 );
@@ -84,7 +84,7 @@ export function languageHints(tags: readonly string[]): readonly string[] {
   const hints = new Set<string>();
   for (const tag of tags) {
     const { mark, language } = markOf(tag);
-    if (MULTI.has(mark)) hints.add("multi");
+    if (MULTI_AUDIO.has(mark)) hints.add("multi");
     else if (language) hints.add(language.code);
   }
   return hints.size ? [...hints] : ["unknown"];
@@ -107,7 +107,6 @@ export function suitability(tags: readonly string[], language: string): number {
     const { mark, language: marked, subtitles } = markOf(tag);
     if (marked?.code === language) return 4;
     if (MULTI.has(mark)) multi = true;
-    else if (ORIGINAL.has(mark)) subtitled = true;
     else if (marked && subtitles) subtitled = true;
     else if (marked) dubbed = true;
   }

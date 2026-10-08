@@ -45,8 +45,8 @@ describe("current-kind library filters", () => {
     expect(languageHints(["MULTISUB"])).toEqual(["unknown"]);
     expect(languageHints(["MULTI SUB"])).toEqual(["unknown"]);
     expect(languageHints(["MULTI AUDIO"])).toEqual(["multi"]);
-    expect(suitability(["VO"], "en")).toBe(2);
-    expect(suitability(["MULTISUB"], "en")).toBe(1);
+    expect(suitability(["VO"], "en")).toBe(3);
+    expect(suitability(["MULTISUB"], "en")).toBe(3);
     expect(versionLabels([{ tags: ["VO"] }, { tags: ["MULTISUB"] }], "en")).toEqual([
       "Original sound",
       "Several subtitle languages",

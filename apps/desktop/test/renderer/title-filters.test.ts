@@ -147,6 +147,65 @@ it("keeps grid arrows and Enter after a mouse click on an inline filter word", a
   });
 });
 
+it("keeps the grid's keys after a mouse selection in More and returns keyboard focus there", async () => {
+  const page = await mount();
+  const second: Title = {
+    ...film,
+    id: "second",
+    key: "movie:second",
+    versions: [{ subscriptionId: SUBSCRIPTION, id: "second", tags: ["4K", "PL"] }],
+  };
+  ipc.always("ondemand.collection", {
+    name: "All",
+    titles: [film, second],
+    total: 2,
+    unfiltered: 10,
+  });
+  const summary = page.group("Language").querySelector("summary")!;
+  await act(async () => {
+    const allowed = summary.dispatchEvent(
+      new MouseEvent("mousedown", {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+      }),
+    );
+    if (allowed) summary.focus();
+    summary.click();
+  });
+  await page.click("Polski", "Language");
+  await page.until(() => expect(page.container.textContent).toContain("2 of 10"));
+  await act(async () => {
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "ArrowRight",
+        bubbles: true,
+      }),
+    );
+  });
+  await act(async () => {
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        bubbles: true,
+      }),
+    );
+  });
+  expect(useUi.getState().details?.id).toBe("second");
+  useUi.setState({ details: null });
+  await act(async () => {
+    summary.focus();
+    summary.closest("details")!.open = true;
+    const polish = [...page.group("Language").querySelectorAll("button")].find(
+      (button) => button.textContent === "Polski",
+    )!;
+    polish.focus();
+    polish.click();
+  });
+  expect(document.activeElement).toBe(summary);
+  expect(summary.closest("details")!.open).toBe(false);
+});
+
 it.each(["filter", "4k tab", "normal list"] as const)(
   "opens the correct version over a remembered choice from %s and keeps menu alternatives",
   async (entry) => {

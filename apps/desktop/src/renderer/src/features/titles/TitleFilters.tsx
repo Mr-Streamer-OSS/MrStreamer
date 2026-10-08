@@ -198,8 +198,9 @@ function Words<V extends string>({
         onChange(choice.value);
         const popup = event.currentTarget.closest("details");
         if (popup) {
+          const ownsFocus = popup.contains(document.activeElement);
           popup.open = false;
-          popup.querySelector("summary")?.focus();
+          if (ownsFocus) popup.querySelector("summary")?.focus();
         }
       }}
       className={cn(
@@ -237,6 +238,7 @@ function Words<V extends string>({
           }}
         >
           <summary
+            onMouseDown={(event) => event.preventDefault()}
             className={cn(
               "cursor-pointer list-none underline-offset-4",
               extra ? "font-semibold underline" : "text-white/70",
