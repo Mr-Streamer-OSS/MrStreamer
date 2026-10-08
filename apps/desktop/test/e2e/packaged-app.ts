@@ -237,14 +237,16 @@ async function pictureSubtitles(page: Page): Promise<{ ok: boolean; detail: stri
     await page.evaluate(
       `document.querySelector("[data-view=title]").dispatchEvent(new MouseEvent("mousemove", { bubbles: true }))`,
     );
-    // "Subtitles", or "Subtitles on" once chosen.
-    const menu = `document.querySelector('[aria-label^="Subtitles"]')`;
+    const menu = `document.querySelector('[data-view="title"] button[aria-label="Subtitles"]')`;
+    const panel = `document.querySelector('aside[aria-label="Subtitle choices"]')`;
     await waitFor(() => page.evaluate<boolean>(`!!${menu}`), 10_000);
-    await page.evaluate(`${menu}.click()`);
-    const track = `[...document.querySelectorAll('[role="dialog"][aria-label^="Subtitles"] button[data-item]')].find((b) => b.textContent.trim() === ${JSON.stringify(label)})`;
+    if (!(await page.evaluate<boolean>(`!!${panel}`))) await page.evaluate(`${menu}.click()`);
+    const track = `[...document.querySelectorAll('aside[aria-label="Subtitle choices"] button[data-item]')].find((b) => b.textContent.trim() === ${JSON.stringify(label)})`;
     await waitFor(() => page.evaluate<boolean>(`!!${track}`), 10_000);
-    // Choosing closes the menu.
     await page.evaluate(`${track}.click()`);
+    // The panel stays open to compare choices. Close it before the next playback key.
+    await page.evaluate(`${panel}.querySelector('[aria-label="Close subtitles"]').click()`);
+    await waitFor(() => page.evaluate<boolean>(`!${panel}`), 10_000);
   };
   await waitFor(async () => (await time()) > 0.1, 30_000);
   await choose("English");
