@@ -39,9 +39,16 @@ export async function connect(port: number, kind: "page" | "node" = "page", poll
     try {
       const targets = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()) as {
         type: string;
+        url: string;
         webSocketDebuggerUrl: string;
       }[];
-      url = targets.find((target) => target.type === kind)?.webSocketDebuggerUrl;
+      // Electron exposes its initial blank page before loading the app. Observing that page
+      // loses the pending measurement when navigation destroys its execution context.
+      url = targets.find(
+        (target) =>
+          target.type === kind &&
+          (kind === "node" || (target.url !== "" && target.url !== "about:blank")),
+      )?.webSocketDebuggerUrl;
     } catch {}
   }
   if (!url)
