@@ -36,11 +36,13 @@ interface Job {
   readonly environment?: { readonly name: string };
   readonly concurrency?: Record<string, unknown>;
   readonly defaults?: { readonly run?: { readonly "working-directory"?: string } };
+  readonly outputs?: Record<string, string>;
   readonly strategy?: { readonly matrix?: { readonly include?: Record<string, string>[] } };
   readonly steps?: readonly Step[];
 }
 
 interface Step {
+  readonly name?: string;
   readonly id?: string;
   readonly if?: string;
   readonly uses?: string;
@@ -326,5 +328,85 @@ describe("the source archives of a release", () => {
     expect(publish?.needs).toContain("sources");
     expect(uploaded).toBe("release-sources-0.0.7");
     expect(uploaded).toMatch(new RegExp(`^${taken.replace("*", ".*")}$`));
+  });
+});
+
+// A release is only as good as the jobs it waits for, and a Store package only as slow as the ones
+// it needs. A dry run reads the same graph, so these read it for every run at once.
+describe("what each job of a release waits for", () => {
+  const { jobs } = read("build-release.yml");
+  const { publish, msix, package: unix, "package-windows": windows } = jobs;
+
+  const uploads = (name: string) =>
+    (jobs[name]?.steps ?? [])
+      .filter((step) => step.uses?.startsWith("actions/upload-artifact@"))
+      .map((step) => String(step.with?.["name"]));
+
+  it("publishes only after every job that makes a release file, the sources and the checks", () => {
+    const makers = Object.keys(jobs).filter((name) =>
+      uploads(name).some((artifact) => artifact.startsWith("release-")),
+    );
+
+    expect(makers.toSorted()).toEqual(["package", "package-windows", "sources"]);
+    expect([publish?.needs].flat().toSorted()).toEqual(["checks", ...makers].toSorted());
+    // A dry run builds all of it and publishes none.
+    expect(publish?.if).toBe("github.event_name != 'pull_request'");
+  });
+
+  it("starts the Store package once the Windows installer is built, whatever the other platforms do", () => {
+    expect([msix?.needs].flat().toSorted()).toEqual(["bundle", "package-windows"]);
+    expect(unix?.strategy?.matrix?.include?.map((leg) => leg["target"])).toEqual([
+      "mac-arm64",
+      "linux-x64",
+    ]);
+    expect(uploads("package-windows")).toEqual(["release-win-x64-${{ inputs.version }}"]);
+  });
+
+  it("hands the Store package the Windows ffmpeg under the key that job saved it with", () => {
+    const save = windows?.steps?.find((step) => step.id === "ffmpeg");
+    const restore = msix?.steps?.find((step) => step.uses?.startsWith("actions/cache/restore@"));
+    const key = windows?.steps?.find((step) => step.id === "ffmpeg-key");
+
+    expect(save?.uses).toMatch(/^actions\/cache@/);
+    expect(save?.with?.["key"]).toBe("${{ steps.ffmpeg-key.outputs.key }}");
+    expect(windows?.outputs?.["ffmpeg-key"]).toBe("${{ steps.ffmpeg-key.outputs.key }}");
+    expect(key?.run).toContain("hashFiles('apps/desktop/scripts/build-ffmpeg.sh')");
+    // The cache is saved when the job succeeds, so a cold build is there for the job that needs it.
+    expect(restore?.with).toEqual({
+      path: save?.with?.["path"],
+      key: "${{ needs.package-windows.outputs.ffmpeg-key }}",
+      "fail-on-cache-miss": true,
+    });
+  });
+});
+
+// The AirPlay helper compiles in every Mac build. Its cache holds the compiler's output and is
+// found by what the script says the output is built from; the Developer ID signature is made on
+// the copy inside the app, later.
+describe("the cached AirPlay helper of a Mac build", () => {
+  const steps = read("build-release.yml").jobs["package"]?.steps ?? [];
+  const find = (id: string) => steps.find((step) => step.id === id);
+  const build = steps.find((step) => step.name === "Build the AirPlay helper");
+  const { mac } = parse(readFileSync("apps/desktop/electron-builder.yml", "utf8")) as {
+    mac: { extraResources: { from: string; to: string }[] };
+  };
+
+  it("is found by the key the build script prints and rebuilt only on a miss", () => {
+    expect(find("airplay-key")?.run).toContain(
+      "scripts/build-airplay-helper.sh --key ${{ matrix.target }}",
+    );
+    expect(find("airplay")?.with?.["key"]).toBe("${{ steps.airplay-key.outputs.key }}");
+    expect(build?.if).toBe("runner.os == 'macOS' && steps.airplay.outputs.cache-hit != 'true'");
+    expect(steps.indexOf(build!)).toBeGreaterThan(steps.indexOf(find("airplay")!));
+  });
+
+  it("holds the folder electron-builder copies into the app to sign, and nothing it makes", () => {
+    // The copy in the app is signed; the cached original never is.
+    expect(find("airplay")?.with?.["path"]).toBe(
+      "apps/desktop/vendor/airplay/${{ matrix.target }}",
+    );
+    expect(mac.extraResources.map((resource) => resource.from)).toContain(
+      "vendor/airplay/mac-${arch}",
+    );
   });
 });

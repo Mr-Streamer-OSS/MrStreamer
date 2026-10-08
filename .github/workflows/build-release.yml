@@ -8,6 +8,10 @@
 # the inputs say. Artifact names carry the version, so the two releases of one run never mix files.
 # It has no concurrency group of its own: release.yml's queue already holds the whole run, and a
 # group here that a release run's own jobs shared could leave them waiting on that run.
+#
+# Publishing waits for every platform, the checks and the sources. Windows packages in a job of its
+# own, so the Store package starts when the Windows build is ready and not when the slowest platform
+# is; the Store job waits for publishing and that package.
 name: Build and publish a release
 
 on:
@@ -74,6 +78,7 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+  # macOS and Linux. Windows has its own job below.
   package:
     name: Package ${{ matrix.target }}
     needs: bundle
@@ -83,12 +88,12 @@ jobs:
       matrix:
         include:
           - { target: mac-arm64, runner: macos-15, builder: --mac --arm64 }
-          - { target: win-x64, runner: windows-2025, builder: --win --x64 }
           - { target: linux-x64, runner: ubuntu-24.04, builder: --linux --x64 }
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     env:
       VERSION: ${{ inputs.version }}
+      SHA: ${{ inputs.sha }}
     # The app, its scripts and its tests live in apps/desktop. Action paths stay relative to the
     # repository root.
     defaults:
@@ -127,24 +132,30 @@ jobs:
         run: |
           brew install --quiet nasm pkg-config
           scripts/build-ffmpeg.sh mac-arm64
-      - if: steps.ffmpeg.outputs.cache-hit != 'true' && runner.os == 'Windows'
-        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
-        with:
-          msystem: MINGW64
-          update: false
-          install: >-
-            make git curl mingw-w64-x86_64-gcc mingw-w64-x86_64-nasm mingw-w64-x86_64-pkgconf
-      - name: Build ffmpeg on Windows
-        if: steps.ffmpeg.outputs.cache-hit != 'true' && runner.os == 'Windows'
-        shell: msys2 {0}
-        run: scripts/build-ffmpeg.sh win-x64
       - name: Check ffmpeg cuts segments for receivers
         # A cached build from before the segment muxer would play on no TV.
         run: |
           muxers=$(vendor/ffmpeg/${{ matrix.target }}/ffmpeg -hide_banner -muxers)
           grep -qw segment <<<"$muxers"
-      - name: Build the AirPlay helper
+
+      # The AirPlay helper as it comes from the compiler, rebuilt only when what the script hashes
+      # changes: its sources, Info.plist and flags, and the Swift compiler and SDK of this runner
+      # image. Packaging signs a copy inside the app, so no release signature is ever cached.
+      - name: Find the AirPlay helper's inputs
+        id: airplay-key
         if: runner.os == 'macOS'
+        # Assigned first, so a script that fails stops the step instead of sharing one empty key.
+        run: |
+          inputs=$(scripts/build-airplay-helper.sh --key ${{ matrix.target }})
+          echo "key=airplay-${{ matrix.target }}-$inputs" >> "$GITHUB_OUTPUT"
+      - id: airplay
+        if: runner.os == 'macOS'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/desktop/vendor/airplay/${{ matrix.target }}
+          key: ${{ steps.airplay-key.outputs.key }}
+      - name: Build the AirPlay helper
+        if: runner.os == 'macOS' && steps.airplay.outputs.cache-hit != 'true'
         run: scripts/build-airplay-helper.sh mac-arm64
 
       - run: npm pkg set version="$VERSION"
@@ -153,9 +164,12 @@ jobs:
           name: js-bundle-${{ inputs.version }}
           path: apps/desktop/out
 
+      # The build and the disk image's notarization print their phases, which the last command
+      # times: the runner's own work apart from the waits on Apple, in the job summary.
       - name: Build for macOS, signed and notarized
         if: runner.os == 'macOS'
         env:
+          DEBUG: electron-notarize*
           # Dry runs happen on this repository's own labelled pull requests, so they sign too.
           CSC_FOR_PULL_REQUEST: "true"
           CSC_LINK: ${{ secrets.MAC_CERTIFICATE_P12 }}
@@ -169,8 +183,10 @@ jobs:
           done
           export APPLE_API_KEY="$RUNNER_TEMP/AuthKey.p8"
           printf '%s\n' "$APPLE_API_KEY_P8" > "$APPLE_API_KEY"
-          pnpm exec electron-builder ${{ matrix.builder }} --publish never
-          node scripts/notarize-dmg.ts dist/*.dmg
+          {
+            pnpm exec electron-builder ${{ matrix.builder }} --publish never
+            node scripts/notarize-dmg.ts dist/*.dmg
+          } 2>&1 | node scripts/mac-release-phases.ts "Mac release phases, $VERSION from ${SHA::12}"
           rm -f "$APPLE_API_KEY"
 
       - name: Check the macOS signature
@@ -195,19 +211,6 @@ jobs:
           said=$("dist/mac-arm64/Mr. Streamer.app/Contents/Resources/airplay/MrStreamerAirPlay" </dev/null)
           grep -q '"type":"hello"' <<<"$said"
 
-      # Windows installers are unsigned for now. Signing belongs here, as its own step with its
-      # own secrets, without touching the Mac certificate; docs/maintainers/signing.md.
-      - name: Build for Windows
-        if: runner.os == 'Windows'
-        run: pnpm exec electron-builder ${{ matrix.builder }} --publish never
-
-      # About has a notice for each plug-in NSIS puts in the setup and its uninstaller, and the
-      # release attaches their sources. A plug-in added or changed since they were reviewed stops
-      # the build here; docs/maintainers/licences.md#windows-setup-program.
-      - name: Check the setup's plug-ins
-        if: runner.os == 'Windows'
-        run: node scripts/installer-plugins.ts dist/*-setup.exe
-
       - name: Build for Linux
         if: runner.os == 'Linux'
         run: pnpm exec electron-builder ${{ matrix.builder }} --publish never
@@ -225,15 +228,6 @@ jobs:
           ditto "$mount/Mr. Streamer.app" "/Applications/Mr. Streamer.app"
           hdiutil detach "$mount"
           node test/e2e/packaged-app.ts "/Applications/Mr. Streamer.app/Contents/MacOS/Mr. Streamer" -- --use-mock-keychain
-
-      - name: Smoke test the installed app on Windows
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $installer = Get-ChildItem dist/*-setup.exe | Select-Object -First 1
-          Start-Process -FilePath $installer.FullName -ArgumentList '/S' -Wait
-          node test/e2e/packaged-app.ts "$env:LOCALAPPDATA\Programs\mrstreamer\Mr. Streamer.exe"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Smoke test the installed app on Linux
         if: runner.os == 'Linux'
@@ -258,14 +252,108 @@ jobs:
           retention-days: ${{ github.event_name == 'pull_request' && 14 || 3 }}
           if-no-files-found: error
 
+  # The Windows installer, in a job of its own: the Store package needs the ffmpeg this job caches,
+  # and waits for it and for no other platform.
+  package-windows:
+    name: Package win-x64
+    needs: bundle
+    runs-on: windows-2025
+    timeout-minutes: 60
+    outputs:
+      # The cache the msix job restores. It exists once this job has succeeded, built or found.
+      ffmpeg-key: ${{ steps.ffmpeg-key.outputs.key }}
+    env:
+      VERSION: ${{ inputs.version }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.sha }}
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # The bundled ffmpeg, rebuilt only when build-ffmpeg.sh changes.
+      - id: ffmpeg-key
+        run: echo "key=ffmpeg-win-x64-${{ hashFiles('apps/desktop/scripts/build-ffmpeg.sh') }}" >> "$GITHUB_OUTPUT"
+      - id: ffmpeg
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/desktop/vendor/ffmpeg/win-x64
+          key: ${{ steps.ffmpeg-key.outputs.key }}
+      - if: steps.ffmpeg.outputs.cache-hit != 'true'
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            make git curl mingw-w64-x86_64-gcc mingw-w64-x86_64-nasm mingw-w64-x86_64-pkgconf
+      - name: Build ffmpeg on Windows
+        if: steps.ffmpeg.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        run: scripts/build-ffmpeg.sh win-x64
+      - name: Check ffmpeg cuts segments for receivers
+        # A cached build from before the segment muxer would play on no TV.
+        run: |
+          muxers=$(vendor/ffmpeg/win-x64/ffmpeg -hide_banner -muxers)
+          grep -qw segment <<<"$muxers"
+
+      - run: npm pkg set version="$VERSION"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: js-bundle-${{ inputs.version }}
+          path: apps/desktop/out
+
+      # Windows installers are unsigned for now. Signing belongs here, as its own step with its
+      # own secrets, without touching the Mac certificate; docs/maintainers/signing.md.
+      - name: Build for Windows
+        run: pnpm exec electron-builder --win --x64 --publish never
+
+      # About has a notice for each plug-in NSIS puts in the setup and its uninstaller, and the
+      # release attaches their sources. A plug-in added or changed since they were reviewed stops
+      # the build here; docs/maintainers/licences.md#windows-setup-program.
+      - name: Check the setup's plug-ins
+        run: node scripts/installer-plugins.ts dist/*-setup.exe
+
+      - name: Check the update metadata
+        run: |
+          for file in dist/latest*.yml; do
+            grep -qx "version: $VERSION" "$file" || { echo "::error::$file does not name $VERSION"; exit 1; }
+          done
+
+      - name: Smoke test the installed app on Windows
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem dist/*-setup.exe | Select-Object -First 1
+          Start-Process -FilePath $installer.FullName -ArgumentList '/S' -Wait
+          node test/e2e/packaged-app.ts "$env:LOCALAPPDATA\Programs\mrstreamer\Mr. Streamer.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-win-x64-${{ inputs.version }}
+          path: |
+            apps/desktop/dist/*.exe
+            apps/desktop/dist/*.blockmap
+            apps/desktop/dist/latest*.yml
+          # Dry runs keep their files for testing; a release keeps them on GitHub Releases.
+          retention-days: ${{ github.event_name == 'pull_request' && 14 || 3 }}
+          if-no-files-found: error
+
   # The Microsoft Store package, an MSIX of the same app, for dry runs and stable releases: only
-  # stable releases go to the Store. It waits for the installers, whose run caches ffmpeg, and
+  # stable releases go to the Store. It waits for the Windows installer and no other platform, and
   # publishing doesn't wait for it, so it can't hold up a release. Its file stays a workflow
   # artifact, apart from the release-* artifacts publish attaches: never on the release or in the
   # update feed. The store job below sends a stable release's to the Store.
   msix:
     name: Package Microsoft Store MSIX
-    needs: [bundle, package]
+    needs: [bundle, package-windows]
     if: github.event_name == 'pull_request' || inputs.channel == 'stable'
     runs-on: windows-2025
     timeout-minutes: 45
@@ -292,7 +380,7 @@ jobs:
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: apps/desktop/vendor/ffmpeg/win-x64
-          key: ffmpeg-win-x64-${{ hashFiles('apps/desktop/scripts/build-ffmpeg.sh') }}
+          key: ${{ needs.package-windows.outputs.ffmpeg-key }}
           fail-on-cache-miss: true
       - run: npm pkg set version="$env:VERSION"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -482,7 +570,7 @@ jobs:
 
   publish:
     name: Publish GitHub Release
-    needs: [checks, package, sources]
+    needs: [checks, package, package-windows, sources]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
