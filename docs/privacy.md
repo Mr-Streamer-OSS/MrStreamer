@@ -42,6 +42,8 @@ The folder contains:
 
 Two items are stored outside this folder: the key that encrypts your password or playlist link, in your system's keychain, and a downloaded update, in a `mrstreamer-updater` folder in your system's cache folder.
 
+Settings > About offers a diagnostics export when you ask for it. You can inspect the exact text before saving it to a file of your choice. It includes the app build, platform, installation kind, subscription counts, a decoder flag, the last update check and at most 500 recent diagnostic entries. Addresses, credentials, channel and title names, and filesystem paths are omitted. Nothing is uploaded. A file you save outside the app's data folder remains there until you delete it.
+
 ## Data sent from your computer
 
 ### Your provider

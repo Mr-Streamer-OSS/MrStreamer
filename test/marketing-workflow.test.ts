@@ -15,6 +15,11 @@ import { describe, expect, it } from "vitest";
 interface Workflow {
   readonly on: {
     readonly push?: { readonly branches?: readonly string[]; readonly paths?: readonly string[] };
+    readonly workflow_run?: {
+      readonly workflows: readonly string[];
+      readonly types: readonly string[];
+      readonly branches: readonly string[];
+    };
   };
   readonly concurrency?: { readonly group: string; readonly "cancel-in-progress": boolean };
   readonly env?: Record<string, string>;
@@ -42,10 +47,18 @@ const { publish, ...others } = deploy.workflow.jobs;
 
 describe("publishing the website", () => {
   it("starts only from main, and only once the owner turned it on", () => {
-    expect(Object.keys(deploy.workflow.on)).toEqual(["push", "workflow_dispatch"]);
+    expect(Object.keys(deploy.workflow.on)).toEqual(["push", "workflow_dispatch", "workflow_run"]);
     expect(deploy.workflow.on.push?.branches).toEqual(["main"]);
+    expect(deploy.workflow.on.workflow_run).toEqual({
+      workflows: ["Release"],
+      types: ["completed"],
+      branches: ["main"],
+    });
     // A run started by hand from another branch builds nothing, so it publishes nothing.
-    expect(others["build"]?.if).toBe("github.ref == 'refs/heads/main'");
+    expect(others["build"]?.needs).toBe("trigger");
+    expect(others["build"]?.if).toBe(
+      "github.ref == 'refs/heads/main' && needs.trigger.outputs.allowed == 'true'",
+    );
     expect(publish?.needs).toBe("build");
     expect(publish?.if).toBe("vars.MARKETING_DEPLOY_ENABLED == 'true'");
   });
@@ -54,6 +67,7 @@ describe("publishing the website", () => {
     expect(deploy.workflow.concurrency).toEqual({
       group: "marketing-production-${{ github.ref }}",
       "cancel-in-progress": false,
+      queue: "max",
     });
   });
 
