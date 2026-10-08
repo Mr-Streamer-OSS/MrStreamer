@@ -5,7 +5,7 @@ import { webvttReader } from "./webvtt.ts";
 
 export const SUBTITLE_TEXT_LIMIT = 10 * 1024 * 1024;
 
-/** Reads UTF-8 SubRip or WebVTT. Refuses empty, oversized or invalid cue files. */
+/** Reads UTF-8 SubRip or WebVTT, drops invalid cues and refuses empty or oversized files. */
 export function subtitleTextFile(text: string): readonly Cue[] {
   if (text.length > SUBTITLE_TEXT_LIMIT) throw new Error("Subtitle file is too large.");
   const clean = text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
@@ -17,14 +17,11 @@ export function subtitleTextFile(text: string): readonly Cue[] {
         "$1.$2$3.$4",
       );
   const reader = webvttReader();
-  const cues = [...reader.push(normalized), ...reader.end()];
-  if (
-    cues.length === 0 ||
-    cues.length > 100000 ||
-    cues.some(
-      ({ start, end, text }) => start < 0 || end <= start || end > 86400 || text.length > 32768,
-    )
-  )
-    throw new Error("Subtitle file has no supported, valid cues.");
+  const parsed = [...reader.push(normalized), ...reader.end()];
+  if (parsed.length > 100000) throw new Error("Subtitle file has too many cues.");
+  const cues = parsed.filter(
+    ({ start, end, text }) => start >= 0 && end > start && end <= 86400 && text.length <= 32768,
+  );
+  if (cues.length === 0) throw new Error("Subtitle file has no supported, valid cues.");
   return cues;
 }

@@ -60,24 +60,38 @@ describe("saved exact-file subtitles", () => {
     });
   });
 
-  it("a replaced listing starts at zero and an obsolete forget cannot erase its replacement", async () => {
-    const runtime = runtimeFor(
-      savedSubtitlesLayer.pipe(Layer.provide(databaseLayer(await tempDir()))),
-    );
-    const saved = await promised(runtime, SavedSubtitles);
-    await saved.timing(file, { offset: 21, speed: 25 / 24 });
-    await saved.remember(file, subtitle);
-    const replacement = { ...file, listingKey: "new-file" };
-    await saved.remember(replacement, subtitle);
-    await saved.forget(file);
-    expect(await saved.read(file)).toBeNull();
-    expect(await saved.read(replacement)).toEqual({ timing: { offset: 0, speed: 1 }, subtitle });
-    await expect(saved.timing(replacement, { offset: 601, speed: 1 })).rejects.toBeDefined();
-    await expect(
-      saved.remember(replacement, { ...subtitle, cues: [{ start: 8, end: 4, text: "Backwards" }] }),
-    ).rejects.toBeDefined();
-    expect((await saved.read(replacement))?.timing).toEqual({ offset: 0, speed: 1 });
-  });
+  it.each(["listingKey", "sourceStamp"] as const)(
+    "a changed %s clears obsolete results without letting an old forget erase its replacement",
+    async (changed) => {
+      const runtime = runtimeFor(
+        savedSubtitlesLayer.pipe(Layer.provide(databaseLayer(await tempDir()))),
+      );
+      const saved = await promised(runtime, SavedSubtitles);
+      await saved.timing(file, { offset: 21, speed: 25 / 24 });
+      await saved.remember(file, subtitle, "old-result");
+      const replacement = { ...file, [changed]: "new-file" };
+      await saved.remember(replacement, subtitle, "new-result");
+      expect(await saved.result(file, "old-result")).toBeNull();
+      await saved.forget(file);
+      expect(await saved.read(file)).toBeNull();
+      expect(await saved.read(replacement)).toEqual({
+        timing: { offset: 0, speed: 1 },
+        subtitle,
+        selection: "new-result",
+      });
+      expect((await saved.result(replacement, "new-result"))?.subtitle).toEqual(subtitle);
+      await expect(saved.timing(replacement, { offset: 601, speed: 1 })).rejects.toBeDefined();
+      await expect(
+        saved.remember(replacement, {
+          ...subtitle,
+          cues: [{ start: 8, end: 4, text: "Backwards" }],
+        }),
+      ).rejects.toBeDefined();
+      expect((await saved.read(replacement))?.timing).toEqual({ offset: 0, speed: 1 });
+      await saved.forget(replacement);
+      expect(await saved.result(replacement, "new-result")).toBeNull();
+    },
+  );
 
   it("account erasure removes cues and timing permanently while retaining other accounts", async () => {
     const dir = await tempDir();

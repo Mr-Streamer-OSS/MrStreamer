@@ -2,6 +2,7 @@
 import { ipc, SUBSCRIPTION } from "./support.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SavedSubtitle } from "@mrstreamer/contracts/online-subtitles";
+import type { SubtitleTrack } from "@mrstreamer/contracts/playback";
 import { player } from "../../src/renderer/src/player/player.ts";
 import { subtitleLayer } from "../../src/renderer/src/player/subtitles.ts";
 import { titlePlayer } from "../../src/renderer/src/player/title-player.ts";
@@ -19,6 +20,15 @@ const saved: SavedSubtitle = {
   },
 };
 const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+const english: SubtitleTrack = {
+  id: 3,
+  page: null,
+  format: "text",
+  language: "en",
+  label: "English",
+  forced: false,
+  default: false,
+};
 function shown() {
   return subtitleLayer.querySelector("[data-subtitle-text]")?.textContent ?? "";
 }
@@ -28,6 +38,7 @@ function at(position: number) {
 }
 async function open() {
   ipc.reset();
+  const restore = ipc.hold("subtitles.saved");
   const pictureCalls: string[] = [];
   vi.stubGlobal("fetch", async (input: string) => {
     pictureCalls.push(input);
@@ -39,7 +50,7 @@ async function open() {
     url: "http://127.0.0.1/title/local-movie.mp4",
     duration: 600,
     audio: [],
-    subtitles: [],
+    subtitles: [english],
   });
   void titlePlayer.open(
     {
@@ -52,7 +63,7 @@ async function open() {
     0,
   );
   await settle();
-  return pictureCalls;
+  return { pictureCalls, restore };
 }
 afterEach(() => {
   titlePlayer.close();
@@ -60,7 +71,7 @@ afterEach(() => {
 });
 describe("a downloaded subtitle on the movie picture", () => {
   it("starts the picture while local restore waits, then applies drift and offset without another picture request", async () => {
-    const calls = await open();
+    const { pictureCalls: calls } = await open();
     expect(calls).toHaveLength(1);
     expect(titlePlayer.acceptDownloaded("other-file", saved)).toBe(false);
     expect(titlePlayer.acceptDownloaded("local-movie", saved)).toBe(true);
@@ -97,5 +108,57 @@ describe("a downloaded subtitle on the movie picture", () => {
     titlePlayer.close();
     expect(shown()).toBe("");
     expect(titlePlayer.acceptDownloaded("local-movie", saved)).toBe(false);
+  });
+
+  it("forgets a downloaded result without changing the global subtitle preference", async () => {
+    await open();
+    titlePlayer.acceptDownloaded("local-movie", saved);
+    at(103);
+    expect(shown()).toBe("Welcome.");
+    ipc.always("subtitles.forget", null);
+    await titlePlayer.forgetDownloaded();
+    expect(shown()).toBe("");
+    expect(titlePlayer.state().savedSubtitle).toBeNull();
+    expect(titlePlayer.state().downloadedOn).toBe(false);
+    expect(ipc.argsOf("preferences.update")).toEqual([]);
+  });
+
+  it.each(["Off", "a file track"])(
+    "keeps the saved result available when %s is chosen while restore waits",
+    async (choice) => {
+      const { restore } = await open();
+      titlePlayer.setSubtitle(choice === "Off" ? null : english);
+      restore.resolve(saved);
+      await settle();
+      expect(titlePlayer.state().savedSubtitle).toEqual(saved);
+      expect(titlePlayer.state().downloadedOn).toBe(false);
+      expect(titlePlayer.state().subtitle).toEqual(choice === "Off" ? null : english);
+      at(103);
+      expect(shown()).toBe("");
+      titlePlayer.showDownloaded();
+      expect(shown()).toBe("Welcome.");
+    },
+  );
+
+  it("does not replace a newer downloaded choice with an old restore response", async () => {
+    const { restore } = await open();
+    const newer = { ...saved, subtitle: { ...saved.subtitle!, release: "New cut" } };
+    titlePlayer.acceptDownloaded("local-movie", newer);
+    restore.resolve(saved);
+    await settle();
+    expect(titlePlayer.state().savedSubtitle).toEqual(newer);
+    expect(titlePlayer.state().downloadedOn).toBe(true);
+  });
+
+  it("reports a failed timing write once and lets the next correction save", async () => {
+    await open();
+    titlePlayer.acceptDownloaded("local-movie", saved);
+    ipc.refuse("subtitles.timing", { kind: "unexpected", detail: "Timing could not be saved." });
+    await expect(titlePlayer.setDownloadedTiming({ offset: 0, speed: 1 })).rejects.toBeDefined();
+    await settle();
+    await titlePlayer.downloadedEditsSaved();
+    ipc.always("subtitles.timing", saved);
+    await titlePlayer.setDownloadedTiming({ offset: 1, speed: 1 });
+    expect(ipc.argsOf("subtitles.timing").map(({ timing }) => timing.offset)).toEqual([0, 1]);
   });
 });

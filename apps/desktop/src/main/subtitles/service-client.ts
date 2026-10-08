@@ -131,29 +131,55 @@ const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 export function subtitleServiceClient(options: { userAgent: string; fetch?: typeof fetch }) {
   const request = options.fetch ?? fetch;
   const userAgent = options.userAgent;
-  const api = async (url: string | URL, init: RequestInit, signal: AbortSignal) => {
+  const api = async (
+    url: string | URL,
+    init: RequestInit,
+    signal: AbortSignal,
+    searchRedirects = false,
+  ) => {
     const timeout = AbortSignal.any([signal, AbortSignal.timeout(15000)]);
-    const response = await request(url, {
-      ...init,
-      signal: timeout,
-      redirect: "manual",
-      headers: { Accept: "application/json", "User-Agent": userAgent, ...init.headers },
-    });
-    if (!response.ok) {
-      await response.body?.cancel();
-      throw new SubtitleRequestFailure(
-        response.status === 401 || response.status === 403
-          ? "credentials"
-          : response.status === 402 || response.status === 406 || response.status === 429
-            ? "quota"
-            : "unavailable",
-      );
+    let target = new URL(url);
+    for (let redirects = 0; ; redirects++) {
+      timeout.throwIfAborted();
+      const response = await request(target, {
+        ...init,
+        signal: timeout,
+        redirect: "manual",
+        headers: { Accept: "application/json", "User-Agent": userAgent, ...init.headers },
+      });
+      const location =
+        searchRedirects && REDIRECTS.has(response.status) ? response.headers.get("location") : null;
+      if (location !== null) {
+        await response.body?.cancel();
+        const next = new URL(location, target);
+        // Only the search GET can redirect. The API key stays on the original HTTPS origin.
+        if (
+          redirects >= 2 ||
+          next.origin !== "https://api.opensubtitles.com" ||
+          next.username ||
+          next.password ||
+          next.port
+        )
+          throw new SubtitleRequestFailure("unavailable");
+        target = next;
+        continue;
+      }
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw new SubtitleRequestFailure(
+          response.status === 401 || response.status === 403
+            ? "credentials"
+            : response.status === 402 || response.status === 406 || response.status === 429
+              ? "quota"
+              : "unavailable",
+        );
+      }
+      return JSON.parse(
+        new TextDecoder("utf-8", { fatal: true }).decode(
+          await readBody(response, JSON_LIMIT, timeout),
+        ),
+      ) as unknown;
     }
-    return JSON.parse(
-      new TextDecoder("utf-8", { fatal: true }).decode(
-        await readBody(response, JSON_LIMIT, timeout),
-      ),
-    ) as unknown;
   };
   const subdlSearch = async (
     credentials: NonNullable<SubtitleCredentials["subdl"]>,
@@ -232,20 +258,28 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
   ): Promise<readonly SubtitleCandidate[]> => {
     const query = checkedQuery(input);
     const url = new URL("https://api.opensubtitles.com/api/v1/subtitles");
+    const languages = [
+      ...new Set(
+        query.languages.flatMap((language) =>
+          language === "pt" ? ["pt-br", "pt-pt"] : [language],
+        ),
+      ),
+    ].sort();
     url.search = new URLSearchParams({
       type: query.kind,
-      languages: query.languages.join(","),
+      languages: languages.join(","),
       ...(query.tmdbId !== undefined
         ? query.kind === "movie"
           ? { tmdb_id: String(query.tmdbId) }
           : { parent_tmdb_id: String(query.tmdbId) }
-        : { query: query.title! }),
+        : { query: query.title!.toLowerCase() }),
       ...(query.kind === "movie"
         ? query.year !== undefined
           ? { year: String(query.year) }
           : {}
         : { season_number: String(query.season), episode_number: String(query.episode) }),
     }).toString();
+    url.searchParams.sort();
     const reply = OpenReply.assert(
       await api(
         url,
@@ -253,13 +287,14 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
           headers: { "Api-Key": credentials.apiKey },
         },
         signal,
+        true,
       ),
     );
     return reply.data
       .flatMap(({ attributes: sub }): SubtitleCandidate[] => {
         const title = sub.feature_details;
         if (
-          !query.languages.includes(sub.language) ||
+          !languages.includes(sub.language.toLowerCase()) ||
           (query.kind === "movie"
             ? query.tmdbId !== undefined && title.tmdb_id !== query.tmdbId
             : (query.tmdbId !== undefined && title.parent_tmdb_id !== query.tmdbId) ||
@@ -474,7 +509,12 @@ async function subtitleArchive(data: Uint8Array, signal: AbortSignal): Promise<U
     const unzip = new Unzip((file) => {
       files.push(file);
       if (files.length > 64) return end(new SubtitleRequestFailure("unsupported"));
-      if (!/\.(srt|vtt)$/i.test(file.name)) return;
+      if (
+        file.name.startsWith("__MACOSX/") ||
+        file.name.split("/").at(-1)?.startsWith("._") ||
+        !/\.(srt|vtt)$/i.test(file.name)
+      )
+        return;
       if (++selected > 1 || (file.originalSize ?? 0) > SUBTITLE_TEXT_LIMIT)
         return end(new SubtitleRequestFailure("unsupported"));
       file.ondata = (error, chunk, final) => {

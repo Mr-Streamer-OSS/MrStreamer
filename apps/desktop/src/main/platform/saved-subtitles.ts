@@ -11,7 +11,7 @@ import { type } from "arktype";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { attempt, Database, unavailable } from "./database.ts";
+import { attempt, Database, transaction, unavailable } from "./database.ts";
 
 /** Main-only identity resolved from the current playback session and provider catalogue. */
 export interface SubtitleFile {
@@ -95,7 +95,13 @@ export const savedSubtitlesLayer = Layer.effect(
       const touchResult = db.prepare(`delete from saved_subtitle_results where
         account = ? and kind = ? and id = ? and source_stamp = ? and listing_key = ? and result_key = ?`);
       const removeResults = db.prepare(`delete from saved_subtitle_results where
-        account = ? and kind = ? and id = ? and source_stamp = ? and listing_key = ?`);
+        account = ? and kind = ? and id = ? and (
+          (source_stamp = ? and listing_key = ?) or not exists (
+            select 1 from saved_subtitles where account = ? and kind = ? and id = ?
+          )
+        )`);
+      const removeObsoleteResults = db.prepare(`delete from saved_subtitle_results where
+        account = ? and kind = ? and id = ? and (source_stamp != ? or listing_key != ?)`);
       const identity = (file: SubtitleFile) =>
         [file.account, file.kind, file.id, file.sourceStamp, file.listingKey] as const;
       const read = (file: SubtitleFile): Stored | null => {
@@ -118,16 +124,19 @@ export const savedSubtitlesLayer = Layer.effect(
           : null;
       const save = (file: SubtitleFile, saved: Stored) => {
         const checked = Stored.assert(saved);
-        write.run(...identity(file), JSON.stringify(checked));
-        if (checked.resultKey) {
-          touchResult.run(...identity(file), checked.resultKey);
-          rememberResult.run(
-            ...identity(file),
-            checked.resultKey,
-            JSON.stringify(visible(checked)),
-          );
-          pruneResults.run(...identity(file));
-        }
+        transaction(db, () => {
+          removeObsoleteResults.run(...identity(file));
+          write.run(...identity(file), JSON.stringify(checked));
+          if (checked.resultKey) {
+            touchResult.run(...identity(file), checked.resultKey);
+            rememberResult.run(
+              ...identity(file),
+              checked.resultKey,
+              JSON.stringify(visible(checked)),
+            );
+            pruneResults.run(...identity(file));
+          }
+        });
       };
       return {
         read: (file: SubtitleFile) => attempt(() => visible(read(file))),
@@ -170,8 +179,11 @@ export const savedSubtitlesLayer = Layer.effect(
           }),
         forget: (file: SubtitleFile) =>
           attempt(() => {
-            remove.run(...identity(file));
-            removeResults.run(...identity(file));
+            transaction(db, () => {
+              remove.run(...identity(file));
+              // With no replacement selected, Forget also clears caches from older identities.
+              removeResults.run(...identity(file), file.account, file.kind, file.id);
+            });
           }),
       };
     }).pipe(Effect.catch(() => Effect.succeed(closed("Saved subtitles can't be opened."))));

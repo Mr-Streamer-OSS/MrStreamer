@@ -29,4 +29,26 @@ describe("downloaded text subtitles", () => {
   ])("refuses unsupported or invalid content", (text) => {
     expect(() => subtitleTextFile(text)).toThrow();
   });
+
+  it("drops invalid individual cues while retaining valid cues in the same file", () => {
+    expect(
+      subtitleTextFile(
+        [
+          "1\n00:00:01,000 --> 00:00:03,000\nFirst",
+          "2\n00:00:04,000 --> 00:00:04,000\nZero duration",
+          "3\n00:00:06,000 --> 00:00:05,000\nBackwards",
+          "4\n00:00:08,000 --> 00:00:09,000\nLast",
+        ].join("\n\n"),
+      ),
+    ).toEqual([
+      { start: 1, end: 3, text: "First" },
+      { start: 8, end: 9, text: "Last" },
+    ]);
+  });
+
+  it("keeps the cue cap even when invalid cues would otherwise be dropped", () => {
+    const badCue = "00:00:01,000 --> 00:00:01,000\nSkip\n\n";
+    const validCue = "00:00:02,000 --> 00:00:03,000\nKeep";
+    expect(() => subtitleTextFile(badCue.repeat(100000) + validCue)).toThrow();
+  });
 });

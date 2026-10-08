@@ -175,13 +175,9 @@ describe("online subtitle service ports", () => {
       const url = new URL(String(input));
       const headers = new Headers(init?.headers);
       if (url.pathname === "/api/v1/subtitles") {
-        expect(Object.fromEntries(url.searchParams)).toEqual({
-          type: "episode",
-          languages: "en,nl",
-          parent_tmdb_id: "456",
-          season_number: "1",
-          episode_number: "2",
-        });
+        expect(url.search).toBe(
+          "?episode_number=2&languages=en%2Cnl&parent_tmdb_id=456&season_number=1&type=episode",
+        );
         expect(headers.get("Api-Key")).toBe(keys.opensubtitles.apiKey);
         expect(headers.has("Authorization")).toBe(false);
         return json({
@@ -260,10 +256,16 @@ describe("online subtitle service ports", () => {
     },
   );
 
-  it("refuses API redirects without sending credentials to another host", async () => {
+  it.each([
+    "https://other.test/steal",
+    "http://api.opensubtitles.com/api/v1/subtitles",
+    "https://private-user:private-pass@api.opensubtitles.com/api/v1/subtitles",
+    "https://api.opensubtitles.com:8443/api/v1/subtitles",
+    "https://vip-api.opensubtitles.com/api/v1/subtitles",
+  ])("refuses search redirects outside its original HTTPS origin: %s", async (location) => {
     const request = vi.fn<typeof fetch>(async (_input, init) => {
       expect(init?.redirect).toBe("manual");
-      return new Response(null, { status: 302, headers: { location: "https://other.test/steal" } });
+      return new Response(null, { status: 302, headers: { location } });
     });
     const client = subtitleServiceClient({ userAgent: "Mr. Streamer v0.0.9", fetch: request });
     await expect(
@@ -274,6 +276,112 @@ describe("online subtitle service ports", () => {
       ),
     ).rejects.toMatchObject({ reason: "unavailable" });
     expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("follows up to two OpenSubtitles search redirects while keeping one request deadline", async () => {
+    const calls: { url: string; signal: AbortSignal | null | undefined }[] = [];
+    const request = vi.fn<typeof fetch>(async (input, init) => {
+      const url = new URL(String(input));
+      calls.push({ url: url.href, signal: init?.signal });
+      expect(init?.redirect).toBe("manual");
+      expect(new Headers(init?.headers).get("Api-Key")).toBe(keys.opensubtitles.apiKey);
+      if (calls.length < 3)
+        return new Response(null, {
+          status: 301,
+          headers: { location: `/api/v1/subtitles?canonical=${calls.length}` },
+        });
+      return json({ data: [] });
+    });
+    const client = subtitleServiceClient({ userAgent: "fixture", fetch: request });
+    expect(
+      await client.openSearch(
+        keys.opensubtitles,
+        { kind: "movie", tmdbId: 123, year: 2019, languages: ["nl", "en"] },
+        signal(),
+      ),
+    ).toEqual([]);
+    expect(calls.map(({ url }) => new URL(url).search)).toEqual([
+      "?languages=en%2Cnl&tmdb_id=123&type=movie&year=2019",
+      "?canonical=1",
+      "?canonical=2",
+    ]);
+    expect(calls.every(({ signal }) => signal === calls[0]?.signal)).toBe(true);
+  });
+
+  it("stops a third search redirect", async () => {
+    const request = vi.fn<typeof fetch>(
+      async () =>
+        new Response(null, { status: 302, headers: { location: "/api/v1/subtitles?next=1" } }),
+    );
+    const client = subtitleServiceClient({ userAgent: "fixture", fetch: request });
+    await expect(
+      client.openSearch(
+        keys.opensubtitles,
+        { kind: "movie", tmdbId: 123, languages: ["en"] },
+        signal(),
+      ),
+    ).rejects.toMatchObject({ reason: "unavailable" });
+    expect(request).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(["login", "download"])(
+    "does not follow an OpenSubtitles %s POST redirect",
+    async (stage) => {
+      const request = vi.fn<typeof fetch>(async (input, init) => {
+        expect(init?.method).toBe("POST");
+        expect(init?.redirect).toBe("manual");
+        if (stage === "download" && new URL(String(input)).pathname.endsWith("/login"))
+          return json({ token: "private-token", base_url: "api.opensubtitles.com" });
+        return new Response(null, { status: 307, headers: { location: "/api/v1/redirect" } });
+      });
+      const client = subtitleServiceClient({ userAgent: "fixture", fetch: request });
+      await expect(
+        client.download({ ...candidate, service: "opensubtitles", fileId: 10 }, keys, signal()),
+      ).rejects.toMatchObject({ reason: "unavailable" });
+      expect(request).toHaveBeenCalledTimes(stage === "login" ? 1 : 2);
+    },
+  );
+
+  it("requests both Portuguese regions and retains each matching service label", async () => {
+    const request = vi.fn<typeof fetch>(async (input) => {
+      expect(new URL(String(input)).search).toBe(
+        "?languages=en%2Cpt-br%2Cpt-pt&tmdb_id=123&type=movie",
+      );
+      return json({
+        data: ["pt-BR", "pt-PT", "en", "de"].map((language, index) => ({
+          attributes: {
+            language,
+            release: "Cinema cut",
+            feature_details: { tmdb_id: 123 },
+            files: [{ file_id: index + 1, file_name: "movie.srt" }],
+          },
+        })),
+      });
+    });
+    const client = subtitleServiceClient({ userAgent: "fixture", fetch: request });
+    const results = await client.openSearch(
+      keys.opensubtitles,
+      { kind: "movie", tmdbId: 123, languages: ["pt", "en"] },
+      signal(),
+    );
+    expect(results.map(({ language }) => language)).toEqual(["pt-BR", "pt-PT", "en"]);
+  });
+
+  it("downloads the text from a macOS ZIP without treating resource forks as another subtitle", async () => {
+    const request = vi.fn<typeof fetch>(
+      async () =>
+        new Response(
+          zipSync({
+            "movie.srt": strToU8(srt),
+            "__MACOSX/._movie.srt": strToU8("resource fork"),
+            "._movie.srt": strToU8("resource fork"),
+          }),
+        ),
+    );
+    const client = subtitleServiceClient({ userAgent: "fixture", fetch: request });
+    expect((await client.download(candidate, keys, signal())).subtitle.cues).toEqual([
+      { start: 10, end: 12, text: "Hallo" },
+    ]);
   });
 
   it("refuses unsafe download redirects, oversized streams, ambiguous ZIP files and unsupported text", async () => {
@@ -391,10 +499,7 @@ describe("explicit title search fallback", () => {
       film_name: "Night Harbour",
       year: "2019",
     });
-    expect(Object.fromEntries(calls[1]!.searchParams)).toMatchObject({
-      query: "Night Harbour",
-      year: "2019",
-    });
+    expect(calls[1]!.search).toBe("?languages=en&query=night+harbour&type=movie&year=2019");
     for (const url of calls) {
       expect(url.searchParams.has("tmdb_id")).toBe(false);
       expect(url.searchParams.has("file_name")).toBe(false);

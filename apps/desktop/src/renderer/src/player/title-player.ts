@@ -983,7 +983,11 @@ async function restoreDownloaded(): Promise<void> {
   const choice = subtitleChoice;
   if (!current) return;
   const saved = await call("subtitles.saved", { sessionId: current.id }).catch(() => null);
-  if (session !== current || receiver || choice !== subtitleChoice) return;
+  if (session !== current || receiver) return;
+  if (choice !== subtitleChoice) {
+    if (!store.getState().savedSubtitle) store.setState({ savedSubtitle: saved });
+    return;
+  }
   if (saved?.subtitle) titlePlayer.acceptDownloaded(current.id, saved);
   else store.setState({ savedSubtitle: saved });
 }
@@ -1283,13 +1287,18 @@ export const titlePlayer = {
     await titlePlayer.downloadedEditsSaved();
     await call("subtitles.forget", { sessionId: current.id });
     if (session !== current) return;
-    if (store.getState().downloadedOn) titlePlayer.setSubtitle(null);
+    if (store.getState().downloadedOn) {
+      subtitleChoice++;
+      store.setState({ downloadedOn: false, subtitleStatus: null });
+      clearSubtitles(video);
+      setSubtitleDelay(video, 0);
+    }
     store.setState({ savedSubtitle: null });
     lastWasDownloaded = false;
   },
 
   downloadedEditsSaved(): Promise<void> {
-    return subtitleSaving.catch(() => {});
+    return subtitleSaving;
   },
 
   showDownloaded(): void {
@@ -1309,16 +1318,17 @@ export const titlePlayer = {
     if (!current || receiver || !saved?.subtitle) return;
     store.setState({ savedSubtitle: { ...saved, timing: valid } });
     if (store.getState().downloadedOn) setDownloadedSubtitleTiming(video, valid);
-    const write = subtitleSaving
-      .catch(() => {})
-      .then(() =>
-        call("subtitles.timing", {
-          sessionId: current.id,
-          timing: valid,
-          ...(saved.selection ? { selection: saved.selection } : {}),
-        }),
-      );
-    subtitleSaving = write.then(() => {});
+    const write = subtitleSaving.then(() =>
+      call("subtitles.timing", {
+        sessionId: current.id,
+        timing: valid,
+        ...(saved.selection ? { selection: saved.selection } : {}),
+      }),
+    );
+    subtitleSaving = write.then(
+      () => {},
+      () => {},
+    );
     await write;
   },
 
