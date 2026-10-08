@@ -17,8 +17,7 @@ export interface LiveSearchIndex {
 
 /** Build once per loaded catalogue/list, so a programme-only match can retain all real copies. */
 export function indexLiveSearch(channels: readonly LiveChannel[]): LiveSearchIndex {
-  // Main stamps list responses against its full catalogue. A favourites/category subset must
-  // retain those decisions rather than treating a missing conflicting copy as agreement.
+  // Stamped search responses retain full-catalogue decisions when only some copies are listed.
   const groups = channels.some((channel) => channel.searchGroup !== undefined)
     ? searchResultGroups(channels)
     : groupLiveSearch(channels);

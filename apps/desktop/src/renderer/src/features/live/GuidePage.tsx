@@ -157,9 +157,13 @@ export function GuidePage({ active }: { active: boolean }) {
     index: 0,
     channel: null,
   });
-  const kept =
+  const byKey =
     searchRows && chosen.searchKey
       ? searchRows.findIndex((row) => row.key === chosen.searchKey)
+      : -1;
+  const kept =
+    byKey !== -1
+      ? byKey
       : chosen.channel === null || sameOwned(rows[chosen.index], chosen.channel)
         ? chosen.index
         : rows.findIndex((channel) => sameOwned(channel, chosen.channel));

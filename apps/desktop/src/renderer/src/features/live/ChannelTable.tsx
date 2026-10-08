@@ -112,6 +112,7 @@ export function ChannelTable({
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const asked = useRef(searchFocus);
+  const focusedRow = useRef<HTMLElement | null>(null);
   // Selection can show because Tab enabled keyboard mode. Only navigation or focus already
   // owned by a result row moves DOM focus; disclosure buttons keep their own Tab position.
   useLayoutEffect(() => {
@@ -119,7 +120,9 @@ export function ChannelTable({
     asked.current = searchFocus;
     const focused = document.activeElement;
     const ownsFocus =
-      focused?.hasAttribute("data-search-row") && scroller.current?.contains(focused);
+      (focused?.hasAttribute("data-search-row") && scroller.current?.contains(focused)) ||
+      // A regroup replaces the focused row's node. Keep its focus on the selected exact copy.
+      (focused === document.body && focusedRow.current !== null && !focusedRow.current.isConnected);
     if (!searchRows || selected === null || (!requested && !ownsFocus)) return;
     scroller.current
       ?.querySelector<HTMLElement>(`[data-index="${selected}"] [data-search-row]`)
@@ -185,7 +188,16 @@ export function ChannelTable({
   );
 
   return (
-    <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 pb-8">
+    <div
+      ref={scroller}
+      onFocusCapture={(event) => {
+        focusedRow.current = event.target.hasAttribute("data-search-row") ? event.target : null;
+      }}
+      onBlurCapture={(event) => {
+        if (event.target.isConnected) focusedRow.current = null;
+      }}
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 pb-8"
+    >
       <div
         className="relative"
         style={{ height: virtualizer.getTotalSize() }}

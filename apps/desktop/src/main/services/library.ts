@@ -774,7 +774,6 @@ const stampedSearchResponses = new WeakMap<
   {
     readonly groups: LiveSearchGroups;
     readonly stamps: Readonly<Record<string, LiveSearchStamp>>;
-    readonly responses: WeakMap<readonly LiveChannel[], readonly LiveChannel[]>;
   }
 >();
 
@@ -793,7 +792,6 @@ function searchGroupCache(all: readonly LiveChannel[]) {
           copies.map((id, order) => [id, { key, order }] as const),
         ),
       ),
-      responses: new WeakMap(),
     };
     stampedSearchResponses.set(index, cache);
   }
@@ -806,15 +804,10 @@ function stampSearchGroups(
   all: readonly LiveChannel[],
 ): readonly LiveChannel[] {
   const cache = searchGroupCache(all);
-  let response = cache.responses.get(channels);
-  if (!response) {
-    response = channels.map(({ searchIdentity: _identity, ...channel }) => ({
-      ...channel,
-      searchGroup: cache.stamps[ownedKey(channel)] ?? { key: ownedKey(channel), order: 0 },
-    }));
-    cache.responses.set(channels, response);
-  }
-  return response;
+  return channels.map(({ searchIdentity: _identity, ...channel }) => ({
+    ...channel,
+    searchGroup: cache.stamps[ownedKey(channel)] ?? { key: ownedKey(channel), order: 0 },
+  }));
 }
 
 function searchIndex(channels: readonly LiveChannel[]): LiveSearchIndex {

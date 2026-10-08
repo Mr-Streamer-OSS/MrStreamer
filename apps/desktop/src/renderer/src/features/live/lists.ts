@@ -110,10 +110,9 @@ export function useListSearch(
   if (answer !== kept) keep(answer);
 
   return useMemo(() => {
-    // Ordinary lists stay cheap. A search waits for the full-catalogue grouping decision,
-    // including conflicts hidden by a favourite or category subset.
-    const words =
-      answer && (grouped.data || grouped.isError) ? searchWords(answer.query) : NO_WORDS;
+    // Wait for the first catalogue decision. Once it has answered or failed, retries keep
+    // filtering the current list, with singletons until a fresh successful decision arrives.
+    const words = answer && grouped.isFetched ? searchWords(answer.query) : NO_WORDS;
     if (!answer || words.length === 0) {
       return { channels, query: "", words: NO_WORDS, matches: NO_MATCHES, groups: null };
     }
@@ -145,7 +144,7 @@ export function useListSearch(
       words,
       matches,
     };
-  }, [channels, answer, grouped.data, grouped.isStale, grouped.isError]);
+  }, [channels, answer, grouped.data, grouped.isStale, grouped.isError, grouped.isFetched]);
 }
 
 /** Each list's names as search compares them, worked out at its first search. */

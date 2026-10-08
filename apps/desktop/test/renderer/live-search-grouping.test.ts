@@ -123,8 +123,8 @@ async function page(
   if (kind === "guide") {
     client.setQueryData(queries.channels(null).queryKey, plain(listed));
     client.setQueryData(queries.channelsOf(listed).queryKey, plain(listed));
-    ipc.always("library.searchGroups", stamps(all));
   }
+  ipc.always("library.searchGroups", stamps(all));
   client.setQueryData(
     queries.categories().queryKey,
     ["0", "1"].map((id) => ({
@@ -230,6 +230,130 @@ async function page(
 }
 
 describe("real search components with two subscriptions", () => {
+  it("starts the palette catalogue read during typing and shares it across searches and reopen", async () => {
+    const p = await page("palette", "");
+    expect(ipc.argsOf("library.searchGroups")).toEqual([]);
+    expect(ipc.argsOf("library.channels")).toEqual([]);
+    const groups = ipc.hold("library.searchGroups");
+    const names = ipc.hold("library.channels");
+    const programmes = ipc.hold("guide.search");
+    const titles = ipc.hold("ondemand.search");
+    await p.type("Canvas");
+    await settled();
+    expect(ipc.argsOf("library.searchGroups")).toEqual([undefined]);
+    expect(ipc.argsOf("library.channels")).toEqual([]);
+    expect(p.rows()).toHaveLength(0);
+    groups.resolve(stamps(all));
+    await settled(150);
+    expect(ipc.argsOf("library.channels")).toEqual([{ query: "Canvas" }]);
+    names.resolve(responses(all.filter((channel) => channel.title === "VRT Canvas")));
+    programmes.resolve([]);
+    titles.resolve({ movies: [], series: [] });
+    await settled();
+    expect(p.rows()).toHaveLength(1);
+    await p.type("");
+    await settled(150);
+    ipc.always("library.channels", responses(all));
+    ipc.always("guide.search", []);
+    ipc.always("ondemand.search", { movies: [], series: [] });
+    await p.type("VRT");
+    await settled(150);
+    await settled();
+    expect(p.rows()).toHaveLength(2);
+    await act(async () => useUi.setState({ searchOpen: false }));
+    await settled(200);
+    await act(async () => useUi.setState({ searchOpen: true, searchFrom: "VRT" }));
+    await settled(200);
+    expect(p.rows()).toHaveLength(2);
+    expect(ipc.argsOf("library.searchGroups")).toHaveLength(1);
+    await p.press("ArrowRight", p.field());
+    await p.press("ArrowDown", p.field());
+    await p.press("Enter", p.field());
+    expect(p.watch).toHaveBeenLastCalledWith(expect.objectContaining(ownedId(blue[0]!)));
+  });
+
+  it.each(["all", "favourites"] as const)(
+    "keeps the selected exact copy and row focus through singleton fallback and regroup in %s",
+    async (kind) => {
+      const listed = kind === "all" ? all : green;
+      const p = await page("guide", "", false, listed, { kind });
+      await p.search("VRT");
+      await p.press("ArrowDown", p.field());
+      await p.press("ArrowDown");
+      await p.press("ArrowRight");
+      const copy = p
+        .rows()
+        .find((row) =>
+          row.getAttribute("aria-label")?.startsWith("VRT Canvas, Green, Belgium, General"),
+        )!;
+      await act(async () => copy.focus());
+      expect(document.activeElement).toBe(copy);
+      const groups = ipc.hold("library.searchGroups");
+      const channels = ipc.hold("library.channels");
+      await act(async () =>
+        ipc.emit("library.updated", {
+          subscriptionId: GREEN,
+          channelCount: listed.length,
+          fetchedAt: 2,
+          failure: null,
+          failedAt: null,
+        }),
+      );
+      channels.resolve(plain(listed));
+      await settled();
+      const singleton = p
+        .rows()
+        .find((row) =>
+          row.getAttribute("aria-label")?.startsWith("VRT Canvas, Green, Belgium, General"),
+        )!;
+      expect(singleton.className).toContain("ring-2");
+      expect(document.activeElement).toBe(singleton);
+      await p.press("Enter");
+      expect(p.watch).toHaveBeenLastCalledWith(expect.objectContaining(ownedId(green[3]!)));
+      await act(async () => useUi.setState({ watching: false, view: "live" }));
+      groups.resolve(stamps(all));
+      await settled();
+      const regrouped = p
+        .rows()
+        .find((row) =>
+          row.getAttribute("aria-label")?.startsWith("VRT Canvas, Green, Belgium, General"),
+        )!;
+      expect(regrouped.className).toContain("ring-2");
+      expect(document.activeElement).toBe(regrouped);
+      await p.press("Enter");
+      expect(p.watch).toHaveBeenLastCalledWith(expect.objectContaining(ownedId(green[3]!)));
+      expect(p.watch).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("keeps a retried search filtered after the first catalogue decision failed", async () => {
+    const p = await page("guide");
+    const groups = ipc.hold("library.searchGroups");
+    await p.search("Canvas");
+    groups.reject({ kind: "unexpected", detail: "Unavailable" });
+    await settled();
+    expect(p.rows()).toHaveLength(4);
+    await p.type("");
+    await settled();
+    expect(p.rows()).toHaveLength(8);
+    const retry = ipc.hold("library.searchGroups");
+    await p.search("Canvas");
+    expect(p.field().value).toBe("Canvas");
+    expect(p.rows()).toHaveLength(4);
+    expect(p.rows().every((row) => row.getAttribute("aria-label")?.startsWith("VRT Canvas,"))).toBe(
+      true,
+    );
+    expect(p.scope().textContent).toContain("4 channels · 4 streams");
+    await p.press("ArrowDown", p.field());
+    await p.press("Enter");
+    expect(p.watch).toHaveBeenLastCalledWith(expect.objectContaining(ownedId(blue[2]!)));
+    retry.resolve(stamps(all));
+    await settled();
+    expect(p.rows()).toHaveLength(1);
+    expect(p.scope().textContent).toContain("1 channel · 4 streams");
+    expect(ipc.argsOf("library.searchGroups")).toHaveLength(2);
+  });
+
   it("does not accept a first stamp answer made obsolete by a catalogue update", async () => {
     const p = await page("guide");
     const old = ipc.hold("library.searchGroups");
