@@ -13,6 +13,7 @@ import { electronExecutable, freePort, record, stop } from "./session.ts";
 import { connect, type Page } from "../../../../apps/desktop/test/e2e/app.ts";
 import { startFakeProvider } from "../../../../apps/desktop/test/fake-provider.ts";
 import { startFakeTmdb } from "../../../../apps/desktop/test/fake-tmdb.ts";
+import { isLocale } from "../../../../packages/contracts/src/language.ts";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
 const desktop = join(root, "apps/desktop");
@@ -29,15 +30,16 @@ type Scenario = (typeof scenarios)[number];
 const [command, selected] = process.argv.slice(2);
 if (command === "--help" || !command) {
   console.log(`Usage: pnpm verify:desktop doctor | ${scenarios.join(" | ")}
+       pnpm verify:desktop downloads <locale>, as fr-FR: Downloads in another interface language
 Run from the repo root, after pnpm install --frozen-lockfile and pnpm build.
 On headless Linux: xvfb-run -a pnpm verify:desktop <scenario>
 Each scenario owns a fresh app/profile/ports and retains proof in .local/verification/.`);
 } else if (command === "doctor") {
   console.log(JSON.stringify(await preflight(), null, 2));
-} else if (command === "downloads" && selected === undefined) {
+} else if (command === "downloads" && (selected === undefined || isLocale(selected))) {
   const build = await preflight();
   if (!build.display) throw new Error("No display. Use xvfb-run -a pnpm verify:desktop downloads.");
-  await runDownloads(build);
+  await runDownloads(build, selected);
 } else if (scenarios.some((scenario) => scenario === command) && selected === undefined) {
   await run(command as Scenario);
 } else {

@@ -14,6 +14,8 @@ Preconditions: built app and fixture media, ffmpeg/ffprobe, a display or Xvfb. R
 
 The proof holds a screenshot and accessibility tree for each step (`settings-<locale>`, `home-<locale>`, `page-*-de-DE`, `player-de-DE`, `more-de-DE`, `error-de-DE`, `error-closed-de-DE`, `movie-fr-FR`, `title-player-fr-FR`, `subtitles-fr-FR`, `series-fr-FR`, `title-error-fr-FR`, `title-error-closed-fr-FR`, `download-done-fr-FR`, `downloads-fr-FR`, `restart-de-DE`, `system-nl-NL`, `unknown-en`) and the observed labels.
 
+Every Downloads state in French, through the same path as English: `pnpm verify:desktop downloads fr-FR` (see [Downloads](downloads.md)).
+
 Source: `docs/contributing/architecture.md#interface-language`, `packages/core/src/i18n.ts` and `i18n/`, `apps/desktop/src/main/language.ts`, `apps/desktop/src/main/menu.ts`, `apps/desktop/src/renderer/src/app/language.ts`, `features/settings/GeneralSection.tsx`.
 
 ## Gotchas
