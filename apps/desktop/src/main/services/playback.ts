@@ -1325,9 +1325,9 @@ function make(deps: PlaybackDeps) {
         session.feed?.changed();
         PubSub.publishUnsafe(replaced, session.id);
       }
-      // Nothing is kept of a file before its first answer that says what it holds (see
-      // `serveSource`): what runs and recovery keep from here on is of the servers heard so far,
-      // so a run's subtitles count as kept from them too.
+      // Nothing is kept of a file before its first answer that says what it holds, nor from one
+      // of a replaced file (see `serveSource`): what runs and recovery keep from here on is of the
+      // servers heard so far, so a run's subtitles count as kept from them too.
       if (session.kept.servers === 0) session.kept.servers = session.identity.servers;
       // A receiver holds a playlist of the file as it was read when the title opened: its length,
       // its tracks and where its segments start. Of another file none of that holds, whether the
@@ -1499,9 +1499,10 @@ function make(deps: PlaybackDeps) {
             body = upstream.body?.getReader() ?? null;
             const held = observe(session, upstream, range !== undefined);
             // An answer that doesn't say what it holds, as a whole file without its length, can't
-            // be told from another file. What runs read from it stays with what they began
-            // keeping, apart from the session's file, whose next answers start what it keeps anew.
-            if (held === null) session.kept = fileKept();
+            // be told from another file, and one from a server that still has a replaced file is
+            // of that file. What runs read from either stays with what they began keeping, apart
+            // from the session's file, whose next answers start what it keeps anew.
+            if (held === null || held.stale) session.kept = fileKept();
             // A whole-file provider ignores Range. Read its one answer forward to the asked
             // position; it still cannot be ended early and resumed for recovery's turns.
             const whole =

@@ -1367,6 +1367,82 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
     }
   });
 
+  it("uses nothing a run read from a server that still sends the file a provider that knows no byte ranges replaced", async () => {
+    // Every file is asked of the server `host`. Once `lagging`, the second still sends the file
+    // as it was, with the ETag it first gave for it.
+    let host = 0;
+    let lagging = false;
+    const tags = new Map<string, string>();
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const answer = await fetch(input, init);
+      const location = answer.headers.get("location");
+      const file = new URL(answer.url).pathname.startsWith("/files/");
+      if (!location?.includes("/files/") && !(file && answer.ok)) return answer;
+      const headers = new Headers(answer.headers);
+      const old = lagging && tags.has(answer.url) && answer.url.includes("/files/1/");
+      if (location) headers.set("location", location.replace(/\/files\/\d+\//, `/files/${host}/`));
+      else if (!tags.has(answer.url)) tags.set(answer.url, headers.get("etag") ?? "");
+      if (old) {
+        await answer.arrayBuffer();
+        headers.set("etag", tags.get(answer.url) ?? "");
+      }
+      const body = old ? fixture("title-long-subs.mkv") : answer.body;
+      const changed = new Response(body, { status: answer.status, headers });
+      Object.defineProperty(changed, "url", { value: answer.url });
+      return changed;
+    };
+    const { open, provider, playback, dispose } = await titles(
+      {},
+      { wholeFiles: true, fileHosts: 2, slotReleaseMs: 0 },
+      fetchImpl,
+    );
+    try {
+      const session = await open("TEST | Long subtitles");
+      const counts = () => ({ requests: provider.fileRequests(), bytes: provider.fileBytes() });
+      const source = session.url.replace("/title/", "/source/").replace(/\.mp4$/, "");
+      const read = async () =>
+        Buffer.from(await (await fetch(source, { headers: { Range: "bytes=0-" } })).arrayBuffer());
+      host = 1;
+      expect(await read()).toEqual(fixture("title-long-subs.mkv"));
+
+      // The same file but for one line of text, which the first server's next answer is of.
+      const corrected = Buffer.from(fixture("title-long-subs.mkv"));
+      corrected.write("Ligne longue", corrected.indexOf("Longue ligne"));
+      const movie = provider.titles.movies.find((each) => each.name.startsWith("TEST | Long sub"));
+      provider.replaceMovieFile(movie?.id ?? 0, corrected);
+      host = 0;
+      expect(await read()).toEqual(corrected);
+      // A run the second server answers with the old file plays it, its lines with it.
+      host = 1;
+      lagging = true;
+      const old = await subtitles(session.url, 0, 4);
+      await old.run();
+      await vi.waitFor(() => expect(linesAt(old.lines, 137)).toEqual(["Longue ligne"]));
+      old.leave();
+      const told = counts();
+      const stale = await subtitles(session.url, 137, 4);
+
+      expect(stale.before.unavailable).toBe("unreadable");
+      expect(stale.before.lines).toEqual([]);
+      expect(counts()).toEqual(told);
+      stale.leave();
+      // A run of the new file from its start has its lines shown.
+      host = 0;
+      const again = await subtitles(session.url, 0, 4);
+      await again.run();
+      await vi.waitFor(() => expect(linesAt(again.lines, 142)).toEqual(["Apres"]));
+      again.leave();
+      const ran = counts();
+      const fresh = await subtitles(session.url, 137, 4);
+      expect(linesAt(fresh.before.lines, 137)).toEqual(["Ligne longue"]);
+      expect(counts()).toEqual(ran);
+      expect(await playback.failure(session.sessionId)).toBeNull();
+      expect(provider.mostFilesAtOnce()).toBe(1);
+    } finally {
+      await dispose();
+    }
+  });
+
   it("uses nothing a run read from a provider that knows no byte ranges when answers carry only the time they were sent", async () => {
     const { open, provider, dispose } = await titles(
       {},
