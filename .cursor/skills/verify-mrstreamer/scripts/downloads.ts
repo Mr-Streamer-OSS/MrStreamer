@@ -24,7 +24,7 @@ import {
   type FakeProvider,
 } from "../../../../apps/desktop/test/fake-provider.ts";
 import { startFakeTmdb, type FakeTmdb } from "../../../../apps/desktop/test/fake-tmdb.ts";
-import { electronExecutable, freePort, record, stop } from "./session.ts";
+import { freePort, record, stop } from "./session.ts";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
 const desktop = join(root, "apps/desktop");

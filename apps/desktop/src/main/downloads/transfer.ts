@@ -67,7 +67,7 @@ export interface TransferRequest {
   readonly progress: (at: TransferProgress) => void;
 }
 
-export interface TransferProgress {
+interface TransferProgress {
   readonly received: number;
   readonly size: number | null;
   /** What the partial is of now; null when the answer gave nothing to resume it by. */

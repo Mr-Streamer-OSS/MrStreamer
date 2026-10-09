@@ -79,8 +79,7 @@ export class DownloadStore extends Context.Service<
   }
 >()("mrstreamer/DownloadStore") {}
 
-/** Also prepared by tests that read the table from outside. */
-export function prepareDownloads(db: DatabaseSync): void {
+function prepareDownloads(db: DatabaseSync): void {
   db.exec(`create table if not exists downloads (
     id text primary key,
     added_at integer not null,

@@ -25,7 +25,6 @@ import {
   artworkUrl,
   type Download,
   type DownloadArtwork,
-  type DownloadFailure,
   type DownloadList,
 } from "@mrstreamer/contracts/downloads";
 import type { EpisodeDetails, RawTitleRef, TitleRef } from "@mrstreamer/contracts/ondemand";
@@ -797,5 +796,3 @@ function hostOf(server: string): string {
 function messageOf(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
-
-export type { DownloadFailure };

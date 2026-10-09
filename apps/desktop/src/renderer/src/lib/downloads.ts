@@ -60,7 +60,7 @@ export function episodeLine(download: Download): string | null {
 }
 
 /** What the player shows for a copy: like its title online, with "Offline" for its subscription. */
-export function copyNow(download: Download): CopyNow {
+function copyNow(download: Download): CopyNow {
   const episode = episodeLine(download);
   return {
     kind: "copy",
