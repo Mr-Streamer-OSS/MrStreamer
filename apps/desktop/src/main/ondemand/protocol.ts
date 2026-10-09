@@ -217,8 +217,12 @@ export type WorkerReply =
   | { readonly id: number; readonly ok: true; readonly value: unknown }
   | { readonly id: number; readonly ok: false; readonly error: AppError };
 
-/** What the worker says unasked: more metadata arrived, or TMDB refused the key. */
+/**
+ * What the worker says unasked: more metadata arrived, or TMDB refused the key. `content` says
+ * that what lists show changed; without it only the status did.
+ */
 export interface WorkerEvent {
   readonly event: "metadata";
+  readonly content: boolean;
   readonly status: MetadataStatus;
 }

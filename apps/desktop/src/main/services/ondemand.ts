@@ -244,6 +244,8 @@ export class OnDemand extends Context.Service<
     readonly reconfigure: Effect.Effect<void>;
     /** The status after every refresh, successful or not. */
     readonly changes: Stream.Stream<OnDemandStatus>;
+    /** TMDB's progress when only it moved, which leaves the lists as they were. */
+    readonly progressChanges: Stream.Stream<OnDemandStatus["metadata"]>;
     /** A title whose details were given before TMDB's arrived, now that they have. */
     readonly detailsChanged: Stream.Stream<TitleKey>;
   }
@@ -279,6 +281,7 @@ function make(deps: OnDemandDeps) {
       (preferences) => preferences.titleLanguage ?? DEFAULT_TITLE_LANGUAGE,
     );
     const updates = yield* PubSub.unbounded<OnDemandStatus>();
+    const progress = yield* PubSub.unbounded<OnDemandStatus["metadata"]>();
     const detailed = yield* PubSub.unbounded<TitleKey>();
     const scope = yield* Effect.scope;
     /** The TMDB key the worker runs with: the viewer's own, or the app's. */
@@ -308,8 +311,9 @@ function make(deps: OnDemandDeps) {
             }),
           (event) => {
             metadataProgress = event.status;
-            // The UI refetches what it shows; the lists' own status stays as it was.
-            Effect.runFork(publishStatus);
+            // New content has the UI refetch what it shows, with the lists' status. Without, the
+            // UI only takes TMDB's progress, and reads nothing again.
+            Effect.runFork(event.content ? publishStatus : publishProgress);
           },
         ),
       ),
@@ -403,6 +407,10 @@ function make(deps: OnDemandDeps) {
       } satisfies OnDemandStatus;
     });
     const publishStatus = Effect.flatMap(status, (current) => PubSub.publish(updates, current));
+    /** Tells the UI TMDB's progress alone, with no word from the worker about the lists. */
+    const publishProgress = Effect.suspend(() =>
+      PubSub.publish(progress, tmdbKey ? metadataProgress : null),
+    );
 
     /** Fetches `source`'s lists, and tells the UI how it ended. */
     const fetchAndStore = (source: Source, playlist?: PlaylistRefresh) =>
@@ -1107,6 +1115,8 @@ function make(deps: OnDemandDeps) {
       }),
 
       changes: Stream.fromPubSub(updates),
+
+      progressChanges: Stream.fromPubSub(progress),
 
       detailsChanged: Stream.fromPubSub(detailed),
     };
