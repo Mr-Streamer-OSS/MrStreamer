@@ -326,6 +326,11 @@ onLiveStart(() => {
 });
 // What comes after the open episode follows the record: one marked or played since is passed over.
 listen("viewing.changed", () => void refreshNext());
+listen("playback.readingAhead", ({ sessionId }) => {
+  if (!session || session.id !== sessionId) return;
+  const phase = store.getState().phase.kind;
+  if (phase === "starting" || phase === "reconnecting") engine?.readingAhead();
+});
 // Main found another file behind the open title and forgot what was saved for the old one: its
 // downloaded text leaves the picture and the panel too. An older session's word, or a receiver's,
 // names no session open here. The file's own tracks say so themselves, through their feed.

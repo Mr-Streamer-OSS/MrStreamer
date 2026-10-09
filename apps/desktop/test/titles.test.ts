@@ -14,6 +14,7 @@ import type { SubtitleChange } from "@mrstreamer/core/subtitles/screen";
 import { readMp4Start } from "../src/renderer/src/player/mp4.ts";
 import { fixture, type FakeProviderOptions } from "./fake-provider.ts";
 import {
+  collect,
   fakeProvider,
   holdableFetch,
   promised,
@@ -78,7 +79,7 @@ async function titles(
   };
   /** Has the subscription's password entered again, as on its row in Settings. */
   const repair = () => subscriptions.update(source?.id ?? "", { secret: "demo" });
-  return { provider, playback, open, repair, dispose: () => runtime.dispose() };
+  return { provider, playback, open, repair, runtime, dispose: () => runtime.dispose() };
 }
 
 /** Plays a run to its end and reads what the player would get. */
@@ -1042,6 +1043,142 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
       expect(answer.status).toBe(206);
       expect(answer.headers.get("content-range")).toBe(`bytes ${position}-${bytes.length - 1}/*`);
       expect(Buffer.from(await answer.arrayBuffer())).toEqual(bytes.subarray(position));
+    } finally {
+      await dispose();
+    }
+  });
+
+  it.each([true, false])(
+    "notifies only when dropped bytes advance, wholeFiles=%s",
+    async (wholeFiles) => {
+      let holding = false;
+      const arrived = Promise.withResolvers<{
+        controller: ReadableStreamDefaultController<Uint8Array>;
+        bytes: Uint8Array;
+      }>();
+      const fetchImpl: typeof fetch = async (input, init) => {
+        const answer = await fetch(input, init);
+        if (!holding || (answer.status !== 200 && answer.status !== 206)) return answer;
+        const bytes = new Uint8Array(await answer.arrayBuffer());
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              arrived.resolve({ controller, bytes });
+            },
+          }),
+          { status: answer.status, headers: answer.headers },
+        );
+      };
+      const { open, playback, runtime, dispose } = await titles(
+        {},
+        { wholeFiles, slotReleaseMs: 0 },
+        fetchImpl,
+      );
+      try {
+        const notices = await collect(runtime, playback.readingAhead);
+        const session = await open("TEST | Long subtitles");
+        expect(notices).toEqual([]);
+        holding = true;
+        const position = 32 * 1024;
+        const source = session.url.replace("/title/", "/source/").replace(/\.mp4$/, "");
+        const reading = fetch(source, { headers: { Range: `bytes=${position}-` } }).then(
+          async (answer) => ({
+            status: answer.status,
+            bytes: Buffer.from(await answer.arrayBuffer()),
+          }),
+        );
+        const { controller, bytes } = await arrived.promise;
+        controller.enqueue(bytes.subarray(0, 8192));
+        if (wholeFiles) await vi.waitFor(() => expect(notices).toEqual([session.sessionId]));
+        // A timer alone sends no notices while the prefix is held, even after the throttle period.
+        await new Promise((resolve) => setTimeout(resolve, 3100));
+        expect(notices).toEqual(wholeFiles ? [session.sessionId] : []);
+        controller.enqueue(bytes.subarray(8192, 16384));
+        if (wholeFiles) await vi.waitFor(() => expect(notices).toHaveLength(2));
+        controller.enqueue(bytes.subarray(16384, 32768));
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        const dropped = [...notices];
+        // All subsequent bytes belong to the answer, so another throttle period yields no notice.
+        await new Promise((resolve) => setTimeout(resolve, 3100));
+        controller.enqueue(bytes.subarray(32768));
+        controller.close();
+        const answer = await reading;
+        expect(answer.status).toBe(206);
+        expect(answer.bytes).toEqual(fixture("title-long-subs.mkv").subarray(position));
+        expect(notices).toEqual(dropped);
+      } finally {
+        await dispose();
+      }
+    },
+  );
+
+  it("waits past the start deadline while a whole-file answer advances to the asked position", async () => {
+    let slow = false;
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const answer = await fetch(input, init);
+      const position = Number(
+        /^bytes=(\d+)-$/.exec(new Headers(init?.headers).get("range") ?? "")?.[1],
+      );
+      if (!slow || !answer.body || !position) return answer;
+      let read = 0;
+      const body = answer.body.pipeThrough(
+        new TransformStream<Uint8Array, Uint8Array>({
+          async transform(chunk, out) {
+            for (let at = 0; at < chunk.length; at += 4096) {
+              // Slow the prefix, then let the first picture arrive within its own deadline.
+              if (read < position) await new Promise((resolve) => setTimeout(resolve, 25));
+              const part = chunk.subarray(at, at + 4096);
+              read += part.length;
+              out.enqueue(part);
+            }
+          },
+        }),
+      );
+      return new Response(body, { status: answer.status, headers: answer.headers });
+    };
+    const timeout = 500;
+    const { open, provider, dispose } = await titles(
+      { runStartMs: timeout },
+      { wholeFiles: true, slotReleaseMs: 0 },
+      fetchImpl,
+    );
+    try {
+      const movie = provider.titles.movies.find((each) =>
+        each.name.startsWith("TEST | Long subtitles"),
+      );
+      provider.replaceMovieFile(movie?.id ?? 0, "title-receiver.mkv");
+      const session = await open("TEST | Long subtitles");
+      slow = true;
+      const began = performance.now();
+      const run = await play(`${session.url}?start=30`);
+      expect(run.response.status).toBe(200);
+      expect(performance.now() - began).toBeGreaterThan(timeout);
+      expect(Number(run.response.headers.get("x-start"))).toBeCloseTo(21.746, 2);
+      expect(picturesOf(run.body).decoded).toBeGreaterThan(0);
+      expect(provider.mostFilesAtOnce()).toBe(1);
+    } finally {
+      await dispose();
+    }
+  });
+
+  it("fails a whole-file read-forward that stops advancing for the start deadline", async () => {
+    const timeout = 500;
+    const { open, provider, dispose } = await titles(
+      { runStartMs: timeout },
+      { wholeFiles: true, slotReleaseMs: 0 },
+    );
+    try {
+      const movie = provider.titles.movies.find((each) =>
+        each.name.startsWith("TEST | Long subtitles"),
+      );
+      provider.replaceMovieFile(movie?.id ?? 0, "title-receiver.mkv");
+      const session = await open("TEST | Long subtitles");
+      provider.stallMovieFile(movie?.id ?? 0, 16 * 1024, 5000);
+      const began = performance.now();
+      const response = await fetch(`${session.url}?start=30`);
+      expect(response.status).toBe(415);
+      expect(performance.now() - began).toBeGreaterThanOrEqual(timeout);
+      expect(performance.now() - began).toBeLessThan(2500);
     } finally {
       await dispose();
     }
