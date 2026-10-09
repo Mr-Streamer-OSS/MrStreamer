@@ -1,6 +1,7 @@
 // A movie's or episode's subtitles as the proxy sends them to the player: a JSON line each, with
-// times in seconds into the title. First what the file holds before the position, as far back as
-// the subtitles on screen there depend on, then `ready`, then each one as the run reads it.
+// times in seconds into the title. The feed recovers what precedes the position and says `ready`
+// when it has that past. Independent text can arrive and show meanwhile; packet changes wait
+// for `ready` because their decoder may depend on earlier packets.
 
 /**
  * Why a track has nothing to show for a position: reading it would take more of the provider than
@@ -12,11 +13,16 @@ export type SubtitlesUnavailable = "limit" | "changed" | "unreadable" | "network
 /** One line of the feed. */
 export type SubtitleFeedLine =
   /**
-   * Everything before the position has been sent: the player can show the track. With `at`, only
-   * from that time on: the track starts afresh there, after a position it had nothing for.
+   * Without `at`, all history needed at the position has been sent: held packet changes can
+   * show and text's history is complete. With `at`, output resumes from that later time after
+   * unavailable history.
    */
   | { readonly ready: true; readonly at?: number }
-  /** What the track holds before the position can't be had: the player shows nothing of it. */
+  /**
+   * The past can't be recovered. Packet state is cleared and output resumes at the feed's next
+   * ready boundary. Independent text keeps showing and arriving, unless `changed` says its
+   * file was replaced and clears it too.
+   */
   | { readonly unavailable: SubtitlesUnavailable }
   /** A packet for the player's decoder, in base64. */
   | { readonly at: number; readonly data: string }

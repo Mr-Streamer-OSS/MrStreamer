@@ -17,8 +17,9 @@
 // and ffmpeg over loopback, answering byte ranges, one upstream request at a time. Each request
 // from the player runs ffmpeg from a position with the chosen tracks, and replaces the run before.
 // With subtitles on, the player also asks for their feed, and the picture doesn't wait for it:
-// what the track holds before the position, as far back as the subtitles on screen there depend
-// on, then what the run reads. The proxy keeps what each run reads of a track
+// packet state from before the position, as far back as the subtitles on screen there depend
+// on, then what the run reads. Independent text goes on while that past is recovered.
+// The proxy keeps what each run reads of a track
 // (see ../playback/subtitle-history.ts) and reads the rest from the file itself, only the track's
 // packets (see ../playback/matroska.ts), when playback spares the provider and no more than a
 // bounded amount (see ../playback/upstream.ts). What can't be had that way leaves the subtitles
@@ -556,7 +557,7 @@ interface Feed {
    * feeds receive the run's independent lines while recovery is under way.
    */
   after: number;
-  /** Sends an entry on, its times counted from `origin`, where the title starts on the file's clock. */
+  /** Sends live output from `origin`, skipping exact text this feed still remembers sending. */
   send(entry: SubtitleEntry, origin: number): void;
   /** Ends the feed: the player asked for another. */
   close(): void;
@@ -1753,19 +1754,6 @@ function make(deps: PlaybackDeps) {
         run.subtitle === null
           ? null
           : { track: run.subtitle, since, from: since, entries: [], bytes: 0 };
-      const previous = session.live;
-      const joined = session.feed;
-      // An early text feed may have replayed the previous run's buffered lines. Reuse that
-      // bounded buffer to skip exact repeats, allowing unread lines even at the same timestamp.
-      const replayed =
-        plan.subtitle?.kind === "cues" &&
-        !readsItsOwn(probe, run.subtitle, run.start) &&
-        live &&
-        previous?.track === live.track &&
-        joined?.track === live.track &&
-        previous.since <= joined.after
-          ? previous.entries
-          : [];
       session.live = live;
       const subtitles =
         plan.subtitle && reading && live
@@ -1776,9 +1764,6 @@ function make(deps: PlaybackDeps) {
               // A run stops when the viewer skips or leaves, at any moment: what it has read
               // counts up to a little before the last subtitle that arrived.
               reading.reach(entry.from - interleave(probe));
-              // A replaced run may still finish reporting. Its history counts, but its
-              // buffered lines must stay fixed: the new run uses them to skip sent repeats.
-              if (session.live !== live) return;
               live.entries.push(entry);
               live.bytes += sizeOf(entry);
               // The oldest go first, and what is left is whole only from after them.
@@ -1788,21 +1773,13 @@ function make(deps: PlaybackDeps) {
                 live.from = Math.max(live.from, gone.from);
               }
               const feed = session.feed;
+              // An accepted report can finish after its run was replaced. Keep its history,
+              // but leave delivery to the current run so late lines aren't marked as sent.
               if (
                 session.live === live &&
                 feed?.track === live.track &&
                 live.since <= feed.after &&
-                entry.from > feed.after &&
-                (feed !== joined ||
-                  !replayed.some(
-                    (known) =>
-                      "text" in entry &&
-                      "text" in known &&
-                      known.from === entry.from &&
-                      known.at === entry.at &&
-                      known.until === entry.until &&
-                      known.text === entry.text,
-                  ))
+                entry.from > feed.after
               ) {
                 feed.send(entry, probe.origin);
               }
@@ -1924,8 +1901,8 @@ function make(deps: PlaybackDeps) {
 
     /**
      * A subtitle track from `start` on, for the player: a JSON line each, with times in title
-     * seconds (see `@mrstreamer/core/subtitles/feed`). The picture doesn't wait for it. First
-     * what the track holds before the position, as far back as what is on screen there depends
+     * seconds (see `@mrstreamer/core/subtitles/feed`). The picture doesn't wait for it. Packet
+     * tracks send what precedes the position, as far back as what is on screen there depends
      * on, then `ready`, then what the run from there reads, for as long as the player listens.
      * Independent text from the run goes on at once while its past is being recovered. Packet
      * decoders wait for `ready`, since their changes may depend on that past.
@@ -1992,20 +1969,48 @@ function make(deps: PlaybackDeps) {
         // Text may join an old, trimmed run before its replacement starts. Keep its requested
         // position so the replacement can deliver the missing lines too.
         feed.after = mine && !earlyText ? Math.max(after, mine.from) : after;
-        for (const entry of mine?.entries ?? []) if (entry.from > feed.after) send(entry, origin);
+        for (const entry of mine?.entries ?? [])
+          if (entry.from > feed.after) feed.send(entry, origin);
       };
+      // This feed may outlive several runs. Remember its live text, rather than the last
+      // run's buffer, so even an intervening cancelled run cannot replay a sent line.
+      const sent: Extract<SubtitleEntry, { readonly text: string }>[] = [];
+      let sentBytes = 0;
       const feed: Feed = {
         track,
         after: Number.POSITIVE_INFINITY,
-        send,
+        send: (entry, origin) => {
+          if ("text" in entry) {
+            if (
+              sent.some(
+                (known) =>
+                  known.from === entry.from &&
+                  known.at === entry.at &&
+                  known.until === entry.until &&
+                  known.text === entry.text,
+              )
+            )
+              return;
+            sent.push(entry);
+            sentBytes += sizeOf(entry);
+            while (sentBytes > LIVE_BYTES && sent.length > 1) {
+              sentBytes -= sizeOf(sent.shift()!);
+            }
+          }
+          send(entry, origin);
+        },
         close: () => {
           left.abort();
+          sent.length = 0;
+          sentBytes = 0;
           response.destroy();
         },
         changed: () => {
           // What the player has of the track is of a file that is gone, and so is the run's.
           left.abort();
           feed.after = Number.POSITIVE_INFINITY;
+          sent.length = 0;
+          sentBytes = 0;
           unavailable = "changed";
           write({ unavailable: "changed" });
         },

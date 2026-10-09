@@ -57,7 +57,8 @@ export interface TitleRun {
 
 /**
  * How a run's subtitles stand: still being read for what came before its start, or not to be had
- * there. Null once they show as the file has them, and with subtitles off.
+ * there. Null once that history is recovered, and with subtitles off. Independent text can
+ * already show while the status is loading or unavailable.
  */
 export type SubtitleStatus = "loading" | "unavailable" | null;
 
@@ -116,8 +117,8 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
   };
   /** The title second from which a track shows again after it had nothing for the start. */
   let showsFrom: number | null = null;
-  /** The feed's packets go through a decoder, whose pictures stay until a later packet ends them. */
-  let decoding = false;
+  /** Until the response identifies independent text, assume the feed needs packet history. */
+  let decoding = true;
   const { promise: started, resolve, reject } = Promise.withResolvers<void>();
   started.catch(() => {});
 
@@ -434,10 +435,12 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
   if (run.subtitle !== null) {
     subtitleWait = setTimeout(() => {
       if (subtitlesSignal.aborted || status !== "loading") return;
-      // A silent feed cannot leave the note loading forever. Stop only this track's read;
-      // the picture and sound keep their own connection and failure handling.
-      subtitlesOff.abort();
-      clearSubtitles(video);
+      // End the wait for history. Independent text can keep showing and arriving; packet
+      // decoders still need that history, so stop their read and clear their output.
+      if (decoding) {
+        subtitlesOff.abort();
+        clearSubtitles(video);
+      }
       showsFrom = null;
       say("unavailable");
     }, SUBTITLE_WAIT_MS);

@@ -2,10 +2,13 @@
 // CC on a playing movie: the lines due where the picture is show on the layer over it, stacked
 // while they overlap, and move at once when G or H shifts them. Off takes the subtitles off and
 // keeps them off, though the run that was showing them goes on sending. And a run with subtitles
-// asks for the picture at once: what was on screen at its position shows when the feed has it, the
-// player says the subtitles are loading until then, and that they can't be had when the feed says
-// so.
+// asks for the picture at once. Independent text shows while history loads; packets wait for
+// ready. Failed history keeps known text unless its file changed, and the loading deadline
+// leaves text and its feed active.
 import { ipc, SUBSCRIPTION } from "./support.ts";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { pesReader } from "@mrstreamer/core/subtitles/transport";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
@@ -27,6 +30,13 @@ const english: SubtitleTrack = {
   default: false,
 };
 const dutch: SubtitleTrack = { ...english, id: 4, language: "nl", label: "Nederlands" };
+const teletext: SubtitleTrack = { ...english, format: "teletext", page: 888 };
+const transport = pesReader();
+const packets = transport.push(
+  readFileSync(join(import.meta.dirname, "../fixtures/h264-subtitles.mpegts")),
+);
+const page = packets.find((packet) => packet.pid === 0x300)!.payload;
+const packetLine = `${JSON.stringify({ at: 0, data: Buffer.from(page).toString("base64") })}\n`;
 
 /** A line of the subtitle feed: text from `start` seconds for a minute, or until `end`. */
 const line = (start: number, text: string, end = start + 60) =>
@@ -36,7 +46,7 @@ const line = (start: number, text: string, end = start + 60) =>
  * Serves runs of the title, with subtitles the test sends while the run plays. The feed is ready
  * at once unless the test holds it back.
  */
-function serveRuns(ready = true) {
+function serveRuns(ready = true, codec: string | null = null) {
   let send: (text: string) => void = () => {};
   /** The pictures asked for, by their query. */
   const pictures: string[] = [];
@@ -54,6 +64,7 @@ function serveRuns(ready = true) {
             if (ready) send('{"ready":true}\n');
           },
         }),
+        { headers: codec ? { "x-codec": codec } : {} },
       );
     }
     // The picture never comes, which these tests don't need.
@@ -63,8 +74,11 @@ function serveRuns(ready = true) {
   return { send: (text: string) => send(text), pictures, requests };
 }
 
-/** Opens the movie at `from` seconds, with English and Dutch subtitles to choose. */
-async function opened(from: number): Promise<void> {
+/** Opens the movie at `from` seconds, with the given subtitle tracks to choose. */
+async function opened(
+  from: number,
+  tracks: readonly SubtitleTrack[] = [english, dutch],
+): Promise<void> {
   ipc.reset();
   const answer = ipc.hold("playback.openTitle");
   void titlePlayer.open(
@@ -83,7 +97,7 @@ async function opened(from: number): Promise<void> {
     url: "http://127.0.0.1/title/s1.mp4",
     duration: 600,
     audio: [],
-    subtitles: [english, dutch],
+    subtitles: tracks,
   });
   await settle();
   // No picture comes here, so nothing moves the element's clock: it is put where the run starts.
@@ -226,21 +240,61 @@ describe("subtitles on a playing movie", () => {
     expect(note()).toBe("Subtitles 0.1 s earlier");
   });
 
-  it("ends the loading note when a subtitle feed stays silent, while the picture remains independent", async () => {
-    const runs = serveRuns(false);
-    await opened(0);
-    const note = await watching();
-    vi.useFakeTimers();
-    await act(async () => titlePlayer.setSubtitle(english));
-    await act(async () => vi.advanceTimersByTimeAsync(50));
-    expect(note()).toBe("Subtitles loading");
-    await act(async () => vi.advanceTimersByTimeAsync(35_000));
-    expect(note()).toBe("Subtitles unavailable");
-    expect(runs.pictures).toContain("?start=0.000&subtitle=3");
-    expect(runs.requests.filter((request) => request.subtitles).at(-1)?.signal?.aborted).toBe(true);
-    expect(runs.requests.filter((request) => !request.subtitles).at(-1)?.signal?.aborted).toBe(
-      false,
-    );
+  it.each([
+    {
+      kind: "text",
+      codec: null,
+      track: english,
+      sent: line(0, "We sail at first light."),
+      expected: ["We sail at first light."],
+    },
+    { kind: "packets", codec: "teletext", track: teletext, sent: packetLine, expected: [] },
+  ])(
+    "ends the loading wait for $kind while preserving its feed policy",
+    async ({ codec, track, sent, expected }) => {
+      const runs = serveRuns(false, codec);
+      await opened(0, [track, dutch]);
+      const note = await watching();
+      vi.useFakeTimers();
+      await act(async () => titlePlayer.setSubtitle(track));
+      runs.send(sent);
+      await act(async () => vi.advanceTimersByTimeAsync(50));
+      expect(note()).toBe("Subtitles loading");
+      expect(shown()).toEqual(expected);
+      await act(async () => vi.advanceTimersByTimeAsync(35_000));
+      expect(note()).toBe("Subtitles unavailable");
+      expect(shown()).toEqual(expected);
+      expect(runs.pictures).toContain("?start=0.000&subtitle=3");
+      expect(runs.requests.filter((request) => request.subtitles).at(-1)?.signal?.aborted).toBe(
+        codec !== null,
+      );
+      expect(runs.requests.filter((request) => !request.subtitles).at(-1)?.signal?.aborted).toBe(
+        false,
+      );
+      if (codec === null) {
+        runs.send(line(0, "The tide waits for no one."));
+        await act(async () => vi.advanceTimersByTimeAsync(50));
+        expect(shown()).toEqual(["The tide waits for no one.", "We sail at first light."]);
+        runs.send('{"ready":true}\n');
+        await act(async () => vi.advanceTimersByTimeAsync(50));
+        expect(note()).toBeNull();
+      }
+    },
+  );
+
+  it.each(["waiting", "ready"])("holds packet output until ready, %s", async (state) => {
+    const runs = serveRuns(false, "teletext");
+    await opened(0, [teletext, dutch]);
+    await act(async () => titlePlayer.setSubtitle(teletext));
+    await act(settle);
+    runs.send(packetLine);
+    await act(settle);
+    expect(shown()).toEqual([]);
+    if (state === "ready") {
+      runs.send('{"ready":true}\n');
+      await act(settle);
+      expect(shown()).toEqual(["TELETEKST 888"]);
+    }
   });
 
   it.each(["ready", "off"])("cancels the loading deadline once the track is %s", async (state) => {
@@ -305,21 +359,21 @@ describe("subtitles on a playing movie", () => {
     expect(note()).toBeNull();
   });
 
-  it("keeps known text when recovering older lines reaches its budget", async () => {
-    const runs = serveRuns(false);
-    await opened(137);
-    await act(async () => titlePlayer.setSubtitle(english));
-    await act(settle);
-    runs.send(line(137, "The tide waits for no one."));
-    await act(settle);
-    expect(shown()).toEqual(["The tide waits for no one."]);
-    runs.send('{"unavailable":"limit"}\n');
-    await act(settle);
-    expect(shown()).toEqual(["The tide waits for no one."]);
-    runs.send('{"unavailable":"changed"}\n');
-    await act(settle);
-    expect(shown()).toEqual([]);
-  });
+  it.each(["limit", "unreadable", "network", "changed"])(
+    "handles %s while text is already showing",
+    async (reason) => {
+      const runs = serveRuns(false);
+      await opened(137);
+      await act(async () => titlePlayer.setSubtitle(english));
+      await act(settle);
+      runs.send(line(137, "The tide waits for no one."));
+      await act(settle);
+      expect(shown()).toEqual(["The tide waits for no one."]);
+      runs.send(`${JSON.stringify({ unavailable: reason })}\n`);
+      await act(settle);
+      expect(shown()).toEqual(reason === "changed" ? [] : ["The tide waits for no one."]);
+    },
+  );
 
   it("say when what was on screen can't be had, and show again from what comes next", async () => {
     const runs = serveRuns(false);
