@@ -1153,6 +1153,8 @@ export const de: Translation = {
   "Downloads can't be opened.": "Downloads können nicht geöffnet werden.",
   "This download stopped.": "Dieser Download wurde abgebrochen.",
   "That download is no longer here.": "Dieser Download ist nicht mehr da.",
+  "A download still holds the provider's connection.":
+    "Ein Download belegt die Verbindung zum Anbieter noch.",
   // The close button on a playback error.
   "Close message": "Meldung schließen",
 };

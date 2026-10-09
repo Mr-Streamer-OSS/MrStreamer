@@ -544,10 +544,12 @@ function make(options: LibraryOptions) {
   });
 }
 
-const switched = Effect.fail(
-  new Failed({
-    error: { kind: "unexpected", detail: t("The subscription changed while loading channels.") },
-  }),
+// Made when it fails, so it says so in the interface language of the moment.
+const switched = Effect.failSync(
+  () =>
+    new Failed({
+      error: { kind: "unexpected", detail: t("The subscription changed while loading channels.") },
+    }),
 );
 
 function sameMembers(a: readonly IndexedCatalogue[], b: readonly IndexedCatalogue[]): boolean {

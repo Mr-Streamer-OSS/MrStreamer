@@ -876,7 +876,7 @@ function make(deps: PlaybackDeps) {
           clearTimeout(timer);
           return given;
         }),
-        (given) => (given ? Effect.void : Effect.fail(stillLent)),
+        (given) => (given ? Effect.void : Effect.fail(stillLent())),
       );
     /** A session is open: what plays, and so `busy`, changed. */
     const register = (session: Session) => {
@@ -892,7 +892,7 @@ function make(deps: PlaybackDeps) {
     /** Fails once the viewer asked for something else since `turn` began. */
     const whileAsked = (turn: number | undefined) =>
       Effect.suspend(() =>
-        turn === undefined || turn === turns ? Effect.void : Effect.fail(superseded),
+        turn === undefined || turn === turns ? Effect.void : Effect.fail(superseded()),
       );
     /**
      * Runs an open in its turn at the provider, unless the viewer asked for something else since
@@ -4618,15 +4618,20 @@ async function readStart(answer: Response, address: string): Promise<Started | n
   };
 }
 
-/** Something else was asked for since: this open gave way before it began. */
-export const superseded = new Failed({
-  error: { kind: "unexpected", detail: t("Something else played in the meantime.") },
-});
+/**
+ * Something else was asked for since: this open gave way before it began. Made when it fails, as
+ * the next one, in the interface language of the moment.
+ */
+export const superseded = () =>
+  new Failed({
+    error: { kind: "unexpected", detail: t("Something else played in the meantime.") },
+  });
 
 /** A download still holds the provider's connection: this open asks the provider nothing. */
-const stillLent = new Failed({
-  error: {
-    kind: "stream",
-    failure: { kind: "network", detail: "A download still holds the provider's connection." },
-  },
-});
+const stillLent = () =>
+  new Failed({
+    error: {
+      kind: "stream",
+      failure: { kind: "network", detail: t("A download still holds the provider's connection.") },
+    },
+  });

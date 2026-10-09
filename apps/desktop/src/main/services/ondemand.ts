@@ -1124,10 +1124,12 @@ function make(deps: OnDemandDeps) {
   });
 }
 
-const switched = Effect.fail(
-  new Failed({
-    error: { kind: "unexpected", detail: t("The subscription changed while loading titles.") },
-  }),
+// Made when it fails, so it says so in the interface language of the moment.
+const switched = Effect.failSync(
+  () =>
+    new Failed({
+      error: { kind: "unexpected", detail: t("The subscription changed while loading titles.") },
+    }),
 );
 
 /** Keeps `value` as the most recently used, dropping the least recently used beyond `limit`. */

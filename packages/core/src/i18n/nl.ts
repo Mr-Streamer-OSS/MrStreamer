@@ -1148,6 +1148,8 @@ export const nl: Translation = {
   "Downloads can't be opened.": "Downloads kunnen niet worden geopend.",
   "This download stopped.": "Deze download is gestopt.",
   "That download is no longer here.": "Die download is er niet meer.",
+  "A download still holds the provider's connection.":
+    "Een download gebruikt de verbinding met de provider nog.",
   // The close button on a playback error.
   "Close message": "Melding sluiten",
 };

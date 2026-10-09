@@ -1212,6 +1212,8 @@ export const fr: Translation = {
   "Downloads can't be opened.": "Impossible d'ouvrir les téléchargements.",
   "This download stopped.": "Ce téléchargement s'est arrêté.",
   "That download is no longer here.": "Ce téléchargement n'est plus là.",
+  "A download still holds the provider's connection.":
+    "Un téléchargement occupe encore la connexion au fournisseur.",
   // The close button on a playback error.
   "Close message": "Fermer le message",
 };
