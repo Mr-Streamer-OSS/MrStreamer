@@ -1201,6 +1201,121 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
     await dispose();
   });
 
+  it("shows the lines on screen at a position from what a run read, asking a provider that knows no byte ranges for nothing", async () => {
+    const { open, provider, playback, dispose } = await titles(
+      {},
+      { wholeFiles: true, slotReleaseMs: 0 },
+    );
+    const session = await open("TEST | Long subtitles");
+    const counts = () => ({ requests: provider.fileRequests(), bytes: provider.fileBytes() });
+    // A run from the start reads every line of the track, to its last.
+    const first = await subtitles(session.url, 0, 4);
+    await first.run();
+    await vi.waitFor(() => expect(linesAt(first.lines, 142)).toEqual(["Apres"]));
+    first.leave();
+    const read = counts();
+
+    const long = await subtitles(session.url, 137, 4);
+    const both = await subtitles(session.url, 131, 4);
+
+    expect(linesAt(long.before.lines, 137)).toEqual(["Longue ligne"]);
+    expect(linesAt(both.before.lines, 131)).toEqual(["Longue ligne", "En meme temps"]);
+    expect(counts()).toEqual(read);
+    expect(await playback.failure(session.sessionId)).toBeNull();
+    expect(provider.mostFilesAtOnce()).toBe(1);
+    await dispose();
+  });
+
+  it("says a provider that knows no byte ranges can't give the lines before a position no run read from the start, and asks it for nothing", async () => {
+    const { open, provider, playback, dispose } = await titles(
+      {},
+      { wholeFiles: true, slotReleaseMs: 0 },
+    );
+    const session = await open("TEST | Long subtitles");
+    const counts = () => ({ requests: provider.fileRequests(), bytes: provider.fileBytes() });
+    const opened = counts();
+
+    const cold = await subtitles(session.url, 137, 4);
+    expect(cold.before.unavailable).toBe("unreadable");
+    expect(counts()).toEqual(opened);
+    // A run from the position reads the lines from there on, which leaves out any that began
+    // before it.
+    const run = await cold.run();
+    expect(framesOf(run.body)).toBeGreaterThan(0);
+    await vi.waitFor(() => expect(linesAt(cold.lines, 142)).toEqual(["Apres"]));
+    cold.leave();
+    const read = counts();
+    const later = await subtitles(session.url, 142, 4);
+
+    expect(later.before.unavailable).toBe("unreadable");
+    expect(later.before.lines).toEqual([]);
+    expect(counts()).toEqual(read);
+    expect(await playback.failure(session.sessionId)).toBeNull();
+    expect(provider.mostFilesAtOnce()).toBe(1);
+    await dispose();
+  });
+
+  it("forgets what a run read once a provider that knows no byte ranges puts another file in its place", async () => {
+    const { open, provider, playback, runtime, dispose } = await titles(
+      {},
+      { wholeFiles: true, slotReleaseMs: 0 },
+    );
+    const session = await open("TEST | Long subtitles");
+    const replaced = await collect(runtime, playback.fileReplaced);
+    const counts = () => ({ requests: provider.fileRequests(), bytes: provider.fileBytes() });
+    const first = await subtitles(session.url, 0, 4);
+    await first.run();
+    await vi.waitFor(() => expect(linesAt(first.lines, 142)).toEqual(["Apres"]));
+    first.leave();
+
+    // The same file but for one line of text: only its ETag tells the two apart.
+    const corrected = Buffer.from(fixture("title-long-subs.mkv"));
+    corrected.write("Ligne longue", corrected.indexOf("Longue ligne"));
+    const movie = provider.titles.movies.find((each) => each.name.startsWith("TEST | Long sub"));
+    provider.replaceMovieFile(movie?.id ?? 0, corrected);
+    // The picture's next answer shows the other file.
+    await play(`${session.url}?start=0`);
+    await vi.waitFor(() => expect(replaced).toContain(session.sessionId));
+    const told = counts();
+    const stale = await subtitles(session.url, 137, 4);
+
+    expect(stale.before.unavailable).toBe("unreadable");
+    expect(stale.before.lines).toEqual([]);
+    expect(counts()).toEqual(told);
+    stale.leave();
+    // A run of the new file from its start has its lines shown.
+    const again = await subtitles(session.url, 0, 4);
+    await again.run();
+    await vi.waitFor(() => expect(linesAt(again.lines, 142)).toEqual(["Apres"]));
+    again.leave();
+    const fresh = await subtitles(session.url, 137, 4);
+    expect(linesAt(fresh.before.lines, 137)).toEqual(["Ligne longue"]);
+    expect(provider.mostFilesAtOnce()).toBe(1);
+    await dispose();
+  });
+
+  it("uses nothing a run read from a provider that knows no byte ranges when answers carry only the time they were sent", async () => {
+    const { open, provider, dispose } = await titles(
+      {},
+      { wholeFiles: true, fileDates: true, slotReleaseMs: 0 },
+    );
+    const session = await open("TEST | Long subtitles");
+    const counts = () => ({ requests: provider.fileRequests(), bytes: provider.fileBytes() });
+    const first = await subtitles(session.url, 0, 4);
+    await first.run();
+    await vi.waitFor(() => expect(linesAt(first.lines, 142)).toEqual(["Apres"]));
+    first.leave();
+    const read = counts();
+
+    const feed = await subtitles(session.url, 137, 4);
+
+    expect(feed.before.unavailable).toBe("unreadable");
+    expect(feed.before.lines).toEqual([]);
+    expect(counts()).toEqual(read);
+    expect(provider.mostFilesAtOnce()).toBe(1);
+    await dispose();
+  });
+
   it("plays a large file whole from a provider that knows no byte ranges", async () => {
     // 10 MB of film, which ffprobe leaves in the middle of: the provider answers the run's
     // request with all of it again.

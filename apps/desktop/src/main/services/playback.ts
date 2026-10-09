@@ -496,7 +496,10 @@ interface FileKept {
   readonly histories: Map<number, SubtitleHistory>;
   /** What the file's descriptions say, once read; Matroska only. */
   layout: Layout | null;
-  /** How many of the provider's servers had answered for the file when this was last read for. */
+  /**
+   * How many of the provider's servers had answered for the file when this was last read for, or
+   * when the file's first answer came (see `observe`). Zero before that answer.
+   */
   servers: number;
 }
 
@@ -1322,6 +1325,9 @@ function make(deps: PlaybackDeps) {
         session.feed?.changed();
         PubSub.publishUnsafe(replaced, session.id);
       }
+      // Nothing is kept of a file before its first answer: what runs and recovery keep from here
+      // on is of the servers heard so far, so a run's subtitles count as kept from them too.
+      if (session.kept.servers === 0) session.kept.servers = session.identity.servers;
       // A receiver holds a playlist of the file as it was read when the title opened: its length,
       // its tracks and where its segments start. Of another file none of that holds, whether the
       // answers tell it by its size or, at the same size, by the mark of the server that sent
@@ -2122,7 +2128,6 @@ function make(deps: PlaybackDeps) {
       if (probe.container !== "matroska" || track.codec === null) {
         throw new Unavailable("unreadable");
       }
-      if (session.identity.ranges === false) throw new Unavailable("unreadable");
       const at = origin + wanted.start;
       const starts = output.kind === "packets" ? freshStart(output.codec, wanted.page) : null;
       const need: Need = {
@@ -2159,6 +2164,9 @@ function make(deps: PlaybackDeps) {
       const history = historyOf(kept, track.id);
       const ready = replayFor(history, need);
       if (ready) return { entries: ready, upTo: need.upTo, origin: probe.origin };
+      // A provider that knows no byte ranges can't send the parts the steps below ask for: only
+      // what the runs kept of its file serves, and nothing is asked of it.
+      if (session.identity.ranges === false) throw new Unavailable("unreadable");
       const read = fileReader(session, kept, attempt);
       kept.layout ??= await readLayout(read);
       still();

@@ -501,6 +501,45 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
     expect(provider.mostFilesAtOnce()).toBe(1);
   });
 
+  it("keeps the line on screen where the receiver skips to from what a run read, on a provider that knows no byte ranges", async () => {
+    const { provider, playback, open, failed } = await receiver(
+      {},
+      { wholeFiles: true, slotReleaseMs: 0 },
+    );
+    const opened = await open(MATROSKA, "title-receiver.mkv");
+    const english = opened.subtitles.find((track) => track.language === "en");
+    const loaded = await playback.loadReceiverTitle(opened.sessionId, {
+      audio: null,
+      subtitle: english!.id,
+    });
+    const main = await playlist(loaded!.url);
+    const video = await playlist(main.stream!);
+    const subtitles = await playlist(main.subtitles!);
+    // Without byte ranges there is no index to cut the picture at its keyframes: the segments
+    // are even, and one starts at 32 s.
+    const at = video.segments.findIndex((each) => Math.abs(each.at - 32) < 0.01);
+    /** Skips to the segment at 32 s, and the next as a receiver fills its buffer. */
+    const skip = () =>
+      Promise.all([
+        segment(video.segments[at]!.url),
+        segment(video.segments[at + 1]!.url).then(() => cues(subtitles.segments[at]!.url)),
+      ]);
+
+    // Nothing has read the file from its start: "Across thirty", from 29 s, can't be had.
+    const [cold, without] = await skip();
+    expect(cold.from).toBeCloseTo(32, 2);
+    expect(without.lines).toEqual([]);
+    // Played from the start to the end, which reads every line.
+    for (const each of video.segments) expect((await segment(each.url)).status).toBe(200);
+    const [made, lines] = await skip();
+
+    expect(made.from).toBeCloseTo(32, 2);
+    expect(made.startsOnKeyframe).toBe(true);
+    expect(lines.lines).toEqual([[29, 33, "Across thirty"]]);
+    expect(failed).toEqual([]);
+    expect(provider.mostFilesAtOnce()).toBe(1);
+  }, 30_000);
+
   it("answers for a segment's subtitles in time while the line from before a skip is still being read", async () => {
     const { provider, playback, open } = await receiver({ receiver: { cuesMs: 150 } });
     const opened = await open(MATROSKA, "title-receiver.mkv");
