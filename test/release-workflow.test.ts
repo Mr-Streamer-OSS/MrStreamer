@@ -411,12 +411,26 @@ describe("what each job of a release waits for", () => {
   });
 
   it("starts the Store package once the Windows installer is built, whatever the other platforms do", () => {
-    expect([msix?.needs].flat().toSorted()).toEqual(["bundle", "package-windows"]);
+    expect([msix?.needs].flat()).toEqual(["package-windows"]);
     expect(unix?.strategy?.matrix?.include?.map((leg) => leg["target"])).toEqual([
       "mac-arm64",
       "linux-x64",
     ]);
     expect(uploads("package-windows")).toEqual(["release-win-x64-${{ inputs.version }}"]);
+  });
+
+  it("gives the Store package the JS bundle the Windows installer has already taken", () => {
+    const downloads = (name: string) =>
+      (jobs[name]?.steps ?? [])
+        .filter((step) => step.uses?.startsWith("actions/download-artifact@"))
+        .map((step) => String(step.with?.["name"]));
+
+    expect(uploads("bundle")).toEqual(["js-bundle-${{ inputs.version }}"]);
+    // The Windows job can't succeed without the bundle, so the Store package, which waits for
+    // that job, finds it as well.
+    expect([windows?.needs].flat()).toEqual(["bundle"]);
+    expect(downloads("package-windows")).toEqual(uploads("bundle"));
+    expect(downloads("msix")).toEqual(uploads("bundle"));
   });
 
   it("hands the Store package the Windows ffmpeg under the key that job saved it with", () => {

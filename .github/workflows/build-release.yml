@@ -371,10 +371,11 @@ jobs:
   # stable releases go to the Store. It waits for the Windows installer and no other platform, and
   # publishing doesn't wait for it, so it can't hold up a release. Its file stays a workflow
   # artifact, apart from the release-* artifacts publish attaches: never on the release or in the
-  # update feed. The store job below sends a stable release's to the Store.
+  # update feed. The store job below sends a stable release's to the Store. The JS bundle it takes
+  # is there once the Windows installer is built, which took it too.
   msix:
     name: Package Microsoft Store MSIX
-    needs: [bundle, package-windows]
+    needs: package-windows
     if: github.event_name == 'pull_request' || inputs.channel == 'stable'
     runs-on: windows-2025
     timeout-minutes: 45
