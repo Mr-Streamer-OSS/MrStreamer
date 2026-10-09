@@ -556,21 +556,28 @@ describe.skipIf(!hasTools)("playback through the system's list of receivers", ()
     const { helper, playback, output, provider, channel, state } = await casting();
     const local = await playback.open(channel, LOCAL);
     const watching = new AbortController();
-    void fetch(local.url, { signal: watching.signal }).catch(() => {});
-    await eventually(() => expect(provider.activeStreams()).toBe(1));
+    const response = await fetch(local.url, { signal: watching.signal });
+    expect(response.status).toBe(200);
+    // Keep reading as the viewer does, so collection of an abandoned response cannot stop it.
+    const reading = response.body?.pipeTo(new WritableStream()).catch(() => {});
+    try {
+      await eventually(() => expect(provider.activeStreams()).toBe(1));
 
-    const picking = output.pick(at(ANCHOR));
-    expect(await helper.took("showPicker")).toMatchObject({ anchor: ANCHOR });
-    await eventually(async () =>
-      expect(await state()).toEqual({ kind: "connecting", protocol: "airplay", receiver: null }),
-    );
-    helper.dismiss();
+      const picking = output.pick(at(ANCHOR));
+      expect(await helper.took("showPicker")).toMatchObject({ anchor: ANCHOR });
+      await eventually(async () =>
+        expect(await state()).toEqual({ kind: "connecting", protocol: "airplay", receiver: null }),
+      );
+      helper.dismiss();
 
-    expect((await picking).output).toEqual({ kind: "local" });
-    expect(helper.commands.filter((command) => command.cmd === "load")).toHaveLength(0);
-    expect(provider.activeStreams()).toBe(1);
-    expect(provider.streamRequests()).toBe(1);
-    watching.abort();
+      expect((await picking).output).toEqual({ kind: "local" });
+      expect(helper.commands.filter((command) => command.cmd === "load")).toHaveLength(0);
+      expect(provider.activeStreams()).toBe(1);
+      expect(provider.streamRequests()).toBe(1);
+    } finally {
+      watching.abort();
+      await reading;
+    }
   });
 
   it("plays on the receiver the viewer picks, and comes back when it lets go", async () => {
