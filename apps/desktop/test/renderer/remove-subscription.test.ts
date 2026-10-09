@@ -8,6 +8,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
+import type { Download } from "@mrstreamer/contracts/downloads";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { SubscriptionSummary } from "@mrstreamer/contracts/subscription";
 import { useUi } from "../../src/renderer/src/app/ui-store.ts";
@@ -70,8 +71,14 @@ function reads() {
 }
 
 /** The section with `saved` subscriptions, and the question Remove asks about `removed`. */
-async function removing(saved: readonly SubscriptionSummary[], removed: SubscriptionSummary) {
+async function removing(
+  saved: readonly SubscriptionSummary[],
+  removed: SubscriptionSummary,
+  downloads: readonly Download[] = [],
+) {
   ipc.reset();
+  // The question reads the downloads, for whether any end with the subscription.
+  ipc.always("downloads.list", { items: downloads, bytes: 0, free: null, ended: 0 });
   const opened = reads();
   const client = new QueryClient();
   client.setQueryData(["subscriptions"], saved);
@@ -98,6 +105,33 @@ async function removing(saved: readonly SubscriptionSummary[], removed: Subscrip
 }
 
 describe("removing a subscription", () => {
+  it("says its unfinished downloads end and its copies stay", async () => {
+    const of = (id: string, status: Download["status"], subscriptionId: string): Download => ({
+      id,
+      title: { kind: "movie", id },
+      subscription: { id: subscriptionId, name: "" },
+      name: id,
+      episodeName: null,
+      year: null,
+      duration: null,
+      originalLanguage: null,
+      posterUrl: null,
+      wideUrl: null,
+      size: null,
+      status,
+      progress: null,
+    });
+    const { container } = await removing([northline, holiday], holiday, [
+      of("queued", { kind: "queued" }, holiday.id),
+      of("waiting", { kind: "waiting" }, holiday.id),
+      of("copy", { kind: "complete" }, holiday.id),
+      of("other", { kind: "queued" }, northline.id),
+    ]);
+    expect(container.textContent).toContain(
+      "Its 2 unfinished downloads end. Downloaded copies stay.",
+    );
+  });
+
   it.each([
     { ticked: false, eraseViewing: false },
     { ticked: true, eraseViewing: true },
