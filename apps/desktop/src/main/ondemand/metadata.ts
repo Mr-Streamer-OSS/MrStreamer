@@ -35,7 +35,8 @@ const GIVE_UP_AFTER = 3 * PARALLEL;
  * How far apart the UI is told of metadata. Every notice of new content has each open list read
  * again from the whole library, a second of the worker's time for a large one, so these start
  * CONTENT_FIRST_MS apart and double with each one sent during a run, up to CONTENT_LAST_MS. A
- * notice of progress only, which costs nothing, keeps PROGRESS_EVERY_MS.
+ * notice of progress only computes the status and reads no list again, so it keeps
+ * PROGRESS_EVERY_MS.
  */
 const PROGRESS_EVERY_MS = 3000;
 const CONTENT_FIRST_MS = 3000;
@@ -115,6 +116,12 @@ export function metadataStore(deps: MetadataDeps) {
     (found) => {
       if (!found) return;
       file = found;
+      // Lists built before this show the provider's names and no genres, and nothing later
+      // would say so when the cache needs no fetching: that is content, told once.
+      if (shows(found)) {
+        untold = true;
+        notify(true);
+      }
       // What is past TMDB's limit goes, key or no key.
       if (Object.values(file.entries).some((entry) => !fresh(entry.at, EXPIRE_MS))) {
         dirty = true;
@@ -148,6 +155,12 @@ export function metadataStore(deps: MetadataDeps) {
 
   const keyOf = (kind: TmdbKind, id: string) => `${kind}:${id}`;
   const fresh = (at: number, keep: number) => now() - at < keep;
+  const servicesShown = (kept: MetadataFile["services"] | undefined) =>
+    kept?.region === deps.region && fresh(kept.at, EXPIRE_MS);
+  /** Whether lists show anything of `kept`: a title TMDB knows or the region's services. */
+  const shows = (kept: MetadataFile) =>
+    servicesShown(kept.services) ||
+    Object.values(kept.entries).some((entry) => !entry.missing && fresh(entry.at, EXPIRE_MS));
   const current = (kind: TmdbKind, id: string) => {
     const entry = file.entries[keyOf(kind, id)];
     return entry && fresh(entry.at, EXPIRE_MS) ? entry : undefined;
@@ -161,15 +174,20 @@ export function metadataStore(deps: MetadataDeps) {
   /**
    * Records a change and tells the UI when its turn comes. `content` is what lists show, `status`
    * is only the status, and `same` is a refetched entry that changed in nothing: saved, and told
-   * to nobody. A forced notice goes at once and carries any content not yet told.
+   * to nobody unless content is waiting. Every arrival checks whether content not yet told is
+   * due, so a title that changed is not held back by the unchanged answers after it. A forced
+   * notice is not held to any spacing and carries any content not yet told. While TMDB has
+   * everyone paused (a busy answer) no answer arrives, and waiting content waits for the next
+   * one: bounded by the pause, and a run that gives up ends with a forced notice.
    */
   function changed(change: "content" | "status" | "same", force = false): void {
     dirty = true;
-    if (change === "same") return;
     if (change === "content") untold = true;
     const at = now();
     const content = untold && (force || at - lastContent > contentGap);
-    if (content || force || at - lastNotice > PROGRESS_EVERY_MS) notify(content);
+    if (content || force || (change !== "same" && at - lastNotice > PROGRESS_EVERY_MS)) {
+      notify(content);
+    }
   }
 
   function notify(content: boolean): void {
@@ -273,16 +291,19 @@ export function metadataStore(deps: MetadataDeps) {
       const key = keyOf(title.kind, title.tmdbId);
       const found = await ask(() => client.details(title.kind, title.tmdbId, asked));
       if (found === null) return;
-      const before = current(title.kind, title.tmdbId);
-      const wasAnswered = answered(title.kind, title.tmdbId);
       /** What the entry's arrival changes: only its time, only the status, or what lists show. */
       const arrived = (entry: Entry): "content" | "status" | "same" => {
+        const kept = file.entries[key];
+        // Lists saw the kept entry only while it hadn't expired.
+        const shown = current(title.kind, title.tmdbId);
+        const counted = answered(title.kind, title.tmdbId);
         file.entries[key] = entry;
-        // A wrong "same" would leave lists stale, so anything but equal is content.
-        if (before && isDeepStrictEqual({ ...before, at: 0 }, { ...entry, at: 0 })) {
-          return wasAnswered ? "same" : "status";
+        // A wrong "same" would leave lists stale, so anything but equal is content, and an entry
+        // that had expired is always content: lists built before and after it differ.
+        if (shown && isDeepStrictEqual({ ...shown, at: 0 }, { ...entry, at: 0 })) {
+          return counted ? "same" : "status";
         }
-        return entry.missing && !before ? "status" : "content";
+        return entry.missing && (!kept || kept.missing) ? "status" : "content";
       };
       if (found === "missing") {
         changed(arrived({ at: now(), missing: true }));
@@ -433,7 +454,7 @@ export function metadataStore(deps: MetadataDeps) {
 
     /** The streaming services of the region, each with what it streams. */
     services(kind: TmdbKind): readonly ServiceTitles[] {
-      if (file.services?.region !== deps.region || !fresh(file.services.at, EXPIRE_MS)) return [];
+      if (!file.services || !servicesShown(file.services)) return [];
       return file.services[kind].map(({ ids, ...service }) => ({ ...service, ids: new Set(ids) }));
     },
 

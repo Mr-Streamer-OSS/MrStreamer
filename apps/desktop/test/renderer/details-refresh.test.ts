@@ -3,8 +3,8 @@
 // as TMDB's metadata arrives, opening the details again reads them again. TMDB's progress alone
 // updates the status and reads no list again.
 import { ipc, SUBSCRIPTION } from "./support.ts";
-import { QueryClient } from "@tanstack/react-query";
-import { describe, expect, it } from "vitest";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
+import { describe, expect, it, vi } from "vitest";
 import type { MovieDetails } from "@mrstreamer/contracts/ondemand";
 import { queries, syncOnDemand } from "../../src/renderer/src/lib/queries.ts";
 
@@ -63,21 +63,47 @@ describe("a title's details", () => {
 });
 
 describe("TMDB's progress", () => {
-  it("updates the status without reading the lists again", async () => {
+  const metadata = { known: 5, wanted: 10, refused: false, fetching: true };
+  const lists = [
+    { subscriptionId: SUBSCRIPTION, movies: 1, series: 0, fetchedAt: 1, failure: null },
+  ];
+  const statusKey = queries.onDemandStatus().queryKey;
+
+  it("updates only the progress of the status, and reads no list again", async () => {
+    ipc.reset();
+    ipc.always("ondemand.collection", { name: "All", total: 0, titles: [] });
+    const client = new QueryClient();
+    const stop = syncOnDemand(client);
+    // An open list: it is observed, so anything that invalidated it would read it again.
+    const list = queries.collection("movie", "all", undefined, 0, 50);
+    const unsubscribe = new QueryObserver(client, list).subscribe(() => {});
+    await vi.waitFor(() => expect(client.getQueryData(list.queryKey)).toBeDefined());
+    // A status that is newer than the progress: its lists stand.
+    client.setQueryData(statusKey, { lists, metadata: null });
+
+    ipc.emit("ondemand.progress", metadata);
+    expect(client.getQueryData(statusKey)).toEqual({ lists, metadata });
+
+    const later = { ...metadata, known: 6 };
+    ipc.emit("ondemand.progress", later);
+    expect(client.getQueryData(statusKey)).toEqual({ lists, metadata: later });
+    await new Promise((done) => setTimeout(done, 20));
+    expect(ipc.argsOf("ondemand.collection")).toHaveLength(1);
+    expect(ipc.methods()).not.toContain("ondemand.status");
+
+    // New content, by contrast, reads the open list again.
+    ipc.emit("ondemand.updated", { lists, metadata });
+    await vi.waitFor(() => expect(ipc.argsOf("ondemand.collection")).toHaveLength(2));
+    unsubscribe();
+    stop();
+  });
+
+  it("leaves a status not yet read to be read, with its progress", () => {
     ipc.reset();
     const client = new QueryClient();
     const stop = syncOnDemand(client);
-    const listKey = ["ondemand", "collection", "movies"];
-    client.setQueryData(listKey, { titles: [] });
-    const metadata = { known: 5, wanted: 10, refused: false, fetching: true };
-    ipc.emit("ondemand.progress", { lists: [], metadata });
-
-    expect(client.getQueryData(queries.onDemandStatus().queryKey)).toEqual({ lists: [], metadata });
-    expect(client.getQueryState(listKey)?.isInvalidated).toBe(false);
-    expect(client.getQueryState(queries.onDemandStatus().queryKey)?.isInvalidated).toBe(false);
-
-    ipc.emit("ondemand.updated", { lists: [], metadata });
-    expect(client.getQueryState(listKey)?.isInvalidated).toBe(true);
+    ipc.emit("ondemand.progress", metadata);
+    expect(client.getQueryData(statusKey)).toBeUndefined();
     stop();
   });
 });

@@ -1,11 +1,14 @@
+import { EventEmitter } from "node:events";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
+import type { Worker } from "node:worker_threads";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Title } from "@mrstreamer/contracts/ondemand";
 import { ownedId, ownedKey } from "@mrstreamer/contracts/subscription";
 import { tmdb as tmdbClient } from "@mrstreamer/core/metadata/tmdb";
 import { metadataStore, type Wanted } from "../src/main/ondemand/metadata.ts";
+import type { WorkerEvent, WorkerRequest } from "../src/main/ondemand/protocol.ts";
 import { OnDemand } from "../src/main/services/ondemand.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { mainLayer } from "../src/main/runtime.ts";
@@ -588,7 +591,7 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
       readonly popularity?: (id: number) => number;
     } = {},
   ) {
-    const clock = { time: 1000 * day, lastAnswer: 0 };
+    const clock = { time: 1000 * day, lastAnswer: 0, requests: 0 };
     const client = tmdbClient({
       key: "test-key",
       api: "http://tmdb.test/3",
@@ -600,6 +603,7 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
         const language = url.searchParams.get("language") ?? "en";
         clock.time += 1000;
         clock.lastAnswer = clock.time;
+        clock.requests++;
         const status = options.status?.(id) ?? 200;
         if (status !== 200) return new Response("{}", { status });
         return Response.json({
@@ -628,6 +632,22 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
   const settled = (store: ReturnType<typeof metadataStore>) =>
     vi.waitFor(() => expect(store.status().fetching).toBe(false), { timeout: 20_000 });
 
+  /** The file a store leaves after asking about `count` titles of `tmdb`, which answers `status`. */
+  async function kept(tmdb: ReturnType<typeof slowTmdb>, count: number) {
+    const path = join(await tempDir(), "metadata.json.gz");
+    const first = metadataStore({
+      path,
+      client: tmdb.client,
+      region: "NL",
+      onChange: () => {},
+      now: tmdb.now,
+    });
+    first.want(titles(count));
+    await settled(first);
+    await first.flush();
+    return path;
+  }
+
   it("tells lists nothing when TMDB's answers are the same as before, and still keeps them", async () => {
     const path = join(await tempDir(), "metadata.json.gz");
     const tmdb = slowTmdb();
@@ -641,12 +661,14 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
     // Past the time titles are fetched again, with the same answers.
     tmdb.clock.time += 151 * day;
     const same = notices(tmdb.clock);
+    const reopened = tmdb.clock.time;
     const again = open(same.onChange);
     again.want(titles(20));
     await settled(again);
     await again.flush();
     expect(same.told.length).toBeGreaterThan(0);
-    expect(same.told.filter(({ content }) => content)).toEqual([]);
+    // Only the kept answers, told as they load; fetching them again says nothing more.
+    expect(same.told.filter(({ content }) => content)).toEqual([{ content: true, at: reopened }]);
 
     // Their new time was saved: well past the first answers' six months, they are still used.
     tmdb.clock.time += 100 * day;
@@ -692,6 +714,10 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
       expect(gap).toBeGreaterThanOrEqual(gaps[index - 1] ?? 0);
     }
     expect(gaps.at(-1)).toBeGreaterThanOrEqual(2 * (gaps[0] ?? 0));
+    // Doubling from 3 s and 30 s apart at most, each plus the answer that came due.
+    expect(gaps[0]).toBeLessThan(10_000);
+    expect(gaps.filter((gap) => gap >= 30_000).length).toBeGreaterThanOrEqual(2);
+    expect(Math.max(...gaps)).toBeLessThan(32_000);
 
     // The status keeps coming every few seconds in between.
     const all = seen.told.map(({ at }) => at);
@@ -766,5 +792,184 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
     const after = seen.told.filter(({ content, at }) => content && at > (switchedAt ?? 0));
     // The one that ends the run being left, and then the next, not 30 s later.
     expect((after[1]?.at ?? Infinity) - (switchedAt ?? 0)).toBeLessThan(25_000);
+  });
+
+  it("tells lists of the metadata kept on disk once it has loaded, with nothing to fetch", async () => {
+    const tmdb = slowTmdb();
+    const path = await kept(tmdb, 3);
+    const requests = tmdb.clock.requests;
+
+    // Lists built before the file loaded show the provider's names: they need to be told.
+    tmdb.clock.time += 10 * day;
+    const seen = notices(tmdb.clock);
+    const heard: (string | null)[] = [];
+    const store: ReturnType<typeof metadataStore> = metadataStore({
+      path,
+      client: tmdb.client,
+      region: "NL",
+      onChange: (notice) => {
+        seen.onChange(notice);
+        heard.push(store.name("movie", "1", "en")?.name ?? null);
+      },
+      now: tmdb.now,
+    });
+    store.want(titles(3));
+    await settled(store);
+    expect(tmdb.clock.requests).toBe(requests);
+    expect(seen.told.filter(({ content }) => content)).toHaveLength(1);
+    // By then the kept answers were there to be read.
+    expect(heard[0]).toBe("Title 1");
+
+    // Without a key it is the same: the store answers from disk.
+    const keyless = notices(tmdb.clock);
+    metadataStore({ path, client: null, region: "NL", onChange: keyless.onChange, now: tmdb.now });
+    await vi.waitFor(() => expect(keyless.told).toEqual([{ content: true, at: tmdb.clock.time }]));
+  });
+
+  it("tells nothing of a file that can't be read, isn't there, or holds nothing lists show", async () => {
+    const quiet = async (path: string, client: ReturnType<typeof slowTmdb>["client"] | null) => {
+      const tmdb = slowTmdb();
+      const seen = notices(tmdb.clock);
+      const store = metadataStore({
+        path,
+        client,
+        region: "NL",
+        onChange: seen.onChange,
+        now: tmdb.now,
+      });
+      // Long enough for the file to have loaded.
+      await new Promise((done) => setTimeout(done, 100));
+      expect(store.get("movie", "1")).toBeNull();
+      expect(seen.told).toEqual([]);
+    };
+    const dir = await tempDir();
+    await quiet(join(dir, "none.json.gz"), null);
+    await writeFile(join(dir, "broken.json.gz"), "not a metadata file");
+    await quiet(join(dir, "broken.json.gz"), slowTmdb().client);
+    // Titles TMDB doesn't know show nothing.
+    await quiet(await kept(slowTmdb({ status: () => 404 }), 3), null);
+  });
+
+  it("tells lists of a changed title within the spacing, not at the end of a run of unchanged answers", async () => {
+    const tmdb = slowTmdb();
+    const path = await kept(tmdb, 200);
+
+    // Past the time titles are fetched again. Of the newest titles, fetched first, two differ:
+    // one that is told at once, and another that arrives with it, while a notice is not due.
+    // All the others are the same.
+    tmdb.clock.time += 151 * day;
+    const changing = slowTmdb({ popularity: (id) => (id === 200 || id === 195 ? 999 : id) });
+    changing.clock.time = tmdb.clock.time;
+    const start = changing.clock.time;
+    const told: { at: number; shown: number | undefined }[] = [];
+    const store: ReturnType<typeof metadataStore> = metadataStore({
+      path,
+      client: changing.client,
+      region: "NL",
+      onChange: ({ content }) => {
+        if (content) {
+          told.push({
+            at: changing.clock.time - start,
+            shown: store.get("movie", "195")?.popularity,
+          });
+        }
+      },
+      now: changing.now,
+    });
+    store.want(titles(200));
+    await settled(store);
+
+    // The run lasts 200 s by the clock; lists had the second title long before its end.
+    const first = told.find(({ shown }) => shown === 999);
+    expect(first?.at ?? Infinity).toBeLessThan(30_000);
+  });
+
+  it.each([
+    ["TMDB no longer knows", { status: () => 404 }, null],
+    ["TMDB answers the same", {}, 1],
+  ])("tells lists when a title that had expired and %s", async (_name, options, popularity) => {
+    const tmdb = slowTmdb();
+    const path = await kept(tmdb, 1);
+
+    // Lists show it at first, and then six months pass.
+    tmdb.clock.time += 100 * day;
+    const again = slowTmdb(options);
+    again.clock.time = tmdb.clock.time;
+    const seen = notices(again.clock);
+    const store = metadataStore({
+      path,
+      client: again.client,
+      region: "NL",
+      onChange: seen.onChange,
+      now: again.now,
+    });
+    await vi.waitFor(() => expect(store.get("movie", "1")?.popularity).toBe(1));
+    again.clock.time += 83 * day;
+    expect(store.get("movie", "1")).toBeNull();
+    const before = seen.told.length;
+
+    store.want(titles(1));
+    await settled(store);
+    expect(store.get("movie", "1")?.popularity ?? null).toBe(popularity);
+    expect(seen.told.slice(before).some(({ content }) => content)).toBe(true);
+  });
+});
+
+describe("TMDB's progress to the UI", { timeout: 30_000 }, () => {
+  /** A catalogue worker the test speaks for; it can hold back what it says of the lists. */
+  class FakeWorker extends EventEmitter {
+    holding = false;
+    held: WorkerRequest | null = null;
+    postMessage(request: WorkerRequest) {
+      if (request.method === "status" && this.holding) {
+        this.held = request;
+        return;
+      }
+      const value =
+        request.method === "status"
+          ? request.args.owners.map(() => ({ movies: 10, series: 0, fetchedAt: 1 }))
+          : null;
+      queueMicrotask(() => this.emit("message", { id: request.id, ok: true, value }));
+    }
+    async terminate() {
+      return 0;
+    }
+  }
+
+  it("carries only the progress, without waiting for the worker to say how the lists stand", async () => {
+    const worker = new FakeWorker();
+    const provider = await fakeProvider();
+    const runtime = runtimeFor(
+      mainLayer({
+        ...testConfig(await tempDir()),
+        tmdbKey: "test-key",
+        catalogueWorker: () => worker as unknown as Worker,
+      }),
+    );
+    try {
+      await (
+        await promised(runtime, Subscriptions)
+      ).add({ server: provider.url, username: "demo", password: "demo" });
+      const onDemand = await promised(runtime, OnDemand);
+      // The first call starts the worker, which is listened to from then on.
+      await onDemand.status();
+      const progress = await collect(runtime, onDemand.progressChanges);
+      const updates = await collect(runtime, onDemand.changes);
+      const metadata = { known: 1, wanted: 10, refused: false, fetching: true };
+
+      worker.holding = true;
+      worker.emit("message", {
+        event: "metadata",
+        content: false,
+        status: metadata,
+      } satisfies WorkerEvent);
+      await vi.waitFor(() => expect(progress).toEqual([metadata]));
+      // No word from the worker on the lists was waited for, and nothing told them changed.
+      expect(worker.held).toBeNull();
+      expect(updates).toEqual([]);
+    } finally {
+      await runtime.dispose();
+      await provider.close();
+    }
   });
 });

@@ -623,8 +623,10 @@ export function syncOnDemand(client: QueryClient): () => void {
     void client.invalidateQueries({ queryKey: queries.details(kind, version).queryKey });
     void client.invalidateQueries({ queryKey: queries.related(kind, version).queryKey });
   });
-  const stopProgress = listen("ondemand.progress", (status) => {
-    client.setQueryData(queries.onDemandStatus().queryKey, status);
+  const stopProgress = listen("ondemand.progress", (metadata) => {
+    // Only the progress; the lists' status is whatever the latest full status said. Without a
+    // status yet, the first one brings the progress with it.
+    client.setQueryData(queries.onDemandStatus().queryKey, (old) => old && { ...old, metadata });
   });
   const stopLists = listen("ondemand.updated", () => {
     // Lists change with a refresh and as TMDB's metadata arrives. A season shown is read again
