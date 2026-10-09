@@ -218,34 +218,40 @@ async function receive(
   const stop = AbortSignal.any([signal, stall.signal]);
   const reader = body.getReader();
   const sink = disk.write(asked.part, from);
-  const broken = new Promise<never>((_resolve, reject) => sink.once("error", reject));
-  const stopped = new Promise<never>((_resolve, reject) => {
-    if (stop.aborted) reject(stop.reason);
-    stop.addEventListener("abort", () => reject(stop.reason), { once: true });
+  // Stopping, or the disk failing, cancels the read under way, which then answers done. Nothing
+  // waits on a promise that outlives one chunk, so no chunk is kept by what waited for it.
+  let broken: unknown = null;
+  const cancel = () => void reader.cancel().catch(() => {});
+  stop.addEventListener("abort", cancel, { once: true });
+  sink.on("error", (cause) => {
+    broken ??= cause;
+    cancel();
   });
-  broken.catch(() => {});
-  stopped.catch(() => {});
   try {
     for (;;) {
-      const { done, value } = await Promise.race([reader.read(), broken, stopped]);
+      const { done, value } = await reader.read();
+      if (broken) throw broken;
+      if (stop.aborted) throw stop.reason;
       if (done) break;
       received += value.length;
       awake();
       asked.progress({ received, size, identity, restarted });
       // At most what the disk hasn't taken yet waits in memory.
-      if (!sink.write(value)) await Promise.race([once(sink, "drain"), broken, stopped]);
+      if (!sink.write(value)) await once(sink, "drain", { signal: stop });
     }
     // Flushed to disk and closed before it counts.
     sink.end();
-    await Promise.race([once(sink, "close"), broken, stopped]);
+    await once(sink, "close", { signal: stop });
+    if (broken) throw broken;
   } catch (cause) {
     if (signal.aborted) return { kind: "stopped" };
     if (stall.signal.aborted) {
       return failed({ kind: "network", detail: "The provider stopped sending the file." });
     }
-    return writeFailure(cause) ?? failed({ kind: "network", detail: messageOf(cause) });
+    return writeFailure(broken ?? cause) ?? failed({ kind: "network", detail: messageOf(cause) });
   } finally {
     clearTimeout(stalled);
+    stop.removeEventListener("abort", cancel);
     // The provider's request is over, and the partial file closed, before this answers.
     await reader.cancel().catch(() => {});
     if (!sink.closed) {

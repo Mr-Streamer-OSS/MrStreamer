@@ -36,6 +36,7 @@ pnpm verify:desktop subscriptions
 pnpm verify:desktop live-tv
 pnpm verify:desktop titles
 pnpm verify:desktop watchlist
+pnpm verify:desktop downloads
 ```
 
 The executable [control helper](scripts/control.ts) reuses `apps/desktop/test/e2e/app.ts` for CDP and the repo's provider/TMDB fixtures. It uses DOM handles from real ARIA labels, button text and poster titles to send pointer/key/text input to the window. Login, navigation and saving go through the UI. Read-only DOM observations and fixture request counters establish results; invoking an IPC setter or modifying the database cannot substitute for the user path.

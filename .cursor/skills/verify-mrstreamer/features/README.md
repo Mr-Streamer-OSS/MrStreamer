@@ -8,6 +8,7 @@ Source of truth for desktop and website verification paths. Run the relevant bas
 | [Live TV](live-tv.md)             | `live-tv`             | Live TV list, guide, favourites, recovery, converted codecs, captions                           |
 | [Movies and series](titles.md)    | `titles`              | Search, filters, version selection, movie/episode playback, languages                           |
 | [Watchlist](watchlist.md)         | `watchlist`           | Toggle removal, Home entry, restart persistence, keyboard, unavailable titles                   |
+| [Downloads](downloads.md)         | `downloads`           | Preemption, cancel/retry/delete, offline restart, removed subscription, network record          |
 | [Marketing website](website.md)   | `pnpm verify:website` | Responsive routes, download choices, guides, releases, privacy; live feed and Safari separately |
 
 For desktop checks, use `pnpm verify:desktop doctor` first; the website helper performs its own live doctor. After a surprising result inspect retained proof and start a new owned session. PNGs and accessibility trees show the before/after state; `proof.json` records actions and observable side effects. A skipped entry point is a reported coverage gap. Passing one baseline never proves every path in a row. Installed packaging, updates, real provider services, hardware/audio output and receivers need their documented native checks. For native macOS behavior use the installed `mac-mini` skill and the parent skill's Mac recipes. Linux evidence is not macOS acceptance.

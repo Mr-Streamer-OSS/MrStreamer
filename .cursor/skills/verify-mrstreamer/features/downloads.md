@@ -1,0 +1,29 @@
+# Downloads
+
+## Sub-features
+
+Download a movie or a single episode from its details, a persistent queue with one transfer at a time, the Downloads page with queue and copies, offline playback of a copy in the title player, playback of the same subscription taking the connection, cancel, retry, delete, interrupted and replaced files, and copies kept after their subscription is removed.
+
+## How to get to it (user POV)
+
+A movie's details have **Download** beside Play and Save; each episode row has a download icon (`Download S1 E2`). The control follows the download: Queued, a percentage, Waiting for playback, an error with Retry, then **Watch offline** (a movie's arrow beside it holds **Delete download**; an episode's reads **Downloaded**). **Downloads**, the sixth page in the top bar, lists the queue, then the copies on this computer with **Watch offline** and **Delete** (pressed twice). Below the width where six page names fit it is the download icon beside Search, with the same name. With no subscription saved, Connect shows **Downloads** top right while a copy exists; that page has only Downloads and **Add subscription**.
+
+## Driving it with Electron CDP
+
+Run `xvfb-run -a pnpm verify:desktop downloads` after `pnpm build` (no Xvfb on macOS or Windows). The scenario in `scripts/downloads.ts` starts the built app three times on one profile, with the fake provider, fake TMDB and a loopback picture server, and drives it with pointer and key input:
+
+1. Connect; download the two-sound-track movie from its details and S1 E2 of the Formats series from its row, until **Watch offline** and **Downloaded** show.
+2. Hold the long-subtitles movie's file at 40 kB, download it, then Play the index-at-the-end movie of the same subscription. Require a moving picture, `waiting` for the held download, and at most one provider file at once; after leaving, require every download complete.
+3. Download the missing-file movie, Retry it from the details (a new file request), cancel a held download and delete the failed one on the Downloads page.
+4. Quit, stop the provider, TMDB and pictures, start again. On Downloads, play the movie offline, skip forward, choose the other sound track, leave; play the long movie, choose its French text track, skip to 40 s, require cues, leave and resume near where it was left.
+5. Remove the subscription in Settings, quit, start again. Connect shows Downloads; the page lists all copies with "Subscription removed, copy kept", local artwork loaded and progress. Play the episode and resume the long movie, then **Add subscription** returns to the form.
+
+`network-hook.cjs` is loaded into main with `NODE_OPTIONS=--require` for this scenario only: it writes every outbound TCP connection and UDP send to `main-network.jsonl` and answers the image CDN hosts from the run's picture server. The window's requests come from CDP `Network.requestWillBeSent`. Each local playback window must show no main connection and no window request except the loopback proxy's `/title/` and `/source/` routes, `mrstreamer:`, `data:`, `blob:` and `file:`. Proof is in `.local/verification/downloads-<unique>/`: `proof.json` (actions, observations including `preemption`, `seek`, `soundTracks`, `embeddedSubtitleCues`, `resume`, `standalone`, `offlinePlayback`, `playbackWithoutSubscription` and a `mainNetwork` summary), screenshots with accessibility trees, `main-network.jsonl` and `electron.log`.
+
+Service contracts are in `apps/desktop/test/downloads.test.ts`: ranged resume after a restart, whole-file and replaced-file restarts, preemption with one provider connection, a refused answer while the provider frees the connection before, a long mid-body stall, cancel while queued or mid-request, retry, disk full before and while writing, an unwritable folder, account removal with copies kept and playable after a restart, quit with a held request, a mapped playlist's file with its headers and cancellation while its file is looked up, no file address on disk, and saved subtitles carried only for the very bytes they were saved for. Renderer contracts are in `test/renderer/downloads.test.ts`.
+
+Source: `docs/user/downloads.md`, `apps/desktop/src/main/services/downloads.ts`, `downloads/transfer.ts`, `platform/downloads-store.ts`, `playback/file-source.ts`, `Playback.lend` and `openCopy` in `services/playback.ts`, `src/renderer/src/features/downloads/`, `lib/downloads.ts`, and `CopyNow` in `player/title-player.ts`.
+
+## Gotchas
+
+Fixture names come back from TMDB as "Original 100000" and similar: the scenario finds rows by the download id main lists, never by provider names. The 20-second fixture is all credits by the 30-second rule, so resume is proved on the 150-second one. The first track of the long-subtitles fixture is pictures, drawn from a metadata track: text cues need its French track. Home's muted preview is playback too, so a download of that subscription waits while Home shows it. The proof uses fixtures and a development build on Linux; disk-full and folder failures are injected at the disk boundary in the service tests, not provoked on a real disk. Native macOS and Windows installs, a real provider and real disk exhaustion need their own checks.

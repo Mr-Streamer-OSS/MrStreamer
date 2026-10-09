@@ -24,6 +24,7 @@ import { Input } from "../../components/ui/input.tsx";
 import { appError, describeError, formatDate } from "../../lib/errors.ts";
 import { clockTime, hostOf, namesList } from "../../lib/format.ts";
 import { useKeyboardMode } from "../../lib/input-mode.ts";
+import { useDownloads } from "../../lib/downloads.ts";
 import { call } from "../../lib/ipc.ts";
 import { queries, subscriptionName, useSubscriptions } from "../../lib/queries.ts";
 import { cn } from "../../lib/utils.ts";
@@ -685,7 +686,8 @@ function Secret({
  * has stopped and the box's answer is sent, so the box and Keep wait for the removal to be
  * answered. With it gone and the others' lists read again, the player holds no channel of it, so
  * the page underneath previews the channel watched last among those that stay. A sheet left open
- * under Settings for a title it had saved closes too.
+ * under Settings for a title it had saved closes too. Its unfinished downloads end with it, which
+ * the question says when it has any; its downloaded copies stay.
  */
 function Remove({
   subscription,
@@ -738,6 +740,13 @@ function Remove({
     },
   });
   const stays = others.map(subscriptionName);
+  const unfinished =
+    useDownloads().data?.items.filter(
+      (item) =>
+        item.subscription?.id === id &&
+        item.status.kind !== "complete" &&
+        item.status.kind !== "missing",
+    ).length ?? 0;
   return (
     <div className="mb-2 ml-5 border-b border-white/8 pt-2 pb-6">
       <p className="mb-3 text-[0.9375rem]">
@@ -753,6 +762,13 @@ function Remove({
           ]
             .filter(Boolean)
             .join(" ")}
+        </p>
+      )}
+      {unfinished > 0 && (
+        <p className="mb-3 text-sm text-foreground/85">
+          {unfinished === 1
+            ? "Its unfinished download ends. Downloaded copies stay."
+            : `Its ${unfinished} unfinished downloads end. Downloaded copies stay.`}
         </p>
       )}
       <label className="mb-4 flex w-fit items-center gap-3 text-[0.9375rem]">
