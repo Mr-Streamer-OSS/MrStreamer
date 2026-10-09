@@ -21,6 +21,7 @@ import { Playback } from "../src/main/services/playback.ts";
 import { Roster } from "../src/main/services/roster.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { fixture, type FakeProvider, type FakeProviderOptions } from "./fake-provider.ts";
+import { startFakeTmdb, type FakeTmdb } from "./fake-tmdb.ts";
 import { fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 
 const hasTools =
@@ -34,11 +35,12 @@ const pictures: typeof fetch = async () =>
     headers: { "Content-Type": "image/png" },
   });
 
-/** The app's services on `dataDir`, as one start of the app has them. */
-async function app(dataDir: string, disk?: Disk) {
+/** The app's services on `dataDir`, as one start of the app has them, with TMDB at `tmdb`. */
+async function app(dataDir: string, disk?: Disk, tmdb?: FakeTmdb) {
   const runtime = runtimeFor(
     mainLayer({
       ...testConfig(dataDir),
+      ...(tmdb ? { tmdbKey: "test-key", tmdbApi: tmdb.url } : {}),
       ffmpeg: "ffmpeg",
       ffprobe: "ffprobe",
       downloads: { fetch: pictures, ...(disk ? { disk } : {}) },
@@ -186,12 +188,15 @@ async function playlistHost() {
 }
 
 /**
- * A playlist host with one mapped film whose address redirects to `/media.mp4?cut=` and the
- * current `cut`: two files of one size behind one path, told apart only by their query, under the
- * same ETag. While `held`, a file answer stops after 40 kB.
+ * A playlist host with one mapped film whose address redirects to `/media.<extension>?cut=` and
+ * the current `cut`: two files of one size behind one path, told apart only by their query, under
+ * the same ETag. While `held`, a file answer stops after 40 kB. With `lengthless`, cut b answers
+ * with the whole file and no size, as a chunked answer does.
  */
-async function cutsHost() {
-  const first = fixture("title-h264-aac.mp4");
+async function cutsHost({ film = "title-h264-aac.mp4", lengthless = false } = {}) {
+  const extension = film.endsWith(".mpegts") ? "ts" : "mp4";
+  const type = extension === "ts" ? "video/mp2t" : "video/mp4";
+  const first = fixture(film);
   // One byte of its pictures differs, within the first 40 kB, so both play.
   const second = Buffer.from(first);
   second[30_000]! ^= 0xff;
@@ -202,16 +207,21 @@ async function cutsHost() {
     const url = new URL(request.url ?? "/", origin);
     asked.push(url.pathname + url.search);
     if (url.pathname === "/list") {
-      return response.end(`#EXTM3U\n#EXTINF:-1 group-title="Films",Film\n${origin}/film.mp4\n`);
+      return response.end(
+        `#EXTM3U\n#EXTINF:-1 group-title="Films",Film\n${origin}/film.${extension}\n`,
+      );
     }
-    if (url.pathname === "/film.mp4") {
-      return response.writeHead(302, { Location: `/media.mp4?cut=${state.cut}` }).end();
+    if (url.pathname === `/film.${extension}`) {
+      return response.writeHead(302, { Location: `/media.${extension}?cut=${state.cut}` }).end();
     }
     const bytes = url.searchParams.get("cut") === "a" ? first : second;
+    if (lengthless && bytes === second) {
+      return response.writeHead(200, { "Content-Type": type, ETag: '"one"' }).end(bytes);
+    }
     const range = /^bytes=(\d+)-$/.exec(request.headers.range ?? "");
     const start = range ? Number(range[1]) : 0;
     response.writeHead(range ? 206 : 200, {
-      "Content-Type": "video/mp4",
+      "Content-Type": type,
       "Content-Length": bytes.length - start,
       ETag: '"one"',
       ...(range ? { "Content-Range": `bytes ${start}-${bytes.length - 1}/${bytes.length}` } : {}),
@@ -696,6 +706,44 @@ describe.skipIf(!hasTools)("downloads", () => {
     expect(await readdir(join(dataDir, "downloads"))).toEqual([]);
   }, 60_000);
 
+  it("answers adds of one title made at once with one download", async () => {
+    const { provider, subscriptionId, downloads, find, quit } = await connected();
+    const film = movie(provider, subscriptionId, "TEST | Index at the end");
+    const [first, second] = await Promise.all([downloads.add(film.ref), downloads.add(film.ref)]);
+    expect(second.id).toBe(first.id);
+    expect((await downloads.list()).items.map((item) => item.id)).toEqual([first.id]);
+    await vi.waitFor(async () => expect((await find(first.id))?.status.kind).toBe("complete"), {
+      timeout: LONG,
+    });
+    await quit();
+  }, 60_000);
+
+  it("queues nothing of a subscription removed while the episode's details were asked for", async () => {
+    const tmdb = await startFakeTmdb();
+    onTestFinished(() => tmdb.close());
+    const provider = await fakeProvider({ maxConnections: 1, slotReleaseMs: 50 });
+    const dataDir = await tempDir();
+    const { subscriptions, onDemand, downloads, roster, quit } = await app(
+      dataDir,
+      undefined,
+      tmdb,
+    );
+    const saved = await subscriptions.add({
+      server: provider.url,
+      username: "demo",
+      password: "demo",
+    });
+    await onDemand.refresh(saved.id);
+    tmdb.failSeasons("hold");
+    const asked = tmdb.seasonRequests().length;
+    const adding = downloads.add(episode(provider, saved.id).ref);
+    await vi.waitFor(() => expect(tmdb.seasonRequests().length).toBeGreaterThan(asked));
+    await roster.remove(saved.id, true);
+    await expect(adding).rejects.toMatchObject({ error: { kind: "no-subscription" } });
+    expect((await downloads.list()).items).toEqual([]);
+    await quit();
+  }, 60_000);
+
   it("asks again when the provider is still freeing the connection of the download before", async () => {
     const { provider, dataDir, subscriptionId, downloads, find } = await connected({
       slotReleaseMs: 800,
@@ -920,65 +968,77 @@ describe.skipIf(!hasTools)("downloads", () => {
     }
   }, 60_000);
 
-  it("brings no subtitle along that was chosen or timed after the address redirected to another query", async () => {
-    const service = serveSubdl();
-    const host = await cutsHost();
-    try {
-      const dataDir = await tempDir();
-      const started = await app(dataDir);
-      const { playback, onDemand, subtitles } = started;
-      await subtitles.configure(
-        { enabled: true, service: "subdl", languages: ["en"] },
-        { subdl: { apiKey: "fixture-key" } },
-      );
-      const ref = await mappedFilm(started, host.link);
-      const file = await onDemand.file(ref);
-      const session = await playback.openTitle(ref, file.url, DECODERS, file);
-      const choose = async (release: string) => {
-        service.answer.release = release;
-        const found = await subtitles.search(session.sessionId);
-        return (await subtitles.choose(session.sessionId, found.results[0]!.id)).saved.selection!;
-      };
-      expect(await read(session.url, 0)).toBeGreaterThan(0);
-      const first = await choose("Cut A");
-      // The same address now leads to the other file, read on a skip, under the same size and ETag.
-      host.state.cut = "b";
-      expect(await read(session.url, 2)).toBeGreaterThan(0);
-      expect(host.asked("/media.mp4?cut=b")).toBeGreaterThan(0);
-      const second = await choose("Cut B");
-      await subtitles.timing(session.sessionId, { offset: 3, speed: 1 });
-      await playback.close(session.sessionId);
+  it.each([
+    { after: "the address redirected to another query", host: {}, from: 2 },
+    {
+      after: "an answer of another query didn't say its size",
+      host: { film: "h264-aac.mpegts", lengthless: true },
+      from: 0,
+    },
+  ])(
+    "brings no subtitle along that was chosen or timed after $after",
+    async (cases) => {
+      const service = serveSubdl();
+      const host = await cutsHost(cases.host);
+      try {
+        const dataDir = await tempDir();
+        const started = await app(dataDir);
+        const { playback, onDemand, subtitles } = started;
+        await subtitles.configure(
+          { enabled: true, service: "subdl", languages: ["en"] },
+          { subdl: { apiKey: "fixture-key" } },
+        );
+        const ref = await mappedFilm(started, host.link);
+        const file = await onDemand.file(ref);
+        const session = await playback.openTitle(ref, file.url, DECODERS, file);
+        const choose = async (release: string) => {
+          service.answer.release = release;
+          const found = await subtitles.search(session.sessionId);
+          return (await subtitles.choose(session.sessionId, found.results[0]!.id)).saved.selection!;
+        };
+        expect(await read(session.url, 0)).toBeGreaterThan(0);
+        const first = await choose("Cut A");
+        // The same address now leads to the other file, read again, under the same size and ETag.
+        host.state.cut = "b";
+        expect(await read(session.url, cases.from)).toBeGreaterThan(0);
+        expect(host.asked(`/media.${file.container}?cut=b`)).toBeGreaterThan(0);
+        const second = await choose("Cut B");
+        await subtitles.timing(session.sessionId, { offset: 3, speed: 1 });
+        await playback.close(session.sessionId);
 
-      host.state.cut = "a";
-      const queued = await started.downloads.add(ref);
-      await vi.waitFor(
-        async () => expect((await started.find(queued.id))?.status.kind).toBe("complete"),
-        { timeout: LONG },
-      );
-      expect(digest(await copyOf(dataDir, queued.id))).toBe(digest(host.first));
-      const copy = await playback.openCopy(
-        {
-          id: queued.id,
-          path: join(dataDir, "downloads", queued.id, "media.mp4"),
-          container: "mp4",
-          title: queued.title,
-        },
-        DECODERS,
-      );
-      expect(await subtitles.saved(copy.sessionId)).toBeNull();
-      await expect(subtitles.show(copy.sessionId, second)).rejects.toBeDefined();
-      // What was chosen while only the first file had been read came along, for its bytes.
-      await subtitles.show(copy.sessionId, first);
-      expect(await subtitles.saved(copy.sessionId)).toMatchObject({
-        subtitle: { release: "Cut A" },
-        timing: { offset: 0 },
-      });
-      await playback.close(copy.sessionId);
-      await started.quit();
-    } finally {
-      await host.close();
-    }
-  }, 60_000);
+        host.state.cut = "a";
+        const queued = await started.downloads.add(ref);
+        await vi.waitFor(
+          async () => expect((await started.find(queued.id))?.status.kind).toBe("complete"),
+          { timeout: LONG },
+        );
+        expect(digest(await copyOf(dataDir, queued.id))).toBe(digest(host.first));
+        const copy = await playback.openCopy(
+          {
+            id: queued.id,
+            path: join(dataDir, "downloads", queued.id, `media.${file.container}`),
+            container: file.container,
+            title: queued.title,
+          },
+          DECODERS,
+        );
+        expect(await read(copy.url, 0)).toBeGreaterThan(0);
+        expect(await subtitles.saved(copy.sessionId)).toBeNull();
+        await expect(subtitles.show(copy.sessionId, second)).rejects.toBeDefined();
+        // What was chosen while only the first file had been read came along, for its bytes.
+        await subtitles.show(copy.sessionId, first);
+        expect(await subtitles.saved(copy.sessionId)).toMatchObject({
+          subtitle: { release: "Cut A" },
+          timing: { offset: 0 },
+        });
+        await playback.close(copy.sessionId);
+        await started.quit();
+      } finally {
+        await host.close();
+      }
+    },
+    60_000,
+  );
 
   it("brings saved subtitles along only for the very bytes they were saved for", async () => {
     const service = serveSubdl();

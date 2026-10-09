@@ -165,6 +165,19 @@ describe("the Downloads page", () => {
     expect(button(page, "Watch offline")).toBeDefined();
     expect(page.textContent).toContain("Unfinished downloads ended with their subscription.");
   });
+
+  it("keeps main's later word over a list it was still reading", async () => {
+    const read = ipc.hold("downloads.list");
+    const page = await show(createElement(DownloadsPage), "h1");
+    await changed(list([download()]), () => button(page, "Watch offline") !== undefined);
+    // The list main read before that copy was complete answers only now.
+    await act(async () => {
+      read.resolve(list([]));
+      await settle();
+    });
+    expect(button(page, "Watch offline")).toBeDefined();
+    expect(page.textContent).not.toContain("Nothing downloaded yet");
+  });
 });
 
 describe("with no subscription saved", () => {
@@ -173,6 +186,8 @@ describe("with no subscription saved", () => {
     ipc.always("downloads.list", list([download({ subscription: null })]));
     const app = await show(createElement(App), "form");
     expect(app.querySelector("form")).not.toBeNull();
+    // Connect offers Downloads once the list it reads says a copy is here.
+    await until(() => button(app, "Downloads") !== undefined);
     await click(button(app, "Downloads"));
     expect(app.querySelector("form")).toBeNull();
     expect(app.textContent).toContain("Past Lives");

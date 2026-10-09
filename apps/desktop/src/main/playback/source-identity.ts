@@ -54,8 +54,9 @@ export function sourceIdentity() {
   /**
    * The resource read, by its path and query, with the mark each host serving it gave, by
    * `resourceKey`, for `proof`. Another path or query is another resource, maybe other bytes under
-   * the same size and ETag, and an answer of a replaced file is other bytes: then nothing in the
-   * answers tells which bytes were read, "mixed" until another file is behind the address.
+   * the same size and ETag, an answer of a replaced file is other bytes, and an answer without a
+   * size may be of any file: then nothing in the answers tells which bytes were read, "mixed"
+   * until another file is behind the address.
    */
   let proven: { readonly resource: string; readonly marks: Map<string, string> } | "mixed" | null =
     null;
@@ -108,7 +109,11 @@ export function sourceIdentity() {
           : answer.status === 200 && length !== null
             ? { start: 0, size: Number(length) }
             : null;
-      if (!held || !Number.isSafeInteger(held.size)) return null;
+      if (!held || !Number.isSafeInteger(held.size)) {
+        // Its bytes are read all the same, and nothing tells which file they are of.
+        proven = "mixed";
+        return null;
+      }
       if (ranged) ranges = answer.status === 206;
       const address = URL.parse(answer.url);
       const resource = address ? address.origin + address.pathname : "";

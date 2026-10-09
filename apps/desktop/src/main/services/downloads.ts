@@ -74,8 +74,9 @@ export class Downloads extends Context.Service<
     readonly list: Effect.Effect<DownloadList, Failed>;
     /**
      * Queues a movie or an episode, by the exact version given, with its details and artwork kept
-     * for the copy. One of the same account already queued or downloaded answers as it is; a
-     * failed one is queued again. Fails while its subscription can't be asked, or doesn't list it.
+     * for the copy. One of the same account already queued or downloaded, or added while this
+     * was looked up, answers as it is; a failed one is queued again. Fails while its subscription
+     * can't be asked, or doesn't list it, and once it was removed or logged in anew meanwhile.
      */
     add(title: TitleRef): Effect.Effect<Download, Failed>;
     /**
@@ -585,28 +586,41 @@ function make(deps: DownloadsDeps) {
           if (unloaded) return yield* unloaded;
           const source = yield* subscriptions.sourceOf(title.subscriptionId);
           const { subscriptionId, ...raw } = title;
-          const known = [...records.values()].find(
-            (record) =>
-              record.account === source.key &&
-              record.title.kind === raw.kind &&
-              record.title.id === raw.id,
-          );
-          if (known) {
-            if (known.state === "failed") {
-              yield* attempt(async () =>
-                update(known.id, ({ failure: _failure, ...rest }) => ({
-                  ...rest,
-                  state: "queued",
-                })),
-              );
-              wake();
-            }
-            const owners = yield* accounts;
-            return downloadOf(records.get(known.id) ?? known, owners, yield* playback.busy);
-          }
+          const knownOf = () =>
+            [...records.values()].find(
+              (record) =>
+                record.account === source.key &&
+                record.title.kind === raw.kind &&
+                record.title.id === raw.id,
+            );
+          const answer = (known: StoredDownload) =>
+            Effect.gen(function* () {
+              if (known.state === "failed") {
+                yield* attempt(async () =>
+                  update(known.id, ({ failure: _failure, ...rest }) => ({
+                    ...rest,
+                    state: "queued",
+                  })),
+                );
+                wake();
+              }
+              const owners = yield* accounts;
+              return downloadOf(records.get(known.id) ?? known, owners, yield* playback.busy);
+            });
+          const known = knownOf();
+          if (known) return yield* answer(known);
           // Asked first: a title its provider doesn't list now isn't queued.
           const file = yield* onDemand.file(title);
           const kept = yield* aboutOf(raw, subscriptionId);
+          // Both took a while. A subscription removed or logged in anew meanwhile had its unfinished
+          // downloads ended without this one (a removal ends them again once it is gone, after
+          // this look), and the same title may have been added meanwhile: that one is the answer.
+          // Nothing waits between the second look and the write.
+          if (!(yield* subscriptions.stands(source))) {
+            return yield* new Failed({ error: { kind: "no-subscription" } });
+          }
+          const added = knownOf();
+          if (added) return yield* answer(added);
           const record: StoredDownload = {
             id: randomUUID(),
             account: source.key,
