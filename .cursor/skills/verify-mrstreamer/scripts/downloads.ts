@@ -75,6 +75,9 @@ export async function runDownloads(build: Record<string, unknown> & { executable
       Number(new URL(url).port),
     );
     observed["fixturePorts"] = fixturePorts;
+    /** Each start's own process, debugging port, profile and renderer, as checked. */
+    const starts: Record<string, unknown>[] = [];
+    observed["starts"] = starts;
 
     /** Starts the app on the run's profile, its main process recorded, and checks it is ours. */
     const start = async (label: string) => {
@@ -131,6 +134,7 @@ export async function runDownloads(build: Record<string, unknown> & { executable
       const url = await page.evaluate<string>("location.href");
       if (!url.startsWith(pathToFileURL(join(desktop, "out/renderer/")).href))
         throw new Error(`Wrong renderer: ${url}`);
+      starts.push({ label, pid: app.pid, port, profile, renderer: url, at: now() });
       await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
       await page.send("Network.enable");
       page.on("Network.requestWillBeSent", (params) => {
@@ -221,7 +225,7 @@ export async function runDownloads(build: Record<string, unknown> & { executable
             name: string;
             status: { kind: string };
             subscription: unknown;
-            progress: { position: number } | null;
+            progress: { position: number; duration: number } | null;
             posterUrl: string | null;
             title: { kind: "movie" | "episode"; id: string };
           }[]
@@ -467,15 +471,30 @@ export async function runDownloads(build: Record<string, unknown> & { executable
     observed["embeddedSubtitleCues"] = await offline.page.evaluate<number>(
       "[...document.querySelector('video').textTracks].filter(t => t.kind === 'subtitles').reduce((n, t) => n + (t.cues?.length ?? 0), 0)",
     );
+    // A cue due on the screen, as the viewer reads it.
+    await offline.wait(
+      async () =>
+        (await offline.page.evaluate<string>(
+          "document.querySelector('[data-subtitle-text]')?.textContent?.trim() ?? ''",
+        )) !== "",
+      45_000,
+    );
+    observed["captionShown"] = await offline.page.evaluate<string>(
+      "document.querySelector('[data-subtitle-text]').textContent.trim()",
+    );
     await offline.capture("copy-subtitles");
     const leftAt = (await offline.video()).time;
     await offline.key("Escape", 27);
     await offline.wait(async () => !(await offline.video()).title);
-    await offline.wait(
-      async () =>
-        ((await offline.listed()).find((item) => item.id === longId)?.progress?.position ?? 0) >=
-        leftAt - 2,
-    );
+    // Main keeps where it was left, and the page shows it too: Watch offline goes from there.
+    await offline.wait(async () => {
+      const kept = (await offline.listed()).find((item) => item.id === longId)?.progress;
+      if (!kept || kept.position < leftAt - 2) return false;
+      const shown = await offline.page.evaluate<string | null>(
+        `(${row(longId)})?.querySelector('span > span[style*="width"]')?.style.width ?? null`,
+      );
+      return shown === `${Math.round((kept.position / kept.duration) * 100)}%`;
+    });
     await watchOffline(offline, longId, "Resume the long-subtitles movie offline");
     const resumedAt = (await offline.video()).time;
     observed["resume"] = { leftAt, resumedAt };
