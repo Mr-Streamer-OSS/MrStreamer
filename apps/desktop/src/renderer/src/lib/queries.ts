@@ -7,6 +7,7 @@ import {
   useQuery,
   useQueryClient,
   type QueryClient,
+  type QueryFilters,
 } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import type { GuideStatus, MapFilter } from "@mrstreamer/contracts/guide";
@@ -631,10 +632,14 @@ export function syncOnDemand(client: QueryClient): () => void {
   const stopLists = listen("ondemand.updated", () => {
     // Lists change with a refresh and as TMDB's metadata arrives. A season shown is read again
     // the next time it shows, not each time more metadata arrives.
-    void client.invalidateQueries({
+    const lists = {
       queryKey: ["ondemand"],
       predicate: (query) => query.queryKey[1] !== "details" && query.queryKey[1] !== "season",
-    });
+    } satisfies QueryFilters;
+    // Invalidation alone reuses a first read with no cached data. Cancel its old answer before
+    // reading the changed catalogue; queries with cached data keep their posters while it loads.
+    void client.cancelQueries(lists);
+    void client.invalidateQueries(lists);
     // So do the names and languages details show. Open details keep what they show; opened
     // again, they are put together anew from what the main process kept, with nothing downloaded.
     void client.invalidateQueries({ queryKey: ["ondemand", "details"], refetchType: "none" });

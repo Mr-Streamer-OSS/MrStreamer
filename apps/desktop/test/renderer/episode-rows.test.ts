@@ -92,6 +92,7 @@ describe("a series' episodes", () => {
     const season = ipc.hold("ondemand.season");
     const client = new QueryClient();
     client.setQueryData(["subscriptions"], [SAVED]);
+    const stopSync = syncOnDemand(client);
     const root = createRoot(document.createElement("div"));
     await act(async () =>
       root.render(
@@ -104,7 +105,10 @@ describe("a series' episodes", () => {
         ),
       ),
     );
-    unmount = () => act(() => root.unmount());
+    unmount = () => {
+      stopSync();
+      act(() => root.unmount());
+    };
     await act(async () => listed.resolve([series]));
     await act(async () => progress.resolve([]));
     await act(async () => opened.resolve(details));
@@ -116,6 +120,11 @@ describe("a series' episodes", () => {
     });
     expect(text()).not.toContain("★");
     expect(text()).not.toContain("Directed by");
+
+    // Catalogue metadata does not interrupt the open season or reread its provider details.
+    await act(async () => ipc.emit("ondemand.updated", { lists: [], metadata: null }));
+    expect(ipc.argsOf("ondemand.details")).toHaveLength(1);
+    expect(ipc.argsOf("ondemand.season")).toHaveLength(1);
 
     await act(async () =>
       season.resolve([
@@ -192,8 +201,11 @@ describe("a series' details", () => {
     expect(text()).toContain("2024");
     expect(text()).toContain("Loading…");
 
+    // The first provider answer still belongs to the open details after a catalogue update.
+    await act(async () => ipc.emit("ondemand.updated", { lists: [], metadata: null }));
     await act(async () => provider.resolve({ ...details, plot: "All about Night Harbour." }));
     await until(() => expect(text()).toContain("All about Night Harbour."));
+    expect(ipc.argsOf("ondemand.details")).toHaveLength(1);
     expect(text()).toContain("Episode 2");
 
     // TMDB's arrive after the provider's: the main process says so, and the sheet reads them.
