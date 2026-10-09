@@ -450,6 +450,10 @@ interface TitleSessionState extends SessionBase {
   probed: number;
   /** The upstream request serving ffprobe or ffmpeg. A new one replaces it. */
   source: AbortController | null;
+  /** Last prefix byte dropped by serveSource, including the last byte before playback. */
+  readForwardAt: number | null;
+  /** Last reading-ahead notice, so even consecutive source requests send at most one per 3 s. */
+  readAheadNotifiedAt: number | null;
   /** Whose turn it is at the provider: one request at a time, playback first. */
   readonly slot: UpstreamSlot;
   /** How fast the file arrives. */
@@ -587,6 +591,8 @@ export interface PlaybackDeps {
   readonly ffprobe?: string | null;
   /** What reading a subtitle track's past may take, when not the usual amounts. */
   readonly recovery?: Partial<RecoveryLimits>;
+  /** How long a local copied-picture start waits without read-forward progress, in ms. */
+  readonly runStartMs?: number;
   /** When that reading gets the provider, when not as usual. */
   readonly upstream?: Partial<UpstreamLimits>;
   /**
@@ -675,6 +681,8 @@ export class Playback extends Context.Service<
      * playback's own reads find out. What was saved for the old file is already forgotten then.
      */
     readonly fileReplaced: Stream.Stream<string>;
+    /** Title session ids whose source is advancing through bytes before the asked position. */
+    readonly readingAhead: Stream.Stream<string>;
     /**
      * Ids of channel sessions whose `tracks` changed since their stream started: a caption channel
      * was found in its pictures. Never of a closed session, nor for a stream the player has asked
@@ -751,6 +759,7 @@ function make(deps: PlaybackDeps) {
     const verifiedFiles = Option.getOrNull(yield* Effect.serviceOption(VerifiedFiles));
     const savedSubtitles = Option.getOrNull(yield* Effect.serviceOption(SavedSubtitles));
     const replaced = yield* PubSub.unbounded<string>();
+    const readingAhead = yield* PubSub.unbounded<string>();
     const tracksChanged = yield* PubSub.unbounded<string>();
     const scope = yield* Effect.scope;
     const sessions = new Map<string, Session>();
@@ -1346,10 +1355,11 @@ function make(deps: PlaybackDeps) {
      * discard the bytes before the asked position and answer with that range. A position at or
      * past its known end gets 416. A nonzero request ends without bytes if a 200 has no known
      * size or an answer names another start and isn't the whole file from zero. A 206 whose
-     * headers don't establish its range still passes through, as before. Reading forward still
-     * has the local run-start or receiver-segment deadline: 30 seconds. The renderer also gives
-     * up after 45 seconds without a picture and retries; a receiver retry can read from zero
-     * again. Extending local startup needs those waits to agree.
+     * headers don't establish its range still passes through, as before. While prefix bytes
+     * advance, their last-drop time keeps local startup alive and readingAhead notices keep the
+     * renderer waiting. When dropping ends or stalls, the local picture has 30 seconds from the
+     * last dropped byte. Receivers keep their 30-second segment deadline: a far segment can
+     * time out, and a retry can read from zero again.
      *
      * While a subtitle track's past is being read (see `subtitlesBefore`), that reading needs
      * turns at the provider. A provider that answers ranges is then asked for the file a part at
@@ -1562,6 +1572,15 @@ function make(deps: PlaybackDeps) {
               got += value.length;
               const skipped = Math.min(discard, value.length);
               discard -= skipped;
+              if (signal.aborted) return;
+              if (skipped > 0) {
+                const now = performance.now();
+                session.readForwardAt = now;
+                if (now - (session.readAheadNotifiedAt ?? -Infinity) >= 3000) {
+                  session.readAheadNotifiedAt = now;
+                  PubSub.publishUnsafe(readingAhead, session.id);
+                }
+              }
               const bytes = value.subarray(skipped);
               if (bytes.length === 0) continue;
               if (position !== null) position += bytes.length;
@@ -1786,12 +1805,28 @@ function make(deps: PlaybackDeps) {
       const pictureStart =
         plan.video === "copy"
           ? await new Promise<number | null>((resolve) => {
-              const timer = setTimeout(() => resolve(null), RUN_START_TIMEOUT_MS);
+              const timeout = deps.runStartMs ?? RUN_START_TIMEOUT_MS;
+              let advanced = performance.now();
+              let finished = false;
+              let timer: ReturnType<typeof setTimeout>;
               const settle = (time: number | null) => {
+                if (finished) return;
+                finished = true;
                 clearTimeout(timer);
                 unsubscribe();
+                signal.removeEventListener("abort", left);
                 resolve(time);
               };
+              const left = () => settle(null);
+              const expired = () => {
+                // Dropping the prefix is useful startup work. Once it ends, the picture has
+                // the same full deadline; a stalled drop has only time since its last byte.
+                advanced = Math.max(advanced, session.readForwardAt ?? 0);
+                const remaining = advanced + timeout - performance.now();
+                if (remaining > 0) timer = setTimeout(expired, remaining);
+                else settle(null);
+              };
+              timer = setTimeout(expired, timeout);
               const unsubscribe = start.subscribe(
                 () => {
                   const time = firstPacketTime(start.text());
@@ -1799,6 +1834,8 @@ function make(deps: PlaybackDeps) {
                 },
                 () => settle(firstPacketTime(start.text())),
               );
+              signal.addEventListener("abort", left, { once: true });
+              if (signal.aborted) left();
               void Promise.all([exited, heard]).then(() => settle(firstPacketTime(start.text())));
             })
           : probe.origin + run.start;
@@ -3491,6 +3528,8 @@ function make(deps: PlaybackDeps) {
           probe: null,
           probed: 0,
           source: null,
+          readForwardAt: null,
+          readAheadNotifiedAt: null,
           slot: upstreamSlot(
             {
               starting: () => session.starting !== null,
@@ -3582,6 +3621,7 @@ function make(deps: PlaybackDeps) {
         }),
 
       fileReplaced: Stream.fromPubSub(replaced),
+      readingAhead: Stream.fromPubSub(readingAhead),
       tracksChanged: Stream.fromPubSub(tracksChanged),
 
       begin: Effect.sync(() => ++turns),

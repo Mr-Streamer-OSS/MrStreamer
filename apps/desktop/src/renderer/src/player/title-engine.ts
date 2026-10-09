@@ -79,6 +79,8 @@ export interface TitleEngine {
    * being read. Showing subtitles again takes a new run.
    */
   hideSubtitles(): void;
+  /** Main says the source advanced toward this run's asked position. Keeps only startup alive. */
+  readingAhead(): void;
   info(): StreamInfo;
   /** Stops reading, ends the run's connection and frees the element. */
   destroy(): void;
@@ -136,11 +138,13 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
   let lastProgressAt = Date.now();
   /** When the run was asked for. */
   const waitingSince = Date.now();
+  let lastReadAheadAt = waitingSince;
   const watchdog = setInterval(() => {
     const now = Date.now();
+    const waitingFrom = Math.max(waitingSince, lastReadAheadAt);
     // Nothing to show yet, paused or not: the provider answered and then stalled. Later than
     // the proxy's own wait for a run's start, whose answer says more.
-    if (from === null && now - waitingSince > NOTHING_TIMEOUT_MS) {
+    if (from === null && now - waitingFrom > NOTHING_TIMEOUT_MS) {
       fail({ kind: "network", detail: `No picture within ${NOTHING_TIMEOUT_MS / 1000} s.` });
       return;
     }
@@ -149,7 +153,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
       lastProgressAt = now;
       return;
     }
-    if (!settled && now - waitingSince > START_TIMEOUT_MS) {
+    if (!settled && now - waitingFrom > START_TIMEOUT_MS) {
       fail({ kind: "network", detail: `No picture within ${START_TIMEOUT_MS / 1000} s.` });
     } else if (settled && now - lastProgressAt > STALL_TIMEOUT_MS && ahead() < 1) {
       fail({ kind: "network", detail: "The title stopped arriving." });
@@ -497,6 +501,9 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
       clearSubtitles(video);
       showsFrom = null;
       say(null);
+    },
+    readingAhead() {
+      if (!settled && !finished) lastReadAheadAt = Date.now();
     },
     info: () => ({
       width: video.videoWidth || null,
