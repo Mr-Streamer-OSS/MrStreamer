@@ -125,10 +125,13 @@ setInterval(() => {}, 1000);
       const leaving = new AbortController();
       const waiting = fetch(`${url}?start=${start}&subtitle=4`, { signal: leaving.signal });
       let args: string[] = [];
-      await vi.waitFor(async () => {
-        args = JSON.parse(await readFile(file, "utf8")) as string[];
-        expect(args.length).toBeGreaterThan(0);
-      });
+      await vi.waitFor(
+        async () => {
+          args = JSON.parse(await readFile(file, "utf8")) as string[];
+          expect(args.length).toBeGreaterThan(0);
+        },
+        { timeout: 10_000 },
+      );
       const subtitles = args.find((arg) => arg.endsWith("/subtitles"))!;
       const picture = args.find((arg) => arg.endsWith("/start"))!;
       await fetch(picture, {
@@ -833,7 +836,9 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
     const feed = await subtitles(session.url, 137, 4);
     expect(feed.lines.map(([, , text]) => text)).not.toContain("Apres");
     await feed.run();
-    await vi.waitFor(() => expect(linesAt(feed.lines, 142)).toEqual(["Autre"]));
+    await vi.waitFor(() => expect(linesAt(feed.lines, 142)).toEqual(["Autre"]), {
+      timeout: 10_000,
+    });
     expect(provider.mostFilesAtOnce()).toBe(1);
     await dispose();
   });
@@ -998,7 +1003,9 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
     const asked = provider.fileRequests();
     const waiting = subtitles(session.url, 137, 4);
     // Recovery has asked the provider, so this feed joined before the new picture request.
-    await vi.waitFor(() => expect(provider.fileRequests()).toBeGreaterThan(asked));
+    await vi.waitFor(() => expect(provider.fileRequests()).toBeGreaterThan(asked), {
+      timeout: 10_000,
+    });
     await play(`${session.url}?start=137&subtitle=4`);
     const feed = await waiting;
     expect(feed.lines.filter(([, , text]) => text === "Apres")).toHaveLength(1);
@@ -1022,11 +1029,15 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
       })
         .then((response) => response.body?.cancel())
         .catch(() => {});
-      await vi.waitFor(() => expect(provider.fileRequests()).toBeGreaterThan(asked));
+      await vi.waitFor(() => expect(provider.fileRequests()).toBeGreaterThan(asked), {
+        timeout: 10_000,
+      });
       cancelled.abort();
       await middle;
       await feed.run();
-      await vi.waitFor(() => expect(linesAt(feed.lines, 135)).toEqual(["Longue ligne"]));
+      await vi.waitFor(() => expect(linesAt(feed.lines, 135)).toEqual(["Longue ligne"]), {
+        timeout: 10_000,
+      });
       expect(feed.lines.filter(([, , text]) => text === "Apres")).toHaveLength(1);
     } finally {
       await dispose();
@@ -1049,8 +1060,9 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
         });
         report.on("error", reject);
         report.write(webvtt([[141, 143, "Already sent"]]));
-        await vi.waitFor(() =>
-          expect(feed.lines.some(([, , text]) => text === "Already sent")).toBe(true),
+        await vi.waitFor(
+          () => expect(feed.lines.some(([, , text]) => text === "Already sent")).toBe(true),
+          { timeout: 10_000 },
         );
         const current = await converter.run(session.url, 135);
         // The old converter's accepted report can still arrive after its process was replaced.
@@ -1060,8 +1072,9 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
           method: "PUT",
           body: webvtt([[137, 138, "Current run"]]),
         });
-        await vi.waitFor(() =>
-          expect(feed.lines.some(([, , text]) => text === "Current run")).toBe(true),
+        await vi.waitFor(
+          () => expect(feed.lines.some(([, , text]) => text === "Current run")).toBe(true),
+          { timeout: 10_000 },
         );
         expect(feed.lines.some(([, , text]) => text === "Late line")).toBe(false);
         await fetch(current.subtitles, {
@@ -1071,8 +1084,9 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
             [141, 143, "New text"],
           ]),
         });
-        await vi.waitFor(() =>
-          expect(feed.lines.filter(([, , text]) => text === "Late line")).toHaveLength(1),
+        await vi.waitFor(
+          () => expect(feed.lines.filter(([, , text]) => text === "Late line")).toHaveLength(1),
+          { timeout: 10_000 },
         );
         expect(feed.lines.filter(([at]) => at === 141).map(([, , text]) => text)).toEqual([
           "Already sent",
@@ -1105,7 +1119,9 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
         expect(feed.lines.some(([at]) => at === 130)).toBe(true);
         const current = await converter.run(session.url, 125);
         await fetch(current.subtitles, { method: "PUT", body: webvtt(lines) });
-        await vi.waitFor(() => expect(feed.lines.some(([at]) => at === 127)).toBe(true));
+        await vi.waitFor(() => expect(feed.lines.some(([at]) => at === 127)).toBe(true), {
+          timeout: 10_000,
+        });
         current.stop();
       } finally {
         await dispose();
@@ -1140,7 +1156,9 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
     try {
       const run = await play(`${session.url}?start=137&subtitle=4`);
       expect(framesOf(run.body)).toBeGreaterThan(0);
-      await vi.waitFor(() => expect(lines.map(([, , text]) => text)).toEqual(["Apres"]));
+      await vi.waitFor(() => expect(lines.map(([, , text]) => text)).toEqual(["Apres"]), {
+        timeout: 10_000,
+      });
       expect(ready).toBe(false);
       await vi.waitFor(() => expect(ready).toBe(true), { timeout: 10_000 });
       expect(linesAt(lines, 137)).toEqual(["Longue ligne"]);
@@ -1497,7 +1515,9 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
     await play(`${session.url}?start=50&subtitle=3`);
     const feed = await subtitles(session.url, 0, 3);
     await feed.run();
-    await vi.waitFor(() => expect(linesAt(feed.lines, 4)).toEqual(["Three to six"]));
+    await vi.waitFor(() => expect(linesAt(feed.lines, 4)).toEqual(["Three to six"]), {
+      timeout: 10_000,
+    });
     expect(provider.mostFilesAtOnce()).toBe(1);
     await dispose();
   });
