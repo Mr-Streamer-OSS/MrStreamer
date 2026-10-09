@@ -254,6 +254,8 @@ function useGone(receivers: readonly Receiver[]): readonly Receiver[] {
  * the system's list: how long it has, and where a code the TV may show goes; the system owns that
  * prompt, so the app can't tell whether one was asked for. And for a few seconds after a connect
  * that reached no receiver: why, while what played here plays on, unless the viewer closes it.
+ * Also while a lost receiver stays lost: a retry refused before it began, as for one gone from
+ * the list, changes nothing else, so this is all that says it failed.
  */
 export function ConnectingNote() {
   const output = useOutput((state) => state.status.output);
@@ -270,7 +272,7 @@ export function ConnectingNote() {
   const waiting = output.kind === "connecting" && output.protocol === "airplay";
   const failed =
     !waiting &&
-    output.kind === "local" &&
+    (output.kind === "local" || output.kind === "lost") &&
     refused &&
     !closed &&
     Date.now() - refused.at < REFUSED_MS
