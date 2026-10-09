@@ -552,7 +552,8 @@ interface Feed {
   readonly track: number;
   /**
    * What the run reads of the track after this time on the file's clock goes to the player. Up
-   * to it, the history did. Infinity until the feed has that.
+   * to it, the history did. Packet feeds wait at Infinity until recovery has that past; text
+   * feeds receive the run's independent lines while recovery is under way.
    */
   after: number;
   /** Sends an entry on, its times counted from `origin`, where the title starts on the file's clock. */
@@ -1308,6 +1309,7 @@ function make(deps: PlaybackDeps) {
           );
         }
         session.kept = fileKept();
+        session.live = null;
         probes.delete(session.probeKey);
         if (session.verified && verifiedFiles) {
           Effect.runSync(
@@ -1751,6 +1753,19 @@ function make(deps: PlaybackDeps) {
         run.subtitle === null
           ? null
           : { track: run.subtitle, since, from: since, entries: [], bytes: 0 };
+      const previous = session.live;
+      const joined = session.feed;
+      // An early text feed may have replayed the previous run's buffered lines. Reuse that
+      // bounded buffer to skip exact repeats, allowing unread lines even at the same timestamp.
+      const replayed =
+        plan.subtitle?.kind === "cues" &&
+        !readsItsOwn(probe, run.subtitle, run.start) &&
+        live &&
+        previous?.track === live.track &&
+        joined?.track === live.track &&
+        previous.since <= joined.after
+          ? previous.entries
+          : [];
       session.live = live;
       const subtitles =
         plan.subtitle && reading && live
@@ -1761,6 +1776,9 @@ function make(deps: PlaybackDeps) {
               // A run stops when the viewer skips or leaves, at any moment: what it has read
               // counts up to a little before the last subtitle that arrived.
               reading.reach(entry.from - interleave(probe));
+              // A replaced run may still finish reporting. Its history counts, but its
+              // buffered lines must stay fixed: the new run uses them to skip sent repeats.
+              if (session.live !== live) return;
               live.entries.push(entry);
               live.bytes += sizeOf(entry);
               // The oldest go first, and what is left is whole only from after them.
@@ -1774,7 +1792,17 @@ function make(deps: PlaybackDeps) {
                 session.live === live &&
                 feed?.track === live.track &&
                 live.since <= feed.after &&
-                entry.from > feed.after
+                entry.from > feed.after &&
+                (feed !== joined ||
+                  !replayed.some(
+                    (known) =>
+                      "text" in entry &&
+                      "text" in known &&
+                      known.from === entry.from &&
+                      known.at === entry.at &&
+                      known.until === entry.until &&
+                      known.text === entry.text,
+                  ))
               ) {
                 feed.send(entry, probe.origin);
               }
@@ -1899,7 +1927,8 @@ function make(deps: PlaybackDeps) {
      * seconds (see `@mrstreamer/core/subtitles/feed`). The picture doesn't wait for it. First
      * what the track holds before the position, as far back as what is on screen there depends
      * on, then `ready`, then what the run from there reads, for as long as the player listens.
-     * Until `ready` the player shows nothing of the track and says it is preparing.
+     * Independent text from the run goes on at once while its past is being recovered. Packet
+     * decoders wait for `ready`, since their changes may depend on that past.
      *
      * Finding the first part takes reading the file, which only gets the provider when playback
      * spares it, and only so much of it (see `subtitlesBefore`). When it can't be found, the feed
@@ -1960,7 +1989,9 @@ function make(deps: PlaybackDeps) {
       const join = (after: number, origin: number) => {
         const live = session.live;
         const mine = live?.track === track && live.since <= after ? live : null;
-        feed.after = mine ? Math.max(after, mine.from) : after;
+        // Text may join an old, trimmed run before its replacement starts. Keep its requested
+        // position so the replacement can deliver the missing lines too.
+        feed.after = mine && !earlyText ? Math.max(after, mine.from) : after;
         for (const entry of mine?.entries ?? []) if (entry.from > feed.after) send(entry, origin);
       };
       const feed: Feed = {
@@ -2016,6 +2047,11 @@ function make(deps: PlaybackDeps) {
         codec,
         start: Math.max(0, Number(url.searchParams.get("start")) || 0),
       };
+      // Text lines stand alone: a run's upcoming lines need none of the earlier ones. Join now
+      // and keep recovering the past for lines that began before the position, however long
+      // they last. Joining again when recovery ends would send the run's lines twice.
+      const earlyText = output.kind === "cues" && !readsItsOwn(probe, track, wanted.start);
+      if (earlyText) join(probe.origin + wanted.start + interleave(probe), probe.origin);
       session.recovering++;
       void subtitlesBefore(session, probe, wanted, attempt)
         .then(
@@ -2027,11 +2063,11 @@ function make(deps: PlaybackDeps) {
               unavailable = "limit";
               record(unavailable);
               write({ unavailable });
-              join(before.upTo, before.origin);
+              if (!earlyText) join(before.upTo, before.origin);
               return;
             }
             for (const entry of before.entries) send(entry, before.origin);
-            join(before.upTo, before.origin);
+            if (!earlyText) join(before.upTo, before.origin);
             write({ ready: true });
             record("ok");
           },
@@ -2046,7 +2082,9 @@ function make(deps: PlaybackDeps) {
             record(unavailable);
             write({ unavailable });
             // What the run reads from here on still comes: see `send`.
-            join(probe.origin + wanted.start + interleave(probe), probe.origin);
+            if (!earlyText) {
+              join(probe.origin + wanted.start + interleave(probe), probe.origin);
+            }
           },
         )
         .finally(() => {

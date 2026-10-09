@@ -291,11 +291,11 @@ describe("subtitles on a playing movie", () => {
     await act(async () => titlePlayer.setSubtitle(english));
     await act(settle);
     // The feed is still finding what the file holds before 137 s: the picture is asked for all
-    // the same, nothing of the track shows yet, and the view says so.
+    // the same. Independent text shows at once while recovery is still loading.
     runs.send(line(121, "We sail at first light."));
     await act(settle);
     expect(runs.pictures).toContain("?start=137.000&subtitle=3");
-    expect(shown()).toEqual([]);
+    expect(shown()).toEqual(["We sail at first light."]);
     expect(note()).toBe("Subtitles loading");
 
     // The word that everything before the position is there.
@@ -303,6 +303,22 @@ describe("subtitles on a playing movie", () => {
     await act(settle);
     expect(shown()).toEqual(["We sail at first light."]);
     expect(note()).toBeNull();
+  });
+
+  it("keeps known text when recovering older lines reaches its budget", async () => {
+    const runs = serveRuns(false);
+    await opened(137);
+    await act(async () => titlePlayer.setSubtitle(english));
+    await act(settle);
+    runs.send(line(137, "The tide waits for no one."));
+    await act(settle);
+    expect(shown()).toEqual(["The tide waits for no one."]);
+    runs.send('{"unavailable":"limit"}\n');
+    await act(settle);
+    expect(shown()).toEqual(["The tide waits for no one."]);
+    runs.send('{"unavailable":"changed"}\n');
+    await act(settle);
+    expect(shown()).toEqual([]);
   });
 
   it("say when what was on screen can't be had, and show again from what comes next", async () => {

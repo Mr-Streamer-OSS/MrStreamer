@@ -6,8 +6,8 @@
 //
 // With subtitles on, a run reads their feed beside the picture, which never waits for it (see
 // @mrstreamer/core/subtitles/feed): what the track holds before the run's start, then the
-// subtitles as the run reads them. Until the feed has the first part, nothing of the track shows
-// and the run says its subtitles are loading; then what is on screen where the picture has got to
+// subtitles as the run reads them. Independent text shows as it arrives while recovery continues.
+// Packet changes wait for the recovered state; then what is on screen where the picture has got to
 // shows at once, such as a picture, page or caption that began long before the start. When the
 // first part can't be had the run says so, and the picture plays on.
 //
@@ -15,7 +15,7 @@
 // provider's connection sits idle until playback moves on; the controller ends the run after a
 // long pause.
 import { subtitleDecoder, type SubtitleCodec } from "@mrstreamer/core/subtitles/decoder";
-import { readFeedLine, type SubtitleFeedLine as FeedLine } from "@mrstreamer/core/subtitles/feed";
+import { readFeedLine } from "@mrstreamer/core/subtitles/feed";
 import type { SubtitleChange } from "@mrstreamer/core/subtitles/screen";
 import type { EngineError, StreamInfo } from "./engine.ts";
 import { readMp4Start } from "./mp4.ts";
@@ -361,7 +361,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
   /**
    * Reads the run's subtitle feed, a JSON line each, for as long as the run lasts. Lines of text
    * go on the element's subtitle track; packets go through the decoder for their codec, and what
-   * they draw is shown. What comes before `ready` is from before the run's start: the decoder
+   * they draw is shown. Packets before `ready` are from before the run's start: the decoder
    * takes all of it, so it knows what later packets build on, and nothing of it shows until then.
    * At `ready` what is on screen where the picture has got to shows, and each change after it.
    * After `unavailable` the track shows only what stands on its own: lines of text as they come,
@@ -382,11 +382,8 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     const decoderFor = () => (isCodec(codec) ? subtitleDecoder(codec, run.page) : null);
     let decoder = decoderFor();
     decoding = decoder !== null;
-    /** What came so far, held until the feed is ready; null once it shows as it comes. */
-    let held: { changes: SubtitleChange[]; lines: Extract<FeedLine, { text: string }>[] } | null = {
-      changes: [],
-      lines: [],
-    };
+    /** Packet changes need the recovered decoder state; text lines can show as they arrive. */
+    let held: SubtitleChange[] | null = [];
     const text = new TextDecoder();
     let pending = "";
     for await (const chunk of response.body) {
@@ -398,11 +395,11 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
         // The tracks are shared with the next run, which may have started already.
         if (!line || subtitlesSignal.aborted) continue;
         if ("unavailable" in line) {
-          // Nothing shows of a past that isn't whole, and no decoder builds on it: what showed
-          // goes too, as when the provider put another file behind the address since.
+          // Packet decoders can't build on an incomplete past. Independent text already read
+          // stays unless the provider replaced the file it belongs to.
           held = null;
           decoder = decoderFor();
-          clearSubtitles(video);
+          if (decoding || line.unavailable === "changed") clearSubtitles(video);
           showsFrom = null;
           say("unavailable");
         } else if ("ready" in line) {
@@ -413,24 +410,20 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
           }
           // What the last change before the position left on screen, and each one after it.
           const now = Math.max(run.start, video.currentTime);
-          const last = held?.changes.findLastIndex((change) => change.at <= now) ?? -1;
-          for (const change of held?.changes.slice(Math.max(0, last)) ?? []) {
+          const last = held?.findLastIndex((change) => change.at <= now) ?? -1;
+          for (const change of held?.slice(Math.max(0, last)) ?? []) {
             presenter?.show(change);
-          }
-          for (const line of held?.lines ?? []) {
-            if (line.until > now) addTextCue(video, line.at, line.until, line.text);
           }
           held = null;
           // Chromium says which cues are due only a moment after the position moves.
           void presenter?.drawNow().catch(() => {});
           say(null);
         } else if ("text" in line) {
-          if (held) held.lines.push(line);
-          else addTextCue(video, line.at, line.until, line.text);
+          addTextCue(video, line.at, line.until, line.text);
         } else {
           const data = Uint8Array.from(atob(line.data), (char) => char.charCodeAt(0));
           const change = decoder?.push(data, line.at);
-          if (change && held) held.changes.push(change);
+          if (change && held) held.push(change);
           else if (change) presenter?.show(change);
         }
       }
