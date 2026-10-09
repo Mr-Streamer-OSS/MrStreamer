@@ -1,0 +1,801 @@
+// Movies and episodes downloaded to this computer: the queue, its one transfer at a time, and the
+// copies that play without a subscription. Each download is a record in the database
+// (../platform/downloads-store.ts) and a folder of its own in the app's downloads folder, with
+// the file, a partial file while it transfers, and the artwork kept for it. Paths, addresses and
+// logins stay here; the window sees the records as `Download`s.
+//
+// One download transfers at a time, of whichever subscription: the first in the queue whose
+// subscription plays nothing. Playback lends it that subscription's provider connection and takes
+// it back for any stream of that subscription (see Playback.lend): the transfer stops, its
+// request ends, and it waits in the queue with its partial file until nothing of its subscription
+// plays. Another subscription's stream lets it go on. A transfer goes on from its partial file
+// only when the provider proves it is the same file; otherwise it starts again and says so (see
+// ../downloads/transfer.ts). It becomes a copy once every byte is on disk: the partial is flushed,
+// renamed, and only then marked complete. Quitting keeps the queue and its partial files.
+//
+// A copy keeps what it needs to show and play without asking anyone: its details and artwork,
+// read as it was queued, how far it was watched here, and the subtitles saved for the exact file
+// it was made from (see `subtitlesOfCopy`). Removing a subscription cancels its unfinished
+// downloads; its copies stay, and play, until the viewer deletes them.
+import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import {
+  artworkUrl,
+  type Download,
+  type DownloadArtwork,
+  type DownloadFailure,
+  type DownloadList,
+} from "@mrstreamer/contracts/downloads";
+import type { EpisodeDetails, RawTitleRef, TitleRef } from "@mrstreamer/contracts/ondemand";
+import { Failed, failedWith } from "@mrstreamer/core/failure";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as PubSub from "effect/PubSub";
+import * as Stream from "effect/Stream";
+import { fileDisk, transfer, type Disk, type TransferOutcome } from "../downloads/transfer.ts";
+import {
+  DownloadStore,
+  type About,
+  type PartIdentity,
+  type StoredDownload,
+} from "../platform/downloads-store.ts";
+import { SavedSubtitles, subtitlesOfCopy } from "../platform/saved-subtitles.ts";
+import { OnDemand } from "./ondemand.ts";
+import { Playback, type Lent, type LocalCopy } from "./playback.ts";
+import { Subscriptions } from "./subscription.ts";
+
+/** How often the window hears how a transfer goes, at most. */
+const CHANGES_MS = 250;
+/** How often a transfer's progress is written down, so a restart goes on from about there. */
+const SAVE_MS = 5000;
+/** The most a picture kept for a download may be. */
+const ARTWORK_BYTES = 8 * 1024 * 1024;
+const ARTWORK_MS = 20_000;
+const ID = /^[0-9a-f-]{36}$/;
+
+export interface DownloadsDeps {
+  readonly dataDir: string;
+  readonly userAgent: string;
+  /** The disk transfers write to; the file system except in tests. */
+  readonly disk?: Disk;
+  /** What artwork is fetched with; `fetch` except in tests. */
+  readonly fetch?: typeof fetch;
+}
+
+export class Downloads extends Context.Service<
+  Downloads,
+  {
+    readonly list: Effect.Effect<DownloadList, Failed>;
+    /**
+     * Queues a movie or an episode, by the exact version given, with its details and artwork kept
+     * for the copy. One of the same account already queued or downloaded answers as it is; a
+     * failed one is queued again. Fails while its subscription can't be asked, or doesn't list it.
+     */
+    add(title: TitleRef): Effect.Effect<Download, Failed>;
+    /**
+     * Cancels an unfinished download, or deletes a copy, with everything kept for it. What plays
+     * the copy closes first; a transfer stops, and its request ends, before its files go.
+     */
+    remove(id: string): Effect.Effect<void, Failed>;
+    /** Queues a failed download again. */
+    retry(id: string): Effect.Effect<void, Failed>;
+    recordProgress(id: string, position: number, duration: number): Effect.Effect<void, Failed>;
+    /** A complete copy, for playback to open; fails when it isn't, or its file is gone. */
+    copy(id: string): Effect.Effect<LocalCopy, Failed>;
+    /** A copy's kept picture, for the app's artwork scheme; null without one. */
+    artwork(
+      id: string,
+      artwork: DownloadArtwork,
+    ): Effect.Effect<{ readonly path: string; readonly type: string } | null>;
+    /**
+     * A subscription is going: its unfinished downloads end, their transfer and files with them.
+     * Its copies stay.
+     */
+    subscriptionGone(subscriptionId: string): Effect.Effect<void>;
+    /** The list after every change, a few times a second at most while a transfer goes on. */
+    readonly changes: Stream.Stream<DownloadList>;
+  }
+>()("mrstreamer/Downloads") {
+  static readonly layer = (deps: DownloadsDeps) => Layer.effect(Downloads, make(deps));
+}
+
+/** The transfer under way. */
+interface Active {
+  readonly id: string;
+  /** Stops it for the viewer or the app; playback's lease stops it for a stream. */
+  readonly controller: AbortController;
+  received: number;
+  size: number | null;
+  identity: PartIdentity | null;
+  restarted: boolean;
+  rate: number | null;
+  /** Settles once its request is over, the partial closed and its lease given back. */
+  over: Promise<void>;
+  /** Settles once what it ended with is written down: a copy, a failure, or where it stopped. */
+  settled: Promise<void>;
+}
+
+function make(deps: DownloadsDeps) {
+  return Effect.gen(function* () {
+    const store = yield* DownloadStore;
+    const playback = yield* Playback;
+    const onDemand = yield* OnDemand;
+    const subscriptions = yield* Subscriptions;
+    const savedSubtitles = yield* SavedSubtitles;
+    const scope = yield* Effect.scope;
+    const disk = deps.disk ?? fileDisk;
+    const fetchArtwork = deps.fetch ?? fetch;
+    const root = join(deps.dataDir, "downloads");
+    const changes = yield* PubSub.sliding<DownloadList>(4);
+
+    const folderOf = (id: string) => join(root, id);
+    const mediaOf = (record: StoredDownload) =>
+      join(folderOf(record.id), `media.${extensionOf(record.container)}`);
+    const partOf = (record: StoredDownload) => `${mediaOf(record)}.part`;
+
+    const records = new Map<string, StoredDownload>();
+    // Without its table nothing can be queued or listed either: each call says so.
+    const stored = yield* store.list.pipe(
+      Effect.catch((failed) =>
+        Effect.as(Effect.logWarning("[downloads] can't be read", failed.error), []),
+      ),
+    );
+    for (const record of stored) records.set(record.id, record);
+    /** Copies whose file is gone, as last looked: looked at again as the window asks for the list. */
+    const missing = new Set<string>();
+    let active: Active | null = null;
+    let ended = 0;
+    let closing = false;
+
+    /**
+     * Writes a record and keeps it. Every write is synchronous, as the database is: none can come
+     * between a removal's and its record going, so nothing writes a removed download back.
+     */
+    const write = (record: StoredDownload) => {
+      Effect.runSync(store.put(record));
+      records.set(record.id, record);
+    };
+    /** Changes a download's record as it is now; one removed meanwhile stays removed. */
+    const update = (id: string, change: (latest: StoredDownload) => StoredDownload) => {
+      const latest = records.get(id);
+      if (latest) write(change(latest));
+    };
+
+    // A copy renamed into place as the app stopped, before it was written down as complete.
+    for (const record of records.values()) {
+      if (
+        record.state === "queued" &&
+        record.size !== null &&
+        (yield* Effect.promise(() => disk.size(mediaOf(record)))) === record.size
+      ) {
+        const complete: StoredDownload = {
+          ...record,
+          state: "complete",
+          received: record.size,
+          completedAt: Date.now(),
+        };
+        yield* store.put(complete).pipe(Effect.ignore);
+        records.set(record.id, complete);
+      }
+    }
+    // Folders no record names: left by a deletion that couldn't finish, or a download that went.
+    yield* Effect.promise(async () => {
+      const names = await readdir(root).catch(() => []);
+      await Promise.all(
+        names
+          .filter((name) => ID.test(name) && !records.has(name))
+          .map((name) => rm(folderOf(name), { recursive: true, force: true }).catch(() => {})),
+      );
+    });
+
+    const lookForMissing = () => {
+      missing.clear();
+      for (const record of records.values()) {
+        if (record.state === "complete" && !existsSync(mediaOf(record))) missing.add(record.id);
+      }
+    };
+    lookForMissing();
+
+    /** The saved subscription of each account now, by its key, with the name it shows. */
+    const accounts = Effect.gen(function* () {
+      const [saved, listed] = yield* Effect.all([subscriptions.saved, subscriptions.list]);
+      const names = new Map(listed.map((each) => [each.id, each.name ?? hostOf(each.server)]));
+      return new Map(
+        saved.map((each) => [each.key, { id: each.id, name: names.get(each.id) ?? "" }]),
+      );
+    });
+
+    const downloadOf = (
+      record: StoredDownload,
+      owners: ReadonlyMap<string, { readonly id: string; readonly name: string }>,
+      busy: ReadonlySet<string>,
+    ): Download => ({
+      id: record.id,
+      title: record.title,
+      subscription: owners.get(record.account) ?? null,
+      name: record.about.name,
+      episodeName: record.about.episodeName,
+      year: record.about.year,
+      duration: record.about.duration,
+      originalLanguage: record.about.originalLanguage,
+      posterUrl: record.about.poster ? artworkUrl(record.id, "poster") : null,
+      wideUrl: record.about.wide ? artworkUrl(record.id, "wide") : null,
+      size:
+        record.state === "complete"
+          ? record.received
+          : active?.id === record.id
+            ? active.size
+            : record.size,
+      status:
+        record.state === "complete"
+          ? { kind: missing.has(record.id) ? "missing" : "complete" }
+          : record.state === "failed"
+            ? {
+                kind: "failed",
+                failure: record.failure ?? {
+                  kind: "app",
+                  error: { kind: "unexpected", detail: "This download stopped." },
+                },
+              }
+            : active?.id === record.id
+              ? {
+                  kind: "transferring",
+                  received: active.received,
+                  size: active.size,
+                  rate: active.rate,
+                  restarted: active.restarted,
+                }
+              : busy.has(record.subscriptionId)
+                ? { kind: "waiting" }
+                : { kind: "queued" },
+      progress: record.progress && {
+        position: record.progress.position,
+        duration: record.progress.duration,
+      },
+    });
+
+    const view = Effect.gen(function* () {
+      const owners = yield* accounts;
+      const busy = yield* playback.busy;
+      const all = [...records.values()];
+      const queue = all.filter((record) => record.state !== "complete");
+      const copies = all
+        .filter((record) => record.state === "complete")
+        .toSorted((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0));
+      const free = yield* Effect.promise(async () => {
+        await mkdir(root, { recursive: true }).catch(() => {});
+        return disk.free(root);
+      });
+      return {
+        items: [...queue, ...copies].map((record) => downloadOf(record, owners, busy)),
+        bytes: all.reduce(
+          (sum, record) => sum + (active?.id === record.id ? active.received : record.received),
+          0,
+        ),
+        free,
+        ended,
+      } satisfies DownloadList;
+    });
+
+    let telling: NodeJS.Timeout | undefined;
+    /** Tells the window, once the changes of the next moment are in. */
+    const tell = () => {
+      if (telling || closing) return;
+      telling = setTimeout(() => {
+        telling = undefined;
+        void Effect.runPromise(view).then(
+          (list) => PubSub.publishUnsafe(changes, list),
+          () => {},
+        );
+      }, CHANGES_MS);
+    };
+
+    /** Starts the next transfer the queue can have now, if none goes on. */
+    let picking = false;
+    let again = false;
+    const next = async (): Promise<void> => {
+      if (picking) {
+        again = true;
+        return;
+      }
+      picking = true;
+      try {
+        do {
+          again = false;
+          if (active || closing) return;
+          const busy = await Effect.runPromise(playback.busy);
+          for (const record of records.values()) {
+            if (record.state !== "queued" || busy.has(record.subscriptionId)) continue;
+            const lent = await Effect.runPromise(playback.lend(record.subscriptionId));
+            if (!lent) continue;
+            // Removed, or the app began to close, while it waited for its lease.
+            if (closing || records.get(record.id) !== record) {
+              lent.release();
+              continue;
+            }
+            start(record, lent);
+            break;
+          }
+        } while (again);
+      } finally {
+        picking = false;
+      }
+    };
+    const wake = () => void next();
+
+    /** Transfers `record` on the connection playback lent it. */
+    const start = (record: StoredDownload, lent: Lent) => {
+      const controller = new AbortController();
+      let outcome: TransferOutcome = { kind: "stopped" };
+      const transferring: Active = {
+        id: record.id,
+        controller,
+        received: record.received,
+        size: record.size,
+        identity: record.identity,
+        restarted: record.restarted,
+        rate: null,
+        over: Promise.resolve(),
+        settled: Promise.resolve(),
+      };
+      active = transferring;
+      tell();
+      transferring.over = transferOf(
+        record,
+        transferring,
+        AbortSignal.any([controller.signal, lent.signal]),
+      )
+        .then(
+          (ended) => void (outcome = ended),
+          (cause) =>
+            void (outcome = {
+              kind: "failed",
+              failure: { kind: "app", error: failedWith(cause).error },
+            }),
+        )
+        // Only once its request is over does the subscription's stream go on.
+        .finally(() => lent.release());
+      transferring.settled = transferring.over
+        .then(() => settle(record.id, transferring, outcome))
+        .catch((cause) => console.warn("[downloads] couldn't keep how a transfer ended", cause))
+        .finally(() => {
+          active = null;
+          tell();
+          wake();
+        });
+    };
+
+    /** Asks the provider for `record`'s file and writes it into its partial file. */
+    const transferOf = async (
+      record: StoredDownload,
+      transferring: Active,
+      signal: AbortSignal,
+    ): Promise<TransferOutcome> => {
+      const title: TitleRef = { ...record.title, subscriptionId: record.subscriptionId };
+      // Stopped while the file is looked up, nothing is asked of the provider's file.
+      const resolved = await Effect.runPromise(
+        Effect.all([subscriptions.sourceOf(record.subscriptionId), onDemand.file(title)]).pipe(
+          Effect.result,
+        ),
+        { signal },
+      ).catch(() => null);
+      if (!resolved || signal.aborted) return { kind: "stopped" };
+      if (resolved._tag === "Failure") {
+        return { kind: "failed", failure: { kind: "app", error: resolved.failure.error } };
+      }
+      const [source, file] = resolved.success;
+      // The file the bytes are of: its listing and login, which its saved subtitles are kept by.
+      update(record.id, (latest) => ({
+        ...latest,
+        listingKey: file.listingKey,
+        sourceStamp: source.fileRevision,
+      }));
+      try {
+        await mkdir(folderOf(record.id), { recursive: true });
+      } catch (cause) {
+        return { kind: "failed", failure: { kind: "folder", detail: messageOf(cause) } };
+      }
+      if (signal.aborted) return { kind: "stopped" };
+      let savedAt = performance.now();
+      let measured = { at: performance.now(), received: record.received };
+      return transfer({
+        url: file.url,
+        headers: file.headers ?? {},
+        request: source.provider.request,
+        userAgent: deps.userAgent,
+        part: partOf(record),
+        known: record.identity,
+        signal,
+        disk,
+        progress: ({ received, size, identity, restarted }) => {
+          if (active !== transferring) return;
+          const now = performance.now();
+          if (now - measured.at >= 1000) {
+            const rate = ((received - measured.received) * 1000) / (now - measured.at);
+            transferring.rate = rate >= 0 ? rate : null;
+            measured = { at: now, received };
+          }
+          const newFile =
+            identity?.mark !== transferring.identity?.mark || restarted !== transferring.restarted;
+          transferring.received = received;
+          transferring.size = size;
+          transferring.identity = identity;
+          transferring.restarted = restarted;
+          tell();
+          // What the partial is of goes down at once; how far it got, now and then.
+          if (newFile || now - savedAt >= SAVE_MS) {
+            savedAt = now;
+            try {
+              update(record.id, (latest) => ({ ...latest, received, size, identity, restarted }));
+            } catch {
+              // Written down at the end, or the transfer goes on from less.
+            }
+          }
+        },
+      });
+    };
+
+    /** Writes down how a transfer ended: a copy, a failure, or where it stopped. */
+    const settle = async (id: string, transferring: Active, outcome: TransferOutcome) => {
+      const record = records.get(id);
+      // Removed meanwhile: its files are the removal's.
+      if (!record) return;
+      const { received, size, identity, restarted } = transferring;
+      const where = { ...record, received, size, identity, restarted };
+      if (outcome.kind === "stopped") return update(id, () => where);
+      if (outcome.kind === "failed") {
+        return update(id, () => ({ ...where, state: "failed", failure: outcome.failure }));
+      }
+      try {
+        await rename(partOf(record), mediaOf(record));
+      } catch (cause) {
+        return update(id, () => ({
+          ...where,
+          state: "failed",
+          failure: { kind: "folder", detail: messageOf(cause) },
+        }));
+      }
+      // What was saved for the exact bytes it was made from comes with the copy. Saved for other
+      // bytes, or without proof of which, it stays the provider file's.
+      const source = await Effect.runPromise(
+        subscriptions.sourceOf(record.subscriptionId).pipe(Effect.option),
+      );
+      if (source._tag === "Some" && outcome.identity && records.has(id)) {
+        await Effect.runPromise(
+          savedSubtitles
+            .duplicate(
+              {
+                account: source.value.key,
+                sourceStamp: record.sourceStamp,
+                listingKey: record.listingKey,
+                kind: record.title.kind,
+                id: record.title.id,
+              },
+              subtitlesOfCopy(record.id, record.title),
+              outcome.identity,
+            )
+            .pipe(Effect.ignore),
+        );
+      }
+      missing.delete(id);
+      update(id, (latest) => {
+        const { failure: _failure, ...rest } = latest;
+        return {
+          ...rest,
+          state: "complete",
+          received: outcome.size,
+          size: outcome.size,
+          identity: outcome.identity,
+          restarted,
+          completedAt: Date.now(),
+        };
+      });
+    };
+
+    /**
+     * Takes a download out: its record at once, so nothing writes it back; then its transfer stops,
+     * its request ends, its playback closes and its files go.
+     */
+    const removeOne = async (id: string) => {
+      const record = records.get(id);
+      if (!record) return;
+      Effect.runSync(store.remove(id));
+      records.delete(id);
+      missing.delete(id);
+      const transferring = active?.id === id ? active : null;
+      if (transferring) {
+        transferring.controller.abort();
+        await transferring.settled;
+      }
+      await Effect.runPromise(playback.closeCopy(id));
+      await Effect.runPromise(
+        savedSubtitles.forget(subtitlesOfCopy(id, record.title)).pipe(Effect.ignore),
+      );
+      // What can't go now, as a file Windows still holds, goes as the app starts next.
+      await rm(folderOf(id), { recursive: true, force: true }).catch(() => {});
+    };
+
+    // Whatever plays decides which subscriptions' downloads wait.
+    yield* Effect.forkIn(
+      Stream.runForEach(playback.busyChanged, () =>
+        Effect.sync(() => {
+          tell();
+          wake();
+        }),
+      ),
+      scope,
+    );
+    yield* Effect.addFinalizer(() =>
+      Effect.promise(async () => {
+        closing = true;
+        clearTimeout(telling);
+        const stopping = active;
+        if (!stopping) return;
+        stopping.controller.abort();
+        await stopping.settled;
+      }),
+    );
+    wake();
+
+    const attempt = <A>(run: () => Promise<A>) =>
+      Effect.tryPromise({
+        try: run,
+        catch: (cause) => (cause instanceof Failed ? cause : failedWith(cause)),
+      });
+
+    const notFound = new Failed({
+      error: { kind: "unexpected", detail: "That download is no longer here." },
+    });
+
+    return {
+      list: Effect.suspend(() => {
+        lookForMissing();
+        return view;
+      }),
+
+      add: (title: TitleRef) =>
+        Effect.gen(function* () {
+          const source = yield* subscriptions.sourceOf(title.subscriptionId);
+          const { subscriptionId, ...raw } = title;
+          const known = [...records.values()].find(
+            (record) =>
+              record.account === source.key &&
+              record.title.kind === raw.kind &&
+              record.title.id === raw.id,
+          );
+          if (known) {
+            if (known.state === "failed") {
+              yield* attempt(async () =>
+                update(known.id, ({ failure: _failure, ...rest }) => ({
+                  ...rest,
+                  state: "queued",
+                })),
+              );
+              wake();
+            }
+            const owners = yield* accounts;
+            return downloadOf(records.get(known.id) ?? known, owners, yield* playback.busy);
+          }
+          // Asked first: a title its provider doesn't list now isn't queued.
+          const file = yield* onDemand.file(title);
+          const kept = yield* aboutOf(raw, subscriptionId);
+          const record: StoredDownload = {
+            id: randomUUID(),
+            account: source.key,
+            subscriptionId,
+            title: raw,
+            listingKey: file.listingKey,
+            sourceStamp: source.fileRevision,
+            container: file.container,
+            about: { ...kept.about, poster: null, wide: null },
+            state: "queued",
+            size: null,
+            received: 0,
+            identity: null,
+            restarted: false,
+            addedAt: Date.now(),
+            completedAt: null,
+            progress: null,
+          };
+          yield* attempt(async () => write(record));
+          yield* Effect.forkIn(
+            Effect.promise(() => keepArtwork(record.id, kept.artwork)),
+            scope,
+          );
+          tell();
+          wake();
+          return downloadOf(record, yield* accounts, yield* playback.busy);
+        }),
+
+      remove: (id: string) =>
+        attempt(async () => {
+          await removeOne(id);
+          tell();
+          wake();
+        }),
+
+      retry: (id: string) =>
+        attempt(async () => {
+          const record = records.get(id);
+          if (!record) throw notFound;
+          if (record.state !== "failed") return;
+          const { failure: _failure, ...rest } = record;
+          write({ ...rest, state: "queued" });
+          tell();
+          wake();
+        }),
+
+      recordProgress: (id: string, position: number, duration: number) =>
+        attempt(async () => {
+          const record = records.get(id);
+          if (record?.state !== "complete") throw notFound;
+          write({
+            ...record,
+            progress: { position: Math.min(position, duration), duration, at: Date.now() },
+          });
+          tell();
+        }),
+
+      copy: (id: string) =>
+        Effect.suspend(() => {
+          const record = records.get(id);
+          if (record?.state !== "complete" || !existsSync(mediaOf(record))) {
+            if (record?.state === "complete") missing.add(id);
+            return Effect.fail(
+              new Failed({
+                error: { kind: "stream", failure: { kind: "unavailable", status: 404 } },
+              }),
+            );
+          }
+          return Effect.succeed({
+            id: record.id,
+            path: mediaOf(record),
+            container: record.container,
+            title: record.title,
+          } satisfies LocalCopy);
+        }),
+
+      artwork: (id: string, artwork: DownloadArtwork) =>
+        Effect.sync(() => {
+          const record = records.get(id);
+          const type = record?.about[artwork];
+          return record && type ? { path: join(folderOf(record.id), artwork), type } : null;
+        }),
+
+      subscriptionGone: (subscriptionId: string) =>
+        Effect.promise(async () => {
+          const gone = [...records.values()].filter(
+            (record) => record.subscriptionId === subscriptionId && record.state !== "complete",
+          );
+          if (gone.length === 0) return;
+          for (const record of gone) await removeOne(record.id).catch(() => {});
+          ended += gone.length;
+          tell();
+          wake();
+        }),
+
+      changes: Stream.fromPubSub(changes),
+    };
+
+    /**
+     * What a download keeps of its title's details, and where its pictures are online, from the
+     * details the viewer just opened: a movie's, or an episode's with its series'.
+     */
+    function aboutOf(title: RawTitleRef, subscriptionId: string) {
+      return Effect.gen(function* () {
+        if (title.kind === "movie") {
+          const details = yield* onDemand.details("movie", { subscriptionId, id: title.id });
+          return {
+            about: {
+              name: details.title.title,
+              episodeName: null,
+              year: details.title.year,
+              duration: details.duration,
+              originalLanguage: details.title.originalLanguage,
+            },
+            artwork: {
+              poster: details.title.posterUrl,
+              wide: details.backdropUrl ?? details.title.backdropUrl,
+            },
+          };
+        }
+        const series = yield* onDemand.details("series", { subscriptionId, id: title.seriesId });
+        const season = yield* onDemand
+          .season({ subscriptionId, id: title.seriesId }, title.season)
+          .pipe(Effect.orElseSucceed((): readonly EpisodeDetails[] => []));
+        const episode =
+          season.find((each) => each.id === title.id) ??
+          (series.kind === "series"
+            ? series.seasons.flatMap((each) => each.episodes).find((each) => each.id === title.id)
+            : undefined);
+        return {
+          about: {
+            name: series.title.title,
+            episodeName: episode?.title ?? null,
+            year: series.title.year,
+            duration: episode?.duration ?? series.duration,
+            originalLanguage: series.title.originalLanguage,
+          },
+          artwork: {
+            poster: series.title.posterUrl,
+            wide: episode?.stillUrl ?? series.backdropUrl ?? series.title.backdropUrl,
+          },
+        };
+      });
+    }
+
+    /**
+     * Fetches a download's pictures into its folder, so the copy shows them with no network. One
+     * that doesn't come leaves the copy without it.
+     */
+    async function keepArtwork(
+      id: string,
+      urls: { readonly poster: string | null; readonly wide: string | null },
+    ): Promise<void> {
+      const kept: Partial<Record<DownloadArtwork, string>> = {};
+      for (const artwork of ["poster", "wide"] as const) {
+        const url = urls[artwork];
+        if (!url || !/^https?:\/\//.test(url)) continue;
+        const picture = await fetchPicture(url).catch(() => null);
+        if (!picture || !records.has(id)) continue;
+        try {
+          await mkdir(folderOf(id), { recursive: true });
+          await writeFile(join(folderOf(id), artwork), picture.bytes);
+          kept[artwork] = picture.type;
+        } catch {
+          // Without it, the copy shows its name.
+        }
+      }
+      if (Object.keys(kept).length === 0) return;
+      try {
+        update(id, (latest) => ({
+          ...latest,
+          about: { ...latest.about, ...kept } satisfies About,
+        }));
+      } catch {
+        // Fetched again by nothing: the copy shows its name.
+      }
+      tell();
+    }
+
+    async function fetchPicture(
+      url: string,
+    ): Promise<{ readonly bytes: Uint8Array; readonly type: string } | null> {
+      const response = await fetchArtwork(url, {
+        headers: { "User-Agent": deps.userAgent },
+        signal: AbortSignal.timeout(ARTWORK_MS),
+      });
+      const type = response.headers.get("content-type")?.split(";")[0]?.trim() ?? "";
+      if (!response.ok || !type.startsWith("image/") || !response.body) {
+        void response.body?.cancel().catch(() => {});
+        return null;
+      }
+      const parts: Uint8Array[] = [];
+      let length = 0;
+      for await (const part of response.body) {
+        length += part.length;
+        if (length > ARTWORK_BYTES) return null;
+        parts.push(part);
+      }
+      return { bytes: Buffer.concat(parts), type };
+    }
+  });
+}
+
+/** A file type safe to name a file with; anything else is kept as "bin". */
+function extensionOf(container: string): string {
+  return /^[a-z0-9]{1,8}$/i.test(container) ? container.toLowerCase() : "bin";
+}
+
+function hostOf(server: string): string {
+  return URL.parse(server)?.host || server;
+}
+
+function messageOf(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
+export type { DownloadFailure };

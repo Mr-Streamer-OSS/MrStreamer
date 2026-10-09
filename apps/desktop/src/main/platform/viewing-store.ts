@@ -78,6 +78,7 @@ import { prepareVerifiedFiles, VERIFIED_FILES_TABLE } from "./verified-files.ts"
 import {
   prepareSavedSubtitles,
   SAVED_SUBTITLES_TABLE,
+  SUBTITLE_PROOFS_TABLE,
   SUBTITLE_RESULTS_TABLE,
 } from "./saved-subtitles.ts";
 import { WATCHLIST_TABLES } from "./watchlist-store.ts";
@@ -854,6 +855,7 @@ function storeOn(db: DatabaseSync): ViewingStore["Service"] {
             VERIFIED_FILES_TABLE,
             SAVED_SUBTITLES_TABLE,
             SUBTITLE_RESULTS_TABLE,
+            SUBTITLE_PROOFS_TABLE,
           ],
           account,
         );

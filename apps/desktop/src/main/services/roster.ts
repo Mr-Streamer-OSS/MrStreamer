@@ -16,6 +16,7 @@ import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import * as Layer from "effect/Layer";
+import { Downloads } from "./downloads.ts";
 import { Library } from "./library.ts";
 import { OnDemand } from "./ondemand.ts";
 import { Output } from "./output.ts";
@@ -59,7 +60,8 @@ export class Roster extends Context.Service<
      * goes on. `eraseViewing` also deletes its account's favourites, watchlist, history and
      * progress, once the subscription is saved no more and before its login goes. Whatever was
      * starred, saved or played for it while the removal took its time is deleted with the rest
-     * or never stored. A record that can't be erased leaves the subscription to try again.
+     * or never stored. A record that can't be erased leaves the subscription to try again. Its
+     * unfinished downloads are cancelled; its downloaded copies stay.
      */
     remove(subscriptionId: string, eraseViewing: boolean): Effect.Effect<void, Failed>;
     /**
@@ -83,6 +85,7 @@ function make() {
     const output = yield* Output;
     const guide = yield* Guide;
     const viewing = yield* ViewingRecord;
+    const downloads = yield* Downloads;
     const scope = yield* Effect.scope;
 
     /** A subscription's guide, when it is due. A failure keeps the guide in use until the next check. */
@@ -179,6 +182,8 @@ function make() {
           if (!subscription) return;
           yield* output.subscriptionGone(subscriptionId);
           yield* playback.closeOf(subscriptionId);
+          // Its unfinished downloads end with it, their requests over before its login goes.
+          yield* downloads.subscriptionGone(subscriptionId);
           // Erased as it goes, and not before: while the removal waits its turn the subscription
           // is saved still, and what is starred or saved for it then has to go with the rest.
           yield* subscriptions.remove(
@@ -187,6 +192,8 @@ function make() {
           );
           // An open asked for as it went has had its turn by now, and found it saved still.
           yield* playback.closeOf(subscriptionId);
+          // As has a download queued as it went.
+          yield* downloads.subscriptionGone(subscriptionId);
           yield* Effect.all(
             [
               library.forget(subscription),

@@ -12,6 +12,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { attempt, Database, transaction, unavailable } from "./database.ts";
+import type { FileProof } from "../playback/source-identity.ts";
 
 /** Main-only identity resolved from the current playback session and provider catalogue. */
 export interface SubtitleFile {
@@ -22,10 +23,35 @@ export interface SubtitleFile {
   readonly id: string;
 }
 
+/**
+ * A downloaded copy's own identity for saved subtitles: what was saved for the provider's file it
+ * was made from is carried over to it (`duplicate`), and from then on it outlasts that account's
+ * login, expiry and erasure, until the copy is deleted.
+ */
+export function subtitlesOfCopy(
+  copyId: string,
+  title: { readonly kind: "movie" | "episode"; readonly id: string },
+): SubtitleFile {
+  return {
+    account: `copy:${copyId}`,
+    sourceStamp: "copy",
+    listingKey: copyId,
+    kind: title.kind,
+    id: title.id,
+  };
+}
+
 const Stored = SavedSubtitle.merge({ "resultKey?": "string <= 64" });
 type Stored = typeof Stored.infer;
 export const SAVED_SUBTITLES_TABLE = "saved_subtitles";
 export const SUBTITLE_RESULTS_TABLE = "saved_subtitle_results";
+/** Which bytes a file's results were saved for, by `FileProof`; a copy takes them only for those. */
+export const SUBTITLE_PROOFS_TABLE = "saved_subtitle_files";
+
+const Proof = type({
+  size: "number.integer >= 0",
+  marks: type({ resource: "string", mark: "string" }).array(),
+});
 
 /** Also prepared by account erasure when no playback service has run. */
 export function prepareSavedSubtitles(db: DatabaseSync): void {
@@ -42,6 +68,11 @@ export function prepareSavedSubtitles(db: DatabaseSync): void {
     account text not null, kind text not null, id text not null,
     source_stamp text not null, listing_key text not null, result_key text not null,
     saved text not null, primary key (account, kind, id, source_stamp, listing_key, result_key)
+  )`);
+  db.exec(`create table if not exists saved_subtitle_files (
+    account text not null, kind text not null, id text not null,
+    source_stamp text not null, listing_key text not null, proof text not null,
+    primary key (account, kind, id)
   )`);
 }
 
@@ -70,6 +101,23 @@ export class SavedSubtitles extends Context.Service<
     hide(file: SubtitleFile): Effect.Effect<void, Failed>;
     /** Forgets a removed file or one playback has observed being replaced. */
     forget(file: SubtitleFile): Effect.Effect<void, Failed>;
+    /**
+     * Notes which bytes `file` is, as the playback that saved a result for it read them. A later
+     * proof replaces it; none is kept for a file read without marks.
+     */
+    prove(file: SubtitleFile, proof: FileProof): Effect.Effect<void, Failed>;
+    /**
+     * Keeps for `to`, a downloaded copy, what is saved for `from`, the provider's file it was
+     * made from: its selected result, whether it shows, its timing and the cached results, in
+     * place of whatever `to` had. Only when `read`, what the download's own answers said of its
+     * bytes, is of the bytes `from`'s results were saved for: the same size and, from one same
+     * address, the same strong mark. Otherwise `to` keeps nothing. Answers whether it was kept.
+     */
+    duplicate(
+      from: SubtitleFile,
+      to: SubtitleFile,
+      read: { readonly resource: string; readonly mark: string; readonly size: number },
+    ): Effect.Effect<boolean, Failed>;
   }
 >()("mrstreamer/SavedSubtitles") {}
 
@@ -107,6 +155,33 @@ export const savedSubtitlesLayer = Layer.effect(
             select 1 from saved_subtitles where account = ? and kind = ? and id = ?
           )
         )`);
+      const selectProof = db.prepare(`select proof from saved_subtitle_files
+        where account = ? and kind = ? and id = ? and source_stamp = ? and listing_key = ?`);
+      const writeProof = db.prepare(`insert into saved_subtitle_files
+        (account, kind, id, source_stamp, listing_key, proof) values (?, ?, ?, ?, ?, ?)
+        on conflict (account, kind, id) do update set source_stamp = excluded.source_stamp,
+        listing_key = excluded.listing_key, proof = excluded.proof`);
+      const removeProof = db.prepare(
+        `delete from saved_subtitle_files where account = ? and kind = ? and id = ?`,
+      );
+      const proofOf = (file: SubtitleFile) => {
+        const row = selectProof.get(...identity(file));
+        if (!row) return null;
+        try {
+          const parsed = Proof(JSON.parse(String(row.proof)));
+          return parsed instanceof type.errors ? null : parsed;
+        } catch {
+          return null;
+        }
+      };
+      const selectResults = db.prepare(`select result_key, saved from saved_subtitle_results where
+        account = ? and kind = ? and id = ? and source_stamp = ? and listing_key = ? order by rowid`);
+      const removeAll = db.prepare(
+        `delete from saved_subtitles where account = ? and kind = ? and id = ?`,
+      );
+      const removeAllResults = db.prepare(
+        `delete from saved_subtitle_results where account = ? and kind = ? and id = ?`,
+      );
       const removeObsoleteResults = db.prepare(`delete from saved_subtitle_results where
         account = ? and kind = ? and id = ? and (source_stamp != ? or listing_key != ?)`);
       const identity = (file: SubtitleFile) =>
@@ -204,12 +279,42 @@ export const savedSubtitlesLayer = Layer.effect(
             if (previous?.subtitle && previous.shown !== false)
               save(file, { ...previous, shown: false });
           }),
+        prove: (file: SubtitleFile, proof: FileProof) =>
+          attempt(() => {
+            writeProof.run(...identity(file), JSON.stringify(Proof.assert(proof)));
+          }),
+        duplicate: (
+          from: SubtitleFile,
+          to: SubtitleFile,
+          read: { readonly resource: string; readonly mark: string; readonly size: number },
+        ) =>
+          attempt(() => {
+            const proof = proofOf(from);
+            const same =
+              proof !== null &&
+              proof.size === read.size &&
+              proof.marks.some(
+                (each) => each.resource === read.resource && each.mark === read.mark,
+              );
+            const selected = same ? select.get(...identity(from)) : undefined;
+            const results = same ? selectResults.all(...identity(from)) : [];
+            transaction(db, () => {
+              removeAll.run(to.account, to.kind, to.id);
+              removeAllResults.run(to.account, to.kind, to.id);
+              if (selected) write.run(...identity(to), String(selected.saved));
+              for (const row of results) {
+                rememberResult.run(...identity(to), String(row.result_key), String(row.saved));
+              }
+            });
+            return same && (selected !== undefined || results.length > 0);
+          }),
         forget: (file: SubtitleFile) =>
           attempt(() => {
             transaction(db, () => {
               remove.run(...identity(file));
               // With no replacement selected, Forget also clears caches from older identities.
               removeResults.run(...identity(file), file.account, file.kind, file.id);
+              removeProof.run(file.account, file.kind, file.id);
             });
           }),
       };
@@ -227,5 +332,7 @@ function closed(detail: string): SavedSubtitles["Service"] {
     show: () => fail,
     hide: () => fail,
     forget: () => fail,
+    prove: () => fail,
+    duplicate: () => fail,
   };
 }

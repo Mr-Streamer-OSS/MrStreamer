@@ -24,6 +24,15 @@ export interface Held {
   readonly stale: boolean;
 }
 
+/**
+ * What proves which file was read: its size, and the strong mark each address it came from gave
+ * it, after redirects. Another reading of the same bytes says the same for its address.
+ */
+export interface FileProof {
+  readonly size: number;
+  readonly marks: readonly { readonly resource: string; readonly mark: string }[];
+}
+
 /** Marks of replaced files kept, for telling a server that lags behind. */
 const RETIRED_KEPT = 64;
 
@@ -59,6 +68,16 @@ export function sourceIdentity() {
      */
     get steady(): boolean {
       return marks.size > 0 && !unmarked;
+    },
+    /** The proof of the file read so far, while every answer of it carried a mark. */
+    get proof(): FileProof | null {
+      if (size === null || marks.size === 0 || unmarked) return null;
+      return {
+        size,
+        marks: [...marks].flatMap(([resource, mark]) =>
+          mark === null ? [] : [{ resource, mark }],
+        ),
+      };
     },
     /**
      * How many addresses have answered for the file. What was kept when fewer had is of servers
@@ -113,7 +132,7 @@ export function sourceIdentity() {
 }
 
 /** The mark of an answer that tells its file from any other: a strong ETag, or an old enough date. */
-function strongMark(headers: Headers): string | null {
+export function strongMark(headers: Headers): string | null {
   const tag = headers.get("etag");
   if (tag !== null && !tag.startsWith("W/")) return `etag ${tag}`;
   const modified = Date.parse(headers.get("last-modified") ?? "");

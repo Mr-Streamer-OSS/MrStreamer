@@ -15,6 +15,7 @@ import {
 import { TitleFilters, type FilterOptions } from "./title-filters.ts";
 import type { Result } from "./errors.ts";
 import type { DiagnosticsPreview } from "./diagnostics.ts";
+import type { CopySession, Download, DownloadList } from "./downloads.ts";
 import {
   MAP_FILTERS,
   type GuideCandidate,
@@ -256,6 +257,8 @@ export const ipcInputs = {
   "subtitles.forget": () => type({ sessionId: "string > 0" }),
   "subtitles.cancel": () => type({ sessionId: "string > 0" }),
   "playback.openTitle": () => type({ title: TitleRef, decoders: decoders() }),
+  /** A downloaded copy by its id, from this computer: no subscription or network is asked. */
+  "playback.openCopy": () => type({ copy: "string > 0", decoders: decoders() }),
   "playback.close": () => type({ sessionId: "string" }),
   "playback.closeAll": none,
   "playback.failure": () => type({ sessionId: "string" }),
@@ -381,6 +384,19 @@ export const ipcInputs = {
   "watchlist.save": () => type({ kind: titleKind(), version: owned() }),
   /** A saved entry by its own id, as `WatchlistEntry` names it. */
   "watchlist.remove": () => type({ entry: owned() }),
+  "downloads.list": none,
+  /** A movie or one episode, by the exact version the viewer chose, at the end of the queue. */
+  "downloads.add": () => type({ title: TitleRef }),
+  /**
+   * Cancels an unfinished download, or deletes a copy from this computer, with what was kept of
+   * it: its file, details, artwork, progress and saved subtitles.
+   */
+  "downloads.remove": () => type({ id: "string > 0" }),
+  /** Puts a failed download back in the queue. */
+  "downloads.retry": () => type({ id: "string > 0" }),
+  /** Remembers how far a copy played here, with the copy alone. */
+  "downloads.recordProgress": () =>
+    type({ id: "string > 0", position: "number >= 0", duration: "number > 0" }),
   "updates.status": none,
   "updates.setChannel": () => type({ channel: "'stable' | 'nightly'" }),
   "updates.check": none,
@@ -520,6 +536,11 @@ export interface IpcOutputs {
   "subtitles.cancel": null;
   /** Opens a movie or episode, and closes any stream that was open before. */
   "playback.openTitle": TitleSession;
+  /**
+   * Opens a downloaded copy from this computer, and closes what played here before. A receiver
+   * plays on: a copy plays here only.
+   */
+  "playback.openCopy": CopySession;
   "playback.close": null;
   /** Closes every stream, including a title still reading its file before its session is known. */
   "playback.closeAll": null;
@@ -611,6 +632,15 @@ export interface IpcOutputs {
    * any more. One already gone changes nothing.
    */
   "watchlist.remove": null;
+  "downloads.list": DownloadList;
+  /**
+   * Queued, with the title's details and artwork kept on this computer. One already downloaded or
+   * in the queue answers as it is.
+   */
+  "downloads.add": Download;
+  "downloads.remove": null;
+  "downloads.retry": null;
+  "downloads.recordProgress": null;
   "updates.status": UpdateStatus;
   /** Chooses Stable or Nightly and checks what it offers; installs and removes nothing. */
   "updates.setChannel": UpdateStatus;
@@ -671,6 +701,8 @@ export interface IpcEvents {
   "ondemand.progress": OnDemandStatus["metadata"];
   /** TMDB's details of a title version arrived after its details were given without them. */
   "ondemand.detailsChanged": OwnedId & { readonly kind: TitleKind };
+  /** The queue or the copies changed, or a transfer moved on: at most a few times a second. */
+  "downloads.changed": DownloadList;
   /** Favourites, watched channels, progress or marks changed, up to `sequence`. */
   "viewing.changed": { readonly sequence: number };
   /** A title was saved to the watchlist or taken out of it. */

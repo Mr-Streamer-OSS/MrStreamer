@@ -16,6 +16,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type { SubtitleFile } from "../platform/saved-subtitles.ts";
+import type { FileProof } from "../playback/source-identity.ts";
 import { SavedSubtitles } from "../platform/saved-subtitles.ts";
 import {
   subtitleServiceClient,
@@ -30,6 +31,8 @@ export interface PlayingFile {
   readonly file: SubtitleFile;
   readonly signal: AbortSignal;
   readonly standing: Effect.Effect<boolean, Failed>;
+  /** Which bytes play, as the file's answers prove them; null when they don't. */
+  readonly proof: () => FileProof | null;
 }
 /** Main's playback and catalogue adapters agree on a currently listed exact file. */
 export interface SubtitleSession extends PlayingFile {
@@ -132,6 +135,12 @@ function make(deps: Parameters<typeof subtitleServiceClient>[0]) {
       Effect.gen(function* () {
         if (session.signal.aborted || !(yield* session.standing))
           return yield* unavailable("This exact file changed or stopped playing here.");
+      });
+    /** Notes which bytes the result was saved for, so a download of the same bytes takes it along. */
+    const proveFile = (session: PlayingFile) =>
+      Effect.suspend(() => {
+        const proof = session.proof();
+        return proof ? storage.prove(session.file, proof).pipe(Effect.ignore) : Effect.void;
       });
     const selectedServices = (settings: OnlineSubtitleSettings): readonly SubtitleService[] =>
       settings.service === "both" ? ["subdl", "opensubtitles"] : [settings.service];
@@ -252,6 +261,7 @@ function make(deps: Parameters<typeof subtitleServiceClient>[0]) {
           if (generation !== revision || signal.aborted || searches.get(id) !== request)
             return yield* unavailable("Subtitle choice was replaced.");
           yield* storage.remember(request.session.file, cached.subtitle, key, cached.timing);
+          yield* proveFile(request.session);
           return { saved: cached, quota: null };
         }
         const keys = yield* accounts.credentials(candidate.service);
@@ -274,6 +284,7 @@ function make(deps: Parameters<typeof subtitleServiceClient>[0]) {
         if (generation !== revision || signal.aborted || searches.get(id) !== request)
           return yield* unavailable("Subtitle choice was replaced.");
         yield* storage.remember(request.session.file, answer.subtitle, key);
+        yield* proveFile(request.session);
         const saved = yield* storage.read(request.session.file);
         if (!saved) return yield* unavailable("The downloaded subtitle couldn't be saved.");
         return {

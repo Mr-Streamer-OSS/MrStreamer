@@ -35,6 +35,17 @@
 // complete playlist and its segments made as the receiver asks for them (see
 // ../playback/receiver.ts). Everything ffmpeg and ffprobe read and report stays on loopback.
 //
+// A downloaded copy plays the way a title does, from a file on this computer in place of the
+// provider's (see ../playback/file-source.ts): the same probe, runs, tracks and subtitles, with no
+// subscription, provider or catalogue asked. Its session is of no subscription and closes nothing
+// a receiver plays.
+//
+// Downloads borrow a subscription's provider connection from here (`lend`), and only while
+// nothing of that subscription plays. Every open of a provider's stream takes it back first,
+// in its turn, and goes on only once the download's request is over: playback comes first, and
+// the provider never sees the download and the stream at once. Another subscription's download
+// goes on.
+//
 // Each session is a scope within the service's. Closing it, by stopping, switching or quitting,
 // aborts its upstream requests, which ends their ffmpeg processes; the proxy closes with the
 // service.
@@ -42,7 +53,8 @@ import { execFile, spawn } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { Readable, Transform } from "node:stream";
-import type { TitleRef } from "@mrstreamer/contracts/ondemand";
+import type { CopySession } from "@mrstreamer/contracts/downloads";
+import type { RawTitleRef, TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { OwnedId } from "@mrstreamer/contracts/subscription";
 import type {
   AudioTrack,
@@ -66,7 +78,8 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import { VerifiedFiles } from "../platform/verified-files.ts";
-import { SavedSubtitles, type SubtitleFile } from "../platform/saved-subtitles.ts";
+import { SavedSubtitles, subtitlesOfCopy, type SubtitleFile } from "../platform/saved-subtitles.ts";
+import { fileRequest } from "../playback/file-source.ts";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
@@ -115,7 +128,12 @@ import { pesReader, type PesPacket } from "@mrstreamer/core/subtitles/transport"
 import { webvttReader, type Cue } from "@mrstreamer/core/subtitles/webvtt";
 import { fileWindows, type FileWindows } from "../playback/file-windows.ts";
 import { blocks, readLayout, selected, type Layout, type ReadFile } from "../playback/matroska.ts";
-import { sourceIdentity, type Held, type SourceIdentity } from "../playback/source-identity.ts";
+import {
+  sourceIdentity,
+  type FileProof,
+  type Held,
+  type SourceIdentity,
+} from "../playback/source-identity.ts";
 import {
   nextScan,
   replayFor,
@@ -418,30 +436,50 @@ interface LiveSession extends SessionBase {
   captions: readonly number[];
 }
 
-/** Main-only handle. Closing or replacing the exact file cancels subtitle work. */
-export interface SubtitlePlayback {
-  readonly title: TitleRef;
+/**
+ * Main-only handle. Closing or replacing the exact file cancels subtitle work. A provider's file
+ * names its title, which the catalogue says is still listed; a copy is its own file.
+ */
+export type SubtitlePlayback = {
   readonly file: SubtitleFile;
   readonly signal: AbortSignal;
   readonly standing: Effect.Effect<boolean, Failed>;
+  /** What proves which bytes play, while the file's answers say; null for a copy's. */
+  readonly proof: () => FileProof | null;
+} & ({ readonly kind: "provider"; readonly title: TitleRef } | { readonly kind: "copy" });
+
+/** A downloaded copy, as playback opens it: one exact file on this computer. */
+export interface LocalCopy {
+  readonly id: string;
+  /** Never leaves the main process. */
+  readonly path: string;
+  readonly container: string;
+  /** The provider's ids of the file it was made from, which its saved subtitles are kept under. */
+  readonly title: RawTitleRef;
 }
+
+/** Durable track-fact identity, supplied only after resolving a current listed file. */
+interface Verified {
+  readonly account: string;
+  readonly sourceStamp: string;
+  readonly fileKey: string;
+  readonly listingKey: string;
+}
+
+/** Whose file a title session plays: a provider's, through its subscription, or a copy's. */
+type TitleOrigin =
+  | { readonly kind: "provider"; readonly title: TitleRef; readonly verified: Verified | null }
+  | { readonly kind: "copy"; readonly copy: string; readonly file: SubtitleFile };
 
 interface TitleSessionState extends SessionBase {
   readonly subtitleFileChanged: AbortController;
   readonly kind: "title";
-  readonly title: TitleRef;
+  readonly origin: TitleOrigin;
   readonly upstreamUrl: string;
   /** Resolved headers of this exact file, shared by probing, playback and receivers. */
   readonly headers: Headers;
   /** Probe reuse belongs to this file and saved source, including its request headers. */
   readonly probeKey: string;
-  /** Durable track-fact identity, supplied only after resolving a current listed file. */
-  readonly verified: {
-    readonly account: string;
-    readonly sourceStamp: string;
-    readonly fileKey: string;
-    readonly listingKey: string;
-  } | null;
   /** What the file holds, as ffprobe read it when the title opened. */
   probe: TitleProbe | null;
   /**
@@ -621,6 +659,19 @@ export interface PlaybackDeps {
  * login an address was made under (`SavedSubscription.revision`): one made under a login that
  * changed since isn't opened, nor one whose login changed while its file was read.
  */
+/** A subscription's provider connection, lent to a download (see `Playback.lend`). */
+export interface Lent {
+  readonly signal: AbortSignal;
+  /** The download's request is over: the connection is the provider's to give again. */
+  release(): void;
+}
+
+/**
+ * How long an open waits for a download to give its connection back before it goes on anyway: a
+ * download whose request doesn't end holds no stream back for longer.
+ */
+const RECLAIM_MS = 10_000;
+
 export interface Asked {
   readonly turn?: number | undefined;
   readonly revision?: number | undefined;
@@ -679,6 +730,28 @@ export class Playback extends Context.Service<
       decoders: readonly Codec[],
       asked?: Asked,
     ): Effect.Effect<TitleSession, Failed>;
+    /**
+     * Opens a downloaded copy from this computer, as `openTitle` opens a provider's file: what
+     * plays here closes first, and a receiver's session plays on. Asks no subscription.
+     */
+    openCopy(
+      copy: LocalCopy,
+      decoders: readonly Codec[],
+      turn?: number,
+    ): Effect.Effect<CopySession, Failed>;
+    /** Closes what plays a copy, as before it is deleted. */
+    closeCopy(copyId: string): Effect.Effect<void>;
+    /**
+     * Lends a subscription's provider connection to a download, while nothing of that
+     * subscription plays: null while something does, or another download has it. The lease's
+     * `signal` aborts once an open of that subscription asks for the connection, and that open
+     * waits until `release` says the download's request is over.
+     */
+    lend(subscriptionId: string): Effect.Effect<Lent | null>;
+    /** The subscriptions something plays from now, which a download of theirs waits for. */
+    readonly busy: Effect.Effect<ReadonlySet<string>>;
+    /** Says when a session opened or closed: `busy` may have changed. */
+    readonly busyChanged: Stream.Stream<void>;
     /** The current local title only, with no provider address or request headers. */
     subtitleContext(sessionId: string): Effect.Effect<SubtitlePlayback | null, Failed>;
     /**
@@ -766,8 +839,40 @@ function make(deps: PlaybackDeps) {
     const replaced = yield* PubSub.unbounded<string>();
     const readingAhead = yield* PubSub.unbounded<string>();
     const tracksChanged = yield* PubSub.unbounded<string>();
+    const busyChanged = yield* PubSub.sliding<void>(1);
     const scope = yield* Effect.scope;
     const sessions = new Map<string, Session>();
+    /** The download each subscription's connection is lent to, while one is. */
+    const lent = new Map<
+      string,
+      { readonly controller: AbortController; readonly released: Promise<void> }
+    >();
+    /** The subscription whose provider a session reads from; none for a copy's. */
+    const subscriptionOf = (session: Session): string | null =>
+      session.kind === "live"
+        ? session.channel.subscriptionId
+        : session.origin.kind === "provider"
+          ? session.origin.title.subscriptionId
+          : null;
+    /**
+     * Takes a subscription's connection back from the download it is lent to, if it is, and
+     * waits until the download's request is over: for the open about to read from that provider.
+     */
+    const reclaim = (subscriptionId: string) =>
+      Effect.promise(async () => {
+        const lease = lent.get(subscriptionId);
+        if (!lease) return;
+        lease.controller.abort();
+        let timer: NodeJS.Timeout | undefined;
+        const late = new Promise<void>((resolve) => (timer = setTimeout(resolve, RECLAIM_MS)));
+        await Promise.race([lease.released, late]);
+        clearTimeout(timer);
+      });
+    /** A session is open: what plays, and so `busy`, changed. */
+    const register = (session: Session) => {
+      sessions.set(session.id, session);
+      PubSub.publishUnsafe(busyChanged, undefined);
+    };
     /** When channel streams failed, by upstream address, for `FAILED_STREAM_MS`. */
     const failedAt = new Map<string, number>();
     /** Opens one at a time, so switching fast never leaves two sessions open. */
@@ -1299,15 +1404,17 @@ function make(deps: PlaybackDeps) {
       const held = session.identity.observe(answer, ranged);
       if (held?.other) {
         session.subtitleFileChanged.abort();
-        if (savedSubtitles && session.verified) {
+        const { origin } = session;
+        const verified = origin.kind === "provider" ? origin.verified : null;
+        if (savedSubtitles && origin.kind === "provider" && verified) {
           Effect.runSync(
             savedSubtitles
               .forget({
-                account: session.verified.account,
-                sourceStamp: session.verified.sourceStamp,
-                listingKey: session.verified.listingKey,
-                kind: session.title.kind,
-                id: session.title.id,
+                account: verified.account,
+                sourceStamp: verified.sourceStamp,
+                listingKey: verified.listingKey,
+                kind: origin.title.kind,
+                id: origin.title.id,
               })
               .pipe(Effect.ignore),
           );
@@ -1315,10 +1422,10 @@ function make(deps: PlaybackDeps) {
         session.kept = fileKept();
         session.live = null;
         probes.delete(session.probeKey);
-        if (session.verified && verifiedFiles) {
+        if (origin.kind === "provider" && verified && verifiedFiles) {
           Effect.runSync(
             verifiedFiles
-              .forget(session.verified.account, session.title, session.verified.fileKey)
+              .forget(verified.account, origin.title, verified.fileKey)
               .pipe(Effect.ignore),
           );
         }
@@ -3421,7 +3528,7 @@ function make(deps: PlaybackDeps) {
           forked,
           Effect.sync(() => {
             closed.abort();
-            sessions.delete(id);
+            if (sessions.delete(id)) PubSub.publishUnsafe(busyChanged, undefined);
             receiver?.closed?.();
           }),
         );
@@ -3518,64 +3625,39 @@ function make(deps: PlaybackDeps) {
           active: null,
           failure: null,
         };
-        sessions.set(id, session);
+        register(session);
         return session;
       });
 
     /**
-     * Opens a title's session after closing any other and reads what its file holds, for the
-     * UI's player or `receiver`. `standing` fails, and closes the session, once the viewer asked
-     * for something else or the subscription's login changed: the file was read meanwhile, and
-     * whatever else the open waits for goes the same way.
+     * A title session of `origin`'s file, read through `request`, and what its file holds as
+     * ffprobe read it. Whatever has to close first has closed. A file that can't be read closes the
+     * session again and fails.
      */
-    const titleSession = (
-      title: TitleRef,
-      upstreamUrl: string,
+    const fileSession = (
+      origin: TitleOrigin,
+      file: {
+        readonly url: string;
+        readonly headers: Headers;
+        readonly request: Provider["request"];
+        readonly probeKey: string;
+      },
       decoders: readonly Codec[],
       receiver: ReceiverTarget | null,
-      asked: Asked,
     ) =>
       Effect.gen(function* () {
-        const source = yield* subscriptions.sourceOf(title.subscriptionId);
-        // The address holds the login it was made under: under another, it is nobody's file.
-        if (asked.revision !== undefined && asked.revision !== source.revision) {
-          return yield* new Failed({ error: { kind: "no-subscription" } });
-        }
-        yield* closeAll;
         const id = randomUUID();
         const { closed, scope: forked, lan } = yield* sessionScope(id, receiver);
-        const headers = new Headers(asked.headers);
         const session: TitleSessionState = {
           kind: "title",
           subtitleFileChanged: new AbortController(),
           id,
           token: randomBytes(18).toString("base64url"),
-          title,
-          upstreamUrl,
-          headers,
-          verified: asked.listingKey
-            ? {
-                account: source.key,
-                sourceStamp: source.fileRevision,
-                listingKey: asked.listingKey,
-                // Only this session's successful write can be forgotten by its replacement.
-                // Address-derived probe keys stay in memory, including on cached-probe opens.
-                fileKey: id,
-              }
-            : null,
-          probeKey: createHash("sha256")
-            .update(
-              JSON.stringify([
-                source.id,
-                source.revision,
-                title.kind,
-                title.id,
-                upstreamUrl,
-                [...headers],
-              ]),
-            )
-            .digest("hex"),
-          request: source.provider.request,
+          origin,
+          upstreamUrl: file.url,
+          headers: file.headers,
+          probeKey: file.probeKey,
+          request: file.request,
           decoders: new Set(decoders),
           closed,
           scope: forked,
@@ -3609,19 +3691,76 @@ function make(deps: PlaybackDeps) {
           live: null,
           receiver: null,
         };
-        sessions.set(id, session);
+        register(session);
         const probe = yield* Effect.tryPromise({
           try: () => probeTitle(session),
           catch: (cause) => (cause instanceof Failed ? cause : failedWith(cause)),
         }).pipe(Effect.tapError(() => Scope.close(forked, Exit.void)));
         session.probe = probe;
         session.probed = session.identity.generation;
+        return { session, probe };
+      });
+
+    /**
+     * Opens a title's session after closing any other and reads what its file holds, for the
+     * UI's player or `receiver`. `standing` fails, and closes the session, once the viewer asked
+     * for something else or the subscription's login changed: the file was read meanwhile, and
+     * whatever else the open waits for goes the same way.
+     */
+    const titleSession = (
+      title: TitleRef,
+      upstreamUrl: string,
+      decoders: readonly Codec[],
+      receiver: ReceiverTarget | null,
+      asked: Asked,
+    ) =>
+      Effect.gen(function* () {
+        const source = yield* subscriptions.sourceOf(title.subscriptionId);
+        // The address holds the login it was made under: under another, it is nobody's file.
+        if (asked.revision !== undefined && asked.revision !== source.revision) {
+          return yield* new Failed({ error: { kind: "no-subscription" } });
+        }
+        yield* closeAll;
+        const headers = new Headers(asked.headers);
+        // Only this session's successful write can be forgotten by its replacement. Address-derived
+        // probe keys stay in memory, including on cached-probe opens.
+        const fileKey = randomUUID();
+        const verified: Verified | null = asked.listingKey
+          ? {
+              account: source.key,
+              sourceStamp: source.fileRevision,
+              listingKey: asked.listingKey,
+              fileKey,
+            }
+          : null;
+        const { session, probe } = yield* fileSession(
+          { kind: "provider", title, verified },
+          {
+            url: upstreamUrl,
+            headers,
+            request: source.provider.request,
+            probeKey: createHash("sha256")
+              .update(
+                JSON.stringify([
+                  source.id,
+                  source.revision,
+                  title.kind,
+                  title.id,
+                  upstreamUrl,
+                  [...headers],
+                ]),
+              )
+              .digest("hex"),
+          },
+          decoders,
+          receiver,
+        );
         const standing = Effect.andThen(whileAsked(asked.turn), whileSaved(source)).pipe(
-          Effect.tapError(() => Scope.close(forked, Exit.void)),
+          Effect.tapError(() => Scope.close(session.scope, Exit.void)),
         );
         yield* standing;
-        if (verifiedFiles && session.verified && probes.get(session.probeKey) === probe) {
-          const { account, sourceStamp, fileKey, listingKey } = session.verified;
+        if (verifiedFiles && verified && probes.get(session.probeKey) === probe) {
+          const { account, sourceStamp, listingKey } = verified;
           yield* verifiedFiles
             .remember(account, sourceStamp, {
               kind: title.kind,
@@ -3645,37 +3784,131 @@ function make(deps: PlaybackDeps) {
             !session ||
             session.kind !== "title" ||
             session.lan ||
-            !session.verified ||
             session.closed.signal.aborted ||
             session.identity.generation !== session.probed
           )
             return null;
+          const { origin } = session;
+          const open = () =>
+            sessions.get(sessionId) === session &&
+            !session.closed.signal.aborted &&
+            !session.subtitleFileChanged.signal.aborted &&
+            session.identity.generation === session.probed;
+          const signal = AbortSignal.any([
+            session.closed.signal,
+            session.subtitleFileChanged.signal,
+          ]);
+          // A copy's saved subtitles are its own, for as long as it plays.
+          if (origin.kind === "copy") {
+            return {
+              kind: "copy",
+              file: origin.file,
+              standing: Effect.sync(open),
+              signal,
+              proof: () => null,
+            } satisfies SubtitlePlayback;
+          }
+          const { title, verified } = origin;
+          if (!verified) return null;
           const file: SubtitleFile = {
-            account: session.verified.account,
-            sourceStamp: session.verified.sourceStamp,
-            listingKey: session.verified.listingKey,
-            kind: session.title.kind,
-            id: session.title.id,
+            account: verified.account,
+            sourceStamp: verified.sourceStamp,
+            listingKey: verified.listingKey,
+            kind: title.kind,
+            id: title.id,
           };
           const standing = Effect.gen(function* () {
-            if (
-              sessions.get(sessionId) !== session ||
-              session.closed.signal.aborted ||
-              session.subtitleFileChanged.signal.aborted ||
-              session.identity.generation !== session.probed
-            )
-              return false;
-            const source = yield* subscriptions.sourceOf(session.title.subscriptionId);
+            if (!open()) return false;
+            const source = yield* subscriptions.sourceOf(title.subscriptionId);
             return source.key === file.account && source.fileRevision === file.sourceStamp;
           });
           if (!(yield* standing)) return null;
           return {
-            title: session.title,
+            kind: "provider",
+            title,
             file,
             standing,
-            signal: AbortSignal.any([session.closed.signal, session.subtitleFileChanged.signal]),
-          };
+            signal,
+            proof: () => (open() ? session.identity.proof : null),
+          } satisfies SubtitlePlayback;
         }),
+
+      openCopy: (copy: LocalCopy, decoders: readonly Codec[], turn?: number) =>
+        inTurn(
+          turn,
+          Effect.gen(function* () {
+            // What plays here goes; a receiver plays on, and a copy plays here only.
+            yield* Effect.forEach(
+              [...sessions.values()].filter((session) => session.lan === null),
+              (session) => Scope.close(session.scope, Exit.void),
+              { discard: true },
+            );
+            const { session, probe } = yield* fileSession(
+              { kind: "copy", copy: copy.id, file: subtitlesOfCopy(copy.id, copy.title) },
+              {
+                url: `copy:${copy.id}`,
+                headers: new Headers(),
+                request: fileRequest(copy.path, copy.container),
+                probeKey: createHash("sha256")
+                  .update(JSON.stringify(["copy", copy.id, copy.path]))
+                  .digest("hex"),
+              },
+              decoders,
+              null,
+            );
+            return {
+              sessionId: session.id,
+              copy: copy.id,
+              url: `${base}/title/${session.token}.mp4`,
+              duration: probe.duration,
+              audio: audioTracks(probe.audio),
+              subtitles: subtitleTracks(probe.subtitles),
+            } satisfies CopySession;
+          }),
+        ),
+
+      closeCopy: (copyId: string) =>
+        Effect.suspend(() =>
+          Effect.forEach(
+            [...sessions.values()].filter(
+              (session) =>
+                session.kind === "title" &&
+                session.origin.kind === "copy" &&
+                session.origin.copy === copyId,
+            ),
+            (session) => Scope.close(session.scope, Exit.void),
+            { discard: true },
+          ),
+        ),
+
+      lend: (subscriptionId: string) =>
+        openOne(
+          Effect.sync((): Lent | null => {
+            if (lent.has(subscriptionId)) return null;
+            for (const session of sessions.values()) {
+              if (subscriptionOf(session) === subscriptionId) return null;
+            }
+            const controller = new AbortController();
+            let release = () => {};
+            const released = new Promise<void>((resolve) => (release = resolve));
+            const lease = { controller, released };
+            lent.set(subscriptionId, lease);
+            return {
+              signal: controller.signal,
+              release: () => {
+                if (lent.get(subscriptionId) === lease) lent.delete(subscriptionId);
+                release();
+              },
+            };
+          }),
+        ),
+
+      busy: Effect.sync(
+        (): ReadonlySet<string> =>
+          new Set([...sessions.values()].flatMap((session) => subscriptionOf(session) ?? [])),
+      ),
+
+      busyChanged: Stream.fromPubSub(busyChanged),
 
       fileReplaced: Stream.fromPubSub(replaced),
       readingAhead: Stream.fromPubSub(readingAhead),
@@ -3707,6 +3940,7 @@ function make(deps: PlaybackDeps) {
                 error: { kind: "unexpected", detail: "A receiver has playback." },
               });
             }
+            yield* reclaim(channel.subscriptionId);
             const session = yield* liveSession(channel, decoders, options, null);
             const extension = session.format === "mpegts" ? "ts" : "m3u8";
             return {
@@ -3727,6 +3961,7 @@ function make(deps: PlaybackDeps) {
         inTurn(
           asked.turn,
           Effect.gen(function* () {
+            yield* reclaim(title.subscriptionId);
             const { session, probe } = yield* titleSession(
               title,
               upstreamUrl,
@@ -3758,6 +3993,7 @@ function make(deps: PlaybackDeps) {
         inTurn(
           options.turn,
           Effect.gen(function* () {
+            yield* reclaim(channel.subscriptionId);
             const session = yield* liveSession(channel, receiver.decoders, options, receiver);
             // The provider's stream starts now, so the receiver finds segments when it asks.
             if (session.receiver && !session.hls) void runLive(session, session.receiver);
@@ -3778,6 +4014,7 @@ function make(deps: PlaybackDeps) {
         inTurn(
           asked.turn,
           Effect.gen(function* () {
+            yield* reclaim(title.subscriptionId);
             const { session, probe, standing } = yield* titleSession(
               title,
               upstreamUrl,
@@ -3877,9 +4114,7 @@ function make(deps: PlaybackDeps) {
           Effect.suspend(() =>
             Effect.forEach(
               [...sessions.values()].filter(
-                (session) =>
-                  (session.kind === "live" ? session.channel : session.title).subscriptionId ===
-                  subscriptionId,
+                (session) => subscriptionOf(session) === subscriptionId,
               ),
               (session) => Scope.close(session.scope, Exit.void),
               { discard: true },
@@ -4314,7 +4549,8 @@ function describeLayout(layout: StreamLayout | null): string {
   return `This stream carries ${parts.join(" and ") || "an unknown format"}.`;
 }
 
-function classify(status: number): StreamFailure {
+/** What a provider's HTTP status says of why a file or stream didn't come. */
+export function classify(status: number): StreamFailure {
   if (status === 401 || status === 403 || status === 429 || status === 458 || status === 509) {
     return { kind: "refused", status };
   }
