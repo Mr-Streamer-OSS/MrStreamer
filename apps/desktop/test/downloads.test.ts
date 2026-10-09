@@ -1,7 +1,7 @@
 // Downloads through the real main runtime: the fake provider at the HTTP boundary, ffprobe and
 // the loopback proxy for copies, and a disk that can fail the way a full or missing one does.
 import { spawnSync } from "node:child_process";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
 import type { AddressInfo } from "node:net";
@@ -521,6 +521,52 @@ describe.skipIf(!hasTools)("downloads", () => {
     );
     expect(await copyOf(dataDir, b.id)).toEqual(second.bytes);
     expect(provider.mostFilesAtOnce()).toBe(1);
+  }, 60_000);
+
+  it("says a copy whose file is gone is missing, plays nothing of it, and still deletes it", async () => {
+    const { provider, dataDir, subscriptionId, downloads, find } = await connected();
+    const film = movie(provider, subscriptionId, "TEST | Index at the end");
+    const done = await downloads.add(film.ref);
+    await vi.waitFor(async () => expect((await find(done.id))?.status.kind).toBe("complete"), {
+      timeout: LONG,
+    });
+    await rm(join(dataDir, "downloads", done.id, "media.mp4"));
+    expect((await find(done.id))?.status.kind).toBe("missing");
+    await expect(downloads.copy(done.id)).rejects.toMatchObject({
+      error: { kind: "stream", failure: { kind: "unavailable" } },
+    });
+    await downloads.remove(done.id);
+    expect((await downloads.list()).items).toEqual([]);
+  }, 60_000);
+
+  it("lets another subscription play while a download goes on", async () => {
+    const { provider, subscriptionId, downloads, subscriptions, onDemand, playback, find } =
+      await connected();
+    const other = await fakeProvider({ maxConnections: 1, slotReleaseMs: 50 });
+    const second = await subscriptions.add({
+      server: other.url,
+      username: "demo",
+      password: "demo",
+    });
+    await onDemand.refresh(second.id);
+    const film = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");
+    provider.stallMovieFile(film.id, 200_000, 4_000);
+    const queued = await downloads.add(film.ref);
+    await vi.waitFor(
+      async () => expect((await find(queued.id))?.status).toMatchObject({ received: 200_000 }),
+      { timeout: LONG },
+    );
+    const elsewhere = movie(other, second.id, "TEST | Index at the end");
+    const file = await onDemand.file(elsewhere.ref);
+    const playing = await playback.openTitle(elsewhere.ref, file.url, DECODERS, file);
+    expect(await read(playing.url, 0)).toBeGreaterThan(0);
+    expect((await find(queued.id))?.status.kind).toBe("transferring");
+    await vi.waitFor(async () => expect((await find(queued.id))?.status.kind).toBe("complete"), {
+      timeout: LONG,
+    });
+    // The download's provider was asked once for the file, never stopped for the other's stream.
+    expect(provider.fileRequests()).toBe(2);
+    await playback.close(playing.sessionId);
   }, 60_000);
 
   it("waits out a provider that stops sending for longer than it took to answer", async () => {

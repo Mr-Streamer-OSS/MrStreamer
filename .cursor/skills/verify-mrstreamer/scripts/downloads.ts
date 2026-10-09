@@ -402,6 +402,13 @@ export async function runDownloads(build: Record<string, unknown> & { executable
     await offline.click("Open Downloads", button("header button", "Downloads"));
     // The movie, the episode, and the movie that waited for playback.
     await offline.wait(async () => (await offline.listed()).length === 3);
+    // Their pictures come from this computer, with the picture server gone.
+    const posters = () =>
+      offline.page.evaluate<number>(
+        "[...document.querySelectorAll('img')].filter(i => i.src.startsWith('mrstreamer:') && i.complete && i.naturalWidth > 0).length",
+      );
+    await offline.wait(async () => (await posters()) === 3);
+    observed["offlineArtworkLoaded"] = await posters();
     await offline.capture("downloads-offline");
     const movieId = await idOf(
       offline,
