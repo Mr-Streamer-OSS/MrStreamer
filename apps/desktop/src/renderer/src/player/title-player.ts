@@ -163,7 +163,7 @@ export interface TitlePlayerState {
   readonly subtitle: SubtitleTrack | null;
   /**
    * How the chosen track stands where the picture is, as its run last said: recovery of what was
-   * on screen before the run's start, and whether what it has covers the position. Null with
+   * on screen before the run's start, and whether a cue it has is due at the position. Null with
    * subtitles off, on a receiver and while a downloaded result shows. `useSubtitleNote` says it.
    */
   readonly subtitleState: SubtitleState | null;
@@ -232,7 +232,7 @@ export function useTitlePlayer<T>(selector: (state: TitlePlayerState) => T): T {
 
 /**
  * What the viewer is told of the chosen subtitles, in the CC panel and over the picture alike:
- * nothing while what the run has stands for the position, else that recovery is still loading
+ * nothing while a cue the run has is due at the position, else that recovery is still loading
  * what was on screen there, or that it can't be had.
  */
 export function useSubtitleNote(): "loading" | "unavailable" | null {

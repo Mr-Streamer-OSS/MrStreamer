@@ -3,7 +3,9 @@
 // message and nothing else. The failure stays what it is, and so does the way to try again: Watch
 // or Play beside the picture, R for a channel and Space for a title. The next failure, as after
 // trying again, says its own. A message is known by the failure its player set, so one that was
-// closed stays closed while the view renders again, or opens again.
+// closed stays closed while the view renders again, or opens again. Enter and Space on the cross
+// press it, as on any button: the views' keys leave both to it (`pressesClose`), so closing never
+// also opens the channel list or plays the title again.
 import { X } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
@@ -23,6 +25,15 @@ export function useClosed(failure: object | null): boolean {
   return useSyncExternalStore(subscribe, () => failure !== null && closed.has(failure));
 }
 
+/** Whether `event` is Enter or Space on a cross, which the cross takes itself. */
+export function pressesClose(event: KeyboardEvent): boolean {
+  return (
+    (event.key === "Enter" || event.key === " ") &&
+    event.target instanceof Element &&
+    event.target.closest("[data-close-message]") !== null
+  );
+}
+
 /**
  * The cross at the top right of the message about `failure`. Closed from the keyboard, focus moves
  * on to the view's way to try again (`data-retry`), so it isn't left on nothing. A click leaves
@@ -34,6 +45,7 @@ export function CloseMessage({ failure, className }: { failure: object; classNam
       variant="media"
       size="icon-sm"
       aria-label="Close message"
+      data-close-message
       className={cn("pointer-events-auto absolute top-0 right-0", className)}
       onClick={(event) => {
         const focused = document.activeElement === event.currentTarget;

@@ -685,17 +685,22 @@ describe("a failure's message", () => {
     expect(message()).toContain("Refused by the provider");
   });
 
-  it("hands focus to Watch when closed from the keyboard, and Enter is the cross's own", async () => {
-    await refusedOnce();
-    const close = button("Close message");
-    close.focus();
-    expect(await key("Enter", close)).toBe(false);
-    expect(useUi.getState().channelsOpen).toBe(false);
+  it.each(["Enter", " "])(
+    "hands focus to Watch when closed from the keyboard, and %j is the cross's own",
+    async (name) => {
+      await refusedOnce();
+      const close = button("Close message");
+      close.focus();
+      // Not taken as a shortcut, so the focused button presses itself.
+      expect(await key(name, close)).toBe(false);
+      expect(useUi.getState().channelsOpen).toBe(false);
 
-    await act(async () => close.click());
-    expect(message()).toBe("");
-    expect(document.activeElement?.getAttribute("aria-label")).toBe("Watch");
-  });
+      await act(async () => close.click());
+      expect(message()).toBe("");
+      expect(document.activeElement?.getAttribute("aria-label")).toBe("Watch");
+      expect(asked()).toHaveLength(1);
+    },
+  );
 
   it("closes in the mini player too", async () => {
     await playing(5);

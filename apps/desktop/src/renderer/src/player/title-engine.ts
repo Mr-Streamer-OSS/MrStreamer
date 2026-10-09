@@ -9,8 +9,8 @@
 // subtitles as the run reads them. Independent text shows as it arrives while recovery continues.
 // Packet changes wait for the recovered state; then what is on screen where the picture has got to
 // shows at once, such as a picture, page or caption that began long before the start. When the
-// first part can't be had the run says so, and the picture plays on. The run also says whether
-// what it has stands for the position, so text that shows is never called loading or unavailable.
+// first part can't be had the run says so, and the picture plays on. The run also says whether a
+// cue it has is due at the position, so text that shows is never called loading or unavailable.
 //
 // Reading holds back once enough is buffered ahead. While paused nothing more is read, and the
 // provider's connection sits idle until playback moves on; the controller ends the run after a
@@ -20,7 +20,13 @@ import { readFeedLine } from "@mrstreamer/core/subtitles/feed";
 import type { SubtitleChange } from "@mrstreamer/core/subtitles/screen";
 import type { EngineError, StreamInfo } from "./engine.ts";
 import { readMp4Start } from "./mp4.ts";
-import { addTextCue, clearSubtitles, subtitlePresenter, subtitlesCover } from "./subtitles.ts";
+import {
+  addTextCue,
+  clearSubtitles,
+  onSubtitlesChange,
+  subtitlePresenter,
+  subtitlesDue,
+} from "./subtitles.ts";
 
 /** Stop reading once this much is buffered ahead, and read again below the second value. */
 const AHEAD_S = { stop: 60, resume: 40 } as const;
@@ -66,8 +72,8 @@ type SubtitleRecovery = "loading" | "unavailable" | "recovered";
 export interface SubtitleState {
   readonly recovery: SubtitleRecovery;
   /**
-   * What the run has stands for the position (see `subtitlesCover`): a line shows there, or the
-   * pause after one does, whatever recovery still looks for before the start.
+   * A cue the run has is due where the picture is, as timed now (see `subtitlesDue`): there is
+   * text or a picture to show, whatever recovery still looks for before the start.
    */
   readonly covered: boolean;
 }
@@ -81,7 +87,7 @@ export interface TitleEngine {
   onEnded(listener: () => void): void;
   /**
    * Called with how the subtitles stand at once, null for a run without them, and again each time
-   * that changes. A run with subtitles starts loading, with nothing that covers the position.
+   * that changes. A run with subtitles starts loading, with no cue due at the position.
    */
   onSubtitles(listener: (state: SubtitleState | null) => void): void;
   /** Seconds into the title. */
@@ -123,7 +129,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
   /** Says how the subtitles stand when that changed: recovery as given, coverage as it is now. */
   const report = (recovery: SubtitleRecovery | undefined = state?.recovery) => {
     if (!state || !recovery) return;
-    const covered = subtitlesCover(video, run.start, video.currentTime);
+    const covered = subtitlesDue(video);
     if (state.recovery === recovery && state.covered === covered) return;
     state = { recovery, covered };
     stateListener?.(state);
@@ -201,7 +207,8 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
       say("recovered");
     } else report();
   };
-  const onSeeked = () => report();
+  // Lines that come, go, or move with the timing, and seeks, change what is due without the clock.
+  const stopFollowing = onSubtitlesChange(() => report());
   // While the subtitles load, the proxy reads the file for them only as far as the picture can
   // spare the provider, which what is buffered here tells it.
   const telling = setInterval(() => {
@@ -212,7 +219,6 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
   video.addEventListener("error", onError);
   video.addEventListener("ended", onEnded);
   video.addEventListener("timeupdate", onTime);
-  video.addEventListener("seeked", onSeeked);
   function stopWatching() {
     if (subtitleWait !== null) clearTimeout(subtitleWait);
     subtitleWait = null;
@@ -221,7 +227,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     video.removeEventListener("error", onError);
     video.removeEventListener("ended", onEnded);
     video.removeEventListener("timeupdate", onTime);
-    video.removeEventListener("seeked", onSeeked);
+    stopFollowing();
   }
 
   /** Seconds buffered beyond the position. */
@@ -445,7 +451,6 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
           say("recovered");
         } else if ("text" in line) {
           addTextCue(video, line.at, line.until, line.text);
-          report();
         } else {
           const data = Uint8Array.from(atob(line.data), (char) => char.charCodeAt(0));
           const change = decoder?.push(data, line.at);

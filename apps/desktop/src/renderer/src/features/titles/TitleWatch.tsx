@@ -12,8 +12,8 @@
 // While a receiver on the network plays the title, the same controls command it and show what it
 // confirmed, the picture area says where it plays, and the controls stay: there is no picture to
 // clear. Going back leaves the receiver playing; only Play here, or quitting, ends it.
-// A failure's message closes with its cross (CloseMessage.tsx), and the controls come back where
-// it stood: Play, or Space, tries the title again.
+// A failure's message closes with its cross (CloseMessage.tsx), also with Enter or Space once Tab
+// reached it, and the controls come back where it stood: Play, or Space, tries the title again.
 import { Slider as SliderPrimitive } from "@base-ui/react/slider";
 import {
   Captions,
@@ -53,7 +53,7 @@ import {
   type TitlePlayerState,
   type TitleProblem,
 } from "../../player/title-player.ts";
-import { CloseMessage, useClosed } from "../watch/CloseMessage.tsx";
+import { CloseMessage, pressesClose, useClosed } from "../watch/CloseMessage.tsx";
 import { Flash, flash, flashNote } from "../watch/Flash.tsx";
 import { useFullscreen, useWake } from "../watch/layout.ts";
 import { MINI_NEEDS_PICTURE, MiniControls, MiniPlayerButton } from "../watch/MiniPlayer.tsx";
@@ -172,8 +172,9 @@ export function TitleWatch() {
       if (ui.searchOpen || ui.settings || ui.updateDialog || !ui.playingTitle) return;
       const current = latest.current;
       current.wake();
-      // The menu's own keys: Escape closes it, and focus goes back to its button.
-      if (current.menu) return;
+      // The menu's own keys: Escape closes it, and focus goes back to its button. A message's
+      // cross takes Enter and Space, so Space closes it rather than playing the title again.
+      if (current.menu || pressesClose(event)) return;
       switch (event.key) {
         case " ":
         case "k":

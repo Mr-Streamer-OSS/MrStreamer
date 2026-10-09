@@ -35,6 +35,7 @@ import { TitleWatch } from "../../src/renderer/src/features/titles/TitleWatch.ts
 import { ReceiverBar } from "../../src/renderer/src/features/watch/ReceiverBar.tsx";
 import { WatchScreen } from "../../src/renderer/src/features/watch/WatchScreen.tsx";
 import { movieNow, playTitle } from "../../src/renderer/src/lib/titles.ts";
+import { outputs } from "../../src/renderer/src/player/output.ts";
 import { player } from "../../src/renderer/src/player/player.ts";
 import type { TitleRun } from "../../src/renderer/src/player/title-engine.ts";
 import { episodeNow, titlePlayer } from "../../src/renderer/src/player/title-player.ts";
@@ -966,6 +967,32 @@ describe("a channel with a receiver connected", () => {
       channel: { subscriptionId: SUBSCRIPTION, id: "a" },
     });
   });
+
+  it.each(["Enter", " "])(
+    "closes a TV's refusal to connect with %j on its cross, and opens no channel list",
+    async (name) => {
+      document.body.append(container);
+      await playing();
+      await emit(HERE);
+      useUi.setState({ watching: true });
+      await show(WatchScreen);
+      const refusal = ipc.hold("output.connect");
+      await act(async () => outputs.connect("tv"));
+      await act(async () => refusal.reject({ kind: "output", failure: { kind: "unreachable" } }));
+      const close = container.querySelector<HTMLButtonElement>('[aria-label="Close message"]')!;
+      expect(close.closest("[data-playback-state]")).toBeNull();
+      close.focus();
+      const event = new KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true });
+      await act(async () => close.dispatchEvent(event));
+      // Not taken as a shortcut, so the focused button presses itself.
+      expect(event.defaultPrevented).toBe(false);
+      expect(useUi.getState().channelsOpen).toBe(false);
+      await act(async () => close.click());
+      expect(container.querySelector('[aria-label="Close message"]')).toBeNull();
+      expect(ipc.argsOf("output.connect")).toHaveLength(1);
+      container.remove();
+    },
+  );
 
   it("keeps the lost TV's name while Try again reaches it, and loads there once it answers", async () => {
     await playing();

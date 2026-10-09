@@ -5,7 +5,7 @@
 // asks for the picture at once. Independent text shows while history loads; packets wait for
 // ready. Failed history keeps known text unless its file changed, and the loading deadline
 // leaves text and its feed active. Loading and unavailable are said, over the picture and in the
-// CC panel alike, only while no text the run has covers the position.
+// CC panel alike, only while no line the run has is due at the position as G and H time it.
 import { ipc, SUBSCRIPTION } from "./support.ts";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -44,11 +44,12 @@ const line = (start: number, text: string, end = start + 60) =>
   `${JSON.stringify({ at: start, until: end, text })}\n`;
 
 /**
- * Serves runs of the title, with subtitles the test sends while the run plays. The feed is ready
- * at once unless the test holds it back.
+ * Serves runs of the title, with subtitles the test sends while the run plays, until it ends the
+ * feed. The feed is ready at once unless the test holds it back.
  */
 function serveRuns(ready = true, codec: string | null = null) {
   let send: (text: string) => void = () => {};
+  let end = () => {};
   /** The pictures asked for, by their query. */
   const pictures: string[] = [];
   const requests: { readonly subtitles: boolean; readonly signal: AbortSignal | null }[] = [];
@@ -62,6 +63,7 @@ function serveRuns(ready = true, codec: string | null = null) {
         new ReadableStream<Uint8Array>({
           start(controller) {
             send = (text) => controller.enqueue(new TextEncoder().encode(text));
+            end = () => controller.close();
             if (ready) send('{"ready":true}\n');
           },
         }),
@@ -72,7 +74,7 @@ function serveRuns(ready = true, codec: string | null = null) {
     pictures.push(new URL(url).search);
     return new Response(new ReadableStream());
   });
-  return { send: (text: string) => send(text), pictures, requests };
+  return { send: (text: string) => send(text), end: () => end(), pictures, requests };
 }
 
 /** Opens the movie at `from` seconds, with the given subtitle tracks to choose. */
@@ -405,13 +407,13 @@ describe("subtitles on a playing movie", () => {
     },
   );
 
-  it("say loading where nothing the run has covers the picture, after a skip too", async () => {
+  it("say loading wherever no line is due while recovery runs, after a skip too", async () => {
     const runs = serveRuns(false);
     await opened(137);
     const note = await watching();
     await act(async () => titlePlayer.setSubtitle(english));
     await act(settle);
-    // A line further on: none of it stands for 137 s yet, where an earlier one may still show.
+    // A line further on: none of it stands for 137 s, where an earlier one may still show.
     runs.send(line(150, "Who goes there?", 154));
     await act(settle);
     expect(shown()).toEqual([]);
@@ -419,16 +421,77 @@ describe("subtitles on a playing movie", () => {
     await act(async () => skipTo(150));
     expect(shown()).toEqual(["Who goes there?"]);
     expect(note()).toBeNull();
-    // The pause after a line is the file's own: nothing is missing there.
+    // After the line nothing shows, and nothing yet says the file has nothing there.
     await act(async () => skipTo(160));
     expect(shown()).toEqual([]);
-    expect(note()).toBeNull();
-    // Back before the first line the run has, recovery still decides what shows.
-    await act(async () => skipTo(140));
     expect(note()).toBe("Subtitles loading");
+    // Once everything before the start is there, a pause between lines is the file's own.
     runs.send('{"ready":true}\n');
     await act(settle);
     expect(note()).toBeNull();
+    await act(async () => skipTo(140));
+    expect(note()).toBeNull();
+  });
+
+  it("say unavailable once the feed ends and its last line is over", async () => {
+    const runs = serveRuns();
+    await opened(0);
+    const note = await watching();
+    await act(async () => titlePlayer.setSubtitle(english));
+    await act(settle);
+    runs.send(line(0, "We sail at first light.", 4));
+    await act(settle);
+    await act(async () => runs.end());
+    await act(settle);
+    // The line still shows: nothing to say yet.
+    expect(shown()).toEqual(["We sail at first light."]);
+    expect(note()).toBeNull();
+    expect(await chosenInPanel()).toBe("English");
+    // Past it no more will come.
+    await act(async () => skipTo(5));
+    expect(shown()).toEqual([]);
+    expect(note()).toBe("Subtitles unavailable");
+    expect(await chosenInPanel()).toBe("EnglishUnavailable");
+
+    // Enter and Space on the note's cross are the cross's own: neither plays the title again.
+    const close = view.querySelector<HTMLButtonElement>('[aria-label="Close message"]')!;
+    close.focus();
+    const asked = ipc.argsOf("playback.openTitle").length;
+    for (const name of ["Enter", " "]) {
+      const event = new KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true });
+      await act(async () => close.dispatchEvent(event));
+      expect(event.defaultPrevented).toBe(false);
+    }
+    await act(async () => close.click());
+    expect(note()).toBeNull();
+    expect(ipc.argsOf("playback.openTitle")).toHaveLength(asked);
+  });
+
+  it("follow G and H while paused: a line they bring to the position isn't loading", async () => {
+    const runs = serveRuns(false);
+    await opened(9.95);
+    const note = await watching();
+    await act(async () => titlePlayer.setSubtitle(english));
+    await act(settle);
+    runs.send(line(10, "Who goes there?", 14));
+    await act(settle);
+    expect(player.element.paused).toBe(true);
+    expect(note()).toBe("Subtitles loading");
+
+    vi.useFakeTimers();
+    // G: earlier, the line is due where the picture stands.
+    await act(async () => nudgeSubtitles(english, -1));
+    expect(shown()).toEqual(["Who goes there?"]);
+    // Once the word on the timing has gone, nothing stands in for it.
+    await act(async () => vi.advanceTimersByTimeAsync(1600));
+    expect(note()).toBeNull();
+    expect(await chosenInPanel()).toBe("English");
+    // H takes it away again, and with it what stood for the position.
+    await act(async () => nudgeSubtitles(english, 1));
+    expect(shown()).toEqual([]);
+    await act(async () => vi.advanceTimersByTimeAsync(1600));
+    expect(note()).toBe("Subtitles loading");
+    expect(await chosenInPanel()).toBe("EnglishLoading");
   });
 
   it("say unavailable at the end of the wait only where no line covers the picture", async () => {
@@ -446,6 +509,10 @@ describe("subtitles on a playing movie", () => {
     expect(shown()).toEqual(["We sail at first light."]);
     expect(note()).toBeNull();
     expect(await chosenInPanel()).toBe("English");
+    // Once it ends, nothing stands for the position again.
+    await act(async () => skipTo(9));
+    expect(shown()).toEqual([]);
+    expect(note()).toBe("Subtitles unavailable");
   });
 
   it("start a replacement track with nothing to show as loading", async () => {
