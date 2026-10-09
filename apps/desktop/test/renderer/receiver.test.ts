@@ -490,6 +490,24 @@ describe("a movie with a receiver connected", () => {
     expect(text()).toContain("Living Room TV got no stream");
     expect(text()).toContain("Play here");
   });
+
+  it("closes the receiver's failure without saying it plays there, and Play tries it again", async () => {
+    await show(TitleWatch);
+    await onReceiver(movieNow(movie, null), 120, 1);
+    await emit(connected(null, { kind: "not-fetched" }));
+
+    await press("Close message");
+    expect(text()).not.toContain("got no stream");
+    expect(text()).not.toMatch(/(Playing|Loading|Paused) on/);
+    expect(titlePlayer.state().phase.kind).toBe("failed");
+
+    // Play opens it there again, and a failure of that says its own.
+    const opened = ipc.hold("output.openTitle");
+    await press("Play");
+    expect(ipc.argsOf("output.openTitle")).toHaveLength(2);
+    await act(async () => opened.reject({ kind: "output", failure: { kind: "not-fetched" } }));
+    expect(text()).toContain("Living Room TV got no stream");
+  });
 });
 
 describe("a movie whose TV another takes the place of", () => {

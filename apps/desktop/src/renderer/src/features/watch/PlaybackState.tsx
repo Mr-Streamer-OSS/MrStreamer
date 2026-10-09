@@ -9,6 +9,8 @@
 // says what the receiver last confirmed of it and where, paused and buffering included, and always
 // offers Play here. A channel that failed there keeps saying so under that receiver's name while
 // it is reached again, or another in its place.
+// A failure's message closes with its cross (CloseMessage.tsx). The picture area then says
+// nothing; Watch and R still try the channel again.
 import { Play, RotateCw, SkipForward } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
@@ -20,6 +22,7 @@ import { qualityName } from "../../lib/quality.ts";
 import { subscriptionName, useChooseQuality, useSubscriptions } from "../../lib/queries.ts";
 import { cn } from "../../lib/utils.ts";
 import { player, receiverState, usePlayer } from "../../player/player.ts";
+import { CloseMessage, useClosed } from "./CloseMessage.tsx";
 import { PlayHere, ReceiverLine } from "./Output.tsx";
 import {
   canRetry,
@@ -41,6 +44,8 @@ interface Message {
   /** What was observed, in a small line of its own under the body. */
   readonly evidence?: ReactNode;
   readonly actions?: ReactNode;
+  /** A failure, whose message the viewer can close. */
+  readonly failure?: FailedPhase;
 }
 
 /** A channel's trouble in words: a reconnect's or a failure's, and what its last try got to. */
@@ -135,6 +140,7 @@ export function PlaybackState({
   const trouble = useTrouble(channel);
   const output = useOutput((state) => state.status.output);
   const connectingFrom = useOutput((state) => state.connectingFrom);
+  const closed = useClosed(phase.kind === "failed" ? phase : null);
   // The connect under way names the receiver it reaches, which need not be the one that failed.
   const receiver =
     output.kind === "receiver" || output.kind === "lost"
@@ -153,6 +159,7 @@ export function PlaybackState({
           title: trouble.title,
           body: trouble.body,
           evidence: trouble.evidence,
+          failure: phase,
           actions: (
             <FailureActions
               failed={phase}
@@ -179,6 +186,8 @@ export function PlaybackState({
             ),
           }
         : null;
+  // Closed: nothing in its place, not even what a receiver said before the failure.
+  if (closed) return null;
   if (receiver) {
     const on = where(receiver);
     if (troubled) {
@@ -187,6 +196,7 @@ export function PlaybackState({
           title={troubled.title}
           body={troubled.body}
           evidence={troubled.evidence}
+          failure={troubled.failure}
           actions={
             <>
               {troubled.actions}
@@ -258,7 +268,7 @@ export function PlaybackState({
         });
 
   return (
-    <div className="pointer-events-none flex max-w-[34rem] flex-col items-center px-8 text-center">
+    <div className="pointer-events-none relative flex max-w-[34rem] flex-col items-center px-12 text-center">
       <ChannelLogo channel={channel} className="mb-6 h-14 w-20" />
       <h2 className="text-3xl font-semibold tracking-tight text-balance">{message.title}</h2>
       {message.body && (
@@ -270,6 +280,7 @@ export function PlaybackState({
       {message.actions && (
         <div className="pointer-events-auto mt-7 flex items-center gap-3">{message.actions}</div>
       )}
+      {message.failure && <CloseMessage failure={message.failure} />}
     </div>
   );
 }
@@ -455,16 +466,18 @@ function Block({
   title,
   body,
   evidence,
+  failure,
   actions,
 }: {
   line?: ReactNode;
   title?: string;
   body?: ReactNode;
   evidence?: ReactNode;
+  failure?: FailedPhase | undefined;
   actions: ReactNode;
 }) {
   return (
-    <div className="pointer-events-none flex max-w-[34rem] flex-col items-center px-8 text-center">
+    <div className="pointer-events-none relative flex max-w-[34rem] flex-col items-center px-12 text-center">
       {line}
       {title && <h2 className="text-3xl font-semibold tracking-tight text-balance">{title}</h2>}
       {body && (
@@ -472,6 +485,7 @@ function Block({
       )}
       {evidence && <Evidence>{evidence}</Evidence>}
       <div className="pointer-events-auto mt-5 flex items-center gap-3">{actions}</div>
+      {failure && <CloseMessage failure={failure} />}
     </div>
   );
 }

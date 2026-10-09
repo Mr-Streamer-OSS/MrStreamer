@@ -80,9 +80,11 @@ const wait = (ms: number) => act(async () => vi.advanceTimersByTimeAsync(ms));
 const text = () => container.textContent ?? "";
 /** The streams asked for so far. */
 const asked = () => ipc.argsOf("playback.open");
-/** What the failed or reconnecting channel offers, in order. */
+/** What the failed or reconnecting channel offers, in order, besides closing its message. */
 const offered = () =>
-  [...container.querySelectorAll("[data-playback-state] button")].map((each) => each.textContent);
+  [
+    ...container.querySelectorAll("[data-playback-state] button:not([aria-label='Close message'])"),
+  ].map((each) => each.textContent);
 /** What a screen reader is told. */
 const announced = () => container.querySelector(".sr-only[role=status]")?.textContent ?? "";
 
@@ -643,6 +645,68 @@ describe("what a failed channel offers", () => {
 
     expect(await key("Enter")).toBe(true);
     expect(useUi.getState().channelsOpen).toBe(true);
+  });
+});
+
+describe("a failure's message", () => {
+  /** What the picture area says, in the window or the mini player. */
+  const message = () =>
+    [...container.querySelectorAll("[data-playback-state]")].map((each) => each.textContent).join();
+
+  /** Watch on a channel the provider refused, and its message on screen. */
+  async function refusedOnce(): Promise<void> {
+    const starts = nextStream();
+    await watching();
+    await starts();
+    await stops(refused(403));
+    expect(message()).toContain("Refused by the provider");
+  }
+
+  it("closes with its cross, stays closed, and the next failure says its own", async () => {
+    await refusedOnce();
+
+    await press("Close message");
+    expect(message()).toBe("");
+    // Still failed: nothing says it plays, and nothing is asked for by itself.
+    expect(player.state().phase.kind).toBe("failed");
+    expect(button("Watch")).toBeDefined();
+    // The controls waking draws the view again; the message stays closed.
+    await act(async () => {
+      container.firstElementChild?.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+    });
+    await wait(5000);
+    expect(message()).toBe("");
+    expect(asked()).toHaveLength(1);
+
+    const starts = nextStream();
+    expect(await key("r")).toBe(true);
+    await starts();
+    await stops(refused(403));
+    expect(message()).toContain("Refused by the provider");
+  });
+
+  it("hands focus to Watch when closed from the keyboard, and Enter is the cross's own", async () => {
+    await refusedOnce();
+    const close = button("Close message");
+    close.focus();
+    expect(await key("Enter", close)).toBe(false);
+    expect(useUi.getState().channelsOpen).toBe(false);
+
+    await act(async () => close.click());
+    expect(message()).toBe("");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Watch");
+  });
+
+  it("closes in the mini player too", async () => {
+    await playing(5);
+    ipc.hold("window.setMiniPlayer").resolve(null);
+    await act(() => miniPlayer.enter());
+    await stops(refused(403));
+    expect(message()).toContain("Refused by the provider");
+
+    await press("Close message");
+    expect(message()).toBe("");
+    expect(player.state().phase.kind).toBe("failed");
   });
 });
 

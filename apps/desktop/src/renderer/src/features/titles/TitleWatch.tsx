@@ -12,6 +12,8 @@
 // While a receiver on the network plays the title, the same controls command it and show what it
 // confirmed, the picture area says where it plays, and the controls stay: there is no picture to
 // clear. Going back leaves the receiver playing; only Play here, or quitting, ends it.
+// A failure's message closes with its cross (CloseMessage.tsx), and the controls come back where
+// it stood: Play, or Space, tries the title again.
 import { Slider as SliderPrimitive } from "@base-ui/react/slider";
 import {
   Captions,
@@ -46,10 +48,12 @@ import { Picture } from "../../player/Picture.tsx";
 import { player } from "../../player/player.ts";
 import {
   titlePlayer,
+  useSubtitleNote,
   useTitlePlayer,
   type TitlePlayerState,
   type TitleProblem,
 } from "../../player/title-player.ts";
+import { CloseMessage, useClosed } from "../watch/CloseMessage.tsx";
 import { Flash, flash, flashNote } from "../watch/Flash.tsx";
 import { useFullscreen, useWake } from "../watch/layout.ts";
 import { MINI_NEEDS_PICTURE, MiniControls, MiniPlayerButton } from "../watch/MiniPlayer.tsx";
@@ -64,7 +68,7 @@ import {
 import { SpeedMenu, stepSpeed } from "../watch/SpeedMenu.tsx";
 import { nudgeSubtitles } from "../watch/SubtitleSettings.tsx";
 import { TrackMenus, type TrackMenu } from "../watch/TrackMenus.tsx";
-import { SubtitlePanel } from "./SubtitlePanel.tsx";
+import { SubtitlePanel, subtitleChoiceNote } from "./SubtitlePanel.tsx";
 import { VolumeControl } from "../watch/VolumeControl.tsx";
 
 /** Controls fade out after this long without input. */
@@ -107,7 +111,9 @@ export function TitleWatch() {
   const phase = useTitlePlayer((state) => state.phase);
   const next = useTitlePlayer((state) => state.next);
   const continued = useTitlePlayer((state) => state.continued);
-  const subtitleStatus = useTitlePlayer((state) => state.subtitleStatus);
+  const subtitleNote = useSubtitleNote();
+  const failure = phase.kind === "failed" ? phase : null;
+  const closed = useClosed(failure);
   const [menu, setMenu] = useState<TitleMenu>(null);
   // The title plays on a receiver on the network, or did until its connection broke.
   const remote = useTitlePlayer((state) => state.shows !== null);
@@ -124,25 +130,27 @@ export function TitleWatch() {
     if (remote && miniPlayer.on()) void miniPlayer.leave();
   }, [remote]);
 
-  // How the chosen subtitles stand after a skip, where a changed speed shows: loading for as long
-  // as it lasts, and that they can't be had for a few seconds. The picture plays either way.
+  // When nothing the chosen subtitles have covers the position, where a changed speed shows:
+  // loading for as long as it lasts, and that they can't be had for a few seconds. Text that
+  // shows is never called either. The picture plays either way.
   useEffect(() => {
     flashNote(
-      subtitleStatus === "loading"
+      subtitleNote === "loading"
         ? "Subtitles loading"
-        : subtitleStatus === "unavailable"
+        : subtitleNote === "unavailable"
           ? "Subtitles unavailable"
           : null,
+      subtitleNote === "unavailable",
     );
     const timer =
-      subtitleStatus === "unavailable"
+      subtitleNote === "unavailable"
         ? setTimeout(() => flashNote(null), SUBTITLES_UNAVAILABLE_MS)
         : undefined;
     return () => {
       clearTimeout(timer);
       flashNote(null);
     };
-  }, [subtitleStatus]);
+  }, [subtitleNote]);
 
   // Nothing open any more, as after a live channel took over: back to the page.
   useEffect(() => {
@@ -259,7 +267,7 @@ export function TitleWatch() {
   // An episode's end, and a next episode that didn't start, take the controls' place.
   const nextUp =
     now.series &&
-    ((phase.kind === "ended" && next !== undefined) || (phase.kind === "failed" && continued))
+    ((phase.kind === "ended" && next !== undefined) || (failure && continued && !closed))
       ? now.series
       : null;
   if (mini) {
@@ -284,6 +292,7 @@ export function TitleWatch() {
         <MiniControls
           visible={controlsVisible}
           status={miniStatus(phase, countdown)}
+          failure={failure}
           onClose={leave}
         >
           <Button
@@ -412,6 +421,7 @@ export function TitleWatch() {
   );
 }
 
+/** Plays and pauses; Play tries a failed title again. */
 function PlayPause({ size = "icon" }: { size?: "icon" | "icon-sm" }) {
   const phase = useTitlePlayer((state) => state.phase);
   const paused = phase.kind !== "playing";
@@ -419,6 +429,7 @@ function PlayPause({ size = "icon" }: { size?: "icon" | "icon-sm" }) {
   return (
     <Tooltip label={label}>
       <Button
+        data-retry={phase.kind === "failed" ? "" : undefined}
         variant="primary"
         size={size}
         aria-label={label}
@@ -491,7 +502,7 @@ function Tracks({ menu, onMenu }: { menu: TitleMenu; onMenu: (menu: TitleMenu) =
   const subtitles = useTitlePlayer((state) => state.subtitles);
   const audioId = useTitlePlayer((state) => state.audioId);
   const subtitle = useTitlePlayer((state) => state.subtitle);
-  const subtitleStatus = useTitlePlayer((state) => state.subtitleStatus);
+  const subtitleNote = useSubtitleNote();
   const speed = useTitlePlayer((state) => state.speed);
   const shows = useTitlePlayer((state) => state.shows);
   const downloadedOn = useTitlePlayer((state) => state.downloadedOn);
@@ -522,13 +533,7 @@ function Tracks({ menu, onMenu }: { menu: TitleMenu; onMenu: (menu: TitleMenu) =
         subtitle={subtitle}
         shows={shows}
         hereOnly="Picture subtitles, teletext and captions play on this computer only."
-        subtitleNote={
-          subtitleStatus === "loading"
-            ? "Loading"
-            : subtitleStatus === "unavailable"
-              ? "Unavailable"
-              : null
-        }
+        subtitleNote={subtitleChoiceNote(subtitleNote)}
         open={menu === "speed" ? null : menu}
         onOpenChange={onMenu}
         onAudio={(id) => titlePlayer.setAudio(id)}
@@ -554,10 +559,12 @@ function State() {
   const skipping = useTitlePlayer((state) => state.confirmed !== null);
   const remote = useTitlePlayer((state) => state.shows !== null);
   const output = useOutput((state) => state.status.output);
+  const closed = useClosed(phase.kind === "failed" ? phase : null);
   // On a receiver there is never a picture here: this says what it does and where.
   const receiver =
     remote && (output.kind === "receiver" || output.kind === "lost") ? output.receiver : null;
-  if (!now) return null;
+  // Closed: nothing in its place, not even what a receiver said before the failure.
+  if (!now || closed) return null;
   if (receiver && phase.kind !== "ended" && phase.kind !== "reconnecting") {
     const on = where(receiver);
     if (phase.kind === "failed") {
@@ -575,6 +582,7 @@ function State() {
         <Stated
           title={failed?.title ?? problemTitle(problem)}
           body={failed?.body ?? problemBody(problem)}
+          failure={phase}
         >
           {(failed?.retry ?? true) && (
             <Button variant="primary" onClick={() => titlePlayer.retry()}>
@@ -656,31 +664,37 @@ function State() {
       break;
   }
   return (
-    <Stated title={title} body={body}>
+    <Stated title={title} body={body} failure={phase.kind === "failed" ? phase : undefined}>
       {actions}
       {receiver && phase.kind === "reconnecting" && <PlayHere />}
     </Stated>
   );
 }
 
-/** What stands where the picture would be: a receiver's line or a title, a body, and actions. */
+/**
+ * What stands where the picture would be: a receiver's line or a title, a body, and actions. A
+ * failure's closes.
+ */
 function Stated({
   line,
   title,
   body,
+  failure,
   children,
 }: {
   line?: ReactNode;
   title?: string;
   body?: ReactNode;
+  failure?: object | undefined;
   children?: ReactNode;
 }) {
   return (
-    <div className="pointer-events-auto flex max-w-[34rem] flex-col items-center px-8 text-center">
+    <div className="pointer-events-auto relative flex max-w-[34rem] flex-col items-center px-12 text-center">
       {line}
       {title && <h2 className="text-3xl font-semibold tracking-tight text-balance">{title}</h2>}
       {body && <p className="mt-3 text-[0.9375rem] text-muted-foreground">{body}</p>}
       {children && <div className="mt-7 flex items-center gap-3">{children}</div>}
+      {failure && <CloseMessage failure={failure} />}
     </div>
   );
 }
@@ -764,6 +778,7 @@ function NextUp({ series }: { series: SeriesDetails }) {
         line={now.detail}
         title="Didn't start"
         detail={problemBody(phase.problem, "episode")}
+        failure={phase}
       >
         <Button variant="primary" size="lg" onClick={() => titlePlayer.retry()}>
           <RotateCw />
@@ -844,12 +859,15 @@ function EndOfEpisode({
   line,
   title,
   detail,
+  failure,
   children,
 }: {
   artworkUrl: string | null;
   line: ReactNode;
   title: string;
   detail: ReactNode;
+  /** A next episode that didn't start, whose message the viewer can close. */
+  failure?: object;
   children: ReactNode;
 }) {
   return (
@@ -858,11 +876,12 @@ function EndOfEpisode({
         <Artwork url={artworkUrl} name={title} size="full" plain />
       </div>
       <div className="absolute inset-0 bg-gradient-to-t from-black via-black/60 to-black/20" />
-      <div className="absolute bottom-16 left-10 max-w-[44rem]">
+      <div className={cn("absolute bottom-16 left-10 max-w-[44rem]", failure && "pr-12")}>
         <div className="text-[0.9375rem] text-muted-foreground">{line}</div>
         <div className="mt-1 text-4xl font-semibold tracking-tight text-balance">{title}</div>
         {detail && <div className="mt-2 text-[0.9375rem] text-muted-foreground">{detail}</div>}
         <div className="mt-7 flex gap-3">{children}</div>
+        {failure && <CloseMessage failure={failure} />}
       </div>
     </div>
   );

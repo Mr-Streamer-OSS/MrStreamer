@@ -415,6 +415,7 @@ export function WatchScreen() {
                   ? failureTitle(phase, channel)
                   : channel.title
           }
+          failure={phase.kind === "failed" ? phase : null}
           onClose={closeWatch}
         >
           {playing ? (
@@ -423,6 +424,7 @@ export function WatchScreen() {
             </Button>
           ) : (
             <Button
+              data-retry
               variant="primary"
               size="icon-sm"
               aria-label="Watch"

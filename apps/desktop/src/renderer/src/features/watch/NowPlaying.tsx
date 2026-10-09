@@ -162,6 +162,7 @@ function Controls({
       ) : (
         <Tooltip label="Watch">
           <Button
+            data-retry
             variant="primary"
             size="icon"
             aria-label="Watch"

@@ -1,7 +1,8 @@
 // What Watch and a playing title draw around the picture while the window is the mini player
 // (app/mini-player.ts): the top of the picture moves the window, a word says what's wrong when
 // nothing plays, and a row of small controls fades in along the bottom, ending with the way back
-// to the full window and Close, which leaves the view.
+// to the full window and Close, which leaves the view. A failure's word closes with the cross at
+// the window's top right, as its message does in the full window.
 import { Maximize2, PictureInPicture2, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { miniPlayer, useMiniPlayer } from "../../app/mini-player.ts";
@@ -9,27 +10,36 @@ import { Button } from "../../components/ui/button.tsx";
 import { Tooltip } from "../../components/ui/tooltip.tsx";
 import { cn } from "../../lib/utils.ts";
 import { outputs, useOutput } from "../../player/output.ts";
+import { CloseMessage, useClosed } from "./CloseMessage.tsx";
 import { flash } from "./Flash.tsx";
 
 export function MiniControls({
   visible,
   status,
+  failure = null,
   onClose,
   children,
 }: {
   visible: boolean;
   /** Why there's no picture, as a few words; null while it plays. */
   status: string | null;
+  /** The failure `status` says, whose word the viewer can close. */
+  failure?: object | null;
   onClose: () => void;
   children: ReactNode;
 }) {
+  const closed = useClosed(failure);
   return (
     <>
       {/* The top of the picture moves the window, as a title bar would. */}
       <div className="drag absolute inset-x-0 top-0 z-10 h-1/3" />
-      {status && (
-        <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center px-6 text-center text-base font-semibold text-balance [text-shadow:0_1px_4px_rgb(0_0_0/90%)]">
+      {status && !closed && (
+        <div
+          data-playback-state=""
+          className="pointer-events-none absolute inset-0 z-10 grid place-items-center px-6 text-center text-base font-semibold text-balance [text-shadow:0_1px_4px_rgb(0_0_0/90%)]"
+        >
           {status}
+          {failure && <CloseMessage failure={failure} className="no-drag top-2 right-2" />}
         </div>
       )}
       <div

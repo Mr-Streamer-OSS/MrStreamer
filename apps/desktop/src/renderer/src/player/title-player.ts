@@ -63,7 +63,7 @@ import {
   showDownloadedSubtitle,
 } from "./subtitles.ts";
 import { outputs, positionOf } from "./output.ts";
-import { titleEngine, type SubtitleStatus, type TitleEngine } from "./title-engine.ts";
+import { titleEngine, type SubtitleState, type TitleEngine } from "./title-engine.ts";
 
 /** How often progress is saved while a title plays. */
 const CHECKPOINT_MS = 60_000;
@@ -162,10 +162,11 @@ export interface TitlePlayerState {
   /** The subtitle track on screen, or null for none. */
   readonly subtitle: SubtitleTrack | null;
   /**
-   * How the chosen track stands after a skip or a start: still loading what was on screen there,
-   * or without it. Null once it shows as the file has it.
+   * How the chosen track stands where the picture is, as its run last said: recovery of what was
+   * on screen before the run's start, and whether what it has covers the position. Null with
+   * subtitles off, on a receiver and while a downloaded result shows. `useSubtitleNote` says it.
    */
-  readonly subtitleStatus: SubtitleStatus;
+  readonly subtitleState: SubtitleState | null;
   /**
    * Main-owned local playback session. Receivers have no online subtitle session, and neither
    * has a session whose file the provider replaced while it played.
@@ -210,7 +211,7 @@ const idle: TitlePlayerState = {
   subtitles: [],
   audioId: null,
   subtitle: null,
-  subtitleStatus: null,
+  subtitleState: null,
   subtitleSessionId: null,
   savedSubtitle: null,
   downloadedOn: false,
@@ -227,6 +228,17 @@ const store = createStore<TitlePlayerState>(() => idle);
 /** Reads the title player's state in a component. */
 export function useTitlePlayer<T>(selector: (state: TitlePlayerState) => T): T {
   return useStore(store, selector);
+}
+
+/**
+ * What the viewer is told of the chosen subtitles, in the CC panel and over the picture alike:
+ * nothing while what the run has stands for the position, else that recovery is still loading
+ * what was on screen there, or that it can't be had.
+ */
+export function useSubtitleNote(): "loading" | "unavailable" | null {
+  return useStore(store, ({ subtitleState: state }) =>
+    !state || state.covered || state.recovery === "recovered" ? null : state.recovery,
+  );
 }
 
 let subtitleChoices: (() => void) | null = null;
@@ -477,6 +489,8 @@ function playAt(speed: number): void {
 function stopEngine(): void {
   engine?.destroy();
   engine = null;
+  // Its subtitles went with it, and with them anything to say of them.
+  if (store.getState().subtitleState) store.setState({ subtitleState: null });
   if (checkpoint) clearInterval(checkpoint);
   checkpoint = null;
 }
@@ -526,7 +540,6 @@ async function run(start: number, attempt = 0, paused = false): Promise<void> {
         ? { kind: "starting" }
         : { kind: "reconnecting", attempt, of: RECONNECT_DELAYS_MS.length },
     position: start,
-    subtitleStatus: subtitle && !store.getState().downloadedOn ? "loading" : null,
   });
   const started = titleEngine(video, {
     url: session.url,
@@ -540,8 +553,8 @@ async function run(start: number, attempt = 0, paused = false): Promise<void> {
   });
   engine = started;
   if (store.getState().downloadedOn) paintDownloaded();
-  started.onSubtitles((subtitleStatus) => {
-    if (mine === generation && !store.getState().downloadedOn) store.setState({ subtitleStatus });
+  started.onSubtitles((subtitleState) => {
+    if (mine === generation && !store.getState().downloadedOn) store.setState({ subtitleState });
   });
   // Starting a run loads the element afresh, which sets its rate to the default one.
   playAt(store.getState().speed);
@@ -888,7 +901,7 @@ function moveToReceiver(media: RemoteMedia | null): void {
   setSubtitleDelay(video, 0);
   store.setState({
     phase: { kind: "opening" },
-    subtitleStatus: null,
+    subtitleState: null,
     speed: 1,
     subtitleSessionId: null,
     savedSubtitle: null,
@@ -1302,7 +1315,7 @@ export const titlePlayer = {
     if (!savedSubtitle?.subtitle) rememberSubtitles(track);
     // Turning subtitles off is instant, and stays off; showing others needs a new run.
     if (!track) {
-      store.setState({ subtitleStatus: null });
+      store.setState({ subtitleState: null });
       if (engine) engine.hideSubtitles();
       else clearSubtitles(video);
       return;
@@ -1344,7 +1357,7 @@ export const titlePlayer = {
       savedSubtitle: saved,
       downloadedOn: saved.subtitle !== null,
       subtitle: null,
-      subtitleStatus: null,
+      subtitleState: null,
     });
     engine?.hideSubtitles();
     if (saved.subtitle) paintDownloaded();
@@ -1360,7 +1373,7 @@ export const titlePlayer = {
     if (session !== current) return;
     if (store.getState().downloadedOn) {
       subtitleChoice++;
-      store.setState({ downloadedOn: false, subtitleStatus: null });
+      store.setState({ downloadedOn: false, subtitleState: null });
       clearSubtitles(video);
       setSubtitleDelay(video, 0);
     }
@@ -1377,7 +1390,7 @@ export const titlePlayer = {
     subtitleChoices?.();
     subtitleChoice++;
     lastWasDownloaded = true;
-    store.setState({ downloadedOn: true, subtitle: null, subtitleStatus: null });
+    store.setState({ downloadedOn: true, subtitle: null, subtitleState: null });
     engine?.hideSubtitles();
     paintDownloaded();
     keepSubtitleChoice();

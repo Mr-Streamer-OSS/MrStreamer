@@ -119,10 +119,10 @@ async function said(page: Page): Promise<string> {
   return text.replace(/\s+/g, " ");
 }
 
-/** What a failed or reconnecting channel offers, in order. */
+/** What a failed or reconnecting channel offers, in order, besides closing its message. */
 function offered(page: Page): Promise<string[]> {
   return page.evaluate<string[]>(
-    `[...document.querySelectorAll("${BLOCK} button")].map((b) => b.textContent.trim())`,
+    `[...document.querySelectorAll("${BLOCK} button:not([aria-label='Close message'])")].map((b) => b.textContent.trim())`,
   );
 }
 

@@ -162,6 +162,19 @@ function showText(video: HTMLVideoElement): void {
   }
 }
 
+/**
+ * Whether the subtitles on `video` stand for `position`: a cue on either track, as timed now, was
+ * due at some moment from `since` to there, or is due there. So a line on screen counts, and so
+ * does the pause after one: nothing shows there because the file has nothing. Times are on the
+ * element's clock.
+ */
+export function subtitlesCover(video: HTMLVideoElement, since: number, position: number): boolean {
+  const from = Math.min(since, position);
+  return [subtitleTrack(video), pictureTrack(video)].some((track) =>
+    [...(track.cues ?? [])].some((cue) => cue.startTime <= position && cue.endTime > from),
+  );
+}
+
 /** Removes every cue from both tracks, and with them the text and the pictures on screen. */
 export function clearSubtitles(video: HTMLVideoElement): void {
   for (const track of [subtitleTrack(video), pictureTrack(video)]) {
