@@ -42,6 +42,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Semaphore from "effect/Semaphore";
+import { t } from "@mrstreamer/core/i18n";
 import {
   readJsonFile,
   removeFile,
@@ -742,7 +743,7 @@ function make(deps: SubscriptionDeps) {
           });
           if (![...imported.groups.keys()].some((each) => playlistGroupId(each) === group))
             return yield* new Failed({
-              error: { kind: "unexpected", detail: "This playlist group no longer exists." },
+              error: { kind: "unexpected", detail: t("This playlist group no longer exists.") },
             });
           return yield* change(subscriptionId, (latest) => {
             if (
@@ -755,7 +756,7 @@ function make(deps: SubscriptionDeps) {
                 new Failed({
                   error: {
                     kind: "unexpected",
-                    detail: "The playlist changed. Open mapping again.",
+                    detail: t("The playlist changed. Open mapping again."),
                   },
                 }),
               );
@@ -770,7 +771,7 @@ function make(deps: SubscriptionDeps) {
                 new Failed({
                   error: {
                     kind: "unexpected",
-                    detail: "Playlist mapping exceeds 10,000 saved groups.",
+                    detail: t("Playlist mapping exceeds {count} saved groups.", { count: 10_000 }),
                   },
                 }),
               );
@@ -834,7 +835,7 @@ function playlistLink(typed: string): Effect.Effect<string, Failed> {
         ? Effect.succeed(account.link)
         : Effect.fail(
             new Failed({
-              error: { kind: "incomplete-login", detail: "Enter the playlist's M3U link." },
+              error: { kind: "incomplete-login", detail: t("Enter the playlist's M3U link.") },
             }),
           ),
     ),

@@ -13,6 +13,7 @@ import { type } from "arktype";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import { t } from "@mrstreamer/core/i18n";
 import { attempt, Database, unavailable } from "./database.ts";
 
 /** What was kept of a title's details for its copy, shown without asking anyone. */
@@ -129,7 +130,7 @@ export const downloadStoreLayer = Layer.effect(
             remove.run(id);
           }),
       };
-    }).pipe(Effect.catch(() => Effect.succeed(closed("Downloads can't be opened."))));
+    }).pipe(Effect.catch(() => Effect.succeed(closed(t("Downloads can't be opened.")))));
   }),
 );
 
@@ -149,7 +150,7 @@ function readRecord(record: unknown): StoredDownload | null {
 function failureOf(stored: object): DownloadFailure {
   return "kind" in stored && typeof stored.kind === "string" && FAILURES.has(stored.kind)
     ? (stored as DownloadFailure)
-    : { kind: "app", error: { kind: "unexpected", detail: "This download stopped." } };
+    : { kind: "app", error: { kind: "unexpected", detail: t("This download stopped.") } };
 }
 
 function closed(detail: string): DownloadStore["Service"] {

@@ -82,7 +82,7 @@ On Windows, the [Microsoft Store](https://apps.microsoft.com/detail/9N45GG76ZP4T
 1. Enter your provider's server address, username and password, or paste the M3U link your provider sent. Mr. Streamer checks the login and loads your channels; movies and series follow. A playlist link starts with channels. In 0.0.9, map its groups in Settings to import movies and series too. An address without `http://` or `https://` connects encrypted when the server allows it; otherwise Mr. Streamer asks before sending your login unencrypted.
 2. **Live TV** lists every channel with what's on now and next. Click one to watch; the list opens over the picture to switch.
 3. **Movies** and **Series** open on For you. A poster opens its details; **Play** or **Resume** starts it.
-4. In Settings (⌘, or Ctrl ,), **General** sets the languages for titles, sound and subtitles, and your update channel; **Subscriptions** shows your accounts, refreshes their lists and adds another one, whose channels, movies and series show beside the first's.
+4. In Settings (⌘, or Ctrl ,), **General** sets the app's own language (English, Nederlands, Français, Deutsch or Español), the languages for titles, sound and subtitles, and your update channel; **Subscriptions** shows your accounts, refreshes their lists and adds another one, whose channels, movies and series show beside the first's.
 
 Mr. Streamer looks for updates after it starts and every four hours. When one is ready, **Update** appears in the top bar: download it, then restart when it suits you. **Stable** gets tested releases, **Nightly** the newest builds.
 

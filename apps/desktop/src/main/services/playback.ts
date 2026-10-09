@@ -127,6 +127,7 @@ import type { SubtitleFeedLine, SubtitlesUnavailable } from "@mrstreamer/core/su
 import { pgsSegments } from "@mrstreamer/core/subtitles/pgs";
 import { pesReader, type PesPacket } from "@mrstreamer/core/subtitles/transport";
 import { webvttReader, type Cue } from "@mrstreamer/core/subtitles/webvtt";
+import { t } from "@mrstreamer/core/i18n";
 import { fileWindows, type FileWindows } from "../playback/file-windows.ts";
 import { blocks, readLayout, selected, type Layout, type ReadFile } from "../playback/matroska.ts";
 import {
@@ -1131,7 +1132,10 @@ function make(deps: PlaybackDeps) {
         }
       | { readonly ok: false; readonly failure: StreamFailure }
     > {
-      const noStream: StreamFailure = { kind: "network", detail: "The provider sent no stream." };
+      const noStream: StreamFailure = {
+        kind: "network",
+        detail: t("The provider sent no stream."),
+      };
       let failure: StreamFailure = noStream;
       // A session that played a stream keeps it: a player asking again, as hls.js does for a
       // playlist, gets that stream or none.
@@ -1196,7 +1200,10 @@ function make(deps: PlaybackDeps) {
           delivery: outcome === "ok" ? "direct" : "none",
           outcome,
         });
-      const noStream: StreamFailure = { kind: "network", detail: "The provider sent no stream." };
+      const noStream: StreamFailure = {
+        kind: "network",
+        detail: t("The provider sent no stream."),
+      };
       const ended = new AbortController();
       response.on("close", () => ended.abort());
       const signal = AbortSignal.any([session.closed.signal, ended.signal]);
@@ -1264,7 +1271,7 @@ function make(deps: PlaybackDeps) {
             : opened
               ? {
                   kind: "unsupported",
-                  detail: "The channel's address doesn't answer with an HLS playlist.",
+                  detail: t("The channel's address doesn't answer with an HLS playlist."),
                 }
               : noStream;
           report(failure.kind);
@@ -1379,7 +1386,7 @@ function make(deps: PlaybackDeps) {
           const detail = errors.trim().split("\n").at(-1) ?? `ffmpeg exited with ${code}`;
           session.failure = {
             kind: "unsupported",
-            detail: `The stream could not be converted. ${detail}`,
+            detail: `${t("The stream could not be converted.")} ${detail}`,
           };
           report("unsupported");
         }
@@ -1454,7 +1461,7 @@ function make(deps: PlaybackDeps) {
       if (receiver?.load && session.identity.generation !== session.probed) {
         const failure: StreamFailure = {
           kind: "network",
-          detail: "The provider put another file behind this title while it played.",
+          detail: t("The provider put another file behind this title while it played."),
         };
         session.failure = failure;
         const { load } = receiver;
@@ -1731,7 +1738,7 @@ function make(deps: PlaybackDeps) {
           } catch {
             // The provider broke off; ffmpeg may still end its run as if the file had.
             if (!signal.aborted) {
-              session.failure ??= { kind: "network", detail: "The provider's file broke off." };
+              session.failure ??= { kind: "network", detail: t("The provider's file broke off.") };
             }
             response.destroy();
             return;
@@ -1798,7 +1805,7 @@ function make(deps: PlaybackDeps) {
       if (!probe || !deps.ffmpeg) {
         session.failure = {
           kind: "unsupported",
-          detail: "This build has no ffmpeg to play movies and episodes.",
+          detail: t("This build has no ffmpeg to play movies and episodes."),
         };
         response.writeHead(415).end();
         return;
@@ -1981,7 +1988,7 @@ function make(deps: PlaybackDeps) {
         stop();
         const failure: StreamFailure = session.failure ?? {
           kind: "unsupported",
-          detail: `The file could not be played. ${lastLine(errors, child.exitCode, child.signalCode, pictureStart)}`,
+          detail: `${t("The file could not be played.")} ${lastLine(errors, child.exitCode, child.signalCode, pictureStart)}`,
         };
         session.failure = failure;
         report(failure.kind);
@@ -2020,7 +2027,7 @@ function make(deps: PlaybackDeps) {
         if (!signal.aborted && !session.failure) {
           session.failure = {
             kind: "unsupported",
-            detail: `The file could not be played. ${lastLine(errors, code, child.signalCode)}`,
+            detail: `${t("The file could not be played.")} ${lastLine(errors, code, child.signalCode)}`,
           };
         }
         response.destroy();
@@ -2685,8 +2692,8 @@ function make(deps: PlaybackDeps) {
         return over({
           kind: "unsupported",
           detail: ffmpeg
-            ? "A receiver plays channels sent as MPEG-TS or HLS, and this one is neither."
-            : "This build has no ffmpeg to make a receiver's stream.",
+            ? t("A receiver plays channels sent as MPEG-TS or HLS, and this one is neither.")
+            : t("This build has no ffmpeg to make a receiver's stream."),
         });
       }
       session.layout = layout;
@@ -2744,10 +2751,10 @@ function make(deps: PlaybackDeps) {
         const failure: StreamFailure =
           session.failure ??
           (code === 0
-            ? { kind: "network", detail: "The provider's stream ended." }
+            ? { kind: "network", detail: t("The provider's stream ended.") }
             : {
                 kind: "unsupported",
-                detail: `The stream could not be made into one a receiver plays. ${lastLine(errors, code, child.signalCode)}`,
+                detail: `${t("The stream could not be made into one a receiver plays.")} ${lastLine(errors, code, child.signalCode)}`,
               });
         report(delivery, failure.kind);
         over(failure);
@@ -2953,7 +2960,7 @@ function make(deps: PlaybackDeps) {
         // provider, and whoever opened the session hears; asking again starts a new one.
         const failure: StreamFailure = (session.failure ??= {
           kind: "network",
-          detail: "The provider did not send the file in time.",
+          detail: t("The provider did not send the file in time."),
         });
         load.run?.stop();
         load.store.fail();
@@ -3139,7 +3146,7 @@ function make(deps: PlaybackDeps) {
         if (code !== 0 || session.failure) {
           session.failure ??= {
             kind: "unsupported",
-            detail: `The file could not be played. ${lastLine(errors, code, child.signalCode)}`,
+            detail: `${t("The file could not be played.")} ${lastLine(errors, code, child.signalCode)}`,
           };
           report(session.failure.kind);
           // Nothing more comes of this run, and the next would fail the same way.
@@ -3197,7 +3204,7 @@ function make(deps: PlaybackDeps) {
         } else {
           session.failure ??= {
             kind: "unsupported",
-            detail: "The file's picture can't be cut where a receiver's playlist needs it.",
+            detail: t("The file's picture can't be cut where a receiver's playlist needs it."),
           };
           load.store.fail();
         }
@@ -3394,7 +3401,10 @@ function make(deps: PlaybackDeps) {
         throw new Failed({
           error: {
             kind: "stream",
-            failure: { kind: "unsupported", detail: "This build has no ffprobe to read movies." },
+            failure: {
+              kind: "unsupported",
+              detail: t("This build has no ffprobe to read movies."),
+            },
           },
         });
       }
@@ -3425,7 +3435,7 @@ function make(deps: PlaybackDeps) {
             kind: "stream",
             failure: session.failure ?? {
               kind: "unsupported",
-              detail: "The file has no picture or sound Mr. Streamer can read.",
+              detail: t("The file has no picture or sound Mr. Streamer can read."),
             },
           },
         });
@@ -3467,7 +3477,7 @@ function make(deps: PlaybackDeps) {
             failure: {
               kind: "network",
               detail: timeout.signal.aborted
-                ? "The provider did not answer in time."
+                ? t("The provider did not answer in time.")
                 : cause instanceof Error
                   ? cause.message
                   : String(cause),
@@ -3949,7 +3959,7 @@ function make(deps: PlaybackDeps) {
             // come between this and the session it would close.
             if (options.preview && [...sessions.values()].some((each) => each.lan !== null)) {
               return yield* new Failed({
-                error: { kind: "unexpected", detail: "A receiver has playback." },
+                error: { kind: "unexpected", detail: t("A receiver has playback.") },
               });
             }
             yield* reclaim(channel.subscriptionId);
@@ -4048,8 +4058,10 @@ function make(deps: PlaybackDeps) {
                   failure: {
                     kind: "unsupported",
                     detail: deps.ffmpeg
-                      ? "The file has no picture, or doesn't say how long it is, so a receiver can't play it."
-                      : "This build has no ffmpeg to make a receiver's stream.",
+                      ? t(
+                          "The file has no picture, or doesn't say how long it is, so a receiver can't play it.",
+                        )
+                      : t("This build has no ffmpeg to make a receiver's stream."),
                   },
                 },
               });
@@ -4557,8 +4569,11 @@ function channelTracks(
 function describeLayout(layout: StreamLayout | null): string {
   const video = layout?.video?.codec;
   const audio = layout?.audio[0]?.codec;
-  const parts = [video && `${video} video`, audio && `${audio} sound`].filter(Boolean);
-  return `This stream carries ${parts.join(" and ") || "an unknown format"}.`;
+  if (video && audio)
+    return t("This stream carries {video} video and {audio} sound.", { video, audio });
+  if (video) return t("This stream carries {video} video.", { video });
+  if (audio) return t("This stream carries {audio} sound.", { audio });
+  return t("This stream carries an unknown format.");
 }
 
 /** What a provider's HTTP status says of why a file or stream didn't come. */
@@ -4605,7 +4620,7 @@ async function readStart(answer: Response, address: string): Promise<Started | n
 
 /** Something else was asked for since: this open gave way before it began. */
 export const superseded = new Failed({
-  error: { kind: "unexpected", detail: "Something else played in the meantime." },
+  error: { kind: "unexpected", detail: t("Something else played in the meantime.") },
 });
 
 /** A download still holds the provider's connection: this open asks the provider nothing. */

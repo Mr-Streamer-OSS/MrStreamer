@@ -58,12 +58,3 @@ export interface PlaylistOmissionPage {
   readonly total: number;
   readonly entries: readonly PlaylistOmission[];
 }
-
-export const PLAYLIST_OMISSION_LABELS: Record<PlaylistOmissionReason, string> = {
-  unmapped: "Group needs mapping",
-  "conflicting-groups": "Groups have different mappings",
-  "unsupported-address": "Unsupported stream address",
-  "missing-name": "No title name",
-  "invalid-episode": "No unambiguous episode number",
-  skip: "Skipped by mapping",
-};

@@ -19,6 +19,7 @@ import type { OwnedId } from "@mrstreamer/contracts/subscription";
 import type { FilterOptions, TitleFilters } from "@mrstreamer/contracts/title-filters";
 import type { WatchlistPage, WatchlistSort } from "@mrstreamer/contracts/watchlist";
 import type { SavedMember, SavedTitle, TitleFacts } from "@mrstreamer/core/ondemand/watchlist";
+import type { ActiveLanguage } from "@mrstreamer/core/i18n";
 import type { OnDemandCatalogue } from "@mrstreamer/core/provider";
 import type { ProviderAccount } from "../providers/account.ts";
 import type { MetadataStatus } from "./metadata.ts";
@@ -210,6 +211,8 @@ export type WorkerRequest = {
     readonly id: number;
     readonly method: M;
     readonly args: WorkerCalls[M]["args"];
+    /** The interface language at the call, which names such as "New this week" are written in. */
+    readonly interfaceLanguage: ActiveLanguage;
   };
 }[WorkerMethod];
 

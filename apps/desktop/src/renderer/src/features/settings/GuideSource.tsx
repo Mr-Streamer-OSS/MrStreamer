@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import type { GuideCandidate, GuideStatus } from "@mrstreamer/contracts/guide";
 import type { SubscriptionSummary } from "@mrstreamer/contracts/subscription";
+import { t } from "@mrstreamer/core/i18n";
 import { Button } from "../../components/ui/button.tsx";
 import { Input } from "../../components/ui/input.tsx";
 import { appError, describeError } from "../../lib/errors.ts";
@@ -63,48 +64,52 @@ export function GuideRows({
   const covered =
     guide && fetchedAt !== null
       ? guide.listed > 0
-        ? `${guide.channels.toLocaleString()} of ${guide.listed.toLocaleString()} channels`
-        : `${guide.channels.toLocaleString()} channels`
-      : "not loaded yet";
+        ? t("{channels} of {listed} channels", { channels: guide.channels, listed: guide.listed })
+        : t("{count} channels", { count: guide.channels })
+      : t("not loaded yet");
   const note =
     guide?.availability === "none"
-      ? "none in this playlist"
+      ? t("none in this playlist")
       : [
           external && hostOf(external.origin),
-          external?.locked ? "needs its address again" : covered,
+          external?.locked ? t("needs its address again") : covered,
         ]
           .filter(Boolean)
           .join(" · ");
   return (
     <>
-      <Row label="Guide" note={note}>
+      <Row label={t("Guide")} note={note}>
         <span className="text-muted-foreground">
           {refresh.isPending
-            ? "refreshing…"
+            ? t("refreshing…")
             : guide?.availability !== "none" && fetchedAt !== null
               ? pastTime(fetchedAt, now)
               : ""}
         </span>
         {external?.locked ? (
-          <Button size="sm" aria-label={`Enter the guide address for ${name}`} onClick={onEdit}>
-            Enter address
+          <Button
+            size="sm"
+            aria-label={t("Enter the guide address for {name}", { name })}
+            onClick={onEdit}
+          >
+            {t("Enter address")}
           </Button>
         ) : (
           <>
             {failure ? (
               <Button
                 size="sm"
-                aria-label="Retry guide"
+                aria-label={t("Retry guide")}
                 disabled={refresh.isPending}
                 onClick={() => refresh.mutate()}
               >
-                Retry
+                {t("Retry")}
               </Button>
             ) : (
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Refresh guide"
+                aria-label={t("Refresh guide")}
                 disabled={refresh.isPending}
                 onClick={() => refresh.mutate()}
               >
@@ -114,10 +119,10 @@ export function GuideRows({
             <Button
               variant={failure ? "ghost" : "secondary"}
               size="sm"
-              aria-label={`Guide for ${name}`}
+              aria-label={t("Guide for {name}", { name })}
               onClick={onEdit}
             >
-              Guide
+              {t("Guide")}
             </Button>
           </>
         )}
@@ -131,22 +136,24 @@ export function GuideRows({
       </div>
       {guide?.availability === "available" && (
         <Row
-          label="Mapped channels"
+          label={t("Mapped channels")}
           note={[
-            `${guide.mapped.toLocaleString()} by hand`,
-            guide.unresolved > 0 && `${guide.unresolved.toLocaleString()} unresolved`,
-            `${Math.max(0, guide.listed - guide.channels).toLocaleString()} without programmes`,
+            t("{count} by hand", { count: guide.mapped }),
+            guide.unresolved > 0 && t("{count} unresolved", { count: guide.unresolved }),
+            t("{count} without programmes", {
+              count: Math.max(0, guide.listed - guide.channels),
+            }),
           ]
             .filter(Boolean)
             .join(" · ")}
         >
           <Button
             size="sm"
-            aria-label={`Map channels of ${name}`}
+            aria-label={t("Map channels of {name}", { name })}
             disabled={switching}
             onClick={onMap}
           >
-            Map
+            {t("Map")}
           </Button>
         </Row>
       )}
@@ -166,20 +173,31 @@ function unanswered(
   now: number,
 ): string {
   const external = externalOf(guide);
-  const kept =
-    guide && guide.fetchedAt !== null
-      ? `Listings are from ${pastTime(guide.fetchedAt, now)}`
-      : null;
-  if (!external) return [describeError(failure), kept && `${kept}.`].filter(Boolean).join(" ");
+  const kept = guide && guide.fetchedAt !== null ? pastTime(guide.fetchedAt, now) : null;
+  if (!external) {
+    return [describeError(failure), kept && t("Listings are from {time}.", { time: kept })]
+      .filter(Boolean)
+      .join(" ");
+  }
   const host = hostOf(external.origin);
   const why =
     failure.kind === "unreachable" && guide?.failedAt
-      ? `${host} hasn't answered since ${pastTime(guide.failedAt, now)}.`
+      ? t("{host} hasn't answered since {time}.", { host, time: pastTime(guide.failedAt, now) })
       : failure.kind === "provider-error"
-        ? `${host} answered with an error (HTTP ${failure.status}).`
+        ? t("{host} answered with an error (HTTP {status}).", {
+            host,
+            status: String(failure.status),
+          })
         : describeError(failure);
-  const whose = `${owner(subscription)}'s guide isn't used.`;
-  return `${why} ${kept ? `${kept}; the ${whose}` : `The ${whose}`}`;
+  const playlist = owner(subscription) === "playlist";
+  const unused = kept
+    ? playlist
+      ? t("Listings are from {time}; the playlist's guide isn't used.", { time: kept })
+      : t("Listings are from {time}; the provider's guide isn't used.", { time: kept })
+    : playlist
+      ? t("The playlist's guide isn't used.")
+      : t("The provider's guide isn't used.");
+  return `${why} ${unused}`;
 }
 
 /** An address typed with http://, which it and any key in it travel over unencrypted. */
@@ -279,24 +297,24 @@ export function GuideForm({
       }}
     >
       <h2 className="mb-5 text-2xl font-semibold tracking-tight">
-        Guide for {subscriptionName(subscription)}
+        {t("Guide for {name}", { name: subscriptionName(subscription) })}
       </h2>
       <div className="space-y-4">
         <div className="text-sm text-muted-foreground">
-          In use
+          {t("In use")}
           <div className="mt-2 text-base text-foreground">
             {external
               ? [
                   hostOf(external.origin),
-                  "key hidden",
-                  external.origin.startsWith("http:") && "not encrypted",
-                  `since ${shortDay(external.since)}`,
+                  t("key hidden"),
+                  external.origin.startsWith("http:") && t("not encrypted"),
+                  t("since {day}", { day: shortDay(external.since) }),
                 ]
                   .filter(Boolean)
                   .join(" · ")
               : [
-                  whose === "playlist" ? "Playlist guide" : "Provider guide",
-                  guide?.availability === "none" && "none in this playlist",
+                  whose === "playlist" ? t("Playlist guide") : t("Provider guide"),
+                  guide?.availability === "none" && t("none in this playlist"),
                 ]
                   .filter(Boolean)
                   .join(" · ")}
@@ -304,16 +322,17 @@ export function GuideForm({
         </div>
         {external?.locked && (
           <p className="text-[0.9375rem]">
-            Your keychain no longer gives Mr. Streamer the saved address from{" "}
-            {hostOf(external.origin)}.
+            {t("Your keychain no longer gives Mr. Streamer the saved address from {host}.", {
+              host: hostOf(external.origin),
+            })}
           </p>
         )}
         <Field
-          label="XMLTV address"
-          {...(external && !external.locked ? { hint: "leave empty to keep" } : {})}
+          label={t("XMLTV address")}
+          {...(external && !external.locked ? { hint: t("leave empty to keep") } : {})}
           note={
             plainHttp(address)
-              ? "Not encrypted. The address, and any key in it, travels as plain text."
+              ? t("Not encrypted. The address, and any key in it, travels as plain text.")
               : null
           }
         >
@@ -331,7 +350,7 @@ export function GuideForm({
           <p role="status" className="mt-4 text-[0.9375rem]">
             {found(candidate, Date.now())}
             {!candidate.sameSource && guide && guide.mapped > 0
-              ? ` Using it clears your ${guide.mapped.toLocaleString()} mapped ${guide.mapped === 1 ? "channel" : "channels"}.`
+              ? ` ${t("Using it clears your {count} mapped channels.", { count: guide.mapped })}`
               : ""}
           </p>
         )}
@@ -345,10 +364,10 @@ export function GuideForm({
         {candidate ? (
           <>
             <Button type="submit" variant="primary" disabled={switching}>
-              {use.isPending ? "Switching…" : "Use this guide"}
+              {use.isPending ? t("Switching…") : t("Use this guide")}
             </Button>
             <Button variant="ghost" disabled={switching} onClick={runCheck}>
-              Check again
+              {t("Check again")}
             </Button>
           </>
         ) : (
@@ -357,7 +376,7 @@ export function GuideForm({
             variant="primary"
             disabled={!checkable || check.isPending || switching}
           >
-            {check.isPending ? "Checking…" : "Check"}
+            {check.isPending ? t("Checking…") : t("Check")}
           </Button>
         )}
         {external && (
@@ -367,16 +386,35 @@ export function GuideForm({
             disabled={switching}
             onClick={() => restore.mutate()}
           >
-            {restore.isPending ? "Going back…" : `Use ${whose} guide`}
+            {restore.isPending
+              ? t("Going back…")
+              : whose === "playlist"
+                ? t("Use playlist guide")
+                : t("Use provider guide")}
           </Button>
         )}
       </div>
       <p className="mt-5 text-xs leading-relaxed text-muted-foreground/80">
         {external || candidate
-          ? `Your ${whose}'s guide isn't used while this address is set. Times follow the guide's own offsets.`
-          : "Check downloads the guide and says what it covers. Nothing changes until you choose Use this guide."}
+          ? [
+              whose === "playlist"
+                ? t("Your playlist's guide isn't used while this address is set.")
+                : t("Your provider's guide isn't used while this address is set."),
+              t("Times follow the guide's own offsets."),
+            ].join(" ")
+          : t(
+              "Check downloads the guide and says what it covers. Nothing changes until you choose Use this guide.",
+            )}
         {external && guide && guide.mapped > 0
-          ? ` Use ${whose} guide also clears your ${guide.mapped.toLocaleString()} mapped ${guide.mapped === 1 ? "channel" : "channels"}.`
+          ? ` ${
+              whose === "playlist"
+                ? t("Use playlist guide also clears your {count} mapped channels.", {
+                    count: guide.mapped,
+                  })
+                : t("Use provider guide also clears your {count} mapped channels.", {
+                    count: guide.mapped,
+                  })
+            }`
           : ""}
       </p>
     </RowForm>
@@ -385,10 +423,19 @@ export function GuideForm({
 
 /** What a check found: "Checked: 1,204 channels in this guide, 412 of your 1,180 match by id." */
 function found(candidate: GuideCandidate, now: number): string {
-  const lists = `${candidate.guideChannels.toLocaleString()} channels in this guide`;
-  const matches =
-    candidate.listed > 0
-      ? `, ${candidate.matched.toLocaleString()} of your ${candidate.listed.toLocaleString()} match by id`
-      : "";
-  return `Checked: ${lists}${matches}. Programmes until ${comingTime(candidate.until, now)}.`;
+  const until = comingTime(candidate.until, now);
+  return candidate.listed > 0
+    ? t(
+        "Checked: {channels} channels in this guide, {matched} of your {listed} match by id. Programmes until {until}.",
+        {
+          channels: candidate.guideChannels,
+          matched: candidate.matched,
+          listed: candidate.listed,
+          until,
+        },
+      )
+    : t("Checked: {channels} channels in this guide. Programmes until {until}.", {
+        channels: candidate.guideChannels,
+        until,
+      });
 }

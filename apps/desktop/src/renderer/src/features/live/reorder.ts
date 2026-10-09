@@ -16,6 +16,7 @@ import { useEffect, useState } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { ownedId, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type { Viewing } from "@mrstreamer/contracts/viewing";
+import { t } from "@mrstreamer/core/i18n";
 import { appError } from "../../lib/errors.ts";
 import { call } from "../../lib/ipc.ts";
 import { keepViewing, queries, useSubscriptions } from "../../lib/queries.ts";
@@ -299,7 +300,11 @@ export function useFavouriteOrder(
         focus: { channel, part, asked: draft.focus.asked + 1 },
         // Another order than the one that failed is another save, under an id of its own.
         ...(to === from ? {} : { status: "editing", commandId: null }),
-        said: `${channel.title}, ${to + 1} of ${order.length}`,
+        said: t("{name}, {position} of {count}", {
+          name: channel.title,
+          position: to + 1,
+          count: order.length,
+        }),
       });
     },
     confirm: () => {

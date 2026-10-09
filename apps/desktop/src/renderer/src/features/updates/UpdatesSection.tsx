@@ -4,6 +4,7 @@
 // Microsoft Store installed gets one row instead, which opens the Store.
 import type { CheckFailure, UpdateStatus } from "@mrstreamer/contracts/updates";
 import type { Channel } from "@mrstreamer/contracts/version";
+import { formatDate, formatPercent, t } from "@mrstreamer/core/i18n";
 import { Button } from "../../components/ui/button.tsx";
 import { Row, Section, Select } from "../settings/Rows.tsx";
 import { noteItems } from "./notes.ts";
@@ -11,52 +12,56 @@ import { useUpdates } from "./use-updates.ts";
 
 const RELEASES_URL = "https://github.com/Mr-Streamer-OSS/MrStreamer/releases";
 
-const CHANNELS: readonly { value: Channel; label: string }[] = [
-  { value: "stable", label: "Stable" },
-  { value: "nightly", label: "Nightly" },
-];
-
-const time = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
+const time = (at: number) => formatDate(at, "time");
 
 /** Why a check found nothing, in a few words. */
 function describeCheckFailure(failure: CheckFailure): string {
   switch (failure.kind) {
     case "offline":
-      return "You seem to be offline.";
+      return t("You seem to be offline.");
     case "busy":
       return failure.until
-        ? `GitHub is limiting requests until ${time.format(failure.until)}.`
-        : "GitHub is limiting requests for now.";
+        ? t("GitHub is limiting requests until {time}.", { time: time(failure.until) })
+        : t("GitHub is limiting requests for now.");
     case "http":
-      return `The update server answered HTTP ${failure.status}.`;
+      return t("The update server answered HTTP {status}.", { status: String(failure.status) });
     case "invalid":
-      return "The update server sent something unexpected.";
+      return t("The update server sent something unexpected.");
   }
 }
 
 export function UpdatesSection() {
   const { status, setChannel, openStore } = useUpdates();
   if (!status) return null;
+  const channels: readonly { value: Channel; label: string }[] = [
+    { value: "stable", label: t("Stable") },
+    { value: "nightly", label: t("Nightly") },
+  ];
   // The Microsoft Store updates a copy it installed, and carries one release line.
   if (status.distribution === "store") {
     return (
-      <Section title="Updates">
-        <Row label={status.version} note="updated by the Microsoft Store">
+      <Section title={t("Updates")}>
+        <Row label={status.version} note={t("updated by the Microsoft Store")}>
           <Button size="sm" onClick={openStore}>
-            Open Store
+            {t("Open Store")}
           </Button>
         </Row>
       </Section>
     );
   }
   return (
-    <Section title="Updates">
+    <Section title={t("Updates")}>
       <State status={status} />
       <Row
-        label="Channel"
-        note={status.channel === "nightly" ? "newest builds" : "tested releases"}
+        label={t("Channel")}
+        note={status.channel === "nightly" ? t("newest builds") : t("tested releases")}
       >
-        <Select label="Channel" value={status.channel} options={CHANNELS} onChange={setChannel} />
+        <Select
+          label={t("Channel")}
+          value={status.channel}
+          options={channels}
+          onChange={setChannel}
+        />
       </Row>
       <Notes status={status} />
     </Section>
@@ -70,30 +75,39 @@ function State({ status }: { status: UpdateStatus }) {
   let note: string;
   switch (update.kind) {
     case "idle":
-      note = nextCheckAt ? `checks at ${time.format(nextCheckAt)}` : "not checked yet";
+      note = nextCheckAt
+        ? t("checks at {time}", { time: time(nextCheckAt) })
+        : t("not checked yet");
       break;
     case "checking":
-      note = "checking…";
+      note = t("checking…");
       break;
     case "current":
-      note = checked ? `up to date, checked ${time.format(checked.at)}` : "up to date";
+      note = checked
+        ? t("up to date, checked {time}", { time: time(checked.at) })
+        : t("up to date");
       break;
     case "available":
-      note = `${update.version} is available`;
+      note = t("{version} is available", { version: update.version });
       break;
     case "downloading":
-      note = `downloading ${update.version}, ${update.percent} %`;
+      note = t("downloading {version}, {percent}", {
+        version: update.version,
+        percent: formatPercent(update.percent / 100),
+      });
       break;
     case "ready":
-      note = `${update.version} is ready; playback stops for a moment while it restarts`;
+      note = t("{version} is ready; playback stops for a moment while it restarts", {
+        version: update.version,
+      });
       break;
     case "failed":
       note =
         update.step === "check"
-          ? "couldn't check"
+          ? t("couldn't check")
           : update.step === "download"
-            ? `the download of ${update.version} stopped`
-            : `${update.version} couldn't be installed`;
+            ? t("the download of {version} stopped", { version: update.version })
+            : t("{version} couldn't be installed", { version: update.version });
       break;
   }
   const failure =
@@ -105,7 +119,13 @@ function State({ status }: { status: UpdateStatus }) {
   // An automatic check that failed keeps the last result on screen, and says so quietly.
   const quietFailure =
     checked?.failure && update.kind !== "failed" && update.kind !== "checking"
-      ? `The last check failed at ${time.format(checked.at)}: ${describeCheckFailure(checked.failure)}${nextCheckAt ? ` Trying again at ${time.format(nextCheckAt)}.` : ""}`
+      ? [
+          t("The last check failed at {time}: {reason}", {
+            time: time(checked.at),
+            reason: describeCheckFailure(checked.failure),
+          }),
+          ...(nextCheckAt ? [t("Trying again at {time}.", { time: time(nextCheckAt) })] : []),
+        ].join(" ")
       : null;
   const busy = update.kind === "downloading" || update.kind === "ready";
   const offered = update.kind === "available" || update.kind === "failed" || busy;
@@ -123,22 +143,22 @@ function State({ status }: { status: UpdateStatus }) {
         )}
         {update.kind === "available" && (
           <Button variant="primary" size="sm" onClick={download}>
-            Download
+            {t("Download")}
           </Button>
         )}
         {update.kind === "downloading" && (
           <Button size="sm" onClick={cancel}>
-            Cancel
+            {t("Cancel")}
           </Button>
         )}
         {update.kind === "ready" && (
           <Button variant="primary" size="sm" onClick={restart}>
-            Restart to update
+            {t("Restart to update")}
           </Button>
         )}
         {update.kind === "failed" && update.step !== "check" && (
           <Button variant="primary" size="sm" onClick={download}>
-            Try again
+            {t("Try again")}
           </Button>
         )}
         {/* Checking stays at hand beside an offer: a newer release may be out since. */}
@@ -149,7 +169,7 @@ function State({ status }: { status: UpdateStatus }) {
             disabled={update.kind === "checking"}
             onClick={check}
           >
-            {update.kind === "checking" ? "Checking…" : "Check now"}
+            {update.kind === "checking" ? t("Checking…") : t("Check now")}
           </Button>
         )}
       </Row>
@@ -173,7 +193,9 @@ function Notes({ status }: { status: UpdateStatus }) {
   if (!offer || items.length === 0) return null;
   return (
     <div className="mt-5">
-      <h3 className="text-[0.9375rem] font-medium">What's new in {offer.version}</h3>
+      <h3 className="text-[0.9375rem] font-medium">
+        {t("What's new in {version}", { version: offer.version })}
+      </h3>
       <ul className="mt-2 list-disc space-y-1.5 pl-5 text-[0.9375rem] text-foreground/85">
         {items.map((item) => (
           <li key={item.text}>

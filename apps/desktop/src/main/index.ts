@@ -30,8 +30,10 @@ import { ViewingRecord } from "@mrstreamer/core/viewing/service";
 import * as Effect from "effect/Effect";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Stream from "effect/Stream";
+import { t } from "@mrstreamer/core/i18n";
 import { WINDOW_BAR } from "../shared/window-bar.ts";
 import { emit, registerIpc } from "./ipc.ts";
+import { applyLanguage, languageFor } from "./language.ts";
 import { miniPlayer, miniPlayerAvailable } from "./mini-player.ts";
 import { electronInstaller } from "./platform/installer.ts";
 import { diagnosticsExporter } from "./platform/diagnostics-export.ts";
@@ -332,7 +334,8 @@ function openWindow(
 async function start(): Promise<void> {
   await app.whenReady();
   if (!isMac) {
-    // Windows has no app menu to keep; macOS needs its default menu for Edit shortcuts like paste.
+    // Windows and Linux have no app menu to keep; macOS gets its menu in the interface language,
+    // with the Edit shortcuts fields need, such as paste (see `applyLanguage`).
     Menu.setApplicationMenu(null);
     app.setAppUserModelId(APP_ID);
     // Nothing checks spelling, so Chromium has no reason to download a dictionary from Google.
@@ -437,6 +440,9 @@ async function start(): Promise<void> {
       ? new Response(bytes, { headers: { "Content-Type": kept.type, "Cache-Control": "no-store" } })
       : new Response(null, { status: 404 });
   });
+  // The interface language, before the window asks for it.
+  let language = languageFor(await runtime.runPromise(settings.interfaceLanguage));
+  applyLanguage(language);
 
   const exporter = diagnosticsExporter(dataDir, async () => {
     const [saved, status] = await Promise.all([
@@ -621,7 +627,7 @@ async function start(): Promise<void> {
           // service looks again when the open takes its turn, for one that began meanwhile.
           if (preview && (yield* output.remote)) {
             return yield* new Failed({
-              error: { kind: "unexpected", detail: "A receiver has playback." },
+              error: { kind: "unexpected", detail: t("A receiver has playback.") },
             });
           }
           const turn = yield* playback.begin;
@@ -758,6 +764,14 @@ async function start(): Promise<void> {
         Effect.as(output.command(generation, command), null),
       "output.volume": (volume) => Effect.as(output.setVolume(volume), null),
       "output.playingTitle": () => output.playingTitle,
+      "language.get": () => Effect.succeed(language),
+      "language.set": ({ choice }) =>
+        Effect.gen(function* () {
+          yield* settings.setInterfaceLanguage(choice);
+          language = languageFor(choice);
+          applyLanguage(language);
+          return language;
+        }),
       "preferences.get": () => settings.get,
       "preferences.update": (patch) =>
         Effect.gen(function* () {
@@ -814,7 +828,7 @@ async function start(): Promise<void> {
                   new Failed({
                     error: {
                       kind: "unexpected",
-                      detail: "The Microsoft Store could not be opened.",
+                      detail: t("The Microsoft Store could not be opened."),
                     },
                   }),
               }),
@@ -825,7 +839,9 @@ async function start(): Promise<void> {
         Effect.tryPromise({
           try: () => exporter.preview(),
           catch: () =>
-            new Failed({ error: { kind: "unexpected", detail: "Diagnostics could not be read." } }),
+            new Failed({
+              error: { kind: "unexpected", detail: t("Diagnostics could not be read.") },
+            }),
         }),
       "diagnostics.save": ({ id }) =>
         Effect.tryPromise({
@@ -833,10 +849,12 @@ async function start(): Promise<void> {
             const text = exporter.textOf(id);
             if (text === null) throw new Error("The preview has expired.");
             if (!mainWindow) return false;
+            // In the interface language: what the system draws around it follows the system's.
             const selected = await dialog.showSaveDialog(mainWindow, {
-              title: "Save diagnostics",
+              title: t("Save diagnostics"),
+              buttonLabel: t("Save"),
               defaultPath: `diagnostics-${app.getVersion()}-${new Date().toISOString().slice(0, 10)}.txt`,
-              filters: [{ name: "Text", extensions: ["txt"] }],
+              filters: [{ name: t("Text"), extensions: ["txt"] }],
               properties: ["showOverwriteConfirmation"],
             });
             if (selected.canceled || !selected.filePath) return false;
@@ -847,7 +865,7 @@ async function start(): Promise<void> {
             new Failed({
               error: {
                 kind: "unexpected",
-                detail: "Diagnostics could not be saved. Try again.",
+                detail: t("Diagnostics could not be saved. Try again."),
               },
             }),
         }),

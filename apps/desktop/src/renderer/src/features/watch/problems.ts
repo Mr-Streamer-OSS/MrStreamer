@@ -7,6 +7,7 @@
 import type { AppError } from "@mrstreamer/contracts/errors";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { LivePlaying, StreamFailure } from "@mrstreamer/contracts/playback";
+import { t } from "@mrstreamer/core/i18n";
 import { describeError } from "../../lib/errors.ts";
 import { clockTime } from "../../lib/format.ts";
 import { qualityChoices } from "../../lib/quality.ts";
@@ -86,82 +87,145 @@ export function failureCopy(
 ): { readonly title: string; readonly body: string } {
   const { chosen, source, tried } = context;
   const playlist = source?.playlist ?? false;
-  /** Who didn't deliver, in the middle and at the start of a sentence. */
-  const provider = source?.several ? source.name : "the provider";
-  const Provider = source?.several ? source.name : "The provider";
+  /** Whose stream it was: a subscription's name once several are saved, else the provider. */
+  const named = source?.several ? source.name : null;
   const name = channel.title;
-  const stays = chosen ? ` Your choice stays ${chosen}.` : "";
-  const its = chosen ? `${name}'s ${chosen} stream` : `${name}'s stream`;
+  const stays = chosen ? ` ${t("Your choice stays {quality}.", { quality: chosen })}` : "";
+  const its = chosen
+    ? t("{name}'s {quality} stream", { name, quality: chosen })
+    : t("{name}'s stream", { name });
   switch (problem.kind) {
     case "unavailable":
       if (chosen) {
         return {
-          title: `No ${chosen} stream`,
-          body: `${Provider} sent no ${chosen} stream for ${name}.${stays}`,
+          title: t("No {quality} stream", { quality: chosen }),
+          body:
+            (named
+              ? t("{source} sent no {quality} stream for {name}.", {
+                  source: named,
+                  quality: chosen,
+                  name,
+                })
+              : t("The provider sent no {quality} stream for {name}.", { quality: chosen, name })) +
+            stays,
+        };
+      }
+      if (tried && tried.names.length > 1 && tried.untried === 0) {
+        return {
+          title: t("No stream right now"),
+          body: named
+            ? t("{source} lists {name} but sent no stream for any of its qualities.", {
+                source: named,
+                name,
+              })
+            : t("The provider lists {name} but sent no stream for any of its qualities.", { name }),
         };
       }
       return {
-        title: "No stream right now",
-        body:
-          tried && tried.names.length > 1 && tried.untried === 0
-            ? `${Provider} lists ${name} but sent no stream for any of its qualities.`
-            : `${Provider} lists ${name} but sent no stream for it.`,
+        title: t("No stream right now"),
+        body: named
+          ? t("{source} lists {name} but sent no stream for it.", { source: named, name })
+          : t("The provider lists {name} but sent no stream for it.", { name }),
       };
     case "refused":
       if (problem.status === 429) {
         return {
-          title: "Provider is limiting requests",
-          body: `${Provider} answered that it gets too many requests. Wait a moment before trying again.`,
+          title: t("Provider is limiting requests"),
+          body: named
+            ? t(
+                "{source} answered that it gets too many requests. Wait a moment before trying again.",
+                { source: named },
+              )
+            : t(
+                "The provider answered that it gets too many requests. Wait a moment before trying again.",
+              ),
         };
       }
       return {
-        title: `Refused by ${provider}`,
-        body: `${name}'s stream was turned down.${refusalCheck(problem.status, playlist)}`,
+        title: named ? t("Refused by {source}", { source: named }) : t("Refused by the provider"),
+        body:
+          t("{name}'s stream was turned down.", { name }) + refusalCheck(problem.status, playlist),
       };
     case "provider-error":
       return {
-        title: "Provider error",
-        body: `${Provider} answered with an error instead of the stream.${stays}`,
+        title: t("Provider error"),
+        body:
+          (named
+            ? t("{source} answered with an error instead of the stream.", { source: named })
+            : t("The provider answered with an error instead of the stream.")) + stays,
       };
     case "unsupported":
       return {
-        title: chosen ? `Can't play ${chosen}` : "Can't play this stream",
-        body: `${its} arrived, but Mr. Streamer couldn't play it on this computer.${stays}`,
+        title: chosen
+          ? t("Can't play {quality}", { quality: chosen })
+          : t("Can't play this stream"),
+        body:
+          t("{stream} arrived, but Mr. Streamer couldn't play it on this computer.", {
+            stream: its,
+          }) + stays,
       };
     case "network":
       if (!recovery.played) {
         return problem.unanswered
           ? {
-              title: `No answer from ${provider}`,
-              body: `${its} never started sending.${stays}`,
+              title: named
+                ? t("No answer from {source}", { source: named })
+                : t("No answer from the provider"),
+              body: t("{stream} never started sending.", { stream: its }) + stays,
             }
-          : { title: "No picture arrived", body: `${its} sent no picture or sound.${stays}` };
+          : {
+              title: t("No picture arrived"),
+              body: t("{stream} sent no picture or sound.", { stream: its }) + stays,
+            };
       }
       if (recovery.relapses > 0) {
         const other = !chosen && channel.variants.length > 1;
+        const seconds = STABLE_PLAYBACK_MS / 1000;
+        const relapses = recovery.relapses;
         return {
-          title: "Keeps dropping",
-          body: `${name} came back ${times(recovery.relapses)} and dropped again within ${STABLE_PLAYBACK_MS / 1000} seconds.${other ? " Another quality may hold better." : stays}`,
+          title: t("Keeps dropping"),
+          body:
+            (relapses === 1
+              ? t("{name} came back once and dropped again within {seconds} seconds.", {
+                  name,
+                  seconds,
+                })
+              : relapses === 2
+                ? t("{name} came back twice and dropped again within {seconds} seconds.", {
+                    name,
+                    seconds,
+                  })
+                : t("{name} came back {count} times and dropped again within {seconds} seconds.", {
+                    name,
+                    count: relapses,
+                    seconds,
+                  })) + (other ? ` ${t("Another quality may hold better.")}` : stays),
         };
       }
       return {
-        title: "Lost the stream",
+        title: t("Lost the stream"),
         body:
-          recovery.reconnects > 0
-            ? `${name} stopped arriving and reconnecting didn't bring it back.${stays}`
-            : `${name} stopped arriving.${stays}`,
+          (recovery.reconnects > 0
+            ? t("{name} stopped arriving and reconnecting didn't bring it back.", { name })
+            : t("{name} stopped arriving.", { name })) + stays,
       };
     case "app":
       if (problem.error.kind === "needs-secret") {
-        const secret = playlist ? "link" : "password";
+        const subscription = source?.name;
         return {
-          title: `${source?.name ?? "This subscription"} needs its ${secret} again`,
-          body: `Its channels play once you enter it. The lists show what it loaded before.`,
+          title: subscription
+            ? playlist
+              ? t("{name} needs its link again", { name: subscription })
+              : t("{name} needs its password again", { name: subscription })
+            : playlist
+              ? t("This subscription needs its link again")
+              : t("This subscription needs its password again"),
+          body: t("Its channels play once you enter it. The lists show what it loaded before."),
         };
       }
       return problem.error.kind === "invalid-login"
-        ? { title: "Login not accepted", body: describeError(problem.error) }
-        : { title: "Can't open this channel", body: describeOpening(problem.error) };
+        ? { title: t("Login not accepted"), body: describeError(problem.error) }
+        : { title: t("Can't open this channel"), body: describeOpening(problem.error) };
     case "receiver":
       return receiverProblem(problem.failure, problem.lost, outputs.failedOn(), null);
   }
@@ -173,9 +237,11 @@ export function failureCopy(
  */
 function refusalCheck(status: number, playlist: boolean): string {
   if (status !== 401 && status !== 403) return "";
-  return playlist
-    ? " Some playlist channels only play in certain countries."
-    : " If another device is watching on this subscription, stop it there first.";
+  return ` ${
+    playlist
+      ? t("Some playlist channels only play in certain countries.")
+      : t("If another device is watching on this subscription, stop it there first.")
+  }`;
 }
 
 const QUOTES_NOTHING = new Set<AppError["kind"]>([
@@ -191,18 +257,8 @@ const QUOTES_NOTHING = new Set<AppError["kind"]>([
 function describeOpening(error: AppError): string {
   if (QUOTES_NOTHING.has(error.kind)) return describeError(error);
   return error.kind === "unreachable"
-    ? "The provider can't be reached."
-    : "Mr. Streamer couldn't open it.";
-}
-
-/** "once", "twice", "3 times". */
-function times(count: number): string {
-  return count === 1 ? "once" : count === 2 ? "twice" : `${count} times`;
-}
-
-/** "1 reconnect", "4 reconnects". */
-function counted(count: number, what: string): string {
-  return `${count} ${what}${count === 1 ? "" : "s"}`;
+    ? t("The provider can't be reached.")
+    : t("Mr. Streamer couldn't open it.");
 }
 
 /**
@@ -219,11 +275,11 @@ export function failureEvidence(
   return [
     "status" in problem ? `HTTP ${problem.status}` : null,
     chosen
-      ? `${chosen} only, as chosen`
+      ? t("{quality} only, as chosen", { quality: chosen })
       : channel.variants.length > 1 && tried
         ? tried.names.join(", ")
         : null,
-    recovery.reconnects > 0 ? counted(recovery.reconnects, "reconnect") : null,
+    recovery.reconnects > 0 ? t("{count} reconnects", { count: recovery.reconnects }) : null,
     clockTime(at, at),
   ]
     .filter(Boolean)
@@ -249,12 +305,15 @@ export function reconnectingCopy(channel: LiveChannel): {
   readonly title: string;
   readonly body: string;
 } {
-  return { title: "Reconnecting", body: `${channel.title}'s stream isn't arriving.` };
+  return {
+    title: t("Reconnecting"),
+    body: t("{name}'s stream isn't arriving.", { name: channel.title }),
+  };
 }
 
 /** "Reconnecting · 2 of 4", as the mini player says it. */
 export function reconnectingLine({ attempt, of }: ReconnectingPhase): string {
-  return `Reconnecting · ${attempt} of ${of}`;
+  return `${t("Reconnecting")} · ${t("{attempt} of {of}", { attempt, of })}`;
 }
 
 /**
@@ -264,15 +323,15 @@ export function reconnectingLine({ attempt, of }: ReconnectingPhase): string {
 export function streamNote(result: StreamFailure | PlaybackProblem): string | null {
   switch (result.kind) {
     case "unavailable":
-      return `No stream · ${result.status}`;
+      return `${t("No stream")} · ${result.status}`;
     case "refused":
-      return `Refused · ${result.status}`;
+      return `${t("Refused")} · ${result.status}`;
     case "provider-error":
-      return `Error · ${result.status}`;
+      return `${t("Error")} · ${result.status}`;
     case "network":
-      return "unanswered" in result && !result.unanswered ? "No picture" : "No data";
+      return "unanswered" in result && !result.unanswered ? t("No picture") : t("No data");
     case "unsupported":
-      return "Can't play";
+      return t("Can't play");
     case "app":
     case "receiver":
       return null;

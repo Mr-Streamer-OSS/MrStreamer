@@ -19,6 +19,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject }
 import { automaticSearchCopy } from "@mrstreamer/core/catalogue/search";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
+import { t } from "@mrstreamer/core/i18n";
 import { hasModifier, isMac, isTyping } from "../../app/platform.ts";
 import { openView, openWatch, useUi } from "../../app/ui-store.ts";
 import { CatalogueNotice, catalogueState } from "../../components/CatalogueNotice.tsx";
@@ -29,6 +30,7 @@ import { WindowBar } from "../../components/WindowBar.tsx";
 import { useNow } from "../../lib/clock.ts";
 import { describeError } from "../../lib/errors.ts";
 import { clockTime, progressOf, timeLeft } from "../../lib/format.ts";
+import { Message } from "../../lib/message.tsx";
 import { call } from "../../lib/ipc.ts";
 import { showSelection, useKeyboardMode } from "../../lib/input-mode.ts";
 import {
@@ -450,17 +452,19 @@ export function GuidePage({ active }: { active: boolean }) {
                     )}
                   >
                     {draft.status === "failed"
-                      ? "Couldn't save the order."
+                      ? t("Couldn't save the order.")
                       : changed
-                        ? "Your favourites changed."
-                        : `${isMac ? "Option" : "Alt"} with Up or Down moves the selected row`}
+                        ? t("Your favourites changed.")
+                        : isMac
+                          ? t("Option with Up or Down moves the selected row")
+                          : t("Alt with Up or Down moves the selected row")}
                   </span>
                   <div className="ml-auto flex flex-none items-center gap-2">
                     <Button onClick={order.cancel} disabled={waiting}>
-                      Cancel
+                      {t("Cancel")}
                     </Button>
                     <Button variant="primary" onClick={order.confirm} disabled={waiting}>
-                      {draft.status === "failed" ? "Retry" : changed ? "Reload" : "Save"}
+                      {draft.status === "failed" ? t("Retry") : changed ? t("Reload") : t("Save")}
                     </Button>
                   </div>
                   <span role="status" className="sr-only">
@@ -471,14 +475,10 @@ export function GuidePage({ active }: { active: boolean }) {
                 <>
                   {searching && listed && (
                     <span role="status" className="flex-none text-sm text-white tabular-nums">
-                      {search.groups?.length.toLocaleString()}{" "}
-                      {search.groups?.length === 1 ? "channel" : "channels"} ·{" "}
-                      {search.groups
-                        ?.reduce((sum, group) => sum + group.streams, 0)
-                        .toLocaleString()}{" "}
-                      {search.groups?.reduce((sum, group) => sum + group.streams, 0) === 1
-                        ? "stream"
-                        : "streams"}
+                      {t("{count} channels", { count: search.groups?.length ?? 0 })} ·{" "}
+                      {t("{count} streams", {
+                        count: search.groups?.reduce((sum, group) => sum + group.streams, 0) ?? 0,
+                      })}
                     </span>
                   )}
                   <div className="ml-auto flex flex-none items-center gap-2">
@@ -487,10 +487,10 @@ export function GuidePage({ active }: { active: boolean }) {
                         ref={reorderButton}
                         variant="ghost"
                         size="sm"
-                        title="Reorder (R)"
+                        title={t("Reorder (R)")}
                         onClick={reorder}
                       >
-                        Reorder
+                        {t("Reorder")}
                       </Button>
                     )}
                     {channels.length > 0 && (
@@ -513,10 +513,10 @@ export function GuidePage({ active }: { active: boolean }) {
             <SourceNotices />
             {refused && (
               <p className="px-9 pb-2.5 text-sm text-muted-foreground">
-                Clear the search to reorder.
+                {t("Clear the search to reorder.")}
                 {/* The field's own button clears a search too, and leaves it at that. */}
                 <button
-                  aria-label="Clear search and reorder"
+                  aria-label={t("Clear search and reorder")}
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => {
                     setText("");
@@ -524,13 +524,13 @@ export function GuidePage({ active }: { active: boolean }) {
                   }}
                   className="ml-3 text-white underline underline-offset-4"
                 >
-                  Clear search
+                  {t("Clear search")}
                 </button>
               </p>
             )}
             {listed && listed.length === 0 ? (
               <p className="px-9 text-sm text-muted-foreground">
-                {list.kind === "favourites" ? "No favourites yet." : "No channels."}
+                {list.kind === "favourites" ? t("No favourites yet.") : t("No channels.")}
               </p>
             ) : listed && searching && rows.length === 0 ? (
               <NothingFound
@@ -619,17 +619,20 @@ function SourceNotices() {
         <p key={subscriptionId} className="flex items-baseline gap-4 px-9 pb-2.5 text-sm">
           <span className="min-w-0 text-foreground/85">
             {failure.kind === "unreachable" && failedAt !== null
-              ? `${name} hasn't answered since ${clockTime(failedAt, now)}.`
+              ? t("{host} hasn't answered since {time}.", {
+                  host: name,
+                  time: clockTime(failedAt, now),
+                })
               : `${name}: ${describeError(failure)}`}
-            {fetchedAt !== null && " Its channels show as they were then."}
+            {fetchedAt !== null && ` ${t("Its channels show as they were then.")}`}
           </span>
           <button
-            aria-label={`Retry ${name}`}
+            aria-label={t("Retry {name}", { name })}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => void call("library.refresh", { subscriptionId }).catch(() => {})}
             className="flex-none text-white underline underline-offset-4"
           >
-            Retry
+            {t("Retry")}
           </button>
         </p>
       ))}
@@ -671,14 +674,14 @@ function SearchField({
           onLeave();
           event.preventDefault();
         }}
-        placeholder={`Search ${list}`}
-        aria-label={`Search ${list}`}
+        placeholder={t("Search {list}", { list })}
+        aria-label={t("Search {list}", { list })}
         spellCheck={false}
         className="min-w-0 flex-1 truncate bg-transparent text-[0.875rem] text-foreground outline-none placeholder:text-muted-foreground"
       />
       {value ? (
         <button
-          aria-label="Clear search"
+          aria-label={t("Clear search")}
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => onChange("")}
           className="-mr-1 grid size-6 flex-none place-items-center rounded-full text-muted-foreground hover:bg-white/10 hover:text-white"
@@ -709,7 +712,10 @@ function NothingFound({
   return (
     <div className="px-9 text-sm text-muted-foreground">
       <p>
-        Nothing in {list} for <b className="font-semibold text-white">{query}</b>.
+        <Message
+          text="Nothing in {list} for {query}."
+          values={{ list, query: <b className="font-semibold text-white">{query}</b> }}
+        />
       </p>
       <p className="mt-3 flex gap-5">
         {onSearchAll && (
@@ -718,7 +724,7 @@ function NothingFound({
             onClick={onSearchAll}
             className={link}
           >
-            Search all channels
+            {t("Search all channels")}
           </button>
         )}
         <button
@@ -726,7 +732,7 @@ function NothingFound({
           onClick={() => useUi.setState({ searchOpen: true })}
           className={link}
         >
-          Search everything {isMac ? "⌘K" : "Ctrl K"}
+          {t("Search everything")} {isMac ? "⌘K" : "Ctrl K"}
         </button>
       </p>
     </div>
@@ -771,7 +777,7 @@ function NowStrip({ active }: { active: boolean }) {
         <div className="mt-4 flex items-center gap-2">
           <Button variant="primary" onClick={() => watchChannel(channel)}>
             <Play className="fill-current" />
-            Watch
+            {t("Watch")}
           </Button>
           {waits ? (
             <span className="ml-1 text-sm text-muted-foreground">{waits}</span>
@@ -779,7 +785,7 @@ function NowStrip({ active }: { active: boolean }) {
             <Button
               variant="secondary"
               size="icon"
-              aria-label={audible ? "Mute" : "Unmute"}
+              aria-label={audible ? t("Mute") : t("Unmute")}
               onClick={() => player.toggleMute()}
             >
               {audible ? <Volume2 /> : <VolumeX />}

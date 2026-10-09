@@ -8,6 +8,7 @@
 // Space on the cross press it, as on any button: the views' keys leave both to it
 // (`pressesClose`), so closing never also opens the channel list or plays the title again.
 import { X } from "lucide-react";
+import { t } from "@mrstreamer/core/i18n";
 import { useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
 import { Button } from "../../components/ui/button.tsx";
@@ -45,7 +46,7 @@ export function CloseMessage({ failure, className }: { failure: object; classNam
     <Button
       variant="media"
       size="icon-sm"
-      aria-label="Close message"
+      aria-label={t("Close message")}
       data-close-message
       className={cn("pointer-events-auto absolute top-0 right-0", className)}
       onClick={(event) => {

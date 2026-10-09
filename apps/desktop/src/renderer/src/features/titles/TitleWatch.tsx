@@ -30,6 +30,7 @@ import type { SeriesDetails } from "@mrstreamer/contracts/ondemand";
 import { ownedId, sameOwned } from "@mrstreamer/contracts/subscription";
 import { nextEpisode } from "@mrstreamer/core/ondemand/details";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
+import { formatDecimal, t } from "@mrstreamer/core/i18n";
 import { miniPlayer, useMiniPlayer } from "../../app/mini-player.ts";
 import { hasModifier, isTyping } from "../../app/platform.ts";
 import { openDetails, useUi } from "../../app/ui-store.ts";
@@ -136,9 +137,9 @@ export function TitleWatch() {
   useEffect(() => {
     flashNote(
       subtitleNote === "loading"
-        ? "Subtitles loading"
+        ? t("Subtitles loading")
         : subtitleNote === "unavailable"
-          ? "Subtitles unavailable"
+          ? t("Subtitles unavailable")
           : null,
       subtitleNote === "unavailable",
     );
@@ -189,7 +190,7 @@ export function TitleWatch() {
         case "ArrowUp":
         case "ArrowDown":
           if (!player.nudgeVolume(event.key === "ArrowUp" ? 0.05 : -0.05)) {
-            flash("TV remote sets volume");
+            flash(t("TV remote sets volume"));
           }
           break;
         case "f":
@@ -198,7 +199,7 @@ export function TitleWatch() {
           break;
         case "p":
         case "P":
-          if (titlePlayer.onReceiver()) flash(MINI_NEEDS_PICTURE);
+          if (titlePlayer.onReceiver()) flash(t(MINI_NEEDS_PICTURE));
           else void miniPlayer.toggle();
           break;
         case "o":
@@ -208,7 +209,7 @@ export function TitleWatch() {
           void openChooser(() => setMenu("output"), view.signal);
           break;
         case "m":
-          if (!player.toggleMute()) flash("TV remote sets volume");
+          if (!player.toggleMute()) flash(t("TV remote sets volume"));
           break;
         case "c":
           titlePlayer.toggleSubtitles();
@@ -220,7 +221,7 @@ export function TitleWatch() {
         case "G":
         case "h":
         case "H":
-          if (titlePlayer.onReceiver()) flash("Subtitle timing plays here only");
+          if (titlePlayer.onReceiver()) flash(t("Subtitle timing plays here only"));
           else {
             const direction = event.key.toLowerCase() === "g" ? -1 : 1;
             const state = titlePlayer.state();
@@ -235,14 +236,18 @@ export function TitleWatch() {
                 ) / 10;
               void titlePlayer
                 .setDownloadedTiming({ ...timing, offset })
-                .catch(() => flash("Subtitle timing could not be saved"));
-              flash(`Subtitle offset ${offset > 0 ? "+" : ""}${offset.toFixed(1)} s`);
+                .catch(() => flash(t("Subtitle timing could not be saved")));
+              flash(
+                t("Subtitle offset {seconds} s", {
+                  seconds: `${offset > 0 ? "+" : ""}${formatDecimal(offset, 1)}`,
+                }),
+              );
             } else nudgeSubtitles(state.subtitle, direction);
           }
           break;
         case "<":
         case ">":
-          if (titlePlayer.onReceiver()) flash("Speed plays here only");
+          if (titlePlayer.onReceiver()) flash(t("Speed plays here only"));
           else stepSpeed(event.key === "<" ? -1 : 1);
           break;
         case "Escape":
@@ -302,7 +307,7 @@ export function TitleWatch() {
           <Button
             variant="media"
             size="icon-sm"
-            aria-label="Back 10 seconds"
+            aria-label={t("Back 10 seconds")}
             onClick={() => titlePlayer.skip(-SKIP_S)}
           >
             <RotateCcw />
@@ -311,7 +316,7 @@ export function TitleWatch() {
           <Button
             variant="media"
             size="icon-sm"
-            aria-label="Forward 10 seconds"
+            aria-label={t("Forward 10 seconds")}
             onClick={() => titlePlayer.skip(SKIP_S)}
           >
             <RotateCw />
@@ -370,22 +375,22 @@ export function TitleWatch() {
           </div>
           <Scrubber />
           <div className="mt-3 flex items-center gap-2">
-            <Tooltip label="Back 10 seconds">
+            <Tooltip label={t("Back 10 seconds")}>
               <Button
                 variant="media"
                 size="icon"
-                aria-label="Back 10 seconds"
+                aria-label={t("Back 10 seconds")}
                 onClick={() => titlePlayer.skip(-SKIP_S)}
               >
                 <RotateCcw />
               </Button>
             </Tooltip>
             <PlayPause />
-            <Tooltip label="Forward 10 seconds">
+            <Tooltip label={t("Forward 10 seconds")}>
               <Button
                 variant="media"
                 size="icon"
-                aria-label="Forward 10 seconds"
+                aria-label={t("Forward 10 seconds")}
                 onClick={() => titlePlayer.skip(SKIP_S)}
               >
                 <RotateCw />
@@ -396,7 +401,7 @@ export function TitleWatch() {
               {next && (
                 <Button variant="media" onClick={() => titlePlayer.playNext()}>
                   <SkipForward />
-                  Next episode
+                  {t("Next episode")}
                 </Button>
               )}
               <VolumeControl />
@@ -407,11 +412,11 @@ export function TitleWatch() {
                 />
               )}
               <MiniPlayerButton />
-              <Tooltip label={fullscreen ? "Exit full screen" : "Full screen"}>
+              <Tooltip label={fullscreen ? t("Exit full screen") : t("Full screen")}>
                 <Button
                   variant="media"
                   size="icon"
-                  aria-label="Full screen"
+                  aria-label={t("Full screen")}
                   onClick={toggleFullscreen}
                 >
                   {fullscreen ? <Minimize /> : <Maximize />}
@@ -431,7 +436,7 @@ export function TitleWatch() {
 function PlayPause({ size = "icon" }: { size?: "icon" | "icon-sm" }) {
   const phase = useTitlePlayer((state) => state.phase);
   const paused = phase.kind !== "playing";
-  const label = phase.kind === "ended" ? "Play again" : paused ? "Play" : "Pause";
+  const label = phase.kind === "ended" ? t("Play again") : paused ? t("Play") : t("Pause");
   return (
     <Tooltip label={label}>
       <Button
@@ -491,7 +496,7 @@ function Scrubber() {
               />
             )}
             <SliderPrimitive.Thumb
-              aria-label="Position"
+              aria-label={t("Position")}
               className="size-3.5 rounded-full bg-white shadow-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </SliderPrimitive.Track>
@@ -516,11 +521,11 @@ function Tracks({ menu, onMenu }: { menu: TitleMenu; onMenu: (menu: TitleMenu) =
     <>
       {shows === null && (
         <>
-          <Tooltip label={downloadedOn || subtitle ? "Subtitles on" : "Subtitles"}>
+          <Tooltip label={downloadedOn || subtitle ? t("Subtitles on") : t("Subtitles")}>
             <Button
               variant="media"
               size="icon"
-              aria-label="Subtitles"
+              aria-label={t("Subtitles")}
               aria-pressed={downloadedOn || subtitle !== null}
               aria-expanded={menu === "subtitles"}
               onClick={() => onMenu(menu === "subtitles" ? null : "subtitles")}
@@ -538,7 +543,7 @@ function Tracks({ menu, onMenu }: { menu: TitleMenu; onMenu: (menu: TitleMenu) =
         subtitles={subtitles}
         subtitle={subtitle}
         shows={shows}
-        hereOnly="Picture subtitles, teletext and captions play on this computer only."
+        hereOnly={t("Picture subtitles, teletext and captions play on this computer only.")}
         subtitleNote={subtitleChoiceNote(subtitleNote)}
         open={menu === "speed" ? null : menu}
         onOpenChange={onMenu}
@@ -581,7 +586,7 @@ function State() {
               problem.failure,
               problem.lost,
               receiver,
-              `${now.name} stopped at ${clock(position)}.`,
+              t("{title} stopped at {position}.", { title: now.name, position: clock(position) }),
             )
           : null;
       return (
@@ -593,7 +598,7 @@ function State() {
           {(failed?.retry ?? true) && (
             <Button variant="primary" onClick={() => titlePlayer.retry()}>
               <RotateCw />
-              Try again
+              {t("Try again")}
             </Button>
           )}
           <PlayHere />
@@ -605,16 +610,19 @@ function State() {
         line={
           <ReceiverLine receiver={receiver}>
             {phase.kind === "playing"
-              ? "Playing"
+              ? t("Playing {where}", { where: on })
               : phase.kind === "paused"
-                ? "Paused"
+                ? t("Paused {where}", { where: on })
                 : skipping
-                  ? "Buffering"
-                  : "Loading"}{" "}
-            {on}
+                  ? t("Buffering {where}", { where: on })
+                  : t("Loading {where}", { where: on })}
           </ReceiverLine>
         }
-        body={skipping && phase.kind === "starting" ? `Seeking to ${clock(position)}` : null}
+        body={
+          skipping && phase.kind === "starting"
+            ? t("Seeking to {position}", { position: clock(position) })
+            : null
+        }
       >
         <PlayHere />
       </Stated>
@@ -631,20 +639,23 @@ function State() {
       body = now.detail;
       break;
     case "reconnecting":
-      title = "Connection lost";
-      body = `Trying again, attempt ${phase.attempt} of ${phase.of}.`;
+      title = t("Connection lost");
+      body = t("Trying again, attempt {attempt} of {of}.", {
+        attempt: phase.attempt,
+        of: phase.of,
+      });
       break;
     case "ended":
-      title = "Finished";
+      title = t("Finished");
       body = now.detail;
       actions = (
         <>
           <Button variant="primary" onClick={() => titlePlayer.seek(0)}>
             <Play className="fill-current" />
-            Play again
+            {t("Play again")}
           </Button>
           <Button variant="secondary" onClick={leave}>
-            Back
+            {t("Back")}
           </Button>
           {receiver && <PlayHere />}
         </>
@@ -653,8 +664,8 @@ function State() {
     case "failed":
       // A copy's file that went from the app's folder.
       if (now.kind === "copy" && phase.problem.kind === "unavailable") {
-        title = "Download missing";
-        body = "Its file is no longer on this computer.";
+        title = t("Download missing");
+        body = t("Its file is no longer on this computer.");
       } else {
         title = problemTitle(phase.problem);
         body = problemBody(phase.problem);
@@ -663,12 +674,12 @@ function State() {
         <>
           <Button variant="primary" onClick={() => titlePlayer.retry()}>
             <RotateCw />
-            Retry
+            {t("Retry")}
           </Button>
           {next && (
             <Button variant="secondary" onClick={() => titlePlayer.playNext()}>
               <SkipForward />
-              Next episode
+              {t("Next episode")}
             </Button>
           )}
         </>
@@ -718,11 +729,13 @@ function Stated({
 function miniStatus(phase: TitlePlayerState["phase"], countdown: number | null): string | null {
   switch (phase.kind) {
     case "reconnecting":
-      return "Connection lost";
+      return t("Connection lost");
     case "failed":
       return problemTitle(phase.problem);
     case "ended":
-      return countdown === null ? "Finished" : `Next episode plays in ${countdown}`;
+      return countdown === null
+        ? t("Finished")
+        : t("Next episode plays in {seconds}", { seconds: countdown });
     default:
       return null;
   }
@@ -731,35 +744,37 @@ function miniStatus(phase: TitlePlayerState["phase"], countdown: number | null):
 function problemTitle(problem: TitleProblem): string {
   switch (problem.kind) {
     case "unavailable":
-      return "Not available";
+      return t("Not available");
     case "refused":
-      return "Refused by the provider";
+      return t("Refused by the provider");
     case "unsupported":
-      return "Can't play this title";
+      return t("Can't play this title");
     case "network":
-      return "Couldn't reconnect";
+      return t("Couldn't reconnect");
     case "provider-error":
-      return "Provider error";
+      return t("Provider error");
     case "app":
-      return "Can't open this title";
+      return t("Can't open this title");
     case "receiver":
       return receiverProblem(problem.failure, problem.lost, outputs.receiver(), null).title;
   }
 }
 
 /** Why it doesn't play, of a "title" or an "episode". */
-function problemBody(problem: TitleProblem, what = "title"): string {
+function problemBody(problem: TitleProblem, what: "title" | "episode" = "title"): string {
   switch (problem.kind) {
     case "unavailable":
-      return `The provider has no file for this ${what} right now.`;
+      return what === "episode"
+        ? t("The provider has no file for this episode right now.")
+        : t("The provider has no file for this title right now.");
     case "refused":
-      return "Another device may be using your connection.";
+      return t("Another device may be using your connection.");
     case "unsupported":
       return problem.detail;
     case "network":
-      return `The connection stopped and trying again didn't help. ${problem.detail}`;
+      return `${t("The connection stopped and trying again didn't help.")} ${problem.detail}`;
     case "provider-error":
-      return `The provider answered with HTTP ${problem.status}.`;
+      return t("The provider answered with HTTP {status}.", { status: String(problem.status) });
     case "app":
       return describeError(problem.error);
     case "receiver":
@@ -788,21 +803,23 @@ function NextUp({ series }: { series: SeriesDetails }) {
       <EndOfEpisode
         artworkUrl={now.artworkUrl}
         line={now.detail}
-        title="Didn't start"
+        title={t("Didn't start")}
         detail={problemBody(phase.problem, "episode")}
         failure={phase}
       >
         <Button variant="primary" size="lg" onClick={() => titlePlayer.retry()}>
           <RotateCw />
-          Try again
+          {t("Try again")}
         </Button>
         <Button variant="secondary" size="lg" onClick={() => toEpisodes(series)}>
-          Episodes
+          {t("Episodes")}
         </Button>
       </EndOfEpisode>
     );
   }
-  const finished = `Finished ${episodeLabel(now.title.season, now.title.episode)}`;
+  const finished = t("Finished {episode}", {
+    episode: episodeLabel(now.title.season, now.title.episode),
+  });
   if (!next) {
     // None left to watch after it: the series' last episode, or the later ones are watched.
     const last = nextEpisode(series, now.title) === null;
@@ -810,14 +827,18 @@ function NextUp({ series }: { series: SeriesDetails }) {
       <EndOfEpisode
         artworkUrl={now.artworkUrl}
         line={finished}
-        title={last ? "That was the last episode" : "The rest is watched"}
-        detail={last ? `${now.name} is finished for now.` : "Every later episode is watched."}
+        title={last ? t("That was the last episode") : t("The rest is watched")}
+        detail={
+          last
+            ? t("{title} is finished for now.", { title: now.name })
+            : t("Every later episode is watched.")
+        }
       >
         <Button variant="secondary" size="lg" onClick={() => toEpisodes(series)}>
-          Episodes
+          {t("Episodes")}
         </Button>
         <Button variant="ghost" size="lg" onClick={leave}>
-          Back
+          {t("Back")}
         </Button>
       </EndOfEpisode>
     );
@@ -827,7 +848,9 @@ function NextUp({ series }: { series: SeriesDetails }) {
     <EndOfEpisode
       artworkUrl={next.stillUrl ?? series.backdropUrl}
       line={
-        next.season === now.title.season ? finished : `${finished} · Season ${next.season} is next`
+        next.season === now.title.season
+          ? finished
+          : `${finished} · ${t("Season {number} is next", { number: String(next.season) })}`
       }
       title={`${episodeLabel(next.season, next.number)} · ${next.title}`}
       detail={
@@ -837,8 +860,9 @@ function NextUp({ series }: { series: SeriesDetails }) {
           <>
             {length && `${length} · `}
             <span className="text-foreground">
-              Plays in {countdown}
-              {receiver && ` ${where(receiver)}`}
+              {receiver
+                ? t("Plays in {seconds} {where}", { seconds: countdown, where: where(receiver) })
+                : t("Plays in {seconds}", { seconds: countdown })}
             </span>
           </>
         )
@@ -846,15 +870,15 @@ function NextUp({ series }: { series: SeriesDetails }) {
     >
       <Button variant="primary" size="lg" onClick={() => titlePlayer.playNext()}>
         <Play className="fill-current" />
-        {countdown === null ? "Next episode" : "Play now"}
+        {countdown === null ? t("Next episode") : t("Play now")}
       </Button>
       {countdown === null ? (
         <Button variant="secondary" size="lg" onClick={() => toEpisodes(series)}>
-          Episodes
+          {t("Episodes")}
         </Button>
       ) : (
         <Button variant="secondary" size="lg" onClick={() => titlePlayer.cancelNext()}>
-          Cancel
+          {t("Cancel")}
         </Button>
       )}
       {receiver && <PlayHere size="lg" />}

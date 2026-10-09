@@ -42,6 +42,7 @@ import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
+import { t } from "@mrstreamer/core/i18n";
 import { readJsonFile, removeFile, writeJsonFile } from "../platform/json-file.ts";
 import { Settings } from "./preferences.ts";
 import {
@@ -545,7 +546,7 @@ function make(options: LibraryOptions) {
 
 const switched = Effect.fail(
   new Failed({
-    error: { kind: "unexpected", detail: "The subscription changed while loading channels." },
+    error: { kind: "unexpected", detail: t("The subscription changed while loading channels.") },
   }),
 );
 

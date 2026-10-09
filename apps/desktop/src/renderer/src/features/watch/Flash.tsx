@@ -5,6 +5,7 @@
 // "Subtitles unavailable", closes with its cross (CloseMessage.tsx).
 import { useEffect, useRef } from "react";
 import { create } from "zustand";
+import { t } from "@mrstreamer/core/i18n";
 import { cn } from "../../lib/utils.ts";
 import { usePlayer } from "../../player/player.ts";
 import { CloseMessage, useClosed } from "./CloseMessage.tsx";
@@ -75,9 +76,11 @@ export function LiveSubtitleHint() {
     seen.current = available;
     if (available === previous) return;
     if (!available) {
-      if (useFlash.getState().text === "Subtitles available · C") useFlash.setState({ text: null });
+      if (useFlash.getState().text === t("Subtitles available · C")) {
+        useFlash.setState({ text: null });
+      }
     } else if (!available.selected && available.played > 10_000) {
-      flash("Subtitles available · C");
+      flash(t("Subtitles available · C"));
     }
   }, [available]);
   return null;

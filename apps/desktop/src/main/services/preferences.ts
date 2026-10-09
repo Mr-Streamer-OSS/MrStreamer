@@ -7,8 +7,10 @@
 // preferences.json in its folder, which holds nothing else. Those are read and changed by naming
 // the subscription, and one that isn't saved has none. Reads and changes take turns at the files,
 // and one that names a subscription checks that it is saved when its turn comes: the subscription
-// may have gone while it waited.
+// may have gone while it waited. The interface language is kept beside them, and changed only
+// through `setInterfaceLanguage`.
 import { join } from "node:path";
+import type { LanguageChoice } from "@mrstreamer/contracts/language";
 import {
   defaultPreferences,
   defaultSubscriptionPreferences,
@@ -31,6 +33,11 @@ import { Subscriptions, type SavedSubscription } from "./subscription.ts";
 const Stored = Preferences.merge(SubscriptionPreferences).merge({
   "favouriteChannelIds?": "string[]",
   "recentChannelIds?": "string[]",
+  /**
+   * The interface language picked in Settings: a `Locale`, or "system". Any string, so a language
+   * a later release adds doesn't make this one drop the file. System default when absent.
+   */
+  "interfaceLanguage?": "string",
 });
 type Stored = typeof Stored.infer;
 
@@ -39,6 +46,9 @@ export class Settings extends Context.Service<
   {
     readonly get: Effect.Effect<Preferences>;
     update(patch: Partial<Preferences>): Effect.Effect<Preferences>;
+    /** The interface language as saved, which may be one this release doesn't know. */
+    readonly interfaceLanguage: Effect.Effect<string | undefined>;
+    setInterfaceLanguage(choice: LanguageChoice): Effect.Effect<void>;
     /**
      * What the viewer left the subscription at. Fails with `no-subscription`, as changing it
      * does, when that subscription isn't saved.
@@ -136,6 +146,9 @@ function make(dataDir: string) {
           change((previous) => ({ ...previous, ...patch })),
           general,
         ),
+      interfaceLanguage: one.withPermits(1)(Effect.map(stored, (file) => file.interfaceLanguage)),
+      setInterfaceLanguage: (choice: LanguageChoice) =>
+        Effect.asVoid(change((previous) => ({ ...previous, interfaceLanguage: choice }))),
       ofSubscription: (subscriptionId: string) =>
         whileSaved(subscriptionId, (subscription) =>
           subscription.original ? Effect.map(stored, ofOriginal) : ofAdded(subscription),
@@ -157,7 +170,12 @@ function make(dataDir: string) {
       forget: (subscription: SavedSubscription) =>
         subscription.original
           ? Effect.asVoid(
-              change((previous) => ({ ...general(previous), ...defaultSubscriptionPreferences })),
+              // The interface language is the viewer's, not the subscription's: it stays.
+              change(({ interfaceLanguage, ...previous }) => ({
+                ...general(previous),
+                ...defaultSubscriptionPreferences,
+                ...(interfaceLanguage === undefined ? {} : { interfaceLanguage }),
+              })),
             )
           : // Its folder went with it: only what was read of it is left to forget.
             one.withPermits(1)(Effect.sync(() => void added.delete(subscription.id))),
@@ -178,7 +196,10 @@ function make(dataDir: string) {
   });
 }
 
-/** The file's preferences, without what belongs to its subscription or to the viewing record. */
+/**
+ * The file's preferences, without what belongs to its subscription or to the viewing record, or
+ * the interface language.
+ */
 function general({
   lastChannelId: _channel,
   lastCategoryId: _category,
@@ -186,6 +207,7 @@ function general({
   channelVariants: _variants,
   favouriteChannelIds: _favourites,
   recentChannelIds: _recent,
+  interfaceLanguage: _language,
   ...preferences
 }: Stored): Preferences {
   return preferences;

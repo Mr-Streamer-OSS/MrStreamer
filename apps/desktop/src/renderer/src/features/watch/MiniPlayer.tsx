@@ -5,6 +5,7 @@
 // the window's top right, as its message does in the full window.
 import { Maximize2, PictureInPicture2, X } from "lucide-react";
 import type { ReactNode } from "react";
+import { t } from "@mrstreamer/core/i18n";
 import { miniPlayer, useMiniPlayer } from "../../app/mini-player.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { Tooltip } from "../../components/ui/tooltip.tsx";
@@ -50,18 +51,18 @@ export function MiniControls({
       >
         {children}
         <div className="ml-auto flex items-center gap-1.5">
-          <Tooltip label="Leave mini player">
+          <Tooltip label={t("Leave mini player")}>
             <Button
               variant="media"
               size="icon-sm"
-              aria-label="Leave mini player"
+              aria-label={t("Leave mini player")}
               onClick={() => void miniPlayer.leave()}
             >
               <Maximize2 />
             </Button>
           </Tooltip>
-          <Tooltip label="Close">
-            <Button variant="media" size="icon-sm" aria-label="Close" onClick={onClose}>
+          <Tooltip label={t("Close")}>
+            <Button variant="media" size="icon-sm" aria-label={t("Close")} onClick={onClose}>
               <X />
             </Button>
           </Tooltip>
@@ -72,7 +73,7 @@ export function MiniControls({
 }
 
 /** What the mini player says while a receiver plays: it is a small picture, and there is none. */
-export const MINI_NEEDS_PICTURE = "Mini player needs the picture here";
+export const MINI_NEEDS_PICTURE = "Mini player needs the picture here" as const;
 
 /**
  * Shrinks the window from Live TV's More menu or a title's bar; absent without stay-on-top support.
@@ -90,7 +91,7 @@ export function MiniPlayerButton({
   if (!available) return null;
   const elsewhere = remote && outputs.receiver() !== null;
   const enter = () => {
-    if (elsewhere) flash(MINI_NEEDS_PICTURE);
+    if (elsewhere) flash(t(MINI_NEEDS_PICTURE));
     else {
       onDone?.();
       void miniPlayer.enter();
@@ -100,9 +101,9 @@ export function MiniPlayerButton({
     return (
       <button
         data-item
-        aria-label="Mini player"
+        aria-label={t("Mini player")}
         aria-disabled={elsewhere}
-        aria-description={elsewhere ? MINI_NEEDS_PICTURE : undefined}
+        aria-description={elsewhere ? t(MINI_NEEDS_PICTURE) : undefined}
         className={cn(
           "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left outline-none hover:bg-white/6 focus-visible:bg-white/10",
           elsewhere && "opacity-45",
@@ -110,7 +111,7 @@ export function MiniPlayerButton({
         onMouseDown={(event) => event.preventDefault()}
         onClick={enter}
       >
-        <span className="flex-1">Mini player</span>
+        <span className="flex-1">{t("Mini player")}</span>
         <span aria-hidden className="text-[0.8125rem] text-muted-foreground">
           P
         </span>
@@ -118,11 +119,11 @@ export function MiniPlayerButton({
     );
   }
   return (
-    <Tooltip label={elsewhere ? MINI_NEEDS_PICTURE : "Mini player"}>
+    <Tooltip label={elsewhere ? t(MINI_NEEDS_PICTURE) : t("Mini player")}>
       <Button
         variant="media"
         size="icon"
-        aria-label="Mini player"
+        aria-label={t("Mini player")}
         aria-disabled={elsewhere}
         className={cn(elsewhere && "opacity-45")}
         onClick={enter}

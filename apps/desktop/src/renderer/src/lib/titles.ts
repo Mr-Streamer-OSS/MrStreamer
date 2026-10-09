@@ -20,6 +20,7 @@ import {
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import { continuation } from "@mrstreamer/core/viewing/episodes";
 import { seriesIdentity } from "@mrstreamer/core/viewing/marks";
+import { t } from "@mrstreamer/core/i18n";
 import { openDetails, useUi } from "../app/ui-store.ts";
 import {
   episodeNow,
@@ -27,6 +28,7 @@ import {
   type NowPlaying,
   type ProviderNow,
 } from "../player/title-player.ts";
+import { minutesLeft } from "./format.ts";
 import { call } from "./ipc.ts";
 import { queries, updateSubscriptionPreferences } from "./queries.ts";
 
@@ -35,8 +37,8 @@ export function runtime(seconds: number): string {
   const minutes = Math.max(1, Math.round(seconds / 60));
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
-  if (hours === 0) return `${minutes} min`;
-  return rest ? `${hours} h ${rest} min` : `${hours} h`;
+  if (hours === 0) return t("{minutes} min", { minutes });
+  return rest ? t("{hours} h {minutes} min", { hours, minutes: rest }) : t("{hours} h", { hours });
 }
 
 /** "38 min left", or null when there's nothing to say. */
@@ -44,7 +46,7 @@ export function timeLeftOf(
   progress: Pick<TitleProgress, "position" | "duration" | "finished"> | undefined,
 ): string | null {
   if (!progress || progress.finished) return null;
-  return `${runtime(progress.duration - progress.position)} left`;
+  return minutesLeft(Math.max(1, Math.round((progress.duration - progress.position) / 60)));
 }
 
 /** "1:02:13" or "24:51": a position on a scrubber. */
@@ -313,7 +315,7 @@ export function useContinueWatching(limit = CONTINUE_LIMIT): {
         progress: null,
         line:
           progress.finished || obsolete
-            ? "Next episode"
+            ? t("Next episode")
             : `${episodeLabel(ref.season, ref.episode)} · ${timeLeftOf(progress) ?? ""}`,
         done: progress.finished || obsolete ? null : progress.position / progress.duration,
         artworkUrl,

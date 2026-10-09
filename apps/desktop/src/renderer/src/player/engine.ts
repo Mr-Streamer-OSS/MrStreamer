@@ -3,6 +3,7 @@
 import Hls from "hls.js";
 import mpegts from "mpegts.js";
 import type { StreamFormat } from "@mrstreamer/contracts/playback";
+import { t } from "@mrstreamer/core/i18n";
 import { hlsTracks, type EngineTracks, type SoundChoice } from "./hls-tracks.ts";
 
 /** The picture may run this far behind the newest data before it jumps forward. */
@@ -101,7 +102,7 @@ function mpegtsEngine(video: HTMLVideoElement, url: string): Engine {
   if (!mpegts.getFeatureList().mseLivePlayback) {
     return failedEngine("mpegts.js", video, {
       kind: "unsupported",
-      detail: "This system cannot play MPEG-TS live streams.",
+      detail: t("This system cannot play MPEG-TS live streams."),
     });
   }
   const player = mpegts.createPlayer(
@@ -128,7 +129,7 @@ function mpegtsEngine(video: HTMLVideoElement, url: string): Engine {
     life.fail(mpegtsError(type, detail, info));
   });
   player.on(mpegts.Events.LOADING_COMPLETE, () => {
-    life.fail({ kind: "network", detail: "The provider ended the stream." });
+    life.fail({ kind: "network", detail: t("The provider ended the stream.") });
   });
   let privateData: ((pid: number, data: Uint8Array, at: number) => void) | null = null;
   // mpegts.js times private data in milliseconds on the timeline it gives the element.
@@ -287,12 +288,14 @@ function lifecycle(video: HTMLVideoElement, teardown: () => void) {
       if (bufferedAhead(video) >= UNPLAYABLE_BUFFER_S) {
         fail({
           kind: "unsupported",
-          detail: "The stream arrives but its audio or video cannot be decoded.",
+          detail: t("The stream arrives but its audio or video cannot be decoded."),
         });
       } else if (now - openedAt > START_TIMEOUT_MS) {
         fail({
           kind: "network",
-          detail: `No picture or sound within ${START_TIMEOUT_MS / 1000} s.`,
+          detail: t("No picture or sound within {seconds} s.", {
+            seconds: START_TIMEOUT_MS / 1000,
+          }),
         });
       }
     } else if (video.paused) {
@@ -303,9 +306,9 @@ function lifecycle(video: HTMLVideoElement, teardown: () => void) {
       const stalled = now - lastProgressAt;
       if (stalled >= WAITING_MS) wait(true);
       if (stalled > BROKEN_TIMING_STALL_MS && bufferedAhead(video) >= UNPLAYABLE_BUFFER_S) {
-        fail({ kind: "media", detail: "The stream arrives, but its timing is broken." });
+        fail({ kind: "media", detail: t("The stream arrives, but its timing is broken.") });
       } else if (stalled > STALL_TIMEOUT_MS) {
-        fail({ kind: "network", detail: "The stream stopped delivering data." });
+        fail({ kind: "network", detail: t("The stream stopped delivering data.") });
       }
     }
   }, 1000);
@@ -341,7 +344,7 @@ function lifecycle(video: HTMLVideoElement, teardown: () => void) {
     const unsupported = error?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED;
     fail({
       kind: unsupported ? "unsupported" : "media",
-      detail: error?.message || "The stream could not be decoded.",
+      detail: error?.message || t("The stream could not be decoded."),
     });
   };
   video.addEventListener("error", onError);

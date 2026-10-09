@@ -7,6 +7,8 @@ import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
 import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { normalize, searchWords } from "@mrstreamer/core/text";
 import { searchResultGroups, type LiveSearchGroup } from "@mrstreamer/core/catalogue/search";
+import { t } from "@mrstreamer/core/i18n";
+import { useLocale } from "../../app/language.ts";
 import { useUi, type ChannelList } from "../../app/ui-store.ts";
 import { useNow } from "../../lib/clock.ts";
 import { endOfDay } from "../../lib/format.ts";
@@ -169,13 +171,13 @@ function searchNames(channels: readonly LiveChannel[]): readonly string[] {
 export function listTitle(list: ChannelList, categories: ReadonlyMap<string, Category>): string {
   switch (list.kind) {
     case "favourites":
-      return "Favourites";
+      return t("Favourites");
     case "recent":
-      return "Recently watched";
+      return t("Recently watched");
     case "all":
-      return "All channels";
+      return t("All channels");
     case "category":
-      return categories.get(ownedKey(list.category))?.title ?? "Channels";
+      return categories.get(ownedKey(list.category))?.title ?? t("Channels");
   }
 }
 
@@ -221,26 +223,27 @@ export function useListEntries(open: ReadonlySet<string>): readonly ListEntry[] 
   const categories = useQuery(queries.categories());
   const viewing = useQuery(queries.viewing());
   const status = useQuery(queries.libraryStatus());
+  const locale = useLocale();
   return useMemo(() => {
     const entries: ListEntry[] = [
       {
         kind: "list",
         list: { kind: "favourites" },
-        title: "Favourites",
+        title: t("Favourites"),
         count: viewing.data?.favourites.length ?? 0,
         nested: false,
       },
       {
         kind: "list",
         list: { kind: "recent" },
-        title: "Recently watched",
+        title: t("Recently watched"),
         count: viewing.data?.recent.length ?? 0,
         nested: false,
       },
       {
         kind: "list",
         list: { kind: "all" },
-        title: "All channels",
+        title: t("All channels"),
         // Every subscription's channels, as the list shows them.
         count: (status.data ?? []).reduce((sum, each) => sum + each.channelCount, 0),
         nested: false,
@@ -277,7 +280,7 @@ export function useListEntries(open: ReadonlySet<string>): readonly ListEntry[] 
       if (expanded) entries.push(...members.map((member) => categoryEntry(member, true)));
     }
     return entries;
-  }, [categories.data, viewing.data, status.data, open]);
+  }, [categories.data, viewing.data, status.data, open, locale]);
 }
 
 /** The country a list's category sits under, so the picker can open it. */

@@ -23,6 +23,7 @@ import type { DownloadFailure } from "@mrstreamer/contracts/downloads";
 import type { StreamFailure } from "@mrstreamer/contracts/playback";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
 import type { Provider } from "@mrstreamer/core/provider";
+import { t } from "@mrstreamer/core/i18n";
 import type { PartIdentity } from "../platform/downloads-store.ts";
 import { resourceKey, strongMark } from "../playback/source-identity.ts";
 import { classify } from "../services/playback.ts";
@@ -128,11 +129,11 @@ export async function transfer(asked: TransferRequest): Promise<TransferOutcome>
     }
     if (response.status === 206 && from === 0 && !startsAtZero(response)) {
       await response.body?.cancel().catch(() => {});
-      return failed({ kind: "network", detail: "The provider sent part of the file." });
+      return failed({ kind: "network", detail: t("The provider sent part of the file.") });
     }
     return receive(asked, disk, response, from, restarted);
   }
-  return failed({ kind: "network", detail: "The provider's file kept changing." });
+  return failed({ kind: "network", detail: t("The provider's file kept changing.") });
 }
 
 /** The provider's answer, asked from byte `resume.from` of the file `resume.known` says. */
@@ -166,7 +167,7 @@ async function connect(
     return failed({
       kind: "network",
       detail: timeout.signal.aborted
-        ? "The provider did not answer in time."
+        ? t("The provider did not answer in time.")
         : cause instanceof Error
           ? cause.message
           : String(cause),
@@ -207,7 +208,7 @@ async function receive(
   const identity: PartIdentity | null =
     mark !== null && size !== null ? { resource: resourceOf(response), mark, size } : null;
   const body = response.body;
-  if (!body) return failed({ kind: "network", detail: "The provider sent no file." });
+  if (!body) return failed({ kind: "network", detail: t("The provider sent no file.") });
   // Without room, the partial stays as it is, of the file it was of.
   if (size !== null) {
     const free = await disk.free(dirname(asked.part));
@@ -276,7 +277,7 @@ async function receive(
   } catch (cause) {
     if (signal.aborted) return { kind: "stopped" };
     if (stall.signal.aborted) {
-      return failed({ kind: "network", detail: "The provider stopped sending the file." });
+      return failed({ kind: "network", detail: t("The provider stopped sending the file.") });
     }
     return writeFailure(broken ?? cause) ?? failed({ kind: "network", detail: messageOf(cause) });
   } finally {
@@ -292,7 +293,7 @@ async function receive(
   }
   if (signal.aborted) return { kind: "stopped" };
   if (size !== null && received !== size) {
-    return failed({ kind: "network", detail: "The provider ended the file early." });
+    return failed({ kind: "network", detail: t("The provider ended the file early.") });
   }
   return { kind: "complete", size: received, identity };
 }

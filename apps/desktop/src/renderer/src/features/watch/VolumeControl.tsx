@@ -1,4 +1,5 @@
 import { Volume2, VolumeX } from "lucide-react";
+import { t } from "@mrstreamer/core/i18n";
 import { Button } from "../../components/ui/button.tsx";
 import { Slider } from "../../components/ui/slider.tsx";
 import { Tooltip } from "../../components/ui/tooltip.tsx";
@@ -18,18 +19,20 @@ export function VolumeControl({ compact = false }: { compact?: boolean }) {
   const receiver = output.kind === "receiver" ? output.volume : null;
   if (remote && !receiver) {
     return (
-      <span className="px-1 text-[0.8125rem] text-muted-foreground">TV remote sets volume</span>
+      <span className="px-1 text-[0.8125rem] text-muted-foreground">
+        {t("TV remote sets volume")}
+      </span>
     );
   }
   const volume = receiver?.level ?? local;
   const muted = receiver?.muted ?? localMuted;
   return (
     <div className="flex items-center gap-3">
-      <Tooltip label={muted ? "Unmute" : "Mute"}>
+      <Tooltip label={muted ? t("Unmute") : t("Mute")}>
         <Button
           variant="media"
           size="icon"
-          aria-label={muted ? "Unmute" : "Mute"}
+          aria-label={muted ? t("Unmute") : t("Mute")}
           onClick={() => player.toggleMute()}
         >
           {muted ? <VolumeX /> : <Volume2 />}
@@ -37,7 +40,7 @@ export function VolumeControl({ compact = false }: { compact?: boolean }) {
       </Tooltip>
       <Slider
         className={compact ? "max-[720px]:hidden" : ""}
-        label="Volume"
+        label={t("Volume")}
         value={muted ? 0 : volume}
         onValueChange={(value) => player.setVolume(value)}
       />

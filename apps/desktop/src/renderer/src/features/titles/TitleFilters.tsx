@@ -8,6 +8,7 @@ import {
   type TitleFilters,
 } from "@mrstreamer/contracts/title-filters";
 import { TITLE_LANGUAGES } from "@mrstreamer/core/ondemand/languages";
+import { formatLanguageName, t } from "@mrstreamer/core/i18n";
 import { queries } from "../../lib/queries.ts";
 import { appError, describeError } from "../../lib/errors.ts";
 import { cn } from "../../lib/utils.ts";
@@ -19,17 +20,18 @@ const QUALITIES: Record<QualityHint, string> = {
   sd: "SD",
   unknown: "Unknown",
 };
-const englishLanguages = new Intl.DisplayNames(["en"], { type: "language" });
 
 function hintName(code: string): string {
-  if (code === "unknown") return "Unknown";
+  if (code === "unknown") return t("Unknown");
   if (code === "multi") return "MULTI";
   return TITLE_LANGUAGES.find((language) => language.code === code)?.name ?? code;
 }
 
 function verifiedName(kind: "audio" | "subtitles", language: string): string {
-  const name = language === "unknown" ? "Unknown" : (englishLanguages.of(language) ?? language);
-  return `${name} ${kind === "audio" ? "sound" : "subtitles"}`;
+  const name = language === "unknown" ? t("Unknown") : (formatLanguageName(language) ?? language);
+  return kind === "audio"
+    ? t("{language} sound", { language: name })
+    : t("{language} subtitles", { language: name });
 }
 
 export interface TitleFilterControls {
@@ -95,17 +97,17 @@ export function TitleFilterBar({
       }}
     >
       <Words
-        label="Quality"
-        description="Hints from the provider's names, not verified picture quality."
+        label={t("Quality")}
+        description={t("Hints from the provider's names, not verified picture quality.")}
         choices={QUALITY_HINTS.filter(
           (value) => options?.qualities.includes(value) || filters.quality === value,
-        ).map((value) => ({ value, label: QUALITIES[value] }))}
+        ).map((value) => ({ value, label: value === "unknown" ? t("Unknown") : QUALITIES[value] }))}
         value={filters.quality}
         onChange={(value) => change("quality", value)}
       />
       <Words
-        label="Language"
-        description="Hints from the provider's names, not verified sound or subtitles."
+        label={t("Language")}
+        description={t("Hints from the provider's names, not verified sound or subtitles.")}
         choices={ordered.map((value) => ({ value, label: hintName(value) }))}
         value={filters.language}
         onChange={(value) => change("language", value)}
@@ -114,8 +116,11 @@ export function TitleFilterBar({
       />
       {(!!options?.files || !!filters.verified) && (
         <Words
-          label="Verified"
-          description={`Tracks read from ${options?.files ?? 0} current files on this device. Filtering opens no files.`}
+          label={t("Verified")}
+          description={t(
+            "Tracks read from {count} current files on this device. Filtering opens no files.",
+            { count: options?.files ?? 0 },
+          )}
           choices={verified.map((entry) => ({
             value: `${entry.kind}:${entry.language}`,
             label: verifiedName(entry.kind, entry.language),
@@ -135,9 +140,7 @@ export function TitleFilterBar({
       )}
       <div className="ml-auto flex items-baseline gap-3 tabular-nums" aria-live="polite">
         {total !== null && unfiltered !== null && (
-          <span>
-            {total.toLocaleString()} of {unfiltered.toLocaleString()}
-          </span>
+          <span>{t("{shown} of {total}", { shown: total, total: unfiltered })}</span>
         )}
         {Object.keys(filters).length > 0 && (
           <button
@@ -145,7 +148,7 @@ export function TitleFilterBar({
             onClick={() => onFilters({})}
             className="underline underline-offset-4"
           >
-            Reset
+            {t("Reset")}
           </button>
         )}
       </div>
@@ -156,7 +159,7 @@ export function TitleFilterBar({
             className="text-white underline underline-offset-4"
             onClick={() => void available.refetch()}
           >
-            Try again
+            {t("Try again")}
           </button>
         </p>
       )}
@@ -220,11 +223,9 @@ function Words<V extends string>({
     >
       <span>
         {label}
-        {count !== undefined
-          ? ` · ${count.toLocaleString()} ${count === 1 ? "file" : "files"}`
-          : ""}
+        {count !== undefined ? ` · ${t("{count} files", { count })}` : ""}
       </span>
-      {button({ value: undefined, label: "Any" })}
+      {button({ value: undefined, label: t("Any") })}
       {first.map(button)}
       {more.length > 0 && (
         <details
@@ -244,7 +245,7 @@ function Words<V extends string>({
               extra ? "font-semibold underline" : "text-white/70",
             )}
           >
-            {extra ? `More: ${extra.label}` : "More…"}
+            {extra ? t("More: {choice}", { choice: extra.label }) : t("More…")}
           </summary>
           <div className="absolute top-full left-0 z-20 mt-2 flex min-w-max flex-col items-start gap-3 border border-white/20 bg-black p-3">
             {more.map(button)}
@@ -260,9 +261,9 @@ function Words<V extends string>({
 export function FilterEmpty({ filters }: { filters: TitleFilters }) {
   return (
     <p className="pr-8 text-[0.9375rem] text-white">
-      No titles match these filters.
+      {t("No titles match these filters.")}
       {filters.verified &&
-        " Verified tracks come from files played on this device. Filtering opens no files."}
+        ` ${t("Verified tracks come from files played on this device. Filtering opens no files.")}`}
     </p>
   );
 }

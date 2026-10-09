@@ -11,6 +11,7 @@ import {
   type LiveSearchGroup,
 } from "@mrstreamer/core/catalogue/search";
 import { ownedId, ownedKey } from "@mrstreamer/contracts/subscription";
+import { t } from "@mrstreamer/core/i18n";
 import { openDetails, useUi } from "../../app/ui-store.ts";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Artwork } from "../../components/TitleArt.tsx";
@@ -42,7 +43,7 @@ export function SearchPalette() {
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/70 transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
         <Dialog.Popup className="fixed top-[12vh] left-1/2 z-50 w-[40rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 overflow-hidden rounded-3xl bg-black text-white shadow-2xl ring-1 ring-white/10 outline-none transition-[opacity,scale] duration-150 data-ending-style:scale-[0.98] data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0">
-          <Dialog.Title className="sr-only">Search</Dialog.Title>
+          <Dialog.Title className="sr-only">{t("Search")}</Dialog.Title>
           <Palette />
         </Dialog.Popup>
       </Dialog.Portal>
@@ -190,23 +191,24 @@ function Palette() {
         <input
           autoFocus
           role="combobox"
-          aria-label="Search channels, movies, series and programmes"
+          aria-label={t("Search channels, movies, series and programmes")}
           aria-haspopup="tree"
           aria-expanded={results.length > 0}
           aria-controls={results.length > 0 ? resultsId : undefined}
           aria-activedescendant={results[active] ? `${resultsId}-${active}` : undefined}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search channels, movies, series and programmes"
+          placeholder={t("Search channels, movies, series and programmes")}
           spellCheck={false}
           className="h-16 flex-1 bg-transparent text-lg text-foreground outline-none placeholder:text-muted-foreground/70"
         />
       </div>
       {debounced.trim() && groups.length > 0 && (
         <div role="status" className="px-5 py-2 text-xs">
-          {groups.length} {groups.length === 1 ? "channel" : "channels"} ·{" "}
-          {groups.reduce((sum, group) => sum + group.streams, 0)}{" "}
-          {groups.reduce((sum, group) => sum + group.streams, 0) === 1 ? "stream" : "streams"}
+          {t("{count} channels", { count: groups.length })} ·{" "}
+          {t("{count} streams", {
+            count: groups.reduce((sum, group) => sum + group.streams, 0),
+          })}
         </div>
       )}
       {results.length > 0 && (
@@ -214,7 +216,7 @@ function Palette() {
           ref={list}
           id={resultsId}
           role="tree"
-          aria-label="Search results"
+          aria-label={t("Search results")}
           className="max-h-[28rem] overflow-y-auto overscroll-contain p-2"
         >
           {results.map((result, index) => {
@@ -250,7 +252,7 @@ function Palette() {
                     </span>
                     <span className="block truncate text-xs text-muted-foreground">
                       {[
-                        title.kind === "movie" ? "Movie" : "Series",
+                        title.kind === "movie" ? t("Movie") : t("Series"),
                         title.year,
                         ...title.tags,
                         sourceOf(title),
@@ -268,7 +270,7 @@ function Palette() {
               const shows = source ? `${channel.title} · ${source}` : channel.title;
               const detail =
                 programme.start <= now
-                  ? `On now · ${shows} · ${timeLeft(programme, now)}`
+                  ? `${t("On now")} · ${shows} · ${timeLeft(programme, now)}`
                   : `${clockTime(programme.start, now)} · ${shows}`;
               return (
                 <button
@@ -336,7 +338,7 @@ function Palette() {
       )}
       {debounced.trim() && results.length === 0 && !channels.isPending && (
         <div className="border-t border-border px-5 py-3 text-xs text-muted-foreground">
-          No matches
+          {t("No matches")}
         </div>
       )}
     </div>
@@ -391,10 +393,8 @@ function LiveResultRow({
         aria-label={[
           channel.title,
           category,
-          grouped
-            ? `${subscriptionCount} ${subscriptionCount === 1 ? "subscription" : "subscriptions"}`
-            : null,
-          grouped ? `${group.streams} ${group.streams === 1 ? "stream" : "streams"}` : null,
+          grouped ? t("{count} subscriptions", { count: subscriptionCount }) : null,
+          grouped ? t("{count} streams", { count: group.streams }) : null,
           grouped ? searchQualities(group.copies) : null,
           !grouped ? nameOf(channel.subscriptionId) : null,
           !grouped ? channel.number : null,
@@ -414,8 +414,8 @@ function LiveResultRow({
             {grouped
               ? [
                   category,
-                  `${subscriptionCount} ${subscriptionCount === 1 ? "subscription" : "subscriptions"}`,
-                  `${group.streams} ${group.streams === 1 ? "stream" : "streams"}`,
+                  t("{count} subscriptions", { count: subscriptionCount }),
+                  t("{count} streams", { count: group.streams }),
                   searchQualities(group.copies),
                 ]
                   .filter(Boolean)
@@ -432,14 +432,14 @@ function LiveResultRow({
           {copy && guide?.now ? (
             <span className="block truncate text-xs">
               {guide.now.title}
-              {guide.next ? ` · Next ${guide.next.title}` : ""}
+              {guide.next ? ` · ${t("Next {title}", { title: guide.next.title })}` : ""}
             </span>
           ) : null}
         </span>
       </button>
       {grouped ? (
         <button
-          aria-label={expanded ? "Hide copies" : "Show copies"}
+          aria-label={expanded ? t("Hide copies") : t("Show copies")}
           aria-expanded={expanded}
           onMouseDown={(event) => event.preventDefault()}
           onClick={onToggle}
@@ -450,7 +450,7 @@ function LiveResultRow({
       ) : (
         <button
           aria-label={
-            favourites.has(ownedKey(channel)) ? "Remove from favourites" : "Add to favourites"
+            favourites.has(ownedKey(channel)) ? t("Remove from favourites") : t("Add to favourites")
           }
           onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === " ") event.stopPropagation();

@@ -3,6 +3,7 @@
 import { ChevronRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
+import { formatNumber } from "@mrstreamer/core/i18n";
 import { sameList, type ChannelList } from "../../app/ui-store.ts";
 import { cn } from "../../lib/utils.ts";
 import type { ListEntry } from "./lists.ts";
@@ -70,7 +71,7 @@ export function ListPicker({
               {entry.kind === "group" ? entry.group : entry.title}
             </span>
             <span className="text-xs text-muted-foreground tabular-nums">
-              {entry.count.toLocaleString()}
+              {formatNumber(entry.count)}
             </span>
             {entry.kind === "group" && (
               <ChevronRight

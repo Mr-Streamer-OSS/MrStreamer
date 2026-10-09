@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useMemo, useRef, useState } from "react";
 import type { ThirdPartyNotice } from "@mrstreamer/contracts/licences";
+import { t } from "@mrstreamer/core/i18n";
 import { appError, describeError } from "../../lib/errors.ts";
 import { queries } from "../../lib/queries.ts";
 import { useRem } from "../../lib/use-rem.ts";
@@ -26,9 +27,9 @@ export function Licences() {
   return (
     <main className="flex min-w-0 flex-1 flex-col px-10 pt-6">
       <div className="mb-4 flex items-baseline gap-3">
-        <h2 className="text-xl font-semibold tracking-tight">Open-source licences</h2>
+        <h2 className="text-xl font-semibold tracking-tight">{t("Open-source licences")}</h2>
         <span className="text-sm text-muted-foreground">
-          {list.data ? `${list.data.length} components` : ""}
+          {list.data ? t("{count} components", { count: list.data.length }) : ""}
         </span>
       </div>
       {list.error && (
@@ -39,7 +40,8 @@ export function Licences() {
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search"
+            placeholder={t("Search")}
+            aria-label={t("Search the licences")}
             spellCheck={false}
             className="mb-2 h-9 rounded-lg bg-white/6 px-3 text-[0.875rem] outline-none placeholder:text-muted-foreground/70 focus:bg-white/10"
           />
@@ -82,7 +84,7 @@ function Notice({ notice }: { notice: ThirdPartyNotice }) {
           rel="noreferrer"
           className="underline underline-offset-4 hover:text-white"
         >
-          Source
+          {t("Source")}
         </a>
         {notice.homepage && (
           <a
@@ -91,7 +93,7 @@ function Notice({ notice }: { notice: ThirdPartyNotice }) {
             rel="noreferrer"
             className="underline underline-offset-4 hover:text-white"
           >
-            Website
+            {t("Website")}
           </a>
         )}
       </div>

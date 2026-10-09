@@ -8,6 +8,7 @@ import { useQueries, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { create } from "zustand";
 import type { WatchlistEntry, WatchlistSort } from "@mrstreamer/contracts/watchlist";
+import { formatNumber, type PlainKey, t } from "@mrstreamer/core/i18n";
 import { Sorts } from "../../components/Sorts.tsx";
 import { WindowBar } from "../../components/WindowBar.tsx";
 import { appError, describeError } from "../../lib/errors.ts";
@@ -17,7 +18,7 @@ import { useRemoveSaved } from "../../lib/watchlist.ts";
 import { Grid, PAGE, usePages } from "../titles/CollectionGrid.tsx";
 import { openSaved, SavedTile } from "./SavedTile.tsx";
 
-const SORTS: readonly { value: WatchlistSort; label: string }[] = [
+const SORTS: readonly { value: WatchlistSort; label: PlainKey }[] = [
   { value: "saved", label: "Saved" },
   { value: "title", label: "A to Z" },
 ];
@@ -76,10 +77,10 @@ export function WatchlistPage({ active }: { active: boolean }) {
         className="flex min-h-0 flex-1 flex-col pt-2 pl-10 outline-none"
       >
         <div className="mb-3 flex items-baseline gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight">Watchlist</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{t("Watchlist")}</h1>
           {total ? (
             <span className="text-sm text-muted-foreground tabular-nums">
-              {total.toLocaleString()}
+              {formatNumber(total)}
             </span>
           ) : null}
         </div>
@@ -87,7 +88,7 @@ export function WatchlistPage({ active }: { active: boolean }) {
           <Notice words={describeError(appError(saved.error))} onRetry={saved.retry} />
         ) : total === 0 ? (
           <p className="text-[0.9375rem] text-muted-foreground">
-            Nothing saved yet. Save a movie or series from its details.
+            {t("Nothing saved yet. Save a movie or series from its details.")}
           </p>
         ) : (
           <>
@@ -99,11 +100,11 @@ export function WatchlistPage({ active }: { active: boolean }) {
             {stale.map(({ subscriptionId, words }) => (
               <Notice
                 key={subscriptionId}
-                words={`${words} Showing what was saved.`}
+                words={`${words} ${t("Showing what was saved.")}`}
                 onRetry={() => void call("ondemand.refresh", { subscriptionId }).catch(() => {})}
               />
             ))}
-            {removal.error && <Notice words="Couldn't remove. Try again." />}
+            {removal.error && <Notice words={t("Couldn't remove. Try again.")} />}
             <Grid
               key={sort}
               total={total ?? 0}
@@ -154,7 +155,7 @@ function Notice({ words, onRetry }: { words: string; onRetry?: () => void }) {
           onClick={onRetry}
           className="ml-2 text-white underline-offset-4 hover:underline"
         >
-          Try again
+          {t("Try again")}
         </button>
       )}
     </p>

@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { ChannelVariant, LiveChannel } from "@mrstreamer/contracts/library";
 import { sameOwned } from "@mrstreamer/contracts/subscription";
 import { chosenVariant, streamsToPlay } from "@mrstreamer/core/catalogue/variants";
+import { t } from "@mrstreamer/core/i18n";
 import { queries } from "../../lib/queries.ts";
 import { usePlayer } from "../../player/player.ts";
 import { streamNote } from "./problems.ts";
@@ -51,12 +52,12 @@ export function useChannelQuality(channel: LiveChannel): ChannelQuality {
   };
   if (stream) {
     for (const { variantId, failure } of stream.failed) note(variantId, streamNote(failure));
-    if (stream.variantId && phase?.kind === "playing") note(stream.variantId, "Playing");
+    if (stream.variantId && phase?.kind === "playing") note(stream.variantId, t("Playing"));
     // Only a failure that is a stream's says anything of the streams it didn't get to.
     const failure = phase?.kind === "failed" ? streamNote(phase.problem) : null;
     if (failure) {
       if (stream.variantId) note(stream.variantId, failure);
-      for (const { id } of channel.variants) if (!notes.has(id)) notes.set(id, "Not tried");
+      for (const { id } of channel.variants) if (!notes.has(id)) notes.set(id, t("Not tried"));
     }
   }
   return {

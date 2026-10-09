@@ -13,7 +13,9 @@ directories:
 files:
   - out/**/*
   - package.json
-electronLanguages: [en]
+# The interface languages (packages/contracts/src/language.ts). Chromium's own strings and macOS's
+# choice of the app's language come from these; a system language outside them shows English.
+electronLanguages: [en-US, nl-NL, fr-FR, de-DE, es-ES]
 # Every release carries latest*.yml update files, nightly or not: the app picks the release
 # itself, so the files need no channel in their names.
 detectUpdateChannel: false
@@ -49,6 +51,12 @@ mac:
       to: airplay
   extendInfo:
     NSLocalNetworkUsageDescription: Mr. Streamer plays on TVs and speakers on your network.
+  # The same sentence in the other interface languages, which macOS shows in the system's
+  # language when it asks for the local network.
+  extraFiles:
+    - from: build/locales
+      to: Resources
+      filter: ["*.lproj/InfoPlist.strings"]
 # The window takes its size from the background, which `pnpm dmg:background` renders.
 dmg:
   title: Mr. Streamer
@@ -90,7 +98,8 @@ appx:
   displayName: "Mr. Streamer: IPTV Player"
   applicationId: MrStreamer
   backgroundColor: "#000000"
-  languages: [en-US]
+  # The interface languages, as the Store lists them.
+  languages: [en-US, nl-NL, fr-FR, de-DE, es-ES]
   # Windows 11, as for the installer.
   minVersion: 10.0.22000.0
   maxVersionTested: 10.0.26100.0

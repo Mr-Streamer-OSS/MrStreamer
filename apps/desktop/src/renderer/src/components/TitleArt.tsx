@@ -3,6 +3,7 @@
 import { X } from "lucide-react";
 import { useState } from "react";
 import type { Title } from "@mrstreamer/contracts/ondemand";
+import { t } from "@mrstreamer/core/i18n";
 import { useSourceOf } from "../lib/queries.ts";
 import { cn } from "../lib/utils.ts";
 import { hueOf } from "./ChannelLogo.tsx";
@@ -135,7 +136,7 @@ export function StillTile({
       </button>
       {onRemove && (
         <button
-          aria-label={`Remove ${name} from Continue watching`}
+          aria-label={t("Remove {name} from Continue watching", { name })}
           onMouseDown={(event) => event.preventDefault()}
           onClick={onRemove}
           className="absolute top-2 right-2 grid size-7 place-items-center rounded-full bg-black/70 text-white opacity-0 ring-1 ring-white/20 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"

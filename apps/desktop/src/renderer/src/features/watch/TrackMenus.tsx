@@ -7,6 +7,7 @@ import { Popover } from "@base-ui/react/popover";
 import { AudioLines, Captions } from "lucide-react";
 import { useRef, type KeyboardEvent, type ReactNode } from "react";
 import type { AudioTrack, SubtitleFormat, SubtitleTrack } from "@mrstreamer/contracts/playback";
+import { t } from "@mrstreamer/core/i18n";
 import { Button } from "../../components/ui/button.tsx";
 import { Tooltip } from "../../components/ui/tooltip.tsx";
 import { cn } from "../../lib/utils.ts";
@@ -56,7 +57,7 @@ export function TrackMenus({
     <>
       {showSound && audio.length > 1 && (
         <Menu
-          label="Sound"
+          label={t("Sound")}
           open={open === "sound"}
           onOpenChange={(next) => onOpenChange(next ? "sound" : null)}
           trigger={<AudioLines />}
@@ -71,7 +72,7 @@ export function TrackMenus({
       )}
       {showSubtitles && subtitles.length > 0 && (
         <Menu
-          label={subtitle ? "Subtitles on" : "Subtitles"}
+          label={subtitle ? t("Subtitles on") : t("Subtitles")}
           on={subtitle !== null}
           open={open === "subtitles"}
           onOpenChange={(next) => onOpenChange(next ? "subtitles" : null)}
@@ -84,7 +85,7 @@ export function TrackMenus({
               onOpenChange(null);
             }}
           >
-            Off
+            {t("Off")}
           </Choice>
           {subtitles.map((track) => {
             const chosen = track.id === subtitle?.id && track.page === subtitle.page;
@@ -94,7 +95,7 @@ export function TrackMenus({
                 key={`${track.id}:${track.page}`}
                 chosen={chosen}
                 disabled={elsewhere}
-                note={elsewhere ? "Here only" : chosen ? subtitleNote : null}
+                note={elsewhere ? t("Here only") : chosen ? subtitleNote : null}
                 onChoose={() => {
                   onSubtitle(track);
                   onOpenChange(null);
@@ -114,12 +115,12 @@ export function TrackMenus({
             <>
               <div role="separator" className="my-1 border-t border-white/12" />
               <Choice chosen={false} disabled onChoose={() => {}}>
-                Subtitle timing
+                {t("Subtitle timing")}
               </Choice>
               <Choice chosen={false} disabled onChoose={() => {}}>
-                Subtitle look
+                {t("Subtitle look")}
               </Choice>
-              <MenuNote>The subtitle settings apply on this computer only.</MenuNote>
+              <MenuNote>{t("The subtitle settings apply on this computer only.")}</MenuNote>
             </>
           )}
         </Menu>

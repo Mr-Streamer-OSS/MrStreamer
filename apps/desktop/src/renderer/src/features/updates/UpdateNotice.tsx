@@ -3,6 +3,7 @@
 // Restart once it's ready. "Not now" hides the notice for that version; Settings still offers it.
 import { Popover } from "@base-ui/react/popover";
 import type { UpdateStatus } from "@mrstreamer/contracts/updates";
+import { formatPercent, t } from "@mrstreamer/core/i18n";
 import { useUi } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { noteItems } from "./notes.ts";
@@ -34,12 +35,12 @@ export function UpdateNotice() {
   const { update } = status;
   const label =
     update.kind === "downloading"
-      ? `Updating · ${update.percent} %`
+      ? `${t("Updating")} · ${formatPercent(update.percent / 100)}`
       : update.kind === "ready"
-        ? "Restart to update"
+        ? t("Restart to update")
         : update.kind === "failed"
-          ? "Update stopped"
-          : "Update";
+          ? t("Update stopped")
+          : t("Update");
   return (
     <Popover.Root
       open={open}
@@ -80,7 +81,7 @@ function UpdatePanel({ status }: { status: UpdateStatus }) {
     <>
       <div className="text-lg font-semibold tracking-tight">Mr. Streamer {version}</div>
       <div className="mt-0.5 text-[0.8125rem] text-muted-foreground">
-        {channel === "nightly" ? "Nightly" : "Stable"}
+        {channel === "nightly" ? t("Nightly") : t("Stable")}
       </div>
       {notes.length > 0 && (
         <ul className="mt-3 list-disc space-y-1 pl-5 text-[0.875rem] text-foreground/85">
@@ -95,7 +96,7 @@ function UpdatePanel({ status }: { status: UpdateStatus }) {
             <div className="h-full bg-white" style={{ width: `${update.percent}%` }} />
           </div>
           <div className="mt-1.5 text-[0.8125rem] text-muted-foreground">
-            Downloading · {update.percent} %
+            {t("Downloading")} · {formatPercent(update.percent / 100)}
           </div>
         </div>
       )}
@@ -106,31 +107,31 @@ function UpdatePanel({ status }: { status: UpdateStatus }) {
         {update.kind === "available" && (
           <>
             <Button variant="primary" size="sm" onClick={download}>
-              Download
+              {t("Download")}
             </Button>
             <Button variant="ghost" size="sm" onClick={later}>
-              Not now
+              {t("Not now")}
             </Button>
           </>
         )}
         {update.kind === "downloading" && (
           <Button variant="secondary" size="sm" onClick={cancel}>
-            Cancel
+            {t("Cancel")}
           </Button>
         )}
         {update.kind === "ready" && (
           <>
             <Button variant="primary" size="sm" onClick={restart}>
-              Restart
+              {t("Restart")}
             </Button>
             <Button variant="ghost" size="sm" onClick={close}>
-              Later
+              {t("Later")}
             </Button>
           </>
         )}
         {update.kind === "failed" && update.step !== "check" && (
           <Button variant="primary" size="sm" onClick={download}>
-            Try again
+            {t("Try again")}
           </Button>
         )}
         <button
@@ -138,12 +139,12 @@ function UpdatePanel({ status }: { status: UpdateStatus }) {
           onClick={() => useUi.setState({ settings: "general", updateDialog: null })}
           className="ml-auto text-[0.8125rem] text-muted-foreground hover:text-white"
         >
-          Release notes ›
+          {t("Release notes")} ›
         </button>
       </div>
       {update.kind === "ready" && (
         <p className="mt-3 text-[0.8125rem] text-muted-foreground">
-          Playback stops for a moment while Mr. Streamer restarts.
+          {t("Playback stops for a moment while Mr. Streamer restarts.")}
         </p>
       )}
     </>

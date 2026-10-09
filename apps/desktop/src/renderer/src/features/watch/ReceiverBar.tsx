@@ -8,6 +8,7 @@ import { useEffect, type ReactNode } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { Receiver } from "@mrstreamer/contracts/output";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
+import { t } from "@mrstreamer/core/i18n";
 import { openWatch, useUi } from "../../app/ui-store.ts";
 import { Progress } from "../../components/Progress.tsx";
 import { Button } from "../../components/ui/button.tsx";
@@ -54,7 +55,7 @@ export function ReceiverBar() {
   return (
     <div
       role="region"
-      aria-label={`Playing ${where(receiver)}`}
+      aria-label={t("Playing {where}", { where: where(receiver) })}
       className="fixed inset-x-0 bottom-0 z-[25] flex h-14 items-center gap-4 border-t border-white/10 bg-black pr-4 pl-6 text-sm"
     >
       <span className="flex flex-none items-center gap-2 text-[0.8125rem] text-muted-foreground">
@@ -69,21 +70,21 @@ export function ReceiverBar() {
         <>
           <span className="min-w-0 flex-1 truncate text-muted-foreground">
             {output.kind === "lost"
-              ? "Connection lost"
+              ? t("Connection lost")
               : output.media
-                ? "Playing"
-                : "Nothing playing"}
+                ? t("Playing")
+                : t("Nothing playing")}
           </span>
           <Controls>
             {output.kind === "receiver" && output.media && (
-              <Tooltip label="Stop">
-                <Button size="icon-sm" aria-label="Stop" onClick={() => outputs.stop()}>
+              <Tooltip label={t("Stop")}>
+                <Button size="icon-sm" aria-label={t("Stop")} onClick={() => outputs.stop()}>
                   <Square className="fill-current" />
                 </Button>
               </Tooltip>
             )}
             <Button size="sm" onClick={() => void outputs.local()}>
-              Disconnect
+              {t("Disconnect")}
             </Button>
           </Controls>
         </>
@@ -121,13 +122,13 @@ function TitleOn({ now, receiver }: { now: NowPlaying; receiver: Receiver }) {
     phase.kind === "failed"
       ? phase.problem.kind === "receiver"
         ? receiverProblem(phase.problem.failure, phase.problem.lost, receiver, null).title
-        : "Didn't play"
+        : t("Didn't play")
       : phase.kind === "ended"
-        ? "Finished"
+        ? t("Finished")
         : phase.kind === "opening" || phase.kind === "starting"
-          ? "Loading"
+          ? t("Loading")
           : phase.kind === "reconnecting"
-            ? "Reconnecting"
+            ? t("Reconnecting")
             : null;
   const playing = phase.kind === "playing";
   return (
@@ -149,18 +150,18 @@ function TitleOn({ now, receiver }: { now: NowPlaying; receiver: Receiver }) {
         <span className="flex-1" />
       )}
       <Controls>
-        <Tooltip label={playing ? "Pause" : "Play"}>
+        <Tooltip label={playing ? t("Pause") : t("Play")}>
           <Button
             variant="primary"
             size="icon-sm"
-            aria-label={playing ? "Pause" : "Play"}
+            aria-label={playing ? t("Pause") : t("Play")}
             onClick={() => titlePlayer.togglePause()}
           >
             {playing ? <Pause className="fill-current" /> : <Play className="fill-current" />}
           </Button>
         </Tooltip>
-        <Tooltip label="Stop">
-          <Button size="icon-sm" aria-label="Stop" onClick={() => titlePlayer.stop()}>
+        <Tooltip label={t("Stop")}>
+          <Button size="icon-sm" aria-label={t("Stop")} onClick={() => titlePlayer.stop()}>
             <Square className="fill-current" />
           </Button>
         </Tooltip>
@@ -194,13 +195,13 @@ function ChannelOn({ channel }: { channel: LiveChannel }) {
     phase.kind === "failed"
       ? failureLine(phase, channel)
       : phase.kind === "tuning" || said === "loading"
-        ? "Loading"
+        ? t("Loading")
         : phase.kind === "reconnecting"
-          ? "Reconnecting"
+          ? t("Reconnecting")
           : said === "paused"
-            ? "Paused"
+            ? t("Paused")
             : said === "buffering"
-              ? "Buffering"
+              ? t("Buffering")
               : null;
   const step = (direction: number) => {
     const target = adjacentChannel(channels ?? [], channel, direction);
@@ -215,18 +216,18 @@ function ChannelOn({ channel }: { channel: LiveChannel }) {
       />
       <span className="flex-1" />
       <Controls>
-        <Tooltip label="Channel up">
-          <Button size="icon-sm" aria-label="Channel up" onClick={() => step(-1)}>
+        <Tooltip label={t("Channel up")}>
+          <Button size="icon-sm" aria-label={t("Channel up")} onClick={() => step(-1)}>
             <ChevronUp />
           </Button>
         </Tooltip>
-        <Tooltip label="Channel down">
-          <Button size="icon-sm" aria-label="Channel down" onClick={() => step(1)}>
+        <Tooltip label={t("Channel down")}>
+          <Button size="icon-sm" aria-label={t("Channel down")} onClick={() => step(1)}>
             <ChevronDown />
           </Button>
         </Tooltip>
-        <Tooltip label="Stop">
-          <Button size="icon-sm" aria-label="Stop" onClick={() => player.stop()}>
+        <Tooltip label={t("Stop")}>
+          <Button size="icon-sm" aria-label={t("Stop")} onClick={() => player.stop()}>
             <Square className="fill-current" />
           </Button>
         </Tooltip>

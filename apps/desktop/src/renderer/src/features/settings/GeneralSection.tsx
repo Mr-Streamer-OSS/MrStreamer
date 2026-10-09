@@ -1,7 +1,9 @@
-// Settings > General: the content preferences, then Updates. Live channels start in a quality,
-// Full HD unless chosen otherwise, and channels can keep their own. Movies and series show in one
-// language, play their sound in another, or in the language they were made in, and show
-// subtitles in a third, only forced ones or none; picking a track in the player sets these too.
+// Settings > General: the app's language, the content preferences, then Updates. The interface
+// language changes only the app's own text, at once; titles, sound and subtitles keep their own.
+// Live channels start in a quality, Full HD unless chosen otherwise, and channels can keep their
+// own. Movies and series show in one language, play their sound in another, or in the language
+// they were made in, and show subtitles in a third, only forced ones or none; picking a track in
+// the player sets these too.
 // TMDB is where names, genres, popularity and streaming services come from. The app has its own
 // key; a viewer's own comes first, for when TMDB stops accepting the app's.
 import { Checkbox } from "@base-ui/react/checkbox";
@@ -9,14 +11,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check } from "lucide-react";
 import { useState } from "react";
 import { QUALITIES } from "@mrstreamer/contracts/library";
+import { LANGUAGE_NAMES, LOCALES, type LanguageChoice } from "@mrstreamer/contracts/language";
 import {
   DEFAULT_LIVE_QUALITY,
   ORIGINAL_SOUND,
   type Preferences,
 } from "@mrstreamer/contracts/preferences";
+import { formatNumber, t } from "@mrstreamer/core/i18n";
 import { DEFAULT_TITLE_LANGUAGE, TITLE_LANGUAGES } from "@mrstreamer/core/ondemand/languages";
 import { languageName } from "@mrstreamer/core/ondemand/tracks";
 import { useUi } from "../../app/ui-store.ts";
+import { changeLanguage } from "../../app/language.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { Input } from "../../components/ui/input.tsx";
 import { appError, describeError } from "../../lib/errors.ts";
@@ -68,6 +73,10 @@ export function GeneralSection() {
       }
     },
   });
+  const language = useQuery(queries.language());
+  const changingLanguage = useMutation({
+    mutationFn: (choice: LanguageChoice) => changeLanguage(client, choice),
+  });
   const titles = preferences.data?.titleLanguage ?? DEFAULT_TITLE_LANGUAGE;
   const audio = preferences.data?.audioLanguage ?? titles;
   const subtitles = preferences.data?.subtitleLanguage ?? FORCED;
@@ -82,10 +91,40 @@ export function GeneralSection() {
 
   return (
     <>
-      <Section title="Live TV">
-        <Row label="Quality" note="Automatic tries the nearest if one fails">
+      <Section title={t("App")}>
+        <Row label={t("Interface language")}>
+          {language.data && (
+            <Select
+              wide
+              label={t("Interface language")}
+              value={language.data.choice}
+              options={[
+                {
+                  value: "system",
+                  label: t("System default ({language})", {
+                    language: LANGUAGE_NAMES[language.data.system],
+                  }),
+                },
+                ...LOCALES.map((locale) => ({
+                  value: locale,
+                  label: LANGUAGE_NAMES[locale],
+                  lang: locale,
+                })),
+              ]}
+              onChange={(choice) => changingLanguage.mutate(choice)}
+            />
+          )}
+        </Row>
+        {changingLanguage.error && (
+          <p className="mt-3 text-sm text-destructive">
+            {describeError(appError(changingLanguage.error))}
+          </p>
+        )}
+      </Section>
+      <Section title={t("Live TV")}>
+        <Row label={t("Quality")} note={t("Automatic tries the nearest if one fails")}>
           <Select
-            label="Quality"
+            label={t("Quality")}
             value={preferences.data?.liveQuality ?? DEFAULT_LIVE_QUALITY}
             options={QUALITIES.map((quality) => ({
               value: quality,
@@ -95,7 +134,7 @@ export function GeneralSection() {
           />
         </Row>
         {ownQualities > 0 && (
-          <Row label="Channels with their own quality" note={ownQualities}>
+          <Row label={t("Channels with their own quality")} note={formatNumber(ownQualities)}>
             <Button
               variant="secondary"
               size="sm"
@@ -107,35 +146,38 @@ export function GeneralSection() {
                 }
               }}
             >
-              Reset
+              {t("Reset")}
             </Button>
           </Row>
         )}
       </Section>
-      <Section title="Movies and series">
-        <Row label="Titles in">
+      <Section title={t("Movies and series")}>
+        <Row label={t("Titles in")}>
           <Select
-            label="Titles in"
+            label={t("Titles in")}
             value={titles}
             options={languages(titles)}
             onChange={(titleLanguage) => update.mutate({ titleLanguage })}
           />
         </Row>
-        <Row label="Audio in">
+        <Row label={t("Audio in")}>
           <Select
-            label="Audio in"
+            label={t("Audio in")}
             value={audio}
-            options={[{ value: ORIGINAL_SOUND, label: "Original language" }, ...languages(audio)]}
+            options={[
+              { value: ORIGINAL_SOUND, label: t("Original language") },
+              ...languages(audio),
+            ]}
             onChange={(audioLanguage) => update.mutate({ audioLanguage })}
           />
         </Row>
-        <Row label="Subtitles">
+        <Row label={t("Subtitles")}>
           <Select
-            label="Subtitles"
+            label={t("Subtitles")}
             value={subtitles}
             options={[
-              { value: "off", label: "Off" },
-              { value: FORCED, label: "Only when forced" },
+              { value: "off", label: t("Off") },
+              { value: FORCED, label: t("Only when forced") },
               ...languages(subtitles),
             ]}
             onChange={(value) =>
@@ -143,9 +185,9 @@ export function GeneralSection() {
             }
           />
         </Row>
-        <Row label="For adults" note="titles in their own tab, channels only in Live TV">
+        <Row label={t("For adults")} note={t("titles in their own tab, channels only in Live TV")}>
           <Checkbox.Root
-            aria-label="For adults"
+            aria-label={t("For adults")}
             checked={preferences.data?.adultTitles ?? false}
             onCheckedChange={(checked) => update.mutate({ adultTitles: checked })}
             className="grid size-4 flex-none place-items-center rounded-[0.25rem] shadow-[inset_0_0_0_1.5px_rgb(255_255_255/45%)] outline-none transition-shadow duration-150 focus-visible:ring-2 focus-visible:ring-ring data-checked:bg-white data-checked:shadow-none"
@@ -155,9 +197,9 @@ export function GeneralSection() {
             </Checkbox.Indicator>
           </Checkbox.Root>
         </Row>
-        <Row label="Next episode" note="plays after a 10 second countdown">
+        <Row label={t("Next episode")} note={t("plays after a 10 second countdown")}>
           <Checkbox.Root
-            aria-label="Next episode"
+            aria-label={t("Next episode")}
             checked={preferences.data?.autoplayNext ?? true}
             onCheckedChange={(checked) => update.mutate({ autoplayNext: checked })}
             className="grid size-4 flex-none place-items-center rounded-[0.25rem] shadow-[inset_0_0_0_1.5px_rgb(255_255_255/45%)] outline-none transition-shadow duration-150 focus-visible:ring-2 focus-visible:ring-ring data-checked:bg-white data-checked:shadow-none"
@@ -206,23 +248,23 @@ function Tmdb({
   const [key, setKey] = useState("");
   const metadata = status.data?.metadata;
   const progress = !metadata
-    ? "no key"
+    ? t("no key")
     : metadata.refused
-      ? "refused the key"
+      ? t("refused the key")
       : metadata.known < metadata.wanted
-        ? `${metadata.known.toLocaleString()} of ${metadata.wanted.toLocaleString()} titles`
-        : `${metadata.known.toLocaleString()} titles`;
+        ? t("{known} of {wanted} titles", { known: metadata.known, wanted: metadata.wanted })
+        : t("{count} titles", { count: metadata.known });
   return (
     <>
-      <Row label="TMDB" note={ownKey ? `your key · ${progress}` : progress}>
+      <Row label="TMDB" note={ownKey ? `${t("your key")} · ${progress}` : progress}>
         {ownKey && (
           <Button variant="ghost" size="sm" onClick={() => onKey("", () => {})}>
-            Use the app's key
+            {t("Use the app's key")}
           </Button>
         )}
         {!editing && (
           <Button variant="secondary" size="sm" onClick={() => setEditing(true)}>
-            Own key…
+            {t("Own key…")}
           </Button>
         )}
       </Row>
@@ -243,15 +285,15 @@ function Tmdb({
             type="password"
             value={key}
             onChange={(event) => setKey(event.target.value)}
-            placeholder="Your own key or read access token"
-            aria-label="Your own TMDB key"
+            placeholder={t("Your own key or read access token")}
+            aria-label={t("Your own TMDB key")}
             className="h-9 flex-1"
           />
           <Button type="submit" variant="secondary" size="sm" disabled={!key.trim()}>
-            Use
+            {t("Use")}
           </Button>
           <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>
-            Cancel
+            {t("Cancel")}
           </Button>
         </form>
       )}

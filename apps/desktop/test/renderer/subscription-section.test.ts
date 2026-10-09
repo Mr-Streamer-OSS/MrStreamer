@@ -16,7 +16,7 @@ import type { CatalogueStatus, LiveChannel } from "@mrstreamer/contracts/library
 import type { SubscriptionSummary } from "@mrstreamer/contracts/subscription";
 import { useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { SubscriptionSection } from "../../src/renderer/src/features/settings/SubscriptionSection.tsx";
-import { formatDate } from "../../src/renderer/src/lib/errors.ts";
+import { formatDate } from "@mrstreamer/core/i18n";
 import { clockTime, comingTime, pastTime } from "../../src/renderer/src/lib/format.ts";
 import { player } from "../../src/renderer/src/player/player.ts";
 
@@ -30,7 +30,7 @@ afterEach(() => {
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** The day Northline runs to, as this machine writes a date. */
 const EXPIRES = "2027-03-12T00:00:00.000Z";
-const expiry = formatDate(EXPIRES);
+const expiry = formatDate(Date.parse(EXPIRES), "date");
 const account = (expiresAt: string | null = null): SubscriptionSummary["account"] => ({
   state: "active",
   expiresAt,

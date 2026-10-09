@@ -5,6 +5,7 @@ import type {
   OnlineSubtitleSearch,
   SubtitleQuota,
 } from "@mrstreamer/contracts/online-subtitles";
+import { t } from "@mrstreamer/core/i18n";
 import { call } from "../lib/ipc.ts";
 import { onSubtitleChoice, titlePlayer } from "./title-player.ts";
 
@@ -78,7 +79,7 @@ export const onlineSubtitles = {
         store.setState({
           pending: null,
           searched: true,
-          error: "Search could not finish. Check the services in Settings and try again.",
+          error: t("Search could not finish. Check the services in Settings and try again."),
         });
     }
   },
@@ -97,8 +98,9 @@ export const onlineSubtitles = {
       if (mine === request)
         store.setState({
           pending: null,
-          error:
+          error: t(
             "This subtitle could not be downloaded. Choose another or check the service in Settings.",
+          ),
         });
     }
   },

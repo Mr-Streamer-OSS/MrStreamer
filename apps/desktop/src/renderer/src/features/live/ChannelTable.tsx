@@ -25,6 +25,7 @@ import type { Listing, ListingMatch, Programme } from "@mrstreamer/contracts/gui
 import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
 import { ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { matchRanges } from "@mrstreamer/core/text";
+import { t } from "@mrstreamer/core/i18n";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Progress } from "../../components/Progress.tsx";
 import { useNow } from "../../lib/clock.ts";
@@ -201,7 +202,7 @@ export function ChannelTable({
       <div
         className="relative"
         style={{ height: virtualizer.getTotalSize() }}
-        {...(order ? { role: "list", "aria-label": "Favourites, in the order to save" } : {})}
+        {...(order ? { role: "list", "aria-label": t("Favourites, in the order to save") } : {})}
       >
         {items.map((item) => {
           const channel = channels[item.index];
@@ -326,7 +327,7 @@ function ChannelRow({
     ? new Set(searchRow.group.copies.map((copy) => copy.subscriptionId)).size
     : 0;
   const groupSummary = grouped
-    ? `${subscriptionCount} ${subscriptionCount === 1 ? "subscription" : "subscriptions"} · ${searchQualities(searchRow.group.copies)}`
+    ? `${t("{count} subscriptions", { count: subscriptionCount })} · ${searchQualities(searchRow.group.copies)}`
     : null;
   const copySummary = searchRow?.copy
     ? [searchQualities([channel]), source, category?.group, category?.title]
@@ -384,9 +385,7 @@ function ChannelRow({
                 ? [
                     channel.title,
                     grouped ? groupSummary : null,
-                    grouped
-                      ? `${searchRow.group.streams} ${searchRow.group.streams === 1 ? "stream" : "streams"}`
-                      : null,
+                    grouped ? t("{count} streams", { count: searchRow.group.streams }) : null,
                     !grouped ? subscription : null,
                     !grouped ? category?.group : null,
                     !grouped ? category?.title : null,
@@ -499,7 +498,7 @@ function ChannelRow({
             <>
               {!grouped && (
                 <IconButton
-                  label={favourite ? "Remove from favourites" : "Add to favourites"}
+                  label={favourite ? t("Remove from favourites") : t("Add to favourites")}
                   onClick={onToggleFavourite}
                   className={cn(!favourite && !selected && "opacity-0 group-hover:opacity-100")}
                 >
@@ -508,7 +507,7 @@ function ChannelRow({
               )}
               {grouped ? (
                 <IconButton
-                  label={copiesOpen ? "Hide copies" : "Show copies"}
+                  label={copiesOpen ? t("Hide copies") : t("Show copies")}
                   onClick={onToggleCopies}
                 >
                   <ChevronDown className={cn("size-4", !copiesOpen && "-rotate-90")} />
@@ -516,7 +515,7 @@ function ChannelRow({
               ) : (
                 listing && (
                   <IconButton
-                    label={expanded ? "Hide later programmes" : "Later programmes"}
+                    label={expanded ? t("Hide later programmes") : t("Later programmes")}
                     onClick={onToggleSchedule}
                     className={cn(!expanded && !selected && "opacity-0 group-hover:opacity-100")}
                   >
@@ -560,9 +559,15 @@ function MoveButton({ by, channel, order }: { by: -1 | 1; channel: LiveChannel; 
   return (
     <button
       data-move={part}
-      aria-label={`Move ${channel.title} ${part}`}
+      aria-label={
+        by < 0
+          ? t("Move {name} up", { name: channel.title })
+          : t("Move {name} down", { name: channel.title })
+      }
       title={
-        by < 0 ? "Move up, or to the top with Shift" : "Move down, or to the bottom with Shift"
+        by < 0
+          ? t("Move up, or to the top with Shift")
+          : t("Move down, or to the bottom with Shift")
       }
       aria-disabled={off}
       tabIndex={order.focus ? 0 : -1}

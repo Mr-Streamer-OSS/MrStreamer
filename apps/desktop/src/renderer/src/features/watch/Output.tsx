@@ -10,6 +10,7 @@
 import { Airplay, Cast, Monitor } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { OutputFailure, Receiver } from "@mrstreamer/contracts/output";
+import { t } from "@mrstreamer/core/i18n";
 import { miniPlayer } from "../../app/mini-player.ts";
 import { isMac } from "../../app/platform.ts";
 import { useUi } from "../../app/ui-store.ts";
@@ -94,7 +95,11 @@ export function OutputButton({
   const active = output.kind === "receiver" || output.kind === "lost";
   const listed = offers.includes("cast");
   const kind = listed ? "cast" : "airplay";
-  const label = active ? `Playing ${where(output.receiver)}` : listed ? "Play on a TV" : "AirPlay";
+  const label = active
+    ? t("Playing {where}", { where: where(output.receiver) })
+    : listed
+      ? t("Play on a TV")
+      : "AirPlay";
   if (!listed) {
     // The system's list is the only chooser: a press opens it, and ends a connect under way.
     // It opens at this element (see `outputs.pick`).
@@ -180,7 +185,7 @@ export function Receivers({
           onDone();
         }}
       >
-        This computer
+        {t("This computer")}
       </Choice>
       {receivers.map((receiver) => (
         <Choice
@@ -188,9 +193,9 @@ export function Receivers({
           chosen={current?.id === receiver.id}
           note={
             target?.id === receiver.id
-              ? `Connecting · ${connecting ?? 0} s`
+              ? `${t("Connecting")} · ${t("{seconds} s", { seconds: connecting ?? 0 })}`
               : refused?.receiver.id === receiver.id
-                ? "Didn't connect"
+                ? t("Didn't connect")
                 : null
           }
           onChoose={() => {
@@ -202,7 +207,7 @@ export function Receivers({
         </Choice>
       ))}
       {gone.map((receiver) => (
-        <Choice key={receiver.id} chosen={false} disabled note="Gone" onChoose={() => {}}>
+        <Choice key={receiver.id} chosen={false} disabled note={t("Gone")} onChoose={() => {}}>
           {receiverName(receiver)}
         </Choice>
       ))}
@@ -213,14 +218,14 @@ export function Receivers({
       )}
       <MenuNote>
         {output.kind === "connecting"
-          ? "Plays here until the TV answers. This computer cancels."
+          ? t("Plays here until the TV answers. This computer cancels.")
           : !nothing
-            ? status.offers.includes("airplay") && "AirPlay opens Apple's list at the controls."
+            ? status.offers.includes("airplay") && t("AirPlay opens Apple's list at the controls.")
             : !status.offers.includes("cast")
-              ? "AirPlay opens Apple's list at the controls."
+              ? t("AirPlay opens Apple's list at the controls.")
               : looking < NONE_FOUND_MS / 1000
-                ? `Looking for Cast devices · ${looking} s`
-                : "No Cast devices found on this network."}
+                ? `${t("Looking for Cast devices")} · ${t("{seconds} s", { seconds: looking })}`
+                : t("No Cast devices found on this network.")}
       </MenuNote>
     </>
   );
@@ -288,10 +293,12 @@ export function ConnectingNote() {
     >
       <div role="status">
         <div className="text-xl font-semibold tracking-tight tabular-nums">
-          {failed ? failed.title : `Connecting over AirPlay · ${seconds ?? 0} s`}
+          {failed
+            ? failed.title
+            : `${t("Connecting over AirPlay")} · ${t("{seconds} s", { seconds: seconds ?? 0 })}`}
         </div>
         <div className="mt-1 text-[0.8125rem] leading-snug text-muted-foreground">
-          {failed ? failed.body : "If your TV shows a code, enter it in the AirPlay window."}
+          {failed ? failed.body : t("If your TV shows a code, enter it in the AirPlay window.")}
         </div>
       </div>
       {failed && refused && <CloseMessage failure={refused} className="top-3 right-3" />}
@@ -323,7 +330,7 @@ export function PlayHere({
   return (
     <Button variant="secondary" size={size ?? "default"} onClick={onPlay ?? playHere}>
       <Monitor />
-      Play here
+      {t("Play here")}
     </Button>
   );
 }
@@ -343,48 +350,56 @@ export function receiverProblem(
     case "unreachable":
       return lost
         ? {
-            title: `${name} connection lost`,
-            body: stopped ?? "Check that it is on and on this network.",
+            title: t("{receiver} connection lost", { receiver: name }),
+            body: stopped ?? t("Check that it is on and on this network."),
             retry: true,
           }
         : {
-            title: `${name} didn't answer`,
-            body: "Check that it is on and on this network.",
+            title: t("{receiver} didn't answer", { receiver: name }),
+            body: t("Check that it is on and on this network."),
             retry: true,
           };
     case "not-fetched":
       return {
-        title: `${name} got no stream`,
+        title: t("{receiver} got no stream", { receiver: name }),
         body: isMac
-          ? "It never fetched the stream from this computer. Check that both are on the same network."
-          : "It never fetched the stream from this computer. Windows Firewall usually causes this. In Windows Security, open Allow an app through firewall and tick Private for Mr. Streamer.",
+          ? t(
+              "It never fetched the stream from this computer. Check that both are on the same network.",
+            )
+          : t(
+              "It never fetched the stream from this computer. Windows Firewall usually causes this. In Windows Security, open Allow an app through firewall and tick Private for Mr. Streamer.",
+            ),
         retry: true,
       };
     case "media":
       return {
-        title: `${name} can't play this`,
-        body: "It took the stream and could not play it.",
+        title: t("{receiver} can't play this", { receiver: name }),
+        body: t("It took the stream and could not play it."),
         retry: false,
       };
     case "no-network":
       return {
-        title: "No local network",
-        body: "This computer is offline or on a VPN only, so a TV cannot reach it.",
+        title: t("No local network"),
+        body: t("This computer is offline or on a VPN only, so a TV cannot reach it."),
         retry: false,
       };
     case "unavailable":
       return receiver?.kind === "cast"
-        ? { title: `${name} isn't available`, body: failure.detail, retry: true }
+        ? {
+            title: t("{receiver} isn't available", { receiver: name }),
+            body: failure.detail,
+            retry: true,
+          }
         : {
-            title: "AirPlay isn't available",
-            body: "The part of Mr. Streamer that speaks AirPlay did not start.",
+            title: t("AirPlay isn't available"),
+            body: t("The part of Mr. Streamer that speaks AirPlay did not start."),
             retry: false,
           };
     case "stream":
       // The provider's own failures have their messages where they always had them.
       return {
-        title: `${name} got no stream`,
-        body: "The provider did not deliver it.",
+        title: t("{receiver} got no stream", { receiver: name }),
+        body: t("The provider did not deliver it."),
         retry: true,
       };
   }

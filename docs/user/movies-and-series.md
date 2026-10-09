@@ -41,6 +41,8 @@ Settings > General has three languages for movies and series:
 
 Picking a sound track or subtitles in the player sets Audio in or Subtitles to its language, so the next title starts the same way. Captions have no language, so picking them leaves Subtitles as it was.
 
+**Interface language**, at the top of General, is the language of Mr. Streamer's own words: menus, buttons, messages and dates. It changes none of the three above. **System default** follows your computer's language when it is English, Dutch, French, German or Spanish, and is English otherwise. The change shows at once, with nothing restarted.
+
 ## Genres and streaming services
 
 Your provider's lists don't say a film's genre or where else it streams, and name films their own way, so Mr. Streamer asks [TMDB](https://www.themoviedb.org), using the TMDB ids providers list. It asks about each title once, newest first, and fills in names, genres, popularity and services as answers come in: on a large subscription that takes about a quarter of an hour the first time, and again once after you choose another language. Titles take their usual name in your language from Settings, or the English one where TMDB has no translation, and their details show the original name. Search finds a title by any of these names and by your provider's. Meanwhile a ring beside search in the top bar fills up, and goes when the asking stops; hover it for how far it got, or click it for Settings. Which titles each service streams comes from [JustWatch](https://www.justwatch.com), for the country your computer is set to.

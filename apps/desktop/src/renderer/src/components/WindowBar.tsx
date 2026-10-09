@@ -5,6 +5,7 @@ import { isMac, useWindowFullScreen } from "../app/platform.ts";
 import { closeWatch, withoutTitles, openView, useUi, type View } from "../app/ui-store.ts";
 import { UpdateNotice } from "../features/updates/UpdateNotice.tsx";
 import { useQuery } from "@tanstack/react-query";
+import { type PlainKey, t } from "@mrstreamer/core/i18n";
 import { queries, useSubscriptions } from "../lib/queries.ts";
 import { cn } from "../lib/utils.ts";
 import { WINDOW_BAR } from "../../../shared/window-bar.ts";
@@ -12,14 +13,14 @@ import { Logo } from "./Logo.tsx";
 import { TmdbProgress } from "./TmdbProgress.tsx";
 import { Button } from "./ui/button.tsx";
 
-const VIEWS: readonly { readonly view: View; readonly label: string }[] = [
+const VIEWS = [
   { view: "home", label: "Home" },
   { view: "live", label: "Live TV" },
   { view: "movies", label: "Movies" },
   { view: "series", label: "Series" },
   { view: "watchlist", label: "Watchlist" },
   { view: "downloads", label: "Downloads" },
-];
+] as const satisfies readonly { readonly view: View; readonly label: PlainKey }[];
 
 /**
  * The top of the window: brand, the pages, how far TMDB has come, search and settings. It is also
@@ -61,7 +62,7 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
           className="flex h-8 items-center gap-1 rounded-full pr-3 pl-1.5 text-[0.875rem] font-semibold text-white hover:text-white/75"
         >
           <ChevronLeft className="size-4" />
-          Back
+          {t("Back")}
         </button>
       ) : (
         <nav ref={pages} className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
@@ -69,7 +70,7 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
             .filter((entry) => !(folded && entry.view === "downloads"))
             .map((entry) => (
               <PageButton key={entry.view} view={entry.view} current={entry.view === view}>
-                {entry.label}
+                {t(entry.label)}
               </PageButton>
             ))}
         </nav>
@@ -81,7 +82,7 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
           <Button
             variant={view === "downloads" ? "secondary" : "ghost"}
             size="icon-sm"
-            aria-label="Downloads"
+            aria-label={t("Downloads")}
             aria-current={view === "downloads" ? "page" : undefined}
             onClick={() => openView("downloads")}
           >
@@ -93,7 +94,7 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
             <Button
               variant="ghost"
               size="icon-sm"
-              aria-label="Search"
+              aria-label={t("Search")}
               onClick={() => useUi.setState({ searchOpen: true })}
             >
               <Search />
@@ -101,7 +102,7 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
             <Button
               variant={settingsOpen ? "secondary" : "ghost"}
               size="icon-sm"
-              aria-label="Settings"
+              aria-label={t("Settings")}
               aria-pressed={settingsOpen}
               onClick={() => useUi.setState({ settings: settingsOpen ? null : "general" })}
             >

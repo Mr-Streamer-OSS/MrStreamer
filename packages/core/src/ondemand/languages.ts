@@ -7,6 +7,7 @@
 // language: "(ENG SUB)" is the film's own sound with English subtitles.
 
 import { languageName } from "./tracks.ts";
+import { type PlainKey, t } from "../i18n.ts";
 
 /**
  * Languages to choose from: ISO 639-1 codes, their names, the marks that stand for them, and
@@ -123,7 +124,7 @@ export function suits(fit: number, madeIn: string | null | undefined, language: 
 }
 
 /** Marks for every language at once, as a version's menu names them. */
-const MULTI_NAMES: Readonly<Record<string, string>> = {
+const MULTI_NAMES: Readonly<Record<string, PlainKey>> = {
   MULTI: "Several languages",
   "MULTI AUDIO": "Several languages",
   MULTISUB: "Several subtitle languages",
@@ -140,7 +141,7 @@ export function versionHint(tags: readonly string[], madeIn: string | null) {
     const multi = MULTI_NAMES[mark];
     if (multi) {
       named = true;
-      return multi;
+      return t(multi);
     }
     if (!language) {
       asListed = true;
@@ -148,12 +149,14 @@ export function versionHint(tags: readonly string[], madeIn: string | null) {
     }
     named = true;
     if (subtitles && (explicit || madeIn !== language.code)) {
-      const original = (madeIn && languageName(madeIn)) || "Original";
-      return `${original} sound, ${language.name} subtitles`;
+      const original = madeIn && languageName(madeIn);
+      return original
+        ? t("{sound} sound, {subtitles} subtitles", { sound: original, subtitles: language.name })
+        : t("Original sound, {subtitles} subtitles", { subtitles: language.name });
     }
-    return `${language.name} sound`;
+    return t("{language} sound", { language: language.name });
   });
-  return { label: parts.join(" · ") || "Standard", named, asListed };
+  return { label: parts.join(" · ") || t("Standard"), named, asListed };
 }
 
 /**

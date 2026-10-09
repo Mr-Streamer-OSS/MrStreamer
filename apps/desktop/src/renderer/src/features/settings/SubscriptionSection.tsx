@@ -18,11 +18,12 @@ import type { GuideStatus } from "@mrstreamer/contracts/guide";
 import type { CatalogueStatus } from "@mrstreamer/contracts/library";
 import type { TitleListsStatus } from "@mrstreamer/contracts/ondemand";
 import type { SubscriptionSummary } from "@mrstreamer/contracts/subscription";
+import { formatDate, formatList, formatNumber, type PlainKey, t } from "@mrstreamer/core/i18n";
 import { resetForAccount, useUi } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { Input } from "../../components/ui/input.tsx";
-import { appError, describeError, formatDate } from "../../lib/errors.ts";
-import { clockTime, hostOf, namesList } from "../../lib/format.ts";
+import { appError, describeError } from "../../lib/errors.ts";
+import { clockTime, hostOf } from "../../lib/format.ts";
 import { useKeyboardMode } from "../../lib/input-mode.ts";
 import { useDownloads } from "../../lib/downloads.ts";
 import { call } from "../../lib/ipc.ts";
@@ -139,10 +140,10 @@ export function SubscriptionSection() {
       )}
       {form?.kind === "add" ? (
         <div className="mt-8">
-          <h2 className="mb-6 text-2xl font-semibold tracking-tight">Add subscription</h2>
+          <h2 className="mb-6 text-2xl font-semibold tracking-tight">{t("Add subscription")}</h2>
           <LoginForm
             beside
-            submit={{ idle: "Add", pending: "Checking…" }}
+            submit={{ idle: t("Add"), pending: t("Checking…") }}
             onAdded={async (added) => {
               keep(client, added);
               closeForm();
@@ -155,11 +156,12 @@ export function SubscriptionSection() {
       ) : (
         <>
           <Button className="mt-4" onClick={() => setForm({ kind: "add" })}>
-            Add subscription
+            {t("Add subscription")}
           </Button>
           <p className="mt-6 text-xs leading-relaxed text-muted-foreground/80">
-            Everything from these subscriptions shows together in Home, Live TV, Movies and Series.
-            One stream plays at a time.
+            {t(
+              "Everything from these subscriptions shows together in Home, Live TV, Movies and Series. One stream plays at a time.",
+            )}
           </p>
         </>
       )}
@@ -235,7 +237,7 @@ function SubscriptionRow({
   const client = useQueryClient();
   const { id, kind, account, needsSecret } = subscription;
   const name = subscriptionName(subscription);
-  const secret = kind === "m3u" ? "link" : "password";
+  const playlist = kind === "m3u";
   const rowId = useId();
   // The form that asks for its password or link has its Cancel here on the row, which waits
   // while a change to the subscription is on its way. So has the form for its guide: its Cancel
@@ -266,11 +268,13 @@ function SubscriptionRow({
   const note = [
     kind === "m3u" ? "M3U" : "Xtream",
     needsSecret
-      ? `needs its ${secret} again`
+      ? playlist
+        ? t("needs its link again")
+        : t("needs its password again")
       : account.state !== "active" && account.state !== "unknown"
         ? stateName(account.state)
         : ending(account.expiresAt),
-    playing && `playing ${playing}`,
+    playing && t("playing {name}", { name: playing }),
   ]
     .filter(Boolean)
     .join(" · ");
@@ -306,36 +310,40 @@ function SubscriptionRow({
               disabled={form === "guide" ? switching : saving}
               onClick={() => onForm(null)}
             >
-              Cancel
+              {t("Cancel")}
             </Button>
           ) : (
             <>
               {failed && (
                 <Button
                   size="sm"
-                  aria-label={`Retry ${name}`}
+                  aria-label={t("Retry {name}", { name })}
                   disabled={retry.isPending}
                   onClick={() => retry.mutate()}
                 >
-                  {retry.isPending ? "Retrying…" : "Retry"}
+                  {retry.isPending ? t("Retrying…") : t("Retry")}
                 </Button>
               )}
               {needsSecret && (
                 <Button
                   size="sm"
-                  aria-label={`Enter the ${secret} for ${name}`}
+                  aria-label={
+                    playlist
+                      ? t("Enter the link for {name}", { name })
+                      : t("Enter the password for {name}", { name })
+                  }
                   onClick={() => onForm("secret")}
                 >
-                  Enter {secret}
+                  {playlist ? t("Enter link") : t("Enter password")}
                 </Button>
               )}
               <Button
                 variant={failed || needsSecret ? "ghost" : "secondary"}
                 size="sm"
-                aria-label={`Edit ${name}`}
+                aria-label={t("Edit {name}", { name })}
                 onClick={() => onForm("edit")}
               >
-                Edit
+                {t("Edit")}
               </Button>
             </>
           )}
@@ -388,7 +396,7 @@ function SubscriptionRow({
             onClick={() => onForm("remove")}
             className="mt-3 text-[0.9375rem] text-muted-foreground hover:text-white"
           >
-            Remove {name}
+            {t("Remove {name}", { name })}
           </button>
         </div>
       )}
@@ -406,9 +414,11 @@ function unanswered(
   catalogue: CatalogueStatus | undefined,
 ): string {
   if (failure.kind !== "unreachable" || !catalogue?.failedAt) return describeError(failure);
-  const since = clockTime(catalogue.failedAt, Date.now());
-  const loaded = catalogue.fetchedAt === null ? "" : " Its lists are from then.";
-  return `${hostOf(subscription.server)} hasn't answered since ${since}.${loaded}`;
+  const since = t("{host} hasn't answered since {time}.", {
+    host: hostOf(subscription.server),
+    time: clockTime(catalogue.failedAt, Date.now()),
+  });
+  return catalogue.fetchedAt === null ? since : `${since} ${t("Its lists are from then.")}`;
 }
 
 /**
@@ -451,25 +461,28 @@ function Details({
   return (
     <>
       <Row
-        label="Status"
+        label={t("Status")}
         note={
           needsSecret
-            ? `needs your ${kind === "m3u" ? "playlist link" : "password"} again`
+            ? kind === "m3u"
+              ? t("needs your playlist link again")
+              : t("needs your password again")
             : undefined
         }
       >
         {stateName(account.state)}
       </Row>
-      <Row label="Expires">{expiry(account.expiresAt)}</Row>
-      <Row label="Connections">{connections(account)}</Row>
+      <Row label={t("Expires")}>{expiry(account.expiresAt)}</Row>
+      <Row label={t("Connections")}>{connections(account)}</Row>
       <Row
-        label="Login"
-        note={kind === "xtream" && server.startsWith("http:") ? "not encrypted" : undefined}
+        label={t("Login")}
+        note={kind === "xtream" && server.startsWith("http:") ? t("not encrypted") : undefined}
       >
         <span className="truncate">{loginOf(subscription)}</span>
       </Row>
       <List
-        label="Channels"
+        label={t("Channels")}
+        refreshLabel={t("Refresh channels")}
         count={catalogue?.channelCount ?? 0}
         fetchedAt={catalogue?.fetchedAt ?? null}
         failure={
@@ -482,7 +495,8 @@ function Details({
       {kind === "m3u" && <PlaylistRows subscription={subscription} onMap={onPlaylistMap} />}
       {kind === "xtream" && (
         <List
-          label="Movies and series"
+          label={t("Movies and series")}
+          refreshLabel={t("Refresh movies and series")}
           count={titles ? titles.movies + titles.series : 0}
           fetchedAt={titles?.fetchedAt ?? null}
           failure={refreshTitles.error ? appError(refreshTitles.error) : (titles?.failure ?? null)}
@@ -502,6 +516,7 @@ function loginOf({ username, server }: SubscriptionSummary): string {
 /** One list: how many, how long ago, why the last refresh failed, and Refresh. */
 function List({
   label,
+  refreshLabel,
   count,
   fetchedAt,
   failure,
@@ -509,6 +524,7 @@ function List({
   onRefresh,
 }: {
   label: string;
+  refreshLabel: string;
   count: number;
   fetchedAt: number | null;
   failure: AppError | null;
@@ -517,14 +533,14 @@ function List({
 }) {
   return (
     <>
-      <Row label={label} note={fetchedAt === null ? "not loaded yet" : count.toLocaleString()}>
+      <Row label={label} note={fetchedAt === null ? t("not loaded yet") : formatNumber(count)}>
         <span className="text-muted-foreground">
-          {refreshing ? "refreshing…" : fetchedAt !== null ? relativeTime(fetchedAt) : ""}
+          {refreshing ? t("refreshing…") : fetchedAt !== null ? relativeTime(fetchedAt) : ""}
         </span>
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label={`Refresh ${label.toLowerCase()}`}
+          aria-label={refreshLabel}
           disabled={refreshing}
           onClick={onRefresh}
         >
@@ -585,7 +601,7 @@ function Edit({
         {subscriptionName(subscription)}
       </h2>
       <div className="space-y-4">
-        <Field label="Name">
+        <Field label={t("Name")}>
           <Input
             value={name}
             onChange={(event) => setName(event.target.value)}
@@ -594,10 +610,10 @@ function Edit({
           />
         </Field>
         <div className="text-sm text-muted-foreground">
-          Login
+          {t("Login")}
           <div className="mt-2 truncate text-base text-foreground">{loginOf(subscription)}</div>
         </div>
-        <Field label={playlist ? "M3U link" : "Password"} hint="leave empty to keep">
+        <Field label={playlist ? t("M3U link") : t("Password")} hint={t("leave empty to keep")}>
           <Input
             type={playlist ? "text" : "password"}
             value={secret}
@@ -607,14 +623,14 @@ function Edit({
         </Field>
       </div>
       <p className="mt-5 text-sm text-muted-foreground">
-        Another server, username or playlist?{" "}
+        {t("Another server, username or playlist?")}{" "}
         <button
           type="button"
           onMouseDown={(event) => event.preventDefault()}
           onClick={onAdd}
           className="text-foreground underline underline-offset-4"
         >
-          Add it as a new subscription.
+          {t("Add it as a new subscription.")}
         </button>
       </p>
       {update.error && (
@@ -622,13 +638,13 @@ function Edit({
       )}
       <div className="mt-6 flex items-center gap-3">
         <Button type="submit" variant="primary" disabled={update.isPending}>
-          {update.isPending ? "Saving…" : "Save"}
+          {update.isPending ? t("Saving…") : t("Save")}
         </Button>
         <Button variant="ghost" disabled={update.isPending} onClick={onDone}>
-          Cancel
+          {t("Cancel")}
         </Button>
         <Button variant="ghost" className="ml-auto" onClick={onRemove}>
-          Remove
+          {t("Remove")}
         </Button>
       </div>
     </RowForm>
@@ -650,10 +666,12 @@ function Secret({
     <RowForm onSubmit={() => secret && update.mutate({ secret })}>
       <p className="mb-4 text-[0.9375rem]">
         {playlist
-          ? `Your keychain no longer gives Mr. Streamer the saved link from ${hostOf(subscription.server)}.`
-          : "Your keychain no longer gives Mr. Streamer the saved password."}
+          ? t("Your keychain no longer gives Mr. Streamer the saved link from {host}.", {
+              host: hostOf(subscription.server),
+            })
+          : t("Your keychain no longer gives Mr. Streamer the saved password.")}
       </p>
-      <Field label={playlist ? "M3U link" : "Password"}>
+      <Field label={playlist ? t("M3U link") : t("Password")}>
         <Input
           type={playlist ? "text" : "password"}
           value={secret}
@@ -672,7 +690,7 @@ function Secret({
         className="mt-5"
         disabled={update.isPending || !secret}
       >
-        {update.isPending ? "Checking…" : "Save"}
+        {update.isPending ? t("Checking…") : t("Save")}
       </Button>
     </RowForm>
   );
@@ -750,15 +768,17 @@ function Remove({
   return (
     <div className="mb-2 ml-5 border-b border-white/8 pt-2 pb-6">
       <p className="mb-3 text-[0.9375rem]">
-        Remove {subscriptionName(subscription)}, and the lists loaded with it, from this device?
+        {t("Remove {name}, and the lists loaded with it, from this device?", {
+          name: subscriptionName(subscription),
+        })}
       </p>
       {(playing || stays.length === 0) && (
         <p className="mb-3 text-sm text-foreground/85">
           {[
-            playing && `${playing} is playing from it and stops.`,
+            playing && t("{name} is playing from it and stops.", { name: playing }),
             stays.length === 0
-              ? "It's your only subscription, so Mr. Streamer returns to Connect."
-              : playing && `${namesList(stays)} ${stays.length === 1 ? "stays" : "stay"}.`,
+              ? t("It's your only subscription, so Mr. Streamer returns to Connect.")
+              : playing && t("{names} stay.", { names: formatList(stays), count: stays.length }),
           ]
             .filter(Boolean)
             .join(" ")}
@@ -766,9 +786,9 @@ function Remove({
       )}
       {unfinished > 0 && (
         <p className="mb-3 text-sm text-foreground/85">
-          {unfinished === 1
-            ? "Its unfinished download ends. Downloaded copies stay."
-            : `Its ${unfinished} unfinished downloads end. Downloaded copies stay.`}
+          {t("Its {count} unfinished downloads end. Downloaded copies stay.", {
+            count: unfinished,
+          })}
         </p>
       )}
       <label className="mb-4 flex w-fit items-center gap-3 text-[0.9375rem]">
@@ -782,14 +802,14 @@ function Remove({
             <Check className="size-3 text-black" strokeWidth={3} />
           </Checkbox.Indicator>
         </Checkbox.Root>
-        Also delete favourites, watchlist, history and progress
+        {t("Also delete favourites, watchlist, history and progress")}
       </label>
       <div className="flex gap-3">
         <Button variant="destructive" disabled={remove.isPending} onClick={() => remove.mutate()}>
-          Remove
+          {t("Remove")}
         </Button>
         <Button variant="ghost" disabled={remove.isPending} onClick={onKeep}>
-          Keep
+          {t("Keep")}
         </Button>
       </div>
       {remove.error && (
@@ -799,8 +819,21 @@ function Remove({
   );
 }
 
+const STATE_NAMES = {
+  active: "Active",
+  expired: "Expired",
+  banned: "Banned",
+  disabled: "Disabled",
+  unknown: "Unknown",
+} as const satisfies Record<SubscriptionSummary["account"]["state"], PlainKey>;
+
 function stateName(state: SubscriptionSummary["account"]["state"]): string {
-  return state[0]?.toUpperCase() + state.slice(1);
+  return t(STATE_NAMES[state]);
+}
+
+/** "12 Mar 2027". */
+function day(iso: string): string {
+  return formatDate(Date.parse(iso), "date");
 }
 
 function daysLeft(expiresAt: string): number {
@@ -809,32 +842,31 @@ function daysLeft(expiresAt: string): number {
 
 /** "12 Mar 2027 · 163 days", or how long ago it ended. */
 function expiry(expiresAt: string | null): string {
-  if (!expiresAt) return "No end date";
+  if (!expiresAt) return t("No end date");
   const days = daysLeft(expiresAt);
-  const left = days > 0 ? `${days} ${days === 1 ? "day" : "days"}` : "ended";
-  return `${formatDate(expiresAt)} · ${left}`;
+  return `${day(expiresAt)} · ${days > 0 ? t("{count} days", { count: days }) : t("ended")}`;
 }
 
 /** What a row says of when the account ends: "12 days left" once it is near, else the date. */
 function ending(expiresAt: string | null): string | null {
   if (!expiresAt) return null;
   const days = daysLeft(expiresAt);
-  if (days <= 0) return "ended";
-  return days <= SOON_DAYS ? `${days} ${days === 1 ? "day" : "days"} left` : formatDate(expiresAt);
+  if (days <= 0) return t("ended");
+  return days <= SOON_DAYS ? t("{count} days left", { count: days }) : day(expiresAt);
 }
 
 /** "1 of 2 in use", as the provider counts them, this app's own stream included. */
 function connections(account: SubscriptionSummary["account"]): string {
   const { maxConnections: max, activeConnections: active } = account;
-  if (max === null) return active === null ? "Not reported" : `${active} in use`;
-  return `${active ?? 0} of ${max} in use`;
+  if (max === null) return active === null ? t("Not reported") : t("{active} in use", { active });
+  return t("{active} of {max} in use", { active: active ?? 0, max });
 }
 
 function relativeTime(epochMs: number): string {
   const minutes = Math.round((Date.now() - epochMs) / 60_000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 1) return t("just now");
+  if (minutes < 60) return t("{minutes} min ago", { minutes });
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} h ago`;
-  return formatDate(new Date(epochMs).toISOString());
+  if (hours < 24) return t("{hours} h ago", { hours });
+  return formatDate(epochMs, "date");
 }

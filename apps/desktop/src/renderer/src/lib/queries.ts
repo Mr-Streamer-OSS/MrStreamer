@@ -53,6 +53,13 @@ export const queries = {
       queryKey: ["playlist", subscriptionId, "omissions", offset, limit],
       queryFn: () => call("playlist.omissions", { subscriptionId, offset, limit }),
     }),
+  /** The interface language, as `language.get` and Settings' changes say. */
+  language: () =>
+    queryOptions({
+      queryKey: ["language"],
+      queryFn: () => call("language.get"),
+      staleTime: Infinity,
+    }),
   preferences: () =>
     queryOptions({
       queryKey: ["preferences"],

@@ -17,6 +17,7 @@ import { KeyRound, Link2 } from "lucide-react";
 import { useState, type FormEvent, type ReactNode } from "react";
 import type { LoginInput } from "@mrstreamer/contracts/ipc";
 import type { SubscriptionSummary } from "@mrstreamer/contracts/subscription";
+import { t } from "@mrstreamer/core/i18n";
 import { isMac, isWindows } from "../../app/platform.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { Input } from "../../components/ui/input.tsx";
@@ -97,7 +98,7 @@ export function LoginForm({
       {intro && <p className="mb-9 text-[0.9375rem] text-muted-foreground">{intro(mode)}</p>}
       <div className="space-y-4">
         {beside && (
-          <Field label="Name" hint="optional, the host without one">
+          <Field label={t("Name")} hint={t("optional, the host without one")}>
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -112,7 +113,7 @@ export function LoginForm({
         )}
         {mode === "login" ? (
           <>
-            <Field label="Server" note={plainHttp(server) ? UNENCRYPTED : null}>
+            <Field label={t("Server")} note={plainHttp(server) ? unencrypted() : null}>
               <Input
                 value={server}
                 onChange={(e) => changeAddress(setServer, e.target.value)}
@@ -120,14 +121,14 @@ export function LoginForm({
                 autoFocus={!beside}
               />
             </Field>
-            <Field label="Username">
+            <Field label={t("Username")}>
               <Input
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 autoComplete="username"
               />
             </Field>
-            <Field label="Password">
+            <Field label={t("Password")}>
               <Input
                 type="password"
                 value={password}
@@ -137,7 +138,10 @@ export function LoginForm({
             </Field>
           </>
         ) : (
-          <Field label="M3U link" note={plainHttp(link) && carriesLogin(link) ? UNENCRYPTED : null}>
+          <Field
+            label={t("M3U link")}
+            note={plainHttp(link) && carriesLogin(link) ? unencrypted() : null}
+          >
             <Input
               value={link}
               onChange={(e) => changeAddress(setLink, e.target.value)}
@@ -154,12 +158,12 @@ export function LoginForm({
         <div className="mt-8">
           <p className="text-[0.9375rem]">{describeError(asking)}</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Your username and password would travel unencrypted.
+            {t("Your username and password would travel unencrypted.")}
           </p>
           <div className="mt-5 flex items-center gap-3">
-            <Button onClick={connectUnencrypted}>Connect without encryption</Button>
+            <Button onClick={connectUnencrypted}>{t("Connect without encryption")}</Button>
             <Button variant="ghost" onClick={() => add.reset()}>
-              Cancel
+              {t("Cancel")}
             </Button>
           </div>
         </div>
@@ -175,7 +179,7 @@ export function LoginForm({
             onClick={() => setMode(mode === "login" ? "link" : "login")}
           >
             {mode === "login" ? <Link2 /> : <KeyRound />}
-            {mode === "login" ? "Use an M3U link" : "Use server and login"}
+            {mode === "login" ? t("Use an M3U link") : t("Use server and login")}
           </Button>
           {onCancel && (
             <Button
@@ -185,33 +189,54 @@ export function LoginForm({
               disabled={add.isPending}
               onClick={onCancel}
             >
-              Cancel
+              {t("Cancel")}
             </Button>
           )}
         </div>
       )}
       <p className="mt-10 text-xs leading-relaxed text-muted-foreground/80">
-        {beside && "Checked with the provider, then "}
-        {savedNote(mode === "link" && !carriesLogin(link) ? "link" : "password", beside)}
-        {beside && " Its channels, movies and series join the lists."}
+        {[
+          savedWhere(beside),
+          encrypted(mode === "link" && !carriesLogin(link) ? "link" : "password"),
+          ...(beside ? [t("Its channels, movies and series join the lists.")] : []),
+        ].join(" ")}
       </p>
     </form>
   );
 }
 
-const UNENCRYPTED = "Not encrypted. Your login travels as plain text.";
+const unencrypted = () => t("Not encrypted. Your login travels as plain text.");
 
-/**
- * Where a login stays, and what keeps its secret: the password, or a playlist's whole link.
- * `continued` writes it as the rest of a sentence.
- */
-function savedNote(secret: "password" | "link", continued = false): string {
-  const saved = continued ? "saved" : "Saved";
-  return isMac
-    ? `${saved} on this Mac. The ${secret} is encrypted with your macOS Keychain.`
-    : isWindows
-      ? `${saved} on this PC. The ${secret} is encrypted with your Windows account.`
-      : `${saved} on this computer. The ${secret} is encrypted with your keyring.`;
+/** Where a login stays; `checked` when the provider checks it first, as beside others. */
+function savedWhere(checked: boolean): string {
+  if (isMac)
+    return checked
+      ? t("Checked with the provider, then saved on this Mac.")
+      : t("Saved on this Mac.");
+  if (isWindows)
+    return checked
+      ? t("Checked with the provider, then saved on this PC.")
+      : t("Saved on this PC.");
+  return checked
+    ? t("Checked with the provider, then saved on this computer.")
+    : t("Saved on this computer.");
+}
+
+/** What keeps a login's secret: the password, or a playlist's whole link. */
+function encrypted(secret: "password" | "link"): string {
+  if (isMac) {
+    return secret === "link"
+      ? t("The link is encrypted with your macOS Keychain.")
+      : t("The password is encrypted with your macOS Keychain.");
+  }
+  if (isWindows) {
+    return secret === "link"
+      ? t("The link is encrypted with your Windows account.")
+      : t("The password is encrypted with your Windows account.");
+  }
+  return secret === "link"
+    ? t("The link is encrypted with your keyring.")
+    : t("The password is encrypted with your keyring.");
 }
 
 /** An address typed with http://, which the login travels over unencrypted. */

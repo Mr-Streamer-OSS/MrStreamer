@@ -2,6 +2,7 @@ import type { RelatedTitles, Title } from "@mrstreamer/contracts/ondemand";
 import { sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type { ProviderTitle } from "../provider.ts";
 import { TITLE_LANGUAGES } from "./languages.ts";
+import { formatLanguageName, t } from "../i18n.ts";
 import { titleName } from "./names.ts";
 
 /** Facts of one exact provider row; name words may be computed on first use. */
@@ -67,7 +68,6 @@ const COMMON_WORDS = new Set([
   "chapter",
   ...TITLE_LANGUAGES.flatMap(({ marks }) => marks.map((mark) => mark.toLowerCase())),
 ]);
-const languages = new Intl.DisplayNames(["en"], { type: "language" });
 
 function words(name: string): Set<string> {
   return new Set(
@@ -127,7 +127,7 @@ export function relatedTitles(source: RelatedSource): RelatedTitles {
       score = 100 + shared.length * 2 + Number(sameLanguage);
       reason = shared.slice(0, 2).join(", ");
       if (sameLanguage && opened.originalLanguage) {
-        reason += ` · ${languages.of(opened.originalLanguage) ?? opened.originalLanguage}`;
+        reason += ` · ${formatLanguageName(opened.originalLanguage) ?? opened.originalLanguage}`;
       }
     } else if (genres.size === 0 || candidate.genres.length === 0) {
       if (!original) continue;
@@ -139,7 +139,7 @@ export function relatedTitles(source: RelatedSource): RelatedTitles {
       );
       if (selected) {
         score = 20;
-        reason = "Same category";
+        reason = t("Same category");
       } else {
         // A name scores at most ten and cannot displace a full row of stronger matches.
         if (best.length === LIMIT && best[LIMIT - 1]!.score >= 10) continue;
@@ -158,7 +158,7 @@ export function relatedTitles(source: RelatedSource): RelatedTitles {
           score = wordScore;
           selected = own;
         }
-        reason = "Similar name";
+        reason = t("Similar name");
       }
       if (!selected) continue;
     }

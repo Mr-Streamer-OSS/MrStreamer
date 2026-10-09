@@ -1,10 +1,12 @@
+import { type PlainKey, t } from "@mrstreamer/core/i18n";
+
 /** Orders to pick from, as words in a row; none pressed while a list shows in its own order. */
 export function Sorts<S extends string>({
   options,
   value,
   onChange,
 }: {
-  options: readonly { readonly value: S; readonly label: string }[];
+  options: readonly { readonly value: S; readonly label: PlainKey }[];
   value: S | null;
   onChange: (sort: S) => void;
 }) {
@@ -22,7 +24,7 @@ export function Sorts<S extends string>({
               : "text-muted-foreground hover:text-white"
           }
         >
-          {entry.label}
+          {t(entry.label)}
         </button>
       ))}
     </div>

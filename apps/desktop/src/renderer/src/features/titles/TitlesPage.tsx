@@ -19,6 +19,7 @@ import {
 } from "@mrstreamer/contracts/ondemand";
 import { ownedId, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type { TitleFilters } from "@mrstreamer/contracts/title-filters";
+import { formatDecimal, formatNumber, type PlainKey, t } from "@mrstreamer/core/i18n";
 import { isMac, isTyping } from "../../app/platform.ts";
 import { openDetails, openView, useUi } from "../../app/ui-store.ts";
 import { Sorts } from "../../components/Sorts.tsx";
@@ -121,14 +122,14 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
     ...(playlistOnly
       ? []
       : [
-          { value: "for-you" as const, label: "For you" },
-          { value: "new" as const, label: "New" },
+          { value: "for-you" as const, label: t("For you") },
+          { value: "new" as const, label: t("New") },
         ]),
-    { value: "genres", label: "Genres" },
-    { value: "services", label: "Services" },
-    ...(fourK.data?.total ? [{ value: "4k" as const, label: "4K" }] : []),
-    ...(adult.data?.total ? [{ value: "adult" as const, label: "Adults" }] : []),
-    { value: "all", label: kind === "movie" ? "All movies" : "All series" },
+    { value: "genres", label: t("Genres") },
+    { value: "services", label: t("Services") },
+    ...(fourK.data?.total ? [{ value: "4k" as const, label: t("4K") }] : []),
+    ...(adult.data?.total ? [{ value: "adult" as const, label: t("Adults") }] : []),
+    { value: "all", label: kind === "movie" ? t("All movies") : t("All series") },
   ];
 
   const searching = place.query.trim() !== "";
@@ -216,12 +217,12 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
                   }
                 }}
               >
-                Try again
+                {t("Try again")}
               </Button>
             </div>
           ) : loading ? (
             <p className="px-10 text-[0.9375rem] text-muted-foreground">
-              Loading {kind === "movie" ? "movies" : "series"}…
+              {kind === "movie" ? t("Loading movies…") : t("Loading series…")}
             </p>
           ) : searching ? (
             <SearchResults
@@ -281,8 +282,8 @@ function SearchField({
           event.currentTarget.blur();
           event.preventDefault();
         }}
-        placeholder={kind === "movie" ? "Search movies" : "Search series"}
-        aria-label={kind === "movie" ? "Search movies" : "Search series"}
+        placeholder={kind === "movie" ? t("Search movies") : t("Search series")}
+        aria-label={kind === "movie" ? t("Search movies") : t("Search series")}
         spellCheck={false}
         className="min-w-0 flex-1 bg-transparent text-[0.875rem] text-foreground outline-none placeholder:text-muted-foreground"
       />
@@ -308,7 +309,6 @@ function SearchResults({
   });
   const titles = found.data?.titles ?? [];
   const total = found.data?.total ?? 0;
-  const noun = kind === "series" ? "series" : total === 1 ? "movie" : "movies";
   return (
     <div className="flex min-h-0 flex-1 flex-col pl-10">
       <TitleFilterBar
@@ -326,10 +326,16 @@ function SearchResults({
         found.data && (
           <p className="mb-4 text-[0.9375rem] font-medium tabular-nums">
             {total === 0
-              ? `No ${kind === "series" ? "series" : "movies"} found`
+              ? kind === "series"
+                ? t("No series found")
+                : t("No movies found")
               : total > titles.length
-                ? `The best ${titles.length} of ${total.toLocaleString()} ${noun}`
-                : `${total.toLocaleString()} ${noun}`}
+                ? kind === "series"
+                  ? t("The best {shown} of {count} series", { shown: titles.length, count: total })
+                  : t("The best {shown} of {count} movies", { shown: titles.length, count: total })
+                : kind === "series"
+                  ? t("{count} series", { count: total })
+                  : t("{count} movies", { count: total })}
           </p>
         )
       )}
@@ -350,13 +356,15 @@ function SearchResults({
         </div>
       )}
       <p className="flex-none py-4 text-[0.8125rem] text-muted-foreground">
-        {kind === "series" ? "Channels, movies" : "Channels, series"} and programmes for “{query}”{" "}
+        {kind === "series"
+          ? t("Channels, movies and programmes for “{query}”", { query })
+          : t("Channels, series and programmes for “{query}”", { query })}{" "}
         <button
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => useUi.setState({ searchOpen: true })}
           className="ml-1 text-white underline-offset-4 hover:underline"
         >
-          Search everything {isMac ? "⌘K" : "Ctrl K"}
+          {t("Search everything")} {isMac ? "⌘K" : "Ctrl K"}
         </button>
       </p>
     </div>
@@ -365,12 +373,15 @@ function SearchResults({
 
 /** Under a found poster: the year, and the original name, which search finds it by too. */
 function searchCaption(title: Title): string {
-  return [title.year, title.originalTitle ? `Original: ${title.originalTitle}` : title.genres[0]]
+  return [
+    title.year,
+    title.originalTitle ? t("Original: {title}", { title: title.originalTitle }) : title.genres[0],
+  ]
     .filter(Boolean)
     .join(" · ");
 }
 
-const SORTS: readonly { value: CollectionSort; label: string }[] = [
+const SORTS: readonly { value: CollectionSort; label: PlainKey }[] = [
   { value: "added", label: "Newest" },
   { value: "popular", label: "Popular" },
   { value: "rating", label: "Top rated" },
@@ -399,7 +410,7 @@ function Collection({
       <div className="mb-3 flex items-baseline gap-3">
         <h1 className="text-2xl font-semibold tracking-tight">{listed.name}</h1>
         <span className="text-sm text-muted-foreground tabular-nums">
-          {listed.total?.toLocaleString()}
+          {listed.total === null ? null : formatNumber(listed.total)}
         </span>
       </div>
       <Sorts options={SORTS} value={sort} onChange={onSort} />
@@ -449,7 +460,7 @@ function Rows({
       <div className="space-y-9">
         {tab === "for-you" && mine.length > 0 && (
           <div>
-            <Section title="Continue watching" columns={stills}>
+            <Section title={t("Continue watching")} columns={stills}>
               {mine.slice(0, stills).map((entry) => (
                 <StillTile
                   key={entry.key}
@@ -518,7 +529,7 @@ function Featured({ title, resume }: { title: Title; resume: ContinueEntry | nul
   const facts = [
     title.year,
     ...title.genres.slice(0, 2),
-    title.rating ? `★ ${title.rating.toFixed(1)}` : null,
+    title.rating ? `★ ${formatDecimal(title.rating, 1)}` : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -543,7 +554,7 @@ function Featured({ title, resume }: { title: Title; resume: ContinueEntry | nul
               }
             >
               <Play className="fill-current" />
-              {resume ? "Resume" : "Play"}
+              {resume ? t("Resume") : t("Play")}
             </Button>
           )}
           <Button
@@ -551,7 +562,7 @@ function Featured({ title, resume }: { title: Title; resume: ContinueEntry | nul
             size="lg"
             onClick={() => openDetails({ kind: title.kind, ...ownedId(title) })}
           >
-            {title.kind === "movie" ? "Details" : "Episodes"}
+            {title.kind === "movie" ? t("Details") : t("Episodes")}
           </Button>
         </div>
       </div>
@@ -576,20 +587,23 @@ function Tiles({
     return <p className="px-10 text-sm text-destructive">{describeError(appError(tiles.error))}</p>;
   }
   const empty = tiles.data?.length === 0;
-  const name = of === "genres" ? "Genres" : "Services";
   return (
     <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-10 pb-16">
       {empty ? (
         <p className="text-[0.9375rem] text-muted-foreground">
           {!metadata
-            ? `${name} need a TMDB key, in Settings.`
+            ? of === "genres"
+              ? t("Genres need a TMDB key, in Settings.")
+              : t("Services need a TMDB key, in Settings.")
             : metadata.refused
-              ? "TMDB refused the key. Check it in Settings."
+              ? t("TMDB refused the key. Check it in Settings.")
               : metadata.known < metadata.wanted
-                ? `${name} appear as details arrive from TMDB.`
+                ? of === "genres"
+                  ? t("Genres appear as details arrive from TMDB.")
+                  : t("Services appear as details arrive from TMDB.")
                 : of === "genres"
-                  ? "No genres for these titles."
-                  : "No streaming services for these titles here."}
+                  ? t("No genres for these titles.")
+                  : t("No streaming services for these titles here.")}
         </p>
       ) : (
         <div
@@ -620,7 +634,7 @@ function CollectionTileButton({ tile, onOpen }: { tile: CollectionTile; onOpen: 
       <span className="absolute bottom-3 left-4">
         <span className="block text-lg font-semibold">{tile.name}</span>
         <span className="block text-xs text-muted-foreground tabular-nums">
-          {tile.count.toLocaleString()}
+          {formatNumber(tile.count)}
         </span>
       </span>
     </button>
@@ -652,7 +666,8 @@ function Section({
             onClick={onAll}
             className="flex items-center gap-0.5 text-sm text-muted-foreground hover:text-white"
           >
-            All{count === undefined ? "" : ` ${count.toLocaleString()}`}
+            {t("All")}
+            {count === undefined ? "" : ` ${formatNumber(count)}`}
             <ChevronRight className="size-3.5" />
           </button>
         )}

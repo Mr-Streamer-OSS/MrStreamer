@@ -38,6 +38,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
+import { t } from "@mrstreamer/core/i18n";
 import { fileDisk, transfer, type Disk, type TransferOutcome } from "../downloads/transfer.ts";
 import {
   DownloadStore,
@@ -244,7 +245,7 @@ function make(deps: DownloadsDeps) {
                 kind: "failed",
                 failure: record.failure ?? {
                   kind: "app",
-                  error: { kind: "unexpected", detail: "This download stopped." },
+                  error: { kind: "unexpected", detail: t("This download stopped.") },
                 },
               }
             : active?.id === record.id
@@ -589,7 +590,7 @@ function make(deps: DownloadsDeps) {
       });
 
     const notFound = new Failed({
-      error: { kind: "unexpected", detail: "That download is no longer here." },
+      error: { kind: "unexpected", detail: t("That download is no longer here.") },
     });
 
     return {

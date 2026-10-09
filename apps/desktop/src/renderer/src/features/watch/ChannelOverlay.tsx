@@ -6,6 +6,7 @@ import { useEffect, useRef } from "react";
 import type { Listing } from "@mrstreamer/contracts/guide";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
+import { t } from "@mrstreamer/core/i18n";
 import type { ChannelList } from "../../app/ui-store.ts";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Progress } from "../../components/Progress.tsx";
@@ -70,7 +71,7 @@ export function ChannelOverlay({
             <ChevronDown className={cn("size-4 flex-none", picking && "rotate-180")} />
           </button>
           <span className="flex-1" />
-          <Button variant="ghost" size="icon-sm" aria-label="Close" onClick={onClose}>
+          <Button variant="ghost" size="icon-sm" aria-label={t("Close")} onClick={onClose}>
             <X />
           </Button>
         </header>
@@ -232,9 +233,11 @@ function Row({
         </span>
         {current && <Progress value={progressOf(current, now)} className="mt-1 w-28" />}
       </span>
-      {playing && <span className="size-2 flex-none rounded-full bg-white" aria-label="Playing" />}
+      {playing && (
+        <span className="size-2 flex-none rounded-full bg-white" aria-label={t("Playing")} />
+      )}
       <button
-        aria-label={favourite ? "Remove from favourites" : "Add to favourites"}
+        aria-label={favourite ? t("Remove from favourites") : t("Add to favourites")}
         onMouseDown={(event) => event.preventDefault()}
         onClick={(event) => {
           event.stopPropagation();

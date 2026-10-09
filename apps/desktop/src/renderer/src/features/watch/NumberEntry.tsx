@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { create } from "zustand";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
+import { t } from "@mrstreamer/core/i18n";
 import { useUi } from "../../app/ui-store.ts";
 import { queries } from "../../lib/queries.ts";
 
@@ -73,7 +74,7 @@ export function NumberEntry({ onChannel }: { onChannel: (channel: LiveChannel) =
     <div className="pointer-events-none fixed top-12 right-12 z-40 min-w-[9rem] rounded-3xl bg-black/80 px-6 py-4 text-right ring-1 ring-white/10">
       <div className="text-5xl font-semibold tracking-tight tabular-nums">{digits}</div>
       <div className="mt-1 max-w-[16rem] truncate text-sm text-muted-foreground">
-        {match ? match.title : all.data ? "No channel" : ""}
+        {match ? match.title : all.data ? t("No channel") : ""}
       </div>
     </div>
   );

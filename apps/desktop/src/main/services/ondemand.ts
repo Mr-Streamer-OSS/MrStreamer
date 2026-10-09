@@ -36,6 +36,7 @@ import { hasTitles, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type { WatchlistPage } from "@mrstreamer/contracts/watchlist";
 import { diagnosed } from "@mrstreamer/core/diagnostics";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
+import { currentLanguage, t } from "@mrstreamer/core/i18n";
 import {
   tmdb,
   GENRES,
@@ -1125,7 +1126,7 @@ function make(deps: OnDemandDeps) {
 
 const switched = Effect.fail(
   new Failed({
-    error: { kind: "unexpected", detail: "The subscription changed while loading titles." },
+    error: { kind: "unexpected", detail: t("The subscription changed while loading titles.") },
   }),
 );
 
@@ -1197,7 +1198,8 @@ function workerClient(start: () => Worker, onEvent: (event: WorkerEvent) => void
     return new Promise((resolve, reject) => {
       const to = running();
       pending.set(id, { resolve: resolve as (value: unknown) => void, reject, worker: to });
-      to.postMessage({ id, method, args });
+      // The worker writes names, such as "New this week", in the language of the call.
+      to.postMessage({ id, method, args, interfaceLanguage: currentLanguage() });
     });
   };
 

@@ -2,13 +2,14 @@
 // play at their own speed and have no such button. The player keeps the speed, so it holds after a
 // seek or another track.
 import { Gauge } from "lucide-react";
+import { formatNumber, t } from "@mrstreamer/core/i18n";
 import { SPEEDS, titlePlayer, type Speed } from "../../player/title-player.ts";
 import { flash } from "./Flash.tsx";
 import { Choice, Menu, MenuNote } from "./TrackMenus.tsx";
 
 /** < and >: a movie or episode one speed slower or faster. */
 export function stepSpeed(direction: -1 | 1): void {
-  flash(`Speed ${speedLabel(titlePlayer.stepSpeed(direction))}`);
+  flash(t("Speed {speed}", { speed: speedLabel(titlePlayer.stepSpeed(direction)) }));
 }
 
 export function SpeedMenu({
@@ -26,13 +27,13 @@ export function SpeedMenu({
   onOpenChange: (open: boolean) => void;
 }) {
   return (
-    <Menu label="Speed" open={open} onOpenChange={onOpenChange} trigger={<Gauge />}>
+    <Menu label={t("Speed")} open={open} onOpenChange={onOpenChange} trigger={<Gauge />}>
       {hereOnly ? (
         <>
-          <Choice chosen={false} disabled note="1×" onChoose={() => {}}>
-            Speed
+          <Choice chosen={false} disabled note={speedLabel(1)} onChoose={() => {}}>
+            {t("Speed")}
           </Choice>
-          <MenuNote>Speed applies on this computer only.</MenuNote>
+          <MenuNote>{t("Speed applies on this computer only.")}</MenuNote>
         </>
       ) : (
         SPEEDS.map((each) => (
@@ -53,5 +54,5 @@ export function SpeedMenu({
 }
 
 function speedLabel(speed: number): string {
-  return `${speed}×`;
+  return `${formatNumber(speed)}×`;
 }

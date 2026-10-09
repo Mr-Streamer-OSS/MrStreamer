@@ -18,6 +18,7 @@ import { ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type { EpisodeMark, SeriesViewing } from "@mrstreamer/contracts/viewing";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import type { EpisodeState } from "@mrstreamer/core/viewing/episodes";
+import { t } from "@mrstreamer/core/i18n";
 import { Button } from "../../components/ui/button.tsx";
 import { appError, describeError } from "../../lib/errors.ts";
 import { call } from "../../lib/ipc.ts";
@@ -160,7 +161,9 @@ export function EpisodeMenu({
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label={`More for ${episodeLabel(episode.season, episode.number)}`}
+            aria-label={t("More for {episode}", {
+              episode: episodeLabel(episode.season, episode.number),
+            })}
             aria-busy={saving || undefined}
             // Dim until the row is pointed at or the button has the keyboard, as in the row's own
             // weight; never disabled, so it keeps the focus while a mark is stored.
@@ -182,7 +185,7 @@ export function EpisodeMenu({
               onPick={() => marks.mark(episode, true)}
             >
               <Check className="size-4 flex-none" />
-              Mark watched
+              {t("Mark watched")}
             </MarkItem>
             <MarkItem
               disabled={marks.busy || state === "unwatched"}
@@ -190,7 +193,7 @@ export function EpisodeMenu({
               onPick={() => marks.mark(episode, false)}
             >
               <Circle className="size-4 flex-none" />
-              Mark unwatched
+              {t("Mark unwatched")}
             </MarkItem>
           </Menu.Popup>
         </Menu.Positioner>
@@ -234,11 +237,31 @@ export function MarkNotice({ marks, source }: { marks: EpisodeMarks; source: str
   const { change } = marks;
   if (!change || change.step === "saving") return null;
   const episode = episodeLabel(change.episode.season, change.episode.number);
-  const as = change.watched ? "watched" : "unwatched";
-  const on = source ? ` on ${source}` : "";
   const failed = change.step === "failed" || change.step === "undo-failed";
   // An Undo the record refused can't be tried again: the series moved on.
-  const action = !failed ? "Undo" : change.error.kind === "mark-changed" ? null : "Retry";
+  const action = !failed ? t("Undo") : change.error.kind === "mark-changed" ? null : t("Retry");
+  /** "S1 E3 marked watched on Holiday house". */
+  const marked = () => {
+    if (change.watched) {
+      return source
+        ? t("{episode} marked watched on {source}", { episode, source })
+        : t("{episode} marked watched", { episode });
+    }
+    return source
+      ? t("{episode} marked unwatched on {source}", { episode, source })
+      : t("{episode} marked unwatched", { episode });
+  };
+  /** "Couldn't mark S1 E3 watched on Holiday house." */
+  const notMarked = () => {
+    if (change.watched) {
+      return source
+        ? t("Couldn't mark {episode} watched on {source}.", { episode, source })
+        : t("Couldn't mark {episode} watched.", { episode });
+    }
+    return source
+      ? t("Couldn't mark {episode} unwatched on {source}.", { episode, source })
+      : t("Couldn't mark {episode} unwatched.", { episode });
+  };
   return (
     <p
       role={failed ? "alert" : "status"}
@@ -249,12 +272,12 @@ export function MarkNotice({ marks, source }: { marks: EpisodeMarks; source: str
     >
       <span>
         {change.step === "failed"
-          ? `Couldn't mark ${episode} ${as}${on}. ${describeError(change.error)}`
+          ? `${notMarked()} ${describeError(change.error)}`
           : change.step === "undo-failed"
             ? change.error.kind === "mark-changed"
               ? describeError(change.error)
-              : `Couldn't undo ${episode}. ${describeError(change.error)}`
-            : `${episode} marked ${as}${on}`}
+              : `${t("Couldn't undo {episode}.", { episode })} ${describeError(change.error)}`
+            : marked()}
       </span>
       {action && (
         <button

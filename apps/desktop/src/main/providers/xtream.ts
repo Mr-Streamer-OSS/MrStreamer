@@ -17,6 +17,7 @@ import {
   type ProviderOptions,
   type ProviderTitle,
 } from "@mrstreamer/core/provider";
+import { t } from "@mrstreamer/core/i18n";
 
 export interface XtreamAccount {
   /** Normalised origin plus an optional path prefix, without a trailing slash. */
@@ -59,13 +60,13 @@ export function parseLogin(input: LoginInput): ParsedLogin {
   } catch {
     throw new AppFailure({
       kind: "incomplete-login",
-      detail: "The server address is not a valid URL.",
+      detail: t("The server address is not a valid URL."),
     });
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new AppFailure({
       kind: "incomplete-login",
-      detail: "The server address must start with http or https.",
+      detail: t("The server address must start with http or https."),
     });
   }
 
@@ -79,7 +80,7 @@ export function parseLogin(input: LoginInput): ParsedLogin {
   if (!username || !password) {
     throw new AppFailure({
       kind: "incomplete-login",
-      detail: "Enter a username and password, or paste an M3U link.",
+      detail: t("Enter a username and password, or paste an M3U link."),
     });
   }
 
@@ -93,7 +94,7 @@ export function parseLogin(input: LoginInput): ParsedLogin {
 }
 
 /** What `describeNetworkError` says when the server's name doesn't resolve. */
-const NAME_NOT_FOUND = "The server name could not be found.";
+const nameNotFound = () => t("The server name could not be found.");
 
 /**
  * Whether a failed https login says only that the address has no Xtream API over https, so http
@@ -104,7 +105,7 @@ const NAME_NOT_FOUND = "The server name could not be found.";
 export function httpsUnavailable(error: AppError): boolean {
   return (
     error.kind === "provider-error" ||
-    (error.kind === "unreachable" && error.detail !== NAME_NOT_FOUND)
+    (error.kind === "unreachable" && error.detail !== nameNotFound())
   );
 }
 
@@ -655,7 +656,7 @@ function notAnApi(server: string): AppFailure {
   return new AppFailure({
     kind: "unreachable",
     server,
-    detail: "The server answered, but not like an Xtream API.",
+    detail: t("The server answered, but not like an Xtream API."),
   });
 }
 
@@ -743,32 +744,32 @@ function toInteger(value: string | number | null | undefined): number | null {
 /** Why a request to a provider failed, in a sentence that names no address beyond its origin. */
 export function describeNetworkError(cause: unknown): string {
   if (cause instanceof DOMException && cause.name === "TimeoutError")
-    return "The server did not answer in time.";
+    return t("The server did not answer in time.");
   // fetch wraps the socket error: TypeError("fetch failed", { cause: Error { code } }).
   const inner = cause instanceof Error && cause.cause instanceof Error ? cause.cause : null;
   const code = inner && "code" in inner ? inner.code : null;
   switch (code) {
     case "ENOTFOUND":
     case "EAI_AGAIN":
-      return NAME_NOT_FOUND;
+      return nameNotFound();
     case "ECONNREFUSED":
-      return "The server refused the connection.";
+      return t("The server refused the connection.");
     case "ECONNRESET":
-      return "The connection was reset.";
+      return t("The connection was reset.");
     case "ETIMEDOUT":
     case "UND_ERR_CONNECT_TIMEOUT":
-      return "The server did not answer in time.";
+      return t("The server did not answer in time.");
     // An https address on a server that speaks only http.
     case "ERR_SSL_WRONG_VERSION_NUMBER":
     case "ERR_SSL_PACKET_LENGTH_TOO_LONG":
-      return "The server doesn't offer an encrypted connection at this address.";
+      return t("The server doesn't offer an encrypted connection at this address.");
     case "DEPTH_ZERO_SELF_SIGNED_CERT":
     case "SELF_SIGNED_CERT_IN_CHAIN":
     case "UNABLE_TO_VERIFY_LEAF_SIGNATURE":
     case "UNABLE_TO_GET_ISSUER_CERT_LOCALLY":
     case "CERT_HAS_EXPIRED":
     case "ERR_TLS_CERT_ALTNAME_INVALID":
-      return "The server's certificate isn't valid for this address.";
+      return t("The server's certificate isn't valid for this address.");
     default:
       return withoutAddresses(
         inner?.message ?? (cause instanceof Error ? cause.message : String(cause)),

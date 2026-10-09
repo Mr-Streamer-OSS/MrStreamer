@@ -8,6 +8,7 @@ import { useMutation } from "@tanstack/react-query";
 import { ArrowDownToLine, Check, ChevronDown, Play, RotateCw } from "lucide-react";
 import type { Download, DownloadFailure } from "@mrstreamer/contracts/downloads";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
+import { formatPercent, t } from "@mrstreamer/core/i18n";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import { Progress } from "../../components/Progress.tsx";
 import { Button } from "../../components/ui/button.tsx";
@@ -38,13 +39,13 @@ function useDownload(title: TitleRef) {
 function shortly(failure: DownloadFailure): string {
   switch (failure.kind) {
     case "disk-full":
-      return "Disk full";
+      return t("Disk full");
     case "folder":
-      return "Can't write";
+      return t("Can't write");
     case "stream":
-      return failure.failure.kind === "refused" ? "Refused" : "Stopped";
+      return failure.failure.kind === "refused" ? t("Refused") : t("Stopped");
     case "app":
-      return "Stopped";
+      return t("Stopped");
   }
 }
 
@@ -76,7 +77,7 @@ function MovieState({
     return (
       <Button variant="secondary" size="lg" disabled={busy} onClick={add}>
         <ArrowDownToLine />
-        Download
+        {t("Download")}
       </Button>
     );
   }
@@ -89,26 +90,34 @@ function MovieState({
           variant="secondary"
           size="lg"
           disabled={busy}
-          aria-label={`${status.kind === "queued" ? "Queued" : "Waiting for playback"}, cancel download`}
+          aria-label={
+            status.kind === "queued"
+              ? t("Queued, cancel download")
+              : t("Waiting for playback, cancel download")
+          }
           onClick={() => remove(id)}
         >
-          {status.kind === "queued" ? "Queued · Cancel" : "Waiting for playback · Cancel"}
+          {status.kind === "queued" ? t("Queued") : t("Waiting for playback")} · {t("Cancel")}
         </Button>
       );
     case "transferring": {
       const done = transferred(download);
-      const percent = done === null ? null : Math.floor(done * 100);
+      const percent = done === null ? null : formatPercent(Math.floor(done * 100) / 100);
       return (
         <Button
           variant="secondary"
           size="lg"
           disabled={busy}
-          aria-label={`Downloading${percent === null ? "" : ` ${percent}%`}, cancel download`}
+          aria-label={
+            percent === null
+              ? t("Downloading, cancel download")
+              : t("Downloading {percent}, cancel download", { percent })
+          }
           onClick={() => remove(id)}
           className="tabular-nums"
         >
           {done !== null && <Progress value={done} className="w-12" />}
-          {percent === null ? "Downloading" : `${percent}%`}
+          {percent ?? t("Downloading")}
         </Button>
       );
     }
@@ -118,17 +127,17 @@ function MovieState({
           variant="destructive"
           size="lg"
           disabled={busy}
-          aria-label={`${describeFailure(status.failure)} Retry download`}
+          aria-label={t("{reason} Retry download", { reason: describeFailure(status.failure) })}
           onClick={() => retry(id)}
         >
           <RotateCw />
-          {shortly(status.failure)} · Retry
+          {shortly(status.failure)} · {t("Retry")}
         </Button>
       );
     case "missing":
       return (
         <Button variant="destructive" size="lg" disabled={busy} onClick={() => remove(id)}>
-          File missing · Delete
+          {t("File missing")} · {t("Delete")}
         </Button>
       );
     case "complete":
@@ -141,7 +150,7 @@ function MovieState({
             className="rounded-r-none pr-5"
           >
             <Play className="fill-current" />
-            Watch offline
+            {t("Watch offline")}
           </Button>
           <Menu.Root>
             <Menu.Trigger
@@ -149,7 +158,7 @@ function MovieState({
                 <Button
                   variant="secondary"
                   size="lg"
-                  aria-label="Download options"
+                  aria-label={t("Download options")}
                   className="rounded-l-none border-l border-black/40 px-3"
                 />
               }
@@ -164,7 +173,7 @@ function MovieState({
                     onClick={() => remove(id)}
                     className="px-2 py-2 outline-none data-highlighted:bg-white/10"
                   >
-                    Delete download
+                    {t("Delete download")}
                   </Menu.Item>
                 </Menu.Popup>
               </Menu.Positioner>
@@ -187,7 +196,12 @@ export function EpisodeDownload({ title }: { title: Extract<TitleRef, { kind: "e
   } as const;
   if (!download) {
     return (
-      <Button {...shared} size="icon-sm" aria-label={`Download ${label}`} onClick={add}>
+      <Button
+        {...shared}
+        size="icon-sm"
+        aria-label={t("Download {title}", { title: label })}
+        onClick={add}
+      >
         <ArrowDownToLine />
       </Button>
     );
@@ -198,18 +212,22 @@ export function EpisodeDownload({ title }: { title: Extract<TitleRef, { kind: "e
       return (
         <Button
           {...shared}
-          aria-label={`Watch ${label} offline`}
+          aria-label={t("Watch {title} offline", { title: label })}
           onClick={() => watchOffline(download)}
         >
           <Check />
-          Downloaded
+          {t("Downloaded")}
         </Button>
       );
     case "queued":
     case "waiting":
       return (
-        <Button {...shared} aria-label={`Cancel download of ${label}`} onClick={() => remove(id)}>
-          {status.kind === "queued" ? "Queued" : "Waiting"}
+        <Button
+          {...shared}
+          aria-label={t("Cancel download of {title}", { title: label })}
+          onClick={() => remove(id)}
+        >
+          {status.kind === "queued" ? t("Queued") : t("Waiting")}
         </Button>
       );
     case "transferring": {
@@ -217,12 +235,12 @@ export function EpisodeDownload({ title }: { title: Extract<TitleRef, { kind: "e
       return (
         <Button
           {...shared}
-          aria-label={`Cancel download of ${label}`}
+          aria-label={t("Cancel download of {title}", { title: label })}
           onClick={() => remove(id)}
           className="tabular-nums"
         >
           {done !== null && <Progress value={done} className="w-9" />}
-          {done === null ? "…" : `${Math.floor(done * 100)}%`}
+          {done === null ? "…" : formatPercent(Math.floor(done * 100) / 100)}
         </Button>
       );
     }
@@ -230,23 +248,26 @@ export function EpisodeDownload({ title }: { title: Extract<TitleRef, { kind: "e
       return (
         <Button
           {...shared}
-          aria-label={`${describeFailure(status.failure)} Retry download of ${label}`}
+          aria-label={t("{reason} Retry download of {title}", {
+            reason: describeFailure(status.failure),
+            title: label,
+          })}
           onClick={() => retry(id)}
           className="text-destructive"
         >
           <RotateCw />
-          Retry
+          {t("Retry")}
         </Button>
       );
     case "missing":
       return (
         <Button
           {...shared}
-          aria-label={`Download of ${label} missing, delete it`}
+          aria-label={t("Download of {title} missing, delete it", { title: label })}
           onClick={() => remove(id)}
           className="text-destructive"
         >
-          Missing
+          {t("Missing")}
         </Button>
       );
   }
