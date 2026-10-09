@@ -10,6 +10,7 @@ import { basename, join } from "node:path";
 import { Writable } from "node:stream";
 import type { Download } from "@mrstreamer/contracts/downloads";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
+import { setLanguage } from "@mrstreamer/core/i18n";
 import { playlistGroupId } from "@mrstreamer/core/playlist/import";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { fileDisk, type Disk } from "../src/main/downloads/transfer.ts";
@@ -1208,4 +1209,16 @@ describe.skipIf(!hasTools)("downloads", () => {
     expect(await subtitles.saved(copy.sessionId)).toBeNull();
     await playback.close(copy.sessionId);
   }, 60_000);
+});
+
+// Main makes its services before it applies the saved interface language, and the viewer can pick
+// another while it runs: a failure made later is in the language of that moment.
+it("says a download asked for after it went is gone in the interface language picked since", async () => {
+  const { downloads, quit } = await app(await tempDir());
+  setLanguage({ locale: "fr-FR", formats: "fr-FR" });
+  onTestFinished(() => setLanguage({ locale: "en-US", formats: "en-US" }));
+  const gone = { error: { kind: "unexpected", detail: "Ce téléchargement n'est plus là." } };
+  await expect(downloads.retry("gone")).rejects.toMatchObject(gone);
+  await expect(downloads.recordProgress("gone", 3, 10)).rejects.toMatchObject(gone);
+  await quit();
 });

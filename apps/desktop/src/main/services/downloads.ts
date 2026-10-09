@@ -589,9 +589,11 @@ function make(deps: DownloadsDeps) {
         catch: (cause) => (cause instanceof Failed ? cause : failedWith(cause)),
       });
 
-    const notFound = new Failed({
-      error: { kind: "unexpected", detail: t("That download is no longer here.") },
-    });
+    // Made when it fails, so it says so in the interface language of the moment.
+    const notFound = () =>
+      new Failed({
+        error: { kind: "unexpected", detail: t("That download is no longer here.") },
+      });
 
     return {
       list: Effect.suspend(() => {
@@ -679,7 +681,7 @@ function make(deps: DownloadsDeps) {
       retry: (id: string) =>
         attempt(async () => {
           const record = records.get(id);
-          if (!record) throw notFound;
+          if (!record) throw notFound();
           if (record.state !== "failed") return;
           const { failure: _failure, ...rest } = record;
           write({ ...rest, state: "queued" });
@@ -690,7 +692,7 @@ function make(deps: DownloadsDeps) {
       recordProgress: (id: string, position: number, duration: number) =>
         attempt(async () => {
           const record = records.get(id);
-          if (record?.state !== "complete") throw notFound;
+          if (record?.state !== "complete") throw notFound();
           write({
             ...record,
             progress: { position: Math.min(position, duration), duration, at: Date.now() },
