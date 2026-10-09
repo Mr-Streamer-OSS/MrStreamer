@@ -3,6 +3,7 @@
 import { spawnSync } from "node:child_process";
 import { readFile, readdir } from "node:fs/promises";
 import { createServer } from "node:http";
+import { DatabaseSync } from "node:sqlite";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { Writable } from "node:stream";
@@ -113,6 +114,9 @@ async function read(url: string, start: number): Promise<number> {
   return (await answer.arrayBuffer()).byteLength;
 }
 
+/** The film's address on the playlist host: a secret in its path, as a provider's login is. */
+const FILM = "/s3cr3t-token/film.mp4";
+
 /**
  * A playlist host with one mapped film, which wants its own User-Agent, as playlists name one.
  * `hold` keeps the next list or file request unanswered until released.
@@ -136,12 +140,12 @@ async function playlistHost() {
             "#EXTM3U",
             '#EXTINF:-1 group-title="Films",Twelve',
             "#EXTVLCOPT:http-user-agent=Twelve",
-            `${origin}/film.mp4`,
+            `${origin}${FILM}`,
             "",
           ].join("\n"),
         );
       }
-      if (path !== "/film.mp4" || request.headers["user-agent"] !== "Twelve") {
+      if (path !== FILM || request.headers["user-agent"] !== "Twelve") {
         return response.writeHead(403).end();
       }
       const range = /^bytes=(\d+)-$/.exec(request.headers.range ?? "");
@@ -161,7 +165,7 @@ async function playlistHost() {
     film,
     link: `${origin}/list?token=fake`,
     asked: (path: string) => asked.filter((each) => each === path).length,
-    hold(path: "/list" | "/film.mp4") {
+    hold(path: "/list" | typeof FILM) {
       const arrived = Promise.withResolvers<void>();
       const released = Promise.withResolvers<void>();
       holds.set(path, { arrived: arrived.resolve, released: released.promise });
@@ -500,6 +504,25 @@ describe.skipIf(!hasTools)("downloads", () => {
     expect(await readdir(join(dataDir, "downloads"))).toEqual([]);
   }, 60_000);
 
+  it("asks again when the provider is still freeing the connection of the download before", async () => {
+    const { provider, dataDir, subscriptionId, downloads, find } = await connected({
+      slotReleaseMs: 800,
+    });
+    const first = movie(provider, subscriptionId, "TEST | Index at the end");
+    const second = movie(provider, subscriptionId, "TEST | Old AVI");
+    const a = await downloads.add(first.ref);
+    const b = await downloads.add(second.ref);
+    await vi.waitFor(
+      async () => {
+        expect((await find(a.id))?.status.kind).toBe("complete");
+        expect((await find(b.id))?.status.kind).toBe("complete");
+      },
+      { timeout: LONG },
+    );
+    expect(await copyOf(dataDir, b.id)).toEqual(second.bytes);
+    expect(provider.mostFilesAtOnce()).toBe(1);
+  }, 60_000);
+
   it("waits out a provider that stops sending for longer than it took to answer", async () => {
     const { provider, dataDir, subscriptionId, downloads, find } = await connected();
     const film = movie(provider, subscriptionId, "TEST | Index at the end");
@@ -544,7 +567,7 @@ describe.skipIf(!hasTools)("downloads", () => {
       const [listed] = (await source.provider.onDemandCatalogue()).movies;
       const ref: TitleRef = { kind: "movie", subscriptionId: saved.id, id: listed!.id };
       // Quit with the file's answer held: the queue keeps it.
-      const answer = host.hold("/film.mp4");
+      const answer = host.hold(FILM);
       const queued = await first.downloads.add(ref);
       await answer.arrived;
       await first.quit();
@@ -552,7 +575,7 @@ describe.skipIf(!hasTools)("downloads", () => {
 
       // The next start reads the playlist again before it knows the file: removed meanwhile, the
       // file is never asked for.
-      const files = host.asked("/film.mp4");
+      const files = host.asked(FILM);
       const list = host.hold("/list");
       const second = await app(dataDir);
       await list.arrived;
@@ -561,7 +584,7 @@ describe.skipIf(!hasTools)("downloads", () => {
       list.release();
       expect((await second.downloads.list()).items).toEqual([]);
       await new Promise((resolve) => setTimeout(resolve, 200));
-      expect(host.asked("/film.mp4")).toBe(files);
+      expect(host.asked(FILM)).toBe(files);
       expect(await readdir(join(dataDir, "downloads"))).toEqual([]);
 
       // Queued again and quit while it is looked up: the next start finishes it.
@@ -571,6 +594,16 @@ describe.skipIf(!hasTools)("downloads", () => {
         { timeout: LONG },
       );
       expect(await copyOf(dataDir, again.id)).toEqual(host.film);
+      // What is kept on disk names no address: the secret in the file's path stays in memory.
+      const db = new DatabaseSync(join(dataDir, "mrstreamer.db"), { readOnly: true });
+      try {
+        const kept = JSON.stringify(db.prepare("select * from downloads").all());
+        expect(kept).toContain(again.id);
+        expect(kept).not.toContain("s3cr3t");
+        expect(kept).not.toContain("127.0.0.1");
+      } finally {
+        db.close();
+      }
       const another = await second.downloads.add({ ...ref });
       expect(another.id).toBe(again.id);
       await second.quit();

@@ -3635,6 +3635,7 @@ function make(deps: PlaybackDeps) {
      * session again and fails.
      */
     const fileSession = (
+      id: string,
       origin: TitleOrigin,
       file: {
         readonly url: string;
@@ -3646,7 +3647,6 @@ function make(deps: PlaybackDeps) {
       receiver: ReceiverTarget | null,
     ) =>
       Effect.gen(function* () {
-        const id = randomUUID();
         const { closed, scope: forked, lan } = yield* sessionScope(id, receiver);
         const session: TitleSessionState = {
           kind: "title",
@@ -3722,9 +3722,10 @@ function make(deps: PlaybackDeps) {
         }
         yield* closeAll;
         const headers = new Headers(asked.headers);
+        const id = randomUUID();
         // Only this session's successful write can be forgotten by its replacement. Address-derived
         // probe keys stay in memory, including on cached-probe opens.
-        const fileKey = randomUUID();
+        const fileKey = id;
         const verified: Verified | null = asked.listingKey
           ? {
               account: source.key,
@@ -3734,6 +3735,7 @@ function make(deps: PlaybackDeps) {
             }
           : null;
         const { session, probe } = yield* fileSession(
+          id,
           { kind: "provider", title, verified },
           {
             url: upstreamUrl,
@@ -3844,6 +3846,7 @@ function make(deps: PlaybackDeps) {
               { discard: true },
             );
             const { session, probe } = yield* fileSession(
+              randomUUID(),
               { kind: "copy", copy: copy.id, file: subtitlesOfCopy(copy.id, copy.title) },
               {
                 url: `copy:${copy.id}`,

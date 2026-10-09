@@ -12,6 +12,8 @@
 // stamp each answer with the time (RFC 9110 8.8.2.2). A file whose answers carry no mark is known
 // by its size alone, so nothing kept of it outlasts the reading it was kept for.
 
+import { createHash } from "node:crypto";
+
 /** What an answer holds of the file. */
 export interface Held {
   /** From which byte on. */
@@ -26,7 +28,8 @@ export interface Held {
 
 /**
  * What proves which file was read: its size, and the strong mark each address it came from gave
- * it, after redirects. Another reading of the same bytes says the same for its address.
+ * it, after redirects, by `resourceKey`. Another reading of the same bytes says the same for its
+ * address. It is kept on disk, so it names no address itself.
  */
 export interface FileProof {
   readonly size: number;
@@ -75,7 +78,7 @@ export function sourceIdentity() {
       return {
         size,
         marks: [...marks].flatMap(([resource, mark]) =>
-          mark === null ? [] : [{ resource, mark }],
+          mark === null ? [] : [{ resource: resourceKey(resource), mark }],
         ),
       };
     },
@@ -129,6 +132,17 @@ export function sourceIdentity() {
       return { ...held, other, stale: false };
     },
   };
+}
+
+/**
+ * An address as what is kept on disk names it: a fingerprint of its origin and path. A provider's
+ * file address holds the login in its path, which never goes to disk.
+ */
+export function resourceKey(address: string): string {
+  const url = URL.parse(address);
+  return createHash("sha256")
+    .update(url ? url.origin + url.pathname : "")
+    .digest("hex");
 }
 
 /** The mark of an answer that tells its file from any other: a strong ETag, or an old enough date. */

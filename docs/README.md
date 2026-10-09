@@ -6,6 +6,7 @@
 - [Subscriptions](./user/subscriptions.md)
 - [Live TV](./user/live-tv.md)
 - [Movies and series](./user/movies-and-series.md)
+- [Downloads](./user/downloads.md)
 - [Updates and channels](./user/updates.md)
 - [What plays](./user/playback.md)
 - [Troubleshooting](./user/troubleshooting.md)

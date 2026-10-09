@@ -17,11 +17,16 @@ import type { DownloadFailure } from "@mrstreamer/contracts/downloads";
 import type { StreamFailure } from "@mrstreamer/contracts/playback";
 import type { Provider } from "@mrstreamer/core/provider";
 import type { PartIdentity } from "../platform/downloads-store.ts";
-import { strongMark } from "../playback/source-identity.ts";
+import { resourceKey, strongMark } from "../playback/source-identity.ts";
 import { classify } from "../services/playback.ts";
 
 /** How long the provider gets to start answering. */
 const CONNECT_TIMEOUT_MS = 15_000;
+/**
+ * Waits before asking again after a refusal: a provider can take a moment to free the connection
+ * of a request that just ended, as another download's or playback's. Its length is the limit.
+ */
+const REFUSED_RETRY_MS = [500, 1500, 3000];
 /** How long the body may send nothing before the transfer counts as broken. */
 const STALL_MS = 60_000;
 
@@ -124,6 +129,7 @@ export async function transfer(asked: TransferRequest): Promise<TransferOutcome>
 async function connect(
   asked: TransferRequest,
   resume: { readonly from: number; readonly known: PartIdentity } | null,
+  attempt = 0,
 ): Promise<
   | { readonly kind: "answer"; readonly response: Response }
   | { readonly kind: "past-end" }
@@ -161,7 +167,20 @@ async function connect(
   if (response.ok) return { kind: "answer", response };
   await response.body?.cancel().catch(() => {});
   if (resume && response.status === 416) return { kind: "past-end" };
-  return failed(classify(response.status));
+  const failure = classify(response.status);
+  const wait = REFUSED_RETRY_MS[attempt];
+  if (failure.kind !== "refused" || wait === undefined) return failed(failure);
+  const waited = await new Promise<boolean>((resolve) => {
+    const done = (went: boolean) => {
+      clearTimeout(timer);
+      asked.signal.removeEventListener("abort", stopped);
+      resolve(went);
+    };
+    const stopped = () => done(false);
+    const timer = setTimeout(() => done(true), wait);
+    asked.signal.addEventListener("abort", stopped, { once: true });
+  });
+  return waited ? connect(asked, resume, attempt + 1) : { kind: "stopped" };
 }
 
 /** Writes the answer's bytes into the partial from byte `from` on, until it ends or stops. */
@@ -270,10 +289,9 @@ function sizeOf(response: Response): number | null {
       : null;
 }
 
-/** The address an answer came from after redirects, without its query, which can hold a login. */
+/** The address an answer came from after redirects, as kept on disk: never the address itself. */
 function resourceOf(response: Response): string {
-  const address = URL.parse(response.url);
-  return address ? address.origin + address.pathname : "";
+  return resourceKey(response.url);
 }
 
 /** The If-Range a strong mark asks with: its ETag, or its date. */

@@ -1,6 +1,6 @@
 # Privacy policy
 
-Last updated 7 October 2026. The current version is at <https://mrstreamer.app/privacy>.
+Last updated 9 October 2026. The current version is at <https://mrstreamer.app/privacy>.
 
 Mr. Streamer is a free, open-source desktop player for the IPTV subscription you already have. This policy explains what it stores on your computer, what it sends and to whom, and what we receive.
 
@@ -14,6 +14,7 @@ Data controller: Wout Stiens, Belgium, publishing as Mr Streamer OSS. Contact: p
 - If your provider has no encrypted address, your login is sent unencrypted. The app tells you before it does this.
 - A programme guide you add from another address is downloaded from that address's server. It receives the address and your IP address, and never your login.
 - When you play on a TV, the TV fetches the stream from your computer over your local network. It never receives your login or your provider's address.
+- Movies and episodes you download, with their details and pictures, are stored only on your computer. Watching them sends nothing.
 
 ## Data stored on your computer
 
@@ -40,6 +41,7 @@ The folder contains:
 - information from TMDB about your providers' movies and series
 - your update channel
 - a diagnostics log of what the app did and how long it took. It contains no server addresses, logins or channel names, and it leaves your computer only if you attach it to an issue or an email.
+- from 0.0.10, the movies and episodes you downloaded, in a `downloads` folder: each file, or the part of it downloaded so far, with the name, year, length, episode name and number, original language, poster and picture kept for it, the provider's numbers for that exact file, how far you watched the copy, and the subtitle text and timing you had saved for that exact version. Each download also keeps the account it came from, as the viewing record does: the server address and username, or a playlist's fingerprint, with the id of the subscription it was added from and a fingerprint of the encrypted password or link. Your password, the playlist link and the file's download address are not stored with it.
 - a cache of images, at most 64 MB, and other files the app's browser engine keeps for itself
 
 Two items are stored outside this folder: the key that encrypts your password or playlist link, in your system's keychain, and a downloaded update, in a `mrstreamer-updater` folder in your system's cache folder.
@@ -75,6 +77,10 @@ When you add a playlist link, Mr. Streamer downloads the playlist from that addr
 ### A guide from another address
 
 If you give a subscription a programme guide from an address of your own, Mr. Streamer downloads the guide from that address: when you choose **Check**, when you refresh it, and about every six hours while it is that subscription's guide. The address's server, and any server it redirects to, receives your IP address, the app version and the address itself, with any key in it. It never receives your provider's address or login, and the app sends it nothing about your channels or what you watch. An address starting with `http://` is sent unencrypted, key included, and the form says so before the first request. Mr. Streamer never follows a redirect from an `https://` address to an `http://` one.
+
+### Downloads, from 0.0.10
+
+A download asks your provider for the file, with your login, as playing it does: your provider sees that you downloaded it, and when. When you download, Mr. Streamer also fetches the title's poster and picture once, from the servers below under Images, to keep with the copy. Watching a downloaded copy connects to nothing: no provider, no TMDB, no image server and no TV.
 
 ### Images
 
@@ -129,6 +135,8 @@ Our email and hosting providers process these messages and visits to our website
 ## Deleting your data
 
 - **Remove**, on a subscription in Settings > Subscriptions, deletes that subscription's login or playlist link, the id and the name the app kept for it, the copies of its provider's lists and guide, and a guide address you gave it with the copy of that guide and the channels you mapped. Your other subscriptions keep theirs. Tick **Also delete favourites, watchlist, history and progress** to delete that account's favourites, watchlist, watched channels, progress in movies and episodes, the episodes you marked, and saved subtitle cues and timing as well. Otherwise they remain on this computer. Your favourites, watchlist and viewing record reappear if you add the same account again.
+- **Remove** also cancels that subscription's unfinished downloads and deletes what they had downloaded. Downloaded copies stay, with their details and progress, until you delete them.
+- **Delete**, on a download in Downloads, deletes its file, its details and pictures, its progress and its saved subtitles.
 - **Use provider guide**, or **Use playlist guide**, in a subscription's Guide form deletes the guide address you gave it, the copy of that guide and the channels you mapped.
 - **Deleting the folder** listed above removes everything Mr. Streamer stores there. To also remove the password key, delete "Mr. Streamer Safe Storage" in Keychain Access on macOS, or the matching entry in your Linux keyring. The update folder can be deleted as well: `~/Library/Caches/mrstreamer-updater` on macOS, `%LOCALAPPDATA%\mrstreamer-updater` on Windows, or `~/.cache/mrstreamer-updater` on Linux.
 - **Uninstalling the app does not delete your data**, so a reinstall continues where you left off. The copy from the Microsoft Store is the exception: uninstalling it deletes its folder.

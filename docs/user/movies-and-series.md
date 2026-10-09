@@ -142,6 +142,6 @@ Home's first row shows what you were watching: movies you started, and for each 
 
 ## One connection
 
-Many subscriptions allow one connection at a time, and Mr. Streamer plays one thing at a time across all of them. Opening a movie or episode stops the live channel first, whichever subscription each is from, and Movies and Series don't play the muted live preview Home shows; it starts again when you go back to Home. A pause of more than five minutes lets go of the connection, and playing again picks up where you were.
+Many subscriptions allow one connection at a time, and Mr. Streamer plays one thing at a time across all of them. Opening a movie or episode stops the live channel first, whichever subscription each is from, and Movies and Series don't play the muted live preview Home shows; it starts again when you go back to Home. A pause of more than five minutes lets go of the connection, and playing again picks up where you were. A [download](downloads.md) from the same subscription waits while anything of it plays.
 
 [What plays](playback.md) lists the formats and what gets converted.

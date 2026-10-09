@@ -29,8 +29,8 @@ export type About = typeof About.infer;
 
 /**
  * Which file the partial bytes are of, as the provider's answers said: the address they came
- * from after redirects, its strong mark, and the whole file's size. A transfer goes on from
- * them only for an answer that says the same.
+ * from after redirects, by its fingerprint (`resourceKey`), its strong mark, and the whole file's
+ * size. A transfer goes on from them only for an answer that says the same.
  */
 const PartIdentity = type({ resource: "string", mark: "string", size: "number.integer >= 0" });
 export type PartIdentity = typeof PartIdentity.infer;
