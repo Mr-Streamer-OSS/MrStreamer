@@ -140,7 +140,16 @@ setInterval(() => {}, 1000);
       });
       const response = await waiting;
       expect(response.status).toBe(200);
-      return { subtitles, stop: () => leaving.abort() };
+      // Read like the player. An abandoned response can be collected and close the run before
+      // its subtitle report arrives. Replacement and explicit abort both end this read.
+      const reading = response.body?.pipeTo(new WritableStream()).catch(() => {});
+      return {
+        subtitles,
+        stop: async () => {
+          leaving.abort();
+          await reading;
+        },
+      };
     },
   };
 }
@@ -1092,7 +1101,7 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
           "Already sent",
           "New text",
         ]);
-        current.stop();
+        await current.stop();
       } finally {
         await dispose();
       }
@@ -1122,7 +1131,7 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
         await vi.waitFor(() => expect(feed.lines.some(([at]) => at === 127)).toBe(true), {
           timeout: 10_000,
         });
-        current.stop();
+        await current.stop();
       } finally {
         await dispose();
       }
