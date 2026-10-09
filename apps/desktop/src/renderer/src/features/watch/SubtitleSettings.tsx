@@ -225,6 +225,8 @@ function Segments<V extends string>({
             aria-checked={option.value === value}
             aria-label={option.label}
             data-item={option.value === value ? "" : undefined}
+            // Tab stops on the chosen one too: the others are Left and Right from it.
+            tabIndex={option.value === value ? 0 : -1}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => onPick(option.value)}
             className={cn(
