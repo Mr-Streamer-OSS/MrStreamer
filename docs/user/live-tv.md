@@ -42,11 +42,11 @@ Programme information comes from your provider. Many providers only cover some c
 
 While watching, the channel list opens over the left of the picture with the list button, Enter or the left arrow. Click a channel to switch; its title switches to another category. Clicking the picture shows the controls, and a double click toggles full screen. From 0.0.9, scroll over the picture to switch channel, once per gesture.
 
-From 0.0.9, the bar keeps Channels, Favourite, Stop or Watch, CC when available, volume, full screen and **More**. More holds channel up, channel down, the previous channel, Sound, Quality, Playback, Play on and Mini player. In 0.0.8, these actions have their own buttons in the bar.
+From 0.0.9, the bar keeps Channels, Favourite, Stop or Watch, CC when available, volume, full screen and **More**. More holds channel up, channel down, the previous channel, Sound, Quality, Play on and Mini player. In 0.0.8, these actions have their own buttons in the bar.
 
 - **Sound**, in More, shows when a channel has more than one sound track. Picking another starts the channel again with it, which takes a moment. An HLS channel, as most of a playlist's are, switches without starting again.
 - **CC** lists the channel's subtitles: DVB subtitles, teletext subtitle pages and closed captions, and on an HLS channel the subtitles its stream offers. C turns the last ones you picked on and off.
-- **Playback**, in More, moves teletext subtitles and captions earlier or later, until you switch channel, and sets how subtitles look, as for [movies and series](movies-and-series.md#watching). Live channels play at their own speed.
+- From 0.0.9, **CC** also has **Timing**, which moves teletext subtitles and captions earlier or later until you switch channel, and the rows that set how subtitles look, as for [movies and series](movies-and-series.md#watching). In 0.0.8 they are under **Playback**. Live channels play at their own speed.
 - **Quality**, in More, shows on a channel with several qualities. Its page says which one plays. Q opens it directly.
 - **Mini player**, in More, or P, shrinks the window into a small picture on top of other windows, as for [movies and series](movies-and-series.md#watching). Up and Down still switch channel; opening the list puts the window back.
 - The keyboard's media keys and the system's own controls show the programme, the channel and its logo. Pause or stop there stops the channel, and **Watch** starts it again. Next and previous do nothing, so a tap on your headphones never changes channel. On [a TV](playback.md#playing-on-a-tv), a channel paused with the TV's own remote shows as paused, and play there plays it on.

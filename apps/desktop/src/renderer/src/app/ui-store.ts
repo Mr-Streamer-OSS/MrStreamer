@@ -65,6 +65,8 @@ interface UiState {
   readonly settings: SettingsTab | null;
   /** What Settings > Subscriptions opens on, once; null leaves its list as it is. */
   readonly subscription: SubscriptionTarget | null;
+  /** Settings > General opens on Online subtitles, once, rather than at its top. */
+  readonly onlineSubtitles: boolean;
   /** The list the guide and Watch's channel list show. */
   readonly list: ChannelList;
   readonly updateDialog: UpdateDialog | null;
@@ -83,6 +85,7 @@ export const useUi = create<UiState>(() => ({
   searchFrom: "",
   settings: null,
   subscription: null,
+  onlineSubtitles: false,
   list: { kind: "all" },
   updateDialog: null,
 }));
@@ -128,6 +131,11 @@ export function resetForAccount(): void {
  */
 export function openSubscription(id: string, show: SubscriptionTarget["show"]): void {
   useUi.setState({ settings: "subscriptions", subscription: { id, show }, searchOpen: false });
+}
+
+/** Opens Settings on Online subtitles, as from a title's CC panel: the title goes on underneath. */
+export function openOnlineSubtitleSettings(): void {
+  useUi.setState({ settings: "general", onlineSubtitles: true, searchOpen: false });
 }
 
 /** Opens Watch over the current page. */

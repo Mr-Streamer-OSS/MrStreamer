@@ -48,7 +48,7 @@ import { MINI_NEEDS_PICTURE, MiniControls } from "./MiniPlayer.tsx";
 import { NowPlayingBar } from "./NowPlaying.tsx";
 import { numberEntry, NumberEntry } from "./NumberEntry.tsx";
 import { ConnectingNote, openChooser } from "./Output.tsx";
-import { nudgeSubtitles } from "./PlaybackMenu.tsx";
+import { nudgeSubtitles } from "./SubtitleSettings.tsx";
 import { PlaybackAnnouncement, PlaybackState, retryFailed } from "./PlaybackState.tsx";
 import { failureTitle, reconnectingLine } from "./problems.ts";
 import type { LiveMenu } from "./LiveMore.tsx";

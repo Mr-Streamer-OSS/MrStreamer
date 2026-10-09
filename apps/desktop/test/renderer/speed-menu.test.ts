@@ -1,10 +1,13 @@
 // @vitest-environment happy-dom
-// What the playback menu sets lives in the player, not on one run: a movie's speed and its
-// subtitles' timing hold through another sound track, which starts a new run, and the next title
-// starts at its own speed and on time.
+// A movie's speed and its subtitles' timing live in the player, not on one run: they hold through
+// another sound track, which starts a new run, and the next title starts at its own speed and on
+// time. The Speed button sets the speed and nothing else: the subtitles' settings are under CC.
 import { ipc, SUBSCRIPTION } from "./support.ts";
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SubtitleTrack } from "@mrstreamer/contracts/playback";
+import { SpeedMenu } from "../../src/renderer/src/features/watch/SpeedMenu.tsx";
 import type { NowPlaying } from "../../src/renderer/src/player/title-player.ts";
 import { player } from "../../src/renderer/src/player/player.ts";
 import { setSubtitleDelay, subtitleLayer } from "../../src/renderer/src/player/subtitles.ts";
@@ -74,7 +77,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("the playback menu's settings", () => {
+describe("a title's speed and subtitle timing", () => {
   it("keep a movie's speed and subtitle timing through another sound track", async () => {
     ipc.reset();
     serveRuns();
@@ -105,5 +108,56 @@ describe("the playback menu's settings", () => {
     expect(shownAt(10.2)).toBe("We sail at first light.");
     expect(shownAt(12.2)).toBe("");
     expect(player.element.playbackRate).toBe(1);
+  });
+});
+
+describe("the Speed button", () => {
+  let unmount = () => {};
+  afterEach(() => unmount());
+  async function menu(hereOnly: boolean, onSpeed: (speed: number) => void = () => {}) {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    unmount = () => {
+      act(() => root.unmount());
+      container.remove();
+    };
+    await act(async () => {
+      root.render(
+        createElement(SpeedMenu, {
+          speed: 1,
+          hereOnly,
+          open: true,
+          onSpeed,
+          onOpenChange: () => {},
+        }),
+      );
+      await settle();
+    });
+    return [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')];
+  }
+
+  it("lists the speeds and no subtitle settings, and sets the one picked", async () => {
+    const picked: number[] = [];
+    const rows = await menu(false, (speed) => picked.push(speed));
+    expect(rows.map((row) => row.textContent)).toEqual([
+      "0.5×",
+      "0.75×",
+      "1×",
+      "1.25×",
+      "1.5×",
+      "2×",
+    ]);
+    expect(rows.find((row) => row.getAttribute("aria-pressed") === "true")?.textContent).toBe("1×");
+    expect(document.body.textContent).not.toMatch(/subtitle/i);
+    await act(async () => rows[4]!.click());
+    expect(picked).toEqual([1.5]);
+  });
+
+  it("lists the speed greyed while a TV plays the title", async () => {
+    const rows = await menu(true);
+    expect(rows.map((row) => [row.textContent, row.disabled])).toEqual([["Speed1×", true]]);
+    expect(document.body.textContent).toContain("Speed applies on this computer only.");
+    expect(document.body.textContent).not.toMatch(/subtitle/i);
   });
 });

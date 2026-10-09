@@ -12,7 +12,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SubtitleTrack } from "@mrstreamer/contracts/playback";
 import { TitleWatch } from "../../src/renderer/src/features/titles/TitleWatch.tsx";
-import { nudgeSubtitles } from "../../src/renderer/src/features/watch/PlaybackMenu.tsx";
+import { nudgeSubtitles } from "../../src/renderer/src/features/watch/SubtitleSettings.tsx";
 import { player } from "../../src/renderer/src/player/player.ts";
 import { subtitleLayer } from "../../src/renderer/src/player/subtitles.ts";
 import { titlePlayer } from "../../src/renderer/src/player/title-player.ts";

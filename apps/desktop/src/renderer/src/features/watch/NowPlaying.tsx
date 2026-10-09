@@ -224,16 +224,6 @@ function Controls({
               }
             : null
         }
-        playback={
-          tracks && tracks.subtitles.length > 0
-            ? {
-                subtitles: tracks.subtitles,
-                subtitle,
-                hereOnly: remote,
-                onOpenChange: (open) => onMenu(open ? "playback" : null),
-              }
-            : null
-        }
       />
     </div>
   );

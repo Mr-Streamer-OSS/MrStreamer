@@ -63,7 +63,7 @@ It also starts the made-up subscription, on loopback ports of its own:
 
 1. Logs in through the form.
 2. Opens Canyon Hours and captures its details.
-3. Plays the first episode, turns on English subtitles, raises them with Subtitle look > Position > Higher so the menu doesn't cover them, opens the subtitle menu and captures.
+3. Plays the first episode, turns on English subtitles, raises them with CC > Position > Higher so the menu doesn't cover them, opens the subtitle menu and captures.
 4. Leaves the episode, which puts the series under Continue watching.
 5. Stars two channels in Live TV, watches one and captures Live TV.
 6. Watches another channel, goes Home and captures.

@@ -115,8 +115,6 @@ try {
   await openMenu(page, "Subtitles");
   await click(page, "[data-item]", "English");
   // Higher up, so the menu the capture shows open doesn't cover the subtitle.
-  await openMenu(page, "Playback");
-  await click(page, "[data-page=look]", "Subtitle look");
   await click(page, "[role=radio]", "Higher");
   await key(page, "Escape", 27);
   const subtitle = () =>

@@ -1,15 +1,22 @@
-// CC keeps the picture playing and the panel open while the viewer compares results.
+// CC, while a title plays here: every subtitle control in one panel. The file's tracks and the
+// saved download, their timing and look, then online search and its results. The picture keeps
+// playing and the panel stays open while the viewer compares results and steps the timing.
+//   Up and Down walk its rows, Tab reaches its fields, Escape closes it from anywhere.
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import type { SubtitleServiceFailure } from "@mrstreamer/contracts/online-subtitles";
 import { TITLE_LANGUAGES } from "@mrstreamer/core/ondemand/languages";
-import { languageName, regionalLanguageName } from "@mrstreamer/core/ondemand/tracks";
+import { regionalLanguageName } from "@mrstreamer/core/ondemand/tracks";
+import { openOnlineSubtitleSettings, useUi } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { onlineSubtitles, useOnlineSubtitles } from "../../player/online-subtitles.ts";
 import { titlePlayer, useTitlePlayer } from "../../player/title-player.ts";
 import { subtitleSettingsQuery } from "../settings/OnlineSubtitlesSection.tsx";
-import { Choice } from "../watch/TrackMenus.tsx";
+import { LookRows, subtitleSettingsFor, TextButton } from "../watch/SubtitleSettings.tsx";
+import { Choice, moveFocus } from "../watch/TrackMenus.tsx";
+import { PanelSection } from "./PanelSection.tsx";
+import { SubtitleTimingSection } from "./SubtitleTimingControls.tsx";
 
 const failureText: Record<SubtitleServiceFailure, string> = {
   "not-configured": "Set up in Settings",
@@ -39,22 +46,36 @@ export function SubtitlePanel({ open, onClose }: { open: boolean; onClose: () =>
     root.current?.querySelector<HTMLElement>("[aria-pressed=true]")?.focus();
     return () => {
       onlineSubtitles.dismissPending();
+      // Settings opened from here covers the title: focus on a button underneath would show its
+      // tooltip, which takes the first Escape from Settings.
+      if (useUi.getState().settings) return;
       if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
     };
   }, [open]);
+  // At the window: a result picked with the pointer goes disabled while it downloads, and focus
+  // leaves the panel with it. Settings and search over the title keep their own Escape.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      const ui = useUi.getState();
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (ui.searchOpen || ui.settings || ui.updateDialog) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    };
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true });
+  }, [open, onClose]);
   if (!open) return null;
+  const downloaded = downloadedOn && saved?.subtitle != null;
+  const settingsFor = subtitleSettingsFor(tracks, subtitle, downloaded);
   return (
     <aside
       ref={root}
       aria-label="Subtitle choices"
       className="no-drag fixed top-12 right-0 bottom-0 z-40 w-[25rem] max-w-full overflow-y-auto border-l border-white/20 bg-black p-5 text-white"
-      onKeyDown={(event) => {
-        if (event.key === "Escape") {
-          event.preventDefault();
-          event.stopPropagation();
-          onClose();
-        }
-      }}
+      onKeyDown={moveFocus}
     >
       <div className="mb-4 flex items-center justify-between">
         <h2 className="font-semibold">Subtitles</h2>
@@ -83,51 +104,60 @@ export function SubtitlePanel({ open, onClose }: { open: boolean; onClose: () =>
         </Choice>
       )}
       {saved?.subtitle && (
-        <Button
-          size="sm"
-          variant="secondary"
-          className="mt-3"
-          onClick={() => {
-            onlineSubtitles.bind(null);
-            onlineSubtitles.bind(sessionId);
-            setForgetError(false);
-            void titlePlayer.forgetDownloaded().catch(() => setForgetError(true));
-          }}
-        >
-          Forget downloaded subtitles
-        </Button>
+        <div className="mt-1 pl-4.5">
+          <TextButton
+            onClick={() => {
+              onlineSubtitles.bind(null);
+              onlineSubtitles.bind(sessionId);
+              setForgetError(false);
+              void titlePlayer.forgetDownloaded().catch(() => setForgetError(true));
+            }}
+          >
+            Forget downloaded subtitles
+          </TextButton>
+        </div>
       )}
       {forgetError && (
         <p role="alert" className="mt-2 text-sm">
           Saved subtitles could not be removed.
         </p>
       )}
-      <div className="mt-5 border-t border-white/20 pt-4">
-        {!settings.data?.enabled ? (
-          <p className="text-sm">Online search is off. Turn it on in Settings.</p>
-        ) : (
-          <>
-            <label className="mb-3 block text-sm">
-              Search language
-              <select
-                aria-label="Subtitle search language"
-                className="ml-3 border border-white/30 bg-black p-1"
-                value={language}
-                onChange={(event) => setLanguage(event.currentTarget.value)}
-              >
-                <option value="saved">Saved languages</option>
-                {TITLE_LANGUAGES.map(({ code, name }) => (
-                  <option key={code} value={code}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <p className="mb-3 text-sm">
-              {settings.data.languages.map(languageName).join(", ")}. Title searches may need a
-              different release.
-            </p>
+      {settingsFor.timing && <SubtitleTimingSection downloaded={downloaded} />}
+      {settingsFor.look && (
+        <PanelSection title="Look">
+          <LookRows text={settingsFor.text} />
+        </PanelSection>
+      )}
+      <PanelSection
+        title="Find online"
+        aside={
+          <TextButton
+            onClick={() => {
+              onClose();
+              openOnlineSubtitleSettings();
+            }}
+          >
+            Settings
+          </TextButton>
+        }
+      >
+        {settings.data?.enabled && (
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              aria-label="Subtitle search language"
+              className="h-8 rounded-lg border border-white/30 bg-black px-1 text-[0.8125rem]"
+              value={language}
+              onChange={(event) => setLanguage(event.currentTarget.value)}
+            >
+              <option value="saved">Saved languages</option>
+              {TITLE_LANGUAGES.map(({ code, name }) => (
+                <option key={code} value={code}>
+                  {name}
+                </option>
+              ))}
+            </select>
             <Button
+              data-item
               variant="secondary"
               size="sm"
               disabled={!sessionId || search.pending !== null}
@@ -137,15 +167,28 @@ export function SubtitlePanel({ open, onClose }: { open: boolean; onClose: () =>
             >
               {search.searched ? "Search again" : "Search subtitles"}
             </Button>
-            <p className="mt-2 text-xs">
-              Choose a result to download. Accounts and saved languages are in Settings.
-            </p>
-          </>
+            {downloaded && search.results.length > 1 && (
+              <Button
+                data-item
+                variant="secondary"
+                size="sm"
+                disabled={search.pending !== null}
+                onClick={() => onlineSubtitles.tryNext()}
+              >
+                Try the next result
+              </Button>
+            )}
+          </div>
         )}
         {search.pending && (
           <div role="status" className="mt-3 flex items-center gap-3 text-sm">
             <span>{search.pending === "search" ? "Searching" : "Downloading"}</span>
-            <Button size="sm" variant="secondary" onClick={() => onlineSubtitles.dismissPending()}>
+            <Button
+              data-item
+              size="sm"
+              variant="secondary"
+              onClick={() => onlineSubtitles.dismissPending()}
+            >
               Cancel
             </Button>
           </div>
@@ -167,6 +210,7 @@ export function SubtitlePanel({ open, onClose }: { open: boolean; onClose: () =>
           {search.results.map((result) => (
             <button
               key={result.id}
+              data-item
               aria-pressed={downloadedOn && search.selected === result.id}
               disabled={search.pending !== null || !settings.data?.enabled}
               className="block w-full border-b border-white/10 py-3 text-left outline-none hover:bg-white/8 focus-visible:bg-white/10 disabled:opacity-50"
@@ -192,7 +236,7 @@ export function SubtitlePanel({ open, onClose }: { open: boolean; onClose: () =>
             {search.quota.resetAt ? ` · Resets ${search.quota.resetAt}` : ""}
           </p>
         )}
-      </div>
+      </PanelSection>
     </aside>
   );
 }
