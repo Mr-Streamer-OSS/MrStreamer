@@ -1,7 +1,7 @@
 // Composition root: creates the window and wires the services to IPC.
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   app,
@@ -10,11 +10,13 @@ import {
   dialog,
   Menu,
   powerSaveBlocker,
+  protocol,
   safeStorage,
   session,
   shell,
   type Rectangle,
 } from "electron";
+import { ARTWORK_SCHEME, DOWNLOAD_ARTWORK } from "@mrstreamer/contracts/downloads";
 import type { IpcEvent, IpcEvents, IpcInput } from "@mrstreamer/contracts/ipc";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { ownedId } from "@mrstreamer/contracts/subscription";
@@ -43,6 +45,7 @@ import { castAdapter } from "./receivers/cast/adapter.ts";
 // oxlint-disable-next-line import/default
 import createCatalogueWorker from "./ondemand/catalogue-worker.ts?nodeWorker";
 import { mainLayer } from "./runtime.ts";
+import { Downloads } from "./services/downloads.ts";
 import { Library } from "./services/library.ts";
 import { OnDemand } from "./services/ondemand.ts";
 import { Output } from "./services/output.ts";
@@ -92,6 +95,11 @@ const STORE_REVIEW = "ms-windows-store://review/?ProductId=9N45GG76ZP4T";
  */
 const DISK_CACHE_BYTES = 64 * 1024 * 1024;
 app.commandLine.appendSwitch("disk-cache-size", String(DISK_CACHE_BYTES));
+
+// The pictures kept with downloads load from the app's own scheme, as a page's images do.
+protocol.registerSchemesAsPrivileged([
+  { scheme: ARTWORK_SCHEME, privileges: { standard: true, secure: true } },
+]);
 
 let mainWindow: BrowserWindow | null = null;
 /**
@@ -393,6 +401,7 @@ async function start(): Promise<void> {
     watchlist,
     diagnostics,
     licences,
+    downloads,
   } = await runtime.runPromise(
     Effect.all({
       subscriptions: Subscriptions,
@@ -409,8 +418,25 @@ async function start(): Promise<void> {
       watchlist: Watchlist,
       diagnostics: Diagnostics,
       licences: Licences,
+      downloads: Downloads,
     }),
   );
+
+  // mrstreamer://download/<id>/<poster|wide>: a download's kept picture, from its own folder.
+  // Nothing else answers: no other host, path or file.
+  protocol.handle(ARTWORK_SCHEME, async (request) => {
+    const url = URL.parse(request.url);
+    const [, id, artwork, extra] = url?.pathname.split("/") ?? [];
+    const kind = DOWNLOAD_ARTWORK.find((each) => each === artwork);
+    if (url?.host !== "download" || !id || !kind || extra !== undefined) {
+      return new Response(null, { status: 404 });
+    }
+    const kept = await runtime.runPromise(downloads.artwork(decodeURIComponent(id), kind));
+    const bytes = kept && (await readFile(kept.path).catch(() => null));
+    return bytes
+      ? new Response(bytes, { headers: { "Content-Type": kept.type, "Cache-Control": "no-store" } })
+      : new Response(null, { status: 404 });
+  });
 
   const exporter = diagnosticsExporter(dataDir, async () => {
     const [saved, status] = await Promise.all([
@@ -457,6 +483,7 @@ async function start(): Promise<void> {
   forward(viewing.changes, "viewing.changed", (sequence) => ({ sequence }));
   forward(watchlist.changes, "watchlist.changed", () => null);
   forward(updates.changes, "updates.changed", (status) => status);
+  forward(downloads.changes, "downloads.changed", (list) => list);
   forward(playback.fileReplaced, "playback.fileReplaced", (sessionId) => ({ sessionId }));
   forward(playback.readingAhead, "playback.readingAhead", (sessionId) => ({ sessionId }));
   forward(playback.tracksChanged, "playback.tracksChanged", (sessionId) => ({ sessionId }));
@@ -637,6 +664,11 @@ async function start(): Promise<void> {
             listingKey,
           });
         }),
+      "playback.openCopy": ({ copy, decoders }) =>
+        Effect.gen(function* () {
+          const turn = yield* playback.begin;
+          return yield* playback.openCopy(yield* downloads.copy(copy), decoders, turn);
+        }),
       "playback.close": ({ sessionId }) => Effect.as(playback.close(sessionId), null),
       "playback.closeAll": () => Effect.andThen(playback.begin, Effect.as(playback.closeAll, null)),
       "playback.failure": ({ sessionId }) => playback.failure(sessionId),
@@ -759,6 +791,12 @@ async function start(): Promise<void> {
       "watchlist.saved": ({ kind, version }) => watchlist.saved(kind, version),
       "watchlist.save": ({ kind, version }) => watchlist.save(kind, version),
       "watchlist.remove": ({ entry }) => Effect.as(watchlist.remove(entry), null),
+      "downloads.list": () => downloads.list,
+      "downloads.add": ({ title }) => downloads.add(title),
+      "downloads.remove": ({ id }) => Effect.as(downloads.remove(id), null),
+      "downloads.retry": ({ id }) => Effect.as(downloads.retry(id), null),
+      "downloads.recordProgress": ({ id, position, duration }) =>
+        Effect.as(downloads.recordProgress(id, position, duration), null),
       "updates.status": () => updates.status,
       "updates.setChannel": ({ channel }) => updates.setChannel(channel),
       "updates.check": () => updates.check,

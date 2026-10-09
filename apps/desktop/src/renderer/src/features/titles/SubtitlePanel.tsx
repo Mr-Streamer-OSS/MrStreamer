@@ -38,8 +38,10 @@ export function SubtitlePanel({ open, onClose }: { open: boolean; onClose: () =>
   const saved = useTitlePlayer((state) => state.savedSubtitle);
   const downloadedOn = useTitlePlayer((state) => state.downloadedOn);
   const note = subtitleChoiceNote(useSubtitleNote());
+  // A downloaded copy plays offline: what was saved for it is all there is, with no search.
+  const offline = useTitlePlayer((state) => state.now?.kind === "copy");
   const search = useOnlineSubtitles((state) => state);
-  const settings = useQuery({ ...subtitleSettingsQuery, enabled: open });
+  const settings = useQuery({ ...subtitleSettingsQuery, enabled: open && !offline });
   const root = useRef<HTMLElement>(null);
   const [language, setLanguage] = useState("saved");
   const [forgetError, setForgetError] = useState(false);
@@ -143,115 +145,117 @@ export function SubtitlePanel({ open, onClose }: { open: boolean; onClose: () =>
           <LookRows text={settingsFor.text} />
         </PanelSection>
       )}
-      <PanelSection
-        title="Find online"
-        aside={
-          <TextButton
-            onClick={() => {
-              onClose();
-              openOnlineSubtitleSettings();
-            }}
-          >
-            Settings
-          </TextButton>
-        }
-      >
-        {settings.data?.enabled && (
-          <div className="flex flex-wrap items-center gap-2">
-            <select
-              aria-label="Subtitle search language"
-              className="h-8 rounded-lg border border-white/30 bg-black px-1 text-[0.8125rem]"
-              value={language}
-              onChange={(event) => setLanguage(event.currentTarget.value)}
+      {!offline && (
+        <PanelSection
+          title="Find online"
+          aside={
+            <TextButton
+              onClick={() => {
+                onClose();
+                openOnlineSubtitleSettings();
+              }}
             >
-              <option value="saved">Saved languages</option>
-              {TITLE_LANGUAGES.map(({ code, name }) => (
-                <option key={code} value={code}>
-                  {name}
-                </option>
-              ))}
-            </select>
-            <Button
-              data-item
-              variant="secondary"
-              size="sm"
-              disabled={!sessionId || search.pending !== null}
-              onClick={() =>
-                void onlineSubtitles.search(language === "saved" ? undefined : [language])
-              }
-            >
-              {search.searched ? "Search again" : "Search subtitles"}
-            </Button>
-            {downloaded && search.results.length > 1 && (
+              Settings
+            </TextButton>
+          }
+        >
+          {settings.data?.enabled && (
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                aria-label="Subtitle search language"
+                className="h-8 rounded-lg border border-white/30 bg-black px-1 text-[0.8125rem]"
+                value={language}
+                onChange={(event) => setLanguage(event.currentTarget.value)}
+              >
+                <option value="saved">Saved languages</option>
+                {TITLE_LANGUAGES.map(({ code, name }) => (
+                  <option key={code} value={code}>
+                    {name}
+                  </option>
+                ))}
+              </select>
               <Button
                 data-item
                 variant="secondary"
                 size="sm"
-                disabled={search.pending !== null}
-                onClick={() => onlineSubtitles.tryNext()}
+                disabled={!sessionId || search.pending !== null}
+                onClick={() =>
+                  void onlineSubtitles.search(language === "saved" ? undefined : [language])
+                }
               >
-                Try the next result
+                {search.searched ? "Search again" : "Search subtitles"}
               </Button>
-            )}
-          </div>
-        )}
-        {search.pending && (
-          <div role="status" className="mt-3 flex items-center gap-3 text-sm">
-            <span>{search.pending === "search" ? "Searching" : "Downloading"}</span>
-            <Button
-              data-item
-              size="sm"
-              variant="secondary"
-              onClick={() => onlineSubtitles.dismissPending()}
-            >
-              Cancel
-            </Button>
-          </div>
-        )}
-        {search.error && (
-          <p role="alert" className="mt-3 text-sm">
-            {search.error}
-          </p>
-        )}
-        {search.failures.map(({ service, reason }) => (
-          <p key={service} className="mt-3 text-sm">
-            {service === "subdl" ? "SubDL" : "OpenSubtitles"}: {failureText[reason]}
-          </p>
-        ))}
-        {search.searched && !search.pending && search.results.length === 0 && !search.error && (
-          <p className="mt-3 text-sm">No subtitles found. Try another language in Settings.</p>
-        )}
-        <div className="mt-3">
-          {search.results.map((result) => (
-            <button
-              key={result.id}
-              data-item
-              aria-pressed={downloadedOn && search.selected === result.id}
-              disabled={search.pending !== null || !settings.data?.enabled}
-              className="block w-full border-b border-white/10 py-3 text-left outline-none hover:bg-white/8 focus-visible:bg-white/10 disabled:opacity-50"
-              onClick={() => void onlineSubtitles.choose(result.id)}
-            >
-              <span className="block break-words font-mono text-xs">
-                {result.release || "Untitled release"}
-              </span>
-              <span className="mt-1 block text-xs">
-                {result.service === "subdl" ? "SubDL" : "OpenSubtitles"} ·{" "}
-                {regionalLanguageName(result.language)}
-                {result.hearingImpaired ? " · Hearing impaired" : ""}
-                {result.downloads !== null
-                  ? ` · ${result.downloads.toLocaleString()} downloads`
-                  : ""}
-              </span>
-            </button>
+              {downloaded && search.results.length > 1 && (
+                <Button
+                  data-item
+                  variant="secondary"
+                  size="sm"
+                  disabled={search.pending !== null}
+                  onClick={() => onlineSubtitles.tryNext()}
+                >
+                  Try the next result
+                </Button>
+              )}
+            </div>
+          )}
+          {search.pending && (
+            <div role="status" className="mt-3 flex items-center gap-3 text-sm">
+              <span>{search.pending === "search" ? "Searching" : "Downloading"}</span>
+              <Button
+                data-item
+                size="sm"
+                variant="secondary"
+                onClick={() => onlineSubtitles.dismissPending()}
+              >
+                Cancel
+              </Button>
+            </div>
+          )}
+          {search.error && (
+            <p role="alert" className="mt-3 text-sm">
+              {search.error}
+            </p>
+          )}
+          {search.failures.map(({ service, reason }) => (
+            <p key={service} className="mt-3 text-sm">
+              {service === "subdl" ? "SubDL" : "OpenSubtitles"}: {failureText[reason]}
+            </p>
           ))}
-        </div>
-        {search.quota && (
-          <p className="mt-3 text-xs">
-            {search.quota.remaining} service downloads remain
-            {search.quota.resetAt ? ` · Resets ${search.quota.resetAt}` : ""}
-          </p>
-        )}
-      </PanelSection>
+          {search.searched && !search.pending && search.results.length === 0 && !search.error && (
+            <p className="mt-3 text-sm">No subtitles found. Try another language in Settings.</p>
+          )}
+          <div className="mt-3">
+            {search.results.map((result) => (
+              <button
+                key={result.id}
+                data-item
+                aria-pressed={downloadedOn && search.selected === result.id}
+                disabled={search.pending !== null || !settings.data?.enabled}
+                className="block w-full border-b border-white/10 py-3 text-left outline-none hover:bg-white/8 focus-visible:bg-white/10 disabled:opacity-50"
+                onClick={() => void onlineSubtitles.choose(result.id)}
+              >
+                <span className="block break-words font-mono text-xs">
+                  {result.release || "Untitled release"}
+                </span>
+                <span className="mt-1 block text-xs">
+                  {result.service === "subdl" ? "SubDL" : "OpenSubtitles"} ·{" "}
+                  {regionalLanguageName(result.language)}
+                  {result.hearingImpaired ? " · Hearing impaired" : ""}
+                  {result.downloads !== null
+                    ? ` · ${result.downloads.toLocaleString()} downloads`
+                    : ""}
+                </span>
+              </button>
+            ))}
+          </div>
+          {search.quota && (
+            <p className="mt-3 text-xs">
+              {search.quota.remaining} service downloads remain
+              {search.quota.resetAt ? ` · Resets ${search.quota.resetAt}` : ""}
+            </p>
+          )}
+        </PanelSection>
+      )}
     </aside>
   );
 }

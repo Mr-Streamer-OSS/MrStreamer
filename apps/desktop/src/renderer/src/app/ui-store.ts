@@ -5,11 +5,14 @@ import type { WatchlistEntry } from "@mrstreamer/contracts/watchlist";
 import { titlePlayer } from "../player/title-player.ts";
 
 /** The page under everything else. Watch, details and playing a title open over it. */
-export type View = "home" | "live" | "movies" | "series" | "watchlist";
+export type View = "home" | "live" | "movies" | "series" | "watchlist" | "downloads";
 
-/** Whether a page stays when every subscription has live TV only, as playlists do: Home and Live TV. */
-export function isLivePage(view: View): boolean {
-  return view === "home" || view === "live";
+/**
+ * Whether a page stays when every subscription has live TV only, as playlists do: Home, Live TV,
+ * and Downloads, whose copies need no subscription at all.
+ */
+export function withoutTitles(view: View): boolean {
+  return view === "home" || view === "live" || view === "downloads";
 }
 
 /** The tabs of the Settings page, and the licences About opens. */

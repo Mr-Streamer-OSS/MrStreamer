@@ -24,6 +24,7 @@ const english: SubtitleTrack = {
 };
 
 const movie = (id: string): NowPlaying => ({
+  kind: "provider",
   title: { kind: "movie", subscriptionId: SUBSCRIPTION, id },
   name: "Night Harbour",
   detail: null,

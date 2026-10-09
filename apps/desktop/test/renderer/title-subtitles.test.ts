@@ -86,6 +86,7 @@ async function opened(
   const answer = ipc.hold("playback.openTitle");
   void titlePlayer.open(
     {
+      kind: "provider",
       title: { kind: "movie", subscriptionId: SUBSCRIPTION, id: "1" },
       name: "Night Harbour",
       detail: null,

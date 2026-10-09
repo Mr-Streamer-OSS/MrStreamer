@@ -17,6 +17,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { databaseLayer } from "./platform/database.ts";
 import { diagnosticsLogLayer } from "./platform/diagnostics-log.ts";
+import { downloadStoreLayer } from "./platform/downloads-store.ts";
 import { guideStoreLayer } from "./platform/guide-store.ts";
 import type { Secrets } from "./platform/secrets.ts";
 import { VerifiedFiles, verifiedFilesLayer } from "./platform/verified-files.ts";
@@ -24,6 +25,7 @@ import { SavedSubtitles, savedSubtitlesLayer } from "./platform/saved-subtitles.
 import { viewingStoreLayer } from "./platform/viewing-store.ts";
 import { xmltvFetch } from "./providers/xmltv.ts";
 import { watchlistStoreLayer } from "./platform/watchlist-store.ts";
+import { Downloads, type DownloadsDeps } from "./services/downloads.ts";
 import { Library } from "./services/library.ts";
 import { OnDemand, type OnDemandDeps } from "./services/ondemand.ts";
 import { Output, type OutputDeps } from "./services/output.ts";
@@ -56,6 +58,8 @@ export interface MainConfig {
   readonly tmdbApi?: string;
   /** How this build reaches receivers on the network; none when absent. */
   readonly output?: OutputDeps;
+  /** Where downloads write and fetch artwork with, when not the file system and `fetch`. */
+  readonly downloads?: Pick<DownloadsDeps, "disk" | "fetch">;
 }
 
 export type MainServices =
@@ -74,7 +78,8 @@ export type MainServices =
   | VerifiedFiles
   | SavedSubtitles
   | SubtitleAccounts
-  | OnlineSubtitles;
+  | OnlineSubtitles
+  | Downloads;
 
 /** Every main-process service, with the app's adapters for their ports. */
 export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
@@ -122,6 +127,8 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
           Effect.gen(function* () {
             const session = yield* playback.subtitleContext(id);
             if (!session) return null;
+            // A copy is searched for nowhere: what was saved for it is all it has.
+            if (session.kind === "copy") return { ...session, query: null };
             const identity = yield* catalogue.subtitleQuery(session.title, session.file.listingKey);
             if (!identity) return null;
             const tmdbId = Number(identity.tmdbId);
@@ -259,9 +266,18 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
     ),
   );
   const watchlist = Watchlist.layer.pipe(Layer.provide(stores));
+  const downloads = Downloads.layer({
+    dataDir,
+    userAgent: config.userAgent,
+    ...config.downloads,
+  }).pipe(
+    Layer.provide(Layer.mergeAll(services, downloadStoreLayer.pipe(Layer.provide(database)))),
+  );
   const output = Output.layer(config.output ?? { adapters: [] }).pipe(Layer.provide(viewing));
   return Roster.layer.pipe(
-    Layer.provideMerge(Layer.mergeAll(guide, viewing, watchlist, output, onlineSubtitles)),
+    Layer.provideMerge(
+      Layer.mergeAll(guide, viewing, watchlist, output, onlineSubtitles, downloads),
+    ),
     Layer.provideMerge(services),
     Layer.provideMerge(diagnosticsLogLayer(dataDir)),
   );

@@ -290,6 +290,12 @@ node apps/desktop/test/e2e/multiple-subscriptions.ts node_modules/electron/dist/
 xvfb-run -a node apps/desktop/test/e2e/live-subtitle-errors-app.ts node_modules/electron/dist/electron -- --no-sandbox "$PWD/apps/desktop"
 ```
 
+Downloads have service contracts in `apps/desktop/test/downloads.test.ts`, against the fake provider and a disk that can fail as a full or missing one does, and renderer contracts in `test/renderer/downloads.test.ts`. The built-app proof is `xvfb-run -a pnpm verify:desktop downloads`, described in the [Downloads feature entry](../../.cursor/skills/verify-mrstreamer/features/downloads.md): three starts on one profile, the second with the fake provider and TMDB stopped, the third with no subscription saved, and every outbound connection of main and the window recorded. `apps/desktop/test/e2e/download-memory.ts` measures what a transfer holds in memory, through the app's transfer and the real file system, against a file generated in another process: ranged to the end, cancelled, resumed, replaced, with ranges ignored, and a disk that fills midway, each finished file checked byte for byte. On a Linux VPS a 2 GiB file kept the process within 92 MiB above its start in every case, as a 256 MiB file did; it writes about 10 GB to the temporary folder.
+
+```sh
+node apps/desktop/test/e2e/download-memory.ts 2048 .local/download-memory.json
+```
+
 ## A real provider
 
 The suite, the packaged-app test and the measurements run against the fakes and always will. They must answer the same way every time and offline, and no public provider offers what they exercise: an Xtream API, movies and series, failures on demand, or clips in every format.

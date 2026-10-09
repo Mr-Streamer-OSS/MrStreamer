@@ -109,6 +109,7 @@ describe("the system's media controls", () => {
       ipc.emit("output.changed", said("playing"));
       titlePlayer.adopt(
         {
+          kind: "provider",
           title,
           name: "Low Tide",
           detail: "2024",

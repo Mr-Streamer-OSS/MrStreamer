@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { runDownloads } from "./downloads.ts";
 import { electronExecutable, freePort, record, stop } from "./session.ts";
 import { connect, type Page } from "../../../../apps/desktop/test/e2e/app.ts";
 import { startFakeProvider } from "../../../../apps/desktop/test/fake-provider.ts";
@@ -20,6 +21,7 @@ const scenarios = [
   "live-tv",
   "titles",
   "watchlist",
+  "downloads",
 ] as const;
 type Scenario = (typeof scenarios)[number];
 const [command, selected] = process.argv.slice(2);
@@ -30,6 +32,10 @@ On headless Linux: xvfb-run -a pnpm verify:desktop <scenario>
 Each scenario owns a fresh app/profile/ports and retains proof in .local/verification/.`);
 } else if (command === "doctor") {
   console.log(JSON.stringify(await preflight(), null, 2));
+} else if (command === "downloads" && selected === undefined) {
+  const build = await preflight();
+  if (!build.display) throw new Error("No display. Use xvfb-run -a pnpm verify:desktop downloads.");
+  await runDownloads(build);
 } else if (scenarios.some((scenario) => scenario === command) && selected === undefined) {
   await run(command as Scenario);
 } else {

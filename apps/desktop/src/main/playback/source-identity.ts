@@ -12,6 +12,8 @@
 // stamp each answer with the time (RFC 9110 8.8.2.2). A file whose answers carry no mark is known
 // by its size alone, so nothing kept of it outlasts the reading it was kept for.
 
+import { createHash } from "node:crypto";
+
 /** What an answer holds of the file. */
 export interface Held {
   /** From which byte on. */
@@ -22,6 +24,18 @@ export interface Held {
   readonly other: boolean;
   /** The answer is of a file that was replaced, from a server that still has it. */
   readonly stale: boolean;
+}
+
+/**
+ * What proves which file was read: its size, and the strong mark each address it came from gave
+ * it, after redirects, by `resourceKey`: query included, since a mark is only of its own address.
+ * The addresses are of one resource, its path and query, perhaps served by several hosts. Another
+ * reading of the same bytes says the same for its address. It is kept on disk, so it names no
+ * address itself.
+ */
+export interface FileProof {
+  readonly size: number;
+  readonly marks: readonly { readonly resource: string; readonly mark: string }[];
 }
 
 /** Marks of replaced files kept, for telling a server that lags behind. */
@@ -37,6 +51,15 @@ export function sourceIdentity() {
   let ranges: boolean | null = null;
   /** The mark each address gave of the file, null for an answer without one. */
   const marks = new Map<string, string | null>();
+  /**
+   * The resource read, by its path and query, with the mark each host serving it gave, by
+   * `resourceKey`, for `proof`. Another path or query is another resource, maybe other bytes under
+   * the same size and ETag, an answer of a replaced file is other bytes, and an answer without a
+   * size may be of any file: then nothing in the answers tells which bytes were read, "mixed"
+   * until another file is behind the address.
+   */
+  let proven: { readonly resource: string; readonly marks: Map<string, string> } | "mixed" | null =
+    null;
   /** Some answer of the file came without a mark. */
   let unmarked = false;
   /** Marks of the files replaced since, by "address mark". */
@@ -60,6 +83,11 @@ export function sourceIdentity() {
     get steady(): boolean {
       return marks.size > 0 && !unmarked;
     },
+    /** The proof of the file read so far, while every answer of it carried a mark. */
+    get proof(): FileProof | null {
+      if (size === null || proven === null || proven === "mixed" || unmarked) return null;
+      return { size, marks: [...proven.marks].map(([resource, mark]) => ({ resource, mark })) };
+    },
     /**
      * How many addresses have answered for the file. What was kept when fewer had is of servers
      * that may hold another file than the one that answered since.
@@ -81,7 +109,11 @@ export function sourceIdentity() {
           : answer.status === 200 && length !== null
             ? { start: 0, size: Number(length) }
             : null;
-      if (!held || !Number.isSafeInteger(held.size)) return null;
+      if (!held || !Number.isSafeInteger(held.size)) {
+        // Its bytes are read all the same, and nothing tells which file they are of.
+        proven = "mixed";
+        return null;
+      }
       if (ranged) ranges = answer.status === 206;
       const address = URL.parse(answer.url);
       const resource = address ? address.origin + address.pathname : "";
@@ -91,7 +123,11 @@ export function sourceIdentity() {
         (size !== null && size !== held.size) ||
         (known !== undefined && known !== null && mark !== null && known !== mark);
       const replaced = mark !== null && retired.has(`${resource} ${mark}`);
-      if (replaced && !other) return { ...held, other: false, stale: true };
+      if (replaced && !other) {
+        // What it sends may be read too, and it is of a file that is gone.
+        proven = "mixed";
+        return { ...held, other: false, stale: true };
+      }
       if (other) {
         // A file that is back can't be told from its copies that never left: forget them all.
         if (replaced) retired.clear();
@@ -101,19 +137,40 @@ export function sourceIdentity() {
           retired.delete(oldest);
         }
         marks.clear();
+        proven = null;
         unmarked = false;
         generation++;
       }
       size = held.size;
       if (mark === null) unmarked = true;
       if (mark !== null || !marks.has(resource)) marks.set(resource, mark);
+      if (mark !== null && proven !== "mixed") {
+        const read = address ? address.pathname + address.search : "";
+        if (proven === null) proven = { resource: read, marks: new Map() };
+        if (proven.resource === read) proven.marks.set(resourceKey(answer.url), mark);
+        else proven = "mixed";
+      }
       return { ...held, other, stale: false };
     },
   };
 }
 
+/**
+ * An address as what is kept on disk names it: a fingerprint of its origin, path and query, which
+ * are what tells one resource from another. Two addresses differing only in their query may be
+ * different files under the same ETag. A provider's file address holds the login in its path or
+ * query, which never goes to disk. Downloads and saved subtitles' proofs both name a file's address
+ * by this, and only this.
+ */
+export function resourceKey(address: string): string {
+  const url = URL.parse(address);
+  return createHash("sha256")
+    .update(url ? url.origin + url.pathname + url.search : "")
+    .digest("hex");
+}
+
 /** The mark of an answer that tells its file from any other: a strong ETag, or an old enough date. */
-function strongMark(headers: Headers): string | null {
+export function strongMark(headers: Headers): string | null {
   const tag = headers.get("etag");
   if (tag !== null && !tag.startsWith("W/")) return `etag ${tag}`;
   const modified = Date.parse(headers.get("last-modified") ?? "");

@@ -64,7 +64,12 @@ async function setup(savedDir?: string) {
   const playing = (id: string) =>
     Effect.sync(() =>
       active && id === sessionId
-        ? { file, signal: controller.signal, standing: Effect.sync(() => active) }
+        ? {
+            file,
+            signal: controller.signal,
+            standing: Effect.sync(() => active),
+            proof: () => null,
+          }
         : null,
     );
   const layer = OnlineSubtitles.layer({ userAgent: "fixture", fetch: fetcher }).pipe(

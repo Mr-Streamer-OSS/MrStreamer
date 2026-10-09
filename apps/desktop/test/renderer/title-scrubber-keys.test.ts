@@ -68,6 +68,7 @@ async function open(id: string): Promise<void> {
   await act(async () => {
     void titlePlayer.open(
       {
+        kind: "provider",
         title: { kind: "movie", subscriptionId: SUBSCRIPTION, id },
         name: "Night Harbour",
         detail: null,

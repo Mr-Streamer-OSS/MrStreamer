@@ -16,6 +16,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type { SubtitleFile } from "../platform/saved-subtitles.ts";
+import type { FileProof } from "../playback/source-identity.ts";
 import { SavedSubtitles } from "../platform/saved-subtitles.ts";
 import {
   subtitleServiceClient,
@@ -30,6 +31,8 @@ export interface PlayingFile {
   readonly file: SubtitleFile;
   readonly signal: AbortSignal;
   readonly standing: Effect.Effect<boolean, Failed>;
+  /** Which bytes play, as the file's answers prove them; null when they don't. */
+  readonly proof: () => FileProof | null;
 }
 /** Main's playback and catalogue adapters agree on a currently listed exact file. */
 export interface SubtitleSession extends PlayingFile {
@@ -251,7 +254,14 @@ function make(deps: Parameters<typeof subtitleServiceClient>[0]) {
           yield* guarded(request.session);
           if (generation !== revision || signal.aborted || searches.get(id) !== request)
             return yield* unavailable("Subtitle choice was replaced.");
-          yield* storage.remember(request.session.file, cached.subtitle, key, cached.timing);
+          // Saved for the bytes this playback proved, so a download of them takes it along.
+          yield* storage.remember(
+            request.session.file,
+            cached.subtitle,
+            key,
+            cached.timing,
+            request.session.proof(),
+          );
           return { saved: cached, quota: null };
         }
         const keys = yield* accounts.credentials(candidate.service);
@@ -273,7 +283,13 @@ function make(deps: Parameters<typeof subtitleServiceClient>[0]) {
         yield* guarded(request.session);
         if (generation !== revision || signal.aborted || searches.get(id) !== request)
           return yield* unavailable("Subtitle choice was replaced.");
-        yield* storage.remember(request.session.file, answer.subtitle, key);
+        yield* storage.remember(
+          request.session.file,
+          answer.subtitle,
+          key,
+          undefined,
+          request.session.proof(),
+        );
         const saved = yield* storage.read(request.session.file);
         if (!saved) return yield* unavailable("The downloaded subtitle couldn't be saved.");
         return {
@@ -290,7 +306,12 @@ function make(deps: Parameters<typeof subtitleServiceClient>[0]) {
       timing: (id: string, timing: SubtitleTiming, selection?: string) =>
         Effect.gen(function* () {
           const session = yield* current(id);
-          yield* storage.timing(session.file, SubtitleTiming.assert(timing), selection);
+          yield* storage.timing(
+            session.file,
+            SubtitleTiming.assert(timing),
+            selection,
+            session.proof(),
+          );
           return (yield* storage.read(session.file))!;
         }),
       show: (id: string, selection?: string) =>
