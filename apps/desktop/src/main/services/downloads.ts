@@ -701,7 +701,10 @@ function make(deps: DownloadsDeps) {
         Effect.suspend(() => {
           const record = records.get(id);
           if (record?.state !== "complete" || !existsSync(mediaOf(record))) {
-            if (record?.state === "complete") missing.add(id);
+            if (record?.state === "complete" && !missing.has(id)) {
+              missing.add(id);
+              tell();
+            }
             return Effect.fail(
               new Failed({
                 error: { kind: "stream", failure: { kind: "unavailable", status: 404 } },

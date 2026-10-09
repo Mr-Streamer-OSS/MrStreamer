@@ -785,17 +785,24 @@ describe.skipIf(!hasTools)("downloads", () => {
   }, 60_000);
 
   it("says a copy whose file is gone is missing, plays nothing of it, and still deletes it", async () => {
-    const { provider, dataDir, subscriptionId, downloads, find } = await connected();
+    const { provider, dataDir, subscriptionId, runtime, downloads, find } = await connected();
+    const told = await collect(runtime, downloads.changes);
     const film = movie(provider, subscriptionId, "TEST | Index at the end");
     const done = await downloads.add(film.ref);
-    await vi.waitFor(async () => expect((await find(done.id))?.status.kind).toBe("complete"), {
+    await vi.waitFor(() => expect(told.at(-1)?.items[0]?.status.kind).toBe("complete"), {
       timeout: LONG,
     });
+    // Nothing more to tell of, so no later list of the finished copy can be what finds it gone.
+    await new Promise((resolve) => setTimeout(resolve, 600));
     await rm(join(dataDir, "downloads", done.id, "media.mp4"));
-    expect((await find(done.id))?.status.kind).toBe("missing");
+    // Opening it is what finds the file gone, so the window that last heard complete hears of it.
     await expect(downloads.copy(done.id)).rejects.toMatchObject({
       error: { kind: "stream", failure: { kind: "unavailable" } },
     });
+    await vi.waitFor(() =>
+      expect(told.at(-1)?.items).toMatchObject([{ id: done.id, status: { kind: "missing" } }]),
+    );
+    expect((await find(done.id))?.status.kind).toBe("missing");
     await downloads.remove(done.id);
     expect((await downloads.list()).items).toEqual([]);
   }, 60_000);
