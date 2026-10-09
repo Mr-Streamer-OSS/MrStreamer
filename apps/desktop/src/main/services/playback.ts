@@ -42,8 +42,9 @@
 //
 // Downloads borrow a subscription's provider connection from here (`lend`), and only while
 // nothing of that subscription plays. Every open of a provider's stream takes it back first,
-// in its turn, and goes on only once the download's request is over: playback comes first, and
-// the provider never sees the download and the stream at once. Another subscription's download
+// in its turn, and goes on only once the download's request is over and its file closed:
+// playback comes first, and the provider never sees the download and the stream at once. An open
+// whose download doesn't let go in time fails, to be asked again. Another subscription's download
 // goes on.
 //
 // Each session is a scope within the service's. Closing it, by stopping, switching or quitting,
@@ -667,8 +668,8 @@ export interface Lent {
 }
 
 /**
- * How long an open waits for a download to give its connection back before it goes on anyway: a
- * download whose request doesn't end holds no stream back for longer.
+ * How long an open waits for a download to give its connection back. One that doesn't by then
+ * fails, as a network failure the player asks again after, and asks the provider for nothing.
  */
 const RECLAIM_MS = 10_000;
 
@@ -856,18 +857,26 @@ function make(deps: PlaybackDeps) {
           : null;
     /**
      * Takes a subscription's connection back from the download it is lent to, if it is, and
-     * waits until the download's request is over: for the open about to read from that provider.
+     * waits until the download's request is over and its file closed: for the open about to read
+     * from that provider. Fails when that takes longer than `RECLAIM_MS`; the lease stays until
+     * the download gives it back, so the next open waits for it again.
      */
     const reclaim = (subscriptionId: string) =>
-      Effect.promise(async () => {
-        const lease = lent.get(subscriptionId);
-        if (!lease) return;
-        lease.controller.abort();
-        let timer: NodeJS.Timeout | undefined;
-        const late = new Promise<void>((resolve) => (timer = setTimeout(resolve, RECLAIM_MS)));
-        await Promise.race([lease.released, late]);
-        clearTimeout(timer);
-      });
+      Effect.flatMap(
+        Effect.promise(async () => {
+          const lease = lent.get(subscriptionId);
+          if (!lease) return true;
+          lease.controller.abort();
+          let timer: NodeJS.Timeout | undefined;
+          const late = new Promise<boolean>(
+            (resolve) => (timer = setTimeout(() => resolve(false), RECLAIM_MS)),
+          );
+          const given = await Promise.race([lease.released.then(() => true), late]);
+          clearTimeout(timer);
+          return given;
+        }),
+        (given) => (given ? Effect.void : Effect.fail(stillLent)),
+      );
     /** A session is open: what plays, and so `busy`, changed. */
     const register = (session: Session) => {
       sessions.set(session.id, session);
@@ -4597,4 +4606,12 @@ async function readStart(answer: Response, address: string): Promise<Started | n
 /** Something else was asked for since: this open gave way before it began. */
 export const superseded = new Failed({
   error: { kind: "unexpected", detail: "Something else played in the meantime." },
+});
+
+/** A download still holds the provider's connection: this open asks the provider nothing. */
+const stillLent = new Failed({
+  error: {
+    kind: "stream",
+    failure: { kind: "network", detail: "A download still holds the provider's connection." },
+  },
 });

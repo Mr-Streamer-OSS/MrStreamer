@@ -1,7 +1,8 @@
 // Downloads through the real main runtime: the fake provider at the HTTP boundary, ffprobe and
 // the loopback proxy for copies, and a disk that can fail the way a full or missing one does.
 import { spawnSync } from "node:child_process";
-import { readFile, readdir, rm } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
 import type { AddressInfo } from "node:net";
@@ -10,7 +11,7 @@ import { Writable } from "node:stream";
 import type { Download } from "@mrstreamer/contracts/downloads";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
 import { playlistGroupId } from "@mrstreamer/core/playlist/import";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { fileDisk, type Disk } from "../src/main/downloads/transfer.ts";
 import { mainLayer } from "../src/main/runtime.ts";
 import { Downloads } from "../src/main/services/downloads.ts";
@@ -107,6 +108,11 @@ async function copyOf(dataDir: string, id: string): Promise<Buffer> {
   return readFile(join(dataDir, "downloads", id, media));
 }
 
+/** A file's bytes as one short string, so a mismatch fails without comparing them byte by byte. */
+function digest(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
 /** Reads a copy session's picture from `start` seconds, as the player asks for it. */
 async function read(url: string, start: number): Promise<number> {
   const answer = await fetch(`${url}?start=${start}`);
@@ -179,11 +185,16 @@ async function playlistHost() {
   };
 }
 
-/** Answers SubDL at main's `fetch` with one English result for whatever is asked, and counts. */
+/**
+ * Answers SubDL at main's `fetch` with one English result for whatever is asked, of the release
+ * `answer.release` names, and counts. `answer.fileMark` changes the ETag of the provider's file
+ * answers: a string replaces it, null removes it.
+ */
 function serveSubdl() {
   const request = fetch;
   let requests = 0;
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+  const answer: { release: string; fileMark?: string | null } = { release: "Cinema cut" };
+  const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
     if (url.hostname === "api.subdl.com") {
       requests++;
@@ -193,19 +204,27 @@ function serveSubdl() {
         subtitles: [
           {
             language: "English",
-            release_name: "Cinema cut",
-            url: "https://dl.subdl.com/fixture.srt",
+            release_name: answer.release,
+            url: `https://dl.subdl.com/${encodeURIComponent(answer.release)}.srt`,
           },
         ],
       });
     }
     if (url.hostname === "dl.subdl.com") {
       requests++;
-      return new Response("1\n00:00:01,000 --> 00:00:03,000\nWelcome.\n");
+      return new Response(`1\n00:00:01,000 --> 00:00:03,000\n${answer.release}.\n`);
     }
-    return request(input, init);
+    const response = await request(input, init);
+    if (answer.fileMark === undefined || !url.pathname.startsWith("/files/")) return response;
+    const headers = new Headers(response.headers);
+    if (answer.fileMark === null) headers.delete("etag");
+    else headers.set("etag", answer.fileMark);
+    const marked = new Response(response.body, { status: response.status, headers });
+    Object.defineProperty(marked, "url", { value: response.url });
+    return marked;
   });
-  return { requests: () => requests };
+  onTestFinished(() => spy.mockRestore());
+  return { answer, requests: () => requests };
 }
 
 describe.skipIf(!hasTools)("downloads", () => {
@@ -316,6 +335,65 @@ describe.skipIf(!hasTools)("downloads", () => {
     }
   }, 120_000);
 
+  it("keeps a partial file the old file's until a replacement is written over it, through a full disk or a crash", async () => {
+    const { provider, dataDir, subscriptionId, downloads, find, quit } = await connected();
+    const film = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");
+    provider.stallMovieFile(film.id, 200_000, 60_000);
+    const queued = await downloads.add(film.ref);
+    await vi.waitFor(
+      async () => expect((await find(queued.id))?.status).toMatchObject({ received: 200_000 }),
+      { timeout: LONG },
+    );
+    await quit();
+    await vi.waitFor(() => expect(provider.activeStreams()).toBe(0));
+    // As long as the first, of other bytes: only its mark tells it apart.
+    const replacement = Buffer.from(film.bytes);
+    replacement.fill(0xab, 0, 200_000);
+    provider.replaceMovieFile(film.id, replacement);
+    provider.stallMovieFile(film.id, Number.MAX_SAFE_INTEGER, 0);
+
+    // The app stops as the replacement is about to be written, before the partial was emptied,
+    // as a crash would: a start from what was on disk then takes the replacement whole.
+    const writing = Promise.withResolvers<void>();
+    const crashing = await app(dataDir, {
+      ...fileDisk,
+      write: () => {
+        writing.resolve();
+        return new Writable({ write: () => {} });
+      },
+    });
+    await writing.promise;
+    const crashed = await tempDir();
+    await cp(dataDir, crashed, { recursive: true });
+    await crashing.quit();
+    const recovered = await app(crashed);
+    await vi.waitFor(
+      async () => expect((await recovered.find(queued.id))?.status.kind).toBe("complete"),
+      { timeout: LONG },
+    );
+    expect(digest(await copyOf(crashed, queued.id))).toBe(digest(replacement));
+    await recovered.quit();
+
+    // No room for the replacement: the partial stays the old file's, and Retry takes the new one.
+    let free = 0;
+    const full = await app(dataDir, { ...fileDisk, free: async () => free });
+    await vi.waitFor(
+      async () =>
+        expect((await full.find(queued.id))?.status).toMatchObject({
+          kind: "failed",
+          failure: { kind: "disk-full" },
+        }),
+      { timeout: LONG },
+    );
+    free = Number.MAX_SAFE_INTEGER;
+    await full.downloads.retry(queued.id);
+    await vi.waitFor(
+      async () => expect((await full.find(queued.id))?.status.kind).toBe("complete"),
+      { timeout: LONG },
+    );
+    expect(digest(await copyOf(dataDir, queued.id))).toBe(digest(replacement));
+  }, 90_000);
+
   it("gives the connection to playback of its subscription, waits, then finishes", async () => {
     const { provider, dataDir, subscriptionId, downloads, playback, onDemand, find } =
       await connected();
@@ -344,6 +422,60 @@ describe.skipIf(!hasTools)("downloads", () => {
     });
     expect(await copyOf(dataDir, queued.id)).toEqual(film.bytes);
     expect(provider.mostFilesAtOnce()).toBe(1);
+  }, 60_000);
+
+  it("fails an open whose download hasn't closed its partial file in time, and opens once it has", async () => {
+    // The first partial file closes only when the test lets it; it keeps none of its bytes.
+    const closing = Promise.withResolvers<void>();
+    const closed = Promise.withResolvers<void>();
+    let held = true;
+    const disk: Disk = {
+      ...fileDisk,
+      write: (path, start) => {
+        if (!held) return fileDisk.write(path, start);
+        held = false;
+        return new Writable({
+          write: (_chunk, _encoding, done) => done(),
+          destroy: (error, done) => {
+            closing.resolve();
+            void closed.promise.then(() => done(error));
+          },
+        });
+      },
+    };
+    const { provider, dataDir, subscriptionId, downloads, playback, onDemand, find } =
+      await connected({}, disk);
+    const film = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");
+    const other = movie(provider, subscriptionId, "TEST | Index at the end");
+    provider.stallMovieFile(film.id, 200_000, 60_000);
+    const queued = await downloads.add(film.ref);
+    await vi.waitFor(
+      async () => expect((await find(queued.id))?.status).toMatchObject({ received: 200_000 }),
+      { timeout: LONG },
+    );
+    const asked = provider.fileRequests();
+    const file = await onDemand.file(other.ref);
+    const opening = playback.openTitle(other.ref, file.url, DECODERS, file);
+    await closing.promise;
+    try {
+      // The provider hears nothing of the stream while the download's file is still open.
+      await expect(opening).rejects.toMatchObject({
+        error: { kind: "stream", failure: { kind: "network" } },
+      });
+      expect(provider.fileRequests()).toBe(asked);
+    } finally {
+      closed.resolve();
+    }
+    // Asked again once it closed, it plays.
+    const playing = await playback.openTitle(other.ref, file.url, DECODERS, file);
+    expect(await read(playing.url, 0)).toBeGreaterThan(0);
+    expect(provider.mostFilesAtOnce()).toBe(1);
+    provider.stallMovieFile(film.id, Number.MAX_SAFE_INTEGER, 0);
+    await playback.close(playing.sessionId);
+    await vi.waitFor(async () => expect((await find(queued.id))?.status.kind).toBe("complete"), {
+      timeout: LONG,
+    });
+    expect(digest(await copyOf(dataDir, queued.id))).toBe(digest(film.bytes));
   }, 60_000);
 
   it("cancels mid-request and while queued, leaving nothing, and retries a failed one", async () => {
@@ -539,6 +671,49 @@ describe.skipIf(!hasTools)("downloads", () => {
     expect((await downloads.list()).items).toEqual([]);
   }, 60_000);
 
+  it("deletes no copy it can't read the record of, and says it can't read them", async () => {
+    const { provider, dataDir, subscriptionId, downloads, find, quit } = await connected();
+    const film = movie(provider, subscriptionId, "TEST | Index at the end");
+    const done = await downloads.add(film.ref);
+    await vi.waitFor(async () => expect((await find(done.id))?.status.kind).toBe("complete"), {
+      timeout: LONG,
+    });
+    await quit();
+    // A download of a later build, with a record this one doesn't know.
+    const later = randomUUID();
+    const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+    db.prepare("insert into downloads (id, added_at, record) values (?, ?, ?)").run(
+      later,
+      Date.now(),
+      JSON.stringify({ id: later, kept: "differently" }),
+    );
+    db.close();
+    await mkdir(join(dataDir, "downloads", later));
+    await writeFile(join(dataDir, "downloads", later, "media.mkv"), "a later build's copy");
+
+    const again = await app(dataDir);
+    expect((await again.downloads.list()).items.map((item) => item.id)).toEqual([done.id]);
+    await again.quit();
+    expect((await readdir(join(dataDir, "downloads"))).toSorted()).toEqual(
+      [done.id, later].toSorted(),
+    );
+
+    // A database that can't be opened lists, queues and deletes nothing.
+    await writeFile(join(dataDir, "mrstreamer.db"), "not a database");
+    const unreadable = await app(dataDir);
+    await expect(unreadable.downloads.list()).rejects.toMatchObject({
+      error: { kind: "unexpected" },
+    });
+    await expect(unreadable.downloads.add(film.ref)).rejects.toMatchObject({
+      error: { kind: "unexpected" },
+    });
+    expect((await readdir(join(dataDir, "downloads"))).toSorted()).toEqual(
+      [done.id, later].toSorted(),
+    );
+    expect(digest(await copyOf(dataDir, done.id))).toBe(digest(film.bytes));
+    await unreadable.quit();
+  }, 60_000);
+
   it("lets another subscription play while a download goes on", async () => {
     const { provider, subscriptionId, downloads, subscriptions, onDemand, playback, find } =
       await connected();
@@ -658,6 +833,74 @@ describe.skipIf(!hasTools)("downloads", () => {
     }
   }, 60_000);
 
+  it("starts again when a file's address redirects to another query, whatever its mark", async () => {
+    // Two files of one size behind one path, told apart by their query, with the same ETag.
+    const first = fixture("title-h264-aac.mp4");
+    const second = Buffer.from(first);
+    second.fill(0xbc, 0, 40_000);
+    let origin = "";
+    let cut = "a";
+    let held = true;
+    const server = createServer((request, response) => {
+      const url = new URL(request.url ?? "/", origin);
+      if (url.pathname === "/list") {
+        return response.end(`#EXTM3U\n#EXTINF:-1 group-title="Films",Film\n${origin}/film.mp4\n`);
+      }
+      if (url.pathname === "/film.mp4") {
+        return response.writeHead(302, { Location: `/media.mp4?cut=${cut}` }).end();
+      }
+      const bytes = url.searchParams.get("cut") === "a" ? first : second;
+      const range = /^bytes=(\d+)-$/.exec(request.headers.range ?? "");
+      const start = range ? Number(range[1]) : 0;
+      response.writeHead(range ? 206 : 200, {
+        "Content-Type": "video/mp4",
+        "Content-Length": bytes.length - start,
+        ETag: '"one"',
+        ...(range ? { "Content-Range": `bytes ${start}-${bytes.length - 1}/${bytes.length}` } : {}),
+      });
+      if (held) response.write(bytes.subarray(start, 40_000));
+      else response.end(bytes.subarray(start));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const dataDir = await tempDir();
+      const started = await app(dataDir);
+      const saved = await started.subscriptions.add({
+        server: `${origin}/list`,
+        username: "",
+        password: "",
+      });
+      await started.subscriptions.mapPlaylist(saved.id, playlistGroupId("Films"), "movie");
+      await started.onDemand.refresh(saved.id);
+      const source = (await started.subscriptions.sources())[0]!;
+      const [listed] = (await source.provider.onDemandCatalogue()).movies;
+      const queued = await started.downloads.add({
+        kind: "movie",
+        subscriptionId: saved.id,
+        id: listed!.id,
+      });
+      await vi.waitFor(
+        async () =>
+          expect((await started.find(queued.id))?.status).toMatchObject({ received: 40_000 }),
+        { timeout: LONG },
+      );
+      await started.quit();
+      cut = "b";
+      held = false;
+      const again = await app(dataDir);
+      await vi.waitFor(
+        async () => expect((await again.find(queued.id))?.status.kind).toBe("complete"),
+        { timeout: LONG },
+      );
+      expect(digest(await copyOf(dataDir, queued.id))).toBe(digest(second));
+      await again.quit();
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 60_000);
+
   it("brings saved subtitles along only for the very bytes they were saved for", async () => {
     const service = serveSubdl();
     const { provider, subscriptionId, downloads, playback, onDemand, subtitles, find, dataDir } =
@@ -713,5 +956,51 @@ describe.skipIf(!hasTools)("downloads", () => {
     expect(saved[0]).toMatchObject({ subtitle: { release: "Cinema cut" }, timing: { offset: -2 } });
     expect(saved[1]).toBeNull();
     expect(service.requests()).toBe(asked);
+  }, 60_000);
+
+  it("brings no subtitle chosen while nothing proved the bytes, though the file was proven before", async () => {
+    const service = serveSubdl();
+    const { provider, subscriptionId, downloads, playback, onDemand, subtitles, find, dataDir } =
+      await connected({ maxConnections: 2, slotReleaseMs: 0 });
+    await subtitles.configure(
+      { enabled: true, service: "subdl", languages: ["en"] },
+      { subdl: { apiKey: "fixture-key" } },
+    );
+    const film = movie(provider, subscriptionId, "TEST | Index at the end");
+    const choose = async (release: string) => {
+      service.answer.release = release;
+      const file = await onDemand.file(film.ref);
+      const session = await playback.openTitle(film.ref, file.url, DECODERS, file);
+      expect(await read(session.url, 0)).toBeGreaterThan(0);
+      const found = await subtitles.search(session.sessionId);
+      await subtitles.choose(session.sessionId, found.results[0]!.id);
+      await playback.close(session.sessionId);
+    };
+    service.answer.fileMark = '"first"';
+    await choose("Cinema cut");
+    // Other bytes of the same size behind the address, with nothing to tell them by.
+    const other = Buffer.from(film.bytes);
+    other[50_000]! ^= 0xff;
+    provider.replaceMovieFile(film.id, other);
+    service.answer.fileMark = null;
+    await choose("Another cut");
+    // The first file is back, as its mark says, and is downloaded.
+    provider.replaceMovieFile(film.id, film.bytes);
+    service.answer.fileMark = '"first"';
+    const queued = await downloads.add(film.ref);
+    await vi.waitFor(async () => expect((await find(queued.id))?.status.kind).toBe("complete"), {
+      timeout: LONG,
+    });
+    const copy = await playback.openCopy(
+      {
+        id: queued.id,
+        path: join(dataDir, "downloads", queued.id, "media.mp4"),
+        container: "mp4",
+        title: queued.title,
+      },
+      DECODERS,
+    );
+    expect(await subtitles.saved(copy.sessionId)).toBeNull();
+    await playback.close(copy.sessionId);
   }, 60_000);
 });

@@ -5,6 +5,12 @@
 // Anything else starts again from the first byte, saying so, and never appends one file's bytes
 // to another's. A whole-file answer to a range is that fresh start.
 //
+// What the partial is of is written down (`identify`) in step with its bytes, so a crash or a
+// failure at any moment leaves it under a mark it really holds, or under none. The old file's mark
+// stays until a fresh start is sure to go ahead, as when there is room for it; then the partial is
+// written down as of nothing before it is touched, and as of the new file once a byte of it is on
+// disk, which means the partial was emptied for it.
+//
 // What ends a transfer is what it answers: complete, with what it wrote; stopped, when its signal
 // aborted, with the partial kept for later; or failed, with why. A complete transfer has every
 // byte the provider said the file holds, flushed to disk. Making it the copy is the caller's.
@@ -15,6 +21,7 @@ import { once } from "node:events";
 import type { Writable } from "node:stream";
 import type { DownloadFailure } from "@mrstreamer/contracts/downloads";
 import type { StreamFailure } from "@mrstreamer/contracts/playback";
+import { Failed, failedWith } from "@mrstreamer/core/failure";
 import type { Provider } from "@mrstreamer/core/provider";
 import type { PartIdentity } from "../platform/downloads-store.ts";
 import { resourceKey, strongMark } from "../playback/source-identity.ts";
@@ -70,13 +77,16 @@ export interface TransferRequest {
   readonly disk?: Disk;
   /** Hears where it is: once the answer says what it sends, then as bytes arrive. */
   readonly progress: (at: TransferProgress) => void;
+  /**
+   * Writes down what the partial's bytes are of now, before it returns: null when they can't be
+   * gone on from. Throws when it can't, which stops the transfer before the partial changes.
+   */
+  readonly identify: (identity: PartIdentity | null) => void;
 }
 
 interface TransferProgress {
   readonly received: number;
   readonly size: number | null;
-  /** What the partial is of now; null when the answer gave nothing to resume it by. */
-  readonly identity: PartIdentity | null;
   /** The bytes before were of another file, or couldn't be gone on from: it started again. */
   readonly restarted: boolean;
 }
@@ -198,8 +208,7 @@ async function receive(
     mark !== null && size !== null ? { resource: resourceOf(response), mark, size } : null;
   const body = response.body;
   if (!body) return failed({ kind: "network", detail: "The provider sent no file." });
-  let received = from;
-  asked.progress({ received, size, identity, restarted });
+  // Without room, the partial stays as it is, of the file it was of.
   if (size !== null) {
     const free = await disk.free(dirname(asked.part));
     const needed = size - from;
@@ -208,6 +217,27 @@ async function receive(
       return { kind: "failed", failure: { kind: "disk-full", needed: needed - free } };
     }
   }
+  let received = from;
+  asked.progress({ received, size, restarted });
+  // Going on, the partial is of this answer's file already. Starting again, it may hold another's
+  // bytes until it is emptied, so it is of none until a byte of this one is on disk.
+  let onDisk = from > 0 ? identity : null;
+  try {
+    asked.identify(onDisk);
+  } catch (cause) {
+    await body.cancel().catch(() => {});
+    const failure = cause instanceof Failed ? cause : failedWith(cause);
+    return { kind: "failed", failure: { kind: "app", error: failure.error } };
+  }
+  const written = (error?: Error | null) => {
+    if (error || onDisk === identity) return;
+    onDisk = identity;
+    try {
+      asked.identify(onDisk);
+    } catch {
+      // Written down as of none until the end: a restart takes it from its first byte.
+    }
+  };
   let stalled: NodeJS.Timeout | undefined;
   const stall = new AbortController();
   const awake = () => {
@@ -235,9 +265,9 @@ async function receive(
       if (done) break;
       received += value.length;
       awake();
-      asked.progress({ received, size, identity, restarted });
+      asked.progress({ received, size, restarted });
       // At most what the disk hasn't taken yet waits in memory.
-      if (!sink.write(value)) await once(sink, "drain", { signal: stop });
+      if (!sink.write(value, written)) await once(sink, "drain", { signal: stop });
     }
     // Flushed to disk and closed before it counts.
     sink.end();

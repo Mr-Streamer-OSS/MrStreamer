@@ -28,8 +28,9 @@ export interface Held {
 
 /**
  * What proves which file was read: its size, and the strong mark each address it came from gave
- * it, after redirects, by `resourceKey`. Another reading of the same bytes says the same for its
- * address. It is kept on disk, so it names no address itself.
+ * it, after redirects, by `resourceKey`: query included, since a mark is only of its own address.
+ * Another reading of the same bytes says the same for its address. It is kept on disk, so it names
+ * no address itself.
  */
 export interface FileProof {
   readonly size: number;
@@ -49,6 +50,8 @@ export function sourceIdentity() {
   let ranges: boolean | null = null;
   /** The mark each address gave of the file, null for an answer without one. */
   const marks = new Map<string, string | null>();
+  /** The same marks by each whole address's `resourceKey`, for `proof`. */
+  const proven = new Map<string, string>();
   /** Some answer of the file came without a mark. */
   let unmarked = false;
   /** Marks of the files replaced since, by "address mark". */
@@ -74,13 +77,8 @@ export function sourceIdentity() {
     },
     /** The proof of the file read so far, while every answer of it carried a mark. */
     get proof(): FileProof | null {
-      if (size === null || marks.size === 0 || unmarked) return null;
-      return {
-        size,
-        marks: [...marks].flatMap(([resource, mark]) =>
-          mark === null ? [] : [{ resource: resourceKey(resource), mark }],
-        ),
-      };
+      if (size === null || proven.size === 0 || unmarked) return null;
+      return { size, marks: [...proven].map(([resource, mark]) => ({ resource, mark })) };
     },
     /**
      * How many addresses have answered for the file. What was kept when fewer had is of servers
@@ -123,25 +121,30 @@ export function sourceIdentity() {
           retired.delete(oldest);
         }
         marks.clear();
+        proven.clear();
         unmarked = false;
         generation++;
       }
       size = held.size;
       if (mark === null) unmarked = true;
       if (mark !== null || !marks.has(resource)) marks.set(resource, mark);
+      if (mark !== null) proven.set(resourceKey(answer.url), mark);
       return { ...held, other, stale: false };
     },
   };
 }
 
 /**
- * An address as what is kept on disk names it: a fingerprint of its origin and path. A provider's
- * file address holds the login in its path, which never goes to disk.
+ * An address as what is kept on disk names it: a fingerprint of its origin, path and query, which
+ * are what tells one resource from another. Two addresses differing only in their query may be
+ * different files under the same ETag. A provider's file address holds the login in its path or
+ * query, which never goes to disk. Downloads and saved subtitles' proofs both name a file's address
+ * by this, and only this.
  */
 export function resourceKey(address: string): string {
   const url = URL.parse(address);
   return createHash("sha256")
-    .update(url ? url.origin + url.pathname : "")
+    .update(url ? url.origin + url.pathname + url.search : "")
     .digest("hex");
 }
 

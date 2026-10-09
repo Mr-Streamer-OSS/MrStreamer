@@ -108,11 +108,7 @@ async function measure(mebibytes: number, out: string | undefined) {
         peak = Math.max(peak, usage.rss);
         peakBuffers = Math.max(peakBuffers, usage.arrayBuffers);
       }, 50);
-      let last: { received: number; restarted: boolean; identity: unknown } = {
-        received: 0,
-        restarted: false,
-        identity: null,
-      };
+      let last = { received: 0, restarted: false };
       const started = performance.now();
       const outcome = await transfer({
         url: `${origin}/movie.mkv`,
@@ -127,6 +123,7 @@ async function measure(mebibytes: number, out: string | undefined) {
           last = at;
           if (options.stopAt !== undefined && at.received >= options.stopAt) stop.abort();
         },
+        identify: () => {},
       });
       clearInterval(sampler);
       const seconds = (performance.now() - started) / 1000;

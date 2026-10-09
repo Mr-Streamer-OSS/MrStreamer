@@ -4,6 +4,7 @@
 // was made from, what was kept of its details, how far its transfer got and how far the copy was
 // watched here. Its bytes and artwork are files in the app's downloads folder (services/downloads.ts).
 // Erasing an account's viewing data leaves these rows: a copy is the viewer's until they delete it.
+// A row this build can't read, as one a later build wrote, is left as it is, and so are its files.
 import type { DatabaseSync } from "node:sqlite";
 import type { DownloadFailure } from "@mrstreamer/contracts/downloads";
 import { RawTitleRef } from "@mrstreamer/contracts/ondemand";
@@ -68,11 +69,20 @@ export type StoredDownload = Omit<Stored, "failure"> & { readonly failure?: Down
 
 const FAILURES: ReadonlySet<string> = new Set(["disk-full", "folder", "stream", "app"]);
 
+/** Every row of the downloads table: the records read, and the ids of those that couldn't be. */
+export interface Inventory {
+  readonly records: readonly StoredDownload[];
+  readonly unreadable: ReadonlySet<string>;
+}
+
 export class DownloadStore extends Context.Service<
   DownloadStore,
   {
-    /** Every download, in the order they were added. */
-    readonly list: Effect.Effect<readonly StoredDownload[], Failed>;
+    /**
+     * Every download this build can read, in the order they were added, and the ids of rows it
+     * can't: what is kept for those isn't another download's to clean up.
+     */
+    readonly list: Effect.Effect<Inventory, Failed>;
     /** Stores a download's record, new or changed. */
     put(download: StoredDownload): Effect.Effect<void, Failed>;
     remove(id: string): Effect.Effect<void, Failed>;
@@ -95,23 +105,21 @@ export const downloadStoreLayer = Layer.effect(
     return yield* attempt(() => {
       const { db } = opened;
       prepareDownloads(db);
-      const all = db.prepare("select record from downloads order by added_at, rowid");
+      const all = db.prepare("select id, record from downloads order by added_at, rowid");
       const write = db.prepare(`insert into downloads (id, added_at, record) values (?, ?, ?)
         on conflict (id) do update set record = excluded.record`);
       const remove = db.prepare("delete from downloads where id = ?");
       return {
-        list: attempt(() =>
-          all.all().flatMap((row): StoredDownload[] => {
-            try {
-              const parsed = Stored(JSON.parse(String(row.record)));
-              if (parsed instanceof type.errors) return [];
-              const { failure, ...rest } = parsed;
-              return [{ ...rest, ...(failure ? { failure: failureOf(failure) } : {}) }];
-            } catch {
-              return [];
-            }
-          }),
-        ),
+        list: attempt((): Inventory => {
+          const records: StoredDownload[] = [];
+          const unreadable = new Set<string>();
+          for (const row of all.all()) {
+            const parsed = readRecord(row.record);
+            if (parsed !== null && parsed.id === row.id) records.push(parsed);
+            else unreadable.add(String(row.id));
+          }
+          return { records, unreadable };
+        }),
         put: (download: StoredDownload) =>
           attempt(() => {
             write.run(download.id, download.addedAt, JSON.stringify(Stored.assert(download)));
@@ -124,6 +132,18 @@ export const downloadStoreLayer = Layer.effect(
     }).pipe(Effect.catch(() => Effect.succeed(closed("Downloads can't be opened."))));
   }),
 );
+
+/** A row's record as this build knows them, or null. */
+function readRecord(record: unknown): StoredDownload | null {
+  try {
+    const parsed = Stored(JSON.parse(String(record)));
+    if (parsed instanceof type.errors) return null;
+    const { failure, ...rest } = parsed;
+    return { ...rest, ...(failure ? { failure: failureOf(failure) } : {}) };
+  } catch {
+    return null;
+  }
+}
 
 /** A stored failure as this build knows them; one it doesn't is an unexpected one. */
 function failureOf(stored: object): DownloadFailure {

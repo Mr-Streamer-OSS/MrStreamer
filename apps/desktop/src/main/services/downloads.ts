@@ -13,6 +13,10 @@
 // ../downloads/transfer.ts). It becomes a copy once every byte is on disk: the partial is flushed,
 // renamed, and only then marked complete. Quitting keeps the queue and its partial files.
 //
+// Only what the database says decides which folders are no download's: when it can't be read,
+// nothing is listed, queued or cleaned up, and each call says so. A row this build can't read
+// keeps its folder for the build that wrote it.
+//
 // A copy keeps what it needs to show and play without asking anyone: its details and artwork,
 // read as it was queued, how far it was watched here, and the subtitles saved for the exact file
 // it was made from (see `subtitlesOfCopy`). Removing a subscription cancels its unfinished
@@ -136,13 +140,12 @@ function make(deps: DownloadsDeps) {
     const partOf = (record: StoredDownload) => `${mediaOf(record)}.part`;
 
     const records = new Map<string, StoredDownload>();
+    const loaded = yield* Effect.result(store.list);
     // Without its table nothing can be queued or listed either: each call says so.
-    const stored = yield* store.list.pipe(
-      Effect.catch((failed) =>
-        Effect.as(Effect.logWarning("[downloads] can't be read", failed.error), []),
-      ),
-    );
-    for (const record of stored) records.set(record.id, record);
+    const unloaded = loaded._tag === "Failure" ? loaded.failure : null;
+    if (unloaded) yield* Effect.logWarning("[downloads] can't be read", unloaded.error);
+    const inventory = loaded._tag === "Success" ? loaded.success : null;
+    for (const record of inventory?.records ?? []) records.set(record.id, record);
     /** Copies whose file is gone, as last looked: looked at again as the window asks for the list. */
     const missing = new Set<string>();
     let active: Active | null = null;
@@ -180,15 +183,19 @@ function make(deps: DownloadsDeps) {
         records.set(record.id, complete);
       }
     }
-    // Folders no record names: left by a deletion that couldn't finish, or a download that went.
-    yield* Effect.promise(async () => {
-      const names = await readdir(root).catch(() => []);
-      await Promise.all(
-        names
-          .filter((name) => ID.test(name) && !records.has(name))
-          .map((name) => rm(folderOf(name), { recursive: true, force: true }).catch(() => {})),
-      );
-    });
+    // Folders no row names: left by a deletion that couldn't finish, or a download that went.
+    // Only a database read whole tells them; a row this build can't read still names its own.
+    if (inventory) {
+      const { unreadable } = inventory;
+      yield* Effect.promise(async () => {
+        const names = await readdir(root).catch(() => []);
+        await Promise.all(
+          names
+            .filter((name) => ID.test(name) && !records.has(name) && !unreadable.has(name))
+            .map((name) => rm(folderOf(name), { recursive: true, force: true }).catch(() => {})),
+        );
+      });
+    }
 
     const lookForMissing = () => {
       missing.clear();
@@ -359,7 +366,19 @@ function make(deps: DownloadsDeps) {
         .finally(() => lent.release());
       transferring.settled = transferring.over
         .then(() => settle(record.id, transferring, outcome))
-        .catch((cause) => console.warn("[downloads] couldn't keep how a transfer ended", cause))
+        .catch((cause) => {
+          console.warn("[downloads] couldn't keep how a transfer ended", cause);
+          // Failed as far as this run knows, so the queue doesn't take it again and again.
+          const latest = records.get(record.id);
+          if (latest?.state === "queued") {
+            const failure = cause instanceof Failed ? cause : failedWith(cause);
+            records.set(record.id, {
+              ...latest,
+              state: "failed",
+              failure: { kind: "app", error: failure.error },
+            });
+          }
+        })
         .finally(() => {
           active = null;
           tell();
@@ -409,7 +428,7 @@ function make(deps: DownloadsDeps) {
         known: record.identity,
         signal,
         disk,
-        progress: ({ received, size, identity, restarted }) => {
+        progress: ({ received, size, restarted }) => {
           if (active !== transferring) return;
           const now = performance.now();
           if (now - measured.at >= 1000) {
@@ -417,22 +436,27 @@ function make(deps: DownloadsDeps) {
             transferring.rate = rate >= 0 ? rate : null;
             measured = { at: now, received };
           }
-          const newFile =
-            identity?.mark !== transferring.identity?.mark || restarted !== transferring.restarted;
+          const again = restarted !== transferring.restarted;
           transferring.received = received;
           transferring.size = size;
-          transferring.identity = identity;
           transferring.restarted = restarted;
           tell();
-          // What the partial is of goes down at once; how far it got, now and then.
-          if (newFile || now - savedAt >= SAVE_MS) {
+          // How far it got goes down now and then; what the partial is of, as `identify` says.
+          if (again || now - savedAt >= SAVE_MS) {
             savedAt = now;
             try {
-              update(record.id, (latest) => ({ ...latest, received, size, identity, restarted }));
+              update(record.id, (latest) => ({ ...latest, received, size, restarted }));
             } catch {
               // Written down at the end, or the transfer goes on from less.
             }
           }
+        },
+        // Throws when it can't be written down, before the transfer touches the partial.
+        identify: (identity) => {
+          transferring.identity = identity;
+          if (sameIdentity(records.get(record.id)?.identity ?? null, identity)) return;
+          const { received, size, restarted } = transferring;
+          update(record.id, (latest) => ({ ...latest, received, size, identity, restarted }));
         },
       });
     };
@@ -551,12 +575,14 @@ function make(deps: DownloadsDeps) {
 
     return {
       list: Effect.suspend(() => {
+        if (unloaded) return Effect.fail(unloaded);
         lookForMissing();
         return view;
       }),
 
       add: (title: TitleRef) =>
         Effect.gen(function* () {
+          if (unloaded) return yield* unloaded;
           const source = yield* subscriptions.sourceOf(title.subscriptionId);
           const { subscriptionId, ...raw } = title;
           const known = [...records.values()].find(
@@ -782,6 +808,10 @@ function make(deps: DownloadsDeps) {
       return { bytes: Buffer.concat(parts), type };
     }
   });
+}
+
+function sameIdentity(a: PartIdentity | null, b: PartIdentity | null): boolean {
+  return a?.resource === b?.resource && a?.mark === b?.mark && a?.size === b?.size;
 }
 
 /** A file type safe to name a file with; anything else is kept as "bin". */
