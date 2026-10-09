@@ -282,6 +282,23 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
     },
   );
 
+  it("copies an end-index MP4's picture when the same title is opened again", async () => {
+    const { provider, playback, load } = await receiver();
+    for (const file of ["title-receiver.mp4", undefined]) {
+      const { video } = await load(MP4, file);
+      expect(video.segments.map((each) => Number(each.at.toFixed(1)))).toEqual([
+        0, 5.1, 13.3, 21.9, 30, 44.8, 52.2, 61,
+      ]);
+      const first = await segment(video.segments[0]!.url);
+      expect(first.status).toBe(200);
+      expect(first.startsOnKeyframe).toBe(true);
+      // Copy keeps both original keyframes; conversion makes one at the segment's start.
+      expect(first.keyframes).toBe(2);
+      await playback.closeAll();
+    }
+    expect(provider.mostFilesAtOnce()).toBe(1);
+  });
+
   it("starts anywhere the receiver skips to, near the end and backwards, one request at a time", async () => {
     const { provider, load } = await receiver();
     const { video } = await load(MATROSKA, "title-receiver.mkv");

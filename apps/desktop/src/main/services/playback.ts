@@ -2607,10 +2607,15 @@ function make(deps: PlaybackDeps) {
               ? layout.cues.flatMap((cue) => (cue.track === track ? [cue.time] : []))
               : null;
           index = "cues";
-        } else if (probe.container === "mp4" && session.identity.size !== null) {
-          const times = await mp4Keyframes(read, session.identity.size, video.id);
-          keyframes = times && times.map((time) => video.start + time);
-          index = "samples";
+        } else if (probe.container === "mp4") {
+          // A cached probe hasn't read this session's source. Learn its size through the same
+          // bounded reader; the index then reuses the header's kept window.
+          if (session.identity.size === null) await read(0, 16);
+          if (session.identity.size !== null) {
+            const times = await mp4Keyframes(read, session.identity.size, video.id);
+            keyframes = times && times.map((time) => video.start + time);
+            index = "samples";
+          }
         }
       } catch {
         // The provider didn't give the index, or it is more than may be read.
