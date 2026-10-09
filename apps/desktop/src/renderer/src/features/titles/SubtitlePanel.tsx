@@ -53,7 +53,11 @@ export function SubtitlePanel({ open, onClose }: { open: boolean; onClose: () =>
     };
   }, [open]);
   // At the window: a result picked with the pointer goes disabled while it downloads, and focus
-  // leaves the panel with it. Settings and search over the title keep their own Escape.
+  // leaves the panel with it. Settings and search over the title keep their own Escape. One
+  // listener for as long as the panel is open: the title's own key handler runs first and can
+  // render the view again, and a listener put back in that moment would miss the key.
+  const close = useRef(onClose);
+  close.current = onClose;
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
@@ -62,11 +66,11 @@ export function SubtitlePanel({ open, onClose }: { open: boolean; onClose: () =>
       if (ui.searchOpen || ui.settings || ui.updateDialog) return;
       event.preventDefault();
       event.stopPropagation();
-      onClose();
+      close.current();
     };
     window.addEventListener("keydown", onKey, { capture: true });
     return () => window.removeEventListener("keydown", onKey, { capture: true });
-  }, [open, onClose]);
+  }, [open]);
   if (!open) return null;
   const downloaded = downloadedOn && saved?.subtitle != null;
   const settingsFor = subtitleSettingsFor(tracks, subtitle, downloaded);
