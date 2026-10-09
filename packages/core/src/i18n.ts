@@ -98,7 +98,10 @@ export function t<K extends MessageKey>(key: K, ...args: MessageArgs<K>): string
   return translate(active.locale, key, ...args);
 }
 
-/** `key` in `locale`, whatever this process's language is. */
+/**
+ * `key` in `locale`, whatever this process's language is, its counts written as `locale` writes
+ * them: in the process's own variant (en-GB for English) when `locale` is its language.
+ */
 export function translate<K extends MessageKey>(
   locale: Locale,
   key: K,
@@ -106,6 +109,7 @@ export function translate<K extends MessageKey>(
 ): string {
   const message: string | Plural | undefined = catalogues[locale]?.[key] ?? en[key];
   const values: Readonly<Record<string, string | number>> = params ?? {};
+  const tag = locale === active.locale ? active.formats : locale;
   const text =
     message === undefined
       ? key
@@ -115,7 +119,7 @@ export function translate<K extends MessageKey>(
   return text.replace(/\{(\w+)\}/g, (whole, name: string) => {
     const value = values[name];
     if (value === undefined) return whole;
-    return typeof value === "number" ? formatNumber(value) : value;
+    return typeof value === "number" ? numbers("count", {}, tag).format(value) : value;
   });
 }
 
@@ -202,8 +206,11 @@ function rules(locale: Locale): Intl.PluralRules {
   return made(pluralRules, locale, () => new Intl.PluralRules(locale));
 }
 
-function numbers(kind: string, options: Intl.NumberFormatOptions): Intl.NumberFormat {
-  const tag = active.formats;
+function numbers(
+  kind: string,
+  options: Intl.NumberFormatOptions,
+  tag = active.formats,
+): Intl.NumberFormat {
   return made(numberFormats, `${kind} ${tag}`, () => new Intl.NumberFormat(tag, options));
 }
 

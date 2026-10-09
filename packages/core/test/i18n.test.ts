@@ -83,6 +83,7 @@ describe("every message in every language", () => {
   const keys = Object.keys(en) as MessageKey[];
 
   it.each(LOCALES)("%s says each one with all of its values in place", (locale) => {
+    setLanguage({ locale, formats: locale });
     for (const key of keys) {
       for (const count of [1, 2, 5, 1_000_000]) {
         const values = valuesFor(key, count);
@@ -114,6 +115,18 @@ describe("messages", () => {
     expect(t("{known} of {wanted} titles", { known: 1200, wanted: 40000 })).toBe(
       "1.200 von 40.000 Titeln",
     );
+  });
+
+  it("in a language other than the process's, write counts as that language does", () => {
+    expect(translate("de-DE", "{known} of {wanted} titles", { known: 1200, wanted: 40000 })).toBe(
+      "1.200 von 40.000 Titeln",
+    );
+    // The process's own language keeps its system variant.
+    setLanguage({ locale: "de-DE", formats: "de-CH" });
+    expect(translate("de-DE", "{count} titles", { count: 1200 })).toBe(
+      `${formatNumber(1200)} Titel`,
+    );
+    expect(translate("en-US", "{count} titles", { count: 1200 })).toBe("1,200 titles");
   });
 
   it("pick the form a count takes in the language", () => {
