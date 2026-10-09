@@ -618,6 +618,9 @@ function outputChanged(status: OutputStatus, before: OutputStatus): void {
     return;
   }
   if (output.kind === "lost") {
+    // Still the same loss while the receivers listed or the scan change: its failure stays the
+    // one the viewer may have closed the message about. Only a receiver reached again loses anew.
+    if (before.output.kind === "lost") return;
     selection++;
     onReceiver.load = null;
     store.setState({

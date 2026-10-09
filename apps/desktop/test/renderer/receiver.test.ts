@@ -509,6 +509,32 @@ describe("a movie with a receiver connected", () => {
     await act(async () => opened.reject({ kind: "output", failure: { kind: "not-fetched" } }));
     expect(text()).toContain("Living Room TV got no stream");
   });
+
+  it("keeps a lost connection's message closed as receivers come and go, and says the next loss", async () => {
+    await show(TitleWatch);
+    await onReceiver(movieNow(movie, null), 120, 1);
+    const lost = () => status({ kind: "lost", receiver: tv, failure: { kind: "unreachable" } });
+    await emit(lost());
+    await press("Close message");
+    expect(text()).not.toContain("connection lost");
+
+    // The same loss, said again as the list is scanned and a TV goes: new objects each time, as
+    // every status that crosses from main is.
+    await emit({ ...lost(), scanning: true });
+    await emit({ ...lost(), receivers: [tv] });
+    expect(text()).not.toContain("connection lost");
+    expect(titlePlayer.state().phase.kind).toBe("failed");
+    expect(ipc.argsOf("output.openTitle")).toHaveLength(1);
+    expect(ipc.argsOf("output.connect")).toHaveLength(0);
+
+    // Reached again with Play, and lost again: that loss says its own.
+    await press("Play");
+    expect(ipc.argsOf("output.connect")).toEqual([{ receiverId: "tv" }]);
+    await emit(reaching(tv));
+    await emit(connected());
+    await emit(lost());
+    expect(text()).toContain("Living Room TV connection lost");
+  });
 });
 
 describe("a movie whose TV another takes the place of", () => {
@@ -1013,6 +1039,40 @@ describe("a channel with a receiver connected", () => {
     await wait(0);
     expect(text()).toContain("Loading on Living Room TV");
     expect(ipc.argsOf("output.playChannel")).toHaveLength(2);
+  });
+
+  it("keeps a lost connection's message closed as receivers come and go, and says the next loss", async () => {
+    await playing();
+    useUi.setState({ watching: true });
+    await show(WatchScreen);
+    /** What the picture area shows, without what a screen reader was told. */
+    const message = () =>
+      [...container.querySelectorAll("[data-playback-state]")]
+        .map((each) => each.textContent)
+        .join();
+    await emit(lost(tv));
+    await press("Close message");
+    expect(message()).not.toContain("connection lost");
+
+    // The same loss, said again as the list is scanned and a TV goes: new objects each time, as
+    // every status that crosses from main is.
+    await emit({ ...lost(tv), scanning: true });
+    await emit({ ...lost(tv), receivers: [tv] });
+    expect(message()).not.toContain("connection lost");
+    expect(player.state().phase.kind).toBe("failed");
+    expect(ipc.argsOf("output.playChannel")).toHaveLength(1);
+    expect(ipc.argsOf("output.connect")).toHaveLength(0);
+
+    // Reached again with R, and lost again: that loss says its own.
+    await key("r");
+    expect(ipc.argsOf("output.connect")).toEqual([{ receiverId: "tv" }]);
+    await emit(reaching(tv));
+    const loaded = ipc.hold("output.playChannel");
+    await emit(connected());
+    await act(async () => loaded.resolve(said(2, item, "loading")));
+    await emit(connected(said(2, item, "playing")));
+    await emit(lost(tv));
+    expect(message()).toContain("Living Room TV connection lost");
   });
 
   it("says the connection lost of the TV that lost it, whatever is reached in its place", async () => {
