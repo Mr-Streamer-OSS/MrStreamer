@@ -1344,8 +1344,12 @@ function make(deps: PlaybackDeps) {
      * from a position to its end, and the provider is asked the same, so the answer passes
      * through as it comes. If the provider instead answers with a known whole file from zero,
      * discard the bytes before the asked position and answer with that range. A position at or
-     * past its end gets 416. For a nonzero request, an unknown size or another start ends the
-     * request without sending bytes from the wrong position.
+     * past its known end gets 416. A nonzero request ends without bytes if a 200 has no known
+     * size or an answer names another start and isn't the whole file from zero. A 206 whose
+     * headers don't establish its range still passes through, as before. Reading forward still
+     * has the local run-start or receiver-segment deadline: 30 seconds. The renderer also gives
+     * up after 45 seconds without a picture and retries; a receiver retry can read from zero
+     * again. Extending local startup needs those waits to agree.
      *
      * While a subtitle track's past is being read (see `subtitlesBefore`), that reading needs
      * turns at the provider. A provider that answers ranges is then asked for the file a part at
@@ -1480,11 +1484,14 @@ function make(deps: PlaybackDeps) {
               position !== null && position > 0 && upstream.status === 200 && held?.start === 0;
             let discard = whole ? (position ?? 0) : 0;
             if (position !== null && position > 0) {
-              if (held === null || (held.start !== position && !whole)) {
+              if (
+                (upstream.status === 200 && !whole) ||
+                (held !== null && held.start !== position && !whole)
+              ) {
                 response.destroy();
                 return;
               }
-              if (position >= held.size) {
+              if (held !== null && position >= held.size) {
                 response.writeHead(416, { "Content-Range": `bytes */${held.size}` }).end();
                 return;
               }

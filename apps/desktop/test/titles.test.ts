@@ -1022,6 +1022,31 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
     await dispose();
   });
 
+  it("passes through a correct 206 range whose total size is unknown", async () => {
+    let changeHeaders = false;
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const answer = await fetch(input, init);
+      if (!changeHeaders || answer.status !== 206) return answer;
+      const headers = new Headers(answer.headers);
+      headers.set("content-range", (headers.get("content-range") ?? "").replace(/\/\d+$/, "/*"));
+      return new Response(answer.body, { status: answer.status, headers });
+    };
+    const { open, dispose } = await titles({}, { slotReleaseMs: 0 }, fetchImpl);
+    try {
+      const session = await open("TEST | Long subtitles");
+      changeHeaders = true;
+      const bytes = fixture("title-long-subs.mkv");
+      const position = Math.floor(bytes.length / 2);
+      const source = session.url.replace("/title/", "/source/").replace(/\.mp4$/, "");
+      const answer = await fetch(source, { headers: { Range: `bytes=${position}-` } });
+      expect(answer.status).toBe(206);
+      expect(answer.headers.get("content-range")).toBe(`bytes ${position}-${bytes.length - 1}/*`);
+      expect(Buffer.from(await answer.arrayBuffer())).toEqual(bytes.subarray(position));
+    } finally {
+      await dispose();
+    }
+  });
+
   it("starts a converted picture exactly where asked, with the subtitle on screen there", async () => {
     const { open, dispose } = await titles();
     // No H.264 here, so the picture converts.
