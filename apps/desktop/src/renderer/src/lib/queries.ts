@@ -504,6 +504,19 @@ export function useSourceOf(): (of: {
 }
 
 /**
+ * Names the subscription of a Live TV search row that stands for one channel, while several are
+ * saved, counting one whose login can't be read. With one saved, every row would name the same.
+ */
+export function useSearchSubscriptionNames(): (subscriptionId: string) => string | null {
+  const several = useSubscriptions().length > 1;
+  const nameOf = useSubscriptionNames();
+  return useCallback(
+    (subscriptionId) => (several ? nameOf(subscriptionId) : null),
+    [several, nameOf],
+  );
+}
+
+/**
  * What the viewer left each saved subscription at, by its id; undefined until every one is
  * known. `refetchOnMount` reads them afresh as a view opens: the main process notes the channel
  * watched last without going through this cache.

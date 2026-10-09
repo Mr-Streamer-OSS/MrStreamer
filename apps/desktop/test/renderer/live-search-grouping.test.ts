@@ -5,7 +5,7 @@ import { act, createElement, Fragment } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defaultSubscriptionPreferences } from "@mrstreamer/contracts/preferences";
-import { ownedId, ownedKey } from "@mrstreamer/contracts/subscription";
+import { ownedId, ownedKey, type SubscriptionSummary } from "@mrstreamer/contracts/subscription";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { ListingMatch, Programme } from "@mrstreamer/contracts/guide";
 import { normalizeCatalogue } from "@mrstreamer/core/catalogue/normalize";
@@ -1061,4 +1061,44 @@ describe("real search components with two subscriptions", () => {
     expect(rows[20]!.textContent).toContain("From this copy's guide.");
     expect(p.watch).not.toHaveBeenCalled();
   });
+
+  // VRT 1's two copies, then VRT Canvas on its own row, all from the first subscription.
+  it.each(["guide", "palette"] as const)(
+    "%s names a channel's subscription on its search rows only while several are saved",
+    async (kind) => {
+      const listed = [blue[0]!, blue[1]!, blue[2]!];
+      const named = async (saved: readonly SubscriptionSummary[]) => {
+        const p = await page(kind, kind === "guide" ? "" : "VRT", false, responses(listed));
+        ipc.always("library.searchGroups", stamps(listed));
+        await act(async () => {
+          p.client.setQueryData(queries.subscriptions().queryKey, saved);
+          p.client.setQueryData(queries.search("VRT").queryKey, responses(listed));
+        });
+        await settled();
+        if (kind === "guide") {
+          await p.search("VRT");
+          p.field().blur();
+          await p.press("ArrowRight", window);
+        } else await p.press("ArrowRight", p.field());
+        const rows = p.rows();
+        expect(rows.map((row) => row.getAttribute("aria-label")?.split(",")[0])).toEqual([
+          "VRT 1",
+          "VRT 1",
+          "VRT 1",
+          "VRT Canvas",
+        ]);
+        const names = rows.map((row) =>
+          `${row.getAttribute("aria-label")} ${row.textContent}`.includes("Northline"),
+        );
+        unmount();
+        return names;
+      };
+      const northline = { ...SAVED, name: "Northline" };
+      expect(await named([northline])).toEqual([false, false, false, false]);
+      // A subscription whose login can't be read is still saved.
+      expect(
+        await named([northline, { ...SAVED, id: GREEN, name: "Green", needsSecret: true }]),
+      ).toEqual([false, true, true, true]);
+    },
+  );
 });

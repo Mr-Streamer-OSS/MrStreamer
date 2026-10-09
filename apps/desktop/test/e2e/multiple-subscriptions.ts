@@ -2,6 +2,7 @@
 // everything alike, and the fake TMDB: what the suite can't, because the window, the player, the
 // worker and the main process meet only there. It connects the first, then checks, in order:
 //
+// - Search with one subscription names it on no row.
 // - A second subscription is added in Settings > Subscriptions while a channel of the first
 //   plays: the stream goes on, on the connection it had, and the row says what plays.
 // - A subscription renamed there is listed under its new name.
@@ -261,6 +262,11 @@ try {
 
   {
     const found = await search(page, CHANNEL);
+    // Its name is its host until it is given one.
+    report(
+      "Search with one subscription names it on no row",
+      found.some((row) => row.includes(host)) ? [`search shows ${found.join(" | ")}`] : [],
+    );
     await watch(page, 0);
     await leave(page, "watch");
     const requests = first.streamRequests();
