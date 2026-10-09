@@ -218,6 +218,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
         if (abort.signal.aborted || ahead() < AHEAD_S.resume) {
           video.removeEventListener("timeupdate", check);
           video.removeEventListener("seeking", check);
+          abort.signal.removeEventListener("abort", check);
           done();
         }
       };
@@ -226,12 +227,23 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
       abort.signal.addEventListener("abort", check, { once: true });
     });
 
+  /**
+   * Resolves once the buffer took what it was given, and rejects when it refused. Whichever comes
+   * takes both listeners away, so a long title leaves none behind for each piece it appended.
+   */
   const updated = (target: SourceBuffer) =>
     new Promise<void>((done, failed) => {
-      target.addEventListener("updateend", () => done(), { once: true });
-      target.addEventListener("error", () => failed(new Error("The player refused the title.")), {
-        once: true,
-      });
+      const settled = new AbortController();
+      const settle = (finish: () => void) => () => {
+        settled.abort();
+        finish();
+      };
+      target.addEventListener("updateend", settle(done), { signal: settled.signal });
+      target.addEventListener(
+        "error",
+        settle(() => failed(new Error("The player refused the title."))),
+        { signal: settled.signal },
+      );
     });
 
   /** Appends a piece, making room behind the position when the element is full. */
