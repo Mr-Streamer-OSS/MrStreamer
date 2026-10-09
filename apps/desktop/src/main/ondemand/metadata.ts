@@ -116,6 +116,8 @@ export function metadataStore(deps: MetadataDeps) {
     (found) => {
       if (!found) return;
       file = found;
+      // A title searched before this was given no names: they are worked out again.
+      searchNames.clear();
       // Lists built before this show the provider's names and no genres, and nothing later
       // would say so when the cache needs no fetching: that is content, told once.
       if (shows(found)) {
