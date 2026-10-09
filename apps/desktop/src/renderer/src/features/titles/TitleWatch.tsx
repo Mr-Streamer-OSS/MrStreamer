@@ -33,6 +33,7 @@ import { hasModifier, isTyping } from "../../app/platform.ts";
 import { openDetails, useUi } from "../../app/ui-store.ts";
 import { Artwork } from "../../components/TitleArt.tsx";
 import { Button } from "../../components/ui/button.tsx";
+import { SliderControl } from "../../components/ui/slider.tsx";
 import { Tooltip } from "../../components/ui/tooltip.tsx";
 import { WindowBar } from "../../components/WindowBar.tsx";
 import { describeError } from "../../lib/errors.ts";
@@ -430,7 +431,10 @@ function PlayPause({ size = "icon" }: { size?: "icon" | "icon-sm" }) {
   );
 }
 
-/** Where the title is, where it can go, and how long is left. Seeks when let go. */
+/**
+ * Where the title is, where it can go, and how long is left. Seeks when let go, and the keys are
+ * the player's again: see `SliderControl`.
+ */
 function Scrubber() {
   const position = useTitlePlayer((state) => state.position);
   const duration = useTitlePlayer((state) => state.duration);
@@ -453,12 +457,10 @@ function Scrubber() {
         onValueCommitted={(next) => {
           titlePlayer.seek(Array.isArray(next) ? (next[0] ?? 0) : next);
           setDragging(null);
-          // Hand the keys back to the player.
-          if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
         }}
         className="flex-1"
       >
-        <SliderPrimitive.Control className="flex h-6 w-full touch-none items-center">
+        <SliderControl className="flex h-6 w-full touch-none items-center">
           <SliderPrimitive.Track className="relative h-1 w-full rounded-full bg-white/25">
             <SliderPrimitive.Indicator className="rounded-full bg-white" />
             {confirmed !== null && (
@@ -473,7 +475,7 @@ function Scrubber() {
               className="size-3.5 rounded-full bg-white shadow-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </SliderPrimitive.Track>
-        </SliderPrimitive.Control>
+        </SliderControl>
       </SliderPrimitive.Root>
       <span className="w-16 text-muted-foreground">-{clock(duration - shown)}</span>
     </div>
