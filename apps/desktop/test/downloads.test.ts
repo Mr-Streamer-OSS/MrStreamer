@@ -500,6 +500,17 @@ describe.skipIf(!hasTools)("downloads", () => {
     expect(await readdir(join(dataDir, "downloads"))).toEqual([]);
   }, 60_000);
 
+  it("waits out a provider that stops sending for longer than it took to answer", async () => {
+    const { provider, dataDir, subscriptionId, downloads, find } = await connected();
+    const film = movie(provider, subscriptionId, "TEST | Index at the end");
+    provider.stallMovieFile(film.id, 30_000, 17_000);
+    const queued = await downloads.add(film.ref);
+    await vi.waitFor(async () => expect((await find(queued.id))?.status.kind).toBe("complete"), {
+      timeout: LONG,
+    });
+    expect(await copyOf(dataDir, queued.id)).toEqual(film.bytes);
+  }, 60_000);
+
   it("ends a held request when the app quits, keeping the queue for the next start", async () => {
     const { provider, dataDir, subscriptionId, downloads, find, quit } = await connected();
     const film = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");

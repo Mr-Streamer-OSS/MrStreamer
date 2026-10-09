@@ -80,6 +80,7 @@ async function heldStart(paused: boolean) {
   const opened = ipc.hold("playback.openTitle");
   void titlePlayer.open(
     {
+      kind: "provider",
       title: { kind: "movie", subscriptionId: SUBSCRIPTION, id: "1" },
       name: "Night Harbour",
       detail: null,

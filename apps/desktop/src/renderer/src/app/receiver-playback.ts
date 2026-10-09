@@ -16,7 +16,7 @@ import { queries } from "../lib/queries.ts";
 import { movieNow } from "../lib/titles.ts";
 import { outputs } from "../player/output.ts";
 import { player } from "../player/player.ts";
-import { episodeNow, titlePlayer, type NowPlaying } from "../player/title-player.ts";
+import { episodeNow, titlePlayer, type ProviderNow } from "../player/title-player.ts";
 import { openWatch, useUi } from "./ui-store.ts";
 
 /**
@@ -60,7 +60,7 @@ export async function showReceiverPlayback(
   // What its file holds is this load's only while the session is the same.
   if (playing?.title.sessionId !== began.sessionId || !latest()) return;
   const ref = playing.title.title;
-  let now: NowPlaying | null = null;
+  let now: ProviderNow | null = null;
   if (ref.kind === "movie") {
     const [title] = await client.fetchQuery(queries.titles("movie", [ref]));
     now = title ? movieNow({ ...title, ...ownedId(ref) }, title.backdropUrl) : null;

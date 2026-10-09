@@ -169,7 +169,8 @@ export function useTitleSession(): void {
     if (!now) return;
     // An episode's detail reads "S1 E3 · Its name".
     const [label, ...name] = now.detail?.split(" · ") ?? [];
-    const episode = now.title.kind === "episode";
+    // A copy shows its own name and detail, as it was kept.
+    const episode = now.kind === "provider" && now.title.kind === "episode";
     // On a receiver the element here plays nothing: whether it plays is the receiver's word.
     const paused = () =>
       titlePlayer.onReceiver()

@@ -152,7 +152,14 @@ describe("removing a subscription", () => {
     await act(
       async () =>
         void titlePlayer.open(
-          { title: film, name: "Blow", detail: "2001", artworkUrl: null, originalLanguage: "en" },
+          {
+            kind: "provider",
+            title: film,
+            name: "Blow",
+            detail: "2001",
+            artworkUrl: null,
+            originalLanguage: "en",
+          },
           600,
         ),
     );

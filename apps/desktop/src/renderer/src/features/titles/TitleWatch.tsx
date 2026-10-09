@@ -203,6 +203,8 @@ export function TitleWatch() {
           break;
         case "o":
         case "O":
+          // A copy plays here only.
+          if (titlePlayer.state().now?.kind === "copy") return;
           void openChooser(() => setMenu("output"), view.signal);
           break;
         case "m":
@@ -267,6 +269,7 @@ export function TitleWatch() {
   const controlsVisible = awake || phase.kind !== "playing" || menu !== null || remote;
   // An episode's end, and a next episode that didn't start, take the controls' place.
   const nextUp =
+    now.kind === "provider" &&
     now.series &&
     ((phase.kind === "ended" && next !== undefined) || (failure && continued && !closed))
       ? now.series
@@ -397,10 +400,12 @@ export function TitleWatch() {
                 </Button>
               )}
               <VolumeControl />
-              <OutputButton
-                open={menu === "output"}
-                onOpenChange={(open) => setMenu(open ? "output" : null)}
-              />
+              {now.kind === "provider" && (
+                <OutputButton
+                  open={menu === "output"}
+                  onOpenChange={(open) => setMenu(open ? "output" : null)}
+                />
+              )}
               <MiniPlayerButton />
               <Tooltip label={fullscreen ? "Exit full screen" : "Full screen"}>
                 <Button
@@ -646,8 +651,14 @@ function State() {
       );
       break;
     case "failed":
-      title = problemTitle(phase.problem);
-      body = problemBody(phase.problem);
+      // A copy's file that went from the app's folder.
+      if (now.kind === "copy" && phase.problem.kind === "unavailable") {
+        title = "Download missing";
+        body = "Its file is no longer on this computer.";
+      } else {
+        title = problemTitle(phase.problem);
+        body = problemBody(phase.problem);
+      }
       actions = (
         <>
           <Button variant="primary" onClick={() => titlePlayer.retry()}>
@@ -771,7 +782,7 @@ function NextUp({ series }: { series: SeriesDetails }) {
   // On a receiver, where the next one plays, and the way back.
   const receiver =
     remote && (output.kind === "receiver" || output.kind === "lost") ? output.receiver : null;
-  if (now?.title.kind !== "episode") return null;
+  if (now?.kind !== "provider" || now.title.kind !== "episode") return null;
   if (phase.kind === "failed") {
     return (
       <EndOfEpisode

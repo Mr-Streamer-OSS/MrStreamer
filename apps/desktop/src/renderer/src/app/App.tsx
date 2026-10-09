@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { hasTitles, ownedKey } from "@mrstreamer/contracts/subscription";
 import { ConnectScreen } from "../features/connect/ConnectScreen.tsx";
+import { DownloadsPage } from "../features/downloads/DownloadsPage.tsx";
 import { HomeScreen } from "../features/home/HomeScreen.tsx";
 import { GuidePage } from "../features/live/GuidePage.tsx";
 import { SearchPalette } from "../features/search/SearchPalette.tsx";
@@ -13,6 +14,7 @@ import { SavedSheet } from "../features/watchlist/SavedSheet.tsx";
 import { WatchlistPage } from "../features/watchlist/WatchlistPage.tsx";
 import { ReceiverBar, useReceiverBar } from "../features/watch/ReceiverBar.tsx";
 import { WatchScreen } from "../features/watch/WatchScreen.tsx";
+import { downloadsQuery } from "../lib/downloads.ts";
 import { appError, describeError } from "../lib/errors.ts";
 import { queries, useLastChannel, useSubscriptionPreferences } from "../lib/queries.ts";
 import { cn } from "../lib/utils.ts";
@@ -21,7 +23,7 @@ import { player, usePlayer } from "../player/player.ts";
 import { titlePlayer } from "../player/title-player.ts";
 import { hasModifier } from "./platform.ts";
 import { showReceiverPlayback } from "./receiver-playback.ts";
-import { isLivePage, useUi, type View } from "./ui-store.ts";
+import { withoutTitles, useUi, type View } from "./ui-store.ts";
 
 export function App() {
   const subscriptions = useQuery(queries.subscriptions());
@@ -59,10 +61,17 @@ export function App() {
   // Connect shows only with no subscription saved. One whose password or link can't be read
   // stays in the lists with what it loaded, and Settings is where it is entered again.
   const connect = subscriptions.isSuccess && subscriptions.data.length === 0;
+  // Downloads stand alone without one: Connect opens them, and Add subscription goes back.
+  const offline = useUi((state) => state.view === "downloads");
   // The login form replaces everything, and a receiver's controls with it: what it plays ends.
   useEffect(() => {
     if (connect) outputs.stop();
   }, [connect]);
+  // A download names the subscription of its account as it is now.
+  const client = useQueryClient();
+  useEffect(() => {
+    void client.invalidateQueries({ queryKey: downloadsQuery().queryKey });
+  }, [client, subscriptions.data]);
 
   if (subscriptions.isPending || preferences.isPending) return null;
   if (subscriptions.isError) {
@@ -72,12 +81,12 @@ export function App() {
       </p>
     );
   }
-  if (connect) return <ConnectScreen />;
+  if (connect) return offline ? <Offline /> : <ConnectScreen />;
   return <Shell liveOnly={!subscriptions.data.some(hasTitles)} />;
 }
 
 /**
- * The page (Home, Live TV, Movies, Series or Watchlist), with details, Watch and a playing title
+ * The page (Home, Live TV, Movies, Series, Watchlist or Downloads), with details, Watch and a playing title
  * opening over it. The page stays laid out underneath, so leaving any of them finds it scrolled
  * where it was, and takes no input meanwhile. Search and settings are available everywhere.
  * Subscriptions with live TV only, unmapped playlists, have no Movies, Series or Watchlist: Home stands in
@@ -85,7 +94,7 @@ export function App() {
  * page, and the pages end above.
  */
 function Shell({ liveOnly }: { liveOnly: boolean }) {
-  const view = useUi((state) => (liveOnly && !isLivePage(state.view) ? "home" : state.view));
+  const view = useUi((state) => (liveOnly && !withoutTitles(state.view) ? "home" : state.view));
   const watching = useUi((state) => state.watching);
   const playingTitle = useUi((state) => state.playingTitle);
   const details = useUi((state) => state.details);
@@ -141,6 +150,8 @@ function Shell({ liveOnly }: { liveOnly: boolean }) {
           <GuidePage active={pageActive} />
         ) : view === "watchlist" ? (
           <WatchlistPage active={pageActive} />
+        ) : view === "downloads" ? (
+          <DownloadsPage />
         ) : (
           // Its own page per kind, so one never shows the other's lists while its own load.
           <TitlesPage
@@ -166,6 +177,24 @@ function Shell({ liveOnly }: { liveOnly: boolean }) {
   );
 }
 
+/**
+ * Downloads with no subscription saved: the page alone, and a copy playing over it. Nothing else
+ * plays, so a copy is all the sound there is.
+ */
+function Offline() {
+  const playingTitle = useUi((state) => state.playingTitle);
+  useEffect(() => player.setAudible(playingTitle), [playingTitle]);
+  useEffect(() => () => titlePlayer.close(), []);
+  return (
+    <>
+      <div className={cn("h-full", playingTitle && "invisible")} inert={playingTitle || undefined}>
+        <DownloadsPage standalone />
+      </div>
+      {playingTitle && <TitleWatch />}
+    </>
+  );
+}
+
 function subscribeVisibility(onChange: () => void): () => void {
   document.addEventListener("visibilitychange", onChange);
   return () => document.removeEventListener("visibilitychange", onChange);
@@ -181,6 +210,7 @@ const PREVIEWS: Record<View, boolean> = {
   movies: false,
   series: false,
   watchlist: false,
+  downloads: false,
 };
 
 /**

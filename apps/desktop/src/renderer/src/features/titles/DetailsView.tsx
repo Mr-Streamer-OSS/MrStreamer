@@ -47,7 +47,7 @@ import {
   useSubscriptionPreferences,
   useSubscriptions,
 } from "../../lib/queries.ts";
-import { episodeNow } from "../../player/title-player.ts";
+import { episodeNow, episodeRef } from "../../player/title-player.ts";
 import {
   automaticVersion,
   movieNow,
@@ -61,6 +61,7 @@ import {
 } from "../../lib/titles.ts";
 import { cn } from "../../lib/utils.ts";
 import { useSaveToggle, type SaveToggle } from "../../lib/watchlist.ts";
+import { EpisodeDownload, MovieDownload } from "../downloads/DownloadControls.tsx";
 import { SaveButton, SaveError } from "../watchlist/SaveButton.tsx";
 import { EpisodeMenu, MarkNotice, useEpisodeMarks } from "./EpisodeMarks.tsx";
 import { RelatedTitles } from "./RelatedTitles.tsx";
@@ -383,6 +384,7 @@ function MovieActions({
       onBeginning={partly ? () => playTitle(now, 0) : null}
       onRemove={listed ? () => removal.mutate(details.title) : null}
       removeError={removal.error}
+      download={<MovieDownload title={now.title} />}
     />
   );
 }
@@ -491,6 +493,7 @@ function Actions({
   onBeginning,
   onRemove,
   removeError,
+  download,
 }: {
   versions: Versions;
   /** Another version's details are on their way: nothing plays until they're here. */
@@ -504,6 +507,8 @@ function Actions({
   onRemove: (() => void) | null;
   /** Why the last removal failed. */
   removeError: Error | null;
+  /** A movie's Download, beside Play and Watchlist. */
+  download?: ReactNode;
 }) {
   const { title, playing, automatic } = versions;
   const all = title?.versions ?? [];
@@ -549,6 +554,7 @@ function Actions({
             From the beginning
           </Button>
         )}
+        {download}
         <SaveButton state={saving} />
         {onRemove && (
           <Button variant="ghost" onClick={onRemove}>
@@ -768,6 +774,9 @@ function Episodes({ details }: { details: SeriesDetails }) {
                 </span>
               </button>
               <span className="flex min-w-8 flex-col items-center gap-1.5 text-muted-foreground">
+                <EpisodeDownload
+                  title={episodeRef(episodeFileVersion(episode, partly?.title.id))}
+                />
                 {episode.versions && episode.versions.length > 1 && (
                   <EpisodeVersionMenu
                     episode={episode}

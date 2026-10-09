@@ -191,7 +191,9 @@ function usePlaying(): { readonly subscriptionId: string; readonly name: string 
   const channel = usePlayer((state) =>
     state.phase.kind === "idle" || state.phase.kind === "failed" ? null : state.channel,
   );
-  if (title) return { subscriptionId: title.title.subscriptionId, name: title.name };
+  // A copy plays from this computer, of no subscription.
+  if (title?.kind === "provider")
+    return { subscriptionId: title.title.subscriptionId, name: title.name };
   return channel && { subscriptionId: channel.subscriptionId, name: channel.title };
 }
 
@@ -703,7 +705,8 @@ function Remove({
     mutationFn: async () => {
       // What plays from it ends here first, with how far it got saved under its own account,
       // which the main process has answered before it is asked to remove the subscription.
-      if (titlePlayer.state().now?.title.subscriptionId === id) {
+      const now = titlePlayer.state().now;
+      if (now?.kind === "provider" && now.title.subscriptionId === id) {
         titlePlayer.close();
         useUi.setState({ playingTitle: false });
         await titlePlayer.saved();

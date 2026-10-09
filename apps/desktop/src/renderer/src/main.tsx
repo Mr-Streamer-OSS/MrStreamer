@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App.tsx";
+import { syncDownloads } from "./lib/downloads.ts";
 import { TooltipProvider } from "./components/ui/tooltip.tsx";
 import {
   syncGuideUpdates,
@@ -22,6 +23,7 @@ syncGuideUpdates(client);
 syncViewing(client);
 syncWatchlist(client);
 syncUpdates(client);
+syncDownloads(client);
 
 const root = document.getElementById("root");
 if (!root) throw new Error("index.html is missing #root");

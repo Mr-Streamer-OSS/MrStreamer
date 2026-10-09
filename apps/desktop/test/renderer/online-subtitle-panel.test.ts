@@ -102,6 +102,7 @@ async function opened(tracks: readonly SubtitleTrack[] = []) {
   });
   void titlePlayer.open(
     {
+      kind: "provider",
       title: { kind: "movie", subscriptionId: SUBSCRIPTION, id: "4k" },
       name: "Night Harbour",
       detail: null,

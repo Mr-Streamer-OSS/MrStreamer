@@ -136,23 +136,27 @@ async function connect(
     const ifRange = ifRangeOf(resume.known.mark);
     if (ifRange) headers.set("If-Range", ifRange);
   }
-  const timeout = AbortSignal.timeout(CONNECT_TIMEOUT_MS);
+  // Only the wait for the answer is timed: its body has the stall deadline of its own.
+  const timeout = new AbortController();
+  const timer = setTimeout(() => timeout.abort(), CONNECT_TIMEOUT_MS);
   let response: Response;
   try {
     response = await asked.request(asked.url, {
       headers,
-      signal: AbortSignal.any([asked.signal, timeout]),
+      signal: AbortSignal.any([asked.signal, timeout.signal]),
     });
   } catch (cause) {
     if (asked.signal.aborted) return { kind: "stopped" };
     return failed({
       kind: "network",
-      detail: timeout.aborted
+      detail: timeout.signal.aborted
         ? "The provider did not answer in time."
         : cause instanceof Error
           ? cause.message
           : String(cause),
     });
+  } finally {
+    clearTimeout(timer);
   }
   if (response.ok) return { kind: "answer", response };
   await response.body?.cancel().catch(() => {});

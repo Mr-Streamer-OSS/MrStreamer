@@ -28,6 +28,10 @@
 // that takes another's place, or is reached again after its connection broke, has nothing of the
 // title: it is opened and loaded there afresh, where it was, paused when it was. Wherever it
 // plays, it is the one play the viewer began, and its progress is saved as that play's.
+//
+// A downloaded copy plays the same way from this computer, as its own title: its progress is kept
+// with the copy, it has no next episode, and it never moves to a receiver. Nothing about it asks
+// a provider, the catalogue or the viewing record.
 import { SubtitleTiming, type SavedSubtitle } from "@mrstreamer/contracts/online-subtitles";
 import { createStore, useStore } from "zustand";
 import type { AppError } from "@mrstreamer/contracts/errors";
@@ -87,30 +91,49 @@ const SHOWN_SUBTITLES: ReadonlySet<SubtitleFormat> = new Set([
 ]);
 
 /** What the view shows about the open title. */
-export interface NowPlaying {
-  readonly title: TitleRef;
+interface Shown {
   /** "Escape from New York", or the series' name. */
   readonly name: string;
-  /** For episodes: "S2 E3 · Aankomst in Tbilisi". */
+  /** For episodes: "S2 E3 · Aankomst in Tbilisi"; for a copy, also that it plays offline. */
   readonly detail: string | null;
   readonly artworkUrl: string | null;
   /** The language it was made in, which "Original language" sound plays; null when unknown. */
   readonly originalLanguage: string | null;
+}
+
+/** A movie or episode from its provider, through the subscription that lists it. */
+export interface ProviderNow extends Shown {
+  readonly kind: "provider";
+  readonly title: TitleRef;
   /** For episodes: the details of the series version they belong to, which list what comes next. */
   readonly series?: SeriesDetails;
 }
 
-/** What the player shows for an episode of `series`: the series, and "S2 E3 · Its name". */
-export function episodeNow(series: SeriesDetails, episode: Episode): NowPlaying {
+/** A downloaded copy, from this computer, by its download's id. */
+export interface CopyNow extends Shown {
+  readonly kind: "copy";
+  readonly copy: string;
+}
+
+export type NowPlaying = ProviderNow | CopyNow;
+
+/** The exact file of an episode, as playing and downloading name it. */
+export function episodeRef(episode: Episode): Extract<TitleRef, { kind: "episode" }> {
   return {
-    title: {
-      kind: "episode",
-      subscriptionId: episode.subscriptionId,
-      id: episode.id,
-      seriesId: episode.seriesId,
-      season: episode.season,
-      episode: episode.number,
-    },
+    kind: "episode",
+    subscriptionId: episode.subscriptionId,
+    id: episode.id,
+    seriesId: episode.seriesId,
+    season: episode.season,
+    episode: episode.number,
+  };
+}
+
+/** What the player shows for an episode of `series`: the series, and "S2 E3 · Its name". */
+export function episodeNow(series: SeriesDetails, episode: Episode): ProviderNow {
+  return {
+    kind: "provider",
+    title: episodeRef(episode),
     name: series.title.title,
     detail: `${episodeLabel(episode.season, episode.number)} · ${episode.title}`,
     artworkUrl: episode.stillUrl ?? series.backdropUrl ?? series.title.posterUrl,
@@ -368,7 +391,9 @@ listen("playback.fileReplaced", ({ sessionId }) => {
  */
 function refreshNext(): Promise<boolean> {
   const { now } = store.getState();
-  if (!now?.series || now.title.kind !== "episode") return Promise.resolve(false);
+  if (now?.kind !== "provider" || !now.series || now.title.kind !== "episode") {
+    return Promise.resolve(false);
+  }
   const { series, title } = now;
   const mine: Promise<boolean> = call("viewing.episodes", { series: seriesOf(title) })
     .catch(() => null)
@@ -396,6 +421,18 @@ function save(): void {
   if (receiver) return;
   const { now, position, duration, next } = store.getState();
   if (!now || !duration || position <= 0) return;
+  // A copy keeps its own, whatever its subscription's record says.
+  if (now.kind === "copy") {
+    saving = call("downloads.recordProgress", {
+      id: now.copy,
+      position: Math.min(position, duration),
+      duration,
+    }).then(
+      () => {},
+      () => {},
+    );
+    return;
+  }
   let saved: Promise<unknown> = call("viewing.recordProgress", {
     commandId: crypto.randomUUID(),
     title: now.title,
@@ -420,7 +457,7 @@ function save(): void {
  * nothing is recorded, and the play's next save asks again.
  */
 async function finishSeries(
-  now: NowPlaying,
+  now: ProviderNow,
   mine: { readonly play: number; readonly since: number },
 ): Promise<void> {
   const { series, title } = now;
@@ -674,7 +711,7 @@ function receiverProblem(cause: unknown): TitleProblem {
  */
 async function openOnReceiver(
   mine: number,
-  now: NowPlaying,
+  now: ProviderNow,
   from: number,
   keep: { readonly audioId: number | null; readonly subtitle: SubtitleTrack | null } | null,
   paused = false,
@@ -806,7 +843,9 @@ function follow(media: RemoteMedia): void {
       const mine = { play, since: openedAt };
       void countDown(generation).then(() => {
         const after = store.getState();
-        if (now && after.now === now && after.next === null) void finishSeries(now, mine);
+        if (now?.kind === "provider" && after.now === now && after.next === null) {
+          void finishSeries(now, mine);
+        }
       });
       break;
     }
@@ -876,7 +915,8 @@ function awaitReceiver(): number {
  */
 function moveToReceiver(media: RemoteMedia | null): void {
   const { now, position, audioId, subtitle } = store.getState();
-  if (!now) return;
+  // A copy plays here only.
+  if (now?.kind !== "provider") return;
   if (receiver) {
     // It plays the load the title follows, as one taken up before this word of it came: nothing
     // took its place.
@@ -917,7 +957,7 @@ function moveToReceiver(media: RemoteMedia | null): void {
  */
 async function moveHere(): Promise<void> {
   const { now, position, phase } = store.getState();
-  if (!now || !receiver) return;
+  if (now?.kind !== "provider" || !receiver) return;
   const asked = returning;
   const held = !asked || receiver.paused || phase.kind === "ended";
   returning = false;
@@ -1074,7 +1114,9 @@ export const titlePlayer = {
   async open(now: NowPlaying, from: number, continued = false): Promise<void> {
     const before = store.getState();
     const sameSeries =
-      before.now?.title.kind === "episode" &&
+      before.now?.kind === "provider" &&
+      now.kind === "provider" &&
+      before.now.title.kind === "episode" &&
       now.title.kind === "episode" &&
       sameOwned(seriesOf(before.now.title), seriesOf(now.title));
     titlePlayer.close();
@@ -1098,11 +1140,13 @@ export const titlePlayer = {
     });
     // Which episode comes next, the record says: none is offered until it has.
     void refreshNext();
-    if (outputs.remote()) return openOnReceiver(mine, now, from, null);
+    if (outputs.remote() && now.kind === "provider") return openOnReceiver(mine, now, from, null);
     try {
       // The languages chosen last, fresh: a choice in the title before counts.
       const [opened, preferences] = await Promise.all([
-        call("playback.openTitle", { title: now.title, decoders: [...titleDecoders] }),
+        now.kind === "provider"
+          ? call("playback.openTitle", { title: now.title, decoders: [...titleDecoders] })
+          : call("playback.openCopy", { copy: now.copy, decoders: [...titleDecoders] }),
         call("preferences.get").catch((): Preferences | null => null),
       ]);
       if (mine !== generation) {
@@ -1214,7 +1258,7 @@ export const titlePlayer = {
   retry(): void {
     const { now, phase, position, continued, audioId, subtitle } = store.getState();
     if (!now || phase.kind !== "failed") return;
-    if (receiver) {
+    if (receiver && now.kind === "provider") {
       // A receiver that is gone has to be connected to again, which loads the title there again.
       if (phase.problem.kind === "receiver" && phase.problem.lost) return outputs.reconnect();
       // Opened afresh: what failed may have closed its session.
@@ -1236,7 +1280,7 @@ export const titlePlayer = {
    */
   playNext(): void {
     const { now, continued, phase } = store.getState();
-    if (!now?.series || (continued && phase.kind !== "failed")) return;
+    if (now?.kind !== "provider" || !now.series || (continued && phase.kind !== "failed")) return;
     const { series } = now;
     const mine = ++nextRequest;
     void refreshNext().then((known) => {
@@ -1490,7 +1534,7 @@ export const titlePlayer = {
    * is, what its file holds and the tracks it plays with. The receiver's word follows.
    */
   adopt(
-    now: NowPlaying,
+    now: ProviderNow,
     playing: {
       readonly sessionId: string;
       readonly duration: number;

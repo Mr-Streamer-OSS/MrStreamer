@@ -21,7 +21,12 @@ import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import { continuation } from "@mrstreamer/core/viewing/episodes";
 import { seriesIdentity } from "@mrstreamer/core/viewing/marks";
 import { openDetails, useUi } from "../app/ui-store.ts";
-import { episodeNow, titlePlayer, type NowPlaying } from "../player/title-player.ts";
+import {
+  episodeNow,
+  titlePlayer,
+  type NowPlaying,
+  type ProviderNow,
+} from "../player/title-player.ts";
 import { call } from "./ipc.ts";
 import { queries, updateSubscriptionPreferences } from "./queries.ts";
 
@@ -61,8 +66,9 @@ export function resumePoint(progress: TitleProgress | undefined): number {
  * What the player shows for a movie, which plays the version `title` names; episodes have
  * `episodeNow` in the player.
  */
-export function movieNow(title: Title, backdropUrl: string | null): NowPlaying {
+export function movieNow(title: Title, backdropUrl: string | null): ProviderNow {
   return {
+    kind: "provider",
     title: { kind: "movie", ...ownedId(title) },
     name: title.title,
     detail: title.year ? String(title.year) : null,
