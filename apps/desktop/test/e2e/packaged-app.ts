@@ -260,11 +260,13 @@ async function pictureSubtitles(page: Page): Promise<{ ok: boolean; detail: stri
   // Choosing subtitles starts a run where the title is. Paused, at a position within what's
   // loaded, only that run puts anything on screen.
   const startAt = async (position: number, label: string) => {
-    const before = await page.evaluate<string>(`(() => {
+    // The player follows the position on timeupdate, which a paused seek fires as it lands. A
+    // choice made before then starts its run where the title was.
+    const before = await page.evaluate<string>(`new Promise((resolve) => {
       const video = document.querySelector("video");
+      video.addEventListener("timeupdate", () => resolve(video.src), { once: true });
       video.currentTime = ${position};
-      return video.src;
-    })()`);
+    })`);
     await choose(label);
     await waitFor(
       () =>
