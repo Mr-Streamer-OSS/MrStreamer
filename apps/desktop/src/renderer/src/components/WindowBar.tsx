@@ -4,7 +4,8 @@ import { hasTitles } from "@mrstreamer/contracts/subscription";
 import { isMac, useWindowFullScreen } from "../app/platform.ts";
 import { closeWatch, withoutTitles, openView, useUi, type View } from "../app/ui-store.ts";
 import { UpdateNotice } from "../features/updates/UpdateNotice.tsx";
-import { useSubscriptions } from "../lib/queries.ts";
+import { useQuery } from "@tanstack/react-query";
+import { queries, useSubscriptions } from "../lib/queries.ts";
 import { cn } from "../lib/utils.ts";
 import { WINDOW_BAR } from "../../../shared/window-bar.ts";
 import { Logo } from "./Logo.tsx";
@@ -32,7 +33,10 @@ const VIEWS: readonly { readonly view: View; readonly label: string }[] = [
 export function WindowBar({ className, onBack }: { className?: string; onBack?: () => void }) {
   const view = useUi((state) => state.view);
   // An unmapped playlist has live TV only; explicit mapping enables the title pages.
-  const liveOnly = !useSubscriptions().some(hasTitles);
+  const subscriptions = useSubscriptions();
+  const liveOnly = !subscriptions.some(hasTitles);
+  // A copy playing with no subscription saved: there is nothing to search, and no Settings page.
+  const alone = useQuery(queries.subscriptions()).data?.length === 0;
   const watching = useUi((state) => state.watching);
   const settingsOpen = useUi((state) => state.settings !== null);
   const detailsOpen = useUi((state) => state.details !== null || state.savedEntry !== null);
@@ -84,23 +88,27 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
             <ArrowDownToLine />
           </Button>
         )}
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Search"
-          onClick={() => useUi.setState({ searchOpen: true })}
-        >
-          <Search />
-        </Button>
-        <Button
-          variant={settingsOpen ? "secondary" : "ghost"}
-          size="icon-sm"
-          aria-label="Settings"
-          aria-pressed={settingsOpen}
-          onClick={() => useUi.setState({ settings: settingsOpen ? null : "general" })}
-        >
-          <Settings />
-        </Button>
+        {!alone && (
+          <>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Search"
+              onClick={() => useUi.setState({ searchOpen: true })}
+            >
+              <Search />
+            </Button>
+            <Button
+              variant={settingsOpen ? "secondary" : "ghost"}
+              size="icon-sm"
+              aria-label="Settings"
+              aria-pressed={settingsOpen}
+              onClick={() => useUi.setState({ settings: settingsOpen ? null : "general" })}
+            >
+              <Settings />
+            </Button>
+          </>
+        )}
       </div>
     </BarFrame>
   );

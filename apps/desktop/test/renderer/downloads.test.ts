@@ -181,6 +181,21 @@ describe("with no subscription saved", () => {
     expect(
       [...app.querySelectorAll("header button")].map((each) => each.textContent?.trim()),
     ).toEqual(["Downloads", "Add subscription"]);
+    // A copy plays over it, with nothing in its bar that needs a subscription.
+    const opened = ipc.hold("playback.openCopy");
+    await click(button(app, "Watch offline"));
+    await until(() => app.querySelector("[data-view=title]") !== null);
+    expect(ipc.argsOf("playback.openCopy")).toEqual([{ copy: "d1", decoders: expect.any(Array) }]);
+    expect(labelled(app, "Search")).toBeNull();
+    expect(labelled(app, "Settings")).toBeNull();
+    opened.reject({ kind: "stream", failure: { kind: "unavailable", status: 404 } });
+    await until(() => app.textContent?.includes("Download missing") ?? false);
+    expect(app.textContent).toContain("Its file is no longer on this computer.");
+    await act(async () => {
+      titlePlayer.close();
+      useUi.setState({ playingTitle: false });
+      await settle();
+    });
     await click(button(app, "Add subscription"));
     expect(app.querySelector("form")).not.toBeNull();
   });
