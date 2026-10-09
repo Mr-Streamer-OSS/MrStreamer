@@ -186,6 +186,66 @@ async function playlistHost() {
 }
 
 /**
+ * A playlist host with one mapped film whose address redirects to `/media.mp4?cut=` and the
+ * current `cut`: two files of one size behind one path, told apart only by their query, under the
+ * same ETag. While `held`, a file answer stops after 40 kB.
+ */
+async function cutsHost() {
+  const first = fixture("title-h264-aac.mp4");
+  // One byte of its pictures differs, within the first 40 kB, so both play.
+  const second = Buffer.from(first);
+  second[30_000]! ^= 0xff;
+  let origin = "";
+  const state = { cut: "a", held: false };
+  const asked: string[] = [];
+  const server = createServer((request, response) => {
+    const url = new URL(request.url ?? "/", origin);
+    asked.push(url.pathname + url.search);
+    if (url.pathname === "/list") {
+      return response.end(`#EXTM3U\n#EXTINF:-1 group-title="Films",Film\n${origin}/film.mp4\n`);
+    }
+    if (url.pathname === "/film.mp4") {
+      return response.writeHead(302, { Location: `/media.mp4?cut=${state.cut}` }).end();
+    }
+    const bytes = url.searchParams.get("cut") === "a" ? first : second;
+    const range = /^bytes=(\d+)-$/.exec(request.headers.range ?? "");
+    const start = range ? Number(range[1]) : 0;
+    response.writeHead(range ? 206 : 200, {
+      "Content-Type": "video/mp4",
+      "Content-Length": bytes.length - start,
+      ETag: '"one"',
+      ...(range ? { "Content-Range": `bytes ${start}-${bytes.length - 1}/${bytes.length}` } : {}),
+    });
+    if (state.held) response.write(bytes.subarray(start, 40_000));
+    else response.end(bytes.subarray(start));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  return {
+    first,
+    second,
+    state,
+    link: `${origin}/list`,
+    asked: (path: string) => asked.filter((each) => each === path).length,
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
+  };
+}
+
+/** Saves `link` as a playlist whose Films are movies, and its one film. */
+async function mappedFilm(started: Awaited<ReturnType<typeof app>>, link: string) {
+  const saved = await started.subscriptions.add({ server: link, username: "", password: "" });
+  await started.subscriptions.mapPlaylist(saved.id, playlistGroupId("Films"), "movie");
+  await started.onDemand.refresh(saved.id);
+  const source = (await started.subscriptions.sources())[0]!;
+  const [listed] = (await source.provider.onDemandCatalogue()).movies;
+  return { kind: "movie", subscriptionId: saved.id, id: listed!.id } satisfies TitleRef;
+}
+
+/**
  * Answers SubDL at main's `fetch` with one English result for whatever is asked, of the release
  * `answer.release` names, and counts. `answer.fileMark` changes the ETag of the provider's file
  * answers: a string replaces it, null removes it.
@@ -834,70 +894,89 @@ describe.skipIf(!hasTools)("downloads", () => {
   }, 60_000);
 
   it("starts again when a file's address redirects to another query, whatever its mark", async () => {
-    // Two files of one size behind one path, told apart by their query, with the same ETag.
-    const first = fixture("title-h264-aac.mp4");
-    const second = Buffer.from(first);
-    second.fill(0xbc, 0, 40_000);
-    let origin = "";
-    let cut = "a";
-    let held = true;
-    const server = createServer((request, response) => {
-      const url = new URL(request.url ?? "/", origin);
-      if (url.pathname === "/list") {
-        return response.end(`#EXTM3U\n#EXTINF:-1 group-title="Films",Film\n${origin}/film.mp4\n`);
-      }
-      if (url.pathname === "/film.mp4") {
-        return response.writeHead(302, { Location: `/media.mp4?cut=${cut}` }).end();
-      }
-      const bytes = url.searchParams.get("cut") === "a" ? first : second;
-      const range = /^bytes=(\d+)-$/.exec(request.headers.range ?? "");
-      const start = range ? Number(range[1]) : 0;
-      response.writeHead(range ? 206 : 200, {
-        "Content-Type": "video/mp4",
-        "Content-Length": bytes.length - start,
-        ETag: '"one"',
-        ...(range ? { "Content-Range": `bytes ${start}-${bytes.length - 1}/${bytes.length}` } : {}),
-      });
-      if (held) response.write(bytes.subarray(start, 40_000));
-      else response.end(bytes.subarray(start));
-    });
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const host = await cutsHost();
+    host.state.held = true;
     try {
       const dataDir = await tempDir();
       const started = await app(dataDir);
-      const saved = await started.subscriptions.add({
-        server: `${origin}/list`,
-        username: "",
-        password: "",
-      });
-      await started.subscriptions.mapPlaylist(saved.id, playlistGroupId("Films"), "movie");
-      await started.onDemand.refresh(saved.id);
-      const source = (await started.subscriptions.sources())[0]!;
-      const [listed] = (await source.provider.onDemandCatalogue()).movies;
-      const queued = await started.downloads.add({
-        kind: "movie",
-        subscriptionId: saved.id,
-        id: listed!.id,
-      });
+      const queued = await started.downloads.add(await mappedFilm(started, host.link));
       await vi.waitFor(
         async () =>
           expect((await started.find(queued.id))?.status).toMatchObject({ received: 40_000 }),
         { timeout: LONG },
       );
       await started.quit();
-      cut = "b";
-      held = false;
+      host.state.cut = "b";
+      host.state.held = false;
       const again = await app(dataDir);
       await vi.waitFor(
         async () => expect((await again.find(queued.id))?.status.kind).toBe("complete"),
         { timeout: LONG },
       );
-      expect(digest(await copyOf(dataDir, queued.id))).toBe(digest(second));
+      expect(digest(await copyOf(dataDir, queued.id))).toBe(digest(host.second));
       await again.quit();
     } finally {
-      server.closeAllConnections();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await host.close();
+    }
+  }, 60_000);
+
+  it("brings no subtitle along that was chosen or timed after the address redirected to another query", async () => {
+    const service = serveSubdl();
+    const host = await cutsHost();
+    try {
+      const dataDir = await tempDir();
+      const started = await app(dataDir);
+      const { playback, onDemand, subtitles } = started;
+      await subtitles.configure(
+        { enabled: true, service: "subdl", languages: ["en"] },
+        { subdl: { apiKey: "fixture-key" } },
+      );
+      const ref = await mappedFilm(started, host.link);
+      const file = await onDemand.file(ref);
+      const session = await playback.openTitle(ref, file.url, DECODERS, file);
+      const choose = async (release: string) => {
+        service.answer.release = release;
+        const found = await subtitles.search(session.sessionId);
+        return (await subtitles.choose(session.sessionId, found.results[0]!.id)).saved.selection!;
+      };
+      expect(await read(session.url, 0)).toBeGreaterThan(0);
+      const first = await choose("Cut A");
+      // The same address now leads to the other file, read on a skip, under the same size and ETag.
+      host.state.cut = "b";
+      expect(await read(session.url, 2)).toBeGreaterThan(0);
+      expect(host.asked("/media.mp4?cut=b")).toBeGreaterThan(0);
+      const second = await choose("Cut B");
+      await subtitles.timing(session.sessionId, { offset: 3, speed: 1 });
+      await playback.close(session.sessionId);
+
+      host.state.cut = "a";
+      const queued = await started.downloads.add(ref);
+      await vi.waitFor(
+        async () => expect((await started.find(queued.id))?.status.kind).toBe("complete"),
+        { timeout: LONG },
+      );
+      expect(digest(await copyOf(dataDir, queued.id))).toBe(digest(host.first));
+      const copy = await playback.openCopy(
+        {
+          id: queued.id,
+          path: join(dataDir, "downloads", queued.id, "media.mp4"),
+          container: "mp4",
+          title: queued.title,
+        },
+        DECODERS,
+      );
+      expect(await subtitles.saved(copy.sessionId)).toBeNull();
+      await expect(subtitles.show(copy.sessionId, second)).rejects.toBeDefined();
+      // What was chosen while only the first file had been read came along, for its bytes.
+      await subtitles.show(copy.sessionId, first);
+      expect(await subtitles.saved(copy.sessionId)).toMatchObject({
+        subtitle: { release: "Cut A" },
+        timing: { offset: 0 },
+      });
+      await playback.close(copy.sessionId);
+      await started.quit();
+    } finally {
+      await host.close();
     }
   }, 60_000);
 
