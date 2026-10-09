@@ -313,8 +313,11 @@ jobs:
       - name: Check and record Windows ffmpeg provenance
         # README.txt is cached with both binaries, including on a warm-cache run.
         run: |
-          grep -q 'C runtime UCRT; MSYS2 UCRT64; packages ' vendor/ffmpeg/win-x64/README.txt
-          grep -q 'mingw-w64-ucrt-x86_64-gcc ' vendor/ffmpeg/win-x64/README.txt
+          # Stable can rebuild a tested nightly from before the script recorded UCRT64.
+          if grep -q 'MSYS2 UCRT64' scripts/build-ffmpeg.sh; then
+            grep -q 'C runtime UCRT; MSYS2 UCRT64; packages ' vendor/ffmpeg/win-x64/README.txt
+            grep -q 'mingw-w64-ucrt-x86_64-gcc ' vendor/ffmpeg/win-x64/README.txt
+          fi
           cat vendor/ffmpeg/win-x64/README.txt
       - name: Check ffmpeg cuts segments for receivers
         # A cached build from before the segment muxer would play on no TV.

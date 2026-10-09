@@ -193,6 +193,52 @@ describe("checking the Store package of a stable release", () => {
   });
 });
 
+describe("Windows FFmpeg provenance across promoted source revisions", () => {
+  const root = mkdtempSync(join(tmpdir(), "ffmpeg-provenance-"));
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+  const command = read("build-release.yml").jobs["package-windows"]?.steps?.find(
+    (step) => step.name === "Check and record Windows ffmpeg provenance",
+  )?.run;
+
+  it.each([
+    {
+      name: "older tested nightly",
+      script: "# MSYS2 MINGW64",
+      stamp: "MSYS2 packages ",
+      status: 0,
+    },
+    {
+      name: "UCRT64 source with its cached provenance",
+      script: "# MSYS2 UCRT64",
+      stamp: "C runtime UCRT; MSYS2 UCRT64; packages mingw-w64-ucrt-x86_64-gcc 15.2.0-8",
+      status: 0,
+    },
+    {
+      name: "UCRT64 source with an obsolete cached binary",
+      script: "# MSYS2 UCRT64",
+      stamp: "MSYS2 packages ",
+      status: 1,
+    },
+  ])("checks $name", ({ name, script, stamp, status }) => {
+    const dir = join(root, name);
+    mkdirSync(join(dir, "scripts"), { recursive: true });
+    mkdirSync(join(dir, "vendor/ffmpeg/win-x64"), { recursive: true });
+    writeFileSync(join(dir, "scripts/build-ffmpeg.sh"), script);
+    writeFileSync(join(dir, "vendor/ffmpeg/win-x64/README.txt"), `Built with: ${stamp}\n`);
+    expect(command).toBeDefined();
+    const checked = spawnSync(
+      "bash",
+      ["--noprofile", "--norc", "-eo", "pipefail", "-c", command!],
+      {
+        cwd: dir,
+        encoding: "utf8",
+      },
+    );
+    expect(checked.status).toBe(status);
+    if (status === 0) expect(checked.stdout).toContain(`Built with: ${stamp}`);
+  });
+});
+
 describe("sending a stable release to the Microsoft Store", () => {
   const release = read("release.yml");
   const build = read("build-release.yml");
@@ -381,7 +427,9 @@ describe("what each job of a release waits for", () => {
     expect(save?.uses).toMatch(/^actions\/cache@/);
     expect(save?.with?.["key"]).toBe("${{ steps.ffmpeg-key.outputs.key }}");
     expect(windows?.outputs?.["ffmpeg-key"]).toBe("${{ steps.ffmpeg-key.outputs.key }}");
-    expect(key?.run).toContain("hashFiles('apps/desktop/scripts/build-ffmpeg.sh')");
+    expect(key?.run).toContain(
+      "hashFiles('apps/desktop/scripts/build-ffmpeg.sh', '.github/workflows/build-release.yml')",
+    );
     // The cache is saved when the job succeeds, so a cold build is there for the job that needs it.
     expect(restore?.with).toEqual({
       path: save?.with?.["path"],
