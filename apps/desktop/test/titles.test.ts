@@ -958,6 +958,70 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
     await dispose();
   });
 
+  it("resumes and skips outside the buffer as on a ranged provider with whole-file answers", async () => {
+    const reference: { start: number; decoded: number }[] = [];
+    for (const wholeFiles of [false, true]) {
+      const { open, provider, dispose } = await titles({}, { wholeFiles, slotReleaseMs: 0 });
+      const movie = provider.titles.movies.find((each) =>
+        each.name.startsWith("TEST | Long subtitles"),
+      );
+      provider.replaceMovieFile(movie?.id ?? 0, "title-receiver.mkv");
+      const session = await open("TEST | Long subtitles");
+      const size = fixture("title-receiver.mkv").length;
+
+      // A resumed run, followed by a new run beyond its buffer, as the player asks for them.
+      for (const [index, position] of [30, 52.5].entries()) {
+        const before = { requests: provider.fileRequests(), bytes: provider.fileBytes() };
+        const run = await play(`${session.url}?start=${position}`);
+        expect(run.response.status).toBe(200);
+        const start = Number(run.response.headers.get("x-start"));
+        const picture = picturesOf(run.body);
+        expect(start).toBeLessThanOrEqual(position);
+        expect(picture.errors).toBe("");
+        expect(picture.decoded).toBeGreaterThan(0);
+        expect(run.streams.map((stream) => stream.codec_name)).toEqual(["h264", "aac"]);
+        if (wholeFiles) expect({ start, decoded: picture.decoded }).toEqual(reference[index]);
+        else reference.push({ start, decoded: picture.decoded });
+        // Metadata and seek reads, each taking a redirect and one file answer.
+        expect(provider.fileRequests() - before.requests).toBeLessThanOrEqual(8);
+        expect(provider.fileBytes() - before.bytes).toBeLessThanOrEqual(4 * size);
+      }
+      expect(provider.mostFilesAtOnce()).toBe(1);
+      await dispose();
+    }
+  });
+
+  it("answers the asked source range and refuses positions at or past the whole file end at once", async () => {
+    const { open, provider, dispose } = await titles({}, { wholeFiles: true, slotReleaseMs: 0 });
+    const session = await open("TEST | Long subtitles");
+    const size = fixture("title-long-subs.mkv").length;
+    const source = session.url.replace("/title/", "/source/").replace(/\.mp4$/, "");
+
+    for (const position of [Math.floor(size / 2), size - 1, size, size + 1]) {
+      const before = { requests: provider.fileRequests(), bytes: provider.fileBytes() };
+      const response = await fetch(source, {
+        headers: { Range: `bytes=${position}-` },
+        signal: AbortSignal.timeout(2000),
+      });
+      const body = await response.arrayBuffer();
+      if (position < size) {
+        expect(response.status).toBe(206);
+        expect(response.headers.get("content-range")).toBe(`bytes ${position}-${size - 1}/${size}`);
+        expect(response.headers.get("content-length")).toBe(String(size - position));
+        expect(Buffer.from(body)).toEqual(fixture("title-long-subs.mkv").subarray(position));
+      } else {
+        expect(response.status).toBe(416);
+        expect(response.headers.get("content-range")).toBe(`bytes */${size}`);
+        expect(body.byteLength).toBe(0);
+      }
+      // One redirect and one file answer for each request ffmpeg could make.
+      expect(provider.fileRequests() - before.requests).toBe(2);
+      expect(provider.fileBytes() - before.bytes).toBeLessThanOrEqual(size);
+    }
+    expect(provider.mostFilesAtOnce()).toBe(1);
+    await dispose();
+  });
+
   it("starts a converted picture exactly where asked, with the subtitle on screen there", async () => {
     const { open, dispose } = await titles();
     // No H.264 here, so the picture converts.

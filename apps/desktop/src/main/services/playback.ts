@@ -1342,7 +1342,10 @@ function make(deps: PlaybackDeps) {
      * The provider's file for ffprobe and ffmpeg, the byte range they ask for. One upstream
      * request at a time: a new one, such as a seek, ends the one before. ffmpeg asks for the file
      * from a position to its end, and the provider is asked the same, so the answer passes
-     * through as it comes.
+     * through as it comes. If the provider instead answers with a known whole file from zero,
+     * discard the bytes before the asked position and answer with that range. A position at or
+     * past its end gets 416. For a nonzero request, an unknown size or another start ends the
+     * request without sending bytes from the wrong position.
      *
      * While a subtitle track's past is being read (see `subtitlesBefore`), that reading needs
      * turns at the provider. A provider that answers ranges is then asked for the file a part at
@@ -1419,7 +1422,7 @@ function make(deps: PlaybackDeps) {
           const size: number | null = answered ? total : identity.size;
           // In parts while a subtitle track's past is being read, so that reading gets turns. A
           // run that is starting reads as it always did; recovery has no turns then anyway.
-          const end =
+          let end =
             !plain &&
             position !== null &&
             size !== null &&
@@ -1469,7 +1472,24 @@ function make(deps: PlaybackDeps) {
               return;
             }
             const upstream = found.response;
+            body = upstream.body?.getReader() ?? null;
             const held = observe(session, upstream, range !== undefined);
+            // A whole-file provider ignores Range. Read its one answer forward to the asked
+            // position; it still cannot be ended early and resumed for recovery's turns.
+            const whole =
+              position !== null && position > 0 && upstream.status === 200 && held?.start === 0;
+            let discard = whole ? (position ?? 0) : 0;
+            if (position !== null && position > 0) {
+              if (held === null || (held.start !== position && !whole)) {
+                response.destroy();
+                return;
+              }
+              if (position >= held.size) {
+                response.writeHead(416, { "Content-Range": `bytes */${held.size}` }).end();
+                return;
+              }
+            }
+            if (whole) end = null;
             const follows =
               held !== null &&
               upstream.status === 206 &&
@@ -1478,13 +1498,11 @@ function make(deps: PlaybackDeps) {
               !held.stale;
             if (answered && (!follows || held.size !== total)) {
               // Not the bytes that follow what ffmpeg has: it asks again, and gets what there is.
-              void upstream.body?.cancel().catch(() => {});
               response.destroy();
               return;
             }
             if (!answered && end !== null && (!follows || held.size !== size)) {
               // A part was asked of a file that isn't the one known: as the provider answers.
-              void upstream.body?.cancel().catch(() => {});
               plain = true;
               continue;
             }
@@ -1496,7 +1514,12 @@ function make(deps: PlaybackDeps) {
               const forwarded: Record<string, string> = { "Accept-Ranges": "bytes" };
               const type = upstream.headers.get("content-type");
               if (type) forwarded["content-type"] = type;
-              if (end !== null && position !== null && size !== null) {
+              if (whole && held !== null && position !== null) {
+                total = held.size;
+                forwarded["content-length"] = String(total - position);
+                forwarded["content-range"] = `bytes ${position}-${total - 1}/${total}`;
+                response.writeHead(206, forwarded);
+              } else if (end !== null && position !== null && size !== null) {
                 // What the provider answers when asked for the file from here to its end.
                 total = size;
                 forwarded["content-length"] = String(size - position);
@@ -1511,16 +1534,14 @@ function make(deps: PlaybackDeps) {
                 }
                 response.writeHead(upstream.status, forwarded);
                 total = held?.size ?? null;
-                // An answer that starts elsewhere than asked, as from a provider that knows no
-                // ranges, passes through as it is.
+                // Requests other than an open range keep the provider's answer as it is.
                 if (held?.start !== position) position = null;
               }
             }
-            if (!upstream.body) {
+            if (!body) {
               response.end();
               return;
             }
-            body = upstream.body.getReader();
             /** Whether the request can be ended early and the file asked for again from there. */
             const resumable = position !== null && total !== null && identity.ranges === true;
             const began = performance.now();
@@ -1532,8 +1553,12 @@ function make(deps: PlaybackDeps) {
                 break;
               }
               got += value.length;
-              if (position !== null) position += value.length;
-              const more = response.write(value);
+              const skipped = Math.min(discard, value.length);
+              discard -= skipped;
+              const bytes = value.subarray(skipped);
+              if (bytes.length === 0) continue;
+              if (position !== null) position += bytes.length;
+              const more = response.write(bytes);
               // A part is read to its end at once, and ffmpeg takes it from memory.
               if (end !== null) continue;
               // ffmpeg takes the file as it comes, or has all it takes for now: either way

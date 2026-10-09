@@ -28,6 +28,8 @@ Source: `docs/user/movies-and-series.md`, `docs/user/playback.md`, `apps/desktop
 
 ## Gotchas
 
+A provider that ignores byte ranges can resume and skip by reading its whole answer forward to the requested byte position. Verify both local playback and a receiver segment away from zero against ranged playback, including decoded pictures, start timestamps, bytes sent and one provider connection. `titles.test.ts` and `receiver.test.ts` cover those service paths. Subtitle history and keyframe-index reads still refuse such providers. A large or slow whole file can exceed the unchanged 30-second playback-start or receiver-segment deadline before reaching the position.
+
 TMDB enrichment changes displayed names; fixture poster titles still include provider names. A populated grid is not proof of playback, filters or version choice. Adult content needs its explicit Settings switch. Some verified series tracks only become filterable after reopening their details; check current user docs before treating absence as a defect.
 
 Downloaded text and timing belong to the exact file and play locally. Receivers keep supported file tracks. Removing a subscription retains its saved subtitle data unless the viewer also deletes its viewing data. After a catalogue refresh, or once 200 other titles' details were read, the next subtitle command of a playing episode asks the provider for its series' details once: the same listing keeps the saved result, timing and search, another listing ends them until the title is opened again, and no answer refuses them until the provider answers. Off or a file track over the saved result is kept for the file playback still holds, with or without that answer. A failed save there is a finding, not proof.

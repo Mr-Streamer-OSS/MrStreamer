@@ -317,6 +317,25 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
     expect(provider.mostFilesAtOnce()).toBe(1);
   });
 
+  it("serves a segment away from the start from a provider that knows no byte ranges", async () => {
+    const { provider, load } = await receiver({}, { wholeFiles: true, slotReleaseMs: 0 });
+    const { video } = await load(MATROSKA, "title-receiver.mkv");
+    const asked = video.segments.find((each) => each.at >= 30)!;
+    const before = { requests: provider.fileRequests(), bytes: provider.fileBytes() };
+    const made = await segment(asked.url);
+
+    expect(made.status).toBe(200);
+    expect(made.from).toBeCloseTo(asked.at, 2);
+    expect(made.to).toBeLessThan(asked.at + asked.length);
+    expect(made.startsOnKeyframe).toBe(true);
+    expect(made.codecs).toEqual(["h264", "aac"]);
+    expect(provider.fileRequests() - before.requests).toBeLessThanOrEqual(8);
+    expect(provider.fileBytes() - before.bytes).toBeLessThanOrEqual(
+      4 * fixture("title-receiver.mkv").length,
+    );
+    expect(provider.mostFilesAtOnce()).toBe(1);
+  });
+
   it("answers requests for segments far apart at once without a second reader", async () => {
     const { provider, playback, load } = await receiver();
     const { opened, video } = await load(MATROSKA, "title-receiver.mkv");
