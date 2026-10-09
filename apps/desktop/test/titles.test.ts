@@ -1,5 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { readFile, rm, writeFile } from "node:fs/promises";
+import { request } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
@@ -87,6 +89,69 @@ async function play(url: string) {
   const response = await fetch(url);
   const body = Buffer.from(await response.arrayBuffer());
   return { response, body, streams: streamsOf(body) };
+}
+
+/**
+ * A converter process whose WebVTT reports the test controls over its real HTTP output.
+ * The service still probes the fake provider and serves its public picture/subtitle addresses.
+ * This makes late reports and a full live buffer deterministic without changing service state.
+ */
+async function controlledConverter() {
+  const directory = await tempDir();
+  const executable = join(directory, "converter.cjs");
+  await writeFile(
+    executable,
+    `#!${process.execPath}
+const { writeFileSync } = require("node:fs");
+const { join } = require("node:path");
+const args = process.argv.slice(2);
+// Recovery uses the real converter; only the picture run's live report is controlled.
+if (args.includes("pipe:0")) {
+  const { spawnSync } = require("node:child_process");
+  process.exit(spawnSync(${JSON.stringify(FFMPEG)}, args, { stdio: "inherit" }).status ?? 1);
+}
+const position = args.includes("-ss") ? Number(args[args.indexOf("-ss") + 1]) : 0;
+writeFileSync(join(${JSON.stringify(directory)}, position + ".json"), JSON.stringify(args));
+process.stdout.write("picture");
+setInterval(() => {}, 1000);
+`,
+    { mode: 0o700 },
+  );
+  return {
+    executable,
+    async run(url: string, start: number) {
+      const file = join(directory, `${start}.json`);
+      await rm(file, { force: true });
+      const leaving = new AbortController();
+      const waiting = fetch(`${url}?start=${start}&subtitle=4`, { signal: leaving.signal });
+      let args: string[] = [];
+      await vi.waitFor(async () => {
+        args = JSON.parse(await readFile(file, "utf8")) as string[];
+        expect(args.length).toBeGreaterThan(0);
+      });
+      const subtitles = args.find((arg) => arg.endsWith("/subtitles"))!;
+      const picture = args.find((arg) => arg.endsWith("/start"))!;
+      await fetch(picture, {
+        method: "PUT",
+        body: `#tb 0: 1/1000\n0, ${start * 1000}, ${start * 1000}, 1, 1, 0\n`,
+      });
+      const response = await waiting;
+      expect(response.status).toBe(200);
+      return { subtitles, stop: () => leaving.abort() };
+    },
+  };
+}
+
+/** A complete converter report with cues at the given file times. */
+function webvtt(lines: readonly Line[]): string {
+  const time = (seconds: number) =>
+    `00:${Math.floor(seconds / 60)
+      .toString()
+      .padStart(2, "0")}:${(seconds % 60).toString().padStart(2, "0")}.000`;
+  return (
+    "WEBVTT\n\n" +
+    lines.map(([from, until, text]) => `${time(from)} --> ${time(until)}\n${text}\n\n`).join("")
+  );
 }
 
 /** A line of text and when it shows, in title seconds. */
@@ -755,6 +820,24 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
     await dispose();
   });
 
+  it("drops a previous run's buffered text when the provider replaces its file", async () => {
+    const { open, provider, dispose } = await titles();
+    const session = await open("TEST | Long subtitles");
+    await play(`${session.url}?start=137&subtitle=4`);
+    const corrected = Buffer.from(fixture("title-long-subs.mkv"));
+    corrected.write("Autre", corrected.indexOf("Apres"));
+    const movie = provider.titles.movies.find((each) => each.name.startsWith("TEST | Long sub"));
+    provider.replaceMovieFile(movie?.id ?? 0, corrected);
+    const told = await subtitles(session.url, 137, 4);
+    expect(told.before.unavailable).toBe("changed");
+    const feed = await subtitles(session.url, 137, 4);
+    expect(feed.lines.map(([, , text]) => text)).not.toContain("Apres");
+    await feed.run();
+    await vi.waitFor(() => expect(linesAt(feed.lines, 142)).toEqual(["Autre"]));
+    expect(provider.mostFilesAtOnce()).toBe(1);
+    await dispose();
+  });
+
   it("never takes a replaced file's subtitles for the new one's when two servers take turns", async () => {
     // A provider that frees its connection at once, so the two servers answer strictly in turn.
     const { open, provider, playback, dispose } = await titles(
@@ -905,6 +988,169 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
     expect(await playback.failure(session.sessionId)).toBeNull();
     expect(provider.mostFilesAtOnce()).toBe(1);
     await dispose();
+  });
+
+  it("sends a buffered text line once when a new run reads it again", async () => {
+    const { open, provider, dispose } = await titles();
+    const session = await open("TEST | Long subtitles");
+    await play(`${session.url}?start=137&subtitle=4`);
+    provider.slowFileParts(1500);
+    const asked = provider.fileRequests();
+    const waiting = subtitles(session.url, 137, 4);
+    // Recovery has asked the provider, so this feed joined before the new picture request.
+    await vi.waitFor(() => expect(provider.fileRequests()).toBeGreaterThan(asked));
+    await play(`${session.url}?start=137&subtitle=4`);
+    const feed = await waiting;
+    expect(feed.lines.filter(([, , text]) => text === "Apres")).toHaveLength(1);
+    expect(linesAt(feed.lines, 137)).toEqual(["Longue ligne"]);
+    expect(provider.mostFilesAtOnce()).toBe(1);
+    await dispose();
+  });
+
+  it("sends live text once across an intervening cancelled run", async () => {
+    const { open, provider, dispose } = await titles();
+    try {
+      const session = await open("TEST | Long subtitles");
+      const first = await subtitles(session.url, 125, 4);
+      await first.run();
+      const feed = await subtitles(session.url, 135, 4);
+      expect(feed.lines.filter(([, , text]) => text === "Apres")).toHaveLength(1);
+      const cancelled = new AbortController();
+      const asked = provider.fileRequests();
+      const middle = fetch(`${session.url}?start=130&subtitle=4`, {
+        signal: cancelled.signal,
+      })
+        .then((response) => response.body?.cancel())
+        .catch(() => {});
+      await vi.waitFor(() => expect(provider.fileRequests()).toBeGreaterThan(asked));
+      cancelled.abort();
+      await middle;
+      await feed.run();
+      await vi.waitFor(() => expect(linesAt(feed.lines, 135)).toEqual(["Longue ligne"]));
+      expect(feed.lines.filter(([, , text]) => text === "Apres")).toHaveLength(1);
+    } finally {
+      await dispose();
+    }
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "leaves a replaced run's late line for the current run, including new text at a known time",
+    async () => {
+      const converter = await controlledConverter();
+      const { open, dispose } = await titles({ ffmpeg: converter.executable });
+      try {
+        const session = await open("TEST | Long subtitles");
+        const old = await converter.run(session.url, 125);
+        const feed = await subtitles(session.url, 135, 4);
+        const { promise: finished, resolve, reject } = Promise.withResolvers<void>();
+        const report = request(old.subtitles, { method: "PUT" }, (response) => {
+          response.resume();
+          response.on("end", resolve);
+        });
+        report.on("error", reject);
+        report.write(webvtt([[141, 143, "Already sent"]]));
+        await vi.waitFor(() =>
+          expect(feed.lines.some(([, , text]) => text === "Already sent")).toBe(true),
+        );
+        const current = await converter.run(session.url, 135);
+        // The old converter's accepted report can still arrive after its process was replaced.
+        report.end(webvtt([[142, 144, "Late line"]]));
+        await finished;
+        await fetch(current.subtitles, {
+          method: "PUT",
+          body: webvtt([[137, 138, "Current run"]]),
+        });
+        await vi.waitFor(() =>
+          expect(feed.lines.some(([, , text]) => text === "Current run")).toBe(true),
+        );
+        expect(feed.lines.some(([, , text]) => text === "Late line")).toBe(false);
+        await fetch(current.subtitles, {
+          method: "PUT",
+          body: webvtt([
+            [142, 144, "Late line"],
+            [141, 143, "New text"],
+          ]),
+        });
+        await vi.waitFor(() =>
+          expect(feed.lines.filter(([, , text]) => text === "Late line")).toHaveLength(1),
+        );
+        expect(feed.lines.filter(([at]) => at === 141).map(([, , text]) => text)).toEqual([
+          "Already sent",
+          "New text",
+        ]);
+        current.stop();
+      } finally {
+        await dispose();
+      }
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "sends text between an old run's trimmed buffer and the early feed's position",
+    async () => {
+      const converter = await controlledConverter();
+      const { open, dispose } = await titles({ ffmpeg: converter.executable });
+      try {
+        const session = await open("TEST | Long subtitles");
+        const old = await converter.run(session.url, 125);
+        // Three independent lines exceed the run's 2 MB buffer, dropping the first at 127 s.
+        const lines: Line[] = [127, 130, 141].map((at) => [
+          at,
+          at + 1,
+          String(at) + "x".repeat(800_000),
+        ]);
+        await fetch(old.subtitles, { method: "PUT", body: webvtt(lines) });
+        const feed = await subtitles(session.url, 125, 4);
+        expect(feed.lines.some(([at]) => at === 127)).toBe(false);
+        expect(feed.lines.some(([at]) => at === 130)).toBe(true);
+        const current = await converter.run(session.url, 125);
+        await fetch(current.subtitles, { method: "PUT", body: webvtt(lines) });
+        await vi.waitFor(() => expect(feed.lines.some(([at]) => at === 127)).toBe(true));
+        current.stop();
+      } finally {
+        await dispose();
+      }
+    },
+  );
+
+  it("sends upcoming text while recovery waits for the provider, then recovers earlier lines once", async () => {
+    const { open, provider, dispose } = await titles();
+    const session = await open("TEST | Long subtitles");
+    provider.slowFileParts(1500);
+    const leaving = new AbortController();
+    const response = await fetch(`${session.url}?only=subtitles&start=137&subtitle=4`, {
+      signal: leaving.signal,
+    });
+    const lines: Line[] = [];
+    let ready = false;
+    const reading = (async () => {
+      let pending = "";
+      const text = new TextDecoder();
+      for await (const chunk of response.body ?? []) {
+        pending += text.decode(chunk, { stream: true });
+        const parts = pending.split("\n");
+        pending = parts.pop() ?? "";
+        for (const part of parts) {
+          const line = readFeedLine(part);
+          if (line && "text" in line) lines.push([line.at, line.until, line.text]);
+          if (line && "ready" in line) ready = true;
+        }
+      }
+    })().catch(() => {});
+    try {
+      const run = await play(`${session.url}?start=137&subtitle=4`);
+      expect(framesOf(run.body)).toBeGreaterThan(0);
+      await vi.waitFor(() => expect(lines.map(([, , text]) => text)).toEqual(["Apres"]));
+      expect(ready).toBe(false);
+      await vi.waitFor(() => expect(ready).toBe(true), { timeout: 10_000 });
+      expect(linesAt(lines, 137)).toEqual(["Longue ligne"]);
+      expect(lines.map(([, , text]) => text).sort()).toEqual(["Apres", "Longue ligne"]);
+      expect(provider.mostFilesAtOnce()).toBe(1);
+    } finally {
+      leaving.abort();
+      await reading;
+      await dispose();
+    }
   });
 
   it("plays a whole file from a provider that knows no byte ranges", async () => {
@@ -1238,6 +1484,21 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
 
     expect(session.subtitles.map((track) => track.label)).toEqual(["English"]);
     expect(run.streams.map((stream) => stream.codec_name)).toEqual(["h264", "aac"]);
+    await dispose();
+  });
+
+  it("keeps earlier MP4 text samples when a new run starts before the previous one", async () => {
+    const { open, provider, dispose } = await titles();
+    const movie = provider.titles.movies.find((each) =>
+      each.name.startsWith("TEST | Index at the end"),
+    );
+    provider.replaceMovieFile(movie?.id ?? 0, fixture("title-receiver.mp4"));
+    const session = await open("TEST | Index at the end");
+    await play(`${session.url}?start=50&subtitle=3`);
+    const feed = await subtitles(session.url, 0, 3);
+    await feed.run();
+    await vi.waitFor(() => expect(linesAt(feed.lines, 4)).toEqual(["Three to six"]));
+    expect(provider.mostFilesAtOnce()).toBe(1);
     await dispose();
   });
 
