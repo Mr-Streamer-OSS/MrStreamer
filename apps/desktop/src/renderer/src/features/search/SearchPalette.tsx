@@ -19,10 +19,10 @@ import { clockTime, timeLeft } from "../../lib/format.ts";
 import {
   queries,
   useCategoryMap,
+  useSearchSubscriptionNames,
   useSourceOf,
   useFavouriteKeys,
   useSubscriptions,
-  useSubscriptionNames,
   useToggleFavourite,
 } from "../../lib/queries.ts";
 import { useDebounced } from "../../lib/use-debounced.ts";
@@ -368,7 +368,7 @@ function LiveResultRow({
   onSelect: () => void;
   onToggle: () => void;
 }) {
-  const nameOf = useSubscriptionNames();
+  const nameOf = useSearchSubscriptionNames();
   const favourites = useFavouriteKeys();
   const toggleFavourite = useToggleFavourite();
   const grouped = !copy && group.copies.length > 1;

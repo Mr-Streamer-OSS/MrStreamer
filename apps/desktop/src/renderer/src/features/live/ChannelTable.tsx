@@ -30,7 +30,7 @@ import { Progress } from "../../components/Progress.tsx";
 import { useNow } from "../../lib/clock.ts";
 import { clockTime, endOfDay, progressOf, timeLeft } from "../../lib/format.ts";
 import { qualitiesLine } from "../../lib/quality.ts";
-import { queries, useSourceOf, useSubscriptionNames } from "../../lib/queries.ts";
+import { queries, useSearchSubscriptionNames, useSourceOf } from "../../lib/queries.ts";
 import { useRem } from "../../lib/use-rem.ts";
 import { cn } from "../../lib/utils.ts";
 import { useVisibleListings } from "./lists.ts";
@@ -131,7 +131,7 @@ export function ChannelTable({
   const rem = useRem();
   const now = useNow();
   const sourceOf = useSourceOf();
-  const subscriptionName = useSubscriptionNames();
+  const subscriptionName = useSearchSubscriptionNames();
   // The row with the focus stays in the page when it scrolls out of view, so it keeps the focus.
   const kept = order || searchRows ? selected : null;
   const rangeExtractor = useCallback(
