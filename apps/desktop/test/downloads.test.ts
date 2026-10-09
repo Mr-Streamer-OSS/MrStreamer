@@ -591,6 +591,27 @@ describe.skipIf(!hasTools)("downloads", () => {
     );
   }, 60_000);
 
+  it("tells of a failed download added again while its subscription plays", async () => {
+    const { provider, subscriptionId, runtime, downloads, playback, onDemand, find } =
+      await connected();
+    const broken = movie(provider, subscriptionId, "TEST | Missing file");
+    const other = movie(provider, subscriptionId, "TEST | Index at the end");
+    const failing = await downloads.add(broken.ref);
+    await vi.waitFor(async () => expect((await find(failing.id))?.status.kind).toBe("failed"), {
+      timeout: LONG,
+    });
+    const file = await onDemand.file(other.ref);
+    const playing = await playback.openTitle(other.ref, file.url, DECODERS, file);
+    const told = await collect(runtime, downloads.changes);
+    // Playback holds the subscription, so no start of the download tells of it instead.
+    const again = await downloads.add(broken.ref);
+    expect(again).toMatchObject({ id: failing.id, status: { kind: "waiting" } });
+    await vi.waitFor(() =>
+      expect(told.at(-1)?.items).toMatchObject([{ id: failing.id, status: { kind: "waiting" } }]),
+    );
+    await playback.close(playing.sessionId);
+  }, 60_000);
+
   it("fails on a full disk or a missing folder, and never makes a copy of the partial", async () => {
     const full: Disk = {
       ...fileDisk,

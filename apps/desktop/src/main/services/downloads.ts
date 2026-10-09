@@ -620,6 +620,7 @@ function make(deps: DownloadsDeps) {
                     state: "queued",
                   })),
                 );
+                tell();
                 wake();
               }
               const owners = yield* accounts;
