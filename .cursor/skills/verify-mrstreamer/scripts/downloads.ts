@@ -4,13 +4,14 @@
 // and deletes through the Downloads page, then plays a copy offline: seeking, changing its sound
 // track, leaving and resuming. The second start has the fake provider, TMDB and picture server
 // stopped; the subscription is removed there, and the third start plays both copies from the
-// Connect screen's Downloads with no subscription saved. Main's outbound connections are recorded
+// Connect screen's Downloads with no subscription saved, then opens a copy whose file it removed
+// and returns to the page, which must say it is missing. Main's outbound connections are recorded
 // by network-hook.cjs, the window's requests over CDP, and each local playback window must have
 // none but the window's own loopback proxy requests.
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -562,6 +563,38 @@ export async function runDownloads(build: Record<string, unknown> & { executable
     await alone.key("Escape", 27);
     await alone.wait(async () => !(await alone.video()).title);
     observed["playbackWithoutSubscription"] = during(aloneFrom, Date.now(), aloneRequests);
+
+    // A copy whose file went from the app's folder: opening it finds it gone, and the page the
+    // viewer returns to hears so from main, before anything here asks for the list again.
+    const copyFolder = join(profile, "downloads", movieId);
+    const media = (await readdir(copyFolder)).find((name) => name.startsWith("media."));
+    if (!media) throw new Error("The movie's copy has no file to remove.");
+    await rm(join(copyFolder, media));
+    actions.push({ action: "Remove the movie copy's file from the run's profile", at: now() });
+    await alone.click(
+      "Watch the movie whose file is gone",
+      `(${row(movieId)})?.querySelector('button')`,
+    );
+    await alone.wait(async () => (await alone.text()).includes("Download missing"));
+    await alone.capture("copy-missing-player");
+    await alone.click("Back from the missing copy", button("button", "Back"));
+    const rowSays = () =>
+      alone.page.evaluate<{ text: string; watchOffline: boolean } | null>(
+        `(() => { const r = ${row(movieId)}; return r && { text: r.textContent, watchOffline: [...r.querySelectorAll('button')].some(b => b.textContent.trim() === 'Watch offline') }; })()`,
+      );
+    await alone.wait(async () => {
+      const says = await rowSays();
+      return (
+        !!says &&
+        says.text.includes("The file is no longer on this computer.") &&
+        !says.watchOffline
+      );
+    });
+    observed["missingCopy"] = {
+      row: await rowSays(),
+      listed: (await alone.listed()).find((item) => item.id === movieId)?.status.kind ?? null,
+    };
+    await alone.capture("downloads-copy-missing");
     await alone.click("Back to the form", button("button", "Add subscription"));
     await alone.wait(() => alone.exists("document.querySelector('form input')"));
     await quit("no subscription");
