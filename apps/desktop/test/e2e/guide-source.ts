@@ -148,7 +148,7 @@ async function play(page: Page): Promise<void> {
   );
   // What was typed last is searched for after a pause.
   await delay(800);
-  await page.evaluate(`document.querySelector('[role="dialog"] [data-index="0"]').click()`);
+  await page.evaluate(`document.querySelector('[role="dialog"] [data-index="0"] button').click()`);
   await waitFor(
     () =>
       page.evaluate<boolean>(`(() => {
