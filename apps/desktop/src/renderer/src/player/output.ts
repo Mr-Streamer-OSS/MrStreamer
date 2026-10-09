@@ -106,6 +106,12 @@ function refused(receiver: Pick<Receiver, "id" | "kind" | "name">) {
   };
 }
 
+/** Connects to `receiver`, and keeps why that reached nothing. */
+function connect(receiver: Pick<Receiver, "id" | "kind" | "name">): void {
+  store.setState({ refused: null });
+  void call("output.connect", { receiverId: receiver.id }).catch(refused(receiver));
+}
+
 /** "Living Room TV", or "AirPlay" for a receiver the system doesn't name. */
 export function receiverName(receiver: Pick<Receiver, "kind" | "name"> | null): string {
   return receiver?.name ?? (receiver?.kind === "cast" ? "the TV" : "AirPlay");
@@ -177,10 +183,7 @@ export const outputs = {
   /** Connects to a receiver the list shows. What plays here goes on until it answers. */
   connect(receiverId: string): void {
     const receiver = store.getState().status.receivers.find((each) => each.id === receiverId);
-    store.setState({ refused: null });
-    void call("output.connect", { receiverId }).catch(
-      refused(receiver ?? { id: receiverId, kind: "cast", name: null }),
-    );
+    connect(receiver ?? { id: receiverId, kind: "cast", name: null });
   },
   /**
    * Says a view with output controls is on screen until `view` ends. The system's list
@@ -213,7 +216,8 @@ export const outputs = {
     const receiver = outputs.receiver();
     if (!receiver) return;
     if (receiver.kind === "airplay") outputs.pick();
-    else outputs.connect(receiver.id);
+    // By the receiver lost, whose name a refusal keeps, also when the list no longer shows it.
+    else connect(receiver);
   },
   /** Back to this computer, also from a connect under way. Resolves once the receiver is let go of. */
   local: (): Promise<void> =>

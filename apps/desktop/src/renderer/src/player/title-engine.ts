@@ -9,7 +9,8 @@
 // subtitles as the run reads them. Independent text shows as it arrives while recovery continues.
 // Packet changes wait for the recovered state; then what is on screen where the picture has got to
 // shows at once, such as a picture, page or caption that began long before the start. When the
-// first part can't be had the run says so, and the picture plays on.
+// first part can't be had the run says so, and the picture plays on. The run also says whether a
+// cue it has is due at the position, so text that shows is never called loading or unavailable.
 //
 // Reading holds back once enough is buffered ahead. While paused nothing more is read, and the
 // provider's connection sits idle until playback moves on; the controller ends the run after a
@@ -19,7 +20,13 @@ import { readFeedLine } from "@mrstreamer/core/subtitles/feed";
 import type { SubtitleChange } from "@mrstreamer/core/subtitles/screen";
 import type { EngineError, StreamInfo } from "./engine.ts";
 import { readMp4Start } from "./mp4.ts";
-import { addTextCue, clearSubtitles, subtitlePresenter } from "./subtitles.ts";
+import {
+  addTextCue,
+  clearSubtitles,
+  onSubtitlesChange,
+  subtitlePresenter,
+  subtitlesDue,
+} from "./subtitles.ts";
 
 /** Stop reading once this much is buffered ahead, and read again below the second value. */
 const AHEAD_S = { stop: 60, resume: 40 } as const;
@@ -56,11 +63,20 @@ export interface TitleRun {
 }
 
 /**
- * How a run's subtitles stand: still being read for what came before its start, or not to be had
- * there. Null once that history is recovered, and with subtitles off. Independent text can
- * already show while the status is loading or unavailable.
+ * The search for what a run's track holds before its start: still under way, given up, or done.
+ * Independent text can already show while it is under way or given up.
  */
-export type SubtitleStatus = "loading" | "unavailable" | null;
+type SubtitleRecovery = "loading" | "unavailable" | "recovered";
+
+/** How a run's chosen subtitles stand where the picture is. */
+export interface SubtitleState {
+  readonly recovery: SubtitleRecovery;
+  /**
+   * A cue the run has is due where the picture is, as timed now (see `subtitlesDue`): there is
+   * text or a picture to show, whatever recovery still looks for before the start.
+   */
+  readonly covered: boolean;
+}
 
 export interface TitleEngine {
   /** Resolves once the picture moves. Rejects with an `EngineError`. */
@@ -69,15 +85,18 @@ export interface TitleEngine {
   onFailure(listener: (error: EngineError) => void): void;
   /** Called when the title plays to its end. */
   onEnded(listener: () => void): void;
-  /** Called each time the subtitles' status changes; a run with subtitles starts as loading. */
-  onSubtitles(listener: (status: SubtitleStatus) => void): void;
+  /**
+   * Called with how the subtitles stand at once, null for a run without them, and again each time
+   * that changes. A run with subtitles starts loading, with no cue due at the position.
+   */
+  onSubtitles(listener: (state: SubtitleState | null) => void): void;
   /** Seconds into the title. */
   position(): number;
   /** Moves within what is already here; false when the caller must start a run from there. */
   seekWithin(position: number): boolean;
   /**
-   * Takes the subtitles off for the rest of the run: what shows goes, and the run's feed stops
-   * being read. Showing subtitles again takes a new run.
+   * Takes the subtitles off for the rest of the run: what shows goes, the run's feed stops being
+   * read, and the run says no more of them. Showing subtitles again takes a new run.
    */
   hideSubtitles(): void;
   /** Main says the source advanced toward this run's asked position. Keeps only startup alive. */
@@ -103,17 +122,24 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
   let failureListener: ((error: EngineError) => void) | null = null;
   let pendingFailure: EngineError | null = null;
   let endedListener: (() => void) | null = null;
-  let status: SubtitleStatus = run.subtitle === null ? null : "loading";
-  let statusListener: ((status: SubtitleStatus) => void) | null = null;
+  let state: SubtitleState | null =
+    run.subtitle === null ? null : { recovery: "loading", covered: false };
+  let stateListener: ((state: SubtitleState | null) => void) | null = null;
   let subtitleWait: ReturnType<typeof setTimeout> | null = null;
-  const say = (next: SubtitleStatus) => {
-    if (status === next) return;
-    status = next;
-    if (next !== "loading" && subtitleWait !== null) {
+  /** Says how the subtitles stand when that changed: recovery as given, coverage as it is now. */
+  const report = (recovery: SubtitleRecovery | undefined = state?.recovery) => {
+    if (!state || !recovery) return;
+    const covered = subtitlesDue(video);
+    if (state.recovery === recovery && state.covered === covered) return;
+    state = { recovery, covered };
+    stateListener?.(state);
+  };
+  const say = (recovery: SubtitleRecovery) => {
+    if (recovery !== "loading" && subtitleWait !== null) {
       clearTimeout(subtitleWait);
       subtitleWait = null;
     }
-    statusListener?.(next);
+    report(recovery);
   };
   /** The title second from which a track shows again after it had nothing for the start. */
   let showsFrom: number | null = null;
@@ -178,13 +204,15 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     }
     if (showsFrom !== null && video.currentTime >= showsFrom) {
       showsFrom = null;
-      say(null);
-    }
+      say("recovered");
+    } else report();
   };
+  // Lines that come, go, or move with the timing, and seeks, change what is due without the clock.
+  const stopFollowing = onSubtitlesChange(() => report());
   // While the subtitles load, the proxy reads the file for them only as far as the picture can
   // spare the provider, which what is buffered here tells it.
   const telling = setInterval(() => {
-    if (status !== "loading" || from === null) return;
+    if (state?.recovery !== "loading" || from === null) return;
     const query = `only=progress&buffered=${ahead().toFixed(1)}&paused=${video.paused ? 1 : 0}`;
     void fetch(`${run.url}?${query}`, { signal: abort.signal }).catch(() => {});
   }, PROGRESS_MS);
@@ -199,6 +227,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     video.removeEventListener("error", onError);
     video.removeEventListener("ended", onEnded);
     video.removeEventListener("timeupdate", onTime);
+    stopFollowing();
   }
 
   /** Seconds buffered beyond the position. */
@@ -405,7 +434,8 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
           say("unavailable");
         } else if ("ready" in line) {
           if (line.at !== undefined) {
-            // The track starts afresh further on: the status goes when the picture gets there.
+            // The track starts afresh further on: it counts as recovered once the picture gets
+            // there.
             showsFrom = line.at;
             continue;
           }
@@ -418,14 +448,17 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
           held = null;
           // Chromium says which cues are due only a moment after the position moves.
           void presenter?.drawNow().catch(() => {});
-          say(null);
+          say("recovered");
         } else if ("text" in line) {
           addTextCue(video, line.at, line.until, line.text);
         } else {
           const data = Uint8Array.from(atob(line.data), (char) => char.charCodeAt(0));
           const change = decoder?.push(data, line.at);
           if (change && held) held.push(change);
-          else if (change) presenter?.show(change);
+          else if (change) {
+            presenter?.show(change);
+            report();
+          }
         }
       }
     }
@@ -434,7 +467,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
 
   if (run.subtitle !== null) {
     subtitleWait = setTimeout(() => {
-      if (subtitlesSignal.aborted || status !== "loading") return;
+      if (subtitlesSignal.aborted || state?.recovery !== "loading") return;
       // End the wait for history. Independent text can keep showing and arriving; packet
       // decoders still need that history, so stop their read and clear their output.
       if (decoding) {
@@ -478,7 +511,8 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
       endedListener = listener;
     },
     onSubtitles(listener) {
-      statusListener = listener;
+      stateListener = listener;
+      listener(state);
     },
     position: () => video.currentTime,
     seekWithin(position) {
@@ -493,10 +527,11 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
       return false;
     },
     hideSubtitles() {
+      stateListener = null;
       subtitlesOff.abort();
       clearSubtitles(video);
       showsFrom = null;
-      say(null);
+      say("recovered");
     },
     readingAhead() {
       if (!settled && !finished) lastReadAheadAt = Date.now();

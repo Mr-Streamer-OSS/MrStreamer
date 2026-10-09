@@ -36,7 +36,7 @@ Providers keep movies and episodes as files, mostly MKV and MP4 and a few AVI. M
 | Subtitles stored as pictures (Blu-ray, DVD, DVB)         | Drawn over the picture                                                    |
 | Teletext subtitles and closed captions                   | Shown under the picture, like text subtitles                              |
 
-A movie starts about a second after you choose it. Skipping into what's already loaded is instant; skipping further away starts it again from there, which takes about a second too. With subtitles on, the picture starts as soon as without them, and the subtitles already on screen at that moment follow as soon as Mr. Streamer has read them: "Subtitles loading" shows at the top right meanwhile.
+A movie starts about a second after you choose it. Skipping into what's already loaded is instant; skipping further away starts it again from there, which takes about a second too. With subtitles on, the picture starts as soon as without them, and the subtitles already on screen at that moment follow as soon as Mr. Streamer has read them. While Mr. Streamer is still reading and no line shows, "Subtitles loading" shows at the top right and **CC** says "Loading" beside the track. Text that shows is never called loading, also while an earlier line is still being looked for or right after you move the timing.
 
 ## Online subtitles, from 0.0.9
 
@@ -83,7 +83,7 @@ A movie or episode starts later on a TV than on your computer, and so does a ski
 - Live subtitles show from their next line after you turn them on, and another sound track starts the channel again, except on HLS channels.
 - An HLS channel shows the subtitles its stream lists and the closed captions in its picture. DVB subtitles and teletext inside an HLS stream don't show.
 - Surround sound that needs converting plays as stereo.
-- After you skip in a movie or episode, the subtitle already on screen at that moment can't always be had: Mr. Streamer reads only a little of the file for it, and only while the picture can spare the connection. That works for MKV files when the subtitle began shortly before, and for MP4 files with text subtitles; a line that began long before, a slow connection, and other kinds of files leave it out. "Subtitles unavailable" then shows for a few seconds, the movie plays on, and the subtitles are back from the next line.
+- After you skip in a movie or episode, the subtitle already on screen at that moment can't always be had: Mr. Streamer reads only a little of the file for it, and only while the picture can spare the connection. That works for MKV files when the subtitle began shortly before, and for MP4 files with text subtitles; a line that began long before, a slow connection, and other kinds of files leave it out. While no line shows, "Subtitles unavailable" shows at the top right, the movie plays on, and the subtitles are back from the next line. The same happens when the subtitles stop arriving altogether.
 - Closed captions come from the CEA-608 data most broadcasts carry. A channel or file that sends captions only in the newer CEA-708 form shows none.
 - Converting an HEVC or Xvid picture uses much more of your computer's processor than playing it as it is.
 - A damaged broadcast can take more than ten seconds to start, while Mr. Streamer retries it with the picture re-encoded.
@@ -93,7 +93,7 @@ A movie or episode starts later on a TV than on your computer, and so does a ski
 
 ## When something won't play
 
-Mr. Streamer tells you why:
+Mr. Streamer tells you why. The cross at the top right of the message closes it, also with Tab and then Enter or Space; the channel or title stays stopped, and **Watch** or **Play** beside the picture tries it again. A new failure shows its own message.
 
 For a channel, a small line under the message adds what Mr. Streamer observed: the provider's HTTP status, the qualities it tried, how often it reconnected and the time. Your provider's address and login never show.
 

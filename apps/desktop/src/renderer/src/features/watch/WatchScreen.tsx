@@ -9,7 +9,8 @@
 //   and H move them earlier or later, I shows the details, S stars, Q opens the quality menu of a
 //   channel with several streams, P shrinks the window into the mini player and back, O opens the
 //   chooser of where it plays, R tries a failed channel again. While a menu is open, keys are its
-//   own. Tab reaches what a failed channel offers, and Enter there presses it.
+//   own. Tab reaches what a failed channel offers, and Enter there presses it; Enter or Space on
+//   a message's cross closes the message.
 // A picture that stands still for a few seconds while it should play says "Waiting for data" at
 // the top right until it moves again or the channel reconnects.
 // While a receiver on the network plays the channel, the controls stay: there is no picture to
@@ -42,6 +43,7 @@ import {
   type ListEntry,
 } from "../live/lists.ts";
 import { ChannelOverlay } from "./ChannelOverlay.tsx";
+import { pressesClose } from "./CloseMessage.tsx";
 import { Flash, flash, flashNote, LiveSubtitleHint } from "./Flash.tsx";
 import { useFullscreen, useWake } from "./layout.ts";
 import { MINI_NEEDS_PICTURE, MiniControls } from "./MiniPlayer.tsx";
@@ -242,12 +244,14 @@ export function WatchScreen() {
       const now = latest.current;
       // The menu's own keys: Escape closes it, and focus goes back to its button.
       if (now.menu) return;
-      // What a failed channel offers takes Enter itself once Tab reached it. Everywhere else
-      // Enter opens the list, also with a control of the bar in focus.
+      // What a failed channel offers takes Enter itself once Tab reached it, and a message's
+      // cross takes Enter and Space. Everywhere else Enter opens the list, also with a control of
+      // the bar in focus.
       if (
-        event.key === "Enter" &&
-        event.target instanceof HTMLButtonElement &&
-        event.target.closest("[data-playback-state]")
+        pressesClose(event) ||
+        (event.key === "Enter" &&
+          event.target instanceof HTMLButtonElement &&
+          event.target.closest("[data-playback-state]"))
       ) {
         return;
       }
@@ -415,6 +419,7 @@ export function WatchScreen() {
                   ? failureTitle(phase, channel)
                   : channel.title
           }
+          failure={phase.kind === "failed" ? phase : null}
           onClose={closeWatch}
         >
           {playing ? (
@@ -423,6 +428,7 @@ export function WatchScreen() {
             </Button>
           ) : (
             <Button
+              data-retry
               variant="primary"
               size="icon-sm"
               aria-label="Watch"

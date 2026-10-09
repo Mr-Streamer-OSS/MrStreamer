@@ -1,6 +1,7 @@
 // CC, while a title plays here: every subtitle control in one panel. The file's tracks and the
 // saved download, their timing and look, then online search and its results. The picture keeps
-// playing and the panel stays open while the viewer compares results and steps the timing.
+// playing and the panel stays open while the viewer compares results and steps the timing. The
+// chosen track says Loading or Unavailable as the note over the picture does (`useSubtitleNote`).
 //   Up and Down walk its rows, Tab reaches its fields, Escape closes it from anywhere.
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
@@ -11,7 +12,7 @@ import { regionalLanguageName } from "@mrstreamer/core/ondemand/tracks";
 import { openOnlineSubtitleSettings, useUi } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { onlineSubtitles, useOnlineSubtitles } from "../../player/online-subtitles.ts";
-import { titlePlayer, useTitlePlayer } from "../../player/title-player.ts";
+import { titlePlayer, useSubtitleNote, useTitlePlayer } from "../../player/title-player.ts";
 import { subtitleSettingsQuery } from "../settings/OnlineSubtitlesSection.tsx";
 import { LookRows, subtitleSettingsFor, TextButton } from "../watch/SubtitleSettings.tsx";
 import { Choice, moveFocus } from "../watch/TrackMenus.tsx";
@@ -25,12 +26,18 @@ const failureText: Record<SubtitleServiceFailure, string> = {
   unavailable: "Service unavailable",
   unsupported: "Unsupported subtitle",
 };
+/** The word beside the chosen track for what `useSubtitleNote` says. */
+export function subtitleChoiceNote(note: ReturnType<typeof useSubtitleNote>): string | null {
+  return note === "loading" ? "Loading" : note === "unavailable" ? "Unavailable" : null;
+}
+
 export function SubtitlePanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const sessionId = useTitlePlayer((state) => state.subtitleSessionId);
   const subtitle = useTitlePlayer((state) => state.subtitle);
   const tracks = useTitlePlayer((state) => state.subtitles);
   const saved = useTitlePlayer((state) => state.savedSubtitle);
   const downloadedOn = useTitlePlayer((state) => state.downloadedOn);
+  const note = subtitleChoiceNote(useSubtitleNote());
   const search = useOnlineSubtitles((state) => state);
   const settings = useQuery({ ...subtitleSettingsQuery, enabled: open });
   const root = useRef<HTMLElement>(null);
@@ -90,15 +97,19 @@ export function SubtitlePanel({ open, onClose }: { open: boolean; onClose: () =>
       <Choice chosen={!subtitle && !downloadedOn} onChoose={() => titlePlayer.setSubtitle(null)}>
         Off
       </Choice>
-      {tracks.map((track) => (
-        <Choice
-          key={`${track.id}:${track.page}`}
-          chosen={!downloadedOn && subtitle?.id === track.id && subtitle.page === track.page}
-          onChoose={() => titlePlayer.setSubtitle(track)}
-        >
-          {track.label}
-        </Choice>
-      ))}
+      {tracks.map((track) => {
+        const chosen = !downloadedOn && subtitle?.id === track.id && subtitle.page === track.page;
+        return (
+          <Choice
+            key={`${track.id}:${track.page}`}
+            chosen={chosen}
+            note={chosen ? note : null}
+            onChoose={() => titlePlayer.setSubtitle(track)}
+          >
+            {track.label}
+          </Choice>
+        );
+      })}
       {saved?.subtitle && (
         <Choice chosen={downloadedOn} onChoose={() => titlePlayer.showDownloaded()}>
           <span className="block break-words">{saved.subtitle.release || "Saved subtitle"}</span>

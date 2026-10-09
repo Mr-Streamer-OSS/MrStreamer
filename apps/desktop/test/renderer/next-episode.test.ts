@@ -176,7 +176,7 @@ const text = () => container.textContent ?? "";
 
 function press(label: string): Promise<void> {
   const button = [...container.querySelectorAll("button")].find(
-    (each) => each.textContent === label,
+    (each) => each.textContent === label || each.getAttribute("aria-label") === label,
   );
   if (!button) throw new Error(`No ${label} button in "${text()}"`);
   return act(async () => button.click());
@@ -369,6 +369,56 @@ describe("the end of an episode", () => {
     await press("Try again");
     expect(opened()).toEqual(["e13", "e21", "e21"]);
   });
+
+  it("gives the controls back when the viewer closes why the next episode didn't start", async () => {
+    await playToEnd(pilotHouse, "s1");
+    const failed = ipc.hold("playback.openTitle");
+    await wait(10_000);
+    await act(async () =>
+      failed.reject({ kind: "stream", failure: { kind: "unavailable", status: 404 } }),
+    );
+
+    await press("Close message");
+    expect(text()).not.toContain("Didn't start");
+    expect(text()).not.toContain("no file for this");
+    expect(titlePlayer.state().phase.kind).toBe("failed");
+
+    // Play beside the picture tries it again; one more failure says so again.
+    const again = ipc.hold("playback.openTitle");
+    await press("Play");
+    expect(opened()).toEqual(["e13", "e21", "e21"]);
+    await act(async () =>
+      again.reject({ kind: "stream", failure: { kind: "unavailable", status: 404 } }),
+    );
+    expect(text()).toContain("Didn't start");
+  });
+
+  it.each(["Enter", " "])(
+    "closes why the next episode didn't start with %j on its cross, and starts nothing",
+    async (name) => {
+      document.body.append(container);
+      await playToEnd(pilotHouse, "s1");
+      const failed = ipc.hold("playback.openTitle");
+      await wait(10_000);
+      await act(async () =>
+        failed.reject({ kind: "stream", failure: { kind: "unavailable", status: 404 } }),
+      );
+      useUi.setState({ playingTitle: true });
+
+      const close = container.querySelector<HTMLButtonElement>('[aria-label="Close message"]')!;
+      close.focus();
+      const event = new KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true });
+      await act(async () => close.dispatchEvent(event));
+      // Not taken as a shortcut, so the focused button presses itself; Space plays nothing.
+      expect(event.defaultPrevented).toBe(false);
+      expect(opened()).toEqual(["e13", "e21"]);
+      await act(async () => close.click());
+      expect(text()).not.toContain("Didn't start");
+      expect(titlePlayer.state().phase.kind).toBe("failed");
+      expect(document.activeElement?.getAttribute("aria-label")).toBe("Play");
+      container.remove();
+    },
+  );
 
   it("ends the last episode of a series watched through by recording that every version of it is finished", async () => {
     // The two before it were watched, one of them in the English version.

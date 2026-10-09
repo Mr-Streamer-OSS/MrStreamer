@@ -73,6 +73,7 @@ The middle of the picture says what went wrong, with a small line of what Mr. St
 - **Quality** opens the quality menu. Nothing starts until you pick one.
 - **Channels** opens the list. **Next channel** takes Quality's place when the channel has no quality left to try.
 - A refusal offers Retry and Channels only, and Mr. Streamer never changes channel by itself.
+- The cross at the message's top right closes it. The channel stays stopped; **Watch** in the controls, or R, tries it again.
 
 When the picture stands still for three seconds, "Waiting for data" shows at the top right until it moves again. When data stays away for fifteen seconds, or the provider ends the stream, the channel reconnects: up to four times, after 1, 2, 4 and 8 seconds, and **Stop** ends that. A channel that comes back and breaks off again within 30 seconds gets no extra tries, so a stream that keeps dropping ends with "Keeps dropping" instead of reconnecting for ever. Once it played for 30 seconds, the next break has all four again. The mini player, and the bar at the foot of the pages while [a TV](playback.md#playing-on-a-tv) plays, say the same in a few words.
 

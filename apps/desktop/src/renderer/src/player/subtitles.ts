@@ -160,6 +160,34 @@ function showText(video: HTMLVideoElement): void {
       rows.push({ cue, box });
     }
   }
+  changed();
+}
+
+/**
+ * Whether a cue on either of `video`'s tracks, as timed now, is due at its position: text or a
+ * picture is there to show. A cue that ended before says nothing of the pause after it, since the
+ * feed may have ended there too.
+ */
+export function subtitlesDue(video: HTMLVideoElement): boolean {
+  const now = video.currentTime;
+  return [subtitleTrack(video), pictureTrack(video)].some((track) =>
+    [...(track.cues ?? [])].some((cue) => cue.startTime <= now && now < cue.endTime),
+  );
+}
+
+const changes = new Set<() => void>();
+
+/**
+ * Calls `listener` each time what is due may have changed: a cue came, went or was moved by the
+ * timing, the position got to one or left it, or a seek moved it. Returns how to stop.
+ */
+export function onSubtitlesChange(listener: () => void): () => void {
+  changes.add(listener);
+  return () => changes.delete(listener);
+}
+
+function changed(): void {
+  for (const listener of changes) listener();
 }
 
 /** Removes every cue from both tracks, and with them the text and the pictures on screen. */
@@ -332,12 +360,14 @@ export function subtitlePresenter(video: HTMLVideoElement) {
       const cue = new VTTCue(at, end, "");
       pictures.set(cue, change.screen);
       cue.onenter = () => {
+        changed();
         // Chromium says so a moment after the cue turns active. By then a cue from before the
         // position may have got its end, behind the position.
         if (cue.endTime <= video.currentTime) return;
         void draw(cue, change.screen);
       };
       cue.onexit = () => {
+        changed();
         if ((timing.activeCues?.length ?? 0) > 0) return;
         if (showing === cue) showing = null;
         release();

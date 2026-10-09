@@ -15,9 +15,11 @@ import { isMac } from "../../app/platform.ts";
 import { useUi } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { Tooltip } from "../../components/ui/tooltip.tsx";
+import { cn } from "../../lib/utils.ts";
 import { outputs, receiverName, useOutput, where } from "../../player/output.ts";
 import { player } from "../../player/player.ts";
 import { titlePlayer } from "../../player/title-player.ts";
+import { CloseMessage, useClosed } from "./CloseMessage.tsx";
 import { Choice, Menu, MenuNote } from "./TrackMenus.tsx";
 
 /** How long the note that a connect reached no receiver stays. */
@@ -251,13 +253,16 @@ function useGone(receivers: readonly Receiver[]): readonly Receiver[] {
  * What a connect has to say, where a pressed key's word shows. While it waits for the viewer in
  * the system's list: how long it has, and where a code the TV may show goes; the system owns that
  * prompt, so the app can't tell whether one was asked for. And for a few seconds after a connect
- * that reached no receiver: why, while what played here plays on.
+ * that reached no receiver: why, while what played here plays on, unless the viewer closes it.
+ * Also while a lost receiver stays lost: a retry refused before it began, as for one gone from
+ * the list, changes nothing else, so this is all that says it failed.
  */
 export function ConnectingNote() {
   const output = useOutput((state) => state.status.output);
   const since = useOutput((state) => state.connectingSince);
   const refused = useOutput((state) => state.refused);
   const seconds = useElapsed(since);
+  const closed = useClosed(refused);
   const [, expire] = useState(0);
   useEffect(() => {
     if (!refused) return;
@@ -266,21 +271,30 @@ export function ConnectingNote() {
   }, [refused]);
   const waiting = output.kind === "connecting" && output.protocol === "airplay";
   const failed =
-    !waiting && output.kind === "local" && refused && Date.now() - refused.at < REFUSED_MS
+    !waiting &&
+    (output.kind === "local" || output.kind === "lost") &&
+    refused &&
+    !closed &&
+    Date.now() - refused.at < REFUSED_MS
       ? receiverProblem(refused.failure, false, refused.receiver, null)
       : null;
   if (!waiting && !failed) return null;
   return (
     <div
-      role="status"
-      className="pointer-events-none fixed top-12 right-12 z-40 max-w-[22rem] rounded-3xl bg-black/80 px-6 py-4 ring-1 ring-white/10"
+      className={cn(
+        "pointer-events-none fixed top-12 right-12 z-40 max-w-[22rem] rounded-3xl bg-black/80 px-6 py-4 ring-1 ring-white/10",
+        failed && "pr-14",
+      )}
     >
-      <div className="text-xl font-semibold tracking-tight tabular-nums">
-        {failed ? failed.title : `Connecting over AirPlay · ${seconds ?? 0} s`}
+      <div role="status">
+        <div className="text-xl font-semibold tracking-tight tabular-nums">
+          {failed ? failed.title : `Connecting over AirPlay · ${seconds ?? 0} s`}
+        </div>
+        <div className="mt-1 text-[0.8125rem] leading-snug text-muted-foreground">
+          {failed ? failed.body : "If your TV shows a code, enter it in the AirPlay window."}
+        </div>
       </div>
-      <div className="mt-1 text-[0.8125rem] leading-snug text-muted-foreground">
-        {failed ? failed.body : "If your TV shows a code, enter it in the AirPlay window."}
-      </div>
+      {failed && refused && <CloseMessage failure={refused} className="top-3 right-3" />}
     </div>
   );
 }
