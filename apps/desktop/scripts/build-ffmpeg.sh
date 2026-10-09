@@ -4,7 +4,7 @@
 #
 #   scripts/build-ffmpeg.sh mac-arm64    on an Apple silicon Mac
 #   scripts/build-ffmpeg.sh linux-x64    on x64 Linux
-#   scripts/build-ffmpeg.sh win-x64      on Windows in an MSYS2 MINGW64 shell, or cross-compiled
+#   scripts/build-ffmpeg.sh win-x64      on Windows in an MSYS2 UCRT64 shell, or cross-compiled
 #                                        on x64 Linux with mingw-w64
 #
 # Needs a C compiler, make, nasm, pkg-config, git and curl; a Linux cross build also needs
@@ -33,6 +33,7 @@ jobs=$(getconf _NPROCESSORS_ONLN)
 x264_flags=(--enable-static --disable-cli --enable-pic --disable-opencl --bit-depth=8 --chroma-format=420)
 ffmpeg_flags=()
 exe=
+native_windows=false
 case $target in
   mac-arm64)
     export MACOSX_DEPLOYMENT_TARGET=12.0
@@ -40,7 +41,17 @@ case $target in
   linux-x64) ;;
   win-x64)
     ffmpeg_flags+=(--extra-ldflags=-static --pkg-config=pkg-config)
-    if [[ $(uname -s) != MINGW* ]]; then
+    if [[ $(uname -s) == MINGW* || $(uname -s) == MSYS* ]]; then
+      if [[ ${MSYSTEM:-} != UCRT64 ]]; then
+        echo "Windows builds require an MSYS2 UCRT64 shell." >&2
+        exit 1
+      fi
+      # Check the compiler's headers too: a changed PATH must not silently select MSVCRT.
+      printf '#include <_mingw.h>\n#ifndef _UCRT\n#error UCRT compiler required\n#endif\n' | gcc -E -x c - >/dev/null
+      export CC=gcc
+      ffmpeg_flags+=(--cc=gcc)
+      native_windows=true
+    else
       x264_flags+=(--host=x86_64-w64-mingw32 --cross-prefix=x86_64-w64-mingw32-)
       ffmpeg_flags+=(--target-os=mingw32 --arch=x86_64 --cross-prefix=x86_64-w64-mingw32-
         --enable-cross-compile)
@@ -117,8 +128,9 @@ configure=(
 make -C ffmpeg -j"$jobs" >/dev/null
 
 # What built the binaries, for the build instructions that come with the GPL's source: the
-# compiler and assembler, and the C runtime. The Windows binaries link MinGW-w64's runtime and
-# winpthreads in, so their exact packages count most.
+# compiler and assembler, and the C runtime. Windows links the MinGW-w64 support runtime and
+# winpthreads statically; UCRT itself is provided by Windows. Retain the installed package versions
+# with the binaries so restoring the cache retains the original build's provenance.
 compiler=$(sed -n 's/^CC=//p' ffmpeg/ffbuild/config.mak)
 toolchain=$("$compiler" --version | sed -n 1p)
 case $target in
@@ -130,12 +142,15 @@ case $target in
     ;;
   win-x64)
     toolchain+="; $(nasm --version | sed -n 1p)"
-    if command -v pacman >/dev/null; then
-      packages=$(pacman -Q | grep -E '^mingw-w64-x86_64-(gcc|crt|headers|winpthreads)' || true)
-      toolchain+="; MSYS2 packages ${packages//$'\n'/, }"
+    runtime=$(printf '#include <_mingw.h>\n__MINGW64_VERSION_STR\n' | "$compiler" -E -P - | sed -n '$p')
+    macros=$(printf '#include <_mingw.h>\n' | "$compiler" -dM -E -)
+    if grep -Eq '^#define _UCRT( |$)' <<<"$macros"; then crt=UCRT; else crt=MSVCRT; fi
+    toolchain+="; MinGW-w64 runtime $runtime; C runtime $crt"
+    if $native_windows; then
+      packages=$(pacman -Q | grep -E '^(make|git|curl) |^mingw-w64-ucrt-x86_64-')
+      toolchain+="; MSYS2 UCRT64; packages ${packages//$'\n'/, }"
     else
-      runtime=$(printf '#include <_mingw.h>\n__MINGW64_VERSION_STR\n' | "$compiler" -E -P - | sed -n '$p')
-      toolchain+="; MinGW-w64 runtime $runtime"
+      toolchain+="; Linux cross-build"
     fi
     ;;
 esac
@@ -147,7 +162,9 @@ for program in ffmpeg ffprobe; do
   case $target in
     mac-arm64) strip -x "$out/$program$exe" ;;
     linux-x64) strip "$out/$program$exe" ;;
-    win-x64) "$(command -v x86_64-w64-mingw32-strip || command -v strip)" "$out/$program$exe" ;;
+    win-x64)
+      if $native_windows; then strip "$out/$program$exe"; else x86_64-w64-mingw32-strip "$out/$program$exe"; fi
+      ;;
   esac
 done
 cp ffmpeg/COPYING.GPLv2 "$out/LICENSE-FFmpeg.txt"
@@ -158,7 +175,8 @@ scripts/build-ffmpeg.sh in the Mr. Streamer source repository. FFmpeg and x264 a
 the GNU GPL, version 2 or later.
 Sources: https://ffmpeg.org/releases/$archive (SHA-256 $FFMPEG_SHA256)
          https://code.videolan.org/videolan/x264/-/tree/$X264_COMMIT
-Configuration: ${features[*]}
+Configuration: ${configure[*]}
+x264 configuration: --prefix=$prefix ${x264_flags[*]}
 Built with: $toolchain
 EOF
 du -h "$out/ffmpeg$exe" "$out/ffprobe$exe"
