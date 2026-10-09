@@ -6,7 +6,7 @@
 //   plays: the stream goes on, on the connection it had, and the row says what plays.
 // - A subscription renamed there is listed under its new name.
 // - Live TV and search show both subscriptions' channels. Two that read the same say whose each
-//   is, and a channel only one has says nothing.
+//   is in Live TV; in search a channel only one has names its subscription on its own row.
 // - Watching the other subscription's channel ends the first's stream: one plays at a time.
 // - A film both list is one tile in Movies, under ids that differ, while the same id at each
 //   stays two films. Play's menu names each version's subscription, the one picked plays from
@@ -174,7 +174,9 @@ async function search(page: Page, words: string): Promise<string[]> {
 
 /** Watches the result at `index` of the search that is open, and waits for its picture. */
 async function watch(page: Page, index: number): Promise<void> {
-  await page.evaluate(`document.querySelector('[role="dialog"] [data-index="${index}"]').click()`);
+  await page.evaluate(
+    `document.querySelector('[role="dialog"] [data-index="${index}"] button').click()`,
+  );
   await waitFor(
     () =>
       page.evaluate<boolean>(`(() => {
@@ -322,12 +324,12 @@ try {
     );
     if (named.join() !== "1,1") problems.push(`search shows ${found.join(" | ")}`);
     await leave(page, "dialog");
-    // A channel only the first lists: nothing reads like it, so nothing says whose it is.
+    // A channel only the first lists has a search row of its own, which names its subscription.
     const single = of(one).find((each) => !each.ambiguous && !each.adult);
     if (!single) problems.push("every channel of the first reads like one of the second");
     else {
       const [row] = await search(page, single.name);
-      if (!row?.includes(single.title) || row.includes(NORTHLINE)) {
+      if (!row?.includes(single.title) || !row.includes(NORTHLINE)) {
         problems.push(`a channel only one lists shows as ${row}`);
       }
       await leave(page, "dialog");

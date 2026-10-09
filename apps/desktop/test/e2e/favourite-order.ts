@@ -222,7 +222,7 @@ try {
     // "/" goes to the field. The words are in two of the favourites' names.
     await key(page, "/", 191);
     await page.send("Input.insertText", { text: "joined mid" });
-    await waitFor(() => says(page, `1 of ${order.length}`), 10_000);
+    await waitFor(() => says(page, "1 channel · 1 stream"), 10_000);
     await press(page, "Reorder");
     await delay(300);
     const problems: string[] = [];
