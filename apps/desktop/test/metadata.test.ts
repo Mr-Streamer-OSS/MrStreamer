@@ -826,6 +826,24 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
     await vi.waitFor(() => expect(keyless.told).toEqual([{ content: true, at: tmdb.clock.time }]));
   });
 
+  it("finds a title by TMDB's names once the kept metadata has loaded, though it was searched before", async () => {
+    const tmdb = slowTmdb();
+    const path = await kept(tmdb, 3);
+    const seen = notices(tmdb.clock);
+    const store = metadataStore({
+      path,
+      client: null,
+      region: "NL",
+      onChange: seen.onChange,
+      now: tmdb.now,
+    });
+
+    // Searched while the file is still being read: no names yet.
+    expect(store.searchName("movie", "1")).toBe("");
+    await vi.waitFor(() => expect(seen.told).toHaveLength(1));
+    expect(store.searchName("movie", "1")).toContain("title 1");
+  });
+
   it("tells nothing of a file that can't be read, isn't there, or holds nothing lists show", async () => {
     const quiet = async (path: string, client: ReturnType<typeof slowTmdb>["client"] | null) => {
       const tmdb = slowTmdb();
