@@ -63,7 +63,8 @@ export async function runDownloads(build: Record<string, unknown> & { executable
   let provider: FakeProvider | undefined;
   let tmdb: FakeTmdb | undefined;
   let pictures: Server | undefined;
-  let running: { app: ChildProcess; page: Page } | undefined;
+  /** The started app, owned from spawn on; its page only once CDP answers. */
+  let running: { app: ChildProcess; page?: Page } | undefined;
   let failed: unknown;
   const cleanupErrors: string[] = [];
   try {
@@ -120,9 +121,19 @@ export async function runDownloads(build: Record<string, unknown> & { executable
           },
         },
       );
+      running = { app };
       for (const stream of [app.stdout, app.stderr])
         stream?.on("data", (chunk: Buffer) => log.push(chunk.toString()));
-      const page = await connect(port);
+      // A spawn error or an interrupt ends the wait for the window as the run's failure.
+      const page = await Promise.race([
+        connect(port),
+        new Promise<never>((_, reject) => {
+          app.on("error", reject);
+          abort.signal.addEventListener("abort", () => reject(abort.signal.reason), {
+            once: true,
+          });
+        }),
+      ]);
       running = { app, page };
       const command = await page.send("Browser.getBrowserCommandLine");
       const args = record(command.result) ? command.result["arguments"] : null;
@@ -150,7 +161,7 @@ export async function runDownloads(build: Record<string, unknown> & { executable
       if (!running) return;
       actions.push({ action: `Quit the app (${label})`, at: now() });
       await stop(running.app, running.page);
-      running.page.close();
+      running.page?.close();
       running = undefined;
     };
 
@@ -621,7 +632,7 @@ export async function runDownloads(build: Record<string, unknown> & { executable
     }
   } catch (error) {
     failed = error;
-    if (running) {
+    if (running?.page) {
       const shot = await running.page
         .send("Page.captureScreenshot", { format: "png" })
         .catch(() => undefined);
@@ -639,7 +650,7 @@ export async function runDownloads(build: Record<string, unknown> & { executable
     if (running) {
       const owned = running;
       await clean(() => stop(owned.app, owned.page));
-      owned.page.close();
+      owned.page?.close();
     }
     if (provider) await clean(() => provider!.close().catch(() => {}));
     if (tmdb) await clean(() => tmdb!.close().catch(() => {}));
