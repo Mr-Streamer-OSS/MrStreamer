@@ -1,8 +1,11 @@
 MinGW-w64 runtime and winpthreads, in the Windows build
 
 On Windows, Mr. Streamer's ffmpeg.exe and ffprobe.exe are built with MSYS2's
-MinGW-w64 toolchain and statically linked against the MinGW-w64 runtime and
-its winpthreads library. Parts of both are under licences that ask for their
+UCRT64 MinGW-w64 toolchain and statically linked against the MinGW-w64 support
+runtime and its winpthreads library. The Universal C Runtime is provided by
+Windows. The bundled resources/ffmpeg/README.txt records the compiler, runtime
+and installed MSYS2 package versions for that build.
+Parts of MinGW-w64 and winpthreads are under licences that ask for their
 notices in binary distributions; they follow, the runtime's first. The Mac
 and Linux builds don't contain them.
 

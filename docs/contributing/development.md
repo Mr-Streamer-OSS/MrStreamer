@@ -47,7 +47,15 @@ apps/desktop/scripts/build-ffmpeg.sh mac-arm64   # or linux-x64, win-x64
 pnpm dist:mac                                    # or dist:win, dist:msix, dist:linux; installers land in apps/desktop/dist
 ```
 
-`build-ffmpeg.sh` needs a C compiler, make, nasm, pkg-config, git and curl. On Windows, run it in an MSYS2 MINGW64 shell; on Linux it can also cross-compile the Windows build with mingw-w64. It puts `ffmpeg`, `ffprobe` and their licences in `apps/desktop/vendor/ffmpeg/<target>`, which electron-builder copies into the app. Without them, the app still builds, but streams that need converting, and every movie and episode, report that they can't be played.
+`build-ffmpeg.sh` needs a C compiler, make, nasm, pkg-config, git and curl. On Windows, open an MSYS2 **UCRT64** shell and install the build tools there:
+
+```sh
+pacman -S --needed make git curl mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-nasm mingw-w64-ucrt-x86_64-pkgconf
+```
+
+The script rejects other MSYS2 environments and checks that GCC uses UCRT headers. FFmpeg and x264 are built together with that toolchain; MinGW-w64 support libraries and winpthreads link statically, while Windows provides UCRT. [MSYS2 recommends UCRT64](https://www.msys2.org/docs/environments/) and deprecated MINGW64 on 15 March 2026. Linux can still cross-compile the Windows build with mingw-w64 for local diagnostics; its README records the compiler's actual C runtime, which may be MSVCRT. Release Windows binaries are built natively in UCRT64.
+
+The script puts `ffmpeg`, `ffprobe` and their licences in `apps/desktop/vendor/ffmpeg/<target>`, which electron-builder copies into the app. `README.txt` records both configure lines, the compiler, assembler and C runtime; native Windows builds also record the installed MSYS2 build-tool and UCRT64 package versions. Without the binaries, the app still builds, but streams that need converting, and every movie and episode, report that they can't be played.
 
 A Mac build signs with a Developer ID from your keychain when one exists and notarizes when `APPLE_API_KEY`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER` are set; see [signing](../maintainers/signing.md). Without a Developer ID, `apps/desktop/scripts/mac-ad-hoc-sign.ts` seals the app ad hoc, so a downloaded copy opens once through System Settings > Privacy & Security > Open Anyway instead of being called damaged.
 

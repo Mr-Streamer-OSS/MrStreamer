@@ -290,9 +290,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      # The bundled ffmpeg, rebuilt only when build-ffmpeg.sh changes.
+      # Include the setup action, environment and package list in the Windows cache identity.
+      # No restore prefix: a UCRT64 build must never restore an old MINGW64 binary.
       - id: ffmpeg-key
-        run: echo "key=ffmpeg-win-x64-${{ hashFiles('apps/desktop/scripts/build-ffmpeg.sh') }}" >> "$GITHUB_OUTPUT"
+        run: echo "key=ffmpeg-win-x64-ucrt64-${{ hashFiles('apps/desktop/scripts/build-ffmpeg.sh', '.github/workflows/build-release.yml') }}" >> "$GITHUB_OUTPUT"
       - id: ffmpeg
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -301,14 +302,23 @@ jobs:
       - if: steps.ffmpeg.outputs.cache-hit != 'true'
         uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
         with:
-          msystem: MINGW64
+          msystem: UCRT64
           update: false
           install: >-
-            make git curl mingw-w64-x86_64-gcc mingw-w64-x86_64-nasm mingw-w64-x86_64-pkgconf
+            make git curl mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-nasm mingw-w64-ucrt-x86_64-pkgconf
       - name: Build ffmpeg on Windows
         if: steps.ffmpeg.outputs.cache-hit != 'true'
         shell: msys2 {0}
         run: scripts/build-ffmpeg.sh win-x64
+      - name: Check and record Windows ffmpeg provenance
+        # README.txt is cached with both binaries, including on a warm-cache run.
+        run: |
+          # Stable can rebuild a tested nightly from before the script recorded UCRT64.
+          if grep -q 'MSYS2 UCRT64' scripts/build-ffmpeg.sh; then
+            grep -q 'C runtime UCRT; MSYS2 UCRT64; packages ' vendor/ffmpeg/win-x64/README.txt
+            grep -q 'mingw-w64-ucrt-x86_64-gcc ' vendor/ffmpeg/win-x64/README.txt
+          fi
+          cat vendor/ffmpeg/win-x64/README.txt
       - name: Check ffmpeg cuts segments for receivers
         # A cached build from before the segment muxer would play on no TV.
         run: |
