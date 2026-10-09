@@ -1,12 +1,13 @@
 // Settings reads secret presence only. Saving configuration never searches or downloads.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   OnlineSubtitlePreferences,
   SubtitleCredentials,
   SubtitleService,
 } from "@mrstreamer/contracts/online-subtitles";
 import { TITLE_LANGUAGES } from "@mrstreamer/core/ondemand/languages";
+import { useUi } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { Input } from "../../components/ui/input.tsx";
 import { call } from "../../lib/ipc.ts";
@@ -24,6 +25,14 @@ export function OnlineSubtitlesSection() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const saved = settings.data;
+  // Opened from a title's CC panel: the section comes into view, once.
+  const section = useRef<HTMLElement>(null);
+  const asked = useUi((state) => state.onlineSubtitles);
+  useEffect(() => {
+    if (!asked) return;
+    section.current?.scrollIntoView();
+    useUi.setState({ onlineSubtitles: false });
+  }, [asked]);
   const update = useMutation({
     mutationFn: ({
       preferences,
@@ -55,7 +64,7 @@ export function OnlineSubtitlesSection() {
     });
   };
   return (
-    <Section title="Online subtitles">
+    <Section ref={section} title="Online subtitles">
       <p className="py-2 text-sm">
         Search only when you ask. The selected services receive the TMDB identity, or the title and
         year when no identity is known, plus the episode and languages. Provider links and logins

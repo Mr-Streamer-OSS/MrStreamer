@@ -202,6 +202,25 @@ describe("the title player's keys after a press on the scrubber", () => {
   });
 });
 
+describe("Escape with the subtitles panel open", () => {
+  it("closes the panel and keeps the title, and leaves the title the next time", async () => {
+    await watching();
+    await act(async () => button("Subtitles")!.click());
+    await settle();
+    expect(container.querySelector('[aria-label="Close subtitles"]')).not.toBeNull();
+
+    // Focus is wherever a pointer left it: the page, not the panel.
+    await act(async () => (document.activeElement as HTMLElement | null)?.blur());
+    await key("Escape");
+    await settle();
+    expect(container.querySelector('[aria-label="Close subtitles"]')).toBeNull();
+    expect(useUi.getState().playingTitle).toBe(true);
+
+    await key("Escape");
+    expect(useUi.getState().playingTitle).toBe(false);
+  });
+});
+
 describe("the title player's keys after a finger on the scrubber", () => {
   it("pause after a tap let go before the next frame", async () => {
     await watching();

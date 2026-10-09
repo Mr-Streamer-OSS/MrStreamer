@@ -6,12 +6,11 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SavedSubtitle } from "@mrstreamer/contracts/online-subtitles";
 import type { SubtitleTrack } from "@mrstreamer/contracts/playback";
+import { useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { SubtitlePanel } from "../../src/renderer/src/features/titles/SubtitlePanel.tsx";
-import {
-  PlaybackChoices,
-  PlaybackMenu,
-} from "../../src/renderer/src/features/watch/PlaybackMenu.tsx";
 import { onlineSubtitles } from "../../src/renderer/src/player/online-subtitles.ts";
+import { player } from "../../src/renderer/src/player/player.ts";
+import { setSubtitleDelay, subtitleDelay } from "../../src/renderer/src/player/subtitles.ts";
 import { titlePlayer } from "../../src/renderer/src/player/title-player.ts";
 
 const saved: SavedSubtitle = {
@@ -54,12 +53,25 @@ const english: SubtitleTrack = {
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
-function button(text: string) {
-  const found = [...document.querySelectorAll<HTMLButtonElement>("button")].find((each) =>
-    each.textContent?.includes(text),
+function offered(text: string) {
+  return [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+    (each) => each.textContent?.includes(text) || each.getAttribute("aria-label") === text,
   );
+}
+function button(text: string) {
+  const found = offered(text);
   if (!found) throw new Error(`Missing button: ${text}`);
   return found;
+}
+async function press(key: string, target: Element = document.activeElement ?? document.body) {
+  await act(async () => {
+    const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+    target.dispatchEvent(event);
+    // happy-dom does not perform a button's native Enter activation.
+    if (key === "Enter" && !event.defaultPrevented && target instanceof HTMLButtonElement)
+      target.click();
+    await settle();
+  });
 }
 async function opened(tracks: readonly SubtitleTrack[] = []) {
   ipc.reset();
@@ -120,6 +132,8 @@ afterEach(async () => {
   container = null;
   onlineSubtitles.bind(null);
   titlePlayer.close();
+  setSubtitleDelay(player.element, 0);
+  useUi.setState({ settings: null, onlineSubtitles: false });
   vi.unstubAllGlobals();
 });
 describe("subtitle choices while the picture plays", () => {
@@ -162,16 +176,10 @@ describe("subtitle choices while the picture plays", () => {
   it("lets typed timing fields own edit keys and offers all six drift presets", async () => {
     await opened();
     titlePlayer.acceptDownloaded("movie", saved);
-    await render(
-      createElement(PlaybackChoices, {
-        speed: { value: 1, onChange: () => {} },
-        subtitles: [],
-        subtitle: null,
-        downloadedTiming: true,
-        onOpenChange: () => {},
-      }),
-    );
-    await act(async () => button("Subtitle timing").click());
+    await render(createElement(SubtitlePanel, { open: true, onClose: () => {} }));
+    // Drift and the frame rates are one row down.
+    expect(container!.querySelector("#subtitle-speed")).toBeNull();
+    await act(async () => button("Drift and frame rate").click());
     const field = container!.querySelector<HTMLInputElement>("#subtitle-offset")!;
     expect(field).not.toBeNull();
     await act(async () => field.focus());
@@ -223,60 +231,208 @@ describe("subtitle choices while the picture plays", () => {
     expect(ipc.argsOf("subtitles.timing").at(-1)?.timing.speed).toBe(1.04);
   });
 
-  it("opens the timing page from the keyboard on its first offset step, walks its buttons, and leaves drift alone", async () => {
+  it("opens on the saved result, walks the timing in reading order with Down, and leaves drift alone", async () => {
     await opened();
     titlePlayer.acceptDownloaded("movie", saved);
     ipc.always("subtitles.timing", saved);
-    await render(
-      createElement(PlaybackMenu, {
-        speed: { value: 1, onChange: () => {} },
-        subtitles: [],
-        subtitle: null,
-        downloadedTiming: true,
-        open: true,
-        onOpenChange: () => {},
-      }),
-    );
-    const press = async (key: string) => {
-      await act(async () => {
-        const target = document.activeElement!;
-        const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
-        target.dispatchEvent(event);
-        // happy-dom does not perform a button's native Enter activation.
-        if (key === "Enter" && !event.defaultPrevented && target instanceof HTMLButtonElement)
-          target.click();
-        await settle();
-      });
-    };
-    await act(async () => button("Subtitle timing").focus());
-    await press("Enter");
-    expect(document.activeElement?.textContent).toBe("-1 s");
+    await render(createElement(SubtitlePanel, { open: true, onClose: () => {} }));
+    expect(document.activeElement?.textContent).toContain("Saved for this version");
+    const walked: string[] = [];
+    for (let step = 0; step < 10; step++) {
+      await press("ArrowDown");
+      const at = document.activeElement;
+      walked.push(at?.getAttribute("aria-label") ?? at?.textContent ?? "");
+    }
+    expect(walked).toEqual([
+      "Forget downloaded subtitles",
+      "Reset",
+      "-1 s",
+      "-0.1 s",
+      "+0.1 s",
+      "+1 s",
+      "Drift and frame rate1.00000",
+      "Medium",
+      "Box",
+      "Low",
+    ]);
+    await act(async () => button("-1 s").focus());
     expect(ipc.argsOf("subtitles.timing")).toEqual([]);
     await press("Enter");
     expect(ipc.argsOf("subtitles.timing").map(({ timing }) => timing)).toEqual([
       { offset: -1, speed: 1 },
     ]);
-    const walked: string[] = [];
-    for (let step = 0; step < 11; step++) {
-      await press("ArrowDown");
-      walked.push(document.activeElement?.textContent ?? "");
-    }
-    expect(walked).toEqual([
-      "-0.1 s",
-      "+0.1 s",
-      "+1 s",
-      "23.976 → 24 fps",
-      "23.976 → 25 fps",
-      "24 → 23.976 fps",
-      "24 → 25 fps",
-      "25 → 23.976 fps",
-      "25 → 24 fps",
-      "Reset timing",
-      "Subtitle timing−1.0 s",
-    ]);
-    await press("Backspace");
-    expect(document.activeElement?.textContent).toContain("Subtitle timing");
+    expect(container?.textContent).toContain("−1.0 s");
     expect(titlePlayer.state().savedSubtitle?.timing).toEqual({ offset: -1, speed: 1 });
+    // A step beside a field being typed in: the field reads what the step set.
+    const field = container!.querySelector<HTMLInputElement>("#subtitle-offset")!;
+    await act(async () => field.focus());
+    await act(async () => {
+      button("+0.1 s").click();
+      await settle();
+    });
+    expect(field.value).toBe("-0.9");
+    await act(async () => {
+      button("Reset").click();
+      await settle();
+    });
+    expect(titlePlayer.state().savedSubtitle?.timing).toEqual({ offset: 0, speed: 1 });
+  });
+
+  it("times a file's own track and sets the look, each shown only for what takes it", async () => {
+    await opened([english]);
+    await render(createElement(SubtitlePanel, { open: true, onClose: () => {} }));
+    // Off: no timing, and the look of what the file could show.
+    expect(offered("Later")).toBeUndefined();
+    expect(offered("Large")).toBeDefined();
+    await act(async () => {
+      button("English").click();
+      await settle();
+    });
+    expect(button("Reset").disabled).toBe(true);
+    await act(async () => button("Later").click());
+    await act(async () => button("Later").click());
+    expect(subtitleDelay()).toBe(0.2);
+    expect(container?.textContent).toContain("+0.2 s");
+    await act(async () => button("Earlier").click());
+    expect(subtitleDelay()).toBe(0.1);
+    await act(async () => button("Reset").click());
+    expect(subtitleDelay()).toBe(0);
+    // A file track has no drift to set.
+    expect(offered("Drift and frame rate")).toBeUndefined();
+
+    await act(async () => button("Large").click());
+    await act(async () => button("Shadow").click());
+    await act(async () => button("Higher").click());
+    expect(ipc.argsOf("preferences.update").at(-1)).toEqual({
+      subtitleLook: { size: "large", background: "shadow", position: "high" },
+    });
+    await press("ArrowLeft", button("Higher"));
+    expect(button("Low").getAttribute("aria-checked")).toBe("true");
+    expect(titlePlayer.state().subtitle).toEqual(english);
+    await act(async () => button("Medium").click());
+    await act(async () => button("Box").click());
+  });
+
+  it("offers nothing to time or style for a file with no subtitles, until a download shows", async () => {
+    await opened();
+    await render(createElement(SubtitlePanel, { open: true, onClose: () => {} }));
+    expect(offered("Large")).toBeUndefined();
+    expect(offered("-1 s")).toBeUndefined();
+    await act(async () => {
+      titlePlayer.acceptDownloaded("movie", saved);
+      await settle();
+    });
+    expect(offered("-1 s")).toBeDefined();
+    expect(offered("Shadow")).toBeDefined();
+  });
+
+  it("tries the next result from beside the results, and forgets the downloads", async () => {
+    await opened();
+    ipc.always("subtitles.forget", null);
+    await render(createElement(SubtitlePanel, { open: true, onClose: () => {} }));
+    await act(async () => {
+      button("Search subtitles").click();
+      await settle();
+    });
+    // Nothing downloaded shows yet, so there is no result to step from.
+    expect(offered("Try the next result")).toBeUndefined();
+    await act(async () => {
+      button("Night.Harbour.Cinema").click();
+      await settle();
+    });
+    await act(async () => {
+      button("Try the next result").click();
+      await settle();
+    });
+    expect(ipc.argsOf("subtitles.choose").map(({ resultId }) => resultId)).toEqual([
+      "first-result",
+      "second-result",
+    ]);
+    await act(async () => {
+      button("Forget downloaded subtitles").click();
+      await settle();
+    });
+    expect(ipc.argsOf("subtitles.forget")).toEqual([{ sessionId: "movie" }]);
+    expect(container?.textContent).not.toContain("Saved for this version");
+    expect(offered("-1 s")).toBeUndefined();
+  });
+
+  it("closes on Escape from anywhere, also once a picked result took focus out of the panel", async () => {
+    await opened();
+    const closed = vi.fn();
+    await render(createElement(SubtitlePanel, { open: true, onClose: closed }));
+    await act(async () => {
+      button("Search subtitles").click();
+      await settle();
+    });
+    // A pointer pick: the result goes disabled while it downloads and focus falls to the page.
+    const held = ipc.hold("subtitles.choose");
+    await act(async () => {
+      button("Night.Harbour.TV").click();
+      await vi.waitFor(() => expect(ipc.argsOf("subtitles.choose")).toHaveLength(1));
+    });
+    await act(async () => {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    });
+    expect(container?.querySelector("aside")?.contains(document.activeElement)).toBe(false);
+    await press("Escape", document.body);
+    expect(closed).toHaveBeenCalledTimes(1);
+    held.resolve({ saved, quota: null });
+    await act(async () => {
+      await settle();
+    });
+
+    // From a field too, and from a row.
+    const field = container!.querySelector<HTMLInputElement>("#subtitle-offset")!;
+    await act(async () => field.focus());
+    await press("Escape");
+    await act(async () => button("Off").focus());
+    await press("Escape");
+    expect(closed).toHaveBeenCalledTimes(3);
+
+    // Settings over the title keeps its own Escape.
+    await act(async () => useUi.setState({ settings: "general" }));
+    await press("Escape", document.body);
+    expect(closed).toHaveBeenCalledTimes(3);
+  });
+
+  it("moves focus into the panel when it opens and hands it back when it closes", async () => {
+    await opened([english]);
+    const opener = document.createElement("button");
+    document.body.append(opener);
+    opener.focus();
+    await render(createElement(SubtitlePanel, { open: true, onClose: () => {} }));
+    expect(document.activeElement?.textContent).toBe("Off");
+    const field = () => container!.querySelector<HTMLSelectElement>("select")!;
+    await act(async () => field().focus());
+    await act(async () =>
+      root!.render(
+        createElement(
+          QueryClientProvider,
+          { client: new QueryClient() },
+          createElement(SubtitlePanel, { open: false, onClose: () => {} }),
+        ),
+      ),
+    );
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
+  });
+
+  it("opens Settings on Online subtitles from its link, which is all there is while search is off", async () => {
+    await opened();
+    ipc.always("subtitles.settings", {
+      enabled: false,
+      service: "both",
+      languages: ["en"],
+      configured: { subdl: false, opensubtitles: false },
+    });
+    const closed = vi.fn();
+    await render(createElement(SubtitlePanel, { open: true, onClose: closed }));
+    expect(offered("Search subtitles")).toBeUndefined();
+    expect(container?.querySelector("select")).toBeNull();
+    await act(async () => button("Settings").click());
+    expect(closed).toHaveBeenCalledTimes(1);
+    expect(useUi.getState()).toMatchObject({ settings: "general", onlineSubtitles: true });
   });
 
   it("names the region of a result's language, and takes a replaced file's saved result away", async () => {

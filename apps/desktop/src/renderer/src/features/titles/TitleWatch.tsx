@@ -1,6 +1,6 @@
 // Playing a movie or an episode: the picture fills the window, with the title, a scrubber and the
-// controls along the bottom, fading when idle. Sound and CC open the file's tracks, and the sliders
-// its speed and the subtitles' timing and look; a series offers its next episode, and at an
+// controls along the bottom, fading when idle. Sound opens the file's sound tracks, CC everything
+// about its subtitles, and Speed plays it slower or faster; a series offers its next episode, and at an
 // episode's end counts down to it (see title-player.ts). Back returns to where the title was opened.
 //   Space or K pauses, Left and Right skip 10 seconds, Up and Down change the volume, F is full
 //   screen, M mutes, C turns subtitles on or off, N plays the next episode, also during the
@@ -61,7 +61,8 @@ import {
   ReceiverLine,
   receiverProblem,
 } from "../watch/Output.tsx";
-import { nudgeSubtitles, PlaybackMenu, stepSpeed } from "../watch/PlaybackMenu.tsx";
+import { SpeedMenu, stepSpeed } from "../watch/SpeedMenu.tsx";
+import { nudgeSubtitles } from "../watch/SubtitleSettings.tsx";
 import { TrackMenus, type TrackMenu } from "../watch/TrackMenus.tsx";
 import { SubtitlePanel } from "./SubtitlePanel.tsx";
 import { VolumeControl } from "../watch/VolumeControl.tsx";
@@ -71,6 +72,8 @@ const IDLE_MS = 3000;
 const SKIP_S = 10;
 /** How long the note that subtitles can't be had stays. */
 const SUBTITLES_UNAVAILABLE_MS = 5000;
+/** Which menu is open over the title's controls: one of the tracks' or its speed. */
+type TitleMenu = TrackMenu | "speed";
 
 /**
  * Leaves the title, saving how far it got, back to its details or the page. One that plays on a
@@ -105,7 +108,7 @@ export function TitleWatch() {
   const next = useTitlePlayer((state) => state.next);
   const continued = useTitlePlayer((state) => state.continued);
   const subtitleStatus = useTitlePlayer((state) => state.subtitleStatus);
-  const [menu, setMenu] = useState<TrackMenu>(null);
+  const [menu, setMenu] = useState<TitleMenu>(null);
   // The title plays on a receiver on the network, or did until its connection broke.
   const remote = useTitlePlayer((state) => state.shows !== null);
   useTitleSession();
@@ -483,7 +486,7 @@ function Scrubber() {
 }
 
 /** The file's sound and subtitle tracks, to choose from while playing. */
-function Tracks({ menu, onMenu }: { menu: TrackMenu; onMenu: (menu: TrackMenu) => void }) {
+function Tracks({ menu, onMenu }: { menu: TitleMenu; onMenu: (menu: TitleMenu) => void }) {
   const audio = useTitlePlayer((state) => state.audio);
   const subtitles = useTitlePlayer((state) => state.subtitles);
   const audioId = useTitlePlayer((state) => state.audioId);
@@ -492,7 +495,6 @@ function Tracks({ menu, onMenu }: { menu: TrackMenu; onMenu: (menu: TrackMenu) =
   const speed = useTitlePlayer((state) => state.speed);
   const shows = useTitlePlayer((state) => state.shows);
   const downloadedOn = useTitlePlayer((state) => state.downloadedOn);
-  const saved = useTitlePlayer((state) => state.savedSubtitle);
   return (
     <>
       {shows === null && (
@@ -527,19 +529,17 @@ function Tracks({ menu, onMenu }: { menu: TrackMenu; onMenu: (menu: TrackMenu) =
               ? "Unavailable"
               : null
         }
-        open={menu}
+        open={menu === "speed" ? null : menu}
         onOpenChange={onMenu}
         onAudio={(id) => titlePlayer.setAudio(id)}
         onSubtitle={(track) => titlePlayer.setSubtitle(track)}
       />
-      <PlaybackMenu
-        downloadedTiming={downloadedOn && saved?.subtitle !== null}
-        speed={{ value: speed, onChange: (next) => titlePlayer.setSpeed(next) }}
-        subtitles={subtitles}
-        subtitle={subtitle}
+      <SpeedMenu
+        speed={speed}
         hereOnly={shows !== null}
-        open={menu === "playback"}
-        onOpenChange={(next) => onMenu(next ? "playback" : null)}
+        open={menu === "speed"}
+        onSpeed={(next) => titlePlayer.setSpeed(next)}
+        onOpenChange={(next) => onMenu(next ? "speed" : null)}
       />
     </>
   );

@@ -5,7 +5,10 @@ import { act, createElement, useState, type ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
+import type { SubtitleFormat, SubtitleTrack } from "@mrstreamer/contracts/playback";
 import { LiveMore, type LiveMenu } from "../../src/renderer/src/features/watch/LiveMore.tsx";
+import { TrackMenus } from "../../src/renderer/src/features/watch/TrackMenus.tsx";
+import { setSubtitleDelay, subtitleDelay } from "../../src/renderer/src/player/subtitles.ts";
 
 import { closeWatch, openWatch, useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { player } from "../../src/renderer/src/player/player.ts";
@@ -37,13 +40,10 @@ it("keeps mouse actions, page focus and discovery tied to More as tracks and out
   ipc.reset();
   const calls: (number | string)[] = [];
   let removeSound = () => {};
-  let useReceiver = () => {};
   function Controls() {
     const [menu, setMenu] = useState<LiveMenu>(null);
     const [soundAvailable, setSoundAvailable] = useState(true);
-    const [hereOnly, setHereOnly] = useState(false);
     removeSound = () => setSoundAvailable(false);
-    useReceiver = () => setHereOnly(true);
     const sound: ComponentProps<typeof LiveMore>["sound"] = soundAvailable
       ? {
           audio: [
@@ -63,22 +63,6 @@ it("keeps mouse actions, page focus and discovery tied to More as tracks and out
       onPrevious: () => calls.push("previous"),
       sound,
       quality: null,
-      playback: {
-        hereOnly,
-        subtitles: [
-          {
-            id: 1,
-            page: null,
-            format: "text",
-            language: "en",
-            label: "English",
-            forced: false,
-            default: false,
-          },
-        ],
-        subtitle: null,
-        onOpenChange: (open) => setMenu(open ? "playback" : null),
-      },
     });
   }
   const container = document.createElement("div");
@@ -119,7 +103,8 @@ it("keeps mouse actions, page focus and discovery tied to More as tracks and out
   expect(button("Back to One").hasAttribute("aria-pressed")).toBe(false);
   expect(document.querySelector('[role="separator"]')).not.toBeNull();
   expect(button("Sound").getAttribute("aria-description")).toBe("Dutch");
-  expect(button("Playback").textContent).toContain("timing, look");
+  // The subtitles' timing and look are under CC, so More has no page for them.
+  expect(document.body.textContent).not.toContain("Playback");
   await click("Channel up");
   expect(calls).toEqual([-1]);
   expect(button("More").getAttribute("aria-expanded")).toBe("false");
@@ -149,27 +134,6 @@ it("keeps mouse actions, page focus and discovery tied to More as tracks and out
   await key("Escape");
   expect(button("More").getAttribute("aria-expanded")).toBe("false");
   expect(document.activeElement).toBe(button("More"));
-
-  await click("More");
-  await click("Playback");
-  await click("Subtitle lookMedium, box");
-  await key("Backspace");
-  expect(document.activeElement?.textContent).toBe("Subtitle lookMedium, box");
-  await key("ArrowLeft");
-  expect(document.activeElement?.getAttribute("aria-label")).toBe("Playback");
-  await key("Escape");
-
-  await act(async () => {
-    useReceiver();
-    await settle();
-  });
-  await click("More");
-  await click("Playback");
-  await key("ArrowDown");
-  expect(document.activeElement?.getAttribute("aria-label")).toBe("Back to More");
-  await key("Backspace");
-  expect(document.activeElement?.getAttribute("aria-label")).toBe("Playback");
-  await key("Escape");
 
   const local = {
     offers: ["cast" as const],
@@ -438,4 +402,109 @@ it("a pointer Quality open on a failed channel starts Down on the chosen quality
   await pressKey("Backspace");
   expect(document.activeElement?.getAttribute("aria-label")).toBe("Quality");
   expect(document.activeElement?.closest('[role="dialog"]')).not.toBeNull();
+});
+
+it("sets a channel's subtitle timing and look under CC, and lists them greyed while a TV plays", async () => {
+  ipc.reset();
+  const teletext: SubtitleTrack = {
+    id: 1,
+    page: 888,
+    format: "text",
+    language: "nl",
+    label: "Nederlands · Teletext",
+    forced: false,
+    default: false,
+  };
+  const pictures: SubtitleTrack = {
+    ...teletext,
+    id: 2,
+    page: null,
+    format: "picture",
+    label: "DVB",
+  };
+  let show = (_subtitle: SubtitleTrack | null, _shows?: readonly SubtitleFormat[] | null) => {};
+  function Controls() {
+    const [open, setOpen] = useState<LiveMenu>(null);
+    const [subtitle, setSubtitle] = useState<SubtitleTrack | null>(null);
+    const [shows, setShows] = useState<readonly SubtitleFormat[] | null>(null);
+    show = (next, receiver = null) => {
+      setSubtitle(next);
+      setShows(receiver);
+    };
+    return createElement(TrackMenus, {
+      showSound: false,
+      audio: [],
+      audioId: null,
+      subtitles: [teletext, pictures],
+      subtitle,
+      shows,
+      open: open === "subtitles" ? open : null,
+      onOpenChange: setOpen,
+      onAudio: () => {},
+      onSubtitle: setSubtitle,
+    });
+  }
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  unmount = () => {
+    act(() => root.unmount());
+    container.remove();
+    setSubtitleDelay(player.element, 0);
+  };
+  await act(async () => {
+    root.render(createElement(Controls));
+    await settle();
+  });
+  const named = (name: string) =>
+    [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+      (each) => each.getAttribute("aria-label") === name || each.textContent === name,
+    );
+  const click = async (name: string) => {
+    await act(async () => {
+      named(name)!.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+      await settle();
+    });
+  };
+
+  // Off: nothing to time, and the look of what the channel could show.
+  await click("Subtitles");
+  expect(named("Later")).toBeUndefined();
+  await click("Large");
+  expect(ipc.argsOf("preferences.update").at(-1)?.subtitleLook?.size).toBe("large");
+  expect(named("Large")?.getAttribute("aria-checked")).toBe("true");
+  await click("Higher");
+  expect(ipc.argsOf("preferences.update").at(-1)?.subtitleLook?.position).toBe("high");
+  // Changing a setting leaves the menu open and the choice of track alone.
+  expect(named("Off")?.getAttribute("aria-pressed")).toBe("true");
+  await click("Medium");
+  await click("Low");
+
+  // Text on: a tenth earlier or later, and back.
+  await act(async () => show(teletext));
+  expect(named("Reset")?.disabled).toBe(true);
+  await click("Later");
+  await click("Later");
+  expect(subtitleDelay()).toBe(0.2);
+  expect(document.body.textContent).toContain("+0.2 s");
+  await click("Earlier");
+  expect(subtitleDelay()).toBe(0.1);
+  await click("Reset");
+  expect(subtitleDelay()).toBe(0);
+  expect(named("Background")).toBeUndefined();
+  expect(named("Shadow")).toBeDefined();
+
+  // Pictures have no timing and no background.
+  await act(async () => show(pictures));
+  expect(named("Later")).toBeUndefined();
+  expect(named("Shadow")).toBeUndefined();
+  expect(named("Small")).toBeDefined();
+
+  // A TV plays: the settings are this computer's, listed and not set.
+  await act(async () => show(null, []));
+  expect(named("Later")).toBeUndefined();
+  expect(named("Small")).toBeUndefined();
+  expect(named("Subtitle timing")?.disabled).toBe(true);
+  expect(named("Subtitle look")?.disabled).toBe(true);
+  expect(document.body.textContent).toContain("The subtitle settings apply on this computer only.");
 });

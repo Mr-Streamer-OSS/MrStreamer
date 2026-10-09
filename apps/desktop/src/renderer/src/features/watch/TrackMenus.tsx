@@ -1,6 +1,8 @@
 // The sound and subtitle controls of Watch and a playing title. Live TV puts Sound in More.
 // Sound lists the stream's sound tracks. CC shows at a glance whether subtitles are on, and lists
-// Off and every subtitle track; C turns the last choice on and off.
+// Off and every subtitle track, then their timing and look; C turns the last choice on and off.
+// A title playing here opens its CC panel instead (SubtitlePanel.tsx), which has the same and
+// online search.
 import { Popover } from "@base-ui/react/popover";
 import { AudioLines, Captions } from "lucide-react";
 import { useRef, type KeyboardEvent, type ReactNode } from "react";
@@ -8,9 +10,10 @@ import type { AudioTrack, SubtitleFormat, SubtitleTrack } from "@mrstreamer/cont
 import { Button } from "../../components/ui/button.tsx";
 import { Tooltip } from "../../components/ui/tooltip.tsx";
 import { cn } from "../../lib/utils.ts";
+import { SubtitleSettingRows } from "./SubtitleSettings.tsx";
 
 /** Which menu is open over the controls, so Escape closes it before anything else. */
-export type TrackMenu = "sound" | "subtitles" | "playback" | "quality" | "output" | null;
+export type TrackMenu = "sound" | "subtitles" | "quality" | "output" | null;
 
 export function TrackMenus({
   audio,
@@ -103,6 +106,21 @@ export function TrackMenus({
           })}
           {shows !== null && subtitles.some((track) => !shows.includes(track.format)) && (
             <MenuNote>{hereOnly}</MenuNote>
+          )}
+          {shows === null ? (
+            <SubtitleSettingRows subtitles={subtitles} subtitle={subtitle} />
+          ) : (
+            // A receiver plays: these settings are this computer's, listed and not set.
+            <>
+              <div role="separator" className="my-1 border-t border-white/12" />
+              <Choice chosen={false} disabled onChoose={() => {}}>
+                Subtitle timing
+              </Choice>
+              <Choice chosen={false} disabled onChoose={() => {}}>
+                Subtitle look
+              </Choice>
+              <MenuNote>The subtitle settings apply on this computer only.</MenuNote>
+            </>
           )}
         </Menu>
       )}
@@ -224,8 +242,11 @@ function chosenItem(popup: HTMLElement): HTMLElement | null {
   );
 }
 
-/** Live and title menus share arrow navigation. Initial Down selects the current usable choice. */
-function moveFocus(event: KeyboardEvent<HTMLDivElement>): void {
+/**
+ * Live and title menus share arrow navigation, and so does the title's CC panel. Initial Down
+ * selects the current usable choice.
+ */
+export function moveFocus(event: KeyboardEvent<HTMLElement>): void {
   if (event.target instanceof HTMLElement && event.target.closest("input, textarea, select"))
     return;
   const items = [

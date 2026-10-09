@@ -1,11 +1,19 @@
 // The pieces Settings is built from: titled lists of rows, each with its name on the left and
 // its control or value on the right, like the system's own settings.
-import type { FormEvent, ReactNode } from "react";
+import type { FormEvent, ReactNode, Ref } from "react";
 
 /** A titled list of rows. */
-export function Section({ title, children }: { title: string; children: ReactNode }) {
+export function Section({
+  title,
+  ref,
+  children,
+}: {
+  title: string;
+  ref?: Ref<HTMLElement>;
+  children: ReactNode;
+}) {
   return (
-    <section className="mb-10">
+    <section ref={ref} className="mb-10">
       <h2 className="mb-1 text-[0.9375rem] font-semibold">{title}</h2>
       <div className="text-[0.9375rem]">{children}</div>
     </section>

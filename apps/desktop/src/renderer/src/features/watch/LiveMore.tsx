@@ -5,15 +5,14 @@ import { qualityName, shortQuality } from "../../lib/quality.ts";
 import { outputs, receiverName, useOutput } from "../../player/output.ts";
 import { MiniPlayerButton } from "./MiniPlayer.tsx";
 import { Receivers } from "./Output.tsx";
-import { PlaybackChoices } from "./PlaybackMenu.tsx";
 import { QualityChoices } from "./QualityMenu.tsx";
 import { Menu, SoundChoices, type TrackMenu } from "./TrackMenus.tsx";
 import { VolumeControl } from "./VolumeControl.tsx";
 
 export type LiveMenu = TrackMenu | "more";
-const pages = ["sound", "quality", "playback", "output"] as const;
+const pages = ["sound", "quality", "output"] as const;
 type Page = (typeof pages)[number];
-const labels = { sound: "Sound", quality: "Quality", playback: "Playback", output: "Play on" };
+const labels = { sound: "Sound", quality: "Quality", output: "Play on" };
 
 /** Live TV's secondary controls, with every page anchored to the visible More button. */
 export function LiveMore({
@@ -25,7 +24,6 @@ export function LiveMore({
   onPrevious,
   sound,
   quality,
-  playback,
 }: {
   menu: LiveMenu;
   keyboardOpen?: boolean;
@@ -35,7 +33,6 @@ export function LiveMore({
   onPrevious: () => void;
   sound: ComponentProps<typeof SoundChoices> | null;
   quality: ComponentProps<typeof QualityChoices> | null;
-  playback: ComponentProps<typeof PlaybackChoices> | null;
 }) {
   const offers = useOutput((state) => state.status.offers);
   const output = useOutput((state) => state.status.output);
@@ -45,7 +42,6 @@ export function LiveMore({
   const available = {
     sound: sound !== null,
     quality: quality !== null,
-    playback: playback !== null,
     output: offers.length > 0,
   };
   const opened = menu !== null && menu !== "subtitles";
@@ -102,10 +98,9 @@ export function LiveMore({
     quality: quality
       ? `${quality.chosen === null ? "Automatic · " : ""}${shortQuality(shownQuality) ?? qualityName(shownQuality)}`
       : undefined,
-    playback: "timing, look",
     output: destination,
   };
-  const keys = { sound: null, quality: "Q", playback: null, output: "O" };
+  const keys = { sound: null, quality: "Q", output: "O" };
   const done = () => onMenu(null);
   const action = (run: () => void) => {
     done();
@@ -151,7 +146,6 @@ export function LiveMore({
               </button>
               {page === "sound" && sound && <SoundChoices {...sound} />}
               {page === "quality" && quality && <QualityChoices {...quality} />}
-              {page === "playback" && playback && <PlaybackChoices {...playback} />}
               {page === "output" && (
                 <Receivers onDone={done} onSystemList={() => action(() => outputs.pick())} />
               )}

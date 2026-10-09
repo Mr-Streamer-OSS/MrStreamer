@@ -6,7 +6,7 @@ Pick channels through global search, Live TV, guide or favourites. Watch shares 
 
 ## How to get to it (user POV)
 
-After connecting, **Search** or Ctrl-K/Cmd-K finds channels and programmes. Enter starts the selected channel. **Live TV** provides channel/category and guide browsing. Escape leaves Watch for Home; **Watch** returns to the current channel. Favourites are saved from channel controls and appear on Home and Live TV.
+After connecting, **Search** or Ctrl-K/Cmd-K finds channels and programmes. Enter starts the selected channel. **Live TV** provides channel/category and guide browsing. Escape leaves Watch for Home; **Watch** returns to the current channel. Favourites are saved from channel controls and appear on Home and Live TV. **CC** lists the channel's subtitles and, under them, **Timing** while teletext, captions or HLS text shows, and the look's Size, Background and Position. **More** has no subtitle settings.
 
 ## Driving it with Electron CDP
 
@@ -14,7 +14,7 @@ Preconditions: `pnpm build`, a display and the fake provider's `h264-aac.mpegts`
 
 For converted codecs, titles and subtitle rendering use `apps/desktop/test/e2e/packaged-app.ts`; recovery uses `live-recovery-app.ts`; favourites use `favourite-order.ts`; external guide settings use `guide-source.ts`. Follow their documented executable arguments and capture the affected entry point, not only global search.
 
-For subtitle availability and subtitle-only outages, use `apps/desktop/test/e2e/live-subtitle-errors-app.ts`. Select cases with `MR_STREAMER_SUBTITLE_ERRORS_ONLY`; use `live-six-off` and `live-six-remembered` for discovery, and `live-segment-outage` to observe subtitle expiry followed by a video reconnect. Require actual subtitle cues before the CC control appears, advancing picture during subtitle failure, restoration of the chosen language on reconnect and explicit Off remaining off. The fixture remains synthetic; actual-provider and native-platform acceptance stay separate.
+For subtitle availability and subtitle-only outages, use `apps/desktop/test/e2e/live-subtitle-errors-app.ts`. Select cases with `MR_STREAMER_SUBTITLE_ERRORS_ONLY`; use `live-six-off` and `live-six-remembered` for discovery, and `live-segment-outage` to observe subtitle expiry followed by a video reconnect. For timing and look, open CC on `TEST | Subtitles and two sound tracks`, pick the teletext track, reopen CC and press Later, Earlier and Reset, then a Size, Background and Position: the value beside Timing follows, the menu stays open, and Escape hands G and H back. `renderer/live-more.test.ts` covers the rows, their show rules and the greyed rows while a TV plays. Require actual subtitle cues before the CC control appears, advancing picture during subtitle failure, restoration of the chosen language on reconnect and explicit Off remaining off. The fixture remains synthetic; actual-provider and native-platform acceptance stay separate.
 
 Source: `docs/user/live-tv.md`, `apps/desktop/src/renderer/src/player/`, `apps/desktop/test/e2e/packaged-app.ts`.
 
