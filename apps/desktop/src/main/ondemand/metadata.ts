@@ -3,6 +3,7 @@
 // title's name is asked for in the viewer's language and kept per language, so switching back
 // asks nothing. Without a key, or with one TMDB refuses, the catalogue works as before, with the
 // provider's names and without genres or services.
+import { isDeepStrictEqual } from "node:util";
 import { type } from "arktype";
 import {
   TmdbError,
@@ -30,6 +31,15 @@ const SERVICES = 12;
 const SERVICE_PAGES = 250;
 /** Requests in a row TMDB didn't answer before a run stops: offline, or TMDB down. */
 const GIVE_UP_AFTER = 3 * PARALLEL;
+/**
+ * How far apart the UI is told of metadata. Every notice of new content has each open list read
+ * again from the whole library, a second of the worker's time for a large one, so these start
+ * CONTENT_FIRST_MS apart and double with each one sent during a run, up to CONTENT_LAST_MS. A
+ * notice of progress only, which costs nothing, keeps PROGRESS_EVERY_MS.
+ */
+const PROGRESS_EVERY_MS = 3000;
+const CONTENT_FIRST_MS = 3000;
+const CONTENT_LAST_MS = 30_000;
 
 const Entry = type({
   at: "number",
@@ -45,6 +55,7 @@ const Entry = type({
   "names?": type({ "[string]": "string | null" }),
   "original?": "string | null",
 });
+type Entry = typeof Entry.infer;
 const ServiceList = type({ id: "number", name: "string", priority: "number", ids: "string[]" });
 const MetadataFile = type({
   version: "1",
@@ -87,8 +98,12 @@ export interface MetadataDeps {
   readonly client: Tmdb | null;
   /** ISO 3166-1 country for streaming services: "NL". */
   readonly region: string;
-  /** Called when more metadata arrived, at most every few seconds. */
-  readonly onChange: () => void;
+  /**
+   * Called when the status moved or more metadata arrived, no more often than the store allows.
+   * `content` says that what lists show changed, so they are read again; without it only the
+   * status did.
+   */
+  readonly onChange: (change: { readonly content: boolean }) => void;
   readonly now?: () => number;
 }
 
@@ -118,7 +133,13 @@ export function metadataStore(deps: MetadataDeps) {
   let dirty = false;
   let saving: Promise<void> = Promise.resolve();
   let lastSave = now();
-  let lastChange = 0;
+  /** When the UI was last told anything, and when it was last told of content. */
+  let lastNotice = 0;
+  let lastContent = 0;
+  /** How long the next notice of content waits after the last one. */
+  let contentGap = CONTENT_FIRST_MS;
+  /** Content that arrived and the UI hasn't been told of yet. */
+  let untold = false;
   /** When TMDB asked to wait until, for every request. */
   let pausedUntil = 0;
   /** Requests in a row that got no answer; the next run tries again. */
@@ -137,12 +158,28 @@ export function metadataStore(deps: MetadataDeps) {
     return entry !== undefined && (entry.missing === true || entry.names?.[language] !== undefined);
   };
 
-  function changed(force = false): void {
+  /**
+   * Records a change and tells the UI when its turn comes. `content` is what lists show, `status`
+   * is only the status, and `same` is a refetched entry that changed in nothing: saved, and told
+   * to nobody. A forced notice goes at once and carries any content not yet told.
+   */
+  function changed(change: "content" | "status" | "same", force = false): void {
     dirty = true;
-    if (force || now() - lastChange > 3000) {
-      lastChange = now();
-      deps.onChange();
+    if (change === "same") return;
+    if (change === "content") untold = true;
+    const at = now();
+    const content = untold && (force || at - lastContent > contentGap);
+    if (content || force || at - lastNotice > PROGRESS_EVERY_MS) notify(content);
+  }
+
+  function notify(content: boolean): void {
+    lastNotice = now();
+    if (content) {
+      lastContent = lastNotice;
+      contentGap = Math.min(contentGap * 2, CONTENT_LAST_MS);
+      untold = false;
     }
+    deps.onChange({ content });
   }
 
   /** Writes what changed, one write at a time, leaving out what is past TMDB's limit. */
@@ -205,7 +242,7 @@ export function metadataStore(deps: MetadataDeps) {
         }
         if (failure.kind === "refused") {
           refused = true;
-          changed(true);
+          changed("status", true);
           return null;
         }
         const wait = failure.kind === "busy" ? failure.retryAfter * 1000 : 1000 * 2 ** tries;
@@ -236,9 +273,19 @@ export function metadataStore(deps: MetadataDeps) {
       const key = keyOf(title.kind, title.tmdbId);
       const found = await ask(() => client.details(title.kind, title.tmdbId, asked));
       if (found === null) return;
+      const before = current(title.kind, title.tmdbId);
+      const wasAnswered = answered(title.kind, title.tmdbId);
+      /** What the entry's arrival changes: only its time, only the status, or what lists show. */
+      const arrived = (entry: Entry): "content" | "status" | "same" => {
+        file.entries[key] = entry;
+        // A wrong "same" would leave lists stale, so anything but equal is content.
+        if (before && isDeepStrictEqual({ ...before, at: 0 }, { ...entry, at: 0 })) {
+          return wasAnswered ? "same" : "status";
+        }
+        return entry.missing && !before ? "status" : "content";
+      };
       if (found === "missing") {
-        file.entries[key] = { at: now(), missing: true };
-        changed();
+        changed(arrived({ at: now(), missing: true }));
         return;
       }
       const { name, original, ...metadata } = found;
@@ -248,9 +295,15 @@ export function metadataStore(deps: MetadataDeps) {
         const english = await ask(() => client.details(title.kind, title.tmdbId, "en"));
         if (english !== null && english !== "missing") names.en = english.name;
       }
-      file.entries[key] = { at: now(), ...metadata, genres: [...metadata.genres], names, original };
+      const change = arrived({
+        at: now(),
+        ...metadata,
+        genres: [...metadata.genres],
+        names,
+        original,
+      });
       searchNames.delete(key);
-      changed();
+      changed(change);
     });
   }
 
@@ -277,20 +330,24 @@ export function metadataStore(deps: MetadataDeps) {
       }
     }
     file.services = { region: deps.region, at: now(), ...lists };
-    changed(true);
+    changed("content", true);
   }
 
   async function run(client: Tmdb): Promise<void> {
     await loading;
     unanswered = 0;
+    // A new list or language is told of quickly again, however long the last run went on.
+    contentGap = CONTENT_FIRST_MS;
     // A newer list, as after a refresh or for another account, takes over at once, ahead of
     // the services, a crawl of minutes.
     const list = wanted;
     const asked = language;
     const replaced = () => wanted !== list || language !== asked;
     await fetchTitles(client, list, asked, replaced);
+    // The services take minutes to crawl; the titles' names needn't wait for them.
+    if (untold) changed("status", true);
     if (!refused && !replaced()) await fetchServices(client, replaced);
-    changed(true);
+    changed("status", true);
     await save();
   }
 
@@ -318,7 +375,7 @@ export function metadataStore(deps: MetadataDeps) {
       })().finally(() => {
         running = null;
         // The run ended, and with it the fetching the status reported.
-        deps.onChange();
+        notify(untold);
       });
     },
 

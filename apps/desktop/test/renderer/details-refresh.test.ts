@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 // A title's details show its name and original language from the lists. When the lists change,
-// as TMDB's metadata arrives, opening the details again reads them again.
+// as TMDB's metadata arrives, opening the details again reads them again. TMDB's progress alone
+// updates the status and reads no list again.
 import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
@@ -58,5 +59,25 @@ describe("a title's details", () => {
     void client.fetchQuery(queries.details("movie", { subscriptionId: SUBSCRIPTION, id: "1" }));
 
     expect(ipc.argsOf("ondemand.details")).toHaveLength(2);
+  });
+});
+
+describe("TMDB's progress", () => {
+  it("updates the status without reading the lists again", async () => {
+    ipc.reset();
+    const client = new QueryClient();
+    const stop = syncOnDemand(client);
+    const listKey = ["ondemand", "collection", "movies"];
+    client.setQueryData(listKey, { titles: [] });
+    const metadata = { known: 5, wanted: 10, refused: false, fetching: true };
+    ipc.emit("ondemand.progress", { lists: [], metadata });
+
+    expect(client.getQueryData(queries.onDemandStatus().queryKey)).toEqual({ lists: [], metadata });
+    expect(client.getQueryState(listKey)?.isInvalidated).toBe(false);
+    expect(client.getQueryState(queries.onDemandStatus().queryKey)?.isInvalidated).toBe(false);
+
+    ipc.emit("ondemand.updated", { lists: [], metadata });
+    expect(client.getQueryState(listKey)?.isInvalidated).toBe(true);
+    stop();
   });
 });

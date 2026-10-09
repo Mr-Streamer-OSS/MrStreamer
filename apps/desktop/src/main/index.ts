@@ -451,6 +451,7 @@ async function start(): Promise<void> {
     );
   forward(library.changes, "library.updated", (status) => status);
   forward(onDemand.changes, "ondemand.updated", (status) => status);
+  forward(onDemand.progressChanges, "ondemand.progress", (status) => status);
   forward(onDemand.detailsChanged, "ondemand.detailsChanged", (title) => title);
   forward(guide.changes, "guide.updated", () => null);
   forward(viewing.changes, "viewing.changed", (sequence) => ({ sequence }));

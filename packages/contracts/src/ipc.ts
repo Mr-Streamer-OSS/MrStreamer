@@ -663,6 +663,8 @@ export interface IpcEvents {
   "guide.updated": null;
   /** The movie and series lists were fetched again, or the fetch failed and kept them. */
   "ondemand.updated": OnDemandStatus;
+  /** Only TMDB's progress moved: the lists are as they were, and nothing needs reading again. */
+  "ondemand.progress": OnDemandStatus;
   /** TMDB's details of a title version arrived after its details were given without them. */
   "ondemand.detailsChanged": OwnedId & { readonly kind: TitleKind };
   /** Favourites, watched channels, progress or marks changed, up to `sequence`. */

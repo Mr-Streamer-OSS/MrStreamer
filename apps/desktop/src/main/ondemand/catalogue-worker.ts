@@ -63,7 +63,7 @@ import type {
 
 const setup = workerData as WorkerSetup;
 
-/** Counts arrivals of metadata, so collections built before them are built again. */
+/** Counts arrivals of metadata that lists show, so collections built before them are built again. */
 let metadataVersion = 0;
 /** The viewer's language as the last call named it: TMDB's names are asked for in it. */
 let viewerLanguage = "en";
@@ -75,9 +75,13 @@ const metadata = metadataStore({
     ? tmdb({ key: setup.tmdb.key, ...(setup.tmdb.api ? { api: setup.tmdb.api } : {}) })
     : null,
   region: setup.tmdb?.region ?? "US",
-  onChange: () => {
-    metadataVersion++;
-    parentPort?.postMessage({ event: "metadata", status: metadata.status() } satisfies WorkerEvent);
+  onChange: ({ content }) => {
+    if (content) metadataVersion++;
+    parentPort?.postMessage({
+      event: "metadata",
+      content,
+      status: metadata.status(),
+    } satisfies WorkerEvent);
   },
 });
 

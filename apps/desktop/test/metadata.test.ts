@@ -567,3 +567,204 @@ describe("TMDB metadata store", { timeout: 30_000 }, () => {
     expect(store.get("movie", "1")).toBeNull();
   });
 });
+
+describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
+  const day = 86_400_000;
+  const titles = (count: number): Wanted[] =>
+    Array.from({ length: count }, (_, index) => ({
+      kind: "movie",
+      tmdbId: String(index + 1),
+      addedAt: index + 1,
+    }));
+
+  /**
+   * A TMDB that answers at once and takes a second of the store's clock for each answer, so a
+   * run of a few hundred titles lasts minutes by that clock and a moment by ours. `status` picks
+   * an answer's HTTP status by title id; `popularity` is what each title's details say.
+   */
+  function slowTmdb(
+    options: {
+      readonly status?: (id: number) => number;
+      readonly popularity?: (id: number) => number;
+    } = {},
+  ) {
+    const clock = { time: 1000 * day, lastAnswer: 0 };
+    const client = tmdbClient({
+      key: "test-key",
+      api: "http://tmdb.test/3",
+      fetch: async (input) => {
+        const url = new URL(String(input));
+        // Streaming services: none.
+        if (!/^\/3\/movie\/\d+$/.test(url.pathname)) return new Response("{}", { status: 404 });
+        const id = Number(url.pathname.split("/").at(-1));
+        const language = url.searchParams.get("language") ?? "en";
+        clock.time += 1000;
+        clock.lastAnswer = clock.time;
+        const status = options.status?.(id) ?? 200;
+        if (status !== 200) return new Response("{}", { status });
+        return Response.json({
+          title: language === "en" ? `Title ${id}` : `Titel ${id}`,
+          original_title: `Title ${id}`,
+          genres: [{ id: 35 }],
+          original_language: "en",
+          popularity: options.popularity?.(id) ?? id,
+          vote_average: 7.5,
+          vote_count: 400,
+        });
+      },
+    });
+    return { clock, client, now: () => clock.time };
+  }
+
+  /** What the store told the UI, and when by the fake clock. */
+  function notices(clock: { time: number }) {
+    const told: { content: boolean; at: number }[] = [];
+    return {
+      told,
+      onChange: ({ content }: { content: boolean }) => told.push({ content, at: clock.time }),
+    };
+  }
+
+  const settled = (store: ReturnType<typeof metadataStore>) =>
+    vi.waitFor(() => expect(store.status().fetching).toBe(false), { timeout: 20_000 });
+
+  it("tells lists nothing when TMDB's answers are the same as before, and still keeps them", async () => {
+    const path = join(await tempDir(), "metadata.json.gz");
+    const tmdb = slowTmdb();
+    const open = (onChange: (change: { content: boolean }) => void, client = tmdb.client) =>
+      metadataStore({ path, client, region: "NL", onChange, now: tmdb.now });
+    const first = open(() => {});
+    first.want(titles(20));
+    await settled(first);
+    await first.flush();
+
+    // Past the time titles are fetched again, with the same answers.
+    tmdb.clock.time += 151 * day;
+    const same = notices(tmdb.clock);
+    const again = open(same.onChange);
+    again.want(titles(20));
+    await settled(again);
+    await again.flush();
+    expect(same.told.length).toBeGreaterThan(0);
+    expect(same.told.filter(({ content }) => content)).toEqual([]);
+
+    // Their new time was saved: well past the first answers' six months, they are still used.
+    tmdb.clock.time += 100 * day;
+    const kept = open(() => {}, null as never);
+    kept.want(titles(20));
+    await vi.waitFor(() => expect(kept.get("movie", "1")).not.toBeNull());
+
+    // Answers that differ are told, so the contrast holds.
+    tmdb.clock.time += 151 * day;
+    const popular = slowTmdb({ popularity: (id) => id + 1 });
+    popular.clock.time = tmdb.clock.time;
+    const changed = notices(popular.clock);
+    const changing = metadataStore({
+      path,
+      client: popular.client,
+      region: "NL",
+      onChange: changed.onChange,
+      now: popular.now,
+    });
+    changing.want(titles(20));
+    await settled(changing);
+    expect(changed.told.some(({ content }) => content)).toBe(true);
+  });
+
+  it("tells lists less often as a run goes on, status as before, and ends with them current", async () => {
+    const tmdb = slowTmdb();
+    const seen = notices(tmdb.clock);
+    const store = metadataStore({
+      path: join(await tempDir(), "metadata.json.gz"),
+      client: tmdb.client,
+      region: "NL",
+      onChange: seen.onChange,
+      now: tmdb.now,
+    });
+    store.want(titles(200));
+    await settled(store);
+
+    const content = seen.told.filter(({ content }) => content).map(({ at }) => at);
+    // Apart from the one that ends the run, which comes when it does.
+    const gaps = content.slice(1, -1).map((at, index) => at - (content[index] ?? 0));
+    expect(gaps.length).toBeGreaterThan(3);
+    for (const [index, gap] of gaps.entries()) {
+      expect(gap).toBeGreaterThanOrEqual(gaps[index - 1] ?? 0);
+    }
+    expect(gaps.at(-1)).toBeGreaterThanOrEqual(2 * (gaps[0] ?? 0));
+
+    // The status keeps coming every few seconds in between.
+    const all = seen.told.map(({ at }) => at);
+    expect(Math.max(...all.slice(1).map((at, index) => at - (all[index] ?? 0)))).toBeLessThan(
+      10_000,
+    );
+
+    // What arrived last was told at the end.
+    expect(content.at(-1)).toBeGreaterThanOrEqual(tmdb.clock.lastAnswer);
+    expect(store.status()).toMatchObject({ known: 200, wanted: 200, fetching: false });
+  });
+
+  it("tells the status alone of an id TMDB doesn't know, and of a refused key", async () => {
+    const unknown = slowTmdb({ status: () => 404 });
+    const missing = notices(unknown.clock);
+    const store = metadataStore({
+      path: join(await tempDir(), "metadata.json.gz"),
+      client: unknown.client,
+      region: "NL",
+      onChange: missing.onChange,
+      now: unknown.now,
+    });
+    store.want(titles(3));
+    await settled(store);
+    expect(store.status()).toMatchObject({ known: 3, fetching: false });
+    expect(missing.told.length).toBeGreaterThan(0);
+    expect(missing.told.filter(({ content }) => content)).toEqual([]);
+
+    const refusing = slowTmdb({ status: () => 401 });
+    const refused = notices(refusing.clock);
+    const blocked = metadataStore({
+      path: join(await tempDir(), "metadata.json.gz"),
+      client: refusing.client,
+      region: "NL",
+      onChange: refused.onChange,
+      now: refusing.now,
+    });
+    blocked.want(titles(3));
+    await settled(blocked);
+    expect(blocked.status()).toMatchObject({ refused: true, fetching: false });
+    expect(refused.told.filter(({ content }) => content)).toEqual([]);
+  });
+
+  it.each([
+    [
+      "a language change",
+      (store: ReturnType<typeof metadataStore>) => store.want(titles(200), "nl"),
+    ],
+    ["a new list", (store: ReturnType<typeof metadataStore>) => store.want(titles(201))],
+  ])("tells lists quickly again after %s", async (_name, change) => {
+    const tmdb = slowTmdb();
+    const seen = notices(tmdb.clock);
+    let switchedAt: number | null = null;
+    const store = metadataStore({
+      path: join(await tempDir(), "metadata.json.gz"),
+      client: tmdb.client,
+      region: "NL",
+      onChange: (notice) => {
+        seen.onChange(notice);
+        // With the gap grown to 30 s, as a long run does.
+        if (switchedAt === null && seen.told.filter(({ content }) => content).length === 6) {
+          switchedAt = tmdb.clock.time;
+          change(store);
+        }
+      },
+      now: tmdb.now,
+    });
+    store.want(titles(200));
+    await settled(store);
+
+    expect(switchedAt).not.toBeNull();
+    const after = seen.told.filter(({ content, at }) => content && at > (switchedAt ?? 0));
+    // The one that ends the run being left, and then the next, not 30 s later.
+    expect((after[1]?.at ?? Infinity) - (switchedAt ?? 0)).toBeLessThan(25_000);
+  });
+});

@@ -616,12 +616,15 @@ export function syncLibraryUpdates(client: QueryClient): () => void {
 
 /**
  * Reads movies and series again once the main process has fetched new lists, and a title's
- * details once TMDB's arrived after them.
+ * details once TMDB's arrived after them. TMDB's progress alone only updates the status.
  */
 export function syncOnDemand(client: QueryClient): () => void {
   const stopDetails = listen("ondemand.detailsChanged", ({ kind, ...version }) => {
     void client.invalidateQueries({ queryKey: queries.details(kind, version).queryKey });
     void client.invalidateQueries({ queryKey: queries.related(kind, version).queryKey });
+  });
+  const stopProgress = listen("ondemand.progress", (status) => {
+    client.setQueryData(queries.onDemandStatus().queryKey, status);
   });
   const stopLists = listen("ondemand.updated", () => {
     // Lists change with a refresh and as TMDB's metadata arrives. A season shown is read again
@@ -638,6 +641,7 @@ export function syncOnDemand(client: QueryClient): () => void {
   });
   return () => {
     stopDetails();
+    stopProgress();
     stopLists();
   };
 }
