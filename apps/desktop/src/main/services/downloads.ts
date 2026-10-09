@@ -99,7 +99,7 @@ export class Downloads extends Context.Service<
      * Its copies stay.
      */
     subscriptionGone(subscriptionId: string): Effect.Effect<void>;
-    /** The list after every change, a few times a second at most while a transfer goes on. */
+    /** The list after every change, each later than the last, a few times a second at most. */
     readonly changes: Stream.Stream<DownloadList>;
   }
 >()("mrstreamer/Downloads") {
@@ -288,15 +288,33 @@ function make(deps: DownloadsDeps) {
     });
 
     let telling: NodeJS.Timeout | undefined;
-    /** Tells the window, once the changes of the next moment are in. */
+    /** Whether a list is being made to tell, and whether anything changed since it began. */
+    let viewing = false;
+    let stale = false;
+    /**
+     * Tells the window, once the changes of the next moment are in. One list is made at a time,
+     * so one that waits on the disk can't arrive after a later one; what changes while it is made
+     * is told once it is out.
+     */
     const tell = () => {
-      if (telling || closing) return;
+      if (closing) return;
+      if (viewing) stale = true;
+      if (telling || viewing) return;
       telling = setTimeout(() => {
         telling = undefined;
-        void Effect.runPromise(view).then(
-          (list) => PubSub.publishUnsafe(changes, list),
-          () => {},
-        );
+        viewing = true;
+        void Effect.runPromise(view)
+          .then(
+            (list) => PubSub.publishUnsafe(changes, list),
+            () => {},
+          )
+          .finally(() => {
+            viewing = false;
+            if (stale) {
+              stale = false;
+              tell();
+            }
+          });
       }, CHANGES_MS);
     };
 

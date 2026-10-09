@@ -6,7 +6,7 @@ import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
 import type { AddressInfo } from "node:net";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { Writable } from "node:stream";
 import type { Download } from "@mrstreamer/contracts/downloads";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
@@ -22,7 +22,7 @@ import { Roster } from "../src/main/services/roster.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { fixture, type FakeProvider, type FakeProviderOptions } from "./fake-provider.ts";
 import { startFakeTmdb, type FakeTmdb } from "./fake-tmdb.ts";
-import { fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+import { collect, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 
 const hasTools =
   spawnSync("ffmpeg", ["-version"]).status === 0 && spawnSync("ffprobe", ["-version"]).status === 0;
@@ -777,6 +777,44 @@ describe.skipIf(!hasTools)("downloads", () => {
     });
     await downloads.remove(done.id);
     expect((await downloads.list()).items).toEqual([]);
+  }, 60_000);
+
+  it("tells of a deleted copy last, though a list made before it waited on the disk", async () => {
+    let hold: PromiseWithResolvers<void> | null = null;
+    const held = Promise.withResolvers<void>();
+    const slow: Disk = {
+      ...fileDisk,
+      free: async (dir) => {
+        const holding = hold;
+        // Only the downloads folder's, which the list asks for; a transfer asks for its own.
+        if (holding && basename(dir) === "downloads") {
+          hold = null;
+          held.resolve();
+          await holding.promise;
+        }
+        return fileDisk.free(dir);
+      },
+    };
+    const { provider, subscriptionId, runtime, downloads, find } = await connected({}, slow);
+    const film = movie(provider, subscriptionId, "TEST | Index at the end");
+    const done = await downloads.add(film.ref);
+    await vi.waitFor(async () => expect((await find(done.id))?.status.kind).toBe("complete"), {
+      timeout: LONG,
+    });
+    const told = await collect(runtime, downloads.changes);
+    const release = Promise.withResolvers<void>();
+    hold = release;
+    await downloads.recordProgress(done.id, 3, 20);
+    // The list telling of that progress has the copy, and waits for the disk's free space.
+    await held.promise;
+    await downloads.remove(done.id);
+    // Time for a later list to be told first, were one made meanwhile.
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    release.resolve();
+    await vi.waitFor(() => expect(told.at(-1)?.items).toEqual([]));
+    expect((await downloads.list()).items).toEqual([]);
+    const gone = told.findIndex((list) => list.items.length === 0);
+    expect(told.slice(gone).flatMap((list) => list.items)).toEqual([]);
   }, 60_000);
 
   it("deletes no copy it can't read the record of, and says it can't read them", async () => {
