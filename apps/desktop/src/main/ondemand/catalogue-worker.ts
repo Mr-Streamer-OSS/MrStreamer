@@ -20,6 +20,7 @@ import {
   indexCatalogue,
   kindOf,
   search,
+  searchPage,
   type IndexedCatalogue,
 } from "@mrstreamer/core/ondemand/catalogue";
 import type { CollectionId, Title, TitleKind } from "@mrstreamer/contracts/ondemand";
@@ -650,14 +651,17 @@ const handlers: {
   searchKind: async ({ language, kind, query, limit, owners, filters, files = [] }) => {
     speaking(language);
     const found = await catalogueOf(owners, language);
+    // Filters apply to every match before the cut; without them only the best `limit` are kept.
+    if (!filters) {
+      const page = searchPage(found.index, kind, query, aliases, limit);
+      return { titles: page.titles.map((title) => named(title, language)), total: page.total };
+    }
     const unfiltered = search(found.index, kind, query, aliases, Infinity);
-    const matches = filters
-      ? filterTitles(unfiltered, filters, filterFiles(found, kind, files))
-      : unfiltered;
+    const matches = filterTitles(unfiltered, filters, filterFiles(found, kind, files));
     return {
       titles: matches.slice(0, limit).map((title) => named(title, language)),
       total: matches.length,
-      ...(filters ? { unfiltered: unfiltered.length } : {}),
+      unfiltered: unfiltered.length,
     };
   },
   filterOptions: async ({ owners, language, kind, files, adults }) => {

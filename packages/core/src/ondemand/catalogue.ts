@@ -260,8 +260,8 @@ export function byIds(
 /**
  * Titles whose name holds every word of the query: the shown name, the provider's names of every
  * version, and `aliases`, other names already folded, such as TMDB's translations. Names that
- * start with it rank first, then names with a word starting with it; ties go to the newest.
- * Titles for adults are left out.
+ * start with it rank first, then names with a word starting with it; ties go to the newest, and
+ * equals to the order of the catalogue. Titles for adults are left out.
  */
 export function search(
   catalogue: IndexedCatalogue,
@@ -270,23 +270,56 @@ export function search(
   aliases: (title: Title) => string = () => "",
   limit = SEARCH_LIMIT,
 ): Title[] {
+  return searchPage(catalogue, kind, query, aliases, limit).titles;
+}
+
+/** What `search` finds, with how many titles match in all, though only the best `limit` come back. */
+export function searchPage(
+  catalogue: IndexedCatalogue,
+  kind: TitleKind,
+  query: string,
+  aliases: (title: Title) => string = () => "",
+  limit = SEARCH_LIMIT,
+): { readonly titles: Title[]; readonly total: number } {
   const folded = normalize(query);
-  if (!folded) return [];
+  if (!folded) return { titles: [], total: 0 };
   const words = folded.split(" ");
   const indexed = kindOf(catalogue, kind);
   const { titles } = indexed;
   const searchNames = indexed.searchNames();
-  const ranked: { title: Title; rank: number }[] = [];
+  // Only the best `limit` are kept: when twice that many wait, the worst half goes, and a match
+  // that doesn't beat the worst kept is never held. The scan is in catalogue order and sorts are
+  // stable, so equals stay in that order, as one sort of every match would leave them.
+  const ranked: Ranked[] = [];
+  let worst: Ranked | undefined;
+  let total = 0;
   for (const [index, title] of titles.entries()) {
     if (title.adult) continue;
     const alias = aliases(title);
     const name = alias ? `${alias} ${searchNames[index] ?? ""}` : (searchNames[index] ?? "");
     if (!words.every((word) => name.includes(word))) continue;
+    total++;
     const rank = name.startsWith(folded) ? 0 : ` ${name}`.includes(` ${folded}`) ? 1 : 2;
-    ranked.push({ title, rank });
+    const entry = { title, rank };
+    if (worst && compareRanked(entry, worst) >= 0) continue;
+    ranked.push(entry);
+    if (ranked.length >= 2 * limit) {
+      ranked.sort(compareRanked);
+      ranked.length = limit;
+      worst = ranked[limit - 1];
+    }
   }
-  ranked.sort((a, b) => a.rank - b.rank || (b.title.addedAt ?? 0) - (a.title.addedAt ?? 0));
-  return ranked.slice(0, limit).map((entry) => entry.title);
+  ranked.sort(compareRanked);
+  return { titles: ranked.slice(0, limit).map((entry) => entry.title), total };
+}
+
+interface Ranked {
+  readonly title: Title;
+  readonly rank: number;
+}
+
+function compareRanked(a: Ranked, b: Ranked): number {
+  return a.rank - b.rank || (b.title.addedAt ?? 0) - (a.title.addedAt ?? 0);
 }
 
 /** A row with the subscription that lists it. */
