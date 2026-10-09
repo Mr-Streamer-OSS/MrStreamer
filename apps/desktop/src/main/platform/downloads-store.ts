@@ -102,7 +102,7 @@ export const downloadStoreLayer = Layer.effect(
   DownloadStore,
   Effect.gen(function* () {
     const opened = yield* Database;
-    if ("failure" in opened) return closed(opened.failure);
+    if ("failure" in opened) return closed(() => opened.failure);
     return yield* attempt(() => {
       const { db } = opened;
       prepareDownloads(db);
@@ -130,7 +130,7 @@ export const downloadStoreLayer = Layer.effect(
             remove.run(id);
           }),
       };
-    }).pipe(Effect.catch(() => Effect.succeed(closed(t("Downloads can't be opened.")))));
+    }).pipe(Effect.catch(() => Effect.succeed(closed(() => t("Downloads can't be opened.")))));
   }),
 );
 
@@ -153,7 +153,11 @@ function failureOf(stored: object): DownloadFailure {
     : { kind: "app", error: { kind: "unexpected", detail: t("This download stopped.") } };
 }
 
-function closed(detail: string): DownloadStore["Service"] {
-  const fail = unavailable(detail);
+/**
+ * A store whose every call fails with `detail`, made when it fails so it says so in the interface
+ * language of the moment.
+ */
+function closed(detail: () => string): DownloadStore["Service"] {
+  const fail = Effect.suspend(() => unavailable(detail()));
   return { list: fail, put: () => fail, remove: () => fail };
 }

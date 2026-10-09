@@ -1222,3 +1222,26 @@ it("says a download asked for after it went is gone in the interface language pi
   await expect(downloads.recordProgress("gone", 3, 10)).rejects.toMatchObject(gone);
   await quit();
 });
+
+// A Downloads table this build can't prepare fails every call from the start, before main applies
+// the saved interface language: each one says so in the language picked since, and keeps every folder.
+it("says Downloads can't be opened in the interface language picked since the start", async () => {
+  const dataDir = await tempDir();
+  const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+  db.exec("create table downloads (id text primary key)");
+  db.close();
+  const kept = randomUUID();
+  await mkdir(join(dataDir, "downloads", kept), { recursive: true });
+  const { downloads, quit } = await app(dataDir);
+  setLanguage({ locale: "fr-FR", formats: "fr-FR" });
+  onTestFinished(() => setLanguage({ locale: "en-US", formats: "en-US" }));
+  const closed = {
+    error: { kind: "unexpected", detail: "Impossible d'ouvrir les téléchargements." },
+  };
+  await expect(downloads.list()).rejects.toMatchObject(closed);
+  await expect(
+    downloads.add({ kind: "movie", subscriptionId: "any", id: "1" }),
+  ).rejects.toMatchObject(closed);
+  await quit();
+  expect(await readdir(join(dataDir, "downloads"))).toEqual([kept]);
+});

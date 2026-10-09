@@ -143,9 +143,16 @@ function make(deps: DownloadsDeps) {
 
     const records = new Map<string, StoredDownload>();
     const loaded = yield* Effect.result(store.list);
-    // Without its table nothing can be queued or listed either: each call says so.
-    const unloaded = loaded._tag === "Failure" ? loaded.failure : null;
-    if (unloaded) yield* Effect.logWarning("[downloads] can't be read", unloaded.error);
+    // Without its table nothing can be queued or listed either: each call says so, as the store
+    // says it then, in the interface language of that moment. A read that works later still fails:
+    // nothing on disk was checked against the table at the start.
+    const unloaded =
+      loaded._tag === "Failure"
+        ? store.list.pipe(Effect.andThen(Effect.fail(loaded.failure)))
+        : null;
+    if (loaded._tag === "Failure") {
+      yield* Effect.logWarning("[downloads] can't be read", loaded.failure.error);
+    }
     const inventory = loaded._tag === "Success" ? loaded.success : null;
     for (const record of inventory?.records ?? []) records.set(record.id, record);
     /** Copies whose file is gone, as last looked: looked at again as the window asks for the list. */
@@ -597,7 +604,7 @@ function make(deps: DownloadsDeps) {
 
     return {
       list: Effect.suspend(() => {
-        if (unloaded) return Effect.fail(unloaded);
+        if (unloaded) return unloaded;
         lookForMissing();
         return view;
       }),
