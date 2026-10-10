@@ -7,10 +7,11 @@ import { ipc, SAVED, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Download, DownloadList } from "@mrstreamer/contracts/downloads";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { OutputStatus } from "@mrstreamer/contracts/output";
+import type { UpdateStatus } from "@mrstreamer/contracts/updates";
 import { App } from "../../src/renderer/src/app/App.tsx";
 import { openWatch, useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { WindowBar } from "../../src/renderer/src/components/WindowBar.tsx";
@@ -466,5 +467,144 @@ describe("the top bar's word on the downloads", () => {
     expect(ipc.argsOf("downloads.recordProgress")).toEqual([
       { id: "copy", position: 1195, duration: 6360 },
     ]);
+  });
+
+  /**
+   * Lays the bar out `width` CSS px wide, as a browser would and happy-dom doesn't: the pages get
+   * what the brand, Search, Settings, an update notice and the Downloads button leave, each sized
+   * by what it reads, and ResizeObserver tells of it once `resize` says the layout changed.
+   */
+  function layOut(width: number) {
+    const observers = new Set<ResizeObserverCallback>();
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        callback: ResizeObserverCallback;
+        constructor(callback: ResizeObserverCallback) {
+          this.callback = callback;
+        }
+        observe() {
+          observers.add(this.callback);
+        }
+        unobserve() {}
+        disconnect() {
+          observers.delete(this.callback);
+        }
+      },
+    );
+    const wide = (text: string, padding: number) => padding + 7 * text.length;
+    const room = (nav: HTMLElement) => {
+      const header = nav.closest("header")!;
+      const notice = header.querySelector("[data-downloads-notice]")?.textContent ?? null;
+      const update = [...header.querySelectorAll("button")].some((each) =>
+        each.textContent?.startsWith("Update"),
+      );
+      return (
+        width - 363 - (notice === null ? 0 : notice ? wide(notice, 51) : 32) - (update ? 88 : 0)
+      );
+    };
+    const names = (nav: HTMLElement) =>
+      [...nav.children].reduce((sum, each) => sum + wide(each.textContent ?? "", 24) + 4, -4);
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return this.tagName === "NAV" ? room(this) : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return this.tagName === "NAV" ? Math.max(room(this), names(this)) : 0;
+    });
+    return {
+      resize: (next = width) =>
+        act(async () => {
+          width = next;
+          for (const observer of observers) observer([], {} as ResizeObserver);
+          await settle();
+        }),
+    };
+  }
+  const pages = (bar: HTMLElement) =>
+    [...bar.querySelectorAll("nav button")].map((each) => each.textContent);
+  const failed = download({
+    id: "full",
+    status: { kind: "failed", failure: { kind: "disk-full", needed: null } },
+  });
+
+  describe("where the bar is narrow", () => {
+    beforeEach(() => {
+      ipc.always("subscription.list", [SAVED]);
+      useUi.setState({ view: "movies" });
+    });
+    afterEach(() => {
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    });
+
+    it("gives the arrow its words back once they fit, with the window as wide as it was", async () => {
+      const update: UpdateStatus = {
+        version: "0.0.9",
+        distribution: "direct",
+        channel: "stable",
+        update: { kind: "available", version: "0.0.10" },
+        offer: null,
+        checked: null,
+        nextCheckAt: null,
+        dismissed: null,
+      };
+      ipc.always("updates.status", update);
+      ipc.always("updates.dismiss", { ...update, dismissed: "0.0.10" });
+      ipc.always("downloads.list", list([failed]));
+      const layout = layOut(900);
+      const bar = await show(createElement(WindowBar), "header [data-downloads-notice]");
+      await until(() => button(bar, "Update") !== undefined);
+      await layout.resize();
+      // Beside Update, the five names leave the notice its arrow alone; it says the rest aloud.
+      expect(notice(bar)?.textContent).toBe("");
+      expect(notice(bar)?.getAttribute("aria-label")).toBe("Downloads, Download stopped");
+      expect(pages(bar)).toEqual(["Home", "Live TV", "Movies", "Series", "Watchlist"]);
+
+      // Not now takes Update away, and with it room enough for the words.
+      await click(button(bar, "Update"));
+      await click(button(document.body, "Not now"));
+      await until(() => button(bar, "Update") === undefined);
+      await layout.resize();
+      expect(notice(bar)?.textContent).toBe("Download stopped");
+      expect(pages(bar)).toEqual(["Home", "Live TV", "Movies", "Series", "Watchlist"]);
+
+      // Shorter words fit where the longer didn't, though nothing resized: Retry's transfer.
+      await layout.resize(820);
+      expect(notice(bar)?.textContent).toBe("");
+      await changed(list([transfer(40, 100)]), () => notice(bar)?.textContent === "40%");
+      expect(pages(bar)).toEqual(["Home", "Live TV", "Movies", "Series", "Watchlist"]);
+    });
+
+    it("keeps the notice in focus as its words go and come back", async () => {
+      ipc.always("downloads.list", list([download({ id: "next", status: { kind: "queued" } })]));
+      const layout = layOut(820);
+      const bar = await show(createElement(WindowBar), "header [data-downloads-notice]");
+      await layout.resize();
+      expect(notice(bar)?.textContent).toBe("Queued");
+      const focused = notice(bar)!;
+      focused.focus();
+
+      // Longer words fold it to its arrow; shorter ones, or more room, give them back.
+      await changed(list([failed]), () => notice(bar)?.textContent === "Download stopped");
+      await layout.resize();
+      expect(notice(bar)?.textContent).toBe("");
+      await changed(
+        list([download({ id: "next", status: { kind: "queued" } })]),
+        () => notice(bar)?.textContent === "Queued",
+      );
+      await layout.resize(700);
+      expect(notice(bar)?.textContent).toBe("");
+      await layout.resize(820);
+      expect(notice(bar)?.textContent).toBe("Queued");
+      // The same button all along, still in focus and pressed as itself.
+      expect(notice(bar)).toBe(focused);
+      expect(document.activeElement).toBe(focused);
+      await click(focused);
+      expect(useUi.getState().view).toBe("downloads");
+    });
   });
 });

@@ -1,9 +1,10 @@
 // Downloads in the top bar, as quiet as the update notice: the arrow and how far the one transfer
 // is, else that the next download waits for playback or is queued, else that one stopped, until
-// Retry or Delete on the Downloads page. It reads the list main keeps current, so nothing is
-// asked while a transfer runs, and renders again only when what it says changes. Pressing it
-// opens Downloads, leaving a title that plays as its Back does. Enter and Space on it press it, as
-// on any button: the players' keys leave both to it (`pressesDownloads`).
+// Retry or Delete on the Downloads page. The bar reads what it says from the list main keeps
+// current (`useDownloadsStatus`), so nothing is asked while a transfer runs, and renders again only
+// when what it says changes. Pressing it opens Downloads, leaving a title that plays as its Back
+// does. Enter and Space on it press it, as on any button: the players' keys leave both to it
+// (`pressesDownloads`).
 import { useQuery } from "@tanstack/react-query";
 import { ArrowDownToLine } from "lucide-react";
 import type { DownloadList } from "@mrstreamer/contracts/downloads";
@@ -57,6 +58,20 @@ function words(progress: Progress): string {
   }
 }
 
+/** What the notice says, in the window's language; `quiet` while the next download waits or is queued. */
+export type DownloadsStatus = { readonly text: string; readonly quiet: boolean };
+
+/** What the notice says now, or null while there is nothing to say. */
+export function useDownloadsStatus(): DownloadsStatus | null {
+  // Only what the notice says: a progress event that changes nothing else renders nothing.
+  const progress = useQuery({ ...downloadsQuery(), select: progressOf }).data;
+  if (!progress) return null;
+  return {
+    text: words(progress),
+    quiet: progress.kind === "waiting" || progress.kind === "queued",
+  };
+}
+
 /** Opens Downloads over whatever is on screen; a title playing gives way first, saving its place. */
 function openDownloads(): void {
   if (useUi.getState().playingTitle) leaveTitle();
@@ -73,48 +88,41 @@ export function pressesDownloads(event: KeyboardEvent): boolean {
 }
 
 /**
- * The notice beside Search. As `page`, it is Downloads' own button where the bar folds the page's
- * name away: shown always, marked while Downloads is on screen, with the notice's words when there
- * are any. Otherwise it shows only while there is something to say. `compact` leaves the arrow
- * alone where the bar has no room for the words, which then show on hover and focus.
+ * The notice beside Search, saying `status`. As `page`, it is Downloads' own button where the bar
+ * folds the page's name away: shown always, marked while Downloads is on screen, with the notice's
+ * words when there are any. Otherwise it shows only while there is something to say. `compact`
+ * leaves the arrow alone where the bar has no room for the words, which then show on hover and
+ * focus. It stays the same button either way, so one in focus stays in focus as the words go.
  */
 export function DownloadsNotice({
+  status,
   page = false,
   current = false,
   compact = false,
 }: {
+  status: DownloadsStatus | null;
   page?: boolean;
   current?: boolean;
   compact?: boolean;
 }) {
-  // Only what the notice says: a progress event that changes nothing else renders nothing.
-  const progress = useQuery({ ...downloadsQuery(), select: progressOf }).data ?? null;
-  if (!progress && !page) return null;
-  const text = progress && words(progress);
-  const quiet = progress?.kind === "waiting" || progress?.kind === "queued";
-  const button = (
-    <Button
-      variant={current ? "secondary" : "ghost"}
-      size={text && !compact ? "sm" : "icon-sm"}
-      aria-label={text ? t("Downloads, {status}", { status: text }) : t("Downloads")}
-      aria-current={current ? "page" : undefined}
-      data-downloads-notice
-      className={cn(
-        text && "tabular-nums",
-        text && (quiet ? "text-muted-foreground" : "text-white"),
-      )}
-      onClick={openDownloads}
-    >
-      <ArrowDownToLine />
-      {!compact && text}
-    </Button>
-  );
-  // Always the tooltip's while compact, so a focused button stays focused as the words come and go.
-  return compact ? (
-    <Tooltip label={text ?? t("Downloads")} side="bottom">
-      {button}
+  if (!status && !page) return null;
+  return (
+    <Tooltip label={status?.text ?? t("Downloads")} side="bottom" disabled={!compact}>
+      <Button
+        variant={current ? "secondary" : "ghost"}
+        size={status && !compact ? "sm" : "icon-sm"}
+        aria-label={status ? t("Downloads, {status}", { status: status.text }) : t("Downloads")}
+        aria-current={current ? "page" : undefined}
+        data-downloads-notice
+        className={cn(
+          status && "tabular-nums",
+          status && (status.quiet ? "text-muted-foreground" : "text-white"),
+        )}
+        onClick={openDownloads}
+      >
+        <ArrowDownToLine />
+        {!compact && status?.text}
+      </Button>
     </Tooltip>
-  ) : (
-    button
   );
 }

@@ -10,7 +10,7 @@ import {
 import { hasTitles } from "@mrstreamer/contracts/subscription";
 import { isMac, useWindowFullScreen } from "../app/platform.ts";
 import { closeWatch, withoutTitles, openView, useUi, type View } from "../app/ui-store.ts";
-import { DownloadsNotice } from "../features/downloads/DownloadsNotice.tsx";
+import { DownloadsNotice, useDownloadsStatus } from "../features/downloads/DownloadsNotice.tsx";
 import { UpdateNotice } from "../features/updates/UpdateNotice.tsx";
 import { useQuery } from "@tanstack/react-query";
 import { type PlainKey, t } from "@mrstreamer/core/i18n";
@@ -52,8 +52,9 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
   const watching = useUi((state) => state.watching);
   const settingsOpen = useUi((state) => state.settings !== null);
   const detailsOpen = useUi((state) => state.details !== null || state.savedEntry !== null);
-  const [pages, fold] = useFolds();
-  const [backRoom, backFold] = useFolds();
+  const status = useDownloadsStatus();
+  const [pages, fold] = useFolds(status?.text);
+  const [backRoom, backFold] = useFolds(status?.text);
   const folded = fold !== "none";
   const back =
     onBack ??
@@ -94,11 +95,16 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
         <UpdateNotice />
         <TmdbProgress />
         {back ? (
-          <DownloadsNotice compact={backFold === "arrow"} />
+          <DownloadsNotice status={status} compact={backFold === "arrow"} />
         ) : folded ? (
-          <DownloadsNotice page current={view === "downloads"} compact={fold === "arrow"} />
+          <DownloadsNotice
+            status={status}
+            page
+            current={view === "downloads"}
+            compact={fold === "arrow"}
+          />
         ) : (
-          view !== "downloads" && <DownloadsNotice />
+          view !== "downloads" && <DownloadsNotice status={status} />
         )}
         {!alone && (
           <>
@@ -197,37 +203,46 @@ export function PageButton({
 type Fold = "none" | "downloads" | "arrow";
 
 /**
- * How far the pages' names fold (see `Fold`). Each fold holds until there is room again for as
- * much as was missing, so the bar never flips back and forth at one width. Downloads comes back
- * once the pages have the room all their names took, a little more than they need while it stands
- * beside Search. The words come back once the bar is as wide again as the names were missing when
- * they went: the arrow alone gives the pages their room, so the pages' own width can't tell.
+ * How far the pages' names fold (see `Fold`), for the bar's notice saying `words`. Each fold holds
+ * until there is room again for as much as was missing, so the bar never flips back and forth at
+ * one width. Downloads comes back once the pages have the room all their names took, a little
+ * more than they need while it stands beside Search. The arrow tries its words again whenever the
+ * pages' room grows or the words change, and keeps them only if the names still fit beside them;
+ * the try is measured before the bar is drawn, so it shows nothing when it fails.
  */
-function useFolds(): [RefCallback<HTMLElement>, Fold] {
+function useFolds(words: string | undefined): [RefCallback<HTMLElement>, Fold] {
   const [fold, setFold] = useState<Fold>("none");
-  const needed = useRef({ pages: 0, bar: 0 });
-  const measured = useRef<() => void>(undefined);
+  // The room all the pages' names took when they stopped fitting, and the room the pages had
+  // beside the arrow when last measured.
+  const needed = useRef(0);
+  const besideArrow = useRef(Infinity);
+  const measured = useRef<(again: boolean) => void>(undefined);
   const ref = useCallback((element: HTMLElement | null) => {
     if (!element) return;
-    const bar = element.parentElement;
-    const measure = () =>
+    // `again`: what the bar holds changed, so the arrow tries its words whatever the room.
+    const measure = (again: boolean) =>
       setFold((was) => {
-        const over = element.scrollWidth > element.clientWidth;
-        if (was === "none") {
-          if (!over) return "none";
-          needed.current.pages = element.scrollWidth;
-          return "downloads";
+        const room = element.clientWidth;
+        const over = element.scrollWidth > room;
+        switch (was) {
+          case "none":
+            if (!over) return "none";
+            needed.current = element.scrollWidth;
+            return "downloads";
+          case "downloads":
+            if (!over) return room < needed.current ? "downloads" : "none";
+            besideArrow.current = Infinity;
+            return "arrow";
+          case "arrow":
+            if (again || room > besideArrow.current) return "downloads";
+            besideArrow.current = room;
+            return "arrow";
         }
-        if (was === "arrow" && bar && bar.clientWidth < needed.current.bar) return "arrow";
-        if (was === "downloads" && over && bar) {
-          needed.current.bar = bar.clientWidth + element.scrollWidth - element.clientWidth;
-          return "arrow";
-        }
-        return element.clientWidth < needed.current.pages ? "downloads" : "none";
       });
     measured.current = measure;
-    measure();
-    const observer = new ResizeObserver(measure);
+    // The pages come back after Back with the fold they had, and the bar may have changed meanwhile.
+    measure(true);
+    const observer = new ResizeObserver(() => measure(false));
     observer.observe(element);
     return () => {
       observer.disconnect();
@@ -235,7 +250,9 @@ function useFolds(): [RefCallback<HTMLElement>, Fold] {
     };
   }, []);
   // A fold can leave the pages' room as it was, as when Downloads' words stand beside Search
-  // before and after its name goes, so nothing resizes: measured again before it is drawn.
-  useLayoutEffect(() => measured.current?.(), [fold]);
+  // before and after its name goes, so nothing resizes: measured again before it is drawn. Words
+  // that change resize nothing either while the arrow stands alone.
+  useLayoutEffect(() => measured.current?.(false), [fold]);
+  useLayoutEffect(() => measured.current?.(true), [words]);
   return [ref, fold];
 }

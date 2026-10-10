@@ -613,6 +613,10 @@ export async function runDownloads(
     // and the download takes it on.
     const recordingStatus = async () =>
       (await online.listed()).find((item) => item.title.id === String(recording.id))?.status.kind;
+    // The request that takes the download on starts where the held one stopped, past its hold:
+    // held again further on, so it is still under way once Home's preview wants the connection.
+    provider.stallMovieFile(recording.id, 60_000, 120_000);
+    actions.push({ action: "Hold the recording's file again at 60 kB", at: now() });
     await online.tabTo("Tab to the notice over Watch", notice("[data-view=watch] header"));
     await online.press("Enter");
     await online.wait(
@@ -682,10 +686,37 @@ export async function runDownloads(
     )!;
     provider.stallMovieFile(held.id, 30_000, 60_000);
     await online.click("Open the index-with-a-gap movie", poster("Index with a gap"));
+    // Download stopped is all the bar has to say, with Back in the pages' place over the details.
+    // Narrowed 20 CSS px at a time until it keeps its arrow alone, the bar then gets the held
+    // movie's percentage as it starts, nothing resized: those shorter words fit beside Back.
+    const stopped = named(t("Download stopped"));
+    const labelOf = (bar: Bar) => bar.downloads[0]?.label ?? "";
+    await online.wait(async () => stopped(labelOf(await barOf(online))));
+    let narrow = 960;
+    let arrowAlone = await settledBar(online);
+    for (; narrow > 520; narrow -= 20) {
+      await layOut(online, narrow);
+      arrowAlone = fits(`stopped at ${narrow} CSS px`, await settledBar(online), stopped);
+      if (arrowAlone.downloads[0]!.text === "") break;
+    }
+    if (arrowAlone.downloads[0]!.text !== "")
+      throw new Error("Download stopped kept its words down to 520 CSS px.");
+    await online.capture(`notice-stopped-arrow-${narrow}`);
     await online.click(
       "Download it, held by the provider",
       button('[role="dialog"] button', t("Download")),
     );
+    await online.wait(async () => percent(labelOf(await barOf(online))));
+    const shorter = fits(`transferring at ${narrow} CSS px`, await settledBar(online), percent);
+    if (shorter.downloads[0]!.text === "")
+      throw new Error(`The percentage stayed behind the arrow at ${narrow} CSS px, where it fits.`);
+    notices["stoppedToTransferring"] = {
+      width: narrow,
+      stopped: arrowAlone,
+      transferring: shorter,
+    };
+    await online.capture(`notice-transferring-${narrow}`);
+    await layOut(online, null);
     await online.wait(async () => (await online.text('[role="dialog"]')).includes("%"));
     await online.key("Escape", 27);
     // The transfer speaks over the failure. Wide, Downloads keeps its place among the pages and
@@ -737,10 +768,87 @@ export async function runDownloads(
       "movie",
       provider.titles.movies.find((each) => each.name.startsWith("TEST | Missing file"))!.id,
     );
+    // Among the pages, the folded Downloads button keeps the keyboard as its words go and come
+    // back. At the narrowest width where it says the percentage, so Download stopped won't fit:
+    // Tab to it, cancel the transfer from its row with the pointer, which leaves Download stopped
+    // to its arrow. On Movies, Tab to it again, widen and narrow the window. On hover the arrow
+    // says the words. Enter on it then opens Downloads.
+    let narrowest = 0;
+    for (let width = 960; width > 520; width -= 20) {
+      await layOut(online, width);
+      const says = (await settledBar(online)).downloads[0]?.text;
+      if (says) narrowest = width;
+      else if (says === "") break;
+    }
+    if (!narrowest) throw new Error("The folded Downloads never said the percentage.");
+    await layOut(online, narrowest);
+    await online.wait(async () => {
+      const bar = await barOf(online);
+      return percent(labelOf(bar)) && bar.downloads[0]!.text !== "";
+    });
+    await online.tabTo("Tab to the folded Downloads saying the percentage", notice());
+    await online.page.evaluate("void (window.__focusedNotice = document.activeElement)");
+    const kept = async (where: string, bar: Bar, words: boolean) => {
+      fits(where, bar, stopped);
+      if ((bar.downloads[0]!.text !== "") !== words)
+        throw new Error(`The notice ${words ? "kept its arrow" : "kept its words"} ${where}.`);
+      const focus = await online.page.evaluate<{ same: boolean; active: string | null }>(
+        "({ same: document.activeElement === window.__focusedNotice && window.__focusedNotice.isConnected, active: document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.tagName ?? null })",
+      );
+      if (!focus.same) throw new Error(`The notice lost the keyboard ${where}: ${focus.active}`);
+      return { ...bar, focus: focus.active };
+    };
+    const focused: Record<string, unknown> = { width: narrowest };
+    notices["focusAcrossFolds"] = focused;
     await online.click("Cancel the held download", `(${row(heldId)})?.querySelector('button')`);
     await online.wait(
       async () => provider!.activeStreams() === 0 && !(await online.exists(row(heldId))),
     );
+    await online.wait(async () => stopped(labelOf(await barOf(online))));
+    focused["stoppedOnDownloads"] = await kept(
+      `once stopped at ${narrowest} CSS px`,
+      await settledBar(online),
+      false,
+    );
+    // Every page draws its own bar, so Movies has the keyboard start over.
+    await online.click("Open Movies with the pointer", button("header nav button", t("Movies")));
+    await online.wait(async () => (await barOf(online)).downloads[0]?.current === null);
+    await online.tabTo("Tab to the folded Downloads with its arrow alone", notice());
+    await online.page.evaluate("void (window.__focusedNotice = document.activeElement)");
+    focused["stoppedOnMovies"] = await kept(
+      `on Movies at ${narrowest} CSS px`,
+      await settledBar(online),
+      false,
+    );
+    const centre = await online.page.evaluate<{ x: number; y: number }>(`(() => {
+      const box = (${notice()}).getBoundingClientRect();
+      return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    })()`);
+    actions.push({ action: "Point at the notice's arrow", at: now() });
+    await online.page.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...centre });
+    const tip = `[...document.querySelectorAll('[data-side]')].find(e => !e.closest('header') && e.checkVisibility() && e.textContent.trim() === ${JSON.stringify(t("Download stopped"))})`;
+    await online.wait(() => online.exists(tip));
+    focused["tooltip"] = await online.page.evaluate<string>(`(${tip}).textContent.trim()`);
+    await online.capture(`notice-arrow-tooltip-${narrowest}`);
+    actions.push({ action: "Point away from the bar", at: now() });
+    await online.page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 400, y: 400 });
+    await online.wait(async () => !(await online.exists(tip)));
+    await layOut(online, null);
+    await online.wait(async () => (await barOf(online)).downloads[0]?.text !== "");
+    focused["wide"] = await kept("at the window's own width", await settledBar(online), true);
+    await online.capture("notice-stopped-focused-wide");
+    await layOut(online, narrowest);
+    await online.wait(async () => (await barOf(online)).downloads[0]?.text === "");
+    focused["narrowAgain"] = await kept(
+      `at ${narrowest} CSS px again`,
+      await settledBar(online),
+      false,
+    );
+    await online.capture(`notice-stopped-focused-${narrowest}`);
+    await online.press("Enter");
+    await online.wait(() => onDownloadsPage(online));
+    focused["enterOpenedDownloads"] = true;
+    await layOut(online, null);
     // With the failed download alone left, the bar says it stopped, away from the page that says
     // why, and the notice leads back there.
     await online.click("Open Movies", button("header button", t("Movies")));
