@@ -6,11 +6,13 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { parse } from "yaml";
 import { afterAll, describe, expect, it } from "vitest";
 import { artifactName, STORE_ENVIRONMENT, STORE_NAME } from "../scripts/store-release.ts";
@@ -181,13 +183,19 @@ describe("a CI run's test report", () => {
   const step = read("ci.yml").jobs["test"]?.steps?.find(
     (each) => each.name === "Require complete test results",
   );
-  const root = mkdtempSync(join(tmpdir(), "test-results-step-"));
+  // Without the links a temp folder's path can hold, as /var on macOS: the check starts in the real
+  // folder and reads the report's paths against it.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "test-results-step-")));
   afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-  /** Runs the step as the job does, in a checkout holding `files`, which map paths to text. */
+  /**
+   * Runs the step as the job does, in a checkout holding `files`, which map paths to text, and this
+   * checkout's installed dependencies.
+   */
   const checkReport = (name: string, files: Record<string, string>) => {
     const dir = join(root, name);
     mkdirSync(dir);
+    symlinkSync(resolve("node_modules"), join(dir, "node_modules"), "junction");
     for (const [path, text] of Object.entries(files)) {
       mkdirSync(join(dir, path, ".."), { recursive: true });
       writeFileSync(join(dir, path), text);

@@ -9,8 +9,9 @@
 // current folder and reads the report's absolute paths relative to it. Local runs keep their
 // optional skips; this holds CI, on Linux, to running everything. The files that skip on Windows
 // fail it there.
-import { globSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { relative } from "node:path";
+import { globSync } from "tinyglobby";
 import { exclude, include } from "../test/suites.ts";
 
 /**
@@ -94,7 +95,8 @@ if (!path) {
   console.error("Name the Vitest JSON report: node scripts/ci-test-results.ts <report.json>");
   process.exit(1);
 }
-const files = globSync(include, { exclude }).map((file) => file.replaceAll("\\", "/"));
+// Found as Vitest 5 finds them (globProjectFiles), dot-named files and folders included.
+const files = globSync(include, { dot: true, ignore: exclude, expandDirectories: false });
 if (files.length === 0)
   fail([`No test files under ${process.cwd()}. Run this from the repository's root.`]);
 const report = readReport(path);

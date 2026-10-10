@@ -94,6 +94,25 @@ describe("CI's test report", () => {
     expect(run.status).toBe(1);
   });
 
+  describe("with dot-named test files and folders, which Vitest runs too", () => {
+    const hidden = ["test/.hidden.test.ts", "apps/desktop/test/.cases/nested.test.ts"];
+    const files = [...testFiles, ...hidden];
+
+    it("passes when they are in it", () => {
+      const run = check([...complete, ...hidden.map((file) => ({ file }))], files);
+
+      expect(run.output).toContain("All 7 test files are in the report: 7 tests passed.");
+      expect(run.status).toBe(0);
+    });
+
+    it("fails when they are left out", () => {
+      const run = check(complete, files);
+
+      for (const file of hidden) expect(run.output).toContain(`${file}: not in the report.`);
+      expect(run.status).toBe(1);
+    });
+  });
+
   it.each([
     {
       name: "missing",
