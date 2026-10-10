@@ -338,6 +338,7 @@ describe.skipIf(!hasTools)("downloads", () => {
         path: join(dataDir, "downloads", first.id, "media.mkv"),
         container: "mkv",
         title: first.title,
+        progress: null,
       },
       DECODERS,
     );
@@ -346,9 +347,12 @@ describe.skipIf(!hasTools)("downloads", () => {
     expect(await read(copy.url, 0)).toBeGreaterThan(0);
     expect(await read(copy.url, 2)).toBeGreaterThan(0);
     await downloads.recordProgress(first.id, 3, 10);
+    // Opened again at once, it says where it was left before any list has told of it.
+    const again = await playback.openCopy(await downloads.copy(first.id), DECODERS);
+    expect(again.progress).toEqual({ position: 3, duration: 10 });
     expect((await find(first.id))?.progress).toEqual({ position: 3, duration: 10 });
     expect(provider.fileRequests()).toBe(asked);
-    await playback.close(copy.sessionId);
+    await playback.close(again.sessionId);
   }, 60_000);
 
   it("goes on from the partial file after a restart when the provider proves it is the same file", async () => {
@@ -719,6 +723,7 @@ describe.skipIf(!hasTools)("downloads", () => {
         path: join(dataDir, "downloads", done.id, "media.mp4"),
         container: "mp4",
         title: kept!.title,
+        progress: null,
       },
       DECODERS,
     );
@@ -1086,6 +1091,7 @@ describe.skipIf(!hasTools)("downloads", () => {
             path: join(dataDir, "downloads", queued.id, `media.${file.container}`),
             container: file.container,
             title: queued.title,
+            progress: null,
           },
           DECODERS,
         );
@@ -1151,6 +1157,7 @@ describe.skipIf(!hasTools)("downloads", () => {
           path: join(dataDir, "downloads", id, `media.${container}`),
           container,
           title: download.title,
+          progress: null,
         },
         DECODERS,
       );
@@ -1203,6 +1210,7 @@ describe.skipIf(!hasTools)("downloads", () => {
         path: join(dataDir, "downloads", queued.id, "media.mp4"),
         container: "mp4",
         title: queued.title,
+        progress: null,
       },
       DECODERS,
     );

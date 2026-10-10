@@ -986,21 +986,31 @@ export async function runDownloads(
     const leftAt = (await offline.video()).time;
     await offline.key("Escape", 27);
     await offline.wait(async () => !(await offline.video()).title);
-    // Main keeps where it was left, and the page shows it too: Watch offline goes from there.
-    await offline.wait(async () => {
-      const kept = (await offline.listed()).find((item) => item.id === longId)?.progress;
-      if (!kept || kept.position < leftAt - 2) return false;
-      const shown = await offline.page.evaluate<string | null>(
-        `(${row(longId)})?.querySelector('span > span[style*="width"]')?.style.width ?? null`,
-      );
-      return shown === `${Math.round((kept.position / kept.duration) * 100)}%`;
-    });
+    // Main keeps where it was left: Watch offline goes from there at once, as the page hears of
+    // it only a moment later.
+    const longProgress = async () =>
+      (await offline.listed()).find((item) => item.id === longId)?.progress;
+    await offline.wait(async () => ((await longProgress())?.position ?? 0) >= leftAt - 2);
+    const keptAtLeave = await longProgress();
+    const shownAtResume = await offline.page.evaluate<string | null>(
+      `(${row(longId)})?.querySelector('span > span[style*="width"]')?.style.width ?? null`,
+    );
     await watchOffline(offline, longId, "Resume the long-subtitles movie offline");
     const resumedAt = (await offline.video()).time;
-    observed["resume"] = { leftAt, resumedAt };
+    observed["resume"] = { leftAt, kept: keptAtLeave, shownAtResume, resumedAt };
     if (resumedAt < leftAt - 8) throw new Error("The copy didn't resume where it was left.");
     await offline.key("Escape", 27);
     await offline.wait(async () => !(await offline.video()).title);
+    // The page shows where it was left too.
+    await offline.wait(async () => {
+      const progress = await longProgress();
+      const shown = await offline.page.evaluate<string | null>(
+        `(${row(longId)})?.querySelector('span > span[style*="width"]')?.style.width ?? null`,
+      );
+      return (
+        !!progress && shown === `${Math.round((progress.position / progress.duration) * 100)}%`
+      );
+    });
     const playedUntil = Date.now();
     observed["offlinePlayback"] = during(playedFrom, playedUntil, requestsFrom);
 

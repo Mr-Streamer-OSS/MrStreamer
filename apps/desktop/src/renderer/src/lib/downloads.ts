@@ -7,7 +7,6 @@ import type { Download, DownloadFailure } from "@mrstreamer/contracts/downloads"
 import type { RawTitleRef } from "@mrstreamer/contracts/ondemand";
 import { formatBytes, formatPercent, t } from "@mrstreamer/core/i18n";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
-import { isFinished } from "@mrstreamer/core/viewing/titles";
 import { useUi } from "../app/ui-store.ts";
 import { titlePlayer, type CopyNow } from "../player/title-player.ts";
 import { describeError } from "./errors.ts";
@@ -75,15 +74,13 @@ function copyNow(download: Download): CopyNow {
   };
 }
 
-/** Plays a copy over everything, from where it was left, or from its start once it was watched. */
+/**
+ * Plays a copy over everything, from where it was left, or from its start once it was watched.
+ * The player takes where from main as the copy opens: this list may not have the last save yet.
+ */
 export function watchOffline(download: Download): void {
-  const { progress } = download;
-  const from =
-    progress && !isFinished(progress.position, progress.duration)
-      ? Math.max(0, progress.position - 5)
-      : 0;
   useUi.setState({ playingTitle: true, searchOpen: false, settings: null });
-  void titlePlayer.open(copyNow(download), from);
+  void titlePlayer.open(copyNow(download), 0);
 }
 
 /** Why a download stopped, in one sentence, with what to do about it. */
