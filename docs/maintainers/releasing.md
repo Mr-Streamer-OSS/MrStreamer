@@ -14,7 +14,7 @@ Releases come from `.github/workflows/release.yml`, which plans them and runs `.
 - Manual runs must select `main`; the plan refuses any other branch.
 - The plan job (`scripts/release-plan.ts`) resolves the commit, version and tag before anything builds. For a stable release it also decides whether a [nightly goes first](#stable-releases). Every later job checks out the planned commit, so merges that land during a run never reach its build.
 - `build-release.yml` builds, checks and publishes each release the plan names. On its commit, in parallel:
-  - the [CI](../contributing/testing.md#ci) Check and Test jobs
+  - the [CI](../contributing/testing.md#ci) Check and Test jobs. Test keeps its report as the `test-results-<version>-<attempt>` artifact. A tested nightly from before `scripts/ci-test-results.ts` has its report checked by the script its own source has; see [the test report](../contributing/testing.md#the-test-report)
   - `bundle` builds the JavaScript once, with the release version, and hands it to every platform as the `js-bundle-<version>` artifact
   - `package` (macOS and Linux) and `package-windows` build each platform on its own runner, from the bundle:
     - the bundled ffmpeg, cached until `apps/desktop/scripts/build-ffmpeg.sh` changes, and checked for the `segment` muxer that playing on a TV needs. Windows uses MSYS2 UCRT64; its cache also hashes the release build workflow so changing the toolchain setup rebuilds it. Both cold and warm Windows runs check and print the cached README's compiler, runtime and package provenance. A tested nightly from before the script recorded UCRT64 can still be rebuilt for stable: its older provenance is printed without requiring the new stamp
