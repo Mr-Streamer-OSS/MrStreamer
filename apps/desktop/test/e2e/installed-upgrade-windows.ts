@@ -4,7 +4,7 @@
 // GitHub-hosted runner with no Mr. Streamer installed, never stops a process it didn't start, and
 // takes back only the firewall rules, profile and audit settings it changed. The runner's disposal
 // is the outer boundary for anything a failure leaves behind.
-import { execFile, execFileSync, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -110,67 +110,79 @@ export function assertNoAppRunning(runner: Runner, when: string): void {
 
 const key = (each: WinProcess) => `${each.pid}@${each.created}`;
 
+/** The app as this run started it: its handle, unlike its id, never names another program. */
+export type Started = Pick<ChildProcess, "pid" | "exitCode" | "signalCode" | "kill">;
+
 /**
- * The process tree of one app instance this run started: the app and everything it started,
- * gathered each time `sample` looks. A child counts only when it started after its parent, so a
- * reused process id never makes another program ours.
+ * The process tree of one app instance this run started: the app and everything it started.
+ * The root is pinned by id and start time as soon as it is made, and must run the installed
+ * executable. Each `sample` follows only parents that still run under the id and start time this
+ * run saw, so a reused id never makes another program, or its children, ours. An app that can't
+ * be pinned is killed through its handle, which names nothing else, and refused.
  */
-export function ownedTree(runner: Runner, root: number) {
-  const owned = new Map<string, WinProcess>();
-  const sample = () => {
-    const all = processes();
-    const rootProcess = all.find((each) => each.pid === root);
-    if (rootProcess && owned.size === 0) owned.set(key(rootProcess), rootProcess);
-    let added = true;
-    while (added) {
-      added = false;
-      for (const each of all) {
-        if (owned.has(key(each))) continue;
-        const parent = [...owned.values()].find((p) => p.pid === each.parent);
-        if (parent && each.created >= parent.created) {
-          owned.set(key(each), each);
-          added = true;
-        }
-      }
-    }
-    return all;
-  };
+export function ownedTree(runner: Runner, app: Started) {
+  const exited = () => app.exitCode !== null || app.signalCode !== null;
+  const root = processes().find((each) => each.pid === app.pid);
+  if (!root || exited() || !same(root.path ?? "", runner.executable)) {
+    app.kill("SIGKILL");
+    throw new Error(
+      `Process ${app.pid} can't be shown to be the installed app this run started: ${JSON.stringify(root ?? null)}.`,
+    );
+  }
+  const owned = new Map([[key(root), root]]);
+  /** The owned processes running now, after adding the children of those. */
   const alive = () => {
-    const now = new Set(processes().map(key));
-    return [...owned.values()].filter((each) => now.has(key(each)));
+    const all = processes();
+    let parents = all.filter((each) => owned.has(key(each)));
+    while (parents.length > 0) {
+      const children = all.filter(
+        (each) =>
+          !owned.has(key(each)) &&
+          parents.some((parent) => parent.pid === each.parent && each.created >= parent.created),
+      );
+      for (const child of children) owned.set(key(child), child);
+      parents = children;
+    }
+    return all.filter((each) => owned.has(key(each)));
   };
   return {
-    sample: () => void sample(),
+    root,
+    sample: () => void alive(),
     /**
      * Ends the instance: the window closes as a user's would, then, only if that leaves the app
-     * running, `taskkill /T /F` on its root, and on any child it left behind. Fails when anything
-     * of the tree, or any other process from the install folder, is still there: the setup must
-     * not replace files in use, and nothing else may be stopped.
+     * running, the app is killed through its handle. A child left behind is killed by its id
+     * alone, right after seeing it still runs under the id and start time this run saw. Fails when
+     * anything of the tree, or any other process from the install folder, is still there: the
+     * setup must not replace files in use, and nothing else may be stopped.
      */
-    async stop(exited: () => boolean, close: () => Promise<unknown>) {
-      sample();
+    async stop(close: () => Promise<unknown>) {
+      alive();
       const forced: string[] = [];
       await close().catch(() => undefined);
       for (let i = 0; i < 150 && !exited(); i++) await delay(100);
       if (!exited()) {
-        forced.push(`taskkill /PID ${root} /T /F`);
-        execFileSync("taskkill", ["/PID", String(root), "/T", "/F"], { stdio: "ignore" });
+        forced.push(`kill ${root.pid} through its handle`);
+        app.kill("SIGKILL");
         for (let i = 0; i < 50 && !exited(); i++) await delay(100);
       }
       for (let i = 0; i < 50 && alive().length > 0; i++) await delay(200);
       for (const left of alive()) {
+        if (!alive().some((each) => key(each) === key(left))) continue;
         forced.push(`taskkill /PID ${left.pid} /F (${left.name})`);
-        execFileSync("taskkill", ["/PID", String(left.pid), "/F"], { stdio: "ignore" });
+        try {
+          execFileSync("taskkill", ["/PID", String(left.pid), "/F"], { stdio: "ignore" });
+        } catch {
+          // Gone already, or not stopped: what still runs is counted below.
+        }
       }
       for (let i = 0; i < 50 && alive().length > 0; i++) await delay(200);
       const remaining = alive();
       const others = appProcesses(runner).filter((each) => !owned.has(key(each)));
       if (!exited() || remaining.length > 0 || others.length > 0)
         throw new Error(
-          `The app's processes did not all end: ${[...remaining, ...others].map((p) => `${p.pid} ${p.name}`).join(", ") || root}.`,
+          `The app's processes did not all end: ${[...remaining, ...others].map((p) => `${p.pid} ${p.name}`).join(", ") || root.pid}.`,
         );
       return {
-        root,
         owned: [...owned.values()].map(({ pid, parent, name, created }) => ({
           pid,
           parent,
@@ -442,32 +454,42 @@ export function outboundBlock(runner: Runner) {
   };
 }
 
-/** Whether the runner itself, outside the blocked programs, still reaches the internet. */
-export function runnerReaches(url: string): number {
-  return Number(
-    powershell(
-      "(Invoke-WebRequest -Uri $env:MRS_URL -UseBasicParsing -TimeoutSec 20 -Method Head).StatusCode",
-      { MRS_URL: url },
-    ),
-  );
+/** What a bundled tool did when asked to read a URL. */
+export interface ToolProbe {
+  readonly code: number | null;
+  /** It started a connection, so the network, or the block, had its say. */
+  readonly attempted: boolean;
+  readonly connected: boolean;
+  /** Its connection lines and its last line. */
+  readonly said: readonly string[];
 }
 
-/** Asks a bundled tool to read `url`, which the block must stop: its exit code and last line. */
-export function toolProbe(
-  tool: string,
-  url: string,
-): Promise<{ code: number | null; said: string }> {
+/**
+ * Asks a bundled ffmpeg or ffprobe to read `url`. The bundled build reads http and tcp but has no
+ * TLS, so `url` must be plain http: https fails before any connection. Its verbose log names each
+ * connection it starts and whether it connected.
+ */
+export function toolProbe(tool: string, url: string): Promise<ToolProbe> {
   return new Promise((resolve) => {
-    const args = ["-hide_banner", "-rw_timeout", "5000000", "-i", url];
+    const args = ["-hide_banner", "-v", "verbose", "-rw_timeout", "5000000", "-i", url];
     execFile(
       tool,
-      tool.toLowerCase().endsWith("ffmpeg.exe") ? ["-nostdin", ...args, "-f", "null", "-"] : args,
+      /ffmpeg(\.exe)?$/i.test(tool) ? ["-nostdin", ...args, "-f", "null", "-"] : args,
       { timeout: 30_000 },
-      (error, _out, err) =>
+      (error, _out, err) => {
+        const lines = err.trim().split(/\r?\n/);
+        const connection = lines.filter((line) =>
+          /(Starting connection attempt|Successfully connected|Connection attempt .+ failed|Connection to .+ failed)/.test(
+            line,
+          ),
+        );
         resolve({
           code: error ? (typeof error.code === "number" ? error.code : null) : 0,
-          said: err.trim().split("\n").at(-1) ?? "",
-        }),
+          attempted: connection.some((line) => line.includes("Starting connection attempt")),
+          connected: connection.some((line) => line.includes("Successfully connected")),
+          said: [...connection, lines.at(-1) ?? ""],
+        });
+      },
     );
   });
 }

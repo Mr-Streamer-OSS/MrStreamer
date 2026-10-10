@@ -27,6 +27,7 @@
 // `resolve` needs GH_TOKEN and GITHUB_REPOSITORY and runs anywhere; `run` only on that runner.
 import { once } from "node:events";
 import { createServer, type Server } from "node:http";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { isAbsolute, join, relative } from "node:path";
@@ -53,15 +54,15 @@ import {
   install,
   outboundBlock,
   ownedTree,
-  processes,
-  runnerReaches,
   toolProbe,
   uninstall,
   type Runner,
 } from "./installed-upgrade-windows.ts";
 
-/** A public address the block must refuse, and the runner itself must still reach. */
+/** A public address the window reaches before the block and not after it. Its CSP allows it. */
 const OUTSIDE = "https://example.com/";
+/** The same for the bundled ffmpeg and ffprobe, which read plain http and have no TLS. */
+const TOOLS_OUTSIDE = "http://example.com/";
 
 // ---------------------------------------------------------------------------------------------
 // Fake services
@@ -856,8 +857,7 @@ async function start(
     { port, profile },
   );
   if (app.pid === undefined) throw new Error(`${runner.executable} didn't start.`);
-  const tree = ownedTree(runner, app.pid);
-  const exited = () => app.exitCode !== null || app.signalCode !== null;
+  const tree = ownedTree(runner, app);
   let page: Page | undefined;
   try {
     page = await connect(port);
@@ -871,9 +871,6 @@ async function start(
       !args.includes(`--remote-debugging-port=${port}`)
     )
       throw new Error("The debugging port belongs to another app.");
-    const native = processes().find((each) => each.pid === app.pid)?.path ?? "";
-    if (native.toLowerCase() !== runner.executable.toLowerCase())
-      throw new Error(`The app runs ${native}, not the installed ${runner.executable}.`);
     const renderer = await page.evaluate<string>("location.href");
     const asar = join(runner.installRoot, "resources", "app.asar", "out", "renderer", "index.html");
     if (
@@ -896,17 +893,59 @@ async function start(
     return {
       d,
       tree,
-      exited,
-      identity: { pid: app.pid, port, profile, executable: native, renderer, status },
-      stop: () => tree.stop(exited, () => page!.send("Browser.close")),
+      identity: { pid: app.pid, port, profile, executable: tree.root.path, renderer, status },
+      stop: () => tree.stop(() => page!.send("Browser.close")),
     };
   } catch (error) {
-    await tree
-      .stop(exited, () => page?.send("Browser.close") ?? Promise.resolve())
-      .catch(() => undefined);
+    await tree.stop(() => page?.send("Browser.close") ?? Promise.resolve()).catch(() => undefined);
     page?.close();
     throw error;
   }
+}
+
+/** What a run leaves on the runner, and how each part is taken down. */
+export interface Leftovers {
+  /** Puts back the network, when the run blocked it. */
+  readonly network: (() => unknown) | null;
+  readonly services: () => unknown;
+  readonly uninstall: () => unknown;
+  readonly installRoot: string;
+  readonly profile: string;
+  readonly lock: string;
+}
+
+/**
+ * Takes down what a run left. The network and the fake services always go back. The install,
+ * then the profile, then its lock go only while nothing has failed, so a failed run, or a failed
+ * step here, leaves the rest as it was for the workflow to upload. `failed` is the run's own
+ * failure, or the first step's; `kept` names what is still on disk.
+ */
+export async function cleanUp(failure: unknown, left: Leftovers) {
+  let failed = failure;
+  const steps: Record<string, unknown> = {};
+  const attempt = async (what: string, action: () => unknown) => {
+    try {
+      steps[what] = (await action()) ?? true;
+    } catch (error) {
+      steps[what] = `failed: ${String(error)}`;
+      failed ??= error;
+    }
+  };
+  if (left.network) await attempt("network", left.network);
+  await attempt("services", left.services);
+  if (!failed) await attempt("uninstall", left.uninstall);
+  if (!failed)
+    await attempt("profile", () =>
+      rm(left.profile, { recursive: true, force: true, maxRetries: 5 }),
+    );
+  if (!failed) await attempt("lock", () => rm(left.lock));
+  const paths = {
+    installation: left.installRoot,
+    profile: left.profile,
+    "profile.lock": left.lock,
+  };
+  const kept = Object.entries(paths).flatMap(([name, path]) => (existsSync(path) ? [name] : []));
+  return { failed, steps, kept };
 }
 
 /** The whole chain on the disposable runner, with its evidence and cleanup. */
@@ -1004,16 +1043,22 @@ async function runCommand(args: string[]) {
         if (pkg.stage !== "stable") await checkAbout();
         const offline: Offline = {
           async cutOff(d) {
+            const probeTools = () =>
+              Promise.all(
+                runner.tools.map(async (tool) => ({
+                  tool,
+                  ...(await toolProbe(tool, TOOLS_OUTSIDE)),
+                })),
+              );
             const reachedBefore = await d.page.evaluate<string>(probe);
+            const toolsBefore = await probeTools();
             const stopped = await services.stop();
             const since = new Date();
             blocking = true;
             const applied = block.apply();
             const app = await d.page.evaluate<string>(probe);
-            const tools = await Promise.all(
-              runner.tools.map(async (tool) => ({ tool, ...(await toolProbe(tool, OUTSIDE)) })),
-            );
-            const runnerStatus = runnerReaches(OUTSIDE);
+            const tools = await probeTools();
+            const checkReaches = await Promise.all([OUTSIDE, TOOLS_OUTSIDE].map(reaches));
             let refused: ReturnType<typeof block.blocked> = [];
             for (let i = 0; i < 30; i++) {
               refused = block.blocked(since);
@@ -1026,12 +1071,14 @@ async function runCommand(args: string[]) {
               await delay(1000);
             }
             const proven = {
+              endpoints: { window: OUTSIDE, tools: TOOLS_OUTSIDE },
               servicesStopped: stopped,
               appReachedOutsideBeforeBlock: reachedBefore,
+              toolsBeforeBlock: toolsBefore,
               applied,
               appAfterBlock: app,
               toolsAfterBlock: tools,
-              runnerStillReaches: runnerStatus,
+              checkStillReaches: checkReaches,
               refused,
             };
             const unrefused = block.programs.filter(
@@ -1039,8 +1086,10 @@ async function runCommand(args: string[]) {
             );
             if (
               reachedBefore !== "reached" ||
+              toolsBefore.some((each) => !each.connected) ||
               app === "reached" ||
-              runnerStatus >= 400 ||
+              tools.some((each) => !each.attempted || each.connected) ||
+              checkReaches.some((each) => each.status === null) ||
               unrefused.length > 0
             )
               throw new Error(
@@ -1083,29 +1132,22 @@ async function runCommand(args: string[]) {
   } catch (error) {
     failed = error;
   } finally {
-    const cleanup: Record<string, unknown> = {};
-    const attempt = async (what: string, action: () => unknown) => {
-      try {
-        cleanup[what] = (await action()) ?? true;
-      } catch (error) {
-        cleanup[what] = `failed: ${String(error)}`;
-        failed ??= error;
-      }
-    };
-    if (blocking) await attempt("network", () => block.restore());
-    await attempt("services", () => services.stop());
-    if (!failed) {
-      await attempt("uninstall", () => uninstall(runner));
-      await attempt("profile", () => rm(profile, { recursive: true, force: true, maxRetries: 5 }));
-      if (!failed) await attempt("lock", () => rm(lock));
-    }
+    const left = await cleanUp(failed, {
+      network: blocking ? () => block.restore() : null,
+      services: () => services.stop(),
+      uninstall: () => uninstall(runner),
+      installRoot: runner.installRoot,
+      profile,
+      lock,
+    });
+    failed = left.failed;
     proof.status = failed ? "failed" : "passed";
     proof.error =
       failed instanceof Error ? (failed.stack ?? failed.message) : failed ? String(failed) : null;
     proof.cleanup = {
-      ...cleanup,
-      kept: failed ? ["installation", "profile", "profile.lock"] : [],
-      failureProfile: failed
+      ...left.steps,
+      kept: left.kept,
+      failureProfile: left.kept.includes("profile")
         ? "The workflow uploads the profile without Chromium's caches. It holds only the fake provider's demo subscription, fixtures and a synthetic TMDB key."
         : null,
     };
@@ -1121,6 +1163,13 @@ async function runCommand(args: string[]) {
   }
   if (failed) throw failed;
 }
+
+/** Whether this check's own Node process, which no rule blocks, gets an answer from `url`. */
+const reaches = (url: string): Promise<{ url: string; status: number | null; error?: string }> =>
+  fetch(url, { method: "HEAD", redirect: "manual", signal: AbortSignal.timeout(20_000) }).then(
+    (response) => ({ url, status: response.status }),
+    (error: unknown) => ({ url, status: null, error: String(error) }),
+  );
 
 /** The window's request to a public address, which the block must stop. */
 const probe = `fetch(${JSON.stringify(OUTSIDE)}, { mode: "no-cors", cache: "no-store" }).then(() => "reached", (error) => "refused: " + error.message)`;
