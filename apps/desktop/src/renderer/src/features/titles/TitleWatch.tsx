@@ -33,7 +33,7 @@ import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import { formatDecimal, t } from "@mrstreamer/core/i18n";
 import { miniPlayer, useMiniPlayer } from "../../app/mini-player.ts";
 import { hasModifier, isTyping } from "../../app/platform.ts";
-import { openDetails, useUi } from "../../app/ui-store.ts";
+import { leaveTitle, openDetails, useUi } from "../../app/ui-store.ts";
 import { Artwork } from "../../components/TitleArt.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { SliderControl } from "../../components/ui/slider.tsx";
@@ -55,6 +55,7 @@ import {
   type TitleProblem,
 } from "../../player/title-player.ts";
 import { CloseMessage, pressesClose, useClosed } from "../watch/CloseMessage.tsx";
+import { pressesDownloads } from "../downloads/DownloadsNotice.tsx";
 import { Flash, flash, flashNote } from "../watch/Flash.tsx";
 import { useFullscreen, useWake } from "../watch/layout.ts";
 import { MINI_NEEDS_PICTURE, MiniControls, MiniPlayerButton } from "../watch/MiniPlayer.tsx";
@@ -81,15 +82,6 @@ const SUBTITLES_UNAVAILABLE_MS = 5000;
 type TitleMenu = TrackMenu | "speed";
 
 /**
- * Leaves the title, saving how far it got, back to its details or the page. One that plays on a
- * receiver plays on there, with its controls a click away at the foot of every page.
- */
-function leave(): void {
-  if (!titlePlayer.onReceiver()) titlePlayer.close();
-  useUi.setState({ playingTitle: false });
-}
-
-/**
  * Leaves the title for its series' episodes: the details it was played from when they are still
  * open underneath, else the details of the version playing.
  */
@@ -98,7 +90,7 @@ function toEpisodes(series: SeriesDetails): void {
   const underneath =
     details?.kind === "series" &&
     series.title.versions.some((version) => sameOwned(version, details));
-  leave();
+  leaveTitle();
   if (!underneath) openDetails({ kind: "series", ...ownedId(series.title) });
 }
 
@@ -174,8 +166,9 @@ export function TitleWatch() {
       const current = latest.current;
       current.wake();
       // The menu's own keys: Escape closes it, and focus goes back to its button. A message's
-      // cross takes Enter and Space, so Space closes it rather than playing the title again.
-      if (current.menu || pressesClose(event)) return;
+      // cross takes Enter and Space, so Space closes it rather than playing the title again, and
+      // so does the bar's word on the downloads, which opens Downloads.
+      if (current.menu || pressesClose(event) || pressesDownloads(event)) return;
       switch (event.key) {
         case " ":
         case "k":
@@ -253,7 +246,7 @@ export function TitleWatch() {
         case "Escape":
           if (document.fullscreenElement) void document.exitFullscreen();
           else if (miniPlayer.on()) void miniPlayer.leave();
-          else leave();
+          else leaveTitle();
           break;
         default:
           return;
@@ -302,7 +295,7 @@ export function TitleWatch() {
           visible={controlsVisible}
           status={miniStatus(phase, countdown)}
           failure={failure}
-          onClose={leave}
+          onClose={leaveTitle}
         >
           <Button
             variant="media"
@@ -352,7 +345,7 @@ export function TitleWatch() {
             controlsVisible ? "opacity-100" : "pointer-events-none opacity-0",
           )}
         >
-          <WindowBar onBack={leave} />
+          <WindowBar onBack={leaveTitle} />
         </div>
       )}
       {nextUp ? (
@@ -654,7 +647,7 @@ function State() {
             <Play className="fill-current" />
             {t("Play again")}
           </Button>
-          <Button variant="secondary" onClick={leave}>
+          <Button variant="secondary" onClick={leaveTitle}>
             {t("Back")}
           </Button>
           {receiver && <PlayHere />}
@@ -837,7 +830,7 @@ function NextUp({ series }: { series: SeriesDetails }) {
         <Button variant="secondary" size="lg" onClick={() => toEpisodes(series)}>
           {t("Episodes")}
         </Button>
-        <Button variant="ghost" size="lg" onClick={leave}>
+        <Button variant="ghost" size="lg" onClick={leaveTitle}>
           {t("Back")}
         </Button>
       </EndOfEpisode>

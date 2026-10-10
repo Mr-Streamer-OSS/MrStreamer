@@ -15,6 +15,8 @@ Supported are movies and episodes of Xtream subscriptions and of playlists whose
 
 **Downloads**, the last page in the top bar, has the queue at the top and what is on this computer below. In a narrow window it is the download icon beside Search.
 
+While a download runs, waits or is queued, the top bar shows it beside Search, on every page but Downloads: the arrow with its progress, **Waiting** or **Queued**. **Download stopped** shows when one failed and nothing else is left, until you retry or delete it. Pressing it opens Downloads, also from a title that plays, which stops as **Back** would stop it.
+
 - One download runs at a time, in the order you added them.
 - **Waiting while … plays**: something from the same subscription is playing, a channel, Home's preview or a title, here or on a TV. Many subscriptions allow one connection, and playback always gets it. The download stops and goes on by itself once that subscription plays nothing. A download from another subscription goes on meanwhile.
 - **Cancel** stops a download and deletes what it had downloaded.

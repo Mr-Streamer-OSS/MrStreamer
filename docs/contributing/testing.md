@@ -49,7 +49,7 @@ The renderer's [`live-recovery`](../../apps/desktop/test/renderer/live-recovery.
 
 ### Downloads
 
-[`downloads`](../../apps/desktop/test/downloads.test.ts) needs ffmpeg and ffprobe and runs the main process against the fake provider and a disk that fails as a full or missing one does. A finished download matches the source byte for byte and plays with no provider request. A partial file resumes only when the provider proves it is the same file, and starts again when it was replaced or ranges are ignored. Cancel, retry, deletion, shutdown and subtitles kept with their file are covered too. `renderer/downloads` covers the Downloads page. The built-app and memory checks are in [Packaged app](#packaged-app) and the [Downloads feature entry](../../.cursor/skills/verify-mrstreamer/features/downloads.md).
+[`downloads`](../../apps/desktop/test/downloads.test.ts) needs ffmpeg and ffprobe and runs the main process against the fake provider and a disk that fails as a full or missing one does. A finished download matches the source byte for byte and plays with no provider request. A partial file resumes only when the provider proves it is the same file, and starts again when it was replaced or ranges are ignored. Cancel, retry, deletion, shutdown and subtitles kept with their file are covered too. `renderer/downloads` covers the Downloads page and the top bar's notice of a download. The built-app and memory checks are in [Packaged app](#packaged-app) and the [Downloads feature entry](../../.cursor/skills/verify-mrstreamer/features/downloads.md).
 
 ### Interface language
 

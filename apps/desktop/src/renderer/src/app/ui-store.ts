@@ -96,6 +96,15 @@ export const useUi = create<UiState>(() => ({
 // Settings over a title holds the countdown to its next episode, so nothing starts behind it.
 useUi.subscribe((state) => titlePlayer.holdNext(state.settings !== null));
 
+/**
+ * Leaves the title, saving how far it got, back to its details or the page. One that plays on a
+ * receiver plays on there, with its controls a click away at the foot of every page.
+ */
+export function leaveTitle(): void {
+  if (!titlePlayer.onReceiver()) titlePlayer.close();
+  useUi.setState({ playingTitle: false });
+}
+
 /** Shows a page, closing Watch, details and Settings over it. */
 export function openView(view: View): void {
   useUi.setState({

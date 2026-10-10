@@ -1223,6 +1223,9 @@ export const es: Translation = {
   "That download is no longer here.": "Esa descarga ya no está.",
   "A download still holds the provider's connection.":
     "Una descarga aún ocupa la conexión con el proveedor.",
+  // The top bar's word on the downloads.
+  "Download stopped": "Descarga detenida",
+  "Downloads, {status}": "Descargas, {status}",
   // The close button on a playback error.
   "Close message": "Cerrar mensaje",
 };

@@ -5,7 +5,10 @@
 // track, leaving and resuming. The second start has the fake provider, TMDB and picture server
 // stopped; the subscription is removed there, and the third start plays both copies from the
 // Connect screen's Downloads with no subscription saved, then opens a copy whose file it removed
-// and returns to the page, which must say it is missing. Main's outbound connections are recorded
+// and returns to the page, which must say it is missing. Along the way the top bar's notice is read
+// as it says how the downloads stand, pressed with the pointer, Enter and Space, from a playing
+// title and Watch too, and laid out at 960 and 760 CSS px, where every page's name must still
+// fit. Main's outbound connections are recorded
 // by network-hook.cjs, the window's requests over CDP, and each local playback window must have
 // none but the window's own loopback proxy requests. It runs in the interface language it is
 // given, English unless asked for another, by starting the app on a system in that language:
@@ -229,6 +232,33 @@ export async function runDownloads(
             windowsVirtualKeyCode: code,
           });
       };
+      /** Enter or Space as a keyboard sends it, with its character, which presses a focused button. */
+      const press = async (name: "Enter" | " ") => {
+        actions.push({ action: `Press ${name === " " ? "Space" : name}`, at: now() });
+        const which =
+          name === " "
+            ? { key: " ", code: "Space", windowsVirtualKeyCode: 32, text: " " }
+            : { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" };
+        await page.send("Input.dispatchKeyEvent", { type: "keyDown", ...which });
+        await page.send("Input.dispatchKeyEvent", { type: "keyUp", ...which });
+      };
+      /** Tab, as the viewer presses it, until `element` has the keyboard. */
+      const tabTo = async (label: string, element: string) => {
+        for (let tabs = 0; tabs < 150; tabs++) {
+          if (await exists(`(${element}) === document.activeElement`)) {
+            actions.push({ action: `${label} (${tabs} Tab presses)`, at: now() });
+            return;
+          }
+          await page.send("Input.dispatchKeyEvent", {
+            type: "rawKeyDown",
+            key: "Tab",
+            code: "Tab",
+            windowsVirtualKeyCode: 9,
+          });
+          await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab" });
+        }
+        throw new Error(`Tab never reached ${element}`);
+      };
       const text = (selector = "body") =>
         page.evaluate<string>(
           `document.querySelector(${JSON.stringify(selector)})?.innerText ?? ""`,
@@ -253,13 +283,13 @@ export async function runDownloads(
             id: string;
             name: string;
             status: { kind: string };
-            subscription: unknown;
+            subscription: { id: string } | null;
             progress: { position: number; duration: number } | null;
             posterUrl: string | null;
             title: { kind: "movie" | "episode"; id: string };
           }[]
         >("window.mrStreamer.invoke('downloads.list').then(r => r.ok ? r.value.items : [])");
-      return { page, wait, exists, capture, click, key, text, video, listed };
+      return { page, wait, exists, capture, click, key, press, tabTo, text, video, listed };
     };
     type Driver = ReturnType<typeof driver>;
 
@@ -270,6 +300,105 @@ export async function runDownloads(
     const poster = (words: string) =>
       `[...document.querySelectorAll('button[title]')].find(b => b.title.includes(${JSON.stringify(words)}))`;
     const row = (id: string) => `document.querySelector('[data-download="${id}"]')`;
+    /** The top bar's notice in `scope`'s bar: Downloads beside Search, named with how they stand. */
+    const notice = (scope = "header") =>
+      `document.querySelector(${JSON.stringify(`${scope} [aria-label^="${t("Downloads, {status}", { status: "" })}"]`)})`;
+    /** The bar as it is laid out: the pages' names, and each Downloads control beside Search. */
+    const barOf = (d: Driver) =>
+      d.page.evaluate<{
+        pages: string[];
+        /** Whether the pages' names overflow the room they have, or a control of the bar is cut. */
+        clipped: boolean;
+        /** Whether a control of the bar reaches past the bar or the window. */
+        overflows: boolean;
+        /** The pages' room in the bar, and what their names take of it, in CSS px. */
+        room: number;
+        needs: number;
+        downloads: { text: string; label: string | null; current: string | null; width: number }[];
+      }>(`(() => {
+        const bar = document.querySelector('header');
+        const label = ${JSON.stringify(t("Downloads"))};
+        return {
+          pages: [...bar.querySelectorAll('nav button')].map(b => b.textContent.trim()),
+          clipped: (n => !!n && n.scrollWidth > n.clientWidth)(bar.querySelector('nav')) ||
+            [...bar.querySelectorAll('button')].some(b => (r => (p => r.left < p.left - 0.5 || r.right > p.right + 0.5)(b.parentElement.getBoundingClientRect()))(b.getBoundingClientRect())),
+          overflows: bar.scrollWidth > bar.clientWidth || [...bar.querySelectorAll('button')]
+            .some(b => (r => r.left < 0 || r.right > innerWidth)(b.getBoundingClientRect())),
+          room: bar.querySelector('nav')?.clientWidth ?? 0,
+          needs: (n => n && n.children.length
+            ? n.lastElementChild.getBoundingClientRect().right - n.firstElementChild.getBoundingClientRect().left
+            : 0)(bar.querySelector('nav')),
+          downloads: [...bar.querySelectorAll('button')]
+            .filter(b => b.getAttribute('aria-label')?.startsWith(label))
+            .map(b => ({ text: b.textContent.trim(), label: b.getAttribute('aria-label'),
+              current: b.getAttribute('aria-current'), width: b.getBoundingClientRect().width })),
+        };
+      })()`);
+    const noticeSays = (d: Driver, scope?: string) =>
+      d.page.evaluate<string | null>(`(${notice(scope)})?.textContent.trim() ?? null`);
+    const onDownloadsPage = (d: Driver) =>
+      d.exists(`document.querySelector('h1')?.textContent === ${JSON.stringify(t("Downloads"))}`);
+    const notices: Record<string, unknown> = {};
+    observed["notice"] = notices;
+    type Bar = Awaited<ReturnType<typeof barOf>>;
+    /** Fails the run where the bar cuts a page's name or a control, or says other than `says`. */
+    const fits = (where: string, bar: Bar, says?: (label: string) => boolean) => {
+      if (bar.clipped || bar.overflows)
+        throw new Error(`The bar doesn't fit ${where}: ${JSON.stringify(bar)}`);
+      if (says && !(bar.downloads.length === 1 && says(bar.downloads[0]!.label ?? "")))
+        throw new Error(
+          `The bar doesn't say how the downloads stand ${where}: ${JSON.stringify(bar)}`,
+        );
+      return bar;
+    };
+    const named = (status: string) => (label: string) =>
+      label === t("Downloads, {status}", { status });
+    const percent = (label: string) => /\d/.test(label);
+    /** Lays the window out `width` CSS px wide, as a narrow or zoomed window has it, or as it is. */
+    const layOut = async (d: Driver, width: number | null) => {
+      if (width === null) await d.page.send("Emulation.clearDeviceMetricsOverride");
+      else
+        await d.page.send("Emulation.setDeviceMetricsOverride", {
+          width,
+          height: 720,
+          deviceScaleFactor: 1,
+          mobile: false,
+        });
+      actions.push({
+        action:
+          width === null
+            ? "Lay the window out at its own width"
+            : `Lay the window out ${width} CSS px wide`,
+        at: now(),
+      });
+    };
+    /** The bar once it stopped folding: the same read twice, a few frames apart. */
+    const settledBar = async (d: Driver) => {
+      let bar = await barOf(d);
+      await d.wait(async () => {
+        await delay(250, undefined, { signal: abort.signal });
+        const next = await barOf(d);
+        const same = JSON.stringify(next) === JSON.stringify(bar);
+        bar = next;
+        return same;
+      });
+      return bar;
+    };
+    /**
+     * The bar at the window's least width and at 760 CSS px, below it: each must fit every page's
+     * name and say how the downloads stand. Then the window's own width again, with every name.
+     */
+    const atWidths = async (d: Driver, name: string, says: (label: string) => boolean) => {
+      const bars: Record<number, Bar> = {};
+      for (const width of [960, 760]) {
+        await layOut(d, width);
+        bars[width] = fits(`${name} at ${width} CSS px`, await settledBar(d), says);
+        await d.capture(`notice-${name}-${width}`);
+      }
+      await layOut(d, null);
+      await d.wait(async () => (await barOf(d)).pages.includes(t("Downloads")));
+      notices[`${name}AtWidths`] = bars;
+    };
     /** The id of the download of a provider's title, as main lists it. */
     const idOf = async (d: Driver, kind: "movie" | "episode", id?: number) => {
       const found = (await d.listed()).find(
@@ -302,6 +431,18 @@ export async function runDownloads(
     }
     await online.click("Submit Connect", "document.querySelector('form button[type=submit]')");
     await online.wait(() => online.exists("document.querySelector('header')"));
+    // Every word the visible notice says, as the window draws it: an observation, never a change.
+    await online.page.evaluate(`(() => {
+      const said = window.__noticeSaid = [];
+      const read = () => {
+        const shown = [...document.querySelectorAll(${JSON.stringify(`header [aria-label^="${t("Downloads, {status}", { status: "" })}"]`)})]
+          .find(n => n.checkVisibility());
+        const text = shown ? shown.textContent.trim() : null;
+        if (said.at(-1)?.text !== text) said.push({ at: Date.now(), text });
+      };
+      new MutationObserver(read).observe(document.body,
+        { subtree: true, childList: true, characterData: true, attributes: true });
+    })()`);
     await online.click("Open Movies", button("header button", t("Movies")));
     await online.click("Open All movies", button("nav button", t("All movies")));
     await online.click("Open the two-sound-track movie", poster("Two sound tracks"));
@@ -341,6 +482,10 @@ export async function runDownloads(
     );
     await online.wait(async () => (await online.text('[role="dialog"]')).includes("%"));
     await online.key("Escape", 27);
+    // The bar says how far the transfer is, as the details did, in the language's own numbers.
+    await online.wait(async () => /\d/.test((await noticeSays(online)) ?? ""));
+    notices["transferring"] = fits("while one transfers", await barOf(online), percent);
+    await online.capture("notice-transferring");
     await online.click("Open the index-at-the-end movie", poster("Index at the end"));
     const filesBefore = provider.fileRequests();
     await online.click(
@@ -364,10 +509,54 @@ export async function runDownloads(
     if (waiting?.status.kind !== "waiting")
       throw new Error("The download didn't wait for playback.");
     if (provider.mostFilesAtOnce() !== 1) throw new Error("The provider saw two files at once.");
-    await online.key("Escape", 27);
-    await online.wait(async () => !(await online.video()).title);
-    await online.key("Escape", 27);
-    await online.click("Open Downloads", button("header button", t("Downloads")));
+    // Over the title, its bar's notice says the download waits. Space on it, reached with Tab,
+    // presses it rather than pausing the title: it leaves the title as Back does, saving where
+    // it got to, and opens Downloads, with nothing of the title or its details left over it.
+    const titleBar = "[data-view=title] header";
+    await online.wait(async () => (await noticeSays(online, titleBar)) === t("Waiting"));
+    const wake = async () => {
+      await online.page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 400, y: 300 });
+      await online.page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 420, y: 320 });
+      await online.wait(() =>
+        online.exists("document.querySelector('[data-view=title][data-controls]')"),
+      );
+      // The bar fades in over 300 ms.
+      await delay(400, undefined, { signal: abort.signal });
+    };
+    await wake();
+    await online.capture("notice-waiting-over-title");
+    await wake();
+    const indexed = provider.titles.movies.find((each) =>
+      each.name.startsWith("TEST | Index at the end"),
+    )!;
+    /**
+     * What main saved of how far the playing title got: an observation, never a change. A title
+     * playing saves every minute, so a position saved before then was saved as it was left.
+     */
+    const saved = () =>
+      online.page.evaluate<{ position: number } | null>(
+        `window.mrStreamer.invoke('viewing.progress', { movies: [${JSON.stringify({ subscriptionId: waiting.subscription?.id, id: String(indexed.id) })}] }).then(r => r.ok ? (r.value[0] ?? null) : null)`,
+      );
+    await online.tabTo("Tab to the notice over the playing title", notice(titleBar));
+    const before = await saved();
+    const pressedOn = await online.video();
+    await online.press(" ");
+    await online.wait(async () => !(await online.video()).title && (await onDownloadsPage(online)));
+    const progress = await saved();
+    notices["fromTitle"] = {
+      title: (await online.video()).title,
+      details: await online.exists("document.querySelector('[role=dialog]')"),
+      downloadsPage: await onDownloadsPage(online),
+      playingWhenPressed: !pressedOn.paused,
+      timeWhenPressed: pressedOn.time,
+      savedBefore: before,
+      saved: progress,
+      bar: await barOf(online),
+    };
+    if (pressedOn.paused) throw new Error("The title was paused before its notice was pressed.");
+    if (before || !progress || progress.position < pressedOn.time - 1)
+      throw new Error(`Leaving the title didn't save where it got to: ${JSON.stringify(progress)}`);
+    await online.capture("notice-opened-downloads-from-title");
     await online.wait(
       async () => (await online.listed()).every((item) => item.status.kind === "complete"),
       60_000,
@@ -410,12 +599,47 @@ export async function runDownloads(
       const v = await online.video();
       return (await online.exists("document.querySelector('[data-view=watch]')")) && v.time > 0.5;
     }, 45_000);
-    // Watch goes back to the page it came from; Home shows the channel, muted.
-    await online.key("Escape", 27);
-    await online.click("Open Home", button("header button", t("Home")));
+    // Watch's bar says the download waits for the channel, as the title's did.
+    await online.wait(
+      async () => (await noticeSays(online, "[data-view=watch] header")) === t("Waiting"),
+      45_000,
+    );
+    notices["overWatch"] = await noticeSays(online, "[data-view=watch] header");
+    await online.page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 400, y: 300 });
+    await delay(400, undefined, { signal: abort.signal });
+    await online.capture("notice-waiting-over-watch");
+    // Enter on it, reached with Tab, presses it rather than opening the channels: Watch closes
+    // over Downloads, no page that previews, so the channel lets the provider's connection go
+    // and the download takes it on.
     const recordingStatus = async () =>
       (await online.listed()).find((item) => item.title.id === String(recording.id))?.status.kind;
+    await online.tabTo("Tab to the notice over Watch", notice("[data-view=watch] header"));
+    await online.press("Enter");
+    await online.wait(
+      async () =>
+        !(await online.exists("document.querySelector('[data-view=watch]')")) &&
+        (await onDownloadsPage(online)),
+    );
+    await online.wait(async () => (await recordingStatus()) === "transferring", 45_000);
+    const recordingRow = row(
+      (await online.listed()).find((item) => item.title.id === String(recording.id))!.id,
+    );
+    await online.wait(async () =>
+      /\d\s?%/.test(await online.page.evaluate<string>(`(${recordingRow})?.innerText ?? ""`)),
+    );
+    notices["fromWatch"] = {
+      watch: await online.exists("document.querySelector('[data-view=watch]')"),
+      downloadsPage: await onDownloadsPage(online),
+      download: await recordingStatus(),
+      mostProviderFilesAtOnce: provider.mostFilesAtOnce(),
+    };
+    await online.capture("notice-opened-downloads-from-watch");
+    // Home shows the channel again, muted, and the download waits behind it, which the bar says
+    // there at every width.
+    await online.click("Open Home", button("header button", t("Home")));
     await online.wait(async () => (await recordingStatus()) === "waiting", 45_000);
+    await online.wait(async () => (await noticeSays(online)) === t("Waiting"));
+    await atWidths(online, "waiting", named(t("Waiting")));
     await search("Broadcast recording", "Broadcast recording");
     const waitingControl = button(
       '[role="dialog"] button',
@@ -464,6 +688,44 @@ export async function runDownloads(
     );
     await online.wait(async () => (await online.text('[role="dialog"]')).includes("%"));
     await online.key("Escape", 27);
+    // The transfer speaks over the failure. Wide, Downloads keeps its place among the pages and
+    // the notice stands beside Search; Enter on it opens the page, which then says it alone.
+    await online.wait(async () => /\d/.test((await noticeSays(online)) ?? ""));
+    notices["wide"] = fits("wide", await barOf(online), percent);
+    await atWidths(online, "transferring", percent);
+    await online.tabTo("Tab to the notice", notice());
+    await online.press("Enter");
+    await online.wait(() => onDownloadsPage(online));
+    await online.wait(async () => (await noticeSays(online)) === null);
+    notices["wideOnDownloads"] = await barOf(online);
+    await online.capture("notice-hidden-on-downloads");
+    // Narrower than the pages' names need: Downloads folds beside Search as one button, marked
+    // on its page and named with the notice's words, its arrow alone where the other names need
+    // the room. The window's least width is 960, so the narrower layout is emulated, as a zoomed
+    // window or longer page names give it.
+    await layOut(online, 760);
+    const folded = async (current: boolean) => {
+      const bar = await barOf(online);
+      return (
+        !bar.pages.includes(t("Downloads")) &&
+        bar.downloads.length === 1 &&
+        (bar.downloads[0]!.current === "page") === current &&
+        percent(bar.downloads[0]!.label ?? "")
+      );
+    };
+    await online.wait(() => folded(true));
+    notices["foldedOnDownloads"] = fits("folded on Downloads", await settledBar(online), percent);
+    await online.capture("notice-folded-on-downloads");
+    await online.click("Open Movies, folded", button("header nav button", t("Movies")));
+    await online.wait(() => folded(false));
+    notices["foldedElsewhere"] = fits("folded on Movies", await settledBar(online), percent);
+    await online.capture("notice-folded-on-movies");
+    await online.tabTo("Tab to the folded Downloads", notice());
+    await online.press(" ");
+    await online.wait(() => onDownloadsPage(online));
+    await online.wait(() => folded(true));
+    await layOut(online, null);
+    await online.wait(async () => (await barOf(online)).pages.includes(t("Downloads")));
     await online.click("Open Downloads", button("header button", t("Downloads")));
     await online.wait(async () =>
       (await online.text()).includes(t("The provider has no file for this title right now.")),
@@ -479,6 +741,35 @@ export async function runDownloads(
     await online.wait(
       async () => provider!.activeStreams() === 0 && !(await online.exists(row(heldId))),
     );
+    // With the failed download alone left, the bar says it stopped, away from the page that says
+    // why, and the notice leads back there.
+    await online.click("Open Movies", button("header button", t("Movies")));
+    await online.wait(async () => (await noticeSays(online)) === t("Download stopped"));
+    notices["stopped"] = fits("stopped", await barOf(online), named(t("Download stopped")));
+    await online.capture("notice-download-stopped");
+    await atWidths(online, "stopped", named(t("Download stopped")));
+    // Settings over the page has Back in the pages' place, which folds the same way: at 520 CSS
+    // px, as a window zoomed past its least width has it, the words go and Back stays whole.
+    await online.click("Open Settings", labelled(t("Settings")));
+    await online.wait(() => online.exists(notice()));
+    const overSettings: Record<number, Bar> = {};
+    for (const width of [960, 520]) {
+      await layOut(online, width);
+      overSettings[width] = fits(
+        `over Settings at ${width} CSS px`,
+        await settledBar(online),
+        named(t("Download stopped")),
+      );
+      await online.capture(`notice-stopped-over-settings-${width}`);
+    }
+    notices["stoppedOverSettings"] = overSettings;
+    if (overSettings[520]!.downloads[0]!.text !== "")
+      throw new Error("The notice kept its words where Back had no room for them.");
+    await layOut(online, null);
+    await online.click("Close Settings", labelled(t("Settings")));
+    await online.wait(async () => (await barOf(online)).pages.includes(t("Downloads")));
+    await online.click("Press the stopped notice", notice());
+    await online.wait(() => onDownloadsPage(online));
     await online.click(
       "Delete the failed download",
       `[...(${row(missingId)})?.querySelectorAll('button') ?? []].find(b => b.textContent.trim() === ${JSON.stringify(t("Delete"))})`,
@@ -489,6 +780,11 @@ export async function runDownloads(
       item.status.kind,
     ]);
     await online.capture("downloads-after-cancel-delete");
+    // Copies alone: nothing to say, on any page.
+    await online.click("Open Movies", button("header button", t("Movies")));
+    await online.wait(async () => (await noticeSays(online)) === null);
+    notices["copiesOnly"] = fits("with copies alone", await barOf(online));
+    notices["said"] = await online.page.evaluate("window.__noticeSaid");
     await quit("online");
 
     // 4. Offline: the provider, TMDB and pictures are gone. Play the movie's copy, seek, change
@@ -782,6 +1078,7 @@ export async function runDownloads(
             "Development build on this platform; no installer or native-platform proof",
             "Decoded audio does not prove audible output",
             "Main's connections are recorded in JavaScript; Chromium's own, over CDP",
+            "Bars narrower than the window's 960 px least width (760 and 520 CSS px) are CDP viewport emulation",
           ],
         },
         null,

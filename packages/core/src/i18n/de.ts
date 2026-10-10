@@ -1155,6 +1155,9 @@ export const de: Translation = {
   "That download is no longer here.": "Dieser Download ist nicht mehr da.",
   "A download still holds the provider's connection.":
     "Ein Download belegt die Verbindung zum Anbieter noch.",
+  // The top bar's word on the downloads.
+  "Download stopped": "Download angehalten",
+  "Downloads, {status}": "Downloads, {status}",
   // The close button on a playback error.
   "Close message": "Meldung schließen",
 };

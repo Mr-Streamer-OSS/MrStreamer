@@ -45,6 +45,7 @@ import {
 } from "../live/lists.ts";
 import { ChannelOverlay } from "./ChannelOverlay.tsx";
 import { pressesClose } from "./CloseMessage.tsx";
+import { pressesDownloads } from "../downloads/DownloadsNotice.tsx";
 import { Flash, flash, flashNote, LiveSubtitleHint } from "./Flash.tsx";
 import { useFullscreen, useWake } from "./layout.ts";
 import { MINI_NEEDS_PICTURE, MiniControls } from "./MiniPlayer.tsx";
@@ -246,10 +247,11 @@ export function WatchScreen() {
       // The menu's own keys: Escape closes it, and focus goes back to its button.
       if (now.menu) return;
       // What a failed channel offers takes Enter itself once Tab reached it, and a message's
-      // cross takes Enter and Space. Everywhere else Enter opens the list, also with a control of
-      // the bar in focus.
+      // cross and the bar's word on the downloads take Enter and Space. Everywhere else Enter
+      // opens the list, also with another control of the bar in focus.
       if (
         pressesClose(event) ||
+        pressesDownloads(event) ||
         (event.key === "Enter" &&
           event.target instanceof HTMLButtonElement &&
           event.target.closest("[data-playback-state]"))
