@@ -156,6 +156,8 @@ Add the label **release dry run** to a pull request from a branch of this reposi
 
 Forks get no signing secrets, so their pull requests can't run it.
 
+A dry run of a pull request that only adds checks to a published nightly can be the later build the [installed upgrade check](../contributing/testing.md#installed-upgrade) installs over it.
+
 ## Microsoft Store package
 
 The Microsoft Store gets an MSIX of the same app for Windows x64, which electron-builder's `appx` target builds from the same files as the installer. The [Store runbook](microsoft-store.md) covers Partner Center and the submission.

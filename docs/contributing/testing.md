@@ -277,6 +277,28 @@ Downloads have service contracts in `apps/desktop/test/downloads.test.ts`, again
 node apps/desktop/test/e2e/download-memory.ts 2048 .local/download-memory.json
 ```
 
+## Installed upgrade
+
+`.github/workflows/windows-installed-upgrade.yml` checks that upgrading an installed Windows app keeps what a viewer had. Start it by hand from `main` with four pins: a published nightly A by tag and full commit, and a later release dry run B by run id and the full commit it built. Nothing is looked up as "latest". It runs `apps/desktop/test/e2e/installed-upgrade.ts` on a disposable `windows-2025` runner, with read access alone and no secret, and publishes nothing.
+
+`resolve` downloads and checks the three installers before anything is installed, and refuses on any doubt:
+
+- the prior stable v0.0.9 setup, by its pinned SHA-256
+- A: a published nightly whose tag still names the pinned commit, which `main` contains, with its setup in the release's `SHA256SUMS.txt` and `latest.yml`
+- B: the one `release-win-x64-*` artifact of a successful, unexpired Release dry run of a pull request from this repository into `main`. Its Plan job's log must name the pinned commit and its version, the publishing jobs must have been skipped, the commit must descend from A and change only the workflow, tests and docs, and the archive must match its digest and its `latest.yml`. A dry run has no `SHA256SUMS.txt`, so no release checksum covers B.
+
+The versions must rise from stable to A to B. `run` then installs each over the last with the silent per-user setup, into `%LOCALAPPDATA%\Programs\mrstreamer`, on one profile under `RUNNER_TEMP`. It refuses anywhere but a GitHub-hosted Windows runner with no Mr. Streamer installed. It checks that each start runs the installed executable and app.asar, and that the app and Settings > About name the expected version and commit. Every process the app started must have ended before the next setup runs. The app is known by its process id and start time from the moment it starts, and its children only through a parent still running under both, so a reused id never makes another program's process the check's. The window is closed as a user would; only if the app stays is it killed, through the handle of the process the check started. Nothing is stopped by its id, which may name another program by then: a child still running twenty seconds after the app fails the run, and is left with the profile for the runner's disposal.
+
+1. On stable, it connects the fake provider and chooses HD, Dutch sound and French subtitles, stars two channels, saves a movie and plays part of it and an episode.
+2. On A, those settings, the favourites in order, the watchlist and the progress are all kept. It downloads two movies and an episode, then plays the copies: a skip, the other sound track, the embedded French subtitles, and leaving and resuming.
+3. On B, everything A left is kept, including the copies, their artwork and their progress. It removes the subscription in Settings and stops the provider, TMDB and artwork. It then blocks outbound connections of the installed app and its bundled ffmpeg and ffprobe with firewall rules named for the run. Before the block, the window reaches `https://example.com/` and both tools connect to `http://example.com/`: the bundled tools read plain http and have no TLS. The block counts only once each of them tries again and is refused, Windows audits each refusal, and the check's own Node process still reaches both addresses. The copies then play again from Connect's Downloads.
+
+Whenever the long movie's copy plays again after being left, once on A and twice on B, the first time where A left it, it must start five seconds before where it was left, as the player goes back, give or take three seconds. Before it resumes, the time it was left at must be kept within two. A copy that jumps ahead fails as surely as one that starts over.
+
+Changes go through the window with pointer and keys; state is read only through the app's read-only calls. Evidence, `proof.json` and screenshots with their text, is uploaded for 14 days. On success the run removes its firewall rules, uninstalls the app and deletes the profile. On failure, its own or a cleanup step's, it still removes the rules and stops the fake services, but leaves the install, the profile and `profile.lock` as they are, and uploads the profile without Chromium's caches for 7 days. `proof.json` names what is still on disk. The profile holds only the fake subscription and fixtures.
+
+The 12-second episode is recorded as finished, so resuming an unfinished episode isn't shown; the 150-second movie's unfinished progress and its copy's resume are. Saved online subtitles and their timing aren't checked, because an installed app has no fake subtitle service. Installs use the setup, not the in-app updater, and not the Store package. Decoded sound isn't audible output.
+
 ## A real provider
 
 The suite, the packaged-app test and the measurements run against the fakes and always will. They must answer the same way every time and offline, and no public provider offers what they exercise: an Xtream API, movies and series, failures on demand, or clips in every format.
