@@ -9,14 +9,18 @@ import { act, createElement, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Download, DownloadList } from "@mrstreamer/contracts/downloads";
+import type { InterfaceLanguage } from "@mrstreamer/contracts/language";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { OutputStatus } from "@mrstreamer/contracts/output";
 import type { UpdateStatus } from "@mrstreamer/contracts/updates";
+import { setLanguage } from "@mrstreamer/core/i18n";
 import { App } from "../../src/renderer/src/app/App.tsx";
+import { useLocale } from "../../src/renderer/src/app/language.ts";
 import { openWatch, useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { WindowBar } from "../../src/renderer/src/components/WindowBar.tsx";
 import { MovieDownload } from "../../src/renderer/src/features/downloads/DownloadControls.tsx";
 import { DownloadsPage } from "../../src/renderer/src/features/downloads/DownloadsPage.tsx";
+import { SettingsPage } from "../../src/renderer/src/features/settings/SettingsPage.tsx";
 import { TitleWatch } from "../../src/renderer/src/features/titles/TitleWatch.tsx";
 import { WatchScreen } from "../../src/renderer/src/features/watch/WatchScreen.tsx";
 import { syncDownloads, watchOffline } from "../../src/renderer/src/lib/downloads.ts";
@@ -470,9 +474,10 @@ describe("the top bar's word on the downloads", () => {
   });
 
   /**
-   * Lays the bar out `width` CSS px wide, as a browser would and happy-dom doesn't: the pages get
-   * what the brand, Search, Settings, an update notice and the Downloads button leave, each sized
-   * by what it reads, and ResizeObserver tells of it once `resize` says the layout changed.
+   * Lays the bar out `width` CSS px wide, as a browser would and happy-dom doesn't: the pages, or
+   * Back in their place, get what the brand, Search, Settings, an update notice and the Downloads
+   * button leave, each sized by what it reads, and ResizeObserver tells of it once `resize` says
+   * the layout changed.
    */
   function layOut(width: number) {
     const observers = new Set<ResizeObserverCallback>();
@@ -493,8 +498,10 @@ describe("the top bar's word on the downloads", () => {
       },
     );
     const wide = (text: string, padding: number) => padding + 7 * text.length;
-    const room = (nav: HTMLElement) => {
-      const header = nav.closest("header")!;
+    // The pages' place: the nav with their names, or the slot Back stands in.
+    const place = (element: HTMLElement) => element.matches("header > :nth-child(2)");
+    const room = (pages: HTMLElement) => {
+      const header = pages.closest("header")!;
       const notice = header.querySelector("[data-downloads-notice]")?.textContent ?? null;
       const update = [...header.querySelectorAll("button")].some((each) =>
         each.textContent?.startsWith("Update"),
@@ -503,17 +510,17 @@ describe("the top bar's word on the downloads", () => {
         width - 363 - (notice === null ? 0 : notice ? wide(notice, 51) : 32) - (update ? 88 : 0)
       );
     };
-    const names = (nav: HTMLElement) =>
-      [...nav.children].reduce((sum, each) => sum + wide(each.textContent ?? "", 24) + 4, -4);
+    const names = (pages: HTMLElement) =>
+      [...pages.children].reduce((sum, each) => sum + wide(each.textContent ?? "", 24) + 4, -4);
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (
       this: HTMLElement,
     ) {
-      return this.tagName === "NAV" ? room(this) : 0;
+      return place(this) ? room(this) : 0;
     });
     vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockImplementation(function (
       this: HTMLElement,
     ) {
-      return this.tagName === "NAV" ? Math.max(room(this), names(this)) : 0;
+      return place(this) ? Math.max(room(this), names(this)) : 0;
     });
     return {
       resize: (next = width) =>
@@ -577,6 +584,48 @@ describe("the top bar's word on the downloads", () => {
       expect(notice(bar)?.textContent).toBe("");
       await changed(list([transfer(40, 100)]), () => notice(bar)?.textContent === "40%");
       expect(pages(bar)).toEqual(["Home", "Live TV", "Movies", "Series", "Watchlist"]);
+    });
+
+    it("gives the arrow its words back when Settings' language pick shortens Back", async () => {
+      const language = (locale: "en-US" | "nl-NL"): InterfaceLanguage => ({
+        choice: locale,
+        system: "en-US",
+        locale,
+        formats: locale,
+      });
+      ipc.always("downloads.list", list([transfer(40, 100)]));
+      ipc.always("language.get", language("nl-NL"));
+      ipc.always("language.set", language("en-US"));
+      setLanguage(language("nl-NL"));
+      useUi.setState({ settings: "general" });
+      // Back has room beside the percentage at this width; the longer Terug doesn't.
+      layOut(490);
+      function Localized() {
+        useLocale();
+        return createElement(SettingsPage);
+      }
+      try {
+        const settings = await show(createElement(Localized), "header [data-downloads-notice]");
+        const said = () => settings.querySelector("header [data-downloads-notice]")?.textContent;
+        await until(() => said() === "");
+        expect(said()).toBe("");
+        expect(button(settings, "Terug")).toBeDefined();
+
+        const picker = () =>
+          settings.querySelector<HTMLSelectElement>('select[aria-label="Taal van de interface"]');
+        await until(() => picker()?.value === "nl-NL");
+        await act(async () => {
+          picker()!.value = "en-US";
+          picker()!.dispatchEvent(new Event("change", { bubbles: true }));
+          await settle();
+        });
+        expect(ipc.argsOf("language.set")).toEqual([{ choice: "en-US" }]);
+        await until(() => said() === "40%");
+        expect(button(settings, "Back")).toBeDefined();
+        expect(said()).toBe("40%");
+      } finally {
+        setLanguage(language("en-US"));
+      }
     });
 
     it("keeps the notice in focus as its words go and come back", async () => {

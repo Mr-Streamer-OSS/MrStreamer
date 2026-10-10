@@ -7,7 +7,9 @@ import {
   type ReactNode,
   type RefCallback,
 } from "react";
+import type { Locale } from "@mrstreamer/contracts/language";
 import { hasTitles } from "@mrstreamer/contracts/subscription";
+import { useLocale } from "../app/language.ts";
 import { isMac, useWindowFullScreen } from "../app/platform.ts";
 import { closeWatch, withoutTitles, openView, useUi, type View } from "../app/ui-store.ts";
 import { DownloadsNotice, useDownloadsStatus } from "../features/downloads/DownloadsNotice.tsx";
@@ -53,8 +55,9 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
   const settingsOpen = useUi((state) => state.settings !== null);
   const detailsOpen = useUi((state) => state.details !== null || state.savedEntry !== null);
   const status = useDownloadsStatus();
-  const [pages, fold] = useFolds(status?.text);
-  const [backRoom, backFold] = useFolds(status?.text);
+  const locale = useLocale();
+  const [pages, fold] = useFolds(status?.text, locale);
+  const [backRoom, backFold] = useFolds(status?.text, locale);
   const folded = fold !== "none";
   const back =
     onBack ??
@@ -203,14 +206,15 @@ export function PageButton({
 type Fold = "none" | "downloads" | "arrow";
 
 /**
- * How far the pages' names fold (see `Fold`), for the bar's notice saying `words`. Each fold holds
- * until there is room again for as much as was missing, so the bar never flips back and forth at
- * one width. Downloads comes back once the pages have the room all their names took, a little
- * more than they need while it stands beside Search. The arrow tries its words again whenever the
- * pages' room grows or the words change, and keeps them only if the names still fit beside them;
- * the try is measured before the bar is drawn, so it shows nothing when it fails.
+ * How far the pages' names fold (see `Fold`), for the bar's notice saying `words` in the interface
+ * language `locale`. Each fold holds until there is room again for as much as was missing, so the
+ * bar never flips back and forth at one width. Downloads comes back once the pages have the room
+ * all their names took, a little more than they need while it stands beside Search. The arrow
+ * tries its words again whenever the pages' room grows, the words change or the language does, as
+ * Back's name can while the words read the same, and keeps them only if the names still fit beside
+ * them; the try is measured before the bar is drawn, so it shows nothing when it fails.
  */
-function useFolds(words: string | undefined): [RefCallback<HTMLElement>, Fold] {
+function useFolds(words: string | undefined, locale: Locale): [RefCallback<HTMLElement>, Fold] {
   const [fold, setFold] = useState<Fold>("none");
   // The room all the pages' names took when they stopped fitting, and the room the pages had
   // beside the arrow when last measured.
@@ -251,8 +255,8 @@ function useFolds(words: string | undefined): [RefCallback<HTMLElement>, Fold] {
   }, []);
   // A fold can leave the pages' room as it was, as when Downloads' words stand beside Search
   // before and after its name goes, so nothing resizes: measured again before it is drawn. Words
-  // that change resize nothing either while the arrow stands alone.
+  // or a language that changes resize nothing either while the arrow stands alone.
   useLayoutEffect(() => measured.current?.(false), [fold]);
-  useLayoutEffect(() => measured.current?.(true), [words]);
+  useLayoutEffect(() => measured.current?.(true), [words, locale]);
   return [ref, fold];
 }
