@@ -523,10 +523,22 @@ export async function seedStable(d: Driver, services: Services, titles: Fixtures
 }
 
 /**
- * Plays the copies on the Downloads page: skip, other sound, embedded subtitles, resume, episode.
- * The long movie's copy must start where it was left before, `from` seconds, within eight.
+ * Fails unless a copy left at `kept` seconds started again five seconds before it, as the player
+ * goes back, give or take three: a picture can start a little early, and the time is read a
+ * moment after it started. Further, either way, is a jump.
  */
-async function playCopies(d: Driver, titles: Fixtures, from = 0) {
+function resumedNear(what: string, started: number, kept: number) {
+  const back = Math.max(0, kept - 5);
+  if (Math.abs(started - back) > 3)
+    throw new Error(`${what} started at ${started} s, not near ${back} s, 5 s before ${kept} s.`);
+}
+
+/**
+ * Plays the copies on the Downloads page: skip, other sound, embedded subtitles, resume, episode.
+ * When an earlier version left the long movie's copy at `kept` seconds, it must start from there.
+ * Leaving it again must keep the time it was left at, and it must resume from that.
+ */
+async function playCopies(d: Driver, titles: Fixtures, kept?: number) {
   const copies = (await d.read("downloads.list")).items;
   const long = copies.find((each) => each.title.kind === "movie" && each.title.id === titles.long);
   const sound = copies.find((each) => each.title.kind === "movie" && each.title.id !== titles.long);
@@ -572,8 +584,8 @@ async function playCopies(d: Driver, titles: Fixtures, from = 0) {
 
   await watch(long.id, "the long-subtitles movie");
   const started = (await d.video()).time;
-  seen["longStartedAt"] = { started, keptBefore: from };
-  if (started < from - 8) throw new Error(`The copy started at ${started} s, not near ${from} s.`);
+  seen["longStartedAt"] = { started, keptBefore: kept ?? null };
+  if (kept !== undefined) resumedNear("The copy", started, kept);
   // Its French lines run from 40 s. The last 30 of its 150 seconds are credits, which would
   // finish it, so the skips stop short of them.
   for (let i = 0; i < 6 && (await d.video()).time < 38; i++) await d.key("ArrowRight", 39);
@@ -614,24 +626,28 @@ async function playCopies(d: Driver, titles: Fixtures, from = 0) {
   const left = (await d.video()).time;
   await leaveTitle(d);
   // Main keeps where it was left, and the page shows it too: Watch offline goes from there.
+  const progress = async () =>
+    (await d.read("downloads.list")).items.find((each) => each.id === long.id)?.progress;
   await d.wait(
     async () => {
-      const kept = (await d.read("downloads.list")).items.find(
-        (each) => each.id === long.id,
-      )?.progress;
-      if (!kept || kept.position < left - 2) return false;
+      const now = await progress();
+      if (!now || now.position < left - 2) return false;
       const shown = await d.page.evaluate<string | null>(
         `(${copyRow(long.id)})?.querySelector('span > span[style*="width"]')?.style.width ?? null`,
       );
-      return shown === `${Math.round((kept.position / kept.duration) * 100)}%`;
+      return shown === `${Math.round((now.position / now.duration) * 100)}%`;
     },
     15_000,
     "the copy's progress kept and shown",
   );
+  // Within two seconds of the time read just before leaving, either way.
+  const keptNow = (await progress())?.position ?? 0;
+  if (Math.abs(keptNow - left) > 2)
+    throw new Error(`The copy was left at ${left} s, but kept ${keptNow} s.`);
   await watch(long.id, "the long-subtitles movie again");
   const resumed = (await d.video()).time;
-  seen["resume"] = { left, resumed };
-  if (resumed < left - 8) throw new Error(`The copy resumed at ${resumed} s, not near ${left} s.`);
+  seen["resume"] = { left, kept: keptNow, resumed };
+  resumedNear("The copy again", resumed, keptNow);
   await leaveTitle(d);
 
   await watch(episode.id, "the episode");
@@ -784,10 +800,11 @@ export async function upgradeToB(d: Driver, titles: Fixtures, a: AfterA, offline
   await d.capture("copies-without-subscription");
   const from = new Date();
   const requestsFrom = d.requests.length;
-  const longCopy = a.copies.find(
+  const leftByA = a.copies.find(
     (each) => each.title.kind === "movie" && each.title.id === titles.long,
-  );
-  const played = await playCopies(d, titles, longCopy?.progress?.position ?? 0);
+  )?.progress;
+  if (!leftByA) throw new Error("A left no progress on the long movie's copy.");
+  const played = await playCopies(d, titles, leftByA.position);
   const outside = d.requests
     .slice(requestsFrom)
     .filter(

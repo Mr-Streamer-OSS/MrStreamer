@@ -118,7 +118,8 @@ export type Started = Pick<ChildProcess, "pid" | "exitCode" | "signalCode" | "ki
  * The root is pinned by id and start time as soon as it is made, and must run the installed
  * executable. Each `sample` follows only parents that still run under the id and start time this
  * run saw, so a reused id never makes another program, or its children, ours. An app that can't
- * be pinned is killed through its handle, which names nothing else, and refused.
+ * be pinned is killed through its handle, which names nothing else, and refused. Nothing is ever
+ * stopped by its id: an id read a moment ago may name another program by the time it is used.
  */
 export function ownedTree(runner: Runner, app: Started) {
   const exited = () => app.exitCode !== null || app.signalCode !== null;
@@ -150,10 +151,10 @@ export function ownedTree(runner: Runner, app: Started) {
     sample: () => void alive(),
     /**
      * Ends the instance: the window closes as a user's would, then, only if that leaves the app
-     * running, the app is killed through its handle. A child left behind is killed by its id
-     * alone, right after seeing it still runs under the id and start time this run saw. Fails when
-     * anything of the tree, or any other process from the install folder, is still there: the
-     * setup must not replace files in use, and nothing else may be stopped.
+     * running, the app is killed through its handle. Its children get twenty seconds to end with
+     * it. Fails when anything of the tree, or any other process from the install folder, is still
+     * there: the setup must not replace files in use. What is left runs on, with the profile, until
+     * the runner is thrown away.
      */
     async stop(close: () => Promise<unknown>) {
       alive();
@@ -165,22 +166,13 @@ export function ownedTree(runner: Runner, app: Started) {
         app.kill("SIGKILL");
         for (let i = 0; i < 50 && !exited(); i++) await delay(100);
       }
-      for (let i = 0; i < 50 && alive().length > 0; i++) await delay(200);
-      for (const left of alive()) {
-        if (!alive().some((each) => key(each) === key(left))) continue;
-        forced.push(`taskkill /PID ${left.pid} /F (${left.name})`);
-        try {
-          execFileSync("taskkill", ["/PID", String(left.pid), "/F"], { stdio: "ignore" });
-        } catch {
-          // Gone already, or not stopped: what still runs is counted below.
-        }
-      }
-      for (let i = 0; i < 50 && alive().length > 0; i++) await delay(200);
+      const until = Date.now() + 20_000;
+      while (alive().length > 0 && Date.now() < until) await delay(200);
       const remaining = alive();
       const others = appProcesses(runner).filter((each) => !owned.has(key(each)));
       if (!exited() || remaining.length > 0 || others.length > 0)
         throw new Error(
-          `The app's processes did not all end: ${[...remaining, ...others].map((p) => `${p.pid} ${p.name}`).join(", ") || root.pid}.`,
+          `The app's processes did not all end, and are left to the runner's disposal: ${[...remaining, ...others].map((p) => `${p.pid} ${p.name}`).join(", ") || root.pid}.`,
         );
       return {
         owned: [...owned.values()].map(({ pid, parent, name, created }) => ({

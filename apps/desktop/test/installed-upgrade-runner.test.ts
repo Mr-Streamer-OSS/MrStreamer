@@ -1,6 +1,7 @@
 // What the Windows installed upgrade check does on its runner: which processes it stops, what a
 // failed run leaves behind, and how it tells the bundled tools reached the network. Windows'
-// process list and taskkill are stand-ins on PATH that only record; nothing real is stopped.
+// process list and taskkill are stand-ins on PATH; the only real process stopped is the test's own
+// app stand-in, through its handle.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { existsSync, readFileSync } from "node:fs";
@@ -73,13 +74,10 @@ describe.skipIf(process.platform === "win32")(
         );
       };
       await command("powershell.exe", `process.stdout.write(fs.readFileSync(${state}, "utf8"));`);
+      // Any use of taskkill is recorded: the check must never stop a process by its id.
       await command(
         "taskkill",
-        `const args = process.argv.slice(2);
-      fs.appendFileSync(${log}, JSON.stringify(args) + "\\n");
-      const pid = Number(args[args.indexOf("/PID") + 1]);
-      const list = JSON.parse(fs.readFileSync(${state}, "utf8"));
-      fs.writeFileSync(${state}, JSON.stringify(list.filter((each) => each.pid !== pid)));`,
+        `fs.appendFileSync(${log}, JSON.stringify(process.argv.slice(2)) + "\\n");`,
       );
       await writeFile(join(folder, "kills.jsonl"), "");
       path = process.env["PATH"] ?? "";
@@ -106,8 +104,28 @@ describe.skipIf(process.platform === "win32")(
       expect(report.owned.map((each) => each.pid)).toEqual([app.pid]);
     });
 
-    // A child gets ten seconds to end by itself after the app before it is stopped.
-    it("stops a child the app left behind, by its id alone", { timeout: 30_000 }, async () => {
+    // A child gets twenty seconds to end after the app before the stop fails.
+    it(
+      "fails, and stops nothing by id, when a child outlives the app",
+      { timeout: 60_000 },
+      async () => {
+        await shown([ours(app.pid!, 1, 0)]);
+        const tree = ownedTree(RUNNER, app);
+        await shown([ours(app.pid!, 1, 0), { ...ours(77, app.pid!, 1), name: "ffmpeg.exe" }]);
+        tree.sample();
+
+        const stopped = tree.stop(async () => {
+          app.kill();
+          await exit(app);
+          await shown([{ ...ours(77, app.pid!, 1), name: "ffmpeg.exe" }]);
+        });
+
+        await expect(stopped).rejects.toThrow(/did not all end.*: 77 ffmpeg\.exe\./);
+        expect(kills()).toEqual([]);
+      },
+    );
+
+    it("leaves alone a program that got a child's id after the child ended", async () => {
       await shown([ours(app.pid!, 1, 0)]);
       const tree = ownedTree(RUNNER, app);
       await shown([ours(app.pid!, 1, 0), ours(77, app.pid!, 1)]);
@@ -116,12 +134,15 @@ describe.skipIf(process.platform === "win32")(
       const report = await tree.stop(async () => {
         app.kill();
         await exit(app);
-        // The app is gone; its id now belongs to another program, which starts one of its own.
-        await shown([ours(77, app.pid!, 1), foreign(app.pid!, 1, 10), foreign(78, app.pid!, 11)]);
+        // The app and its child are gone; the child's id now names another program.
+        await shown([foreign(77, 4, 20)]);
       });
 
-      expect(kills()).toEqual([["/PID", "77", "/F"]]);
-      expect(report.graceful).toBe(false);
+      expect(kills()).toEqual([]);
+      expect(report.owned).toEqual([
+        { pid: app.pid, parent: 1, name: "Mr. Streamer.exe", created: at(0) },
+        { pid: 77, parent: app.pid, name: "Mr. Streamer.exe", created: at(1) },
+      ]);
     });
 
     it("refuses an app it can't show to be the installed one, and kills it through its handle", async () => {
