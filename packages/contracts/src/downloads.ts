@@ -92,6 +92,11 @@ export interface CopySession {
   readonly duration: number | null;
   readonly audio: readonly AudioTrack[];
   readonly subtitles: readonly SubtitleTrack[];
+  /**
+   * How far the copy was watched as it opened, every save asked for before the open counted: what
+   * Watch offline goes on from, though `downloads.changed` may not have told the window yet.
+   */
+  readonly progress: Download["progress"];
 }
 
 /** The artwork a download keeps: what `posterUrl` and `wideUrl` serve. */

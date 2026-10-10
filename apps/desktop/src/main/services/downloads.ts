@@ -726,6 +726,10 @@ function make(deps: DownloadsDeps) {
             path: mediaOf(record),
             container: record.container,
             title: record.title,
+            progress: record.progress && {
+              position: record.progress.position,
+              duration: record.progress.duration,
+            },
           } satisfies LocalCopy);
         }),
 

@@ -270,7 +270,8 @@ describe("a copy playing offline", () => {
     const watch = await show(createElement(TitleWatch), "body");
     await act(async () => {
       useUi.setState({ playingTitle: true });
-      watchOffline(download({ progress: { position: 1200, duration: 6360 } }));
+      // Left at 1200 s a moment ago: main kept it, the list the window holds still says 300 s.
+      watchOffline(download({ progress: { position: 300, duration: 6360 } }));
       opened.resolve({
         sessionId: "c1",
         copy: "d1",
@@ -278,6 +279,7 @@ describe("a copy playing offline", () => {
         duration: 6360,
         audio: [],
         subtitles: [],
+        progress: { position: 1200, duration: 6360 },
       });
       await settle();
     });
@@ -307,6 +309,26 @@ describe("a copy playing offline", () => {
     ] as const) {
       expect(methods).not.toContain(online);
     }
+  });
+
+  it("starts over once main says it was watched to its end", async () => {
+    const opened = ipc.hold("playback.openCopy");
+    await show(createElement(TitleWatch), "body");
+    await act(async () => {
+      useUi.setState({ playingTitle: true });
+      watchOffline(download({ progress: { position: 1200, duration: 6360 } }));
+      opened.resolve({
+        sessionId: "c1",
+        copy: "d1",
+        url: "http://127.0.0.1/title/c1.mp4",
+        duration: 6360,
+        audio: [],
+        subtitles: [],
+        progress: { position: 6300, duration: 6360 },
+      });
+      await settle();
+    });
+    expect(titlePlayer.state().position).toBe(0);
   });
 });
 
@@ -448,6 +470,7 @@ describe("the top bar's word on the downloads", () => {
         duration: 6360,
         audio: [],
         subtitles: [],
+        progress: { position: 1200, duration: 6360 },
       });
       await settle();
     });

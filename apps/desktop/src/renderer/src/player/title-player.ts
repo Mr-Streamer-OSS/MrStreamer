@@ -1109,7 +1109,8 @@ outputs.subscribe(outputChanged);
 export const titlePlayer = {
   /**
    * Opens a title and plays it from `from` seconds: the resume position, or 0 to start at the
-   * beginning. Closes whatever played before, live or on demand. `continued` is for `playNext`.
+   * beginning. A copy goes on from where main kept it as it opens instead, with `from` shown until
+   * then. Closes whatever played before, live or on demand. `continued` is for `playNext`.
    */
   async open(now: NowPlaying, from: number, continued = false): Promise<void> {
     const before = store.getState();
@@ -1154,7 +1155,16 @@ export const titlePlayer = {
         return;
       }
       session = { id: opened.sessionId, url: opened.url };
-      store.setState({ subtitleSessionId: opened.sessionId });
+      // Where a copy was left, as main kept it: the window's list hears of a save only a moment
+      // later. Watched to its end, it starts over.
+      if ("copy" in opened) {
+        const { progress } = opened;
+        from =
+          progress && !isFinished(progress.position, progress.duration)
+            ? Math.max(0, progress.position - 5)
+            : 0;
+      }
+      store.setState({ subtitleSessionId: opened.sessionId, position: from });
       // The sound picked last or in Settings, else the movies and series language, English to
       // begin with. "original" is the language the title was made in, or the file's own choice.
       const sound =

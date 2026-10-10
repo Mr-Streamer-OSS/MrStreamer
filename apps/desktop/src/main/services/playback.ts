@@ -458,6 +458,8 @@ export interface LocalCopy {
   readonly container: string;
   /** The provider's ids of the file it was made from, which its saved subtitles are kept under. */
   readonly title: RawTitleRef;
+  /** How far it was watched here, as kept when it was asked for. */
+  readonly progress: CopySession["progress"];
 }
 
 /** Durable track-fact identity, supplied only after resolving a current listed file. */
@@ -3885,6 +3887,7 @@ function make(deps: PlaybackDeps) {
               duration: probe.duration,
               audio: audioTracks(probe.audio),
               subtitles: subtitleTracks(probe.subtitles),
+              progress: copy.progress,
             } satisfies CopySession;
           }),
         ),
