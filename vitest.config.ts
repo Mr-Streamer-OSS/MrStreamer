@@ -1,8 +1,10 @@
 import { defineConfig } from "vitest/config";
+import { exclude, include } from "./test/suites.ts";
 
 export default defineConfig({
   test: {
-    include: ["test/**/*.test.ts", "packages/*/test/**/*.test.ts", "apps/*/test/**/*.test.ts"],
+    include,
+    exclude,
     environment: "node",
   },
 });

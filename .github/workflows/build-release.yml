@@ -49,6 +49,8 @@ jobs:
     uses: ./.github/workflows/ci.yml
     with:
       ref: ${{ inputs.sha }}
+      # A stable run checks two releases, so each report takes its version.
+      report-name: ${{ inputs.version }}
 
   # The JavaScript is the same on every platform: built once, packaged three times.
   bundle:

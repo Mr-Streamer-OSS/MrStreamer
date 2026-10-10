@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { parse } from "yaml";
@@ -9,7 +9,8 @@ import { describe, expect, it } from "vitest";
 // run can't be tried without publishing, so this reads the two workflows and checks who can start
 // a publication, which job gets the token, and that what runs beside it is pinned. The step that
 // keeps an overtaken build from being published runs here for real, against repositories made
-// for it.
+// for it, and so does the gate that admits a finished release run, with a stand-in for gh that
+// answers by the job names the release workflows give.
 
 /** The parts of a workflow file this test reads. */
 interface Workflow {
@@ -80,6 +81,13 @@ describe("publishing the website", () => {
     expect(publish?.environment?.name).toBe("marketing-production");
     const uses = publish?.steps.flatMap((step) => step.uses ?? []) ?? [];
     expect(uses.some((action) => action.startsWith("actions/checkout@"))).toBe(false);
+  });
+
+  it("starts on a push that changes what it checks main for before publishing", () => {
+    const paths = (deploy.workflow.on.push?.paths ?? []).map((path) => path.replace(/\/\*\*$/, ""));
+    const inputs = deploy.workflow.env?.["MARKETING_INPUTS"]?.split(/\s+/) ?? [];
+
+    expect(paths.toSorted()).toEqual(inputs.toSorted());
   });
 
   it("pins every action to a commit and the Vercel CLI to a version", () => {
@@ -180,5 +188,72 @@ describe.skipIf(process.platform === "win32")("a build that main has moved past"
 
   it("is not published when its commit is no longer part of main", () => {
     expect(() => leftToNewerRun([], "0".repeat(40))).toThrow();
+  });
+});
+
+/** The display names of a workflow's jobs, which GitHub's job records carry. */
+const jobNames = (name: string): Record<string, string | undefined> => {
+  const { jobs } = parse(readFileSync(`.github/workflows/${name}`, "utf8")) as {
+    jobs: Record<string, { name?: string }>;
+  };
+  return Object.fromEntries(Object.entries(jobs).map(([id, job]) => [id, job.name]));
+};
+const releaseJobs = jobNames("release.yml");
+/** The job that records a stable release on main, as build-release.yml names it. */
+const recorded = jobNames("build-release.yml")["finalize"];
+
+/**
+ * Whether the trigger job lets the run a finished release run started build the website, when
+ * GitHub lists `jobs` for that release run. A stand-in gh answers from them as gh applies --jq.
+ */
+function admits(jobs: readonly { name: string; conclusion: string }[]): boolean {
+  const folder = mkdtempSync(join(tmpdir(), "mr-streamer-marketing-trigger-"));
+  try {
+    writeFileSync(join(folder, "jobs.json"), JSON.stringify({ jobs }));
+    writeFileSync(
+      join(folder, "gh"),
+      '#!/bin/bash\nwhile [ "$#" -gt 0 ]; do [ "$1" = --jq ] && filter=$2; shift; done\njq -r "$filter" "$JOBS"\n',
+    );
+    chmodSync(join(folder, "gh"), 0o755);
+    const output = join(folder, "output");
+    writeFileSync(output, "");
+    const step = others["trigger"]?.steps.find((each) => each.id === "trigger");
+    execFileSync(
+      "bash",
+      ["--noprofile", "--norc", "-eo", "pipefail", "-c", step?.run ?? "exit 1"],
+      {
+        env: {
+          PATH: `${folder}:${process.env["PATH"]}`,
+          JOBS: join(folder, "jobs.json"),
+          GITHUB_EVENT_NAME: "workflow_run",
+          GITHUB_OUTPUT: output,
+          GH_REPO: "Mr-Streamer-OSS/MrStreamer",
+          RELEASE_RUN: "1",
+        },
+        stdio: "pipe",
+      },
+    );
+    return readFileSync(output, "utf8").includes("allowed=true");
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+}
+
+// The step is a bash script, as the workflow's Linux runner runs it.
+describe.skipIf(process.platform === "win32")("a finished release run", () => {
+  // GitHub names a job of a called workflow after the job that called it.
+  const job = (caller: string, conclusion: string) => ({
+    name: `${releaseJobs[caller]} / ${recorded}`,
+    conclusion,
+  });
+
+  it("builds the website once it recorded a stable release, by the name build-release.yml gives that job", () => {
+    expect(recorded).toBeDefined();
+    expect(admits([job("nightly-first", "skipped"), job("release", "success")])).toBe(true);
+  });
+
+  it("builds nothing after a nightly, a dry run or a stable release that wasn't recorded", () => {
+    expect(admits([job("release", "skipped")])).toBe(false);
+    expect(admits([job("nightly-first", "skipped"), job("release", "failure")])).toBe(false);
   });
 });

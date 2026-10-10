@@ -26,7 +26,8 @@ import { artifactName, STORE_ENVIRONMENT, STORE_NAME } from "../scripts/store-re
 //
 // A stable release builds a commit an earlier nightly tested, under main's workflow, so the Store
 // package's check works out the version with source that can be older than the check. That command
-// runs here for real, on this checkout.
+// runs here for real, on this checkout. So does CI's check of its test report, which a release runs
+// on that older source too, in checkouts of either layout.
 
 /** The parts of a workflow file this test reads. */
 interface Workflow {
@@ -150,6 +151,11 @@ describe("a stable run that publishes a nightly first", () => {
 
     expect(uploaded).toContain("release-mac-arm64-0.0.4-nightly.20261002.117");
     expect(uploaded).toContain("release-mac-arm64-0.0.4");
+    // Each release's checks keep their own test report.
+    expect(uploaded.filter((name) => name.startsWith("test-results-"))).toEqual([
+      "test-results-0.0.4-nightly.20261002.117-1",
+      "test-results-0.0.4-1",
+    ]);
     // Only the stable release builds a Store package.
     expect(uploaded.filter((name) => name.startsWith("msix-"))).toEqual([
       "msix-0.0.4",
@@ -168,6 +174,84 @@ describe("a stable run that publishes a nightly first", () => {
     expect(first.uploaded).toEqual(expect.arrayContaining(first.deployed));
     // Artifacts of earlier attempts stay in the run, so a re-run deploys from new names.
     expect(run(2).deployed.filter((name) => first.uploaded.includes(name))).toEqual([]);
+  });
+});
+
+describe("a CI run's test report", () => {
+  const step = read("ci.yml").jobs["test"]?.steps?.find(
+    (each) => each.name === "Require complete test results",
+  );
+  const root = mkdtempSync(join(tmpdir(), "test-results-step-"));
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+  /** Runs the step as the job does, in a checkout holding `files`, which map paths to text. */
+  const checkReport = (name: string, files: Record<string, string>) => {
+    const dir = join(root, name);
+    mkdirSync(dir);
+    for (const [path, text] of Object.entries(files)) {
+      mkdirSync(join(dir, path, ".."), { recursive: true });
+      writeFileSync(join(dir, path), text);
+    }
+    writeFileSync(
+      join(dir, "test-results.json"),
+      JSON.stringify({
+        testResults: [
+          {
+            name: join(dir, "test/a.test.ts"),
+            status: "passed",
+            assertionResults: [{ fullName: "a", status: "passed" }],
+          },
+        ],
+      }),
+    );
+    expect(step?.run).toBeDefined();
+    return spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", step!.run!], {
+      cwd: dir,
+      env: { PATH: process.env["PATH"], RUNNER_TEMP: dir },
+      encoding: "utf8",
+    });
+  };
+
+  it("is kept under a name of its own in a run of its own", () => {
+    const { uploaded } = artifacts(
+      ".github/workflows/ci.yml",
+      known({
+        "inputs.report-name": "",
+        "github.run_id": "38021750609",
+        "github.run_attempt": "2",
+      }),
+    );
+
+    expect(uploaded).toEqual(["test-results-38021750609-2"]);
+  });
+
+  it("must hold every test file of a source with the check", () => {
+    const run = checkReport("current", {
+      "scripts/ci-test-results.ts": readFileSync("scripts/ci-test-results.ts", "utf8"),
+      "test/suites.ts": readFileSync("test/suites.ts", "utf8"),
+      "test/a.test.ts": "",
+    });
+
+    expect(run.stdout).toContain("All 1 test files are in the report");
+    expect(run.status).toBe(0);
+  });
+
+  it("is checked by its own script for a tested nightly from before the check", () => {
+    // The script sources up to bbd8d930 check their report with.
+    const run = checkReport("older", {
+      "apps/desktop/scripts/ci-multimedia-results.ts":
+        "console.log(`older check of ${process.argv[2]}`);",
+    });
+
+    expect(run.stdout).toContain(`older check of ${join(root, "older", "test-results.json")}`);
+    expect(run.status).toBe(0);
+  });
+
+  it("fails for a source with no script to check it", () => {
+    const run = checkReport("none", {});
+
+    expect(run.stdout).toContain("no script that checks its test report");
+    expect(run.status).toBe(1);
   });
 });
 
