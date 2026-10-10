@@ -8,10 +8,12 @@ import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { runDownloads } from "./downloads.ts";
+import { languageScenario } from "./language.ts";
 import { electronExecutable, freePort, record, stop } from "./session.ts";
 import { connect, type Page } from "../../../../apps/desktop/test/e2e/app.ts";
 import { startFakeProvider } from "../../../../apps/desktop/test/fake-provider.ts";
 import { startFakeTmdb } from "../../../../apps/desktop/test/fake-tmdb.ts";
+import { isLocale } from "../../../../packages/contracts/src/language.ts";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
 const desktop = join(root, "apps/desktop");
@@ -22,20 +24,22 @@ const scenarios = [
   "titles",
   "watchlist",
   "downloads",
+  "language",
 ] as const;
 type Scenario = (typeof scenarios)[number];
 const [command, selected] = process.argv.slice(2);
 if (command === "--help" || !command) {
   console.log(`Usage: pnpm verify:desktop doctor | ${scenarios.join(" | ")}
+       pnpm verify:desktop downloads <locale>, as fr-FR: Downloads in another interface language
 Run from the repo root, after pnpm install --frozen-lockfile and pnpm build.
 On headless Linux: xvfb-run -a pnpm verify:desktop <scenario>
 Each scenario owns a fresh app/profile/ports and retains proof in .local/verification/.`);
 } else if (command === "doctor") {
   console.log(JSON.stringify(await preflight(), null, 2));
-} else if (command === "downloads" && selected === undefined) {
+} else if (command === "downloads" && (selected === undefined || isLocale(selected))) {
   const build = await preflight();
   if (!build.display) throw new Error("No display. Use xvfb-run -a pnpm verify:desktop downloads.");
-  await runDownloads(build);
+  await runDownloads(build, selected);
 } else if (scenarios.some((scenario) => scenario === command) && selected === undefined) {
   await run(command as Scenario);
 } else {
@@ -105,48 +109,75 @@ async function run(scenario: Scenario) {
     provider = await startFakeProvider({ channels: 60, titles: 30, live: true });
     if (scenario === "background-refresh") releaseGuide = provider.hold("guide").release;
     tmdb = await startFakeTmdb();
-    const port = await freePort();
-    const args = [
-      `--remote-debugging-port=${port}`,
-      "--remote-debugging-address=127.0.0.1",
-      `--user-data-dir=${profile}`,
-      "--enable-automation",
-      "--use-mock-keychain",
-      ...(process.platform === "linux" ? ["--no-sandbox"] : []),
-      desktop,
-    ];
-    // Discard ambient test overrides; this run's external services are its own loopback fixtures.
-    const env = Object.fromEntries(
-      Object.entries(process.env).filter(
-        ([name]) => !name.startsWith("MR_STREAMER_") && name !== "ELECTRON_RUN_AS_NODE",
-      ),
-    );
-    app = spawn(build.executable, args, {
-      cwd: root,
-      detached: process.platform !== "win32",
-      stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        ...env,
-        ...(process.env["MR_STREAMER_FFMPEG"]
-          ? { MR_STREAMER_FFMPEG: process.env["MR_STREAMER_FFMPEG"] }
-          : {}),
-        MR_STREAMER_UPDATE_CHECKS: "off",
-        MR_STREAMER_TMDB_API: tmdb.url,
-        MR_STREAMER_TMDB_KEY: "test-key",
-      },
-    });
-    let spawnError: Error | undefined;
-    app.on("error", (error) => {
-      spawnError = error;
-    });
-    for (const stream of [app.stdout, app.stderr])
-      stream?.on("data", (chunk: Buffer) => log.push(chunk.toString()));
-    page = await connect(port);
-    if (spawnError) throw spawnError;
-    const livePage = page;
+    const ownedProfile = profile;
+    const ownedTmdb = tmdb;
+    let port = 0;
+    /**
+     * Starts the app on this run's profile, with the system's language `system` as Linux reads
+     * it from the environment (English unless a scenario says otherwise), and waits for its
+     * window. Scenarios that restart call it again after `quit`.
+     */
+    const launch = async (system = "en_US") => {
+      port = await freePort();
+      const args = [
+        `--remote-debugging-port=${port}`,
+        "--remote-debugging-address=127.0.0.1",
+        `--user-data-dir=${ownedProfile}`,
+        "--enable-automation",
+        "--use-mock-keychain",
+        ...(process.platform === "linux" ? ["--no-sandbox"] : []),
+        desktop,
+      ];
+      // Discard ambient test overrides; this run's external services are its own loopback fixtures.
+      const env = Object.fromEntries(
+        Object.entries(process.env).filter(
+          ([name]) =>
+            !name.startsWith("MR_STREAMER_") &&
+            name !== "ELECTRON_RUN_AS_NODE" &&
+            !/^(LANGUAGE|LANG|LC_ALL|LC_MESSAGES)$/.test(name),
+        ),
+      );
+      const started = spawn(build.executable, args, {
+        cwd: root,
+        detached: process.platform !== "win32",
+        stdio: ["ignore", "pipe", "pipe"],
+        env: {
+          ...env,
+          ...(process.env["MR_STREAMER_FFMPEG"]
+            ? { MR_STREAMER_FFMPEG: process.env["MR_STREAMER_FFMPEG"] }
+            : {}),
+          LANGUAGE: system,
+          LANG: `${system}.UTF-8`,
+          MR_STREAMER_UPDATE_CHECKS: "off",
+          MR_STREAMER_TMDB_API: ownedTmdb.url,
+          MR_STREAMER_TMDB_KEY: "test-key",
+        },
+      });
+      app = started;
+      let spawnError: Error | undefined;
+      started.on("error", (error) => {
+        spawnError = error;
+      });
+      for (const stream of [started.stdout, started.stderr])
+        stream?.on("data", (chunk: Buffer) => log.push(chunk.toString()));
+      page = await connect(port);
+      if (spawnError) throw spawnError;
+      await doctor();
+      await send("Emulation.setFocusEmulationEnabled", { enabled: true });
+    };
+    /** Quits the app as the viewer does, keeping the profile for the next `launch`. */
+    const quit = async () => {
+      if (app) await stop(app, page);
+      page?.close();
+      page = undefined;
+    };
+    const live = () => {
+      if (!page) throw new Error("The app isn't running.");
+      return page;
+    };
     const send = async (method: string, params: Record<string, unknown> = {}) => {
       abort.signal.throwIfAborted();
-      const reply = await livePage.send(method, params);
+      const reply = await live().send(method, params);
       if (reply.error) throw new Error(`${method}: ${JSON.stringify(reply.error)}`);
       return reply.result;
     };
@@ -163,7 +194,7 @@ async function run(scenario: Scenario) {
         if (!reply["arguments"].includes(expected))
           throw new Error("CDP belongs to a different app instance.");
       }
-      const url = await livePage.evaluate<string>("location.href");
+      const url = await live().evaluate<string>("location.href");
       if (!url.startsWith(pathToFileURL(join(desktop, "out/renderer/")).href))
         throw new Error(`Wrong renderer: ${url}`);
       observed["doctor"] = {
@@ -175,8 +206,10 @@ async function run(scenario: Scenario) {
         ...build,
       };
     };
-    await doctor();
-    await send("Emulation.setFocusEmulationEnabled", { enabled: true });
+    await launch();
+    const livePage = {
+      evaluate: <T>(expression: string) => live().evaluate<T>(expression),
+    };
     const wait = (check: () => Promise<boolean>) => until(check, abort.signal);
     const exists = (expression: string) => livePage.evaluate<boolean>(`!!(${expression})`);
     const action = (label: string) => actions.push({ action: label, at: new Date().toISOString() });
@@ -275,6 +308,21 @@ async function run(scenario: Scenario) {
       observed["subscriptionRows"] = await livePage.evaluate<number>(
         "[...document.querySelectorAll('li')].filter(row => row.querySelector('button')?.textContent.includes(' · ')).length",
       );
+    } else if (scenario === "language") {
+      await languageScenario({
+        profile: ownedProfile,
+        observed,
+        evaluate: (expression) => livePage.evaluate(expression),
+        send,
+        wait,
+        exists,
+        click,
+        key,
+        capture,
+        action,
+        launch,
+        quit,
+      });
     } else if (scenario === "live-tv") {
       await click("Open global Search", "document.querySelector('button[aria-label=Search]')");
       action("Search TEST | H.264 + AAC");
@@ -400,6 +448,8 @@ async function run(scenario: Scenario) {
     if (provider) {
       const ownedProvider = provider;
       await clean(() => ownedProvider.close());
+      // The provider hears a stream's socket close a moment after the app's process ends.
+      for (let i = 0; i < 20 && ownedProvider.activeStreams() !== 0; i++) await delay(100);
       observed["streamsAfterAppExit"] = ownedProvider.activeStreams();
       if (ownedProvider.activeStreams() !== 0)
         cleanupErrors.push("Provider still has active streams after app exit.");

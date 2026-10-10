@@ -10,12 +10,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 import type { TitleKind } from "@mrstreamer/contracts/ondemand";
 import { ownedId, type OwnedId } from "@mrstreamer/contracts/subscription";
+import { t } from "@mrstreamer/core/i18n";
 import { call } from "./ipc.ts";
 import { queries } from "./queries.ts";
 
 /** "Movie" or "Series", where the watchlist shows both together. */
 export function kindLabel(kind: TitleKind): string {
-  return kind === "movie" ? "Movie" : "Series";
+  return kind === "movie" ? t("Movie") : t("Series");
 }
 
 /** A title's place on the watchlist, and the one thing its button does about it. */

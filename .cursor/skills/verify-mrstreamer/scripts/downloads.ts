@@ -7,7 +7,9 @@
 // Connect screen's Downloads with no subscription saved, then opens a copy whose file it removed
 // and returns to the page, which must say it is missing. Main's outbound connections are recorded
 // by network-hook.cjs, the window's requests over CDP, and each local playback window must have
-// none but the window's own loopback proxy requests.
+// none but the window's own loopback proxy requests. It runs in the interface language it is
+// given, English unless asked for another, by starting the app on a system in that language:
+// what it looks for is the catalogue's text in it, so untranslated text fails the run.
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -20,6 +22,9 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { crc32, deflateSync } from "node:zlib";
 import { connect, type Page } from "../../../../apps/desktop/test/e2e/app.ts";
+import { SOURCE_LOCALE, type Locale } from "../../../../packages/contracts/src/language.ts";
+import { setLanguage, t } from "../../../../packages/core/src/i18n.ts";
+import { episodeLabel } from "../../../../packages/core/src/ondemand/names.ts";
 import {
   startFakeProvider,
   type FakeProvider,
@@ -46,16 +51,23 @@ interface WindowRequest {
   readonly url: string;
 }
 
-export async function runDownloads(build: Record<string, unknown> & { executable: string }) {
+export async function runDownloads(
+  build: Record<string, unknown> & { executable: string },
+  locale: Locale = SOURCE_LOCALE,
+) {
+  // The text expected below, in the language the app shows.
+  setLanguage({ locale, formats: locale });
   const evidenceRoot = join(root, ".local/verification");
   await mkdir(evidenceRoot, { recursive: true });
-  const evidence = await mkdtemp(join(evidenceRoot, "downloads-"));
+  const evidence = await mkdtemp(
+    join(evidenceRoot, locale === SOURCE_LOCALE ? "downloads-" : `downloads-${locale}-`),
+  );
   const abort = new AbortController();
   const interrupt = () => abort.abort(new Error("Verification interrupted."));
   process.once("SIGINT", interrupt);
   process.once("SIGTERM", interrupt);
   const actions: { action: string; at: string }[] = [];
-  const observed: Record<string, unknown> = { build };
+  const observed: Record<string, unknown> = { build, locale };
   const log: string[] = [];
   const networkLog = join(evidence, "main-network.jsonl");
   const windowRequests: WindowRequest[] = [];
@@ -89,9 +101,12 @@ export async function runDownloads(build: Record<string, unknown> & { executable
           ([name]) =>
             !name.startsWith("MR_STREAMER_") &&
             name !== "ELECTRON_RUN_AS_NODE" &&
-            name !== "NODE_OPTIONS",
+            name !== "NODE_OPTIONS" &&
+            !/^(LANGUAGE|LANG|LC_ALL|LC_MESSAGES)$/.test(name),
         ),
       );
+      // The system's language, as Linux reads it: System default shows the app in `locale`.
+      const system = locale.replace("-", "_");
       const app = spawn(
         build.executable,
         [
@@ -112,6 +127,8 @@ export async function runDownloads(build: Record<string, unknown> & { executable
             ...(process.env["MR_STREAMER_FFMPEG"]
               ? { MR_STREAMER_FFMPEG: process.env["MR_STREAMER_FFMPEG"] }
               : {}),
+            LANGUAGE: system,
+            LANG: `${system}.UTF-8`,
             MR_STREAMER_UPDATE_CHECKS: "off",
             MR_STREAMER_TMDB_API: tmdb!.url,
             MR_STREAMER_TMDB_KEY: "test-key",
@@ -285,22 +302,28 @@ export async function runDownloads(build: Record<string, unknown> & { executable
     }
     await online.click("Submit Connect", "document.querySelector('form button[type=submit]')");
     await online.wait(() => online.exists("document.querySelector('header')"));
-    await online.click("Open Movies", button("header button", "Movies"));
-    await online.click("Open All movies", button("nav button", "All movies"));
+    await online.click("Open Movies", button("header button", t("Movies")));
+    await online.click("Open All movies", button("nav button", t("All movies")));
     await online.click("Open the two-sound-track movie", poster("Two sound tracks"));
-    await online.click("Download the movie", button('[role="dialog"] button', "Download"));
+    await online.click("Download the movie", button('[role="dialog"] button', t("Download")));
     await online.wait(
-      () => online.exists(button('[role="dialog"] button', "Watch offline")),
+      () => online.exists(button('[role="dialog"] button', t("Watch offline"))),
       60_000,
     );
     await online.capture("movie-downloaded");
     await online.key("Escape", 27);
 
-    await online.click("Open Series", button("header button", "Series"));
-    await online.click("Open All series", button("nav button", "All series"));
+    await online.click("Open Series", button("header button", t("Series")));
+    await online.click("Open All series", button("nav button", t("All series")));
     await online.click("Open the Formats series", poster("Formats"));
-    await online.click("Download S1 E2", labelled("Download S1 E2"));
-    await online.wait(() => online.exists(labelled("Watch S1 E2 offline")), 60_000);
+    await online.click(
+      "Download S1 E2",
+      labelled(t("Download {title}", { title: episodeLabel(1, 2) })),
+    );
+    await online.wait(
+      () => online.exists(labelled(t("Watch {title} offline", { title: episodeLabel(1, 2) }))),
+      60_000,
+    );
     await online.capture("episode-downloaded");
     await online.key("Escape", 27);
 
@@ -309,12 +332,12 @@ export async function runDownloads(build: Record<string, unknown> & { executable
       each.name.startsWith("TEST | Long subtitles"),
     )!;
     provider.stallMovieFile(slow.id, 40_000, 20_000);
-    await online.click("Open Movies", button("header button", "Movies"));
-    await online.click("Open All movies", button("nav button", "All movies"));
+    await online.click("Open Movies", button("header button", t("Movies")));
+    await online.click("Open All movies", button("nav button", t("All movies")));
     await online.click("Open the long-subtitles movie", poster("Long subtitles"));
     await online.click(
       "Download it, held by the provider at 40 kB",
-      button('[role="dialog"] button', "Download"),
+      button('[role="dialog"] button', t("Download")),
     );
     await online.wait(async () => (await online.text('[role="dialog"]')).includes("%"));
     await online.key("Escape", 27);
@@ -322,7 +345,7 @@ export async function runDownloads(build: Record<string, unknown> & { executable
     const filesBefore = provider.fileRequests();
     await online.click(
       "Play it from the same subscription",
-      button('[role="dialog"] button', "Play"),
+      button('[role="dialog"] button', t("Play")),
     );
     await online.wait(async () => {
       const v = await online.video();
@@ -344,7 +367,7 @@ export async function runDownloads(build: Record<string, unknown> & { executable
     await online.key("Escape", 27);
     await online.wait(async () => !(await online.video()).title);
     await online.key("Escape", 27);
-    await online.click("Open Downloads", button("header button", "Downloads"));
+    await online.click("Open Downloads", button("header button", t("Downloads")));
     await online.wait(
       async () => (await online.listed()).every((item) => item.status.kind === "complete"),
       60_000,
@@ -355,19 +378,78 @@ export async function runDownloads(build: Record<string, unknown> & { executable
     ]);
     if (provider.mostFilesAtOnce() !== 1) throw new Error("The provider saw two files at once.");
 
+    // Home's muted preview of a channel is playback too: a download held by the provider waits
+    // behind it, and the details, opened over Home from Search, say so on the control that
+    // cancels it. A search result names the provider's title in its tooltip.
+    const recording = provider.titles.movies.find((each) =>
+      each.name.startsWith("TEST | Broadcast recording"),
+    )!;
+    provider.stallMovieFile(recording.id, 30_000, 120_000);
+    await online.click("Open Movies", button("header button", t("Movies")));
+    await online.click("Open All movies", button("nav button", t("All movies")));
+    await online.click("Open the broadcast-recording movie", poster("Broadcast recording"));
+    await online.click(
+      "Download it, held by the provider",
+      button('[role="dialog"] button', t("Download")),
+    );
+    await online.wait(async () => (await online.text('[role="dialog"]')).includes("%"));
+    await online.key("Escape", 27);
+    const search = async (words: string, label: string) => {
+      await online.click("Open global Search", labelled(t("Search")));
+      actions.push({ action: `Search ${words}`, at: now() });
+      await online.page.send("Input.insertText", { text: words });
+      await online.wait(() =>
+        online.page.evaluate<boolean>(
+          `(e => !!e && (e.textContent.includes(${JSON.stringify(label)}) || [...e.querySelectorAll('[title]')].some(n => n.title.includes(${JSON.stringify(label)}))))(document.querySelector('[role=tree] [aria-selected=true]'))`,
+        ),
+      );
+      await online.key("Enter", 13);
+    };
+    await search("TEST | H.264 + AAC", "H.264 + AAC");
+    await online.wait(async () => {
+      const v = await online.video();
+      return (await online.exists("document.querySelector('[data-view=watch]')")) && v.time > 0.5;
+    }, 45_000);
+    // Watch goes back to the page it came from; Home shows the channel, muted.
+    await online.key("Escape", 27);
+    await online.click("Open Home", button("header button", t("Home")));
+    const recordingStatus = async () =>
+      (await online.listed()).find((item) => item.title.id === String(recording.id))?.status.kind;
+    await online.wait(async () => (await recordingStatus()) === "waiting", 45_000);
+    await search("Broadcast recording", "Broadcast recording");
+    const waitingControl = button(
+      '[role="dialog"] button',
+      `${t("Waiting for playback")} · ${t("Cancel")}`,
+    );
+    await online.wait(() => online.exists(waitingControl));
+    observed["waitingBehindPreview"] = {
+      status: await recordingStatus(),
+      details: await online.page.evaluate<string>(
+        `(${waitingControl})?.closest('[role=dialog]')?.innerText ?? ''`,
+      ),
+      preview: await online.page.evaluate<{ time: number; paused: boolean }[]>(
+        "[...document.querySelectorAll('video')].map(v => ({ time: v.currentTime, paused: v.paused }))",
+      ),
+      mostProviderFilesAtOnce: provider.mostFilesAtOnce(),
+    };
+    await online.capture("waiting-behind-home-preview");
+    await online.click("Cancel the waiting download", waitingControl);
+    await online.wait(async () => (await recordingStatus()) === undefined);
+    await online.key("Escape", 27);
+
     // 3. Failure, retry, delete and cancel through the page and the details.
-    await online.click("Open Movies", button("header button", "Movies"));
-    await online.click("Open All movies", button("nav button", "All movies"));
+    await online.click("Open Movies", button("header button", t("Movies")));
+    await online.click("Open All movies", button("nav button", t("All movies")));
     await online.click("Open the missing-file movie", poster("Missing file"));
     await online.click(
       "Download a file the provider doesn't have",
-      button('[role="dialog"] button', "Download"),
+      button('[role="dialog"] button', t("Download")),
     );
-    await online.wait(async () => (await online.text('[role="dialog"]')).includes("Retry"));
+    await online.wait(async () => (await online.text('[role="dialog"]')).includes(t("Retry")));
     const retried = provider.fileRequests();
     await online.click(
       "Retry from the details",
-      `[...document.querySelectorAll('[role="dialog"] button')].find(b => b.textContent.includes('Retry'))`,
+      `[...document.querySelectorAll('[role="dialog"] button')].find(b => b.textContent.includes(${JSON.stringify(t("Retry"))}))`,
     );
     await online.wait(async () => provider!.fileRequests() > retried);
     await online.key("Escape", 27);
@@ -378,12 +460,14 @@ export async function runDownloads(build: Record<string, unknown> & { executable
     await online.click("Open the index-with-a-gap movie", poster("Index with a gap"));
     await online.click(
       "Download it, held by the provider",
-      button('[role="dialog"] button', "Download"),
+      button('[role="dialog"] button', t("Download")),
     );
     await online.wait(async () => (await online.text('[role="dialog"]')).includes("%"));
     await online.key("Escape", 27);
-    await online.click("Open Downloads", button("header button", "Downloads"));
-    await online.wait(async () => (await online.text()).includes("The provider has no file"));
+    await online.click("Open Downloads", button("header button", t("Downloads")));
+    await online.wait(async () =>
+      (await online.text()).includes(t("The provider has no file for this title right now.")),
+    );
     await online.capture("downloads-queue-and-copies");
     const heldId = await idOf(online, "movie", held.id);
     const missingId = await idOf(
@@ -397,7 +481,7 @@ export async function runDownloads(build: Record<string, unknown> & { executable
     );
     await online.click(
       "Delete the failed download",
-      `[...(${row(missingId)})?.querySelectorAll('button') ?? []].find(b => b.textContent.trim() === 'Delete')`,
+      `[...(${row(missingId)})?.querySelectorAll('button') ?? []].find(b => b.textContent.trim() === ${JSON.stringify(t("Delete"))})`,
     );
     await online.wait(async () => !(await online.exists(row(missingId))));
     observed["afterCancelAndDelete"] = (await online.listed()).map((item) => [
@@ -415,7 +499,7 @@ export async function runDownloads(build: Record<string, unknown> & { executable
     actions.push({ action: "Stop the fake provider, TMDB and picture server", at: now() });
     const offline = await start("network denied");
     await offline.wait(() => offline.exists("document.querySelector('header')"));
-    await offline.click("Open Downloads", button("header button", "Downloads"));
+    await offline.click("Open Downloads", button("header button", t("Downloads")));
     // The movie, the episode, and the movie that waited for playback.
     await offline.wait(async () => (await offline.listed()).length === 3);
     // Their pictures come from this computer, with the picture server gone.
@@ -441,7 +525,7 @@ export async function runDownloads(build: Record<string, unknown> & { executable
     await offline.wait(async () => (await offline.video()).time >= beforeSeek + 8);
     await offline.wait(async () => !(await offline.video()).paused);
     observed["seek"] = { from: beforeSeek, to: (await offline.video()).time };
-    await offline.click("Open Sound", labelled("Sound"));
+    await offline.click("Open Sound", labelled(t("Sound")));
     const sounds = await offline.page.evaluate<string[]>(
       "[...document.querySelectorAll('[role=dialog] [role=menuitemradio], [role=dialog] button[aria-pressed]')].map(b => b.textContent.trim())",
     );
@@ -463,12 +547,12 @@ export async function runDownloads(build: Record<string, unknown> & { executable
     const longId = await idOf(offline, "movie", slow.id);
     await watchOffline(offline, longId, "Watch the long-subtitles movie offline");
     for (let skip = 0; skip < 4; skip++) await offline.key("ArrowRight", 39);
-    await offline.click("Open Subtitles", labelled("Subtitles"));
+    await offline.click("Open Subtitles", labelled(t("Subtitles")));
     await offline.click(
       "Choose the file's French text track",
-      `[...document.querySelectorAll('aside[aria-label="Subtitle choices"] button[aria-pressed]')].find(b => b.textContent.trim() === 'Français')`,
+      `[...document.querySelectorAll('aside[aria-label=${JSON.stringify(t("Subtitle choices"))}] button[aria-pressed]')].find(b => b.textContent.trim() === 'Français')`,
     );
-    await offline.click("Close Subtitles", labelled("Close subtitles"));
+    await offline.click("Close Subtitles", labelled(t("Close subtitles")));
     await offline.wait(async () => {
       const v = await offline.video();
       return !v.paused && v.time >= 40;
@@ -517,8 +601,8 @@ export async function runDownloads(build: Record<string, unknown> & { executable
     observed["offlinePlayback"] = during(playedFrom, playedUntil, requestsFrom);
 
     // 5. Remove the subscription through Settings, restart, and play both copies with none saved.
-    await offline.click("Open Settings", labelled("Settings"));
-    await offline.click("Open Subscriptions", button("nav button", "Subscriptions"));
+    await offline.click("Open Settings", labelled(t("Settings")));
+    await offline.click("Open Subscriptions", button("nav button", t("Subscriptions")));
     const subscriptionRow = `[...document.querySelectorAll('li')].find(r => r.querySelector('button')?.textContent.includes(' · '))`;
     for (let attempt = 1; ; attempt++) {
       await offline.click(
@@ -536,20 +620,31 @@ export async function runDownloads(build: Record<string, unknown> & { executable
     }
     await offline.click(
       "Ask to remove it",
-      `[...document.querySelectorAll('button')].find(b => b.textContent.trim().startsWith('Remove '))`,
+      `[...(${subscriptionRow})?.querySelectorAll('button') ?? []].find(b => b.textContent.trim().startsWith(${JSON.stringify(t("Remove {name}", { name: "" }))}))`,
     );
-    await offline.wait(async () => (await offline.text()).includes("from this device?"));
+    // The question after the subscription's name, which the fixture chose.
+    const question = t("Remove {name}, and the lists loaded with it, from this device?", {
+      name: "\n",
+    }).split("\n");
+    await offline.wait(async () => (await offline.text()).includes(question.at(-1) ?? ""));
     await offline.capture("remove-subscription-question");
-    await offline.click("Confirm removal", button("button", "Remove"));
+    // In the row: the page under Settings has buttons of the same name in some languages, as
+    // French Delete and Remove are both Supprimer.
+    await offline.click(
+      "Confirm removal",
+      `[...(${subscriptionRow})?.querySelectorAll('button') ?? []].find(b => b.textContent.trim() === ${JSON.stringify(t("Remove"))})`,
+    );
     await offline.wait(() => offline.exists("document.querySelector('form input')"), 30_000);
-    await offline.wait(() => offline.exists(button("button", "Downloads")));
+    await offline.wait(() => offline.exists(button("button", t("Downloads"))));
     await offline.capture("connect-with-downloads");
     await quit("network denied");
 
     const alone = await start("no subscription");
-    await alone.click("Open Downloads from Connect", button("button", "Downloads"));
+    await alone.click("Open Downloads from Connect", button("button", t("Downloads")));
     await alone.wait(async () => (await alone.listed()).length === 3);
-    await alone.wait(async () => (await alone.text()).includes("Subscription removed, copy kept"));
+    await alone.wait(async () =>
+      (await alone.text()).includes(t("Subscription removed, copy kept")),
+    );
     observed["standalone"] = {
       items: (await alone.listed()).map((item) => ({
         name: item.name,
@@ -586,18 +681,18 @@ export async function runDownloads(build: Record<string, unknown> & { executable
       "Watch the movie whose file is gone",
       `(${row(movieId)})?.querySelector('button')`,
     );
-    await alone.wait(async () => (await alone.text()).includes("Download missing"));
+    await alone.wait(async () => (await alone.text()).includes(t("Download missing")));
     await alone.capture("copy-missing-player");
-    await alone.click("Back from the missing copy", button("button", "Back"));
+    await alone.click("Back from the missing copy", button("button", t("Back")));
     const rowSays = () =>
       alone.page.evaluate<{ text: string; watchOffline: boolean } | null>(
-        `(() => { const r = ${row(movieId)}; return r && { text: r.textContent, watchOffline: [...r.querySelectorAll('button')].some(b => b.textContent.trim() === 'Watch offline') }; })()`,
+        `(() => { const r = ${row(movieId)}; return r && { text: r.textContent, watchOffline: [...r.querySelectorAll('button')].some(b => b.textContent.trim() === ${JSON.stringify(t("Watch offline"))}) }; })()`,
       );
     await alone.wait(async () => {
       const says = await rowSays();
       return (
         !!says &&
-        says.text.includes("The file is no longer on this computer.") &&
+        says.text.includes(t("The file is no longer on this computer.")) &&
         !says.watchOffline
       );
     });
@@ -606,7 +701,7 @@ export async function runDownloads(build: Record<string, unknown> & { executable
       listed: (await alone.listed()).find((item) => item.id === movieId)?.status.kind ?? null,
     };
     await alone.capture("downloads-copy-missing");
-    await alone.click("Back to the form", button("button", "Add subscription"));
+    await alone.click("Back to the form", button("button", t("Add subscription")));
     await alone.wait(() => alone.exists("document.querySelector('form input')"));
     await quit("no subscription");
 
@@ -668,6 +763,7 @@ export async function runDownloads(build: Record<string, unknown> & { executable
       JSON.stringify(
         {
           scenario: "downloads",
+          locale,
           status: failed ? "failed" : "passed",
           actions,
           observed,
@@ -692,7 +788,7 @@ export async function runDownloads(build: Record<string, unknown> & { executable
         2,
       ),
     );
-    console.log(`${failed ? "FAIL" : "PASS"} downloads: ${evidence}`);
+    console.log(`${failed ? "FAIL" : "PASS"} downloads ${locale}: ${evidence}`);
   }
   if (failed) throw failed;
 }

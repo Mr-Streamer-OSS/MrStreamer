@@ -34,6 +34,7 @@ import { episodeFileVersion } from "@mrstreamer/core/ondemand/details";
 import { versionOptions } from "@mrstreamer/core/ondemand/version-options";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import { continuation, episodeStates } from "@mrstreamer/core/viewing/episodes";
+import { formatDate, formatDecimal, t } from "@mrstreamer/core/i18n";
 import { openSubscription, useUi, type DetailsTarget } from "../../app/ui-store.ts";
 import { Progress } from "../../components/Progress.tsx";
 import { Sheet } from "../../components/Sheet.tsx";
@@ -142,7 +143,7 @@ export function DetailsView({ target }: { target: DetailsTarget }) {
     failure?.kind === "needs-secret"
       ? subscriptions.find((each) => each.id === failure.subscriptionId)
       : undefined;
-  const secret = locked?.kind === "m3u" ? "link" : "password";
+  const playlist = locked?.kind === "m3u";
   // Saving needs the title from the lists alone, so it works while the details are on their way.
   const saving = useSaveToggle(target.kind, target, title !== null);
   return (
@@ -162,10 +163,12 @@ export function DetailsView({ target }: { target: DetailsTarget }) {
           </div>
           <p className="mt-6 text-[0.9375rem] text-muted-foreground">
             {locked
-              ? `${subscriptionName(locked)} needs its ${secret} again.`
+              ? playlist
+                ? t("{name} needs its link again.", { name: subscriptionName(locked) })
+                : t("{name} needs its password again.", { name: subscriptionName(locked) })
               : failure
                 ? describeError(failure)
-                : "Loading…"}
+                : t("Loading…")}
           </p>
           {/* The version that plays couldn't be opened: its subscription's row in Settings is
               where its secret is entered again, and another version may play meanwhile, as one
@@ -174,7 +177,7 @@ export function DetailsView({ target }: { target: DetailsTarget }) {
             <div className="mt-4 flex items-center gap-3">
               {locked && (
                 <Button variant="primary" onClick={() => openSubscription(locked.id, "secret")}>
-                  Enter {secret}
+                  {playlist ? t("Enter link") : t("Enter password")}
                 </Button>
               )}
               {title.versions.length > 1 && (
@@ -185,7 +188,7 @@ export function DetailsView({ target }: { target: DetailsTarget }) {
                   onPick={chooseVersion}
                   trigger={<Button variant="secondary" />}
                 >
-                  Other versions
+                  {t("Other versions")}
                   <ChevronDown />
                 </VersionMenu>
               )}
@@ -194,8 +197,8 @@ export function DetailsView({ target }: { target: DetailsTarget }) {
         </Header>
       ) : (
         <div className="p-10 text-[0.9375rem] text-muted-foreground">
-          <Dialog.Title className="sr-only">Details</Dialog.Title>
-          {failure ? describeError(failure) : "Loading…"}
+          <Dialog.Title className="sr-only">{t("Details")}</Dialog.Title>
+          {failure ? describeError(failure) : t("Loading…")}
         </div>
       )}
     </Sheet>
@@ -249,14 +252,14 @@ function Content({
 /** "Original title …", the year, the length or seasons, genres and rating, as far as known. */
 function factsOf(title: Title, details?: TitleDetails): string {
   return [
-    details?.originalTitle ? `Original title ${details.originalTitle}` : null,
+    details?.originalTitle ? t("Original title {title}", { title: details.originalTitle }) : null,
     title.year,
     details?.kind === "movie" && details.duration ? runtime(details.duration) : null,
     details?.kind === "series" && details.seasons.length > 0
-      ? `${details.seasons.length} ${details.seasons.length === 1 ? "season" : "seasons"}`
+      ? t("{count} seasons", { count: details.seasons.length })
       : null,
     (details ?? title).genres.slice(0, 3).join(", ") || null,
-    title.rating ? `★ ${title.rating.toFixed(1)}` : null,
+    title.rating ? `★ ${formatDecimal(title.rating, 1)}` : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -304,7 +307,7 @@ function Credits({ details }: { details: TitleDetails }) {
       {makers.length > 0 && (
         <div className="w-28 flex-none self-center text-[0.8125rem]">
           <div className="text-muted-foreground">
-            {details.kind === "movie" ? "Directed by" : "Created by"}
+            {details.kind === "movie" ? t("Directed by") : t("Created by")}
           </div>
           {makers.map((name) => (
             <div key={name} className="truncate font-medium">
@@ -379,7 +382,7 @@ function MovieActions({
       switching={switching}
       saving={saving}
       progress={partly ? current : undefined}
-      primaryLabel={partly ? "Resume" : "Play"}
+      primaryLabel={partly ? t("Resume") : t("Play")}
       onPrimary={() => playTitle(now, resumePoint(partly ? current : undefined))}
       onBeginning={partly ? () => playTitle(now, 0) : null}
       onRemove={listed ? () => removal.mutate(details.title) : null}
@@ -443,9 +446,9 @@ function SeriesActions({
         <SaveError state={saving} />
         {error && (
           <p role="alert" className="mt-6 text-[0.9375rem] text-destructive">
-            Couldn't read what you watched. {describeError(error)}{" "}
+            {t("Couldn't read what you watched.")} {describeError(error)}{" "}
             <button onClick={retry} className="text-white underline underline-offset-4">
-              Try again
+              {t("Try again")}
             </button>
           </p>
         )}
@@ -459,14 +462,18 @@ function SeriesActions({
       <div className="mt-6">
         <SaveButton state={saving} />
         <SaveError state={saving} />
-        <p className="mt-6 text-[0.9375rem] text-muted-foreground">No episodes yet.</p>
+        <p className="mt-6 text-[0.9375rem] text-muted-foreground">{t("No episodes yet.")}</p>
       </div>
     );
   }
   const { episode, resume: partly, replay } = target;
   // Replay once every numbered episode is watched: the first of them, from its beginning.
-  const verb = replay ? "Replay" : partly ? "Resume" : "Play";
-  const label = `${verb} ${episodeLabel(episode.season, episode.number)}`;
+  const which = { episode: episodeLabel(episode.season, episode.number) };
+  const label = replay
+    ? t("Replay {episode}", which)
+    : partly
+      ? t("Resume {episode}", which)
+      : t("Play {episode}", which);
   const now = episodeNow(details, episode);
   return (
     <Actions
@@ -551,22 +558,22 @@ function Actions({
         {onBeginning && (
           <Button variant="secondary" size="lg" disabled={switching} onClick={onBeginning}>
             <RotateCcw />
-            From the beginning
+            {t("From the beginning")}
           </Button>
         )}
         {download}
         <SaveButton state={saving} />
         {onRemove && (
           <Button variant="ghost" onClick={onRemove}>
-            Remove from Continue watching
+            {t("Remove from Continue watching")}
           </Button>
         )}
       </div>
       {/* What plays: "4K · English sound", and whose it is once several subscriptions list the
           title. A version without marks says nothing more. */}
-      {said && (several || said.label !== "Standard" || said.source) && (
+      {said && (several || said.label !== t("Standard") || said.source) && (
         <div className="mt-3 text-[0.8125rem] text-muted-foreground">
-          {[several || said.label !== "Standard" ? said.label : null, said.source]
+          {[several || said.label !== t("Standard") ? said.label : null, said.source]
             .filter(Boolean)
             .join(" · ")}
         </div>
@@ -598,8 +605,8 @@ function useVersionNames(
             ownedKey(version),
             [
               group.quality,
-              group.quality && group.label === "Standard" ? null : group.label,
-              group.versions.length > 1 ? `Version ${at + 1}` : null,
+              group.quality && group.label === t("Standard") ? null : group.label,
+              group.versions.length > 1 ? t("Version {number}", { number: String(at + 1) }) : null,
             ]
               .filter(Boolean)
               .join(" · "),
@@ -617,17 +624,12 @@ function useVersionNames(
 /** Guest stars an episode's row names. */
 const GUESTS_SHOWN = 2;
 
-const airDay = new Intl.DateTimeFormat(undefined, {
-  day: "numeric",
-  month: "short",
-  year: "numeric",
-  timeZone: "UTC",
-});
-
 /** "5 Mar 2024" from "2024-03-05"; a date written another way stays as it is. */
 function airDate(text: string): string {
   const day = /^(\d{4})-(\d{2})-(\d{2})/.exec(text);
-  return day ? airDay.format(Date.UTC(Number(day[1]), Number(day[2]) - 1, Number(day[3]))) : text;
+  return day
+    ? formatDate(Date.UTC(Number(day[1]), Number(day[2]) - 1, Number(day[3])), "calendarDay")
+    : text;
 }
 
 /** "Directed by Lotte Smit · With Ana Costa, Eva Vos", or "" when TMDB named no one. */
@@ -635,8 +637,8 @@ function creditsOf(episode: Partial<EpisodeDetails>): string {
   const directors = episode.directors ?? [];
   const guests = (episode.cast ?? []).slice(0, GUESTS_SHOWN).map((person) => person.name);
   return [
-    directors.length > 0 ? `Directed by ${directors.join(", ")}` : null,
-    guests.length > 0 ? `With ${guests.join(", ")}` : null,
+    directors.length > 0 ? t("Directed by {names}", { names: directors.join(", ") }) : null,
+    guests.length > 0 ? t("With {names}", { names: guests.join(", ") }) : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -708,7 +710,7 @@ function Episodes({ details }: { details: SeriesDetails }) {
           const facts = [
             episode.airDate ? airDate(episode.airDate) : null,
             timeLeftOf(partly) ?? (episode.duration ? runtime(episode.duration) : null),
-            saving ? "Saving…" : null,
+            saving ? t("Saving…") : null,
           ]
             .filter(Boolean)
             .join(" · ");
@@ -751,7 +753,7 @@ function Episodes({ details }: { details: SeriesDetails }) {
                     </span>
                     {episode.rating != null && (
                       <span className="flex-none text-[0.8125rem] text-muted-foreground">
-                        ★ {episode.rating.toFixed(1)}
+                        ★ {formatDecimal(episode.rating, 1)}
                       </span>
                     )}
                   </span>
@@ -789,7 +791,9 @@ function Episodes({ details }: { details: SeriesDetails }) {
                 {saving ? (
                   <CircleDashed className="size-4 opacity-50" aria-hidden />
                 ) : (
-                  state?.kind === "watched" && <Check className="size-4" aria-label="Watched" />
+                  state?.kind === "watched" && (
+                    <Check className="size-4" aria-label={t("Watched")} />
+                  )
                 )}
                 {state && (
                   <EpisodeMenu episode={episode} state={state.kind} source={source} marks={marks} />
@@ -830,7 +834,9 @@ function EpisodeVersionMenu({
         <Button
           variant="ghost"
           size="sm"
-          aria-label={`Versions for ${episodeLabel(episode.season, episode.number)}`}
+          aria-label={t("Versions for {episode}", {
+            episode: episodeLabel(episode.season, episode.number),
+          })}
         />
       }
       onPick={(version) => {
@@ -852,7 +858,7 @@ function EpisodeVersionMenu({
         );
       }}
     >
-      {episode.versions?.length} versions
+      {t("{count} versions", { count: episode.versions?.length ?? 0 })}
     </VersionMenu>
   );
 }

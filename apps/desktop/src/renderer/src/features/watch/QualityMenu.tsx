@@ -3,6 +3,7 @@
 // start; a quality picked here is remembered for the channel and never passed. Each row says what
 // the channel's last try got from its stream, where it got anything.
 import type { ChannelVariant, LiveChannel } from "@mrstreamer/contracts/library";
+import { t } from "@mrstreamer/core/i18n";
 import { Button } from "../../components/ui/button.tsx";
 import { qualityChoices, qualityName } from "../../lib/quality.ts";
 import { Choice } from "./TrackMenus.tsx";
@@ -42,7 +43,8 @@ export function QualityChoices({
   return (
     <>
       <Choice chosen={chosen === null} onChoose={() => pick(null)}>
-        Automatic<span className="text-muted-foreground"> · {qualityName(automatic)}</span>
+        {t("Automatic")}
+        <span className="text-muted-foreground"> · {qualityName(automatic)}</span>
       </Choice>
       {choices.map(({ variant, name }) => (
         <Choice
@@ -58,17 +60,23 @@ export function QualityChoices({
       {chosen ? (
         <div className="flex items-center gap-2 px-2 py-1">
           <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-foreground/85">
-            {choices.find(({ variant }) => variant.id === chosen.id)?.name} for {channel.title}
+            {t("{quality} for {name}", {
+              quality: choices.find(({ variant }) => variant.id === chosen.id)?.name ?? "",
+              name: channel.title,
+            })}
           </span>
           <Button data-item variant="secondary" size="sm" onClick={() => pick(null)}>
-            Use Automatic
+            {t("Use Automatic")}
           </Button>
         </div>
       ) : (
         playing && (
           <div className="px-2 py-1 text-[0.8125rem] text-muted-foreground">
-            Playing{" "}
-            {[qualityName(playing), height ? `${height}p` : null].filter(Boolean).join(" · ")}
+            {t("Playing {where}", {
+              where: [qualityName(playing), height ? `${height}p` : null]
+                .filter(Boolean)
+                .join(" · "),
+            })}
           </div>
         )
       )}

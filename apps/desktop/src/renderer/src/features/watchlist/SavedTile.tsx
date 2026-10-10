@@ -4,6 +4,7 @@
 import { X } from "lucide-react";
 import { ownedId } from "@mrstreamer/contracts/subscription";
 import type { WatchlistEntry } from "@mrstreamer/contracts/watchlist";
+import { t } from "@mrstreamer/core/i18n";
 import { openDetails, openSavedEntry } from "../../app/ui-store.ts";
 import { Artwork } from "../../components/TitleArt.tsx";
 import { useSourceOf } from "../../lib/queries.ts";
@@ -73,12 +74,12 @@ export function SavedTile({
           {name}
         </span>
         <span className="block truncate text-xs text-muted-foreground">
-          {!unavailable ? facts : brief ? "Unavailable" : `Unavailable · ${facts}`}
+          {!unavailable ? facts : brief ? t("Unavailable") : `${t("Unavailable")} · ${facts}`}
         </span>
       </button>
       {onRemove && (
         <button
-          aria-label={`Remove ${name} from Watchlist`}
+          aria-label={t("Remove {name} from Watchlist", { name })}
           data-remove
           onMouseDown={(event) => event.preventDefault()}
           onClick={onRemove}

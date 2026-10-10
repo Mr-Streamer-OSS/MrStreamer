@@ -33,6 +33,7 @@ import {
 } from "@mrstreamer/core/ondemand/filters";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
 import { adultIn } from "@mrstreamer/core/adult";
+import { setLanguage, t } from "@mrstreamer/core/i18n";
 import type { OnDemandCatalogue, ProviderTitle } from "@mrstreamer/core/provider";
 import { tmdb, tmdbImage } from "@mrstreamer/core/metadata/tmdb";
 import { collections, type Collections } from "@mrstreamer/core/ondemand/collections";
@@ -382,7 +383,10 @@ async function catalogueOf(
 ): Promise<Shown> {
   const members = (await Promise.all(owners.map(current))).flatMap((each) => each ?? []);
   if (required && members.length === 0 && owners.length > 0) {
-    throw new AppFailure({ kind: "unexpected", detail: "Movies and series haven't loaded yet." });
+    throw new AppFailure({
+      kind: "unexpected",
+      detail: t("Movies and series haven't loaded yet."),
+    });
   }
   return shownOf(members, language);
 }
@@ -490,7 +494,7 @@ async function refresh(args: WorkerCalls["refresh"]["args"]): Promise<null> {
     (under && under.revision > revision) ||
     (fetched.get(subscriptionId)?.revision ?? -1) > revision
   ) {
-    throw new AppFailure({ kind: "unexpected", detail: "Stopped." });
+    throw new AppFailure({ kind: "unexpected", detail: t("Stopped.") });
   }
   if (under?.revision === revision) return under.done;
   // This subscription's, under the login it had before. Another subscription's goes on.
@@ -518,7 +522,7 @@ async function refresh(args: WorkerCalls["refresh"]["args"]): Promise<null> {
         list,
       });
     }
-    if (abort.signal.aborted) throw new AppFailure({ kind: "unexpected", detail: "Stopped." });
+    if (abort.signal.aborted) throw new AppFailure({ kind: "unexpected", detail: t("Stopped.") });
     // A category list that comes back empty keeps the one before: panels answer an overloaded
     // request with an empty list too, and without its names, titles only a category marks for
     // adults would show everywhere.
@@ -844,6 +848,7 @@ const handlers: {
 };
 
 parentPort?.on("message", (request: WorkerRequest) => {
+  setLanguage(request.interfaceLanguage);
   const handler = handlers[request.method] as (args: unknown) => Promise<unknown>;
   handler(request.args).then(
     (value) => parentPort?.postMessage({ id: request.id, ok: true, value }),

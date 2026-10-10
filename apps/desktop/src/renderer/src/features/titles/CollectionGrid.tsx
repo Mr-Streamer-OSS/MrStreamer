@@ -14,6 +14,7 @@ import type {
 } from "@mrstreamer/contracts/ondemand";
 import { ownedId } from "@mrstreamer/contracts/subscription";
 import type { TitleFilters } from "@mrstreamer/contracts/title-filters";
+import { formatDecimal } from "@mrstreamer/core/i18n";
 import { hasModifier, isTyping } from "../../app/platform.ts";
 import { openDetails, useUi } from "../../app/ui-store.ts";
 import { Artwork } from "../../components/TitleArt.tsx";
@@ -153,7 +154,7 @@ export function CollectionGrid({
 
 /** What a poster says under its name: the year, the first genre and the rating. */
 function describe(title: Title): string {
-  return [title.year, title.genres[0], title.rating ? `★ ${title.rating.toFixed(1)}` : null]
+  return [title.year, title.genres[0], title.rating ? `★ ${formatDecimal(title.rating, 1)}` : null]
     .filter(Boolean)
     .join(" · ");
 }

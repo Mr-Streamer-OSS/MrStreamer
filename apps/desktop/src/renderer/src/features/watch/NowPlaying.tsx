@@ -3,6 +3,7 @@ import { List, Maximize, Minimize, Play, Square, Star } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
 import { ownedKey, sameOwned } from "@mrstreamer/contracts/subscription";
+import { t } from "@mrstreamer/core/i18n";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Progress } from "../../components/Progress.tsx";
 import { Button } from "../../components/ui/button.tsx";
@@ -74,7 +75,12 @@ function Details({ channel, categories }: NowPlayingProps) {
   // Whose channel it is, where another subscription has one of its name.
   const source = useSourceOf()(channel);
   const line = current
-    ? [channel.title, source, `Until ${clockTime(current.stop, now)}`, timeLeft(current, now)]
+    ? [
+        channel.title,
+        source,
+        t("Until {time}", { time: clockTime(current.stop, now) }),
+        timeLeft(current, now),
+      ]
     : [channelLine(channel, categories), source];
   const fellBack = quality.fellBack;
   return (
@@ -91,7 +97,10 @@ function Details({ channel, categories }: NowPlayingProps) {
           {fellBack && (
             <span className="text-white">
               {" · "}
-              {qualityName(fellBack.from)} didn't start, playing {qualityName(fellBack.to)}
+              {t("{from} didn't start, playing {to}", {
+                from: qualityName(fellBack.from),
+                to: qualityName(fellBack.to),
+              })}
             </span>
           )}
         </div>
@@ -137,16 +146,16 @@ function Controls({
   }, [menu, tracks?.subtitles.length, onMenu]);
   return (
     <div className="ml-auto flex flex-none flex-wrap items-center justify-end gap-3 max-[720px]:gap-1.5">
-      <Tooltip label="Channels">
-        <Button variant="media" size="icon" aria-label="Channels" onClick={onOpenChannels}>
+      <Tooltip label={t("Channels")}>
+        <Button variant="media" size="icon" aria-label={t("Channels")} onClick={onOpenChannels}>
           <List />
         </Button>
       </Tooltip>
-      <Tooltip label={favourite ? "Remove from favourites" : "Add to favourites"}>
+      <Tooltip label={favourite ? t("Remove from favourites") : t("Add to favourites")}>
         <Button
           variant="media"
           size="icon"
-          aria-label={favourite ? "Remove from favourites" : "Add to favourites"}
+          aria-label={favourite ? t("Remove from favourites") : t("Add to favourites")}
           aria-pressed={favourite}
           onClick={() => toggleFavourite(channel)}
         >
@@ -154,18 +163,18 @@ function Controls({
         </Button>
       </Tooltip>
       {active ? (
-        <Tooltip label="Stop">
-          <Button variant="media" size="icon" aria-label="Stop" onClick={() => player.stop()}>
+        <Tooltip label={t("Stop")}>
+          <Button variant="media" size="icon" aria-label={t("Stop")} onClick={() => player.stop()}>
             <Square className="size-3.5 fill-current" />
           </Button>
         </Tooltip>
       ) : (
-        <Tooltip label="Watch">
+        <Tooltip label={t("Watch")}>
           <Button
             data-retry
             variant="primary"
             size="icon"
-            aria-label="Watch"
+            aria-label={t("Watch")}
             onClick={() => player.play(channel)}
           >
             <Play className="size-4 translate-x-px fill-current" />
@@ -179,9 +188,9 @@ function Controls({
           audioId={audioId ?? tracks.playing}
           subtitles={tracks.subtitles}
           subtitle={remote ? null : subtitle}
-          subtitleNote={subtitleLoading ? "Loading" : null}
+          subtitleNote={subtitleLoading ? t("Loading") : null}
           shows={remote ? [] : null}
-          hereOnly="Live subtitles play on this computer only."
+          hereOnly={t("Live subtitles play on this computer only.")}
           open={menu === "subtitles" ? menu : null}
           onOpenChange={onMenu}
           onAudio={(id) => player.setAudio(id)}
@@ -189,8 +198,13 @@ function Controls({
         />
       )}
       <VolumeControl compact />
-      <Tooltip label={fullscreen ? "Exit full screen" : "Full screen"}>
-        <Button variant="media" size="icon" aria-label="Full screen" onClick={onToggleFullscreen}>
+      <Tooltip label={fullscreen ? t("Exit full screen") : t("Full screen")}>
+        <Button
+          variant="media"
+          size="icon"
+          aria-label={t("Full screen")}
+          onClick={onToggleFullscreen}
+        >
           {fullscreen ? <Minimize /> : <Maximize />}
         </Button>
       </Tooltip>

@@ -1,6 +1,7 @@
 import { Dialog } from "@base-ui/react/dialog";
 import { X } from "lucide-react";
 import type { ReactNode, RefObject } from "react";
+import { t } from "@mrstreamer/core/i18n";
 import { cn } from "../lib/utils.ts";
 
 /**
@@ -44,7 +45,7 @@ export function Sheet({
           {children}
           {/* After the content, so focus starts on its main action rather than on Close. */}
           <Dialog.Close
-            aria-label="Close"
+            aria-label={t("Close")}
             className="absolute top-4 right-4 z-10 grid size-9 place-items-center rounded-full bg-black/60 text-white ring-1 ring-white/20 hover:bg-black/80"
           >
             <X className="size-4" />

@@ -5,13 +5,14 @@
 import { queryOptions, useQuery, type QueryClient } from "@tanstack/react-query";
 import type { Download, DownloadFailure } from "@mrstreamer/contracts/downloads";
 import type { RawTitleRef } from "@mrstreamer/contracts/ondemand";
+import { formatBytes, formatPercent, t } from "@mrstreamer/core/i18n";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import { isFinished } from "@mrstreamer/core/viewing/titles";
 import { useUi } from "../app/ui-store.ts";
 import { titlePlayer, type CopyNow } from "../player/title-player.ts";
 import { describeError } from "./errors.ts";
 import { call, listen } from "./ipc.ts";
-import { runtime } from "./titles.ts";
+import { minutesLeft } from "./format.ts";
 
 export const downloadsQuery = () =>
   queryOptions({
@@ -68,7 +69,7 @@ function copyNow(download: Download): CopyNow {
     kind: "copy",
     copy: download.id,
     name: download.name,
-    detail: [episode ?? download.year, "Offline"].filter(Boolean).join(" · "),
+    detail: [episode ?? download.year, t("Offline")].filter(Boolean).join(" · "),
     artworkUrl: download.wideUrl ?? download.posterUrl,
     originalLanguage: download.originalLanguage,
   };
@@ -85,27 +86,15 @@ export function watchOffline(download: Download): void {
   void titlePlayer.open(copyNow(download), from);
 }
 
-/** "1.4 GB", "820 MB". */
-export function bytes(size: number): string {
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let value = size;
-  let unit = 0;
-  while (value >= 1000 && unit < units.length - 1) {
-    value /= 1000;
-    unit++;
-  }
-  return `${value.toLocaleString(undefined, { maximumFractionDigits: unit >= 3 ? 1 : 0 })} ${units[unit]}`;
-}
-
 /** Why a download stopped, in one sentence, with what to do about it. */
 export function describeFailure(failure: DownloadFailure): string {
   switch (failure.kind) {
     case "disk-full":
       return failure.needed === null
-        ? "Disk full. Free some space, then retry."
-        : `Disk full. Free ${bytes(failure.needed)}, then retry.`;
+        ? t("Disk full. Free some space, then retry.")
+        : t("Disk full. Free {size}, then retry.", { size: formatBytes(failure.needed) });
     case "folder":
-      return "The downloads folder can't be written. Retry, or check the disk.";
+      return t("The downloads folder can't be written. Retry, or check the disk.");
     case "stream":
       return describeError({ kind: "stream", failure: failure.failure });
     case "app":
@@ -118,22 +107,25 @@ export function statusLine(download: Download): string {
   const { status } = download;
   switch (status.kind) {
     case "queued":
-      return "Queued";
+      return t("Queued");
     case "waiting":
       return download.subscription
-        ? `Waiting while ${download.subscription.name} plays`
-        : "Waiting for playback";
+        ? t("Waiting while {subscription} plays", { subscription: download.subscription.name })
+        : t("Waiting for playback");
     case "transferring": {
       if (status.size === null || status.size === 0) {
-        return status.received > 0 ? `${bytes(status.received)}` : "Starting";
+        return status.received > 0 ? formatBytes(status.received) : t("Starting");
       }
       const left =
         status.rate && status.rate > 0 ? (status.size - status.received) / status.rate : null;
       return [
-        `${Math.floor((status.received / status.size) * 100)}%`,
-        `${bytes(status.received)} of ${bytes(status.size)}`,
-        left !== null ? `${runtime(left)} left` : null,
-        status.restarted ? "started again, the file changed" : null,
+        formatPercent(Math.floor((status.received / status.size) * 100) / 100),
+        t("{received} of {size}", {
+          received: formatBytes(status.received),
+          size: formatBytes(status.size),
+        }),
+        left !== null ? minutesLeft(Math.max(1, Math.round(left / 60))) : null,
+        status.restarted ? t("started again, the file changed") : null,
       ]
         .filter(Boolean)
         .join(" · ");
@@ -143,7 +135,7 @@ export function statusLine(download: Download): string {
     case "complete":
       return "";
     case "missing":
-      return "The file is no longer on this computer.";
+      return t("The file is no longer on this computer.");
   }
 }
 

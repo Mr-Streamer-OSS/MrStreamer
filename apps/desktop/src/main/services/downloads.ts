@@ -38,6 +38,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
+import { t } from "@mrstreamer/core/i18n";
 import { fileDisk, transfer, type Disk, type TransferOutcome } from "../downloads/transfer.ts";
 import {
   DownloadStore,
@@ -142,9 +143,16 @@ function make(deps: DownloadsDeps) {
 
     const records = new Map<string, StoredDownload>();
     const loaded = yield* Effect.result(store.list);
-    // Without its table nothing can be queued or listed either: each call says so.
-    const unloaded = loaded._tag === "Failure" ? loaded.failure : null;
-    if (unloaded) yield* Effect.logWarning("[downloads] can't be read", unloaded.error);
+    // Without its table nothing can be queued or listed either: each call says so, as the store
+    // says it then, in the interface language of that moment. A read that works later still fails:
+    // nothing on disk was checked against the table at the start.
+    const unloaded =
+      loaded._tag === "Failure"
+        ? store.list.pipe(Effect.andThen(Effect.fail(loaded.failure)))
+        : null;
+    if (loaded._tag === "Failure") {
+      yield* Effect.logWarning("[downloads] can't be read", loaded.failure.error);
+    }
     const inventory = loaded._tag === "Success" ? loaded.success : null;
     for (const record of inventory?.records ?? []) records.set(record.id, record);
     /** Copies whose file is gone, as last looked: looked at again as the window asks for the list. */
@@ -244,7 +252,7 @@ function make(deps: DownloadsDeps) {
                 kind: "failed",
                 failure: record.failure ?? {
                   kind: "app",
-                  error: { kind: "unexpected", detail: "This download stopped." },
+                  error: { kind: "unexpected", detail: t("This download stopped.") },
                 },
               }
             : active?.id === record.id
@@ -588,13 +596,15 @@ function make(deps: DownloadsDeps) {
         catch: (cause) => (cause instanceof Failed ? cause : failedWith(cause)),
       });
 
-    const notFound = new Failed({
-      error: { kind: "unexpected", detail: "That download is no longer here." },
-    });
+    // Made when it fails, so it says so in the interface language of the moment.
+    const notFound = () =>
+      new Failed({
+        error: { kind: "unexpected", detail: t("That download is no longer here.") },
+      });
 
     return {
       list: Effect.suspend(() => {
-        if (unloaded) return Effect.fail(unloaded);
+        if (unloaded) return unloaded;
         lookForMissing();
         return view;
       }),
@@ -678,7 +688,7 @@ function make(deps: DownloadsDeps) {
       retry: (id: string) =>
         attempt(async () => {
           const record = records.get(id);
-          if (!record) throw notFound;
+          if (!record) throw notFound();
           if (record.state !== "failed") return;
           const { failure: _failure, ...rest } = record;
           write({ ...rest, state: "queued" });
@@ -689,7 +699,7 @@ function make(deps: DownloadsDeps) {
       recordProgress: (id: string, position: number, duration: number) =>
         attempt(async () => {
           const record = records.get(id);
-          if (record?.state !== "complete") throw notFound;
+          if (record?.state !== "complete") throw notFound();
           write({
             ...record,
             progress: { position: Math.min(position, duration), duration, at: Date.now() },

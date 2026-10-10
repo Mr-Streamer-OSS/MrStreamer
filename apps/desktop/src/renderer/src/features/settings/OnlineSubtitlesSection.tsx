@@ -7,6 +7,7 @@ import type {
   SubtitleService,
 } from "@mrstreamer/contracts/online-subtitles";
 import { TITLE_LANGUAGES } from "@mrstreamer/core/ondemand/languages";
+import { t } from "@mrstreamer/core/i18n";
 import { useUi } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { Input } from "../../components/ui/input.tsx";
@@ -64,27 +65,27 @@ export function OnlineSubtitlesSection() {
     });
   };
   return (
-    <Section ref={section} title="Online subtitles">
+    <Section ref={section} title={t("Online subtitles")}>
       <p className="py-2 text-sm">
-        Search only when you ask. The selected services receive the TMDB identity, or the title and
-        year when no identity is known, plus the episode and languages. Provider links and logins
-        stay on this computer.
+        {t(
+          "Search only when you ask. The selected services receive the TMDB identity, or the title and year when no identity is known, plus the episode and languages. Provider links and logins stay on this computer.",
+        )}
       </p>
-      <Row label="Online search">
+      <Row label={t("Online search")}>
         <input
           type="checkbox"
-          aria-label="Online subtitle search"
+          aria-label={t("Online subtitle search")}
           checked={saved?.enabled ?? false}
           disabled={!saved || update.isPending}
           onChange={(event) => change({ enabled: event.currentTarget.checked })}
         />
       </Row>
-      <Row label="Search services">
+      <Row label={t("Search services")}>
         <Select
-          label="Subtitle search services"
+          label={t("Subtitle search services")}
           value={saved?.service ?? "both"}
           options={[
-            { value: "both", label: "Every service set up" },
+            { value: "both", label: t("Every service set up") },
             { value: "subdl", label: "SubDL" },
             { value: "opensubtitles", label: "OpenSubtitles" },
           ]}
@@ -92,10 +93,10 @@ export function OnlineSubtitlesSection() {
         />
       </Row>
       <fieldset disabled={!saved || update.isPending} className="border-b border-white/8 py-3">
-        <legend className="pt-3">Languages</legend>
+        <legend className="pt-3">{t("Languages")}</legend>
         <div className="grid grid-cols-3 gap-2 pt-2">
           {TITLE_LANGUAGES.map(({ code, name }) => (
-            <label key={code} className="flex gap-2 text-sm">
+            <label key={code} lang={code} className="flex gap-2 text-sm">
               <input
                 type="checkbox"
                 checked={saved?.languages.includes(code) ?? false}
@@ -116,7 +117,7 @@ export function OnlineSubtitlesSection() {
         <div key={service}>
           <Row
             label={service === "subdl" ? "SubDL" : "OpenSubtitles"}
-            note={saved?.configured[service] ? "Saved" : "Not set up"}
+            note={saved?.configured[service] ? t("Saved") : t("Not set up")}
           >
             <Button
               size="sm"
@@ -129,7 +130,7 @@ export function OnlineSubtitlesSection() {
                 setPassword("");
               }}
             >
-              {saved?.configured[service] ? "Replace" : "Set up"}
+              {saved?.configured[service] ? t("Replace") : t("Set up")}
             </Button>
             {saved?.configured[service] && (
               <Button
@@ -138,7 +139,7 @@ export function OnlineSubtitlesSection() {
                 disabled={update.isPending}
                 onClick={() => change({}, { [service]: null })}
               >
-                Remove
+                {t("Remove")}
               </Button>
             )}
           </Row>
@@ -166,13 +167,17 @@ export function OnlineSubtitlesSection() {
             >
               <p className="mb-3 text-sm">
                 {service === "subdl"
-                  ? "Use the API key from your SubDL account."
-                  : "Use your OpenSubtitles API key and account. Login happens when you download."}
+                  ? t("Use the API key from your SubDL account.")
+                  : t(
+                      "Use your OpenSubtitles API key and account. Login happens when you download.",
+                    )}
               </p>
               <Input
                 type="password"
-                aria-label={`${service === "subdl" ? "SubDL" : "OpenSubtitles"} API key`}
-                placeholder="API key"
+                aria-label={t("{service} API key", {
+                  service: service === "subdl" ? "SubDL" : "OpenSubtitles",
+                })}
+                placeholder={t("API key")}
                 autoComplete="off"
                 value={apiKey}
                 onChange={(event) => setApiKey(event.currentTarget.value)}
@@ -180,15 +185,15 @@ export function OnlineSubtitlesSection() {
               {service === "opensubtitles" && (
                 <div className="mt-2 space-y-2">
                   <Input
-                    aria-label="OpenSubtitles username"
-                    placeholder="Username"
+                    aria-label={t("OpenSubtitles username")}
+                    placeholder={t("Username")}
                     value={username}
                     onChange={(event) => setUsername(event.currentTarget.value)}
                   />
                   <Input
                     type="password"
-                    aria-label="OpenSubtitles password"
-                    placeholder="Password"
+                    aria-label={t("OpenSubtitles password")}
+                    placeholder={t("Password")}
                     autoComplete="off"
                     value={password}
                     onChange={(event) => setPassword(event.currentTarget.value)}
@@ -206,7 +211,7 @@ export function OnlineSubtitlesSection() {
                   (service === "opensubtitles" && (!username.trim() || !password))
                 }
               >
-                Save
+                {t("Save")}
               </Button>
             </RowForm>
           )}
@@ -214,7 +219,7 @@ export function OnlineSubtitlesSection() {
       ))}
       {(settings.isError || update.isError) && (
         <p role="alert" className="pt-3 text-sm">
-          Subtitle settings could not be saved or read. Your saved keys were not changed.
+          {t("Subtitle settings could not be saved or read. Your saved keys were not changed.")}
         </p>
       )}
     </Section>

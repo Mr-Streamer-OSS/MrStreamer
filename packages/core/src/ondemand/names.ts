@@ -3,6 +3,7 @@
 // "Race Across the World (NL) - S02E03 - Tbilisi". A bare year stays part of the title, because
 // it often is one: "Wonder Woman 1984", "Blade Runner 2049".
 import { recase } from "../catalogue/normalize.ts";
+import { t } from "../i18n.ts";
 
 /** A trailing "(NL)", "(MULTI)", "(NL AUDIO)", "(DE-DUBBED)". */
 const LANGUAGE = /\s*[([]\s*(MULTISUB|[A-Za-z]{2,5}(?:[\s-][A-Za-z]{2,7})?)\s*[)\]]\s*$/i;
@@ -82,7 +83,9 @@ export function titleName(raw: string, releaseDate: string | null = null): Title
 
 /** "S2 E3". Specials, season 0, are "Special 3". */
 export function episodeLabel(season: number, episode: number): string {
-  return season === 0 ? `Special ${episode}` : `S${season} E${episode}`;
+  return season === 0
+    ? t("Special {episode}", { episode: String(episode) })
+    : t("S{season} E{episode}", { season: String(season), episode: String(episode) });
 }
 
 /**
@@ -93,7 +96,7 @@ export function episodeName(raw: string, number: number): string {
   const text = raw.normalize("NFKC").replace(/\s+/g, " ").trim();
   const match = EPISODE_NUMBER.exec(text);
   const rest = match ? text.slice(match.index + match[0].length).trim() : text;
-  return rest && match ? recase(rest) : `Episode ${number}`;
+  return rest && match ? recase(rest) : t("Episode {number}", { number: String(number) });
 }
 
 function yearOf(date: string | null): number | null {

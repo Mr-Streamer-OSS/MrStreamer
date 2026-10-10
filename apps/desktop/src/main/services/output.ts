@@ -288,7 +288,7 @@ function make(deps: OutputDeps) {
       turn === undefined
         ? Effect.void
         : Effect.flatMap(playback.passed(turn), (passed) =>
-            passed ? Effect.fail(superseded) : Effect.void,
+            passed ? Effect.fail(superseded()) : Effect.void,
           );
 
     /** Runs what an adapter's or the playback service's callback sets off, outside any call. */

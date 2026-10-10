@@ -19,6 +19,7 @@ import { GENRES, tmdbImage, type EpisodeAbout, type TitleAbout } from "../metada
 import type { ProviderDetails, ProviderEpisode } from "../provider.ts";
 import { suitability } from "./languages.ts";
 import { episodeName, titleName } from "./names.ts";
+import { t } from "../i18n.ts";
 
 export function movieDetails(
   title: Title,
@@ -94,7 +95,9 @@ export function seriesDetails(
       const known = provided.get(number);
       return {
         number,
-        name: known?.name ?? (number === 0 ? "Specials" : `Season ${number}`),
+        name:
+          known?.name ??
+          (number === 0 ? t("Specials") : t("Season {number}", { number: String(number) })),
         posterUrl: known?.posterUrl ?? null,
         episodes: sourceOrder ? episodes : episodes.sort((a, b) => a.number - b.number),
       };

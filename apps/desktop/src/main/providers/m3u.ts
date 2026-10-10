@@ -9,6 +9,7 @@ import {
 import type { PlaylistMapping } from "@mrstreamer/contracts/playlist";
 import { m3uReader, type PlaylistEntry } from "@mrstreamer/core/playlist/m3u";
 import { providerFetch, type Provider, type ProviderOptions } from "@mrstreamer/core/provider";
+import { t } from "@mrstreamer/core/i18n";
 import { describeNetworkError } from "./xtream.ts";
 
 export interface PlaylistAccount {
@@ -134,7 +135,7 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
           if ((account.mapping || inspecting) && bytes > MAPPING_BYTES) {
             throw new AppFailure({
               kind: "unexpected",
-              detail: "Playlist exceeds the 64 MiB mapping limit.",
+              detail: t("Playlist exceeds the {size} MiB mapping limit.", { size: 64 }),
             });
           }
           for (const entry of reader.push(piece)) {
@@ -142,7 +143,7 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
             if ((account.mapping || inspecting) && entries.length > 100_000)
               throw new AppFailure({
                 kind: "unexpected",
-                detail: "Playlist exceeds the 100,000 entry mapping limit.",
+                detail: t("Playlist exceeds the {count} entry mapping limit.", { count: 100_000 }),
               });
           }
           if (reader.playlist === false) {
@@ -160,12 +161,14 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
           bytes > MAPPING_BYTES
             ? new AppFailure({
                 kind: "unexpected",
-                detail: "Playlist exceeds the 64 MiB mapping limit.",
+                detail: t("Playlist exceeds the {size} MiB mapping limit.", { size: 64 }),
               })
             : entries.length > 100_000
               ? new AppFailure({
                   kind: "unexpected",
-                  detail: "Playlist exceeds the 100,000 entry mapping limit.",
+                  detail: t("Playlist exceeds the {count} entry mapping limit.", {
+                    count: 100_000,
+                  }),
                 })
               : undefined;
         last = playlistRead(
@@ -207,7 +210,7 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
           if (characters > 65_536)
             throw new AppFailure({
               kind: "unexpected",
-              detail: "Playlist header exceeds 65,536 characters.",
+              detail: t("Playlist header exceeds {count} characters.", { count: 65_536 }),
             });
           reader.push(part);
           if (reader.playlist !== null) break;
@@ -229,7 +232,9 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
       if (!(await firstLine(signal)).playlist) {
         throw new AppFailure({
           kind: "incomplete-login",
-          detail: "This address isn't a playlist. A server address needs a username and password.",
+          detail: t(
+            "This address isn't a playlist. A server address needs a username and password.",
+          ),
         });
       }
       return { state: "active", expiresAt: null, maxConnections: null, activeConnections: null };
@@ -337,7 +342,7 @@ function notAPlaylist(link: string): AppFailure {
   return new AppFailure({
     kind: "unreachable",
     server: new URL(link).origin,
-    detail: "The address answered, but not with a playlist.",
+    detail: t("The address answered, but not with a playlist."),
   });
 }
 

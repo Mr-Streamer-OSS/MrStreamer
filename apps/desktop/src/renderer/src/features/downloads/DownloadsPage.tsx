@@ -9,13 +9,13 @@ import { useMutation } from "@tanstack/react-query";
 import { Play } from "lucide-react";
 import { useState } from "react";
 import type { Download } from "@mrstreamer/contracts/downloads";
+import { formatBytes, formatNumber, t } from "@mrstreamer/core/i18n";
 import { openView } from "../../app/ui-store.ts";
 import { Progress } from "../../components/Progress.tsx";
 import { Artwork } from "../../components/TitleArt.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { BarFrame, Brand, PageButton, WindowBar } from "../../components/WindowBar.tsx";
 import {
-  bytes,
   episodeLine,
   statusLine,
   transferred,
@@ -35,8 +35,10 @@ export function DownloadsPage({ standalone = false }: { standalone?: boolean }) 
   const copies = items.filter(onComputer);
   const summary = list.data
     ? [
-        list.data.bytes > 0 ? `${bytes(list.data.bytes)} on this computer` : null,
-        list.data.free !== null ? `${bytes(list.data.free)} free` : null,
+        list.data.bytes > 0
+          ? t("{size} on this computer", { size: formatBytes(list.data.bytes) })
+          : null,
+        list.data.free !== null ? t("{size} free", { size: formatBytes(list.data.free) }) : null,
       ]
         .filter(Boolean)
         .join(" · ")
@@ -46,9 +48,11 @@ export function DownloadsPage({ standalone = false }: { standalone?: boolean }) 
       {standalone ? <OfflineBar /> : <WindowBar className="bg-black" />}
       <div className="min-h-0 flex-1 overflow-y-auto px-10 pt-2 pb-10">
         <div className="mb-3 flex items-baseline gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight">Downloads</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{t("Downloads")}</h1>
           {items.length > 0 && (
-            <span className="text-sm text-muted-foreground tabular-nums">{items.length}</span>
+            <span className="text-sm text-muted-foreground tabular-nums">
+              {formatNumber(items.length)}
+            </span>
           )}
           <span className="ml-auto text-[0.8125rem] text-muted-foreground tabular-nums">
             {summary}
@@ -58,26 +62,26 @@ export function DownloadsPage({ standalone = false }: { standalone?: boolean }) 
           <p className="text-sm text-destructive">{describeError(appError(list.error))}</p>
         ) : list.data && items.length === 0 ? (
           <p className="text-[0.9375rem] text-muted-foreground">
-            Nothing downloaded yet. Download a movie or an episode from its details.
+            {t("Nothing downloaded yet. Download a movie or an episode from its details.")}
           </p>
         ) : null}
         {queue.length > 0 && (
-          <section aria-label="Queue">
-            <h2 className="mt-2 mb-1 text-[0.9375rem] font-semibold">Queue</h2>
+          <section aria-label={t("Queue")}>
+            <h2 className="mt-2 mb-1 text-[0.9375rem] font-semibold">{t("Queue")}</h2>
             {queue.map((item) => (
               <Row key={item.id} item={item} />
             ))}
           </section>
         )}
         {copies.length > 0 && (
-          <section aria-label="On this computer">
+          <section aria-label={t("On this computer")}>
             <h2
               className={cn(
                 "mb-1 text-[0.9375rem] font-semibold",
                 queue.length > 0 ? "mt-6" : "mt-2",
               )}
             >
-              On this computer
+              {t("On this computer")}
             </h2>
             {copies.map((item) => (
               <Row key={item.id} item={item} />
@@ -86,7 +90,7 @@ export function DownloadsPage({ standalone = false }: { standalone?: boolean }) 
         )}
         {list.data && list.data.ended > 0 && (
           <p className="mt-4 text-[0.8125rem] text-muted-foreground">
-            Unfinished downloads ended with their subscription.
+            {t("Unfinished downloads ended with their subscription.")}
           </p>
         )}
       </div>
@@ -100,11 +104,11 @@ function OfflineBar() {
     <BarFrame className="bg-black">
       <Brand />
       <PageButton view="downloads" current>
-        Downloads
+        {t("Downloads")}
       </PageButton>
       <div className="ml-auto flex items-center gap-1.5">
         <Button variant="ghost" size="sm" onClick={() => openView("home")}>
-          Add subscription
+          {t("Add subscription")}
         </Button>
       </div>
     </BarFrame>
@@ -127,8 +131,8 @@ function Row({ item }: { item: Download }) {
     item.title.kind === "movie" ? item.year : null,
     copy && item.duration ? runtime(item.duration) : null,
     !copy ? item.subscription?.name : null,
-    item.size ? bytes(item.size) : null,
-    copy && !item.subscription ? "Subscription removed, copy kept" : null,
+    item.size ? formatBytes(item.size) : null,
+    copy && !item.subscription ? t("Subscription removed, copy kept") : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -182,12 +186,12 @@ function Row({ item }: { item: Download }) {
         {status.kind === "complete" && (
           <Button variant="primary" size="sm" onClick={() => watchOffline(item)}>
             <Play className="fill-current" />
-            Watch offline
+            {t("Watch offline")}
           </Button>
         )}
         {status.kind === "failed" && (
           <Button size="sm" disabled={retry.isPending} onClick={() => retry.mutate()}>
-            Retry
+            {t("Retry")}
           </Button>
         )}
         {copy || status.kind === "failed" ? (
@@ -202,11 +206,11 @@ function Row({ item }: { item: Download }) {
               remove.mutate();
             }}
           >
-            {confirming ? "Delete copy" : "Delete"}
+            {confirming ? t("Delete copy") : t("Delete")}
           </Button>
         ) : (
           <Button size="sm" disabled={remove.isPending} onClick={() => remove.mutate()}>
-            Cancel
+            {t("Cancel")}
           </Button>
         )}
       </div>

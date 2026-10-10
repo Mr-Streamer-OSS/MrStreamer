@@ -12,6 +12,7 @@ import type {
   Receiver,
   RemoteMedia,
 } from "@mrstreamer/contracts/output";
+import { t } from "@mrstreamer/core/i18n";
 import { appError } from "../lib/errors.ts";
 import { call, listen } from "../lib/ipc.ts";
 
@@ -114,16 +115,16 @@ function connect(receiver: Pick<Receiver, "id" | "kind" | "name">): void {
 
 /** "Living Room TV", or "AirPlay" for a receiver the system doesn't name. */
 export function receiverName(receiver: Pick<Receiver, "kind" | "name"> | null): string {
-  return receiver?.name ?? (receiver?.kind === "cast" ? "the TV" : "AirPlay");
+  return receiver?.name ?? (receiver?.kind === "cast" ? t("the TV") : "AirPlay");
 }
 
 /** "on Living Room TV", or "over AirPlay" for a receiver the system doesn't name. */
 export function where(receiver: Pick<Receiver, "kind" | "name"> | null): string {
   return receiver?.name
-    ? `on ${receiver.name}`
+    ? t("on {receiver}", { receiver: receiver.name })
     : receiver?.kind === "cast"
-      ? "on the TV"
-      : "over AirPlay";
+      ? t("on the TV")
+      : t("over AirPlay");
 }
 
 /**
@@ -134,7 +135,10 @@ export function usePreviewWaits(): string | null {
   const output = useOutput((state) => state.status.output);
   if (output.kind !== "receiver" && output.kind !== "lost") return null;
   const busy = output.kind === "receiver" && output.media !== null;
-  return `Preview waits while ${receiverName(output.receiver)} ${busy ? "plays" : "is connected"}`;
+  const receiver = receiverName(output.receiver);
+  return busy
+    ? t("Preview waits while {receiver} plays", { receiver })
+    : t("Preview waits while {receiver} is connected", { receiver });
 }
 
 /** Where `media` is now, in seconds into its title: the receiver's last word, moved on while it plays. */

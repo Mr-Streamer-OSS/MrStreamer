@@ -1,6 +1,7 @@
 // The pieces Settings is built from: titled lists of rows, each with its name on the left and
 // its control or value on the right, like the system's own settings.
 import type { FormEvent, ReactNode, Ref } from "react";
+import { cn } from "../../lib/utils.ts";
 
 /** A titled list of rows. */
 export function Section({
@@ -62,11 +63,15 @@ export function Select<T extends string>({
   value,
   options,
   onChange,
+  wide = false,
 }: {
   label: string;
   value: T;
-  options: readonly { readonly value: T; readonly label: string }[];
+  /** Each choice, with the language its label is in when that isn't the interface's. */
+  options: readonly { readonly value: T; readonly label: string; readonly lang?: string }[];
   onChange: (value: T) => void;
+  /** Room for a longer choice, such as System default with the language it follows. */
+  wide?: boolean;
 }) {
   return (
     <select
@@ -76,10 +81,13 @@ export function Select<T extends string>({
         const picked = options.find((option) => option.value === event.target.value);
         if (picked) onChange(picked.value);
       }}
-      className="h-9 w-56 rounded-lg bg-white/6 px-3 ring-1 ring-input outline-none focus:ring-2 focus:ring-ring"
+      className={cn(
+        "h-9 truncate rounded-lg bg-white/6 px-3 ring-1 ring-input outline-none focus:ring-2 focus:ring-ring",
+        wide ? "w-64" : "w-56",
+      )}
     >
       {options.map((option) => (
-        <option key={option.value} value={option.value}>
+        <option key={option.value} value={option.value} lang={option.lang}>
           {option.label}
         </option>
       ))}

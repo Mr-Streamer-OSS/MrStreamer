@@ -1,5 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowDownToLine } from "lucide-react";
+import { t } from "@mrstreamer/core/i18n";
 import { isMac, useWindowFullScreen } from "../../app/platform.ts";
 import { openView, resetForAccount } from "../../app/ui-store.ts";
 import { Logo } from "../../components/Logo.tsx";
@@ -31,19 +32,21 @@ export function ConnectScreen() {
         {kept > 0 && (
           <Button variant="ghost" size="sm" onClick={() => openView("downloads")}>
             <ArrowDownToLine />
-            Downloads
+            {t("Downloads")}
           </Button>
         )}
       </div>
       <div className="w-[26rem] py-12">
         <Logo className="mb-7 size-14" />
-        <h1 className="mb-2 text-4xl font-semibold tracking-tight">Connect your subscription</h1>
+        <h1 className="mb-2 text-4xl font-semibold tracking-tight">
+          {t("Connect your subscription")}
+        </h1>
         <LoginForm
-          submit={{ idle: "Connect", pending: "Connecting…" }}
+          submit={{ idle: t("Connect"), pending: t("Connecting…") }}
           intro={(mode) =>
             mode === "login"
-              ? "Your provider's server address and login."
-              : "The M3U link from your provider."
+              ? t("Your provider's server address and login.")
+              : t("The M3U link from your provider.")
           }
           onAdded={async () => {
             player.reset();

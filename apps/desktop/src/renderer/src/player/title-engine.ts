@@ -18,6 +18,7 @@
 import { subtitleDecoder, type SubtitleCodec } from "@mrstreamer/core/subtitles/decoder";
 import { readFeedLine } from "@mrstreamer/core/subtitles/feed";
 import type { SubtitleChange } from "@mrstreamer/core/subtitles/screen";
+import { t } from "@mrstreamer/core/i18n";
 import type { EngineError, StreamInfo } from "./engine.ts";
 import { readMp4Start } from "./mp4.ts";
 import {
@@ -172,7 +173,10 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     // Nothing to show yet, paused or not: the provider answered and then stalled. Later than
     // the proxy's own wait for a run's start, whose answer says more.
     if (from === null && now - waitingFrom > NOTHING_TIMEOUT_MS) {
-      fail({ kind: "network", detail: `No picture within ${NOTHING_TIMEOUT_MS / 1000} s.` });
+      fail({
+        kind: "network",
+        detail: t("No picture within {seconds} s.", { seconds: NOTHING_TIMEOUT_MS / 1000 }),
+      });
       return;
     }
     if (video.paused || video.seeking || video.currentTime > lastTime + 0.05) {
@@ -181,16 +185,19 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
       return;
     }
     if (!settled && now - waitingFrom > START_TIMEOUT_MS) {
-      fail({ kind: "network", detail: `No picture within ${START_TIMEOUT_MS / 1000} s.` });
+      fail({
+        kind: "network",
+        detail: t("No picture within {seconds} s.", { seconds: START_TIMEOUT_MS / 1000 }),
+      });
     } else if (settled && now - lastProgressAt > STALL_TIMEOUT_MS && ahead() < 1) {
-      fail({ kind: "network", detail: "The title stopped arriving." });
+      fail({ kind: "network", detail: t("The title stopped arriving.") });
     }
   }, 1000);
   const onError = () => {
     const error = video.error;
     fail({
       kind: error?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED ? "unsupported" : "media",
-      detail: error?.message || "The title could not be decoded.",
+      detail: error?.message || t("The title could not be decoded."),
     });
   };
   const onEnded = () => endedListener?.();
@@ -314,7 +321,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     if (!response.ok || !response.body) {
       throw {
         kind: response.status === 415 ? "unsupported" : "network",
-        detail: `The title answered HTTP ${response.status}.`,
+        detail: t("The title answered HTTP {status}.", { status: String(response.status) }),
       } satisfies EngineError;
     }
     const pictureStart = Number(response.headers.get("x-start")) || 0;
@@ -331,7 +338,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
       if (done || head.length > HEAD_LIMIT) {
         throw {
           kind: "unsupported",
-          detail: "The title didn't start like a video.",
+          detail: t("The title didn't start like a video."),
         } satisfies EngineError;
       }
       const joined = new Uint8Array(head.length + value.length);
@@ -345,7 +352,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     if (!MediaSource.isTypeSupported(type)) {
       throw {
         kind: "unsupported",
-        detail: `This system can't play ${start.codecs}.`,
+        detail: t("This system can't play {codecs}.", { codecs: start.codecs }),
       } satisfies EngineError;
     }
     if (run.duration) mediaSource.duration = run.duration;

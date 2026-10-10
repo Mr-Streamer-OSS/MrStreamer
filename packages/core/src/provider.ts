@@ -1,5 +1,6 @@
 import type { StreamFormat } from "@mrstreamer/contracts/playback";
 import type { AccountStatus } from "@mrstreamer/contracts/subscription";
+import { t } from "./i18n.ts";
 
 /** A category as the provider lists it. */
 export interface ProviderCategory {
@@ -199,11 +200,13 @@ export function providerFetch(fetchImpl: typeof fetch, login: readonly string[])
         const location = REDIRECTS.has(response.status) ? response.headers.get("location") : null;
         if (location === null) return response;
         void response.body?.cancel().catch(() => {});
-        if (redirects === MAX_REDIRECTS) throw new TypeError("It redirected too many times.");
+        if (redirects === MAX_REDIRECTS) throw new TypeError(t("It redirected too many times."));
         const next = new URL(location, target);
         if (exposesLogin(start, next, login)) {
           throw new TypeError(
-            "It redirected to an unencrypted address with your login in it, so Mr. Streamer stopped.",
+            t(
+              "It redirected to an unencrypted address with your login in it, so Mr. Streamer stopped.",
+            ),
           );
         }
         target = next;

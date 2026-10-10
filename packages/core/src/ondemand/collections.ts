@@ -7,6 +7,7 @@ import type {
   Title,
   TitleKind,
 } from "@mrstreamer/contracts/ondemand";
+import { type PlainKey, t } from "../i18n.ts";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
 import { GENRES, tmdbImage, type TitleMetadata } from "../metadata/tmdb.ts";
 import { suitability, suits } from "./languages.ts";
@@ -231,9 +232,10 @@ export function collections(source: CollectionSource): Collections {
       }
       if (id.startsWith("like:")) {
         const seed = seedOf(id.slice("like:".length));
-        return seed ? `More like ${seed.title.title}` : null;
+        return seed ? t("More like {title}", { title: seed.title.title }) : null;
       }
-      return NAMES[id as keyof typeof NAMES] ?? null;
+      const name = NAMES.get(id);
+      return name === undefined ? null : t(name);
     },
 
     genres: once(() => {
@@ -274,16 +276,17 @@ function once<A>(make: () => A): () => A {
   return () => (value ??= { made: make() }).made;
 }
 
-const NAMES = {
-  all: "All",
-  "new-week": "New this week",
-  "new-month": "New this month",
-  recent: "Recent releases",
-  popular: "Popular",
-  "top-rated": "Top rated",
-  "4k": "4K",
-  adult: "For adults",
-} as const;
+/** The fixed collections' names, in the interface language when they're asked for. */
+const NAMES = new Map<string, PlainKey>([
+  ["all", "All"],
+  ["new-week", "New this week"],
+  ["new-month", "New this month"],
+  ["recent", "Recent releases"],
+  ["popular", "Popular"],
+  ["top-rated", "Top rated"],
+  ["4k", "4K"],
+  ["adult", "For adults"],
+]);
 
 const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
 

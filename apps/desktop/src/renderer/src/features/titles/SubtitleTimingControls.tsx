@@ -6,6 +6,7 @@ import {
   DEFAULT_SUBTITLE_TIMING,
   type SubtitleTiming,
 } from "@mrstreamer/contracts/online-subtitles";
+import { formatDecimal, formatNumber, t } from "@mrstreamer/core/i18n";
 import { Button } from "../../components/ui/button.tsx";
 import { Input } from "../../components/ui/input.tsx";
 import { cn } from "../../lib/utils.ts";
@@ -52,7 +53,8 @@ function TimingField({
       onChange={(event) => {
         const text = event.currentTarget.value;
         setDraft(text);
-        const number = Number(text);
+        // Either decimal mark, as the viewer's language writes it.
+        const number = Number(text.replace(",", "."));
         if (text.trim() && Number.isFinite(number) && number >= min && number <= max)
           onChange(number);
       }}
@@ -70,7 +72,7 @@ export function SubtitleTimingSection({ downloaded }: { downloaded: boolean }) {
   return downloaded ? (
     <DownloadedTiming />
   ) : (
-    <PanelSection title="Timing" aside={<TrackTiming />} />
+    <PanelSection title={t("Timing")} aside={<TrackTiming />} />
   );
 }
 
@@ -81,7 +83,9 @@ function DownloadedTiming() {
   // No note over the picture as G and H leave: the section shows the offset and the drift itself.
   const change = (next: SubtitleTiming) => {
     setError(null);
-    void titlePlayer.setDownloadedTiming(next).catch(() => setError("Timing could not be saved."));
+    void titlePlayer
+      .setDownloadedTiming(next)
+      .catch(() => setError(t("Timing could not be saved.")));
   };
   // A button beside a field that is being typed in: the field lets go, so it reads what the
   // button set and not the text typed before.
@@ -103,17 +107,16 @@ function DownloadedTiming() {
         })
       }
     >
-      {by > 0 ? "+" : ""}
-      {by} s
+      {t("{seconds} s", { seconds: `${by > 0 ? "+" : ""}${formatNumber(by)}` })}
     </Button>
   );
   return (
     <PanelSection
-      title="Timing"
+      title={t("Timing")}
       aside={
         <>
           <span className="text-[0.8125rem] tabular-nums">{delayLabel(timing.offset)}</span>
-          <TextButton onClick={() => press(DEFAULT_SUBTITLE_TIMING)}>Reset</TextButton>
+          <TextButton onClick={() => press(DEFAULT_SUBTITLE_TIMING)}>{t("Reset")}</TextButton>
         </>
       }
     >
@@ -121,7 +124,7 @@ function DownloadedTiming() {
         {[-1, -0.1].map(step)}
         <TimingField
           id="subtitle-offset"
-          label="Offset, seconds"
+          label={t("Offset, seconds")}
           className="min-w-12 flex-1"
           min={-600}
           max={600}
@@ -138,15 +141,15 @@ function DownloadedTiming() {
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => setDrift(!drift)}
       >
-        <span className="flex-1">Drift and frame rate</span>
-        <span className="text-[0.8125rem] tabular-nums">{timing.speed.toFixed(5)}</span>
+        <span className="flex-1">{t("Drift and frame rate")}</span>
+        <span className="text-[0.8125rem] tabular-nums">{formatDecimal(timing.speed, 5)}</span>
         <ChevronRight className={cn("size-4 flex-none", drift && "rotate-90")} />
       </button>
       {drift && (
         <>
           <div className="flex items-center gap-3 py-1">
             <label htmlFor="subtitle-speed" className="flex-1">
-              Drift ratio
+              {t("Drift ratio")}
             </label>
             <TimingField
               id="subtitle-speed"
@@ -158,7 +161,7 @@ function DownloadedTiming() {
               onChange={(speed) => change({ ...timing, speed })}
             />
           </div>
-          <div className="grid grid-cols-2 gap-1" aria-label="Subtitle FPS to video FPS">
+          <div className="grid grid-cols-2 gap-1" aria-label={t("Subtitle FPS to video FPS")}>
             {FPS.flatMap((subtitleFps) =>
               FPS.filter((videoFps) => subtitleFps !== videoFps).map((videoFps) => (
                 <button
@@ -168,7 +171,7 @@ function DownloadedTiming() {
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => press({ ...timing, speed: subtitleFps / videoFps })}
                 >
-                  {subtitleFps} → {videoFps} fps
+                  {formatNumber(subtitleFps)} → {formatNumber(videoFps)} fps
                 </button>
               )),
             )}

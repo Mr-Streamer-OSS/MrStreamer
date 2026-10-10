@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
+import { formatNumber, t } from "@mrstreamer/core/i18n";
 import { Button } from "../../components/ui/button.tsx";
 import { call } from "../../lib/ipc.ts";
 
@@ -28,60 +29,66 @@ export function DiagnosticsExport() {
         disabled={preview.isPending}
         onClick={() => (report ? heading.current?.focus() : preview.mutate())}
       >
-        {preview.isPending ? "Reading diagnostics…" : "Diagnostics…"}
+        {preview.isPending ? t("Reading diagnostics…") : t("Diagnostics…")}
       </Button>
       {report && (
         <section
-          aria-label="Diagnostics export"
+          aria-label={t("Diagnostics export")}
           className="order-last mt-4 basis-full space-y-3 text-sm"
         >
           <h2 ref={heading} tabIndex={-1} className="font-semibold outline-none">
-            Diagnostics export
+            {t("Diagnostics export")}
           </h2>
           <dl className="grid grid-cols-[7rem_1fr] gap-x-4 gap-y-2">
-            <dt className="text-muted-foreground">Build</dt>
+            <dt className="text-muted-foreground">{t("Build")}</dt>
             <dd>
-              {report.version} · {report.channel === "nightly" ? "Nightly" : "Stable"} ·{" "}
-              {report.commit.slice(0, 7)} · {report.platform} ·{" "}
-              {report.distribution === "store" ? "Microsoft Store" : "Direct install"}
+              {[
+                report.version,
+                report.channel === "nightly" ? t("Nightly") : t("Stable"),
+                report.commit.slice(0, 7),
+                report.platform,
+                report.distribution === "store" ? "Microsoft Store" : t("Direct install"),
+              ].join(" · ")}
             </dd>
-            <dt className="text-muted-foreground">Operations</dt>
+            <dt className="text-muted-foreground">{t("Operations")}</dt>
             <dd>
-              {report.entries} recent {report.entries === 1 ? "entry" : "entries"} ·{" "}
-              {report.failures} {report.failures === 1 ? "failure" : "failures"}
+              {t("{count} recent entries", { count: report.entries })} ·{" "}
+              {t("{count} failures", { count: report.failures })}
             </dd>
-            <dt className="text-muted-foreground">Playback</dt>
+            <dt className="text-muted-foreground">{t("Playback")}</dt>
             <dd>
-              Accelerated video decoding{" "}
-              {report.acceleratedVideoDecodeDisabled ? "disabled" : "allowed"}
+              {report.acceleratedVideoDecodeDisabled
+                ? t("Accelerated video decoding disabled")
+                : t("Accelerated video decoding allowed")}
             </dd>
-            <dt className="text-muted-foreground">Updates</dt>
-            <dd>{report.checked === "none" ? "No check recorded" : report.checked}</dd>
-            <dt className="text-muted-foreground">Subscriptions</dt>
+            <dt className="text-muted-foreground">{t("Updates")}</dt>
+            <dd>{report.checked === "none" ? t("No check recorded") : report.checked}</dd>
+            <dt className="text-muted-foreground">{t("Subscriptions")}</dt>
             <dd>
-              {report.subscriptions.xtream} Xtream · {report.subscriptions.m3u} M3U
+              {formatNumber(report.subscriptions.xtream)} Xtream ·{" "}
+              {formatNumber(report.subscriptions.m3u)} M3U
             </dd>
-            <dt className="text-muted-foreground">Not in it</dt>
-            <dd>Addresses, logins, channel and title names, filesystem paths</dd>
+            <dt className="text-muted-foreground">{t("Not in it")}</dt>
+            <dd>{t("Addresses, logins, channel and title names, filesystem paths")}</dd>
           </dl>
-          <p>Nothing is sent by Mr. Streamer.</p>
+          <p>{t("Nothing is sent by Mr. Streamer.")}</p>
           <div className="flex flex-wrap gap-2">
             <Button
               variant="secondary"
               disabled={save.isPending}
               onClick={() => save.mutate(report.id)}
             >
-              Save…
+              {t("Save…")}
             </Button>
             <Button
               variant="ghost"
               aria-expanded={showText}
               onClick={() => setShowText((shown) => !shown)}
             >
-              {showText ? "Hide the text" : "Show the text"}
+              {showText ? t("Hide the text") : t("Show the text")}
             </Button>
             <Button variant="ghost" disabled={save.isPending} onClick={close}>
-              Cancel
+              {t("Cancel")}
             </Button>
           </div>
           {showText && (
@@ -89,14 +96,14 @@ export function DiagnosticsExport() {
               {report.text}
             </pre>
           )}
-          {save.isSuccess && save.data && <p role="status">Diagnostics saved.</p>}
+          {save.isSuccess && save.data && <p role="status">{t("Diagnostics saved.")}</p>}
         </section>
       )}
       {(preview.isError || save.isError) && (
         <p role="alert" className="order-last basis-full text-sm">
           {save.isError
-            ? "Diagnostics could not be saved. Try again."
-            : "Diagnostics could not be read."}
+            ? t("Diagnostics could not be saved. Try again.")
+            : t("Diagnostics could not be read.")}
         </p>
       )}
     </>

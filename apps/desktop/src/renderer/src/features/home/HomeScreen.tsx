@@ -16,6 +16,7 @@ import {
   sameOwned,
   type OwnedId,
 } from "@mrstreamer/contracts/subscription";
+import { formatNumber, t } from "@mrstreamer/core/i18n";
 import { openDetails, openView, useUi, type ChannelList } from "../../app/ui-store.ts";
 import { CatalogueNotice, catalogueState } from "../../components/CatalogueNotice.tsx";
 import { ChannelLogo, hueOf } from "../../components/ChannelLogo.tsx";
@@ -192,7 +193,7 @@ export function HomeScreen({ active }: { active: boolean }) {
       <div ref={grid} className={`space-y-9 px-10 ${mappedOnly && !hero ? "pt-10" : "pt-2"} pb-16`}>
         {entries.length > 0 && (
           <div>
-            <Section title="Continue watching" tileRem={TILE_REM}>
+            <Section title={t("Continue watching")} tileRem={TILE_REM}>
               {entries.map((entry) => (
                 <StillTile
                   key={entry.key}
@@ -214,7 +215,7 @@ export function HomeScreen({ active }: { active: boolean }) {
         )}
         {saved && saved.total > 0 && (
           <Section
-            title="Watchlist"
+            title={t("Watchlist")}
             count={saved.total}
             onAll={() => openView("watchlist")}
             tileRem={POSTER_REM}
@@ -226,7 +227,7 @@ export function HomeScreen({ active }: { active: boolean }) {
         )}
         {shown.favourites.length > 0 && (
           <Section
-            title="Favourites"
+            title={t("Favourites")}
             count={favourites.length}
             onAll={() => browse({ kind: "favourites" })}
             tileRem={TILE_REM}
@@ -236,7 +237,7 @@ export function HomeScreen({ active }: { active: boolean }) {
         )}
         {shown.recent.length > 0 && (
           <Section
-            title="Recently watched"
+            title={t("Recently watched")}
             count={recent.length}
             onAll={() => browse({ kind: "recent" })}
             tileRem={TILE_REM}
@@ -246,7 +247,7 @@ export function HomeScreen({ active }: { active: boolean }) {
         )}
         {newMovies.length > 0 && (
           <Section
-            title={mappedOnly ? "Movies" : "New movies"}
+            title={mappedOnly ? t("Movies") : t("New movies")}
             onAll={() => openCollection("movie", titleCollection)}
             tileRem={POSTER_REM}
           >
@@ -255,7 +256,7 @@ export function HomeScreen({ active }: { active: boolean }) {
         )}
         {newSeries.length > 0 && (
           <Section
-            title={mappedOnly ? "Series" : "New series"}
+            title={mappedOnly ? t("Series") : t("New series")}
             onAll={() => openCollection("series", titleCollection)}
             tileRem={POSTER_REM}
           >
@@ -264,7 +265,7 @@ export function HomeScreen({ active }: { active: boolean }) {
         )}
         {shown.category.length > 0 && (
           <Section
-            title={category?.title ?? "All channels"}
+            title={category?.title ?? t("All channels")}
             count={
               category?.channelCount ??
               status.data?.reduce((sum, each) => sum + each.channelCount, 0) ??
@@ -351,23 +352,27 @@ function Hero({
           <div className="mt-3 flex items-center gap-2 text-[0.9375rem] text-foreground/85">
             <ChannelLogo channel={channel} className="h-6 w-9" />
             {current
-              ? `${channel.title} · Until ${clockTime(current.stop, now)} · ${timeLeft(current, now)}`
+              ? [
+                  channel.title,
+                  t("Until {time}", { time: clockTime(current.stop, now) }),
+                  timeLeft(current, now),
+                ].join(" · ")
               : [channelLine(channel, categories), ...channel.tags].filter(Boolean).join(" · ")}
           </div>
           {current && <Progress value={progressOf(current, now)} className="mt-3 w-72" />}
           <div className="mt-8 flex items-center gap-3">
             <Button variant="primary" size="lg" onClick={() => watchChannel(channel)}>
               <Play className="fill-current" />
-              Watch
+              {t("Watch")}
             </Button>
             <Button variant="secondary" size="lg" onClick={() => browse({ kind: "all" })}>
-              All channels
+              {t("All channels")}
             </Button>
             {live && streaming && !waits && (
               <Button
                 variant="secondary"
                 size="icon-lg"
-                aria-label={audible ? "Mute" : "Unmute"}
+                aria-label={audible ? t("Mute") : t("Unmute")}
                 onClick={() => player.toggleMute()}
               >
                 {audible ? <Volume2 /> : <VolumeX />}
@@ -379,7 +384,7 @@ function Hero({
       {!channel && (
         <div className="relative">
           <Button variant="primary" size="lg" onClick={() => browse({ kind: "all" })}>
-            All channels
+            {t("All channels")}
           </Button>
         </div>
       )}
@@ -411,7 +416,8 @@ function Section({
             onClick={onAll}
             className="flex items-center gap-0.5 text-sm text-muted-foreground hover:text-white"
           >
-            All{count === undefined ? "" : ` ${count.toLocaleString()}`}
+            {t("All")}
+            {count === undefined ? "" : ` ${formatNumber(count)}`}
             <ChevronRight className="size-3.5" />
           </button>
         )}

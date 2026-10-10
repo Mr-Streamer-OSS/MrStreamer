@@ -3,6 +3,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { RotateCw } from "lucide-react";
 import type { ReactNode } from "react";
+import { t } from "@mrstreamer/core/i18n";
 import { openSubscription, useUi } from "../app/ui-store.ts";
 import { appError, describeError } from "../lib/errors.ts";
 import { call } from "../lib/ipc.ts";
@@ -46,20 +47,22 @@ function Failed({ cause }: { cause: unknown }) {
   const loginProblem = error.kind === "invalid-login" || error.kind === "account-inactive";
   return (
     <Notice
-      title="Channels unavailable"
+      title={t("Channels unavailable")}
       message={
         locked
-          ? `${subscriptionName(locked)} needs its ${locked.kind === "m3u" ? "link" : "password"} again.`
+          ? locked.kind === "m3u"
+            ? t("{name} needs its link again.", { name: subscriptionName(locked) })
+            : t("{name} needs its password again.", { name: subscriptionName(locked) })
           : describeError(error)
       }
     >
       {locked ? (
         <Button variant="primary" onClick={() => openSubscription(locked.id, "secret")}>
-          Enter {locked.kind === "m3u" ? "link" : "password"}
+          {locked.kind === "m3u" ? t("Enter link") : t("Enter password")}
         </Button>
       ) : loginProblem ? (
         <Button variant="primary" onClick={() => useUi.setState({ settings: "subscriptions" })}>
-          Update login
+          {t("Update login")}
         </Button>
       ) : (
         <Button
@@ -67,7 +70,7 @@ function Failed({ cause }: { cause: unknown }) {
           onClick={() => void client.invalidateQueries({ queryKey: ["library"] })}
         >
           <RotateCw />
-          Try again
+          {t("Try again")}
         </Button>
       )}
     </Notice>
@@ -83,16 +86,16 @@ function Empty() {
   });
   return (
     <Notice
-      title="No live channels"
+      title={t("No live channels")}
       message={
         refresh.error
           ? describeError(appError(refresh.error))
-          : "Your provider lists no live channels right now."
+          : t("Your provider lists no live channels right now.")
       }
     >
       <Button variant="primary" disabled={refresh.isPending} onClick={() => refresh.mutate()}>
         <RotateCw />
-        {refresh.isPending ? "Checking…" : "Check again"}
+        {refresh.isPending ? t("Checking…") : t("Check again")}
       </Button>
     </Notice>
   );

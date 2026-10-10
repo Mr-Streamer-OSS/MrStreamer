@@ -42,6 +42,7 @@ import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
+import { t } from "@mrstreamer/core/i18n";
 import { readJsonFile, removeFile, writeJsonFile } from "../platform/json-file.ts";
 import { Settings } from "./preferences.ts";
 import {
@@ -543,10 +544,12 @@ function make(options: LibraryOptions) {
   });
 }
 
-const switched = Effect.fail(
-  new Failed({
-    error: { kind: "unexpected", detail: "The subscription changed while loading channels." },
-  }),
+// Made when it fails, so it says so in the interface language of the moment.
+const switched = Effect.failSync(
+  () =>
+    new Failed({
+      error: { kind: "unexpected", detail: t("The subscription changed while loading channels.") },
+    }),
 );
 
 function sameMembers(a: readonly IndexedCatalogue[], b: readonly IndexedCatalogue[]): boolean {

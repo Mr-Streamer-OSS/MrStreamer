@@ -27,6 +27,7 @@ import {
 import type { GuideChannel, GuideStatus, MapChannel, MapFilter } from "@mrstreamer/contracts/guide";
 import type { SubscriptionSummary } from "@mrstreamer/contracts/subscription";
 import { searchWords } from "@mrstreamer/core/text";
+import { formatNumber, type PlainKey, t } from "@mrstreamer/core/i18n";
 import { Sheet } from "../../components/Sheet.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { appError, describeError } from "../../lib/errors.ts";
@@ -44,11 +45,11 @@ const ROW_REM = 2.5;
 /** A search waits this long for typing to pause, as the other lists' do. */
 const SEARCH_DELAY_MS = 120;
 
-const FILTERS: readonly { readonly value: MapFilter; readonly label: string }[] = [
+const FILTERS = [
   { value: "without", label: "Without programmes" },
   { value: "mapped", label: "Mapped by hand" },
   { value: "all", label: "All" },
-];
+] as const satisfies readonly { readonly value: MapFilter; readonly label: PlainKey }[];
 
 export function GuideMap({
   subscription,
@@ -91,12 +92,14 @@ export function GuideMap({
   return (
     <Sheet onClose={onClose} overSettings initialFocus={channelList}>
       <div className="flex h-full flex-col px-8 pt-7 pb-6">
-        <Dialog.Title className="text-2xl font-semibold tracking-tight">Map channels</Dialog.Title>
+        <Dialog.Title className="text-2xl font-semibold tracking-tight">
+          {t("Map channels")}
+        </Dialog.Title>
         <p className="mt-1 text-[0.9375rem] text-muted-foreground">
           {[
             subscriptionName(subscription),
             source,
-            `${without.toLocaleString()} ${without === 1 ? "channel" : "channels"} without programmes`,
+            t("{count} channels without programmes", { count: without }),
           ]
             .filter(Boolean)
             .join(" · ")}
@@ -105,23 +108,23 @@ export function GuideMap({
           <section className="flex min-h-0 min-w-0 flex-col">
             <div className="mb-2 flex min-h-9 items-center gap-3 text-[0.9375rem]">
               <h3 className="min-w-0 flex-1 truncate font-semibold">
-                Channels
+                {t("Channels")}
                 {first && (
                   <span className="font-normal text-muted-foreground">
                     {" "}
-                    · {first.total.toLocaleString()}
+                    · {formatNumber(first.total)}
                   </span>
                 )}
               </h3>
               <Select
-                label="Channels shown"
+                label={t("Channels shown")}
                 value={filter}
-                options={FILTERS}
+                options={FILTERS.map((each) => ({ value: each.value, label: t(each.label) }))}
                 onChange={setFilter}
               />
             </div>
             <SearchField
-              label="Search channels"
+              label={t("Search channels")}
               value={text}
               onChange={setText}
               onDown={() => channelList.current?.focus()}
@@ -133,18 +136,18 @@ export function GuideMap({
             ) : first?.total === 0 ? (
               <p className="text-[0.9375rem] text-muted-foreground">
                 {query
-                  ? "No channel matches."
+                  ? t("No channel matches.")
                   : filter === "without"
-                    ? "Every channel has programmes."
+                    ? t("Every channel has programmes.")
                     : filter === "mapped"
-                      ? "No channel is mapped by hand."
-                      : "No channels."}
+                      ? t("No channel is mapped by hand.")
+                      : t("No channels.")}
               </p>
             ) : (
               <Options
                 key={listKey}
                 box={channelList}
-                label="Channels"
+                label={t("Channels")}
                 total={total}
                 active={index}
                 onActive={(next) => setAt({ list: listKey, index: next })}
@@ -194,9 +197,9 @@ export function GuideMap({
           )}
         </div>
         <div className="mt-4 flex items-center gap-3 border-t border-white/8 pt-3 text-sm text-muted-foreground">
-          Mappings apply at once to Live TV, Home and search.
+          {t("Mappings apply at once to Live TV, Home and search.")}
           <Button size="sm" className="ml-auto" onClick={onClose}>
-            Done
+            {t("Done")}
           </Button>
         </div>
       </div>
@@ -206,11 +209,11 @@ export function GuideMap({
 
 /** How a channel gets its programmes, in a few words beside its name. */
 function stateOf(channel: MapChannel): string {
-  if (!channel.listed) return "no longer listed";
-  if (channel.mappedTo === null) return channel.guideId ?? "no id match";
+  if (!channel.listed) return t("no longer listed");
+  if (channel.mappedTo === null) return channel.guideId ?? t("no id match");
   return channel.guideId === null
-    ? `mapped · ${channel.mappedTo} · not in this guide`
-    : `mapped · ${channel.mappedTo}`;
+    ? `${t("mapped")} · ${channel.mappedTo} · ${t("not in this guide")}`
+    : `${t("mapped")} · ${channel.mappedTo}`;
 }
 
 /**
@@ -286,11 +289,13 @@ function Picker({
   return (
     <section className="flex min-h-0 min-w-0 flex-col">
       <div className="mb-2 flex min-h-9 items-center text-[0.9375rem]">
-        <h3 className="min-w-0 truncate font-semibold">Guide for {channel.title}</h3>
+        <h3 className="min-w-0 truncate font-semibold">
+          {t("Guide for {name}", { name: channel.title })}
+        </h3>
       </div>
       <SearchField
         field={field}
-        label="Search guide channels"
+        label={t("Search guide channels")}
         value={text}
         onChange={setText}
         onDown={() => list.current?.focus()}
@@ -298,7 +303,7 @@ function Picker({
       <Options
         key={listKey}
         box={list}
-        label={`Guide channels for ${channel.title}`}
+        label={t("Guide channels for {name}", { name: channel.title })}
         total={total + 1}
         active={active}
         onActive={(next) => setAt({ list: listKey, index: next })}
@@ -311,14 +316,14 @@ function Picker({
               <>
                 <span className="min-w-0 flex-1 truncate text-muted-foreground">
                   {channel.mappedTo === null
-                    ? `Automatic · ${channel.guideId ?? "no id match"}`
-                    : "Automatic"}
+                    ? `${t("Automatic")} · ${channel.guideId ?? t("no id match")}`
+                    : t("Automatic")}
                 </span>
                 <Choice
                   current={channel.mappedTo === null}
                   offered={isActive}
                   pending={map.isPending}
-                  label="Restore"
+                  label={t("Restore")}
                   onChoose={() => choose(0)}
                 />
               </>
@@ -331,7 +336,7 @@ function Picker({
                 <span className="min-w-0 flex-1 truncate">
                   <Marked text={option.name} words={words} />
                   {!option.programmes && (
-                    <span className="text-muted-foreground"> · no programmes</span>
+                    <span className="text-muted-foreground"> · {t("no programmes")}</span>
                   )}
                 </span>
                 <span className="max-w-[45%] flex-none truncate font-mono text-xs text-muted-foreground">
@@ -341,7 +346,7 @@ function Picker({
                   current={option.id === channel.mappedTo}
                   offered={isActive && channel.listed}
                   pending={map.isPending}
-                  label="Map"
+                  label={t("Map")}
                   onChoose={() => choose(index)}
                 />
               </>
@@ -355,7 +360,7 @@ function Picker({
             {describeError(appError(map.error))}
           </span>
         ) : query ? (
-          `${total.toLocaleString()} of ${guideChannels.toLocaleString()} shown`
+          t("{shown} of {total} shown", { shown: total, total: guideChannels })
         ) : null}
       </div>
     </section>
@@ -377,7 +382,9 @@ function Choice({
   label: string;
   onChoose: () => void;
 }) {
-  if (current) return <span className="flex-none px-3.5 text-[0.8125rem] opacity-60">Current</span>;
+  if (current) {
+    return <span className="flex-none px-3.5 text-[0.8125rem] opacity-60">{t("Current")}</span>;
+  }
   return (
     <Button
       size="sm"

@@ -5,25 +5,28 @@ import type { Title, TitleVersion } from "@mrstreamer/contracts/ondemand";
 import { ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { languageName } from "@mrstreamer/core/ondemand/tracks";
 import { versionOptions, type VersionOptionGroup } from "@mrstreamer/core/ondemand/version-options";
+import { formatDate, t } from "@mrstreamer/core/i18n";
 import { Button } from "../../components/ui/button.tsx";
 import { useSubscriptionNames, useSubscriptions } from "../../lib/queries.ts";
 import { usePickVersion } from "../../lib/titles.ts";
 import { cn } from "../../lib/utils.ts";
 
 const AUTOMATIC = "automatic";
-const addedDate = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 
 /** A current file's observed languages. Series summaries explicitly describe only read episodes. */
 function observedLabel(version: TitleVersion, kind: Title["kind"]): string | null {
   if (!version.observed) return null;
-  const name = (code: string | null) => languageName(code) ?? "Unknown";
+  const name = (code: string | null) => languageName(code) ?? t("Unknown");
   const { audio, subtitles, files } = version.observed;
-  const sound = audio.length ? `${[...new Set(audio.map(name))].join(", ")} sound` : "No sound";
+  const sound = audio.length
+    ? t("{language} sound", { language: [...new Set(audio.map(name))].join(", ") })
+    : t("No sound");
   const captions = subtitles.length
-    ? `${[...new Set(subtitles.map(name))].join(", ")} subtitles`
-    : "No subtitles";
-  const read = kind === "series" ? `Read ${files} ${files === 1 ? "file" : "files"} · ` : "";
-  return `${read}${sound} · ${captions}`;
+    ? t("{language} subtitles", { language: [...new Set(subtitles.map(name))].join(", ") })
+    : t("No subtitles");
+  return [kind === "series" && t("Read {count} files", { count: files }), sound, captions]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 /** Quality first, every exact file reachable, with tracks claimed only after a local file read. */
@@ -75,9 +78,9 @@ export function VersionMenu({
     const observed = observedLabel(version, title.kind);
     const metadata = [
       version.name,
-      ordinal !== undefined ? `Version ${ordinal}` : null,
+      ordinal !== undefined ? t("Version {number}", { number: String(ordinal) }) : null,
       version.container?.toUpperCase(),
-      version.addedAt ? addedDate.format(version.addedAt) : null,
+      version.addedAt ? formatDate(version.addedAt, "medium") : null,
     ]
       .filter(Boolean)
       .join(" · ");
@@ -93,7 +96,7 @@ export function VersionMenu({
         aria-label={[
           describe(group, version),
           metadata,
-          observed ? "Tracks read locally" : "as listed",
+          observed ? t("Tracks read locally") : t("as listed"),
         ]
           .filter(Boolean)
           .join(" · ")}
@@ -109,7 +112,7 @@ export function VersionMenu({
               {observed && (
                 <Check
                   aria-hidden
-                  aria-label="Tracks read locally"
+                  aria-label={t("Tracks read locally")}
                   className="ml-1 inline size-3"
                 />
               )}
@@ -119,7 +122,7 @@ export function VersionMenu({
           {(metadata || group.asListed) && (
             <span className="mt-1 block break-words text-[0.75rem] text-white/50">
               {metadata}
-              {group.asListed && !observed && `${metadata ? " · " : ""}as listed`}
+              {group.asListed && !observed && `${metadata ? " · " : ""}${t("as listed")}`}
             </span>
           )}
         </span>
@@ -134,7 +137,7 @@ export function VersionMenu({
             <Button
               variant="primary"
               size="lg"
-              aria-label="Versions"
+              aria-label={t("Versions")}
               className="rounded-l-none border-l border-black/20 px-3"
             />
           )
@@ -164,7 +167,7 @@ export function VersionMenu({
                     <Menu.RadioItemIndicator className="size-1.5 rounded-full bg-white" />
                   </span>
                   <span className="min-w-0 flex-1">
-                    Automatic
+                    {t("Automatic")}
                     {automaticGroup && automaticFile && (
                       <span className="mt-1 block text-[0.75rem] text-white/60">
                         {describe(automaticGroup, automaticFile)}
@@ -181,7 +184,13 @@ export function VersionMenu({
                     <Menu.Item
                       closeOnClick={false}
                       aria-expanded={expanded.has(group.key)}
-                      aria-label={`${[group.quality, group.label, "as listed"].filter(Boolean).join(" · ")}, ${group.versions.length} versions, ${names(group.subscriptionId)}`}
+                      aria-label={[
+                        [group.quality, group.label, t("as listed")].filter(Boolean).join(" · "),
+                        t("{count} versions", { count: group.versions.length }),
+                        names(group.subscriptionId),
+                      ]
+                        .filter(Boolean)
+                        .join(", ")}
                       onClick={() => expand(group.key, !expanded.has(group.key))}
                       onKeyDown={(event) => {
                         if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
@@ -199,13 +208,15 @@ export function VersionMenu({
                       </span>
                       <span className="w-9 flex-none font-semibold">{group.quality}</span>
                       <span className="min-w-0 flex-1">
-                        {group.label} · {group.versions.length} versions{" "}
+                        {group.label} · {t("{count} versions", { count: group.versions.length })}{" "}
                         <ChevronRight
                           aria-hidden
                           className={cn("inline size-3", expanded.has(group.key) && "rotate-90")}
                         />
                         {group.asListed && (
-                          <span className="ml-1 text-[0.75rem] text-white/50">as listed</span>
+                          <span className="ml-1 text-[0.75rem] text-white/50">
+                            {t("as listed")}
+                          </span>
                         )}
                       </span>
                       <span className="flex-none text-[0.8125rem]">

@@ -56,6 +56,7 @@ import {
   type StreamSession,
   type TitleSession,
 } from "./playback.ts";
+import { LOCALES, type InterfaceLanguage } from "./language.ts";
 import { Preferences, SubscriptionPreferences } from "./preferences.ts";
 import { PlaylistMode, type PlaylistGroupPage, type PlaylistOmissionPage } from "./playlist.ts";
 import type { OwnedId, SubscriptionSummary } from "./subscription.ts";
@@ -323,7 +324,10 @@ export const ipcInputs = {
   "output.volume": () => type({ "level?": "0 <= number <= 1", "muted?": "boolean" }),
   "output.playingTitle": none,
   "preferences.get": none,
-  "preferences.update": () => Preferences.partial(),
+  // Only the preferences' own keys: the interface language changes through `language.set` alone.
+  "preferences.update": () => Preferences.partial().onUndeclaredKey("delete"),
+  "language.get": none,
+  "language.set": () => type({ choice: type.enumerated("system", ...LOCALES) }),
   "viewing.get": none,
   // Each change carries an id the UI makes up, so sending it again changes nothing more.
   "viewing.setFavourite": () =>
@@ -577,6 +581,13 @@ export interface IpcOutputs {
   "output.playingTitle": RemotePlayingTitle | null;
   "preferences.get": Preferences;
   "preferences.update": Preferences;
+  /** The interface language in effect, and how it was chosen. */
+  "language.get": InterfaceLanguage;
+  /**
+   * Saves the interface language and shows the app's own text in it at once, menus and dialogs
+   * included. Title, sound and subtitle languages stay as they are.
+   */
+  "language.set": InterfaceLanguage;
   /** Favourites, recently watched channels and Continue watching of every saved subscription. */
   "viewing.get": Viewing;
   /** Adds a channel to the favourites, or takes it out. */

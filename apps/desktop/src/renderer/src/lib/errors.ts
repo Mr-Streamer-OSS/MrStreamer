@@ -3,6 +3,7 @@ import type { GuideFailure } from "@mrstreamer/contracts/guide";
 import type { OutputFailure } from "@mrstreamer/contracts/output";
 import type { StreamFailure } from "@mrstreamer/contracts/playback";
 import { GUIDE_LIMITS } from "@mrstreamer/core/guide/limits";
+import { formatDate, formatMebibytes, t } from "@mrstreamer/core/i18n";
 import { isMac } from "../app/platform.ts";
 
 /** The typed error behind a failed call, or an `unexpected` error for anything else. */
@@ -17,29 +18,42 @@ export function describeError(error: AppError): string {
     case "incomplete-login":
       return error.detail;
     case "invalid-login":
-      return "The provider rejected this username or password.";
+      return t("The provider rejected this username or password.");
     case "account-inactive":
-      return error.state === "expired" && error.expiresAt
-        ? `This subscription expired on ${formatDate(error.expiresAt)}.`
-        : `The provider reports this subscription as ${error.state}.`;
+      if (error.state === "expired" && error.expiresAt) {
+        return t("This subscription expired on {date}.", {
+          date: formatDate(Date.parse(error.expiresAt), "date"),
+        });
+      }
+      return error.state === "expired"
+        ? t("The provider reports this subscription as expired.")
+        : error.state === "banned"
+          ? t("The provider reports this subscription as banned.")
+          : t("The provider reports this subscription as disabled.");
     case "unreachable":
-      return `Can't reach ${error.server.replace(/^https?:\/\//, "")}. ${error.detail}`;
+      return `${t("Can't reach {server}.", { server: error.server.replace(/^https?:\/\//, "") })} ${error.detail}`;
     case "unencrypted-only":
-      return `${URL.parse(error.server)?.hostname ?? error.server} has no encrypted connection.`;
+      return t("{server} has no encrypted connection.", {
+        server: URL.parse(error.server)?.hostname ?? error.server,
+      });
     case "provider-error":
-      return `The provider answered with an error (HTTP ${error.status}).`;
+      return t("The provider answered with an error (HTTP {status}).", {
+        status: String(error.status),
+      });
     case "no-subscription":
-      return "No subscription is connected.";
+      return t("No subscription is connected.");
     case "needs-secret":
-      return "This subscription needs its password or link again, in Settings.";
+      return t("This subscription needs its password or link again, in Settings.");
     case "keychain-refused":
       return isMac
-        ? 'The macOS Keychain would not store your password. Open Keychain Access, delete "Mr. Streamer Safe Storage", then quit and reopen Mr. Streamer.'
-        : "Your system's keychain would not store your password.";
+        ? t(
+            'The macOS Keychain would not store your password. Open Keychain Access, delete "Mr. Streamer Safe Storage", then quit and reopen Mr. Streamer.',
+          )
+        : t("Your system's keychain would not store your password.");
     case "channel-not-found":
-      return "This channel is no longer in the provider's list.";
+      return t("This channel is no longer in the provider's list.");
     case "title-not-found":
-      return "The provider no longer lists this title.";
+      return t("The provider no longer lists this title.");
     case "stream":
       return describeStreamFailure(error.failure);
     case "output":
@@ -47,17 +61,23 @@ export function describeError(error: AppError): string {
     case "guide":
       return describeGuideFailure(error.failure);
     case "favourites-changed":
-      return "Your favourites changed.";
+      return t("Your favourites changed.");
     case "mark-changed":
-      return "This can no longer be undone.";
+      return t("This can no longer be undone.");
     case "incomplete-catalogue":
-      if (error.list) return `The provider sent no ${error.list}, so the previous list stays.`;
+      if (error.list === "movies")
+        return t("The provider sent no movies, so the previous list stays.");
+      if (error.list === "series")
+        return t("The provider sent no series, so the previous list stays.");
       return error.received === 0
-        ? "The provider sent an empty channel list, so the previous list stays."
-        : `The provider sent ${error.received.toLocaleString()} of ${error.previous.toLocaleString()} channels, so the previous list stays.`;
+        ? t("The provider sent an empty channel list, so the previous list stays.")
+        : t("The provider sent {received} of {previous} channels, so the previous list stays.", {
+            received: error.received,
+            previous: error.previous,
+          });
     case "invalid-input":
     case "unexpected":
-      return `Something went wrong: ${error.detail}`;
+      return t("Something went wrong: {detail}", { detail: error.detail });
   }
 }
 
@@ -65,15 +85,17 @@ export function describeError(error: AppError): string {
 function describeStreamFailure(failure: StreamFailure): string {
   switch (failure.kind) {
     case "refused":
-      return "The provider refused this title. Another device may be using your connection.";
+      return t("The provider refused this title. Another device may be using your connection.");
     case "unavailable":
-      return "The provider has no file for this title right now.";
+      return t("The provider has no file for this title right now.");
     case "provider-error":
-      return `The provider answered with an error (HTTP ${failure.status}).`;
+      return t("The provider answered with an error (HTTP {status}).", {
+        status: String(failure.status),
+      });
     case "network":
-      return `The connection to the provider failed. ${failure.detail}`;
+      return `${t("The connection to the provider failed.")} ${failure.detail}`;
     case "unsupported":
-      return `Mr. Streamer can't play this file. ${failure.detail}`;
+      return `${t("Mr. Streamer can't play this file.")} ${failure.detail}`;
   }
 }
 
@@ -81,15 +103,17 @@ function describeStreamFailure(failure: StreamFailure): string {
 function describeOutputFailure(failure: OutputFailure): string {
   switch (failure.kind) {
     case "unreachable":
-      return "The receiver didn't answer.";
+      return t("The receiver didn't answer.");
     case "not-fetched":
-      return "The receiver couldn't reach this computer. Check that your firewall allows Mr. Streamer on private networks.";
+      return t(
+        "The receiver couldn't reach this computer. Check that your firewall allows Mr. Streamer on private networks.",
+      );
     case "media":
-      return `The receiver couldn't play this. ${failure.detail}`;
+      return `${t("The receiver couldn't play this.")} ${failure.detail}`;
     case "no-network":
-      return "This computer isn't on a local network.";
+      return t("This computer isn't on a local network.");
     case "unavailable":
-      return `Mr. Streamer can't reach receivers right now. ${failure.detail}`;
+      return `${t("Mr. Streamer can't reach receivers right now.")} ${failure.detail}`;
     case "stream":
       return describeStreamFailure(failure.failure);
   }
@@ -99,49 +123,44 @@ function describeOutputFailure(failure: OutputFailure): string {
 function describeGuideFailure(failure: GuideFailure): string {
   switch (failure.kind) {
     case "address":
-      return "Enter the address of an XMLTV guide.";
+      return t("Enter the address of an XMLTV guide.");
     case "locked":
-      return "This guide needs its address again.";
+      return t("This guide needs its address again.");
     case "redirect":
       return failure.reason === "unencrypted"
-        ? "The address redirected to an unencrypted one, so Mr. Streamer stopped."
-        : "The address redirected too many times.";
+        ? t("The address redirected to an unencrypted one, so Mr. Streamer stopped.")
+        : t("The address redirected too many times.");
     case "not-xmltv":
-      return "The address answered, but not with an XMLTV guide.";
+      return t("The address answered, but not with an XMLTV guide.");
     case "incomplete":
-      return "The guide stopped before its end, or is damaged.";
+      return t("The guide stopped before its end, or is damaged.");
     case "empty":
-      return "The guide lists no programmes.";
+      return t("The guide lists no programmes.");
     case "ended":
-      return "Every programme in this guide has ended.";
+      return t("Every programme in this guide has ended.");
     case "too-large":
-      return `This guide is larger than Mr. Streamer reads: ${tooLarge(failure.limit)}.`;
+      return t("This guide is larger than Mr. Streamer reads: {limit}.", {
+        limit: tooLarge(failure.limit),
+      });
     case "changed":
-      return "The guide changed meanwhile, so nothing was changed.";
+      return t("The guide changed meanwhile, so nothing was changed.");
     case "cancelled":
-      return "Stopped.";
+      return t("Stopped.");
   }
 }
 
 /** Which of the limits a guide is read under it is past, in the limit's own measure. */
 function tooLarge(limit: Extract<GuideFailure, { kind: "too-large" }>["limit"]): string {
-  const megabytes = (bytes: number) => `${(bytes / (1024 * 1024)).toLocaleString()} MB`;
   switch (limit) {
     case "bytes":
-      return `over ${megabytes(GUIDE_LIMITS.bytes)} unpacked`;
+      return t("over {size} unpacked", { size: formatMebibytes(GUIDE_LIMITS.bytes) });
     case "element":
-      return `one of its entries is over ${megabytes(GUIDE_LIMITS.elementBytes)}`;
+      return t("one of its entries is over {size}", {
+        size: formatMebibytes(GUIDE_LIMITS.elementBytes),
+      });
     case "channels":
-      return `over ${GUIDE_LIMITS.channels.toLocaleString()} channels`;
+      return t("over {count} channels", { count: GUIDE_LIMITS.channels });
     case "programmes":
-      return `over ${GUIDE_LIMITS.programmes.toLocaleString()} programmes still to come`;
+      return t("over {count} programmes still to come", { count: GUIDE_LIMITS.programmes });
   }
-}
-
-export function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
 }

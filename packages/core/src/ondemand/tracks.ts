@@ -8,6 +8,7 @@ import type {
   SubtitleFormat,
   SubtitleTrack,
 } from "@mrstreamer/contracts/playback";
+import { type PlainKey, t } from "../i18n.ts";
 
 /**
  * ISO 639-2 bibliographic codes, as files often carry them, and the codes Intl knows them by.
@@ -92,10 +93,10 @@ export interface SubtitleFacts extends TrackFacts {
 /** "English · 5.1", "Español · Stereo · Commentary". */
 export function audioTracks(tracks: readonly AudioFacts[]): AudioTrack[] {
   const labelled = tracks.map((track) => {
-    const parts = [languageName(track.language) ?? "Sound", layout(track.channels)];
-    if (track.name && /comment/i.test(track.name)) parts.push("Commentary");
+    const parts = [languageName(track.language) ?? t("Sound"), layout(track.channels)];
+    if (track.name && /comment/i.test(track.name)) parts.push(t("Commentary"));
     else if (track.description || (track.name && /descri/i.test(track.name))) {
-      parts.push("Audio description");
+      parts.push(t("Audio description"));
     }
     return { track, label: parts.filter(Boolean).join(" · ") };
   });
@@ -111,11 +112,12 @@ export function audioTracks(tracks: readonly AudioFacts[]): AudioTrack[] {
 export function subtitleTracks(tracks: readonly SubtitleFacts[]): SubtitleTrack[] {
   const labelled = tracks.map((track) => {
     const parts = [
-      languageName(track.language) ?? (track.format === "captions" ? "Captions" : "Subtitles"),
+      languageName(track.language) ??
+        (track.format === "captions" ? t("Captions") : t("Subtitles")),
     ];
-    if (track.forced || (track.name && /forced/i.test(track.name))) parts.push("Forced");
+    if (track.forced || (track.name && /forced/i.test(track.name))) parts.push(t("Forced"));
     if (track.hearingImpaired || (track.name && /\b(sdh|cc)\b|hearing/i.test(track.name))) {
-      parts.push("SDH");
+      parts.push(t("SDH"));
     }
     return { track, label: parts.join(" · ") };
   });
@@ -163,7 +165,9 @@ export interface SubtitleRenditionFacts extends RenditionFacts {
  */
 export function renditionAudio(renditions: readonly RenditionFacts[]): AudioTrack[] {
   const labelled = renditions.map((rendition, at) =>
-    named(rendition, `Track ${at + 1}`, [rendition.accessible && "Audio description"]),
+    named(rendition, t("Track {number}", { number: String(at + 1) }), [
+      rendition.accessible && t("Audio description"),
+    ]),
   );
   return distinct(labelled).map(({ track, label }) => ({
     id: track.id,
@@ -179,10 +183,13 @@ export function renditionAudio(renditions: readonly RenditionFacts[]): AudioTrac
  */
 export function renditionSubtitles(renditions: readonly SubtitleRenditionFacts[]): SubtitleTrack[] {
   const labelled = renditions.map((rendition, at) =>
-    named(rendition, rendition.format === "captions" ? "Captions" : `Track ${at + 1}`, [
-      rendition.forced && "Forced",
-      rendition.accessible && "SDH",
-    ]),
+    named(
+      rendition,
+      rendition.format === "captions"
+        ? t("Captions")
+        : t("Track {number}", { number: String(at + 1) }),
+      [rendition.forced && t("Forced"), rendition.accessible && t("SDH")],
+    ),
   );
   return apart(labelled).map(({ track, label }) => ({
     id: track.id,
@@ -227,18 +234,18 @@ function apart<T extends TrackFacts & { readonly format: SubtitleFormat }>(
   const told = labelled.map(({ track, label }) => {
     const twins = labelled.filter((other) => other.label === label);
     return twins.some((other) => other.track.format !== track.format)
-      ? { track, label: `${label} · ${FORMAT_NAMES[track.format]}` }
+      ? { track, label: `${label} · ${t(FORMAT_NAMES[track.format])}` }
       : { track, label };
   });
   return distinct(told);
 }
 
-const FORMAT_NAMES: Record<SubtitleFormat, string> = {
+const FORMAT_NAMES = {
   text: "Text",
   picture: "Picture",
   teletext: "Teletext",
   captions: "Captions",
-};
+} as const satisfies Record<SubtitleFormat, PlainKey>;
 
 /**
  * Tracks that would read the same get the file's own name after them, or a number when it has
@@ -264,15 +271,15 @@ function layout(channels: number | null): string | null {
     case null:
       return null;
     case 1:
-      return "Mono";
+      return t("Mono");
     case 2:
-      return "Stereo";
+      return t("Stereo");
     case 6:
       return "5.1";
     case 8:
       return "7.1";
     default:
-      return `${channels} channels`;
+      return t("{channels} ch", { channels });
   }
 }
 

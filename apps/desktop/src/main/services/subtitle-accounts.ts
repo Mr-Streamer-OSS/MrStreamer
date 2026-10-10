@@ -14,6 +14,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Semaphore from "effect/Semaphore";
+import { t } from "@mrstreamer/core/i18n";
 import { readJsonFile, writeJsonFile } from "../platform/json-file.ts";
 import type { Secrets } from "../platform/secrets.ts";
 
@@ -133,7 +134,7 @@ function secretFailure(cause: unknown): Failed {
     : new Failed({
         error: {
           kind: "unexpected",
-          detail: "Subtitle account details couldn't be read or saved.",
+          detail: t("Subtitle account details couldn't be read or saved."),
         },
       });
 }

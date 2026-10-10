@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { TitleDetails } from "@mrstreamer/contracts/ondemand";
 import { ownedId } from "@mrstreamer/contracts/subscription";
+import { t } from "@mrstreamer/core/i18n";
 import { openDetails } from "../../app/ui-store.ts";
 import { PosterTile } from "../../components/TitleArt.tsx";
 import { queries } from "../../lib/queries.ts";
@@ -21,11 +22,11 @@ export function RelatedTitles({
   return (
     <section
       className="mt-8 min-w-0"
-      aria-label="Also in your subscriptions"
+      aria-label={t("Also in your subscriptions")}
       inert={switching || undefined}
     >
       <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h2 className="text-[0.9375rem] font-semibold">Also in your subscriptions</h2>
+        <h2 className="text-[0.9375rem] font-semibold">{t("Also in your subscriptions")}</h2>
         {picks.length > 0 && related.data?.basis && (
           <span className="text-xs text-foreground/70">{related.data.basis}</span>
         )}
@@ -50,10 +51,12 @@ export function RelatedTitles({
           role={related.isError ? "status" : undefined}
         >
           {related.isError
-            ? "Related titles couldn't be read."
+            ? t("Related titles couldn't be read.")
             : related.isPending || switching
-              ? "Loading related titles…"
-              : "Nothing like it in your lists yet. Titles here come from your subscriptions, not from the web."}
+              ? t("Loading related titles…")
+              : t(
+                  "Nothing like it in your lists yet. Titles here come from your subscriptions, not from the web.",
+                )}
         </p>
       )}
     </section>

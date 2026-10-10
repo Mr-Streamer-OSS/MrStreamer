@@ -270,3 +270,65 @@ describe("preferences", () => {
     expect(await (await settingsIn(dataDir)).get()).toEqual({ volume: 0.3, muted: true });
   });
 });
+
+describe("the interface language", () => {
+  it("survives a restart beside the other preferences, which it leaves alone", async () => {
+    const dataDir = await tempDir();
+    const settings = await settingsIn(dataDir);
+    await settings.update({
+      titleLanguage: "nl",
+      audioLanguage: "original",
+      subtitleLanguage: "en",
+    });
+    await settings.setInterfaceLanguage("de-DE");
+
+    const returned = await settingsIn(dataDir);
+    expect(await returned.interfaceLanguage()).toBe("de-DE");
+    // The preferences the UI reads and changes don't carry it.
+    expect(await returned.get()).toEqual({
+      volume: 1,
+      muted: false,
+      titleLanguage: "nl",
+      audioLanguage: "original",
+      subtitleLanguage: "en",
+    });
+    await returned.setInterfaceLanguage("system");
+    expect(await (await settingsIn(dataDir)).interfaceLanguage()).toBe("system");
+  });
+
+  it("is only ever set to a language this release speaks, or System default", () => {
+    const set = ipcInputs["language.set"]();
+    expect(set({ choice: "fr-FR" })).toEqual({ choice: "fr-FR" });
+    expect(set({ choice: "system" })).toEqual({ choice: "system" });
+    expect(set({ choice: "it-IT" })).toBeInstanceOf(type.errors);
+    // Not through the preferences, which take their own keys alone.
+    expect(ipcInputs["preferences.update"]()({ interfaceLanguage: "de-DE", muted: true })).toEqual({
+      muted: true,
+    });
+  });
+
+  it("keeps a language a later release saved, and the rest of the file with it", async () => {
+    const dataDir = await tempDir();
+    const later = { volume: 0.6, muted: false, lastChannelId: null, lastCategoryId: null };
+    await writeFile(
+      join(dataDir, "preferences.json"),
+      JSON.stringify({ ...later, interfaceLanguage: "it-IT" }),
+    );
+
+    const settings = await settingsIn(dataDir);
+    expect(await settings.interfaceLanguage()).toBe("it-IT");
+    expect(await settings.get()).toEqual({ volume: 0.6, muted: false });
+    await settings.update({ muted: true });
+    expect(await stored(dataDir)).toEqual({ ...later, muted: true, interfaceLanguage: "it-IT" });
+  });
+
+  it("stays when the original subscription goes", async () => {
+    const { dataDir, settings, subscriptions, id } = await connected();
+    await settings.setInterfaceLanguage("es-ES");
+    const gone = await savedAs(subscriptions, id);
+    await subscriptions.remove(id);
+    await settings.forget(gone);
+
+    expect(await (await settingsIn(dataDir)).interfaceLanguage()).toBe("es-ES");
+  });
+});

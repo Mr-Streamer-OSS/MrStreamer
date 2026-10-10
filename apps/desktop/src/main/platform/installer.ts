@@ -5,6 +5,7 @@
 // when installing, so a refused update surfaces from `install`.
 import type { OutgoingHttpHeaders } from "node:http";
 import electronUpdater, { type CancellationToken } from "electron-updater";
+import { t } from "@mrstreamer/core/i18n";
 import type { Installer } from "../services/updates.ts";
 
 /**
@@ -57,7 +58,14 @@ export function electronInstaller(updater: Updater = electronUpdater.autoUpdater
       // The metadata has to describe the release the service chose, not whatever sits there.
       const offered = result?.updateInfo.version;
       if (offered !== target.version) {
-        throw new Error(`The release offers ${offered ?? "nothing"} instead of ${target.version}.`);
+        throw new Error(
+          offered
+            ? t("The release offers {offered} instead of {version}.", {
+                offered,
+                version: target.version,
+              })
+            : t("The release offers nothing instead of {version}.", { version: target.version }),
+        );
       }
       updater.on("download-progress", progress);
       await updater.downloadUpdate(token);

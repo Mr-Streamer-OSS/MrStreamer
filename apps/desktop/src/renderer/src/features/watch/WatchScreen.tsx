@@ -20,6 +20,7 @@ import { Play, Square } from "lucide-react";
 import { useEffect, useRef, useState, type WheelEvent } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { sameOwned } from "@mrstreamer/contracts/subscription";
+import { t } from "@mrstreamer/core/i18n";
 import { hasModifier, isTyping } from "../../app/platform.ts";
 import { miniPlayer, useMiniPlayer } from "../../app/mini-player.ts";
 import { closeWatch, useUi, type ChannelList } from "../../app/ui-store.ts";
@@ -102,7 +103,7 @@ export function WatchScreen() {
 
   // A standing note, with nothing that moves: the picture itself says when it is over.
   useEffect(() => {
-    flashNote(waiting ? "Waiting for data" : null);
+    flashNote(waiting ? t("Waiting for data") : null);
     return () => flashNote(null);
   }, [waiting]);
 
@@ -330,7 +331,7 @@ export function WatchScreen() {
           break;
         case "p":
         case "P":
-          if (player.onReceiver()) flash(MINI_NEEDS_PICTURE);
+          if (player.onReceiver()) flash(t(MINI_NEEDS_PICTURE));
           else void miniPlayer.toggle();
           break;
         case "o":
@@ -342,17 +343,17 @@ export function WatchScreen() {
           }, view.signal);
           break;
         case "m":
-          if (!player.toggleMute()) flash("TV remote sets volume");
+          if (!player.toggleMute()) flash(t("TV remote sets volume"));
           break;
         case "c":
-          if (player.onReceiver()) flash("Live subtitles play here only");
+          if (player.onReceiver()) flash(t("Live subtitles play here only"));
           else player.toggleSubtitles();
           break;
         case "g":
         case "G":
         case "h":
         case "H":
-          if (player.onReceiver()) flash("Subtitle timing plays here only");
+          if (player.onReceiver()) flash(t("Subtitle timing plays here only"));
           else nudgeSubtitles(player.state().subtitle, event.key.toLowerCase() === "g" ? -1 : 1);
           break;
         case "i":
@@ -423,7 +424,12 @@ export function WatchScreen() {
           onClose={closeWatch}
         >
           {playing ? (
-            <Button variant="media" size="icon-sm" aria-label="Stop" onClick={() => player.stop()}>
+            <Button
+              variant="media"
+              size="icon-sm"
+              aria-label={t("Stop")}
+              onClick={() => player.stop()}
+            >
               <Square className="size-3 fill-current" />
             </Button>
           ) : (
@@ -431,7 +437,7 @@ export function WatchScreen() {
               data-retry
               variant="primary"
               size="icon-sm"
-              aria-label="Watch"
+              aria-label={t("Watch")}
               onClick={() => player.play(channel)}
             >
               <Play className="size-3.5 translate-x-px fill-current" />

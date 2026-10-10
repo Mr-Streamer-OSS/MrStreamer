@@ -37,9 +37,10 @@ pnpm verify:desktop live-tv
 pnpm verify:desktop titles
 pnpm verify:desktop watchlist
 pnpm verify:desktop downloads
+pnpm verify:desktop language
 ```
 
-The executable [control helper](scripts/control.ts) reuses `apps/desktop/test/e2e/app.ts` for CDP and the repo's provider/TMDB fixtures. It uses DOM handles from real ARIA labels, button text and poster titles to send pointer/key/text input to the window. Login, navigation and saving go through the UI. Read-only DOM observations and fixture request counters establish results; invoking an IPC setter or modifying the database cannot substitute for the user path.
+The executable [control helper](scripts/control.ts) reuses `apps/desktop/test/e2e/app.ts` for CDP and the repo's provider/TMDB fixtures. It uses DOM handles from real ARIA labels, button text and poster titles to send pointer/key/text input to the window. Login, navigation and saving go through the UI. On Linux every scenario starts on an English system (`LANGUAGE`/`LANG`), so the app's System default reads in English; `language` restarts on others. Read-only DOM observations and fixture request counters establish results; invoking an IPC setter or modifying the database cannot substitute for the user path.
 
 These scenarios are baseline proofs, not exhaustive acceptance. Each feature entry names additional supported paths and the existing deeper harness. For a changed path outside the baseline, drive it through the existing harness or extend this helper with a focused UI scenario and retained evidence. For a running Electron desktop window use its repo CDP harness; for a web surface use T3's collaborative browser. For website proof, follow [the website entry](features/website.md). Prefer T3 collaborative preview for browser driving: status, open, snapshot and focused interactions. If tools are absent or opening the browser reports it unavailable, the repo fallback below uses the same pinned Electron/CDP machinery.
 

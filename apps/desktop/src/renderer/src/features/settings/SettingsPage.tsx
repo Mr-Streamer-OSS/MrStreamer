@@ -1,11 +1,13 @@
 import { useEffect, type ReactNode } from "react";
 import { useMutation } from "@tanstack/react-query";
+import { type PlainKey, t } from "@mrstreamer/core/i18n";
 import { isTyping } from "../../app/platform.ts";
 import { useUi, type SettingsTab } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { WindowBar } from "../../components/WindowBar.tsx";
 import { cn } from "../../lib/utils.ts";
 import { call } from "../../lib/ipc.ts";
+import { Message } from "../../lib/message.tsx";
 import tmdbLogo from "../../assets/tmdb.svg";
 import { GeneralSection } from "./GeneralSection.tsx";
 import { DiagnosticsExport } from "./DiagnosticsExport.tsx";
@@ -13,11 +15,11 @@ import { Licences } from "./Licences.tsx";
 import { SubscriptionSection } from "./SubscriptionSection.tsx";
 import { useUpdates } from "../updates/use-updates.ts";
 
-const TABS: readonly { value: SettingsTab; label: string }[] = [
+const TABS = [
   { value: "general", label: "General" },
   { value: "subscriptions", label: "Subscriptions" },
   { value: "about", label: "About" },
-];
+] as const satisfies readonly { value: SettingsTab; label: PlainKey }[];
 
 const REPOSITORY_URL = "https://github.com/Mr-Streamer-OSS/MrStreamer";
 const PRIVACY_URL = "https://mrstreamer.app/privacy";
@@ -54,20 +56,22 @@ export function SettingsPage() {
       <WindowBar className="bg-black" />
       <div className="flex min-h-0 flex-1">
         <nav className="w-60 flex-none border-r border-border px-4 pt-4">
-          <h1 className="mb-4 px-3 text-2xl font-semibold tracking-tight">Settings</h1>
+          <h1 className="mb-4 truncate px-3 text-2xl font-semibold tracking-tight">
+            {t("Settings")}
+          </h1>
           {TABS.map((entry) => (
             <button
               key={entry.value}
               aria-current={entry.value === shownTab ? "page" : undefined}
               onClick={() => useUi.setState({ settings: entry.value })}
               className={cn(
-                "mb-0.5 block w-full rounded-lg px-3 py-2 text-left text-[0.9375rem] transition-colors",
+                "mb-0.5 block w-full truncate rounded-lg px-3 py-2 text-left text-[0.9375rem] transition-colors",
                 entry.value === shownTab
                   ? "bg-white/10 text-white"
                   : "text-muted-foreground hover:bg-white/5 hover:text-white",
               )}
             >
-              {entry.label}
+              {t(entry.label)}
             </button>
           ))}
         </nav>
@@ -96,14 +100,18 @@ function About() {
   const rating = useMutation({ mutationFn: () => call("updates.rateStore") });
   const rows: [string, ReactNode][] = [
     [
-      "Version",
+      t("Version"),
       status
-        ? `${status.version} · ${status.channel === "nightly" ? "Nightly" : "Stable"}${status.distribution === "store" ? " · Microsoft Store" : ""}`
+        ? [
+            status.version,
+            status.channel === "nightly" ? t("Nightly") : t("Stable"),
+            ...(status.distribution === "store" ? ["Microsoft Store"] : []),
+          ].join(" · ")
         : "",
     ],
-    ["Website", <Link href="https://mrstreamer.app">mrstreamer.app</Link>],
+    [t("Website"), <Link href="https://mrstreamer.app">mrstreamer.app</Link>],
     [
-      "Source",
+      t("Source"),
       <>
         <Link href={REPOSITORY_URL}>GitHub</Link>
         {__BUILD_COMMIT__ && (
@@ -118,16 +126,16 @@ function About() {
       </>,
     ],
     [
-      "Licences",
+      t("Licences"),
       <button
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => useUi.setState({ settings: "licences" })}
         className="underline underline-offset-4"
       >
-        Open-source licences
+        {t("Open-source licences")}
       </button>,
     ],
-    ["Privacy", <Link href={PRIVACY_URL}>mrstreamer.app/privacy</Link>],
+    [t("Privacy"), <Link href={PRIVACY_URL}>mrstreamer.app/privacy</Link>],
   ];
   return (
     <section>
@@ -139,18 +147,18 @@ function About() {
             <a href={`${REPOSITORY_URL}/issues/new/choose`} target="_blank" rel="noreferrer" />
           }
         >
-          Report a bug
+          {t("Report a bug")}
         </Button>
         <DiagnosticsExport />
         {status?.distribution === "store" && (
           <Button variant="secondary" disabled={rating.isPending} onClick={() => rating.mutate()}>
-            Rate in the Microsoft Store
+            {t("Rate in the Microsoft Store")}
           </Button>
         )}
       </div>
       {rating.isError && (
         <p role="alert" className="mt-2 text-sm">
-          The Microsoft Store could not be opened.
+          {t("The Microsoft Store could not be opened.")}
         </p>
       )}
       {/* TMDB's terms ask for its logo and this notice; JustWatch supplies the streaming data. */}
@@ -159,9 +167,13 @@ function About() {
           <img src={tmdbLogo} alt="TMDB" className="mb-3 h-3.5" />
         </a>
         <p>
-          This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise
-          approved by TMDB. Where titles stream comes from{" "}
-          <Link href="https://www.justwatch.com">JustWatch</Link>.
+          {t(
+            "This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.",
+          )}{" "}
+          <Message
+            text="Where titles stream comes from {justWatch}."
+            values={{ justWatch: <Link href="https://www.justwatch.com">JustWatch</Link> }}
+          />
         </p>
       </div>
     </section>
@@ -181,7 +193,7 @@ function Rows({ rows }: { rows: readonly (readonly [string, ReactNode])[] }) {
     <dl className="mb-8 space-y-3.5 text-[0.9375rem]">
       {rows.map(([label, value]) => (
         <div key={label} className="flex gap-4">
-          <dt className="w-28 flex-none text-muted-foreground">{label}</dt>
+          <dt className="w-28 flex-none truncate text-muted-foreground">{label}</dt>
           <dd className="m-0 min-w-0 truncate">{value}</dd>
         </div>
       ))}

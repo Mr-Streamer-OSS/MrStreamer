@@ -7,6 +7,7 @@
 import type { KeyboardEvent, ReactNode } from "react";
 import type { SubtitleTrack } from "@mrstreamer/contracts/playback";
 import type { SubtitleLook } from "@mrstreamer/contracts/preferences";
+import { formatDecimal, type PlainKey, t } from "@mrstreamer/core/i18n";
 import { call } from "../../lib/ipc.ts";
 import { cn } from "../../lib/utils.ts";
 import { player } from "../../player/player.ts";
@@ -19,19 +20,26 @@ import {
 } from "../../player/subtitles.ts";
 import { flash } from "./Flash.tsx";
 
+/** Each choice's word on its button, and its whole name for assistive technology. */
 const SIZES = [
   { value: "small", short: "S", label: "Small" },
   { value: "medium", short: "M", label: "Medium" },
   { value: "large", short: "L", label: "Large" },
-] as const;
+] as const satisfies readonly Segment<SubtitleLook["size"]>[];
 const BACKGROUNDS = [
   { value: "box", short: "Box", label: "Box" },
   { value: "shadow", short: "Shadow", label: "Shadow" },
-] as const;
+] as const satisfies readonly Segment<SubtitleLook["background"]>[];
 const POSITIONS = [
   { value: "low", short: "Low", label: "Low" },
   { value: "high", short: "Higher", label: "Higher" },
-] as const;
+] as const satisfies readonly Segment<SubtitleLook["position"]>[];
+
+interface Segment<V extends string> {
+  readonly value: V;
+  readonly short: PlainKey;
+  readonly label: PlainKey;
+}
 
 /** Subtitles drawn as text, which take timing and every look setting. */
 const isText = (track: SubtitleTrack) => track.format !== "picture";
@@ -43,8 +51,10 @@ export function nudgeSubtitles(subtitle: SubtitleTrack | null, direction: -1 | 1
   const delay = subtitleDelay();
   flash(
     delay === 0
-      ? "Subtitles on time"
-      : `Subtitles ${Math.abs(delay).toFixed(1)} s ${delay > 0 ? "later" : "earlier"}`,
+      ? t("Subtitles on time")
+      : delay > 0
+        ? t("Subtitles {seconds} s later", { seconds: formatDecimal(Math.abs(delay), 1) })
+        : t("Subtitles {seconds} s earlier", { seconds: formatDecimal(Math.abs(delay), 1) }),
   );
 }
 
@@ -81,7 +91,7 @@ export function SubtitleSettingRows({
       <div className="px-2">
         {timing && (
           <div className="flex items-center gap-3 py-1">
-            <span className="flex-1">Timing</span>
+            <span className="flex-1">{t("Timing")}</span>
             <TrackTiming />
           </div>
         )}
@@ -96,15 +106,21 @@ export function TrackTiming() {
   const delay = useSubtitleSettings((state) => state.delay);
   return (
     <div className="flex items-center gap-1">
-      <Step label="Earlier" onClick={() => setSubtitleDelay(player.element, delay - TIMING_STEP_S)}>
+      <Step
+        label={t("Earlier")}
+        onClick={() => setSubtitleDelay(player.element, delay - TIMING_STEP_S)}
+      >
         −
       </Step>
       <span className="w-12 text-center text-[0.8125rem] tabular-nums">{delayLabel(delay)}</span>
-      <Step label="Later" onClick={() => setSubtitleDelay(player.element, delay + TIMING_STEP_S)}>
+      <Step
+        label={t("Later")}
+        onClick={() => setSubtitleDelay(player.element, delay + TIMING_STEP_S)}
+      >
         +
       </Step>
       <TextButton disabled={delay === 0} onClick={() => setSubtitleDelay(player.element, 0)}>
-        Reset
+        {t("Reset")}
       </TextButton>
     </div>
   );
@@ -120,21 +136,21 @@ export function LookRows({ text }: { text: boolean }) {
   return (
     <>
       <Segments
-        label="Size"
+        label={t("Size")}
         options={SIZES}
         value={look.size}
         onPick={(size) => pick({ ...look, size })}
       />
       {text && (
         <Segments
-          label="Background"
+          label={t("Background")}
           options={BACKGROUNDS}
           value={look.background}
           onPick={(background) => pick({ ...look, background })}
         />
       )}
       <Segments
-        label="Position"
+        label={t("Position")}
         options={POSITIONS}
         value={look.position}
         onPick={(position) => pick({ ...look, position })}
@@ -199,7 +215,7 @@ function Segments<V extends string>({
   onPick,
 }: {
   label: string;
-  options: readonly { readonly value: V; readonly short: string; readonly label: string }[];
+  options: readonly Segment<V>[];
   value: V;
   onPick: (value: V) => void;
 }) {
@@ -223,7 +239,7 @@ function Segments<V extends string>({
             key={option.value}
             role="radio"
             aria-checked={option.value === value}
-            aria-label={option.label}
+            aria-label={t(option.label)}
             data-item={option.value === value ? "" : undefined}
             // Tab stops on the chosen one too: the others are Left and Right from it.
             tabIndex={option.value === value ? 0 : -1}
@@ -236,7 +252,7 @@ function Segments<V extends string>({
                 : "text-foreground/80 hover:bg-white/8",
             )}
           >
-            {option.short}
+            {t(option.short)}
           </button>
         ))}
       </div>
@@ -246,6 +262,6 @@ function Segments<V extends string>({
 
 /** "0.0 s", "+0.3 s" for later, "−0.2 s" for earlier. */
 export function delayLabel(delay: number): string {
-  if (delay === 0) return "0.0 s";
-  return `${delay > 0 ? "+" : "−"}${Math.abs(delay).toFixed(1)} s`;
+  const sign = delay > 0 ? "+" : delay < 0 ? "−" : "";
+  return t("{seconds} s", { seconds: `${sign}${formatDecimal(Math.abs(delay), 1)}` });
 }

@@ -6,6 +6,7 @@ import {
   type LiveChannel,
   type Quality,
 } from "@mrstreamer/contracts/library";
+import { t } from "@mrstreamer/core/i18n";
 
 const NAMES: Readonly<Record<Quality, string>> = {
   uhd: "4K",
@@ -18,7 +19,7 @@ const SHORT: Readonly<Record<Quality, string>> = { uhd: "4K", fhd: "FHD", hd: "H
 
 /** "Full HD", or "Not labelled" when the provider doesn't say. */
 export function qualityName(variant: ChannelVariant | undefined): string {
-  return variant?.quality ? NAMES[variant.quality] : "Not labelled";
+  return variant?.quality ? NAMES[variant.quality] : t("Not labelled");
 }
 
 /** The name of a quality to choose in Settings: "Full HD". */

@@ -14,6 +14,7 @@
 import { Play, RotateCw, SkipForward } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
+import { t } from "@mrstreamer/core/i18n";
 import { openSubscription } from "../../app/ui-store.ts";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Button } from "../../components/ui/button.tsx";
@@ -150,7 +151,7 @@ export function PlaybackState({
         : null;
   const channels = (
     <Button variant="secondary" onClick={onChannels}>
-      Channels
+      {t("Channels")}
     </Button>
   );
   const troubled: Message | null =
@@ -179,7 +180,7 @@ export function PlaybackState({
             actions: (
               <>
                 <Button variant="ghost" onClick={() => player.stop()}>
-                  Stop
+                  {t("Stop")}
                 </Button>
                 {channels}
               </>
@@ -213,20 +214,19 @@ export function PlaybackState({
         line={
           <ReceiverLine receiver={receiver}>
             {phase.kind === "idle"
-              ? "Stopped"
+              ? t("Stopped {where}", { where: on })
               : phase.kind === "tuning" || said === "loading"
-                ? "Loading"
+                ? t("Loading {where}", { where: on })
                 : said === "paused"
-                  ? "Paused"
+                  ? t("Paused {where}", { where: on })
                   : said === "buffering"
-                    ? "Buffering"
-                    : "Playing"}{" "}
-            {on}
+                    ? t("Buffering {where}", { where: on })
+                    : t("Playing {where}", { where: on })}
           </ReceiverLine>
         }
         body={
           phase.kind === "tuning" ? (
-            <Elapsed since={phase.since} what={`Tuning ${channel.title}`} />
+            <Elapsed since={phase.since} what={t("Tuning {name}", { name: channel.title })} />
           ) : undefined
         }
         actions={
@@ -234,7 +234,7 @@ export function PlaybackState({
             {phase.kind === "idle" && (
               <Button variant="primary" onClick={onWatch}>
                 <Play className="fill-current" />
-                Watch
+                {t("Watch")}
               </Button>
             )}
             <PlayHere />
@@ -253,7 +253,7 @@ export function PlaybackState({
           body: <Elapsed since={phase.since} />,
           actions: (
             <Button variant="ghost" onClick={() => player.stop()}>
-              Cancel
+              {t("Cancel")}
             </Button>
           ),
         }
@@ -262,7 +262,7 @@ export function PlaybackState({
           actions: (
             <Button variant="primary" size="lg" onClick={onWatch}>
               <Play className="fill-current" />
-              Watch
+              {t("Watch")}
             </Button>
           ),
         });
@@ -319,7 +319,7 @@ function FailureActions({
       !connecting && (
         <Button variant="primary" onClick={retryFailed}>
           <RotateCw />
-          Try again
+          {t("Try again")}
         </Button>
       )
     );
@@ -330,7 +330,7 @@ function FailureActions({
     return (
       <>
         <Button variant="primary" onClick={() => openSubscription(channel.subscriptionId, "edit")}>
-          Update login
+          {t("Update login")}
         </Button>
         {channels}
       </>
@@ -343,7 +343,7 @@ function FailureActions({
           variant="primary"
           onClick={() => openSubscription(channel.subscriptionId, "secret")}
         >
-          Enter {source?.playlist ? "link" : "password"}
+          {source?.playlist ? t("Enter link") : t("Enter password")}
         </Button>
         {channels}
       </>
@@ -352,7 +352,7 @@ function FailureActions({
   const retry = canRetry(problem) && (
     <Button variant="primary" onClick={retryFailed}>
       <RotateCw />
-      Retry
+      {t("Retry")}
     </Button>
   );
   if (!isStreamsOwn(problem)) {
@@ -377,7 +377,7 @@ function FailureActions({
           </Button>
         )}
         <Button variant="secondary" onClick={() => chooseQuality(channel, null)}>
-          Automatic
+          {t("Automatic")}
         </Button>
         {!retry && channels}
       </>
@@ -390,12 +390,12 @@ function FailureActions({
       {retry}
       {untried ? (
         <Button variant={retry ? "secondary" : "primary"} onClick={onQuality}>
-          Quality
+          {t("Quality")}
         </Button>
       ) : (
         <Button variant="secondary" onClick={onNext}>
           <SkipForward />
-          Next channel
+          {t("Next channel")}
         </Button>
       )}
       {channels}
@@ -426,25 +426,32 @@ function Attempts({ phase }: { phase: ReconnectingPhase }) {
           />
         ))}
       </span>
-      attempt {phase.attempt} of {phase.of}
-      {phase.until !== null && <Remaining until={phase.until} />}
+      {phase.until === null ? (
+        t("attempt {attempt} of {of}", { attempt: phase.attempt, of: phase.of })
+      ) : (
+        <Remaining attempt={phase.attempt} of={phase.of} until={phase.until} />
+      )}
     </>
   );
 }
 
-/** " in 4 s", counted down once a second until `until`. */
-function Remaining({ until }: { until: number }) {
+/** "attempt 2 of 4 in 4 s", counted down once a second until `until`. */
+function Remaining({ attempt, of, until }: { attempt: number; of: number; until: number }) {
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [until]);
-  return <> in {Math.max(1, Math.ceil((until - now) / 1000))} s</>;
+  return t("attempt {attempt} of {of} in {seconds} s", {
+    attempt,
+    of,
+    seconds: Math.max(1, Math.ceil((until - now) / 1000)),
+  });
 }
 
 /** "Tuning · 3 s", updated once a second. */
-function Elapsed({ since, what = "Tuning" }: { since: number; what?: string }) {
+function Elapsed({ since, what = t("Tuning") }: { since: number; what?: string }) {
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -452,7 +459,7 @@ function Elapsed({ since, what = "Tuning" }: { since: number; what?: string }) {
   }, []);
   return (
     <>
-      {what} · {Math.max(0, Math.floor((now - since) / 1000))} s
+      {what} · {t("{seconds} s", { seconds: Math.max(0, Math.floor((now - since) / 1000)) })}
     </>
   );
 }

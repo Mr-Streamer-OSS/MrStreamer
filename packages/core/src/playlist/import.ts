@@ -8,6 +8,7 @@ import type {
   PlaylistSample,
 } from "@mrstreamer/contracts/playlist";
 import type { ProviderDetails, ProviderEpisode, ProviderTitle } from "../provider.ts";
+import { t } from "../i18n.ts";
 import {
   playlistCatalogue,
   streamFormat,
@@ -66,7 +67,7 @@ function classifiedPlaylist(
   if (entries.length > 100_000)
     throw new AppFailure({
       kind: "unexpected",
-      detail: "Playlist exceeds the 100,000 entry mapping limit.",
+      detail: t("Playlist exceeds the {count} entry mapping limit.", { count: 100_000 }),
     });
   const unique = new Map<string, PlaylistEntry>();
   for (const entry of entries) {
@@ -125,7 +126,7 @@ function classifiedPlaylist(
         if (groups.size === 10_000)
           throw new AppFailure({
             kind: "unexpected",
-            detail: "Playlist mapping supports at most 10,000 groups.",
+            detail: t("Playlist mapping supports at most {count} groups.", { count: 10_000 }),
           });
         groups.set(group, [report]);
       }

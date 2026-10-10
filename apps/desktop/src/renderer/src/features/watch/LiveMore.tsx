@@ -1,6 +1,7 @@
 import { ChevronLeft, ChevronRight, Ellipsis } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, type ComponentProps } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
+import { type PlainKey, t } from "@mrstreamer/core/i18n";
 import { qualityName, shortQuality } from "../../lib/quality.ts";
 import { outputs, receiverName, useOutput } from "../../player/output.ts";
 import { MiniPlayerButton } from "./MiniPlayer.tsx";
@@ -12,7 +13,11 @@ import { VolumeControl } from "./VolumeControl.tsx";
 export type LiveMenu = TrackMenu | "more";
 const pages = ["sound", "quality", "output"] as const;
 type Page = (typeof pages)[number];
-const labels = { sound: "Sound", quality: "Quality", output: "Play on" };
+const labels = {
+  sound: "Sound",
+  quality: "Quality",
+  output: "Play on",
+} as const satisfies Record<Page, PlainKey>;
 
 /** Live TV's secondary controls, with every page anchored to the visible More button. */
 export function LiveMore({
@@ -37,7 +42,7 @@ export function LiveMore({
   const offers = useOutput((state) => state.status.offers);
   const output = useOutput((state) => state.status.output);
   const active = output.kind === "receiver" || output.kind === "lost";
-  const destination = active ? receiverName(output.receiver) : "This computer";
+  const destination = active ? receiverName(output.receiver) : t("This computer");
   const listed = offers.includes("cast");
   const available = {
     sound: sound !== null,
@@ -96,7 +101,7 @@ export function LiveMore({
   const values = {
     sound: playingSound?.label,
     quality: quality
-      ? `${quality.chosen === null ? "Automatic · " : ""}${shortQuality(shownQuality) ?? qualityName(shownQuality)}`
+      ? `${quality.chosen === null ? `${t("Automatic")} · ` : ""}${shortQuality(shownQuality) ?? qualityName(shownQuality)}`
       : undefined,
     output: destination,
   };
@@ -110,9 +115,9 @@ export function LiveMore({
     // Apple's system picker measures this visible button even after the page closes.
     <span data-output="">
       <Menu
-        label="More"
+        label={t("More")}
         on={active}
-        description={active ? `Playing on ${destination}` : undefined}
+        description={active ? t("Playing on {receiver}", { receiver: destination }) : undefined}
         focusChosen={page !== null && keyboardOpen}
         open={opened}
         onOpenChange={(open) => onMenu(open ? "more" : null)}
@@ -136,13 +141,13 @@ export function LiveMore({
               <button
                 data-item
                 data-live-back
-                aria-label="Back to More"
+                aria-label={t("Back to More")}
                 className="mb-1 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left font-semibold outline-none hover:bg-white/6 focus-visible:bg-white/10"
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={(event) => go(null, event.detail === 0 ? "keyboard" : "pointer")}
               >
                 <ChevronLeft className="size-4" />
-                {labels[page]}
+                {t(labels[page])}
               </button>
               {page === "sound" && sound && <SoundChoices {...sound} />}
               {page === "quality" && quality && <QualityChoices {...quality} />}
@@ -153,11 +158,26 @@ export function LiveMore({
           ) : (
             <>
               {[
-                { label: "Channel up", key: "Up", run: () => onSwitch(-1), disabled: false },
-                { label: "Channel down", key: "Down", run: () => onSwitch(1), disabled: false },
                 {
-                  label: previous ? `Back to ${previous.title}` : "Previous channel",
+                  label: t("Channel up"),
+                  key: "Up",
+                  caption: t("Up"),
+                  run: () => onSwitch(-1),
+                  disabled: false,
+                },
+                {
+                  label: t("Channel down"),
+                  key: "Down",
+                  caption: t("Down"),
+                  run: () => onSwitch(1),
+                  disabled: false,
+                },
+                {
+                  label: previous
+                    ? t("Back to {name}", { name: previous.title })
+                    : t("Previous channel"),
                   key: "Backspace",
+                  caption: t("Backspace"),
                   run: onPrevious,
                   disabled: !previous,
                 },
@@ -173,7 +193,7 @@ export function LiveMore({
                 >
                   <span className="min-w-0 flex-1 truncate">{item.label}</span>
                   <span aria-hidden className="flex-none text-[0.8125rem] text-muted-foreground">
-                    {item.key}
+                    {item.caption}
                   </span>
                 </button>
               ))}
@@ -185,13 +205,13 @@ export function LiveMore({
                       key={each}
                       data-item
                       data-live-page={each}
-                      aria-label={labels[each]}
+                      aria-label={t(labels[each])}
                       aria-description={values[each]}
                       className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left outline-none hover:bg-white/6 focus-visible:bg-white/10"
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={(event) => go(each, event.detail === 0 ? "keyboard" : "pointer")}
                     >
-                      <span className="flex-none">{labels[each]}</span>
+                      <span className="flex-none">{t(labels[each])}</span>
                       <span
                         aria-hidden
                         className="ml-auto min-w-0 truncate text-[0.8125rem] text-muted-foreground"

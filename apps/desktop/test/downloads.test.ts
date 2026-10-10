@@ -10,6 +10,7 @@ import { basename, join } from "node:path";
 import { Writable } from "node:stream";
 import type { Download } from "@mrstreamer/contracts/downloads";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
+import { setLanguage } from "@mrstreamer/core/i18n";
 import { playlistGroupId } from "@mrstreamer/core/playlist/import";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { fileDisk, type Disk } from "../src/main/downloads/transfer.ts";
@@ -1208,4 +1209,39 @@ describe.skipIf(!hasTools)("downloads", () => {
     expect(await subtitles.saved(copy.sessionId)).toBeNull();
     await playback.close(copy.sessionId);
   }, 60_000);
+});
+
+// Main makes its services before it applies the saved interface language, and the viewer can pick
+// another while it runs: a failure made later is in the language of that moment.
+it("says a download asked for after it went is gone in the interface language picked since", async () => {
+  const { downloads, quit } = await app(await tempDir());
+  setLanguage({ locale: "fr-FR", formats: "fr-FR" });
+  onTestFinished(() => setLanguage({ locale: "en-US", formats: "en-US" }));
+  const gone = { error: { kind: "unexpected", detail: "Ce téléchargement n'est plus là." } };
+  await expect(downloads.retry("gone")).rejects.toMatchObject(gone);
+  await expect(downloads.recordProgress("gone", 3, 10)).rejects.toMatchObject(gone);
+  await quit();
+});
+
+// A Downloads table this build can't prepare fails every call from the start, before main applies
+// the saved interface language: each one says so in the language picked since, and keeps every folder.
+it("says Downloads can't be opened in the interface language picked since the start", async () => {
+  const dataDir = await tempDir();
+  const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+  db.exec("create table downloads (id text primary key)");
+  db.close();
+  const kept = randomUUID();
+  await mkdir(join(dataDir, "downloads", kept), { recursive: true });
+  const { downloads, quit } = await app(dataDir);
+  setLanguage({ locale: "fr-FR", formats: "fr-FR" });
+  onTestFinished(() => setLanguage({ locale: "en-US", formats: "en-US" }));
+  const closed = {
+    error: { kind: "unexpected", detail: "Impossible d'ouvrir les téléchargements." },
+  };
+  await expect(downloads.list()).rejects.toMatchObject(closed);
+  await expect(
+    downloads.add({ kind: "movie", subscriptionId: "any", id: "1" }),
+  ).rejects.toMatchObject(closed);
+  await quit();
+  expect(await readdir(join(dataDir, "downloads"))).toEqual([kept]);
 });
