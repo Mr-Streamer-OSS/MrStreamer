@@ -1,20 +1,30 @@
 // @vitest-environment happy-dom
 // Downloads in the window: the page's queue and copies, Connect's way to them with no
-// subscription saved, a movie's Download in its details, and a copy playing offline in the same
-// player, which asks no provider, record, receiver or subtitle service.
-import { ipc, SUBSCRIPTION } from "./support.ts";
+// subscription saved, a movie's Download in its details, the top bar's word on how they stand,
+// and a copy playing offline in the same player, which asks no provider, record, receiver or
+// subtitle service.
+import { ipc, SAVED, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Download, DownloadList } from "@mrstreamer/contracts/downloads";
+import type { InterfaceLanguage } from "@mrstreamer/contracts/language";
+import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { OutputStatus } from "@mrstreamer/contracts/output";
+import type { UpdateStatus } from "@mrstreamer/contracts/updates";
+import { setLanguage } from "@mrstreamer/core/i18n";
 import { App } from "../../src/renderer/src/app/App.tsx";
-import { useUi } from "../../src/renderer/src/app/ui-store.ts";
+import { useLocale } from "../../src/renderer/src/app/language.ts";
+import { openWatch, useUi } from "../../src/renderer/src/app/ui-store.ts";
+import { WindowBar } from "../../src/renderer/src/components/WindowBar.tsx";
 import { MovieDownload } from "../../src/renderer/src/features/downloads/DownloadControls.tsx";
 import { DownloadsPage } from "../../src/renderer/src/features/downloads/DownloadsPage.tsx";
+import { SettingsPage } from "../../src/renderer/src/features/settings/SettingsPage.tsx";
 import { TitleWatch } from "../../src/renderer/src/features/titles/TitleWatch.tsx";
+import { WatchScreen } from "../../src/renderer/src/features/watch/WatchScreen.tsx";
 import { syncDownloads, watchOffline } from "../../src/renderer/src/lib/downloads.ts";
+import { player } from "../../src/renderer/src/player/player.ts";
 import { titlePlayer } from "../../src/renderer/src/player/title-player.ts";
 
 /** A download of a movie of the test subscription, as main lists it; `over` changes it. */
@@ -36,6 +46,19 @@ function download(over: Partial<Download> = {}): Download {
     ...over,
   };
 }
+
+/** A live channel of the test subscription, for Watch. */
+const channel: LiveChannel = {
+  subscriptionId: SUBSCRIPTION,
+  id: "vrt",
+  name: "BE | VRT 1",
+  title: "VRT 1",
+  tags: [],
+  number: null,
+  logoUrl: null,
+  categoryIds: [],
+  variants: [{ id: "vrt", name: "BE | VRT 1", tags: [], quality: null }],
+};
 
 const list = (items: readonly Download[], ended = 0): DownloadList => ({
   items,
@@ -59,6 +82,7 @@ afterEach(() => {
   unmount();
   stopSync();
   titlePlayer.close();
+  player.reset();
 });
 
 beforeEach(() => {
@@ -93,6 +117,13 @@ const labelled = (within: HTMLElement, label: string) =>
 async function changed(next: DownloadList, ready: () => boolean): Promise<void> {
   await act(async () => ipc.emit("downloads.changed", next));
   await until(ready);
+}
+
+/** A key pressed with `target` in focus; says whether the window took it for itself. */
+async function key(name: string, target: EventTarget = window): Promise<boolean> {
+  const event = new KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true });
+  await act(async () => target.dispatchEvent(event));
+  return event.defaultPrevented;
 }
 
 const click = (element: HTMLElement | null | undefined) =>
@@ -313,5 +344,316 @@ describe("a movie's Download in its details", () => {
     ipc.always("downloads.list", list([download({ title: { kind: "movie", id: "other" } })]));
     const details = await show(createElement(MovieDownload, { title: ref }), "button");
     expect(button(details, "Download")).toBeDefined();
+  });
+});
+
+describe("the top bar's word on the downloads", () => {
+  const transfer = (received: number, size: number | null) =>
+    download({
+      id: "running",
+      status: { kind: "transferring", received, size, rate: null, restarted: false },
+    });
+  /** The bar's Downloads beside Search, which names how they stand while there is something to say. */
+  const notice = (within: HTMLElement) =>
+    within.querySelector<HTMLButtonElement>('header [aria-label^="Downloads, "]');
+
+  it("follows the one transfer, then what waits, and says nothing of copies", async () => {
+    useUi.setState({ view: "movies" });
+    const read = ipc.hold("downloads.list");
+    const bar = await show(createElement(WindowBar), "header");
+    // Nothing until main's list is read.
+    expect(notice(bar)).toBeNull();
+    await act(async () => {
+      read.resolve(list([download(), download({ id: "gone", status: { kind: "missing" } })]));
+      await settle();
+    });
+    expect(notice(bar)).toBeNull();
+
+    const queued = download({ id: "next", status: { kind: "queued" } });
+    const waiting = download({ id: "other", status: { kind: "waiting" } });
+    // The transfer speaks before what waits or is queued, floored as its row is.
+    await changed(list([queued, waiting, transfer(4_299, 10_000)]), () => notice(bar) !== null);
+    expect(notice(bar)?.textContent).toBe("42%");
+    expect(notice(bar)?.getAttribute("aria-label")).toBe("Downloads, 42%");
+    await changed(
+      list([queued, transfer(9_999, 10_000)]),
+      () => notice(bar)?.textContent === "99%",
+    );
+    // Without a size, the bytes so far, and Starting before the first.
+    await changed(list([transfer(0, null)]), () => notice(bar)?.textContent === "Starting");
+    await changed(list([transfer(118_000_000, null)]), () => notice(bar)?.textContent === "118 MB");
+    // Between transfers, what waits for playback comes before what is queued.
+    await changed(list([queued, waiting]), () => notice(bar)?.textContent === "Waiting");
+    await changed(list([queued]), () => notice(bar)?.textContent === "Queued");
+    // A failure speaks once nothing else is left, while Retry can still reach its subscription.
+    const failed = download({
+      id: "full",
+      status: { kind: "failed", failure: { kind: "disk-full", needed: null } },
+    });
+    await changed(
+      list([failed, download()]),
+      () => notice(bar)?.textContent === "Download stopped",
+    );
+    await changed(list([{ ...failed, subscription: null }]), () => notice(bar) === null);
+    expect(notice(bar)).toBeNull();
+    // Every change came as main's event: the list was read once.
+    expect(ipc.argsOf("downloads.list")).toHaveLength(1);
+  });
+
+  it("leaves the Downloads page to say it while its name is in the bar", async () => {
+    ipc.always("downloads.list", list([transfer(25, 100)]));
+    useUi.setState({ view: "downloads" });
+    const bar = await show(createElement(WindowBar), "header");
+    await settle();
+    expect(button(bar, "Downloads")?.getAttribute("aria-current")).toBe("page");
+    expect(notice(bar)).toBeNull();
+    // Settings over the page has Back in the bar instead of the pages.
+    await act(async () => useUi.setState({ settings: "general" }));
+    await until(() => notice(bar) !== null);
+    expect(notice(bar)?.textContent).toBe("25%");
+    await click(notice(bar));
+    expect(useUi.getState()).toMatchObject({ view: "downloads", settings: null });
+  });
+
+  it("opens Downloads from Watch, whose Enter opens the channels everywhere else", async () => {
+    ipc.always("downloads.list", list([transfer(40, 100)]));
+    ipc.hold("playback.open");
+    openWatch();
+    player.play(channel);
+    const watch = await show(createElement(WatchScreen), "header [data-downloads-notice]");
+    const focused = notice(watch)!;
+    focused.focus();
+    expect(await key("Enter", focused)).toBe(false);
+    expect(await key(" ", focused)).toBe(false);
+    expect(useUi.getState().channelsOpen).toBe(false);
+    await click(focused);
+    expect(useUi.getState()).toMatchObject({ view: "downloads", watching: false });
+
+    await act(async () => openWatch());
+    expect(await key("Enter")).toBe(true);
+    expect(useUi.getState().channelsOpen).toBe(true);
+  });
+
+  it("opens Downloads from a title playing, which leaves it as Back does", async () => {
+    ipc.always("subscription.list", [SAVED]);
+    ipc.always("downloads.list", list([download({ id: "copy" }), transfer(40, 100)]));
+    const opened = ipc.hold("playback.openCopy");
+    const app = await show(createElement(App), "header");
+    await act(async () => {
+      watchOffline(download({ id: "copy", progress: { position: 1200, duration: 6360 } }));
+      opened.resolve({
+        sessionId: "c1",
+        copy: "copy",
+        url: "http://127.0.0.1/title/c1.mp4",
+        duration: 6360,
+        audio: [],
+        subtitles: [],
+      });
+      await settle();
+    });
+    const title = () => app.querySelector<HTMLElement>("[data-view=title]");
+    await until(() => title() !== null && notice(title()!) !== null);
+    expect(notice(title()!)?.textContent).toBe("40%");
+    // Enter and Space with the notice in focus are its own, to press it; the title's keys stay
+    // the title's everywhere else, and K with the notice in focus too.
+    const focused = notice(title()!)!;
+    focused.focus();
+    expect(await key("Enter", focused)).toBe(false);
+    expect(await key(" ", focused)).toBe(false);
+    expect(await key("k", focused)).toBe(true);
+    expect(await key(" ")).toBe(true);
+    expect(title()).not.toBeNull();
+    await click(focused);
+    await until(() => app.querySelector("h1")?.textContent === "Downloads");
+    expect(title()).toBeNull();
+    expect(app.querySelector("h1")?.textContent).toBe("Downloads");
+    // The copy closed as Back closes it, keeping where it got to.
+    expect(ipc.argsOf("downloads.recordProgress")).toEqual([
+      { id: "copy", position: 1195, duration: 6360 },
+    ]);
+  });
+
+  /**
+   * Lays the bar out `width` CSS px wide, as a browser would and happy-dom doesn't: the pages, or
+   * Back in their place, get what the brand, Search, Settings, an update notice and the Downloads
+   * button leave, each sized by what it reads, and ResizeObserver tells of it once `resize` says
+   * the layout changed.
+   */
+  function layOut(width: number) {
+    const observers = new Set<ResizeObserverCallback>();
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        callback: ResizeObserverCallback;
+        constructor(callback: ResizeObserverCallback) {
+          this.callback = callback;
+        }
+        observe() {
+          observers.add(this.callback);
+        }
+        unobserve() {}
+        disconnect() {
+          observers.delete(this.callback);
+        }
+      },
+    );
+    const wide = (text: string, padding: number) => padding + 7 * text.length;
+    // The pages' place: the nav with their names, or the slot Back stands in.
+    const place = (element: HTMLElement) => element.matches("header > :nth-child(2)");
+    const room = (pages: HTMLElement) => {
+      const header = pages.closest("header")!;
+      const notice = header.querySelector("[data-downloads-notice]")?.textContent ?? null;
+      const update = [...header.querySelectorAll("button")].some((each) =>
+        each.textContent?.startsWith("Update"),
+      );
+      return (
+        width - 363 - (notice === null ? 0 : notice ? wide(notice, 51) : 32) - (update ? 88 : 0)
+      );
+    };
+    const names = (pages: HTMLElement) =>
+      [...pages.children].reduce((sum, each) => sum + wide(each.textContent ?? "", 24) + 4, -4);
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return place(this) ? room(this) : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return place(this) ? Math.max(room(this), names(this)) : 0;
+    });
+    return {
+      resize: (next = width) =>
+        act(async () => {
+          width = next;
+          for (const observer of observers) observer([], {} as ResizeObserver);
+          await settle();
+        }),
+    };
+  }
+  const pages = (bar: HTMLElement) =>
+    [...bar.querySelectorAll("nav button")].map((each) => each.textContent);
+  const failed = download({
+    id: "full",
+    status: { kind: "failed", failure: { kind: "disk-full", needed: null } },
+  });
+
+  describe("where the bar is narrow", () => {
+    beforeEach(() => {
+      ipc.always("subscription.list", [SAVED]);
+      useUi.setState({ view: "movies" });
+    });
+    afterEach(() => {
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    });
+
+    it("gives the arrow its words back once they fit, with the window as wide as it was", async () => {
+      const update: UpdateStatus = {
+        version: "0.0.9",
+        distribution: "direct",
+        channel: "stable",
+        update: { kind: "available", version: "0.0.10" },
+        offer: null,
+        checked: null,
+        nextCheckAt: null,
+        dismissed: null,
+      };
+      ipc.always("updates.status", update);
+      ipc.always("updates.dismiss", { ...update, dismissed: "0.0.10" });
+      ipc.always("downloads.list", list([failed]));
+      const layout = layOut(900);
+      const bar = await show(createElement(WindowBar), "header [data-downloads-notice]");
+      await until(() => button(bar, "Update") !== undefined);
+      await layout.resize();
+      // Beside Update, the five names leave the notice its arrow alone; it says the rest aloud.
+      expect(notice(bar)?.textContent).toBe("");
+      expect(notice(bar)?.getAttribute("aria-label")).toBe("Downloads, Download stopped");
+      expect(pages(bar)).toEqual(["Home", "Live TV", "Movies", "Series", "Watchlist"]);
+
+      // Not now takes Update away, and with it room enough for the words.
+      await click(button(bar, "Update"));
+      await click(button(document.body, "Not now"));
+      await until(() => button(bar, "Update") === undefined);
+      await layout.resize();
+      expect(notice(bar)?.textContent).toBe("Download stopped");
+      expect(pages(bar)).toEqual(["Home", "Live TV", "Movies", "Series", "Watchlist"]);
+
+      // Shorter words fit where the longer didn't, though nothing resized: Retry's transfer.
+      await layout.resize(820);
+      expect(notice(bar)?.textContent).toBe("");
+      await changed(list([transfer(40, 100)]), () => notice(bar)?.textContent === "40%");
+      expect(pages(bar)).toEqual(["Home", "Live TV", "Movies", "Series", "Watchlist"]);
+    });
+
+    it("gives the arrow its words back when Settings' language pick shortens Back", async () => {
+      const language = (locale: "en-US" | "nl-NL"): InterfaceLanguage => ({
+        choice: locale,
+        system: "en-US",
+        locale,
+        formats: locale,
+      });
+      ipc.always("downloads.list", list([transfer(40, 100)]));
+      ipc.always("language.get", language("nl-NL"));
+      ipc.always("language.set", language("en-US"));
+      setLanguage(language("nl-NL"));
+      useUi.setState({ settings: "general" });
+      // Back has room beside the percentage at this width; the longer Terug doesn't.
+      layOut(490);
+      function Localized() {
+        useLocale();
+        return createElement(SettingsPage);
+      }
+      try {
+        const settings = await show(createElement(Localized), "header [data-downloads-notice]");
+        const said = () => settings.querySelector("header [data-downloads-notice]")?.textContent;
+        await until(() => said() === "");
+        expect(said()).toBe("");
+        expect(button(settings, "Terug")).toBeDefined();
+
+        const picker = () =>
+          settings.querySelector<HTMLSelectElement>('select[aria-label="Taal van de interface"]');
+        await until(() => picker()?.value === "nl-NL");
+        await act(async () => {
+          picker()!.value = "en-US";
+          picker()!.dispatchEvent(new Event("change", { bubbles: true }));
+          await settle();
+        });
+        expect(ipc.argsOf("language.set")).toEqual([{ choice: "en-US" }]);
+        await until(() => said() === "40%");
+        expect(button(settings, "Back")).toBeDefined();
+        expect(said()).toBe("40%");
+      } finally {
+        setLanguage(language("en-US"));
+      }
+    });
+
+    it("keeps the notice in focus as its words go and come back", async () => {
+      ipc.always("downloads.list", list([download({ id: "next", status: { kind: "queued" } })]));
+      const layout = layOut(820);
+      const bar = await show(createElement(WindowBar), "header [data-downloads-notice]");
+      await layout.resize();
+      expect(notice(bar)?.textContent).toBe("Queued");
+      const focused = notice(bar)!;
+      focused.focus();
+
+      // Longer words fold it to its arrow; shorter ones, or more room, give them back.
+      await changed(list([failed]), () => notice(bar)?.textContent === "Download stopped");
+      await layout.resize();
+      expect(notice(bar)?.textContent).toBe("");
+      await changed(
+        list([download({ id: "next", status: { kind: "queued" } })]),
+        () => notice(bar)?.textContent === "Queued",
+      );
+      await layout.resize(700);
+      expect(notice(bar)?.textContent).toBe("");
+      await layout.resize(820);
+      expect(notice(bar)?.textContent).toBe("Queued");
+      // The same button all along, still in focus and pressed as itself.
+      expect(notice(bar)).toBe(focused);
+      expect(document.activeElement).toBe(focused);
+      await click(focused);
+      expect(useUi.getState().view).toBe("downloads");
+    });
   });
 });

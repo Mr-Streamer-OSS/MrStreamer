@@ -1,8 +1,18 @@
-import { ArrowDownToLine, ChevronLeft, Search, Settings } from "lucide-react";
-import { useCallback, useRef, useState, type ReactNode, type RefCallback } from "react";
+import { ChevronLeft, Search, Settings } from "lucide-react";
+import {
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefCallback,
+} from "react";
+import type { Locale } from "@mrstreamer/contracts/language";
 import { hasTitles } from "@mrstreamer/contracts/subscription";
+import { useLocale } from "../app/language.ts";
 import { isMac, useWindowFullScreen } from "../app/platform.ts";
 import { closeWatch, withoutTitles, openView, useUi, type View } from "../app/ui-store.ts";
+import { DownloadsNotice, useDownloadsStatus } from "../features/downloads/DownloadsNotice.tsx";
 import { UpdateNotice } from "../features/updates/UpdateNotice.tsx";
 import { useQuery } from "@tanstack/react-query";
 import { type PlainKey, t } from "@mrstreamer/core/i18n";
@@ -29,7 +39,10 @@ const VIEWS = [
  * title's details, Back takes the pages' place and returns to the page underneath. `onBack`
  * overrides where it goes, as a playing title or an open collection does. Subscriptions with
  * live TV only have no Movies, Series or Watchlist. Where the window is too narrow for every
- * page's name, Downloads goes beside Search as a button of its own, under the same name.
+ * page's name, Downloads goes beside Search as a button of its own, under the same name. That
+ * place also says how the downloads stand while one is under way, waits or stopped, except over
+ * the Downloads page itself while its name is in the bar. Where even the other names, or Back,
+ * don't fit beside those words, it keeps its arrow alone and says them on hover and focus.
  */
 export function WindowBar({ className, onBack }: { className?: string; onBack?: () => void }) {
   const view = useUi((state) => state.view);
@@ -41,7 +54,11 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
   const watching = useUi((state) => state.watching);
   const settingsOpen = useUi((state) => state.settings !== null);
   const detailsOpen = useUi((state) => state.details !== null || state.savedEntry !== null);
-  const [pages, folded] = useFolds();
+  const status = useDownloadsStatus();
+  const locale = useLocale();
+  const [pages, fold] = useFolds(status?.text, locale);
+  const [backRoom, backFold] = useFolds(status?.text, locale);
+  const folded = fold !== "none";
   const back =
     onBack ??
     (settingsOpen
@@ -56,14 +73,16 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
     <BarFrame className={className}>
       <Brand />
       {back ? (
-        <button
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={back}
-          className="flex h-8 items-center gap-1 rounded-full pr-3 pl-1.5 text-[0.875rem] font-semibold text-white hover:text-white/75"
-        >
-          <ChevronLeft className="size-4" />
-          {t("Back")}
-        </button>
+        <div ref={backRoom} className="flex min-w-0 flex-1 overflow-hidden">
+          <button
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={back}
+            className="flex h-8 flex-none items-center gap-1 rounded-full pr-3 pl-1.5 text-[0.875rem] font-semibold text-white hover:text-white/75"
+          >
+            <ChevronLeft className="size-4" />
+            {t("Back")}
+          </button>
+        </div>
       ) : (
         <nav ref={pages} className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
           {shown
@@ -78,16 +97,17 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
       <div className="ml-auto flex items-center gap-1.5">
         <UpdateNotice />
         <TmdbProgress />
-        {folded && !back && (
-          <Button
-            variant={view === "downloads" ? "secondary" : "ghost"}
-            size="icon-sm"
-            aria-label={t("Downloads")}
-            aria-current={view === "downloads" ? "page" : undefined}
-            onClick={() => openView("downloads")}
-          >
-            <ArrowDownToLine />
-          </Button>
+        {back ? (
+          <DownloadsNotice status={status} compact={backFold === "arrow"} />
+        ) : folded ? (
+          <DownloadsNotice
+            status={status}
+            page
+            current={view === "downloads"}
+            compact={fold === "arrow"}
+          />
+        ) : (
+          view !== "downloads" && <DownloadsNotice status={status} />
         )}
         {!alone && (
           <>
@@ -178,27 +198,65 @@ export function PageButton({
 }
 
 /**
- * Whether the pages' names fold Downloads away: once they don't fit where the bar holds them, and
- * until there is room again for as much as they took. That room is a little more than they need
- * while Downloads stands beside Search, so the bar never flips back and forth at one width.
+ * How far the bar folds: "none" while every page's name fits; "downloads" once they don't fit
+ * where the bar holds them, which puts Downloads beside Search; "arrow" once the other names
+ * don't fit beside that button's words either, which leaves it its arrow alone. Back, in the
+ * pages' place, folds the same way, with nothing for "downloads" to fold.
  */
-function useFolds(): [RefCallback<HTMLElement>, boolean] {
-  const [folded, setFolded] = useState(false);
+type Fold = "none" | "downloads" | "arrow";
+
+/**
+ * How far the pages' names fold (see `Fold`), for the bar's notice saying `words` in the interface
+ * language `locale`. Each fold holds until there is room again for as much as was missing, so the
+ * bar never flips back and forth at one width. Downloads comes back once the pages have the room
+ * all their names took, a little more than they need while it stands beside Search. The arrow
+ * tries its words again whenever the pages' room grows, the words change or the language does, as
+ * Back's name can while the words read the same, and keeps them only if the names still fit beside
+ * them; the try is measured before the bar is drawn, so it shows nothing when it fails.
+ */
+function useFolds(words: string | undefined, locale: Locale): [RefCallback<HTMLElement>, Fold] {
+  const [fold, setFold] = useState<Fold>("none");
+  // The room all the pages' names took when they stopped fitting, and the room the pages had
+  // beside the arrow when last measured.
   const needed = useRef(0);
+  const besideArrow = useRef(Infinity);
+  const measured = useRef<(again: boolean) => void>(undefined);
   const ref = useCallback((element: HTMLElement | null) => {
     if (!element) return;
-    const measure = () =>
-      setFolded((was) => {
-        if (!was && element.scrollWidth > element.clientWidth) {
-          needed.current = element.scrollWidth;
-          return true;
+    // `again`: what the bar holds changed, so the arrow tries its words whatever the room.
+    const measure = (again: boolean) =>
+      setFold((was) => {
+        const room = element.clientWidth;
+        const over = element.scrollWidth > room;
+        switch (was) {
+          case "none":
+            if (!over) return "none";
+            needed.current = element.scrollWidth;
+            return "downloads";
+          case "downloads":
+            if (!over) return room < needed.current ? "downloads" : "none";
+            besideArrow.current = Infinity;
+            return "arrow";
+          case "arrow":
+            if (again || room > besideArrow.current) return "downloads";
+            besideArrow.current = room;
+            return "arrow";
         }
-        return was && element.clientWidth < needed.current;
       });
-    measure();
-    const observer = new ResizeObserver(measure);
+    measured.current = measure;
+    // The pages come back after Back with the fold they had, and the bar may have changed meanwhile.
+    measure(true);
+    const observer = new ResizeObserver(() => measure(false));
     observer.observe(element);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      measured.current = undefined;
+    };
   }, []);
-  return [ref, folded];
+  // A fold can leave the pages' room as it was, as when Downloads' words stand beside Search
+  // before and after its name goes, so nothing resizes: measured again before it is drawn. Words
+  // or a language that changes resize nothing either while the arrow stands alone.
+  useLayoutEffect(() => measured.current?.(false), [fold]);
+  useLayoutEffect(() => measured.current?.(true), [words, locale]);
+  return [ref, fold];
 }

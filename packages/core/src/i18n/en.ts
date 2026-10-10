@@ -1125,6 +1125,9 @@ export const en = {
   "That download is no longer here.": "That download is no longer here.",
   "A download still holds the provider's connection.":
     "A download still holds the provider's connection.",
+  // The top bar's word on the downloads.
+  "Download stopped": "Download stopped",
+  "Downloads, {status}": "Downloads, {status}",
   // The close button on a playback error.
   "Close message": "Close message",
 } as const satisfies Readonly<Record<string, string | Plural>>;

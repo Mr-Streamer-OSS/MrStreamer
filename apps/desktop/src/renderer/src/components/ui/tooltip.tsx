@@ -3,18 +3,23 @@ import type { ReactElement, ReactNode } from "react";
 
 export const TooltipProvider = TooltipPrimitive.Provider;
 
-/** Wraps a control with a short label that appears on hover or keyboard focus. */
+/**
+ * Wraps a control with a short label that appears on hover or keyboard focus. `disabled` keeps the
+ * label away while the control says it itself, with the control left as it is.
+ */
 export function Tooltip({
   label,
   children,
   side = "top",
+  disabled = false,
 }: {
   label: ReactNode;
   children: ReactElement;
   side?: "top" | "bottom" | "left" | "right";
+  disabled?: boolean;
 }) {
   return (
-    <TooltipPrimitive.Root>
+    <TooltipPrimitive.Root disabled={disabled}>
       <TooltipPrimitive.Trigger render={children} />
       <TooltipPrimitive.Portal>
         <TooltipPrimitive.Positioner side={side} sideOffset={8} className="z-[140]">

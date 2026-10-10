@@ -1150,6 +1150,9 @@ export const nl: Translation = {
   "That download is no longer here.": "Die download is er niet meer.",
   "A download still holds the provider's connection.":
     "Een download gebruikt de verbinding met de provider nog.",
+  // The top bar's word on the downloads.
+  "Download stopped": "Download gestopt",
+  "Downloads, {status}": "Downloads, {status}",
   // The close button on a playback error.
   "Close message": "Melding sluiten",
 };
