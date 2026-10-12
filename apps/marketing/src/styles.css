@@ -222,7 +222,7 @@ h1 {
 }
 
 .note a,
-.questions a,
+#questions a,
 .download-links a,
 #downloads > p a {
   color: #fff;
@@ -288,9 +288,8 @@ h1 {
   line-height: 1.45;
 }
 
-/* What you need, Questions and Downloads: a heading over one reading column. */
-.column > p,
-.questions dd {
+/* What you need, the FAQ link and Downloads: one reading column. */
+.column > p {
   max-width: 36em;
   line-height: 1.5;
 }
