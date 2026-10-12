@@ -1248,4 +1248,23 @@ export const es: Translation = {
   "Downloads, {status}": "Descargas, {status}",
   // The close button on a playback error.
   "Close message": "Cerrar mensaje",
+  // Whole-series downloads.
+  "Downloading {percent}": "Descargando {percent}",
+  "{done} of {count}": "{done} de {count}",
+  "{done} of {count} · {failed} failed": "{done} de {count} · {failed} fallidos",
+  "Download {count} new": "Descargar {count} nuevos",
+  "To download": "Por descargar",
+  "Already downloaded": "Ya descargados",
+  "Already queued": "Ya en cola",
+  "Download {count} episodes": {
+    one: "Descargar {count} episodio",
+    other: "Descargar {count} episodios",
+  },
+  "Retry failed": "Reintentar fallidos",
+  "Cancel the rest": "Cancelar el resto",
+  "Open Downloads": "Abrir descargas",
+  "Queued {added} of {count}. {failed} couldn't be added: {episodes}.":
+    "{added} de {count} en cola. No se pudieron añadir {failed}: {episodes}.",
+  "Queued {count} episodes. {complete} already downloaded, {queued} already queued.":
+    "{count} episodios en cola. {complete} ya descargados, {queued} ya en cola.",
 };

@@ -1175,4 +1175,23 @@ export const nl: Translation = {
   "Downloads, {status}": "Downloads, {status}",
   // The close button on a playback error.
   "Close message": "Melding sluiten",
+  // Whole-series downloads.
+  "Downloading {percent}": "Downloaden {percent}",
+  "{done} of {count}": "{done} van {count}",
+  "{done} of {count} · {failed} failed": "{done} van {count} · {failed} mislukt",
+  "Download {count} new": "{count} nieuwe downloaden",
+  "To download": "Te downloaden",
+  "Already downloaded": "Al gedownload",
+  "Already queued": "Al in wachtrij",
+  "Download {count} episodes": {
+    one: "{count} aflevering downloaden",
+    other: "{count} afleveringen downloaden",
+  },
+  "Retry failed": "Mislukte opnieuw proberen",
+  "Cancel the rest": "De rest annuleren",
+  "Open Downloads": "Downloads openen",
+  "Queued {added} of {count}. {failed} couldn't be added: {episodes}.":
+    "{added} van {count} in wachtrij. {failed} konden niet worden toegevoegd: {episodes}.",
+  "Queued {count} episodes. {complete} already downloaded, {queued} already queued.":
+    "{count} afleveringen in wachtrij. {complete} al gedownload, {queued} al in wachtrij.",
 };

@@ -1150,4 +1150,23 @@ export const en = {
   "Downloads, {status}": "Downloads, {status}",
   // The close button on a playback error.
   "Close message": "Close message",
+  // Whole-series downloads.
+  "Downloading {percent}": "Downloading {percent}",
+  "{done} of {count}": "{done} of {count}",
+  "{done} of {count} · {failed} failed": "{done} of {count} · {failed} failed",
+  "Download {count} new": "Download {count} new",
+  "To download": "To download",
+  "Already downloaded": "Already downloaded",
+  "Already queued": "Already queued",
+  "Download {count} episodes": {
+    one: "Download {count} episode",
+    other: "Download {count} episodes",
+  },
+  "Retry failed": "Retry failed",
+  "Cancel the rest": "Cancel the rest",
+  "Open Downloads": "Open Downloads",
+  "Queued {added} of {count}. {failed} couldn't be added: {episodes}.":
+    "Queued {added} of {count}. {failed} couldn't be added: {episodes}.",
+  "Queued {count} episodes. {complete} already downloaded, {queued} already queued.":
+    "Queued {count} episodes. {complete} already downloaded, {queued} already queued.",
 } as const satisfies Readonly<Record<string, string | Plural>>;

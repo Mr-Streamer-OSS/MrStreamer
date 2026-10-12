@@ -1239,4 +1239,23 @@ export const fr: Translation = {
   "Downloads, {status}": "Téléchargements, {status}",
   // The close button on a playback error.
   "Close message": "Fermer le message",
+  // Whole-series downloads.
+  "Downloading {percent}": "Téléchargement {percent}",
+  "{done} of {count}": "{done} sur {count}",
+  "{done} of {count} · {failed} failed": "{done} sur {count} · {failed} en échec",
+  "Download {count} new": "Télécharger {count} nouveaux",
+  "To download": "À télécharger",
+  "Already downloaded": "Déjà téléchargés",
+  "Already queued": "Déjà en attente",
+  "Download {count} episodes": {
+    one: "Télécharger {count} épisode",
+    other: "Télécharger {count} épisodes",
+  },
+  "Retry failed": "Réessayer les échecs",
+  "Cancel the rest": "Annuler le reste",
+  "Open Downloads": "Ouvrir les téléchargements",
+  "Queued {added} of {count}. {failed} couldn't be added: {episodes}.":
+    "{added} sur {count} en attente. {failed} n’ont pas pu être ajoutés : {episodes}.",
+  "Queued {count} episodes. {complete} already downloaded, {queued} already queued.":
+    "{count} épisodes en attente. {complete} déjà téléchargés, {queued} déjà en attente.",
 };

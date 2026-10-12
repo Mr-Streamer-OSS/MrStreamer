@@ -1180,4 +1180,23 @@ export const de: Translation = {
   "Downloads, {status}": "Downloads, {status}",
   // The close button on a playback error.
   "Close message": "Meldung schließen",
+  // Whole-series downloads.
+  "Downloading {percent}": "Download läuft {percent}",
+  "{done} of {count}": "{done} von {count}",
+  "{done} of {count} · {failed} failed": "{done} von {count} · {failed} fehlgeschlagen",
+  "Download {count} new": "{count} neue herunterladen",
+  "To download": "Herunterzuladen",
+  "Already downloaded": "Bereits heruntergeladen",
+  "Already queued": "Bereits eingereiht",
+  "Download {count} episodes": {
+    one: "{count} Folge herunterladen",
+    other: "{count} Folgen herunterladen",
+  },
+  "Retry failed": "Fehlgeschlagene erneut versuchen",
+  "Cancel the rest": "Rest abbrechen",
+  "Open Downloads": "Downloads öffnen",
+  "Queued {added} of {count}. {failed} couldn't be added: {episodes}.":
+    "{added} von {count} eingereiht. {failed} konnten nicht hinzugefügt werden: {episodes}.",
+  "Queued {count} episodes. {complete} already downloaded, {queued} already queued.":
+    "{count} Folgen eingereiht. {complete} bereits heruntergeladen, {queued} bereits eingereiht.",
 };
