@@ -83,7 +83,7 @@ const RETRY_AFTER = ["15 minutes", "30 minutes", "1 hour", "2 hours", "4 hours"]
 export interface DirectUpdates {
   /** Finds releases this platform can install. Rejects with `DiscoveryFailed`. */
   readonly discover: (signal: AbortSignal) => Promise<readonly Offer[]>;
-  readonly observeCheck?: OperationObserver;
+  readonly observeCheck?: (channel: Channel) => ReturnType<OperationObserver>;
   readonly installer: Installer;
   /** When automatic checks run; null for none, as in most tests. */
   readonly schedule?: CheckSchedule | null;
@@ -216,44 +216,45 @@ function make(deps: UpdatesDeps & DirectUpdates) {
     });
 
     /** Asks the sources for releases; what it found, or why not. */
-    const discover = Effect.suspend(() => {
-      const finished = deps.observeCheck?.();
-      return Effect.tryPromise({
-        try: (signal) => deps.discover(signal),
-        catch: (cause) => cause,
-      }).pipe(
-        diagnosed("check"),
-        Effect.tapError((cause) =>
-          Effect.sync(() => {
-            if (cause instanceof DiscoveryFailed) {
-              for (const answer of cause.answers)
-                diagnostics.record({ op: "update-source", ...answer });
-            }
-          }),
-        ),
-        Effect.result,
-        Effect.map((found): CheckResult =>
-          found._tag === "Success"
-            ? { ok: true, offers: found.success }
-            : {
-                ok: false,
-                failure:
-                  found.failure instanceof DiscoveryFailed
-                    ? found.failure.failure
-                    : { kind: "offline" },
-              },
-        ),
-        Effect.tap((result) =>
-          Effect.sync(() =>
-            finished?.(
-              result.ok ? "success" : "failed",
-              result.ok ? undefined : checkFailure(result.failure),
+    const discover = (checkedChannel: Channel) =>
+      Effect.suspend(() => {
+        const finished = deps.observeCheck?.(checkedChannel);
+        return Effect.tryPromise({
+          try: (signal) => deps.discover(signal),
+          catch: (cause) => cause,
+        }).pipe(
+          diagnosed("check"),
+          Effect.tapError((cause) =>
+            Effect.sync(() => {
+              if (cause instanceof DiscoveryFailed) {
+                for (const answer of cause.answers)
+                  diagnostics.record({ op: "update-source", ...answer });
+              }
+            }),
+          ),
+          Effect.result,
+          Effect.map((found): CheckResult =>
+            found._tag === "Success"
+              ? { ok: true, offers: found.success }
+              : {
+                  ok: false,
+                  failure:
+                    found.failure instanceof DiscoveryFailed
+                      ? found.failure.failure
+                      : { kind: "offline" },
+                },
+          ),
+          Effect.tap((result) =>
+            Effect.sync(() =>
+              finished?.(
+                result.ok ? "success" : "failed",
+                result.ok ? undefined : checkFailure(result.failure),
+              ),
             ),
           ),
-        ),
-        Effect.onInterrupt(() => Effect.sync(() => finished?.("interrupted"))),
-      );
-    });
+          Effect.onInterrupt(() => Effect.sync(() => finished?.("interrupted"))),
+        );
+      });
 
     /** A download in progress or ready: a check can't take it away, even one that fails. */
     const staged = () => update.kind === "downloading" || update.kind === "ready";
@@ -268,7 +269,7 @@ function make(deps: UpdatesDeps & DirectUpdates) {
         if (staged()) return null;
         let running = checking?.channel === channel ? checking : null;
         if (!running) {
-          running = { channel, fiber: yield* Effect.forkIn(discover, scope) };
+          running = { channel, fiber: yield* Effect.forkIn(discover(channel), scope) };
           checking = running;
         }
         if (manual) {

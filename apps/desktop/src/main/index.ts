@@ -405,8 +405,9 @@ async function start(): Promise<void> {
       localEndpoint,
     }),
   });
+  let dimensionsReady = storeCopy;
   const observeOperation = (operation: SummaryOperation) => () => {
-    const generation = analytics.noteOperationStarted(operation);
+    const generation = dimensionsReady ? analytics.noteOperationStarted(operation) : null;
     return (outcome: SummaryOutcome, failure?: SummaryFailure) =>
       analytics.noteOperationFinished(operation, generation, outcome, failure);
   };
@@ -446,7 +447,11 @@ async function start(): Promise<void> {
         ? { installed: app.getVersion(), openStore: () => shell.openExternal(STORE_PAGE) }
         : {
             installed: app.getVersion(),
-            observeCheck: observeOperation("update_check"),
+            observeCheck: (channel) => {
+              analytics.setUpdateChannel(channel);
+              dimensionsReady = true;
+              return observeOperation("update_check")();
+            },
             discover: discovery({
               feedUrl: UPDATE_FEED,
               api: UPDATE_API,
@@ -516,6 +521,7 @@ async function start(): Promise<void> {
   });
   const updateStatus = await runtime.runPromise(updates.status);
   analytics.setUpdateChannel(storeCopy ? "none" : updateStatus.channel);
+  dimensionsReady = true;
   // The ordinary preferences query/mutation owns the renderer cache. Analytics alone persists
   // consent; viewing settings never receive a second copy that could race or reset that choice.
   const generalPreferences = Effect.gen(function* () {

@@ -869,6 +869,7 @@ describe("finding releases", () => {
 it("observes one actual shared update check and bounded failures, excluding installer actions", async () => {
   const outcomes: { outcome: SummaryOutcome; failure?: SummaryFailure }[] = [];
   let starts = 0;
+  const channels: string[] = [];
   let release: (() => void) | undefined;
   let fail = false;
   const pending = new Promise<void>((resolve) => {
@@ -884,7 +885,8 @@ it("observes one actual shared update check and bounded failures, excluding inst
       if (fail) throw new Error("PRIVATE network details");
       return [offer("v0.2.1")];
     },
-    observeCheck() {
+    observeCheck(channel) {
+      channels.push(channel);
       starts++;
       return (outcome, failure) => outcomes.push({ outcome, ...(failure ? { failure } : {}) });
     },
@@ -905,4 +907,7 @@ it("observes one actual shared update check and bounded failures, excluding inst
   await service.restart();
   expect(starts).toBe(3);
   expect(outcomes).toHaveLength(3);
+  expect(channels).toEqual(["stable", "stable", "stable"]);
+  await service.setChannel("nightly");
+  expect(channels).toEqual(["stable", "stable", "stable", "nightly"]);
 });

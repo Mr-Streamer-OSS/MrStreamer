@@ -51,6 +51,6 @@ Group comparisons by recorded `app_version`, `build_channel`, `update_channel`, 
 - Failure-category bars sum the six fixed failure counters for each operation.
 - Renderer stability is `(sum(crashed) + sum(killed) + sum(other)) / sum(starts)`, with the observation limits above. A zero start denominator yields no rate.
 
-Exclude saturated summaries from these calculations. Keep existing first-seen and foreground-active views separate. Received-summary coverage is not the entire active population. Short-lived users who never return, consent changes, partial-day dimension resets, offline expiry, startup before consent loads and interrupted processes all limit coverage.
+Exclude saturated summaries from these calculations. Keep existing first-seen and foreground-active views separate. Received-summary coverage is not the entire active population. Short-lived users who never return, consent changes, partial-day dimension resets, offline expiry, startup before consent and selected-channel dimensions are known and interrupted processes all limit coverage.
 
 Verify the contract through focused public-owner/capture tests and the built-app Privacy feature-map path. Settings helper, FAQ and privacy-policy claims must match this catalogue before release. Live dashboards and retention still require their own acceptance.
