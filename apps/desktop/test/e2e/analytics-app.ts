@@ -361,6 +361,15 @@ async function productPaths() {
       "Crashed only the owned renderer, main observed one unexpected exit; reloaded its primary window",
     at: new Date().toISOString(),
   });
+  // The recovered Home and Settings entries must reach the coalesced checkpoint before
+  // comparing that persisted snapshot with the next day's capture.
+  await waitFor(async () => {
+    const observed = await analyticsState();
+    return (
+      (observed.summary?.counts.features.home ?? 0) >= 3 &&
+      (observed.summary?.counts.features.settings ?? 0) >= 3
+    );
+  });
   const before = await analyticsState();
   if (!before.summary) throw new Error("No observed daily counts.");
   const all = before.summary.counts;
