@@ -7,7 +7,6 @@ import {
   type CaptureEvent,
   type ProfileOrigin,
 } from "./model.ts";
-import { sameProperties } from "./properties.ts";
 import { analyticsStore } from "./storage.ts";
 import type { CaptureTransport } from "./transport.ts";
 import {
@@ -27,7 +26,7 @@ const ATTEMPTS = 3;
 
 interface OperationGeneration {
   readonly consent: number;
-  readonly properties: BuildProperties;
+  readonly dimensions: number;
 }
 
 interface AnalyticsOptions {
@@ -50,6 +49,7 @@ export class Analytics {
   private available = true;
   private paused = false;
   private revision = 0;
+  private dimensions = 0;
   private foreground = false;
   private closing = false;
   private stopped = false;
@@ -143,6 +143,7 @@ export class Analytics {
   setUpdateChannel(channel: BuildProperties["update_channel"]): void {
     if (channel === this.properties.update_channel) return;
     this.properties = { ...this.properties, update_channel: channel };
+    this.dimensions++;
     if (this.transport && this.summary && this.canCapture()) {
       this.summary = summaryOnDay(
         this.summary,
@@ -163,11 +164,11 @@ export class Analytics {
   /** A terminal result can count only in the enabled generation that observed its start. */
   noteOperationStarted(operation: SummaryOperation): OperationGeneration | null {
     if (!this.transport || !this.canCapture() || this.closing) return null;
-    this.note((counts) => {
+    const observed = this.note((counts) => {
       const measured = counts[operation];
       measured.started = incrementSummary(counts, measured.started);
     });
-    return { consent: this.revision, properties: this.properties };
+    return observed ? { consent: this.revision, dimensions: this.dimensions } : null;
   }
 
   /** Outcomes describe the observed operation, never content, provider identity or raw failure. */
@@ -180,7 +181,7 @@ export class Analytics {
     if (
       !generation ||
       generation.consent !== this.revision ||
-      !sameProperties(generation.properties, this.properties)
+      generation.dimensions !== this.dimensions
     )
       return;
     this.note((counts) => {
@@ -198,18 +199,19 @@ export class Analytics {
   }
 
   /** Notes mutate fixed-size memory. At most one checkpoint is queued, regardless of UI rate. */
-  private note(change: (counts: SummaryCounts) => void): void {
-    if (!this.transport || !this.canCapture() || this.closing) return;
+  private note(change: (counts: SummaryCounts) => void): boolean {
+    if (!this.transport || !this.canCapture() || this.closing) return false;
     const day = new Date().toISOString().slice(0, 10);
     if (
       (this.summary && day < this.summary.day) ||
       (this.record?.lastDay && day < this.record.lastDay)
     )
-      return;
+      return false;
     this.summary = summaryOnDay(this.summary, day, this.properties);
     change(this.summary.counts);
     this.notesDirty = true;
     this.checkpoint();
+    return true;
   }
 
   private checkpoint(): void {

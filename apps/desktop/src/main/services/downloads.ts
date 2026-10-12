@@ -402,8 +402,6 @@ function make(deps: DownloadsDeps) {
           const failure = await settle(record.id, transferring, outcome);
           if (failure === "stopped") finished?.("interrupted");
           else if (failure) finished?.("failed", downloadFailure(failure));
-          else if (outcome.kind === "failed")
-            finished?.("failed", downloadFailure(outcome.failure));
           else finished?.(outcome.kind === "stopped" ? "interrupted" : "success");
         })
         .catch((cause) => {

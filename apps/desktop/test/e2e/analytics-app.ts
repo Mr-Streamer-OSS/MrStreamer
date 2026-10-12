@@ -75,6 +75,15 @@ let debuggingPort = 0;
 let failure: unknown;
 const cleanupErrors: string[] = [];
 
+/** Validate a clone, then compare the complete raw wire body before any unknown-key deletion. */
+function captured(payload: unknown): CaptureEvent {
+  const event = CaptureEvent(structuredClone(payload));
+  if (event instanceof type.errors) throw new Error("Invalid capture event.");
+  if (!isDeepStrictEqual(payload, { api_key: "mrstreamer-local-verification", ...event }))
+    throw new Error("Unexpected raw capture fields.");
+  return event;
+}
+
 async function waitFor(check: () => Promise<boolean>, timeoutMs = 60_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -403,15 +412,27 @@ async function productPaths() {
   await waitFor(
     async () =>
       payloads.some((payload) => {
-        const event = CaptureEvent(payload);
-        return !(event instanceof type.errors) && event.event === "app_summary_day";
+        return record(payload) && payload["event"] === "app_summary_day";
       }),
     75_000,
   );
-  const summary = payloads
-    .map((payload) => CaptureEvent(payload))
-    .find((event) => !(event instanceof type.errors) && event.event === "app_summary_day");
-  if (!summary || summary instanceof type.errors || summary.event !== "app_summary_day")
+  const enabled = payloads.map(captured);
+  if (
+    !isDeepStrictEqual(
+      enabled.map((event) => event.event),
+      ["installation_observed", "app_active_day", "app_active_day", "app_summary_day"],
+    )
+  )
+    throw new Error("Wrong enabled capture set.");
+  const rawSummary = payloads.find(
+    (payload) => record(payload) && payload["event"] === "app_summary_day",
+  );
+  if (!record(rawSummary) || !record(rawSummary["properties"]))
+    throw new Error("No raw summary capture.");
+  observations["summaryAllowlist"] = Object.keys(rawSummary["properties"]).sort();
+  observations["enabledCaptureSet"] = enabled.map((event) => event.event);
+  const summary = enabled.find((event) => event.event === "app_summary_day");
+  if (!summary || summary.event !== "app_summary_day")
     throw new Error("No actual summary capture.");
   if (!isDeepStrictEqual(summary.properties.counts, before.summary.counts))
     throw new Error("Capture lost observed counts.");
@@ -430,7 +451,6 @@ async function productPaths() {
       },
     ]),
   );
-  observations["summaryAllowlist"] = Object.keys(summary.properties).sort();
   observations["summaryRecordedBuild"] = before.summary.properties;
   rejectUpdate = false;
 }
@@ -473,8 +493,8 @@ try {
     action: "Opened real General Privacy control, default checked",
     at: new Date().toISOString(),
   });
-  const first = CaptureEvent(payloads[0]);
-  const day = CaptureEvent(payloads[1]);
+  const first = captured(payloads[0]);
+  const day = captured(payloads[1]);
   if (
     first instanceof type.errors ||
     day instanceof type.errors ||

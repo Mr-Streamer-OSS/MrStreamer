@@ -870,6 +870,79 @@ describe("completed daily product and reliability capture", () => {
     });
   });
 
+  it("excludes obsolete outcomes after a channel round trip, keeps same-channel midnight results and pending dimensions", async () => {
+    clock();
+    const capture = await captureServer();
+    let accepting = false;
+    const transport = localCapture(capture.endpoint);
+    if (!transport) throw new Error("No local transport.");
+    const store = memoryStore();
+    const { owner } = await start({
+      store,
+      transport: {
+        async send(event, signal) {
+          if (!accepting) return "retry";
+          return transport.send(event, signal);
+        },
+      },
+    });
+    owner.setForeground(true);
+    await until(async () => (await store.load())?.pending[0]?.attempts === 1);
+    const pending = (await store.load())?.pending.map((item) => item.event);
+    const obsolete = owner.noteOperationStarted("update_check");
+    owner.setUpdateChannel("nightly");
+    owner.setUpdateChannel("stable");
+    const current = owner.noteOperationStarted("update_check");
+    owner.setUpdateChannel("stable");
+    owner.noteOperationFinished("update_check", current, "success");
+    owner.noteOperationFinished("update_check", obsolete, "failed", "network");
+    await vi.advanceTimersByTimeAsync(1000);
+    // Channel changes do not relabel events already waiting in the durable outbox.
+    expect((await store.load())?.pending.map((item) => item.event)).toEqual(pending);
+    accepting = true;
+    await nextDay(owner);
+    await vi.advanceTimersByTimeAsync(1000);
+    await until(() => capture.payloads.length === 4);
+    expect(capture.payloads[3]).toMatchObject({
+      event: "app_summary_day",
+      properties: {
+        update_channel: "stable",
+        counts: { update_check: { started: 1, success: 1, failed: 0, failures: { network: 0 } } },
+      },
+    });
+    // Same-owner, same-channel results remain valid when only the UTC day changes.
+    const crossing = owner.noteOperationStarted("playback_open");
+    await nextDay(owner, "2026-10-13");
+    await until(() => capture.payloads.length === 6);
+    owner.setUpdateChannel("stable");
+    owner.noteOperationFinished("playback_open", crossing, "success");
+    await nextDay(owner, "2026-10-14");
+    await until(() => capture.payloads.length === 8);
+    expect(capture.payloads[7]).toMatchObject({
+      properties: { counts: { playback_open: { started: 0, success: 1 } } },
+    });
+  });
+
+  it("does not accept an outcome whose start was dropped during clock rollback", async () => {
+    clock();
+    const { owner, events } = await start({ store: memoryStore() });
+    owner.setForeground(true);
+    await until(() => events.length === 2);
+    owner.noteFeature("home");
+    vi.setSystemTime(new Date("2026-10-10T12:00:00Z"));
+    const dropped = owner.noteOperationStarted("playback_open");
+    expect(dropped).toBeNull();
+    vi.setSystemTime(new Date("2026-10-11T12:00:00Z"));
+    owner.noteOperationFinished("playback_open", dropped, "failed", "app");
+    const observed = owner.noteOperationStarted("playback_open");
+    owner.noteOperationFinished("playback_open", observed, "success");
+    await nextDay(owner);
+    await until(() => events.length === 4);
+    expect(events[3]).toMatchObject({
+      properties: { counts: { playback_open: { started: 1, success: 1, failed: 0 } } },
+    });
+  });
+
   it("pauses notes synchronously, clears daily counts, and never backfills across off/on or restart", async () => {
     clock();
     const store = memoryStore();

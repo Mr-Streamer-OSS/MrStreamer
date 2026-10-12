@@ -32,6 +32,7 @@ export function appFailure(error: AppError): SummaryFailure {
       return "credentials";
     case "unreachable":
       return "network";
+    case "provider-error":
     case "no-subscription":
     case "channel-not-found":
     case "title-not-found":

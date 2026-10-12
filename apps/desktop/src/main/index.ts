@@ -27,8 +27,6 @@ import { Guide } from "@mrstreamer/core/guide/service";
 import { seriesEpisodeSeasons } from "@mrstreamer/core/ondemand/details";
 import { discovery, metadataFileFor } from "@mrstreamer/core/updates/feed";
 import { ViewingRecord } from "@mrstreamer/core/viewing/service";
-import * as Cause from "effect/Cause";
-import * as Exit from "effect/Exit";
 import * as Effect from "effect/Effect";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Stream from "effect/Stream";
@@ -37,7 +35,7 @@ import { WINDOW_BAR } from "../shared/window-bar.ts";
 import { analyticsBuild } from "./analytics/build.ts";
 import { Analytics } from "./analytics/service.ts";
 import type { SummaryFailure, SummaryOperation, SummaryOutcome } from "./analytics/summary.ts";
-import { appFailure } from "./analytics/operations.ts";
+import { observeOpen } from "./analytics/playback.ts";
 import { profileOrigin } from "./analytics/storage.ts";
 import { analyticsTransport } from "./analytics/transport.ts";
 import { emit, registerIpc } from "./ipc.ts";
@@ -411,20 +409,6 @@ async function start(): Promise<void> {
     return (outcome: SummaryOutcome, failure?: SummaryFailure) =>
       analytics.noteOperationFinished(operation, generation, outcome, failure);
   };
-  const observeOpen = <A>(effect: Effect.Effect<A, Failed>) =>
-    Effect.suspend(() => {
-      const finished = observeOperation("playback_open")();
-      return effect.pipe(
-        Effect.onExit((exit) =>
-          Effect.sync(() => {
-            if (Exit.isSuccess(exit)) return finished("success");
-            if (Cause.hasInterruptsOnly(exit.cause)) return finished("interrupted");
-            const failed = Cause.findErrorOption(exit.cause);
-            finished("failed", failed._tag === "Some" ? appFailure(failed.value.error) : "app");
-          }),
-        ),
-      );
-    });
 
   const runtime = ManagedRuntime.make(
     mainLayer({
@@ -715,6 +699,21 @@ async function start(): Promise<void> {
         preview,
       }) =>
         observeOpen(
+          coordination,
+          observeOperation("playback_open"),
+          (turn) =>
+            Effect.gen(function* () {
+              const channel = yield* library.channel(named);
+              const variants = yield* streamsOf(channel, variant);
+              return yield* playback.open(ownedId(channel), decoders, {
+                variants,
+                repair: repair ?? false,
+                audio: audio ?? null,
+                audioLanguage: audioLanguage ?? null,
+                preview: preview ?? false,
+                turn,
+              });
+            }),
           Effect.gen(function* () {
             // A page's preview never takes the provider's connection from a receiver. Refused
             // here while one is the output, also one that is gone with nothing open; the playback
@@ -724,17 +723,6 @@ async function start(): Promise<void> {
                 error: { kind: "unexpected", detail: t("A receiver has playback.") },
               });
             }
-            const turn = yield* coordination.begin;
-            const channel = yield* library.channel(named);
-            const variants = yield* streamsOf(channel, variant);
-            return yield* playback.open(ownedId(channel), decoders, {
-              variants,
-              repair: repair ?? false,
-              audio: audio ?? null,
-              audioLanguage: audioLanguage ?? null,
-              preview: preview ?? false,
-              turn,
-            });
           }),
         ),
       "subtitles.settings": () => onlineSubtitles.settings,
@@ -752,9 +740,8 @@ async function start(): Promise<void> {
       "subtitles.forget": ({ sessionId }) => Effect.as(onlineSubtitles.forget(sessionId), null),
       "subtitles.cancel": ({ sessionId }) => Effect.as(onlineSubtitles.cancel(sessionId), null),
       "playback.openTitle": ({ title, decoders }) =>
-        observeOpen(
+        observeOpen(coordination, observeOperation("playback_open"), (turn) =>
           Effect.gen(function* () {
-            const turn = yield* coordination.begin;
             // What plays goes first, whichever subscription it is of, so no provider sees a
             // connection beside the one about to open.
             yield* playback.closeAll;
@@ -768,9 +755,8 @@ async function start(): Promise<void> {
           }),
         ),
       "playback.openCopy": ({ copy, decoders }) =>
-        observeOpen(
+        observeOpen(coordination, observeOperation("playback_open"), (turn) =>
           Effect.gen(function* () {
-            const turn = yield* coordination.begin;
             return yield* playback.openCopy(yield* downloads.copy(copy), decoders, turn);
           }),
         ),
@@ -820,9 +806,8 @@ async function start(): Promise<void> {
       "output.closePicker": ({ request }) => Effect.as(output.closePicker(request), null),
       "output.disconnect": () => Effect.as(output.disconnect, null),
       "output.playChannel": ({ channel: named, variant, audio, audioLanguage, name }) =>
-        observeOpen(
+        observeOpen(coordination, observeOperation("playback_open"), (turn) =>
           Effect.gen(function* () {
-            const turn = yield* coordination.begin;
             const channel = yield* library.channel(named);
             const variants = yield* streamsOf(channel, variant);
             return yield* output.playChannel(ownedId(channel), {
@@ -835,9 +820,8 @@ async function start(): Promise<void> {
           }),
         ),
       "output.openTitle": ({ title, since }) =>
-        observeOpen(
+        observeOpen(coordination, observeOperation("playback_open"), (turn) =>
           Effect.gen(function* () {
-            const turn = yield* coordination.begin;
             const { url, revision, headers, listingKey } = yield* onDemand.file(title);
             return yield* output.openTitle(title, url, since, {
               turn,
