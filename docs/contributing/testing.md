@@ -279,7 +279,7 @@ node apps/desktop/test/e2e/download-memory.ts 2048 .local/download-memory.json
 
 ## Installed upgrade
 
-`.github/workflows/windows-installed-upgrade.yml` checks that upgrading an installed Windows app keeps what a viewer had. Start it by hand from `main` with four pins: a published nightly A by tag and full commit, and a later release dry run B by run id and the full commit it built. Nothing is looked up as "latest". It runs `apps/desktop/test/e2e/installed-upgrade.ts` on a disposable `windows-2025` runner, with read access alone and no secret, and publishes nothing.
+`.github/workflows/windows-installed-upgrade.yml` checks that upgrading an installed Windows app keeps what a viewer had. Its default `legacy` mode takes four pins: a published nightly A by tag and full commit, and a later release dry run B by run id and the full commit it built. Start it by hand from `main`. Nothing is looked up as "latest". It runs `apps/desktop/test/e2e/installed-upgrade.ts` on a disposable `windows-2025` runner, with read access alone and no secret, and publishes nothing. Dispatch inputs are conditionally required: the resolver step rejects missing pins, unknown modes and pins belonging to the other mode before installation.
 
 `resolve` downloads and checks the three installers before anything is installed, and refuses on any doubt:
 
@@ -300,6 +300,27 @@ Whenever the long movie's copy plays again after being left, once on A and twice
 Changes go through the window with pointer and keys; state is read only through the app's read-only calls. Evidence, `proof.json` and screenshots with their text, is uploaded for 14 days. On success the run removes its firewall rules, uninstalls the app and deletes the profile. On failure, its own or a cleanup step's, it still removes the rules and stops the fake services, but leaves the install, the profile and `profile.lock` as they are, and uploads the profile without Chromium's caches for 7 days. `proof.json` names what is still on disk. The profile holds only the fake subscription and fixtures.
 
 The 12-second episode is recorded as finished, so resuming an unfinished episode isn't shown; the 150-second movie's unfinished progress and its copy's resume are. Saved online subtitles and their timing aren't checked, because an installed app has no fake subtitle service. Installs use the setup, not the in-app updater, and not the Store package. Decoded sound isn't audible output.
+
+### Published stable to exact nightly
+
+Select `published-pair` when checking a published candidate with product changes. Supply only `stable-tag`, `stable-sha`, `candidate-tag` and `candidate-sha`. Both tags include `v`; both commits are full lowercase SHAs. The baseline is explicit, with no pinned or moving default. Resolve the current stable and the exact candidate before dispatching. A successful older candidate check never accepts a newer tag or source.
+
+`resolve-published` verifies both tags still name their pins, the baseline is a published stable and the candidate is a published nightly, both commits belong to `main`, and the candidate strictly descends from stable with a strictly higher app version. Both actual published setups must match their asset size/digest, one `SHA256SUMS.txt` entry and `latest.yml`'s version, filename, size and SHA-512. This mode downloads no dry-run package and does not apply or change the legacy A/B verification-only allowlist.
+
+```sh
+node apps/desktop/test/e2e/installed-upgrade.ts resolve-published \
+  --stable-tag "$STABLE_TAG" --stable-sha "$STABLE_SHA" \
+  --candidate-tag "$CANDIDATE_TAG" --candidate-sha "$CANDIDATE_SHA" \
+  --out "$RUNNER_TEMP/installed-upgrade-packages"
+node apps/desktop/test/e2e/installed-upgrade.ts run-published \
+  --packages "$RUNNER_TEMP/installed-upgrade-packages" --root "$RUNNER_TEMP/installed-upgrade"
+```
+
+The resolver needs `GH_TOKEN` and `GITHUB_REPOSITORY`. The native command requires the GitHub-hosted Windows runner, a main-branch verification workflow, a matching repository receipt and a fresh root under `RUNNER_TEMP`. It checks both installers' bytes before installing anything. The existing NSIS helper refuses an existing installation and replaces only this run's per-user install. Each setup is observed as one child of the driver, by executable path, PID and creation time. Missing or ambiguous ownership fails the check. Installer, installed executable, app.asar and bundled tool hashes are recorded.
+
+There are two installs and three starts on the same profile. `seedStable` populates the installed stable. The genuine candidate replacement runs `upgradeToA` to check retained settings, ordered favourites, Watchlist and progress, then creates and plays the copies. The same candidate restarts with unchanged executable/app.asar/tool hashes and uses `upgradeToB` for retained copies, artwork and progress, subscription removal and the existing observed native firewall refusal/offline playback check. Proof calls that phase `candidate-restart`, with the same version and source. It claims no second version upgrade. Stable 0.0.11's Home Watchlist button and builds with a top-bar Watchlist are supported through public UI paths.
+
+Schema 2 `receipt.json` identifies the two published packages and their exact pins and metadata hashes. `proof.json` keeps the verification workflow commit/run/driver hash separate from installed app versions and sources. Published release metadata does not identify the package-building workflow commit; inspect actual release/package receipts separately. Process ownership, cleanup and evidence retention follow the legacy contract above. Contract tests use synthetic packages and installer stand-ins, and do not establish native acceptance. No final published candidate or Windows run is implied by this infrastructure. Inspect the actual authorized run's screenshots, state and cleanup before recording acceptance; stable promotion still requires maintainer approval of the exact tested nightly.
 
 ## A real provider
 
