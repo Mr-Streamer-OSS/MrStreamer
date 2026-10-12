@@ -357,7 +357,7 @@ export async function seedSubtitleUi(d: Driver) {
 }
 
 /** Shows the exact saved result and nondefault timing, then observes its shifted cue clock. */
-export async function observeSavedSubtitle(d: Driver) {
+export async function observeSavedSubtitle(d: Driver, context: "provider" | "copy" = "provider") {
   await d.click("Open saved Subtitles", labelled("Subtitles"));
   await d.click("Show saved online subtitle", savedChoice);
   await d.wait(
@@ -372,7 +372,7 @@ export async function observeSavedSubtitle(d: Driver) {
   );
   if (timing.offset !== SUBTITLE_TIMING.offset || timing.speed !== SUBTITLE_TIMING.speed)
     throw new Error(`Saved subtitle timing changed: ${JSON.stringify(timing)}`);
-  await d.capture("saved-subtitle-timing");
+  await d.capture(`saved-${context}-subtitle-timing`);
   await d.click("Close saved Subtitles", labelled("Close subtitles"));
   for (let attempts = 0; (await d.video()).time > 38 && attempts < 15; attempts++)
     await d.key("ArrowLeft", 37);
@@ -385,14 +385,18 @@ export async function observeSavedSubtitle(d: Driver) {
       "document.querySelector('[data-subtitle-text]')?.textContent?.trim() ?? ''",
     );
   await d.wait(async () => (await d.video()).time >= 41, 45_000, "time before shifted cue");
-  const before = { time: (await d.video()).time, caption: await caption() };
+  const observe = () =>
+    d.page.evaluate<{ time: number; caption: string }>(
+      `({time: document.querySelector('video')?.currentTime ?? 0, caption: document.querySelector('[data-subtitle-text]')?.textContent?.trim() ?? ''})`,
+    );
+  const before = await observe();
   if (before.time >= start || before.caption !== "")
     throw new Error(`Cue did not use its saved timing: ${JSON.stringify(before)}`);
   await d.wait(async () => (await caption()) === SUBTITLE_CUE.text, 15_000, "saved online cue");
-  const shown = { time: (await d.video()).time, caption: await caption() };
+  const shown = await observe();
   if (shown.time < start || shown.time >= end || shown.caption !== SUBTITLE_CUE.text)
     throw new Error(`Saved cue outside shifted interval: ${JSON.stringify(shown)}`);
-  await d.capture("saved-subtitle-cue");
+  await d.capture(`saved-${context}-subtitle-cue`);
   return {
     release: SUBTITLE_RELEASE,
     timing,

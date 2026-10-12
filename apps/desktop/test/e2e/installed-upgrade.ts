@@ -930,7 +930,7 @@ async function playCopies(d: Driver, titles: Fixtures, kept?: number, savedSubti
     "document.querySelector('[data-subtitle-text]').textContent.trim()",
   );
   await d.capture("copy-subtitles");
-  if (savedSubtitles) seen["savedSubtitle"] = await observeSavedSubtitle(d);
+  if (savedSubtitles) seen["savedSubtitle"] = await observeSavedSubtitle(d, "copy");
   const left = (await d.video()).time;
   await leaveTitle(d);
   // Main keeps where it was left, and the page shows it too: Watch offline goes from there.
@@ -1542,7 +1542,7 @@ export async function runCommand(args: string[], published = false) {
       startedAt: new Date().toISOString(),
     }),
   );
-  // The app reads only what the check sets: a synthetic TMDB key, so the built-in one is never sent.
+  // The synthetic TMDB key keeps the built-in key out of fixture requests.
   for (const name of Object.keys(process.env))
     if (
       name.startsWith("MR_STREAMER_") ||
@@ -1799,7 +1799,7 @@ export async function runCommand(args: string[], published = false) {
       ...left.steps,
       kept: left.kept,
       failureProfile: left.kept.includes("profile")
-        ? "The workflow uploads the profile without Chromium's caches. It holds only the fake provider's demo subscription, fixtures and a synthetic TMDB key."
+        ? "The workflow uploads the profile without Chromium's caches. It holds only the fake provider's demo subscription, fixtures and synthetic TMDB and SubDL keys."
         : null,
     };
     proof.limits = [
