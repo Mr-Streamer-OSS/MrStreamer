@@ -24,7 +24,8 @@ A clean, fast, open-source IPTV player for macOS, Windows and Linux. Bring your 
     <tr><th>Movies and series</th><td>Yes</td><td>From 0.0.9, supported files after mapping groups in Settings</td></tr>
     <tr><th>Sound and subtitle tracks</th><td colspan="2">Every track the provider sends</td></tr>
     <tr><th>Streams at once</th><td colspan="2">One, across every subscription</td></tr>
-    <tr><th>Recording, downloads</th><td colspan="2">No</td></tr>
+    <tr><th>Downloads</th><td>Movies and episodes</td><td>Supported movie and episode files after mapping groups</td></tr>
+    <tr><th>Live TV recording</th><td colspan="2">No</td></tr>
     <tr><th>On a TV</th><td colspan="2">AirPlay on macOS, Google Cast on Windows, not on Linux</td></tr>
     <tr><th>Signed</th><td colspan="2">Mac DMG and Store package. The Windows .exe is not signed yet</td></tr>
   </tbody>
@@ -92,7 +93,7 @@ Mr. Streamer looks for updates after it starts and every four hours. When one is
 <summary><strong>Limits</strong></summary>
 
 - One stream at a time, across every subscription you add: Xtream Codes access, or an M3U playlist. Mixed-playlist movie and series import needs 0.0.9 and explicit group mapping.
-- No recording or downloads. [Playing on a TV](docs/user/playback.md#playing-on-a-tv) uses AirPlay on macOS and Google Cast on Windows; the Linux builds play on the computer only.
+- [Download movies and episodes](docs/user/downloads.md) to watch offline. Live TV cannot be recorded. [Playing on a TV](docs/user/playback.md#playing-on-a-tv) uses AirPlay on macOS and Google Cast on Windows; the Linux builds play on the computer only.
 - Surround sound that needs converting plays as stereo, and converting a picture uses much more of your computer's processor than playing it as it is.
 - Choosing another sound track on a live channel starts the channel again for a moment.
 - The Windows installer isn't signed yet; the Microsoft Store version is.
@@ -103,7 +104,7 @@ Mr. Streamer looks for updates after it starts and every four hours. When one is
 
 ## Help
 
-[Live TV](docs/user/live-tv.md) · [Movies and series](docs/user/movies-and-series.md) · [Updates and channels](docs/user/updates.md) · [What plays](docs/user/playback.md) · [Troubleshooting](docs/user/troubleshooting.md) · [Privacy](docs/privacy.md)
+[Live TV](docs/user/live-tv.md) · [Movies and series](docs/user/movies-and-series.md) · [Downloads](docs/user/downloads.md) · [Updates and channels](docs/user/updates.md) · [What plays](docs/user/playback.md) · [Troubleshooting](docs/user/troubleshooting.md) · [Privacy](docs/privacy.md)
 
 Found a bug? [Report it](https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose) with your system, the Mr. Streamer version from Settings > About, and what happened.
 
