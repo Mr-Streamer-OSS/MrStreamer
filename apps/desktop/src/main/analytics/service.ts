@@ -215,7 +215,14 @@ export class Analytics {
   }
 
   private checkpoint(): void {
-    if (this.checkpointTimer || this.checkpointPending || !this.notesDirty || this.closing) return;
+    if (
+      this.checkpointTimer ||
+      this.checkpointPending ||
+      !this.notesDirty ||
+      this.closing ||
+      !this.canCapture()
+    )
+      return;
     this.checkpointTimer = setTimeout(() => {
       this.checkpointTimer = undefined;
       this.checkpointPending = true;
