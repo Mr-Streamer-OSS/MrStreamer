@@ -1,6 +1,6 @@
 // Shared by the guide sidebar and Watch's channel overlay. Countries open one level at a time.
 import { ChevronLeft, ChevronRight, Search, X } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef } from "react";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
 import { formatNumber, t } from "@mrstreamer/core/i18n";
 import { sameList, type ChannelList } from "../../app/ui-store.ts";
@@ -13,6 +13,7 @@ export function ListPicker({
   highlight,
   onPick,
   onChannels,
+  notice,
   className,
 }: {
   picker: ListPickerState;
@@ -20,6 +21,8 @@ export function ListPicker({
   highlight: number | null;
   onPick: (list: ChannelList) => void;
   onChannels: () => void;
+  /** A removed category falls back to All channels; keep its explanation beside that row. */
+  notice?: string | null;
   className?: string;
 }) {
   const box = useRef<HTMLDivElement>(null);
@@ -154,33 +157,39 @@ export function ListPicker({
               ? item.group
               : [item.title, item.context].filter(Boolean).join(" · ");
           return (
-            <button
-              key={item.kind === "group" ? `g:${item.group}` : listKey(item.list)}
-              data-entry={index}
-              aria-current={current ? "true" : undefined}
-              title={title}
-              onFocus={() => setEntry(index)}
-              onClick={() => pick(index)}
-              className={cn(
-                "flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-white hover:bg-white/8 focus-visible:outline-2 focus-visible:outline-white/70 focus-visible:outline-offset-[-2px]",
-                current && "bg-white/10",
-                highlight === index && "ring-2 ring-white/70 ring-inset",
-                group === null && query.trim() === "" && index === 3 && "mt-3",
-              )}
-            >
-              <span className="min-w-0 flex-1 truncate">
-                {item.kind === "group" ? item.group : item.title}
-                {item.kind === "list" && item.context && (
-                  <span className="text-muted-foreground"> · {item.context}</span>
+            <Fragment key={item.kind === "group" ? `g:${item.group}` : listKey(item.list)}>
+              <button
+                data-entry={index}
+                aria-current={current ? "true" : undefined}
+                title={title}
+                onFocus={() => setEntry(index)}
+                onClick={() => pick(index)}
+                className={cn(
+                  "flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-white hover:bg-white/8 focus-visible:outline-2 focus-visible:outline-white/70 focus-visible:outline-offset-[-2px]",
+                  current && "bg-white/10",
+                  highlight === index && "ring-2 ring-white/70 ring-inset",
+                  group === null && query.trim() === "" && index === 3 && "mt-3",
                 )}
-              </span>
-              <span className="flex-none text-xs text-muted-foreground tabular-nums">
-                {formatNumber(item.count)}
-              </span>
-              {item.kind === "group" && (
-                <ChevronRight className="size-3.5 flex-none text-muted-foreground" />
+              >
+                <span className="min-w-0 flex-1 truncate">
+                  {item.kind === "group" ? item.group : item.title}
+                  {item.kind === "list" && item.context && (
+                    <span className="text-muted-foreground"> · {item.context}</span>
+                  )}
+                </span>
+                <span className="flex-none text-xs text-muted-foreground tabular-nums">
+                  {formatNumber(item.count)}
+                </span>
+                {item.kind === "group" && (
+                  <ChevronRight className="size-3.5 flex-none text-muted-foreground" />
+                )}
+              </button>
+              {notice && item.kind === "list" && item.list.kind === "all" && (
+                <p role="status" className="px-3 pt-2 text-sm">
+                  {notice}
+                </p>
               )}
-            </button>
+            </Fragment>
           );
         })}
       </div>

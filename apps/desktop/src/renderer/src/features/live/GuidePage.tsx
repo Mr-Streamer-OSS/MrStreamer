@@ -434,6 +434,11 @@ export function GuidePage({ active }: { active: boolean }) {
         <div className="flex min-h-0 flex-1">
           <ListPicker
             picker={picker}
+            notice={
+              removedCategory
+                ? t("{name} is no longer listed. Showing all channels.", { name: removedCategory })
+                : null
+            }
             selected={list}
             onChannels={() => setFocus("channels")}
             highlight={keyboard && focus === "lists" ? entry : null}
@@ -446,11 +451,6 @@ export function GuidePage({ active }: { active: boolean }) {
           />
           <main className="flex min-w-0 flex-1 flex-col">
             <NowStrip active={active} />
-            {removedCategory && (
-              <p role="status" className="px-9 pt-2 text-sm">
-                {t("{name} is no longer listed. Showing all channels.", { name: removedCategory })}
-              </p>
-            )}
             <div className="flex h-14 flex-none items-center gap-3 px-9 pt-2 pb-3">
               <h1 className="min-w-0 truncate text-xl font-semibold tracking-tight">{title}</h1>
               {draft ? (

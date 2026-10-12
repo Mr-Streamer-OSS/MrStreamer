@@ -213,11 +213,11 @@ export async function liveCategoriesScenario(
   await refresh("remove");
   await d.wait(() =>
     d.evaluate<boolean>(
-      "document.querySelector('main h1')?.textContent === 'All channels' && document.querySelector('main [role=status]')?.textContent.includes('is no longer listed')",
+      "document.querySelector('main h1')?.textContent === 'All channels' && document.querySelector('[role=navigation] [role=status]')?.textContent.includes('is no longer listed')",
     ),
   );
   d.observed["removedCategoryFallback"] = await d.evaluate<string>(
-    "document.querySelector('main [role=status]').textContent",
+    "document.querySelector('[role=navigation] [role=status]').textContent",
   );
   await d.capture("categories-removed-refresh");
   await d.click("Reopen Belgium after refresh", row("Belgium"));

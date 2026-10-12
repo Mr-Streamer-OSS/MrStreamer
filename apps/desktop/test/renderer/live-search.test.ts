@@ -155,6 +155,7 @@ async function guidePage(list: ChannelList = { kind: "all" }) {
         (row) => row.querySelector("[title]")?.firstElementChild?.textContent === title,
       ),
     text: () => container.querySelector("main")?.textContent ?? "",
+    notice: () => container.querySelector('[role="status"]')?.textContent ?? "",
     /** Types `text` into the field, as the whole of what it holds. */
     type: (text: string) =>
       act(async () => {
@@ -220,9 +221,9 @@ describe("searching the list Live TV shows", () => {
       },
     ]);
     await ready(() => expect(useUi.getState().list).toEqual({ kind: "all" }));
-    expect(page.text()).toContain("News is no longer listed. Showing all channels.");
+    expect(page.notice()).toContain("News is no longer listed. Showing all channels.");
     await page.click("Favourites");
-    await ready(() => expect(page.text()).not.toContain("is no longer listed"));
+    await ready(() => expect(page.notice()).not.toContain("is no longer listed"));
   });
 
   it("shows the channels found by a name or a programme together, one row each in the list's order", async () => {
