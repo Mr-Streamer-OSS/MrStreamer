@@ -1002,7 +1002,10 @@ export async function upgradeToA(
   let savedSubtitle;
   if (subtitleMode !== "none") {
     await openMovie(d, "Long subtitles");
-    await d.click("Play before downloading subtitles", button('[role="dialog"] button', "Play"));
+    await d.click(
+      "Play or resume before downloading subtitles",
+      `[...document.querySelectorAll('[role="dialog"] button')].find(b => ['Play', 'Resume'].includes(b.textContent.trim()))`,
+    );
     await playing(d);
     savedSubtitle =
       subtitleMode === "seed" ? await seedSubtitleUi(d) : await observeSavedSubtitle(d);
@@ -1324,6 +1327,16 @@ async function start(
       throw new Error("Renderer listener is not the active owned app");
     tree.sample();
     verifiedPage = page;
+    // The bridge can appear before Connect mounts. Wait for the legacy form before reading it.
+    if (pkg.stage === "stable" && !subtitleOrigin)
+      await d.wait(
+        () =>
+          d.page.evaluate<boolean>(
+            "!!document.querySelector('form button[type=submit]')?.textContent.trim()",
+          ),
+        30_000,
+        "the legacy Connect form",
+      );
     // Legacy 0.0.9 predates language.get and renders fixed English. Observe that UI directly.
     const language =
       pkg.stage === "stable" && !subtitleOrigin
@@ -1742,7 +1755,12 @@ export async function runCommand(args: string[], published = false) {
       // that failed keeps its own error; a stop that fails after a passing stage is the failure.
       record(proof.actions, pkg.stage, session.d.actions);
       try {
-        record(proof.ends, pkg.stage, await session.stop());
+        const ended = await session.stop();
+        record(proof.ends, pkg.stage, ended);
+        // Published stable/C acceptance requires a real clean shutdown before replacement.
+        // Keep the legacy check's explicitly recorded terminated gate for compatibility.
+        if (published && !ended.graceful)
+          failed ??= new Error("Published installed app required forced termination.");
       } catch (error) {
         record(proof.ends, pkg.stage, `failed: ${String(error)}`);
         failed ??= error;

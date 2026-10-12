@@ -257,6 +257,8 @@ export async function resumeMain(main: Page) {
 
 const button = (words: string) =>
   `[...document.querySelectorAll('button')].find(b => b.textContent.trim() === ${JSON.stringify(words)})`;
+const driftToggle = `[...document.querySelectorAll('aside[aria-label="Subtitle choices"] button[aria-expanded]')].find(b => b.querySelector('span')?.textContent === 'Drift and frame rate')`;
+const savedChoice = `[...document.querySelectorAll('aside[aria-label="Subtitle choices"] button[aria-pressed]')].find(b => b.textContent.includes('Saved for this version') && [...b.querySelectorAll('span')].some(s => s.textContent === ${JSON.stringify(SUBTITLE_RELEASE)}))`;
 const labelled = (label: string) =>
   `document.querySelector(${JSON.stringify(`[aria-label="${label}"]`)})`;
 async function input(d: Driver, label: string, selector: string, value: string) {
@@ -270,6 +272,9 @@ async function input(d: Driver, label: string, selector: string, value: string) 
       code: "KeyA",
       windowsVirtualKeyCode: 65,
       modifiers,
+      ...(process.platform === "darwin" && type === "rawKeyDown"
+        ? { commands: ["selectAll"] }
+        : {}),
     });
   await d.type(label, value);
   await d.key("Tab", 9);
@@ -340,7 +345,7 @@ export async function seedSubtitleUi(d: Driver) {
     "document.querySelector('#subtitle-offset')",
     String(SUBTITLE_TIMING.offset),
   );
-  await d.click("Open subtitle drift", button("Drift and frame rate"));
+  await d.click("Open subtitle drift", driftToggle);
   await input(
     d,
     "Set saved subtitle drift",
@@ -354,15 +359,14 @@ export async function seedSubtitleUi(d: Driver) {
 /** Shows the exact saved result and nondefault timing, then observes its shifted cue clock. */
 export async function observeSavedSubtitle(d: Driver) {
   await d.click("Open saved Subtitles", labelled("Subtitles"));
-  const chosen = `[...document.querySelectorAll('aside[aria-label="Subtitle choices"] button[aria-pressed]')].find(b => b.querySelector('span')?.textContent === ${JSON.stringify(SUBTITLE_RELEASE)})`;
-  await d.click("Show saved online subtitle", chosen);
+  await d.click("Show saved online subtitle", savedChoice);
   await d.wait(
-    () => d.page.evaluate<boolean>(`(${chosen})?.getAttribute('aria-pressed') === 'true'`),
+    () => d.page.evaluate<boolean>(`(${savedChoice})?.getAttribute('aria-pressed') === 'true'`),
     10_000,
     "saved exact-file result",
   );
   if (!(await d.exists("document.querySelector('#subtitle-speed')")))
-    await d.click("Read saved subtitle drift", button("Drift and frame rate"));
+    await d.click("Read saved subtitle drift", driftToggle);
   const timing = await d.page.evaluate<{ offset: number; speed: number }>(
     `({offset:Number(document.querySelector('#subtitle-offset')?.value),speed:Number(document.querySelector('#subtitle-speed')?.value)})`,
   );
