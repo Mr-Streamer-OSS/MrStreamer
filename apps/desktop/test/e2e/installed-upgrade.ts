@@ -51,6 +51,17 @@ import { startFakeProvider, type FakeProvider } from "../fake-provider.ts";
 import { startFakeTmdb } from "../fake-tmdb.ts";
 import { connect, launch, type Page } from "./app.ts";
 import {
+  bootstrapSubtitles,
+  pauseMain,
+  inspectorOwner,
+  resumeMain,
+  startSubtitleFixture,
+  configureSubtitleUi,
+  seedSubtitleUi,
+  observeSavedSubtitle,
+  subtitleRequests,
+} from "./installed-subtitles.ts";
+import {
   readPins,
   resolvePackages,
   restGitHub,
@@ -477,7 +488,8 @@ type Read =
   | "viewing.progress"
   | "watchlist.list"
   | "downloads.list"
-  | "subscription.list";
+  | "subscription.list"
+  | "subtitles.settings";
 
 /** A request the window made, without its query, which can hold the fake login. */
 interface WindowRequest {
@@ -728,7 +740,12 @@ async function pick(d: Driver, label: string, value: string) {
 // The three stages
 
 /** The prior stable release, from the Connect screen on. */
-export async function seedStable(d: Driver, services: Services, titles: Fixtures) {
+export async function seedStable(
+  d: Driver,
+  services: Services,
+  titles: Fixtures,
+  savedSubtitles = false,
+) {
   await d.wait(() => d.exists("document.querySelector('form input')"), 30_000, "the Connect form");
   for (const [index, text] of [services.url, "demo", "demo"].entries()) {
     await d.click(
@@ -748,6 +765,7 @@ export async function seedStable(d: Driver, services: Services, titles: Fixtures
   await pick(d, "Quality", "hd");
   await pick(d, "Audio in", "nl");
   await pick(d, "Subtitles", "fr");
+  if (savedSubtitles) await configureSubtitleUi(d);
   await d.capture("settings");
   await d.key("Escape", 27);
   await d.click("Open Live TV", button("header button", "Live TV"));
@@ -773,6 +791,7 @@ export async function seedStable(d: Driver, services: Services, titles: Fixtures
   await d.click("Save the movie", button('[role="dialog"] button', "Save"));
   await d.click("Play the movie", button('[role="dialog"] button', "Play"));
   await playing(d);
+  const savedSubtitle = savedSubtitles ? await seedSubtitleUi(d) : undefined;
   await d.key("ArrowRight", 39);
   await d.key("ArrowRight", 39);
   await d.wait(async () => (await d.video()).time > 20, 30_000, "the movie past 20 s");
@@ -807,7 +826,7 @@ export async function seedStable(d: Driver, services: Services, titles: Fixtures
     !seeded.progress.some((each) => each.title.kind === "episode")
   )
     throw new Error(`The stable release didn't keep what was set: ${JSON.stringify(seeded)}`);
-  return seeded;
+  return { ...seeded, savedSubtitle };
 }
 
 /**
@@ -826,7 +845,7 @@ function resumedNear(what: string, started: number, kept: number) {
  * When an earlier version left the long movie's copy at `kept` seconds, it must start from there.
  * Leaving it again must keep the time it was left at, and it must resume from that.
  */
-async function playCopies(d: Driver, titles: Fixtures, kept?: number) {
+async function playCopies(d: Driver, titles: Fixtures, kept?: number, savedSubtitles = false) {
   const copies = (await d.read("downloads.list")).items;
   const long = copies.find((each) => each.title.kind === "movie" && each.title.id === titles.long);
   const sound = copies.find((each) => each.title.kind === "movie" && each.title.id !== titles.long);
@@ -911,6 +930,7 @@ async function playCopies(d: Driver, titles: Fixtures, kept?: number) {
     "document.querySelector('[data-subtitle-text]').textContent.trim()",
   );
   await d.capture("copy-subtitles");
+  if (savedSubtitles) seen["savedSubtitle"] = await observeSavedSubtitle(d);
   const left = (await d.video()).time;
   await leaveTitle(d);
   // Main keeps where it was left, and the page shows it too: Watch offline goes from there.
@@ -965,10 +985,12 @@ export async function upgradeToA(
   titles: Fixtures,
   seeded: State,
   operation = "Upgrading to A",
+  subtitleMode: "none" | "seed" | "retained" = "none",
 ) {
   const kept = retained(seeded, await state(d, titles), operation);
   await d.click("Open Settings", labelled("Settings"));
   await d.click("Open General", button("nav button", "General"));
+  if (subtitleMode === "seed") await configureSubtitleUi(d);
   await d.capture("settings");
   await d.key("Escape", 27);
   await d.click("Open Live TV", button("header button", "Live TV"));
@@ -977,6 +999,16 @@ export async function upgradeToA(
   await openWatchlist(d);
   await d.capture("watchlist");
 
+  let savedSubtitle;
+  if (subtitleMode !== "none") {
+    await openMovie(d, "Long subtitles");
+    await d.click("Play before downloading subtitles", button('[role="dialog"] button', "Play"));
+    await playing(d);
+    savedSubtitle =
+      subtitleMode === "seed" ? await seedSubtitleUi(d) : await observeSavedSubtitle(d);
+    await leaveTitle(d);
+    await d.key("Escape", 27);
+  }
   for (const movie of ["Two sound tracks", "Long subtitles"]) {
     await openMovie(d, movie);
     await d.click(`Download ${movie}`, button('[role="dialog"] button', "Download"));
@@ -1000,9 +1032,10 @@ export async function upgradeToA(
   );
   await copiesShown(d, 3);
   await d.capture("copies");
-  const played = await playCopies(d, titles);
+  const played = await playCopies(d, titles, undefined, subtitleMode !== "none");
   return {
     kept,
+    savedSubtitle,
     played,
     copies: (await d.read("downloads.list")).items,
     after: await state(d, titles),
@@ -1028,6 +1061,7 @@ export async function upgradeToB(
   a: AfterA,
   offline: Offline,
   operation = "Upgrading to B",
+  savedSubtitles = false,
 ) {
   const kept = retained(a.after, await state(d, titles), operation);
   await d.click("Open Downloads", button("header button", "Downloads"));
@@ -1103,7 +1137,7 @@ export async function upgradeToB(
     (each) => each.title.kind === "movie" && each.title.id === titles.long,
   )?.progress;
   if (!leftByA) throw new Error("A left no progress on the long movie's copy.");
-  const played = await playCopies(d, titles, leftByA.position);
+  const played = await playCopies(d, titles, leftByA.position, savedSubtitles);
   const outside = d.requests
     .slice(requestsFrom)
     .filter(
@@ -1179,22 +1213,92 @@ async function start(
   evidence: string,
   pkg: RunPackage,
   tmdbApi: string,
+  subtitleOrigin?: string,
 ) {
   const port = 20000 + Math.floor(Math.random() * 20000);
+  const inspectPort = port + 20000;
   process.env["MR_STREAMER_TMDB_API"] = tmdbApi;
+  const beforeLaunch = {
+    executable: await fileSha256(runner.executable),
+    appAsar: await fileSha256(join(runner.installRoot, "resources", "app.asar")),
+    tools: Object.fromEntries(
+      await Promise.all(runner.tools.map(async (tool) => [tool, await fileSha256(tool)])),
+    ),
+  };
   const app = launch(
     runner.executable,
-    ["--remote-debugging-address=127.0.0.1", "--enable-automation"],
+    [
+      "--remote-debugging-address=127.0.0.1",
+      "--enable-automation",
+      "--lang=en-US",
+      ...(subtitleOrigin ? [`--inspect-brk=127.0.0.1:${inspectPort}`] : []),
+    ],
     { port, profile },
   );
   if (app.pid === undefined) throw new Error(`${runner.executable} didn't start.`);
   const tree = ownedTree(runner, app);
   let page: Page | undefined;
+  let verifiedPage: Page | undefined;
+  let main: Page | undefined;
+  let bootstrap: Awaited<ReturnType<typeof bootstrapSubtitles>> | undefined;
+  const stop = async () => {
+    const exitedBeforeClose = app.exitCode !== null || app.signalCode !== null;
+    main?.close();
+    const ended = await tree.stop(() => verifiedPage?.send("Browser.close") ?? Promise.resolve());
+    const exit = { code: app.exitCode, signal: app.signalCode };
+    if (
+      exitedBeforeClose ||
+      (exit.code !== null && exit.code !== 0) ||
+      (ended.forced.length === 0 && (exit.code !== 0 || exit.signal !== null)) ||
+      (ended.forced.length > 0 && exit.signal !== null && exit.signal !== "SIGKILL")
+    )
+      throw new Error(`The installed app exited unexpectedly: ${JSON.stringify(exit)}.`);
+    return {
+      ...ended,
+      exit,
+      graceful: ended.graceful && exit.code === 0 && exit.signal === null,
+      gate: ended.forced.length === 0 ? "graceful" : "forced-terminated",
+    };
+  };
   try {
+    if (subtitleOrigin) {
+      main = await connect(inspectPort, "node");
+      const owner = await inspectorOwner(inspectPort, [app.pid]);
+      if (owner !== app.pid || app.exitCode !== null || app.signalCode !== null)
+        throw new Error("Inspector owner exited before initial pause");
+      const paused = await pauseMain(main);
+      const identity = await paused.evaluate<{
+        pid: number;
+        executable: string;
+        resources: string;
+        argv: string[];
+      }>(
+        `({pid:process.pid,executable:process.execPath,resources:process.resourcesPath,argv:process.argv})`,
+      );
+      tree.sample();
+      if (
+        identity.pid !== app.pid ||
+        identity.executable.toLowerCase() !== runner.executable.toLowerCase() ||
+        identity.resources.toLowerCase() !== join(runner.installRoot, "resources").toLowerCase() ||
+        !identity.argv.includes(`--user-data-dir=${profile}`)
+      )
+        throw new Error("Paused main is not the owned installed app");
+      if (
+        (await fileSha256(identity.executable)) !== beforeLaunch.executable ||
+        (await fileSha256(join(identity.resources, "app.asar"))) !== beforeLaunch.appAsar ||
+        (
+          await Promise.all(
+            runner.tools.map(async (tool) => (await fileSha256(tool)) === beforeLaunch.tools[tool]),
+          )
+        ).some((same) => !same)
+      )
+        throw new Error("Paused installed executable changed");
+      bootstrap = await bootstrapSubtitles(paused, subtitleOrigin);
+      if (bootstrap.pid !== app.pid) throw new Error("Subtitle bootstrap PID changed");
+      await resumeMain(main);
+    }
     page = await connect(port);
     const d = driver(page, evidence, pkg.stage);
-    await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
-    await page.send("Network.enable");
     const command = await page.send("Browser.getBrowserCommandLine");
     const args = (command.result as { arguments?: string[] } | undefined)?.arguments ?? [];
     if (
@@ -1215,16 +1319,33 @@ async function start(
       throw new Error(
         `The app says ${status.version} (${status.distribution}), not ${pkg.version} direct.`,
       );
-    if (pkg.stage !== "stable") {
-      const language = await d.read("language.get");
-      if (language.locale !== "en-US")
-        throw new Error(`The check reads English; the app shows ${language.locale}.`);
-    }
+    const rendererOwnerPid = await inspectorOwner(port, [app.pid]);
+    if (rendererOwnerPid !== app.pid || app.exitCode !== null || app.signalCode !== null)
+      throw new Error("Renderer listener is not the active owned app");
     tree.sample();
+    verifiedPage = page;
+    // Legacy 0.0.9 predates language.get and renders fixed English. Observe that UI directly.
+    const language =
+      pkg.stage === "stable" && !subtitleOrigin
+        ? {
+            legacyConnect: await d.page.evaluate<string>(
+              "document.querySelector('form button[type=submit]')?.textContent.trim() ?? ''",
+            ),
+          }
+        : await d.read("language.get");
+    if ("locale" in language ? language.locale !== "en-US" : language.legacyConnect !== "Connect")
+      throw new Error(`The check requires English: ${JSON.stringify(language)}.`);
+    await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
+    await page.send("Network.enable");
     return {
       d,
       tree,
+      subtitleRequests: () => (main ? subtitleRequests(main) : Promise.resolve([])),
       identity: {
+        subtitleBootstrap: bootstrap,
+        rendererOwnerPid,
+        language,
+        beforeLaunch,
         pid: app.pid,
         createdAt: tree.root.created,
         port,
@@ -1240,10 +1361,10 @@ async function start(
           ),
         },
       },
-      stop: () => tree.stop(() => page!.send("Browser.close")),
+      stop,
     };
   } catch (error) {
-    await tree.stop(() => page?.send("Browser.close") ?? Promise.resolve()).catch(() => undefined);
+    await stop().catch(() => undefined);
     page?.close();
     throw error;
   }
@@ -1429,6 +1550,9 @@ export async function runCommand(args: string[], published = false) {
       runId: process.env["GITHUB_RUN_ID"] ?? null,
       runAttempt: process.env["GITHUB_RUN_ATTEMPT"] ?? null,
       driverSha256: sha256(await readFile(fileURLToPath(import.meta.url))),
+      subtitleHelperSha256: sha256(
+        await readFile(new URL("./installed-subtitles.ts", import.meta.url)),
+      ),
     },
     receipt,
     installs: {} as ByStage,
@@ -1445,6 +1569,14 @@ export async function runCommand(args: string[], published = false) {
   const record = (part: ByStage, stage: RunStage, value: unknown) => (part[stage] = value);
   const services = await startServices();
   const titles = fixtures(services.titles);
+  const subtitles = await startSubtitleFixture().catch(async (error) => {
+    try {
+      await services.stop();
+    } catch (cleanup) {
+      throw new AggregateError([error, cleanup], "Subtitle startup and provider cleanup failed");
+    }
+    throw error;
+  });
   const block = outboundBlock(runner);
   let blocking = false;
   let failed: unknown;
@@ -1469,7 +1601,14 @@ export async function runCommand(args: string[], published = false) {
             : await install(runner, setup, pkg.version, previous),
         );
       previous = pkg.version;
-      const session = await start(runner, profile, evidence, pkg, services.tmdbApi);
+      const session = await start(
+        runner,
+        profile,
+        evidence,
+        pkg,
+        services.tmdbApi,
+        published || pkg.stage !== "stable" ? subtitles.origin : undefined,
+      );
       try {
         record(proof.starts, pkg.stage, session.identity);
         if (
@@ -1489,6 +1628,7 @@ export async function runCommand(args: string[], published = false) {
           record(proof.about, pkg.stage, shown.source);
         };
         if (pkg.stage !== "stable") await checkAbout();
+        let requestsAtCutoff: number | undefined;
         const offline: Offline = {
           async cutOff(d) {
             const probeTools = () =>
@@ -1501,6 +1641,8 @@ export async function runCommand(args: string[], published = false) {
             const reachedBefore = await d.page.evaluate<string>(probe);
             const toolsBefore = await probeTools();
             const stopped = await services.stop();
+            const subtitlesStopped = await subtitles.stop();
+            requestsAtCutoff = (await session.subtitleRequests()).length;
             const since = new Date();
             blocking = true;
             const applied = block.apply();
@@ -1521,6 +1663,7 @@ export async function runCommand(args: string[], published = false) {
             const proven = {
               endpoints: { window: OUTSIDE, tools: TOOLS_OUTSIDE },
               servicesStopped: stopped,
+              subtitlesStopped,
               appReachedOutsideBeforeBlock: reachedBefore,
               toolsBeforeBlock: toolsBefore,
               applied,
@@ -1548,13 +1691,15 @@ export async function runCommand(args: string[], published = false) {
           refused: (since) => block.blocked(since),
         };
         session.tree.sample();
-        if (pkg.stage === "stable") seeded = await seedStable(session.d, services, titles);
+        if (pkg.stage === "stable")
+          seeded = await seedStable(session.d, services, titles, published);
         else if (pkg.stage === "a" || pkg.stage === "candidate")
           afterA = await upgradeToA(
             session.d,
             titles,
             seeded!,
             pkg.stage === "candidate" ? "Upgrading to candidate" : "Upgrading to A",
+            published ? "retained" : "seed",
           );
         else
           record(
@@ -1566,13 +1711,24 @@ export async function runCommand(args: string[], published = false) {
               afterA!,
               offline,
               pkg.stage === "candidate-restart" ? "Restarting candidate" : "Upgrading to B",
+              true,
             ),
           );
+        if (pkg.stage === "candidate" && (await session.subtitleRequests()).length !== 0)
+          throw new Error(
+            "Candidate migration fetched a new online subtitle instead of retaining stable's saved file",
+          );
+        if (
+          requestsAtCutoff !== undefined &&
+          (await session.subtitleRequests()).length !== requestsAtCutoff
+        )
+          throw new Error("Offline copies attempted new subtitle service requests");
         if (pkg.stage === "stable") await checkAbout();
         if (pkg.stage === "stable") record(proof.stages, "stable", seeded);
         if (pkg.stage === "a" || pkg.stage === "candidate")
           record(proof.stages, pkg.stage, {
             kept: afterA!.kept,
+            savedSubtitle: afterA!.savedSubtitle,
             played: afterA!.played,
             copies: afterA!.copies,
             after: afterA!.after,
@@ -1599,7 +1755,16 @@ export async function runCommand(args: string[], published = false) {
   } finally {
     const left = await cleanUp(failed, {
       network: blocking ? () => block.restore() : null,
-      services: () => services.stop(),
+      services: async () => {
+        const outcomes = await Promise.allSettled([services.stop(), subtitles.stop()]);
+        const failures = outcomes.filter((result) => result.status === "rejected");
+        if (failures.length)
+          throw new AggregateError(
+            failures.map((result) => result.reason),
+            "Fixture cleanup failed",
+          );
+        return outcomes;
+      },
       uninstall: () => uninstall(runner),
       installRoot: runner.installRoot,
       profile,
@@ -1609,6 +1774,9 @@ export async function runCommand(args: string[], published = false) {
     proof.status = failed ? "failed" : "passed";
     proof.error =
       failed instanceof Error ? (failed.stack ?? failed.message) : failed ? String(failed) : null;
+    Object.assign(proof, {
+      subtitleFixture: { requests: subtitles.requests, zipSha256: subtitles.zipSha256 },
+    });
     proof.cleanup = {
       ...left.steps,
       kept: left.kept,
@@ -1620,7 +1788,9 @@ export async function runCommand(args: string[], published = false) {
       ...receipt.limits,
       "Decoded sound is not audible output; GPU, native menus and dialogs are not checked.",
       "The stable episode is a 12-second clip, recorded as finished: unfinished-episode resume is not shown. The movie's unfinished progress and its copy's resume are.",
-      "Embedded subtitles are shown from a copy. Saved online subtitles and their timing across upgrades are not checked: an installed app has no fake subtitle service.",
+      published
+        ? "Saved online subtitles are seeded on stable through UI with a paused-main SubDL boundary, then checked on candidate and offline restart."
+        : "Legacy stable has no online subtitle requirement. A seeds the exact-file saved result before downloading; B checks subsequent upgrade persistence.",
       "Installs are by the silent setup, not by the in-app updater, and the direct setup alone, not the Microsoft Store package.",
     ];
     await writeFile(join(evidence, "proof.json"), JSON.stringify(proof, null, 2));
