@@ -6,7 +6,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import type { Download, DownloadList, DownloadStatus } from "@mrstreamer/contracts/downloads";
 import type { Episode, SeriesDetails } from "@mrstreamer/contracts/ondemand";
-import type { TitleProgress } from "@mrstreamer/contracts/viewing";
+import type { EpisodeMark, TitleProgress } from "@mrstreamer/contracts/viewing";
 import { SeriesDownload } from "../../src/renderer/src/features/downloads/SeriesDownload.tsx";
 import { downloadsQuery, syncDownloads } from "../../src/renderer/src/lib/downloads.ts";
 
@@ -23,6 +23,7 @@ const episode = (season: number, number: number, id = `${season}-${number}`): Ep
   airDate: null,
 });
 const episodes = [episode(0, 1), episode(1, 1), episode(1, 2), episode(2, 1), episode(2, 2)];
+const episodeOrder = ["2-2", "0-1", "1-2", "1-1", "2-1"];
 const details: SeriesDetails = {
   kind: "series",
   title: {
@@ -59,7 +60,7 @@ const details: SeriesDetails = {
     posterUrl: null,
     episodes: episodes.filter((episode) => episode.season === number),
   })),
-  episodeOrder: ["2-2", "0-1", "1-2", "1-1", "2-1"],
+  episodeOrder,
 };
 const download = (episode: Episode, status: DownloadStatus): Download => ({
   id: `d-${episode.id}`,
@@ -116,7 +117,7 @@ async function mount(
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
-  const render = (value = picked, key = "series") =>
+  const render = (value = picked, key = "series", marks: readonly EpisodeMark[] = []) =>
     act(async () =>
       root.render(
         createElement(
@@ -125,7 +126,7 @@ async function mount(
           createElement(SeriesDownload, {
             details: value,
             progress,
-            marks: [],
+            marks,
             version: "NL · Fixture",
             key,
           }),
@@ -263,6 +264,106 @@ it("keeps successful additions after a partial queue failure and retries only th
   expect(ipc.argsOf("downloads.add").at(-1)?.title.id).toBe("2-2");
 });
 
+it("removes obsolete failure feedback after a language refresh and queues the current files", async () => {
+  const first = ipc.hold("downloads.add");
+  const page = await mount();
+  await page.open();
+  await page.click("Download 5 episodes");
+  await act(async () => first.reject({ kind: "no-subscription" }));
+  await until(() =>
+    expect(page.container.textContent).toContain("Queued 4 of 5. 1 couldn't be added: S2 E2."),
+  );
+  const changed = {
+    ...details,
+    episodeOrder: episodeOrder.map((id) => `${id}-new-language`),
+    seasons: details.seasons.map((season) => ({
+      ...season,
+      episodes: season.episodes.map((episode) => ({
+        ...episode,
+        id: `${episode.id}-new-language`,
+        versions: [
+          { id: episode.id, duration: 2000, name: "Old default (NL)", tags: ["NL"] },
+          {
+            id: `${episode.id}-new-language`,
+            duration: 2000,
+            name: "New default (EN)",
+            tags: ["EN"],
+          },
+        ],
+      })),
+    })),
+  };
+  await page.render(changed);
+  expect(page.container.querySelector('[role="status"]')).toBeNull();
+  expect(
+    [...page.container.querySelectorAll("button")].some((button) => button.textContent === "Retry"),
+  ).toBe(false);
+  expect(ipc.argsOf("downloads.remove")).toHaveLength(0);
+  await page.open();
+  expect(document.body.textContent).not.toContain("Retry failed");
+  await page.click("Download 5 episodes");
+  await until(() => expect(ipc.argsOf("downloads.add")).toHaveLength(10));
+  expect(ipc.argsOf("downloads.add")[5]?.title.id).toBe("2-2-new-language");
+});
+
+it("removes the old resumed-file Retry when the episode is marked watched", async () => {
+  const selected = {
+    ...details,
+    seasons: details.seasons.map((season) => ({
+      ...season,
+      episodes: season.episodes.map((episode) =>
+        episode.id === "2-2"
+          ? {
+              ...episode,
+              versions: [
+                { id: "2-2", duration: 2000, name: "Default (NL)", tags: ["NL"] },
+                { id: "resumed", duration: 2000, name: "Resumed (EN)", tags: ["EN"] },
+              ],
+            }
+          : episode,
+      ),
+    })),
+  };
+  const progress: TitleProgress[] = [
+    {
+      title: {
+        kind: "episode",
+        subscriptionId: SUBSCRIPTION,
+        id: "resumed",
+        seriesId: "series",
+        season: 2,
+        episode: 2,
+      },
+      position: 60,
+      duration: 2000,
+      finished: false,
+      at: 1,
+      since: 1,
+    },
+  ];
+  const first = ipc.hold("downloads.add");
+  const page = await mount([], selected, progress);
+  await page.open();
+  await page.click("Download 5 episodes");
+  await act(async () => first.reject({ kind: "no-subscription" }));
+  await until(() => expect(page.container.textContent).toContain("1 couldn't be added: S2 E2."));
+  expect(ipc.argsOf("downloads.add")[0]?.title.id).toBe("resumed");
+  const copies = episodes
+    .filter((episode) => episode.id !== "2-2")
+    .map((episode) => download(episode, { kind: "queued" }));
+  await page.changed(copies);
+  await page.render(selected, "series", [
+    { season: 2, episode: 2, watched: true, at: 2, revision: 2 },
+  ]);
+  expect(page.container.querySelector('[role="status"]')).toBeNull();
+  await page.open();
+  expect(document.body.textContent).not.toContain("Retry failed");
+  await page.click("Download 1 episode");
+  await until(() => expect(ipc.argsOf("downloads.add")).toHaveLength(6));
+  expect(ipc.argsOf("downloads.add").at(-1)?.title.id).toBe("2-2");
+  expect(ipc.argsOf("downloads.remove")).toHaveLength(0);
+});
+
 it("stops further additions after switching series versions while a submitted call finishes", async () => {
   const first = ipc.hold("downloads.add");
   const page = await mount();
@@ -302,24 +403,37 @@ it("replaces a missing copy through Delete then Add and keeps unrelated copies",
   expect(ipc.argsOf("downloads.add")[0]?.title.id).toBe("0-1");
 });
 
-it("stops remaining additions when a language refresh changes episode files in the same series", async () => {
-  const first = ipc.hold("downloads.add");
-  const page = await mount();
-  await page.open();
-  await page.click("Download 5 episodes");
-  await until(() => expect(ipc.argsOf("downloads.add")).toHaveLength(1));
-  const changed = {
-    ...details,
-    seasons: details.seasons.map((season) => ({
-      ...season,
-      episodes: season.episodes.map((episode) => ({
-        ...episode,
-        id: `${episode.id}-new-language`,
+it.each(["success", "failure"])(
+  "stops additions and suppresses a late %s after episode files change",
+  async (outcome) => {
+    const first = ipc.hold("downloads.add");
+    const page = await mount();
+    await page.open();
+    await page.click("Download 5 episodes");
+    await until(() => expect(ipc.argsOf("downloads.add")).toHaveLength(1));
+    const changed = {
+      ...details,
+      episodeOrder: episodeOrder.map((id) => `${id}-new-language`),
+      seasons: details.seasons.map((season) => ({
+        ...season,
+        episodes: season.episodes.map((episode) => ({
+          ...episode,
+          id: `${episode.id}-new-language`,
+        })),
       })),
-    })),
-  };
-  await page.render(changed);
-  await act(async () => first.resolve(download(episodes[4]!, { kind: "queued" })));
-  await until(() => expect(page.container.textContent).toContain("Queued 1 episodes"));
-  expect(ipc.argsOf("downloads.add")).toHaveLength(1);
-});
+    };
+    await page.render(changed);
+    await act(async () => {
+      if (outcome === "success") first.resolve(download(episodes[4]!, { kind: "queued" }));
+      else first.reject({ kind: "no-subscription" });
+    });
+    expect(page.container.querySelector('[role="status"]')).toBeNull();
+    expect(ipc.argsOf("downloads.add")).toHaveLength(1);
+    expect(ipc.argsOf("downloads.remove")).toHaveLength(0);
+    await page.open();
+    expect(document.body.textContent).not.toContain("Retry failed");
+    await page.click("Download 5 episodes");
+    await until(() => expect(ipc.argsOf("downloads.add")).toHaveLength(6));
+    expect(ipc.argsOf("downloads.add")[1]?.title.id).toBe("2-2-new-language");
+  },
+);

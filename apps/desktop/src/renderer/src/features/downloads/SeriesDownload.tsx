@@ -29,6 +29,7 @@ const downloadOf = (items: readonly Download[], title: TitleRef) =>
       item.title.id === title.id,
   );
 type Result = {
+  readonly revision: number;
   readonly added: number;
   readonly attempted: number;
   readonly complete: number;
@@ -73,7 +74,7 @@ export function SeriesDownload({
       files[index]?.status.kind === "missing",
   );
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<Result | null>(null);
+  const [queueResult, setResult] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
   const selection = JSON.stringify(titles);
   const life = useRef({ mounted: true, busy: false, selection, disabled, revision: 0 });
@@ -82,6 +83,8 @@ export function SeriesDownload({
     life.current.selection = selection;
     life.current.disabled = disabled;
   }
+  // Feedback and Retry describe only the files selected when that operation started.
+  const result = queueResult?.revision === life.current.revision ? queueResult : null;
   useEffect(() => {
     life.current.mounted = true;
     return () => {
@@ -136,8 +139,9 @@ export function SeriesDownload({
       } catch (cause) {
         failures.push({ title, reason: describeError(appError(cause)) });
       }
-      if (life.current.mounted)
+      if (life.current.mounted && life.current.revision === selectedScope)
         setResult({
+          revision: selectedScope,
           added,
           attempted,
           complete: skippedComplete,
@@ -147,7 +151,15 @@ export function SeriesDownload({
     }
     life.current.busy = false;
     if (life.current.mounted) {
-      setResult({ added, attempted, complete: skippedComplete, queued: skippedQueued, failures });
+      if (life.current.revision === selectedScope)
+        setResult({
+          revision: selectedScope,
+          added,
+          attempted,
+          complete: skippedComplete,
+          queued: skippedQueued,
+          failures,
+        });
       setBusy(false);
       // Also reconcile a successful answer if an event was missed while the list first loaded.
       void client.invalidateQueries({ queryKey: downloadsQuery().queryKey });
@@ -241,6 +253,7 @@ export function SeriesDownload({
                 </p>
               )}
               <Menu.Item
+                nativeButton
                 render={<Button variant="primary" className="w-full" />}
                 disabled={busy || !list.data || eligible.length === 0}
                 closeOnClick
