@@ -37,19 +37,22 @@ export function Sheet({
         <Dialog.Popup
           {...(initialFocus ? { initialFocus } : {})}
           className={cn(
-            "fixed inset-x-[max(1.5rem,calc((100vw-68rem)/2))] bottom-[var(--receiver-bar,0px)] z-20 overflow-y-auto overscroll-contain rounded-t-3xl bg-black shadow-2xl ring-1 ring-white/10 outline-none transition-[opacity,translate] duration-200 data-ending-style:translate-y-4 data-ending-style:opacity-0 data-starting-style:translate-y-4 data-starting-style:opacity-0",
+            "fixed inset-x-[max(1.5rem,calc((100vw-68rem)/2))] bottom-[var(--receiver-bar,0px)] z-20 flex flex-col overflow-hidden rounded-t-3xl bg-black shadow-2xl ring-1 ring-white/10 outline-none transition-[opacity,translate] duration-200 data-ending-style:translate-y-4 data-ending-style:opacity-0 data-starting-style:translate-y-4 data-starting-style:opacity-0",
             short ? "max-h-[calc(100%-3.75rem-var(--receiver-bar,0px))]" : "top-[3.75rem]",
             overSettings && "z-50",
           )}
         >
-          {children}
-          {/* After the content, so focus starts on its main action rather than on Close. */}
-          <Dialog.Close
-            aria-label={t("Close")}
-            className="absolute top-4 right-4 z-10 grid size-9 place-items-center rounded-full bg-black/60 text-white ring-1 ring-white/20 hover:bg-black/80"
-          >
-            <X className="size-4" />
-          </Dialog.Close>
+          {/* The outer frame clips the scrollbar as well as the content at its rounded edge. */}
+          <div className="relative min-h-0 overflow-y-auto overscroll-contain">
+            {children}
+            {/* After the content, so focus starts on its main action rather than on Close. */}
+            <Dialog.Close
+              aria-label={t("Close")}
+              className="absolute top-4 right-4 z-10 grid size-9 place-items-center rounded-full bg-black/60 text-white ring-1 ring-white/20 hover:bg-black/80"
+            >
+              <X className="size-4" />
+            </Dialog.Close>
+          </div>
         </Dialog.Popup>
       </Dialog.Portal>
     </Dialog.Root>
