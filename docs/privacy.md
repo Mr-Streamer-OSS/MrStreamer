@@ -21,7 +21,7 @@ Most of what the app handles never reaches us. It stays in its data folder ([whe
 - the statistics setting and its installation identifier
 - a diagnostics log with no addresses, logins or channel names
 
-We can't see, copy or delete any of it. **Export diagnostics** in Settings > About shows you the text before you save it and uploads nothing.
+We can't see, copy or delete any of it. **Diagnostics…** in Settings > About shows you the text before you save it and uploads nothing.
 
 ### Usage statistics
 
@@ -56,7 +56,7 @@ Our legal basis for all three is legitimate interest (GDPR Article 6(1)(f)). You
 The app contacts these straight from your computer, not through us. Their own policies apply.
 
 - **Your provider** gets your login, IP address and app version, and sees what you open, watch and download. Each provider gets only its own login and requests, and learns nothing about your other subscriptions.
-- **Servers a playlist or guide address names** get your IP address, the app version and the stream or guide requested. A guide address can carry its own key. The app refreshes a guide from another address about every six hours.
+- **Servers a playlist or guide address names** get your IP address, the app version and the stream or guide requested. A playlist can supply its own browser identification and referrer for a stream. A guide address can carry its own key. The app refreshes a guide from another address about every six hours.
 - **[TMDB](https://www.themoviedb.org/privacy-policy)** gets the titles your providers list, your language and country, an API key (ours or your own) and your IP address. Never your provider's address or login.
 - **Image servers** named by your provider or TMDB get your IP address, the image requested, your language, and the app and system version.
 - **[OpenSubtitles](https://www.opensubtitles.com/en/privacy)** and **[SubDL](https://subdl.com/privacy)**, only after you turn subtitle search on and search: the title's TMDB id, or its name and year, the episode, languages, the service's API key and your IP address. OpenSubtitles also gets your username and password when you download a subtitle.
@@ -71,7 +71,7 @@ Your network operator and DNS provider can see which servers the app contacts.
 
 - **[PostHog](https://posthog.com/privacy)** stores app statistics in its EU Cloud.
 - **[Vercel](https://vercel.com/legal/privacy-notice)** hosts the website and runs its analytics ([details](https://vercel.com/docs/analytics/privacy-policy)).
-- **[Cloudflare](https://www.cloudflare.com/privacypolicy/)** handles delivery of messages sent to hello@, privacy@ and security@mrstreamer.app through [Email Routing](https://developers.cloudflare.com/email-service/get-started/route-emails/).
+- **[Cloudflare](https://www.cloudflare.com/privacypolicy/)** handles delivery of messages sent to hello@, privacy@ and security@mrstreamer.app through [Email Routing](https://developers.cloudflare.com/email-service/get-started/route-emails/), to the mailbox provider where we read them.
 
 ## Your choices
 
@@ -84,7 +84,7 @@ Your network operator and DNS provider can see which servers the app contacts.
 
 - **Remove** on a subscription in Settings > Subscriptions deletes its login, lists, guide and mapped channels, and cancels its unfinished downloads. Tick **Also delete favourites, watchlist, history and progress** to delete those and its saved subtitles too. Finished downloads stay until you delete them.
 - **Delete** on a download deletes the copy with its details, pictures, progress and subtitles.
-- **Deleting the data folder** deletes everything else, including the statistics setting, so a new folder starts with statistics on. The password key stays in your keychain as "Mr. Streamer Safe Storage", and a downloaded update in the `mrstreamer-updater` cache folder, until you delete them.
+- **Deleting the data folder** deletes everything else, including the statistics setting, so a new folder starts with statistics on. To also remove the password key, delete "Mr. Streamer Safe Storage" in Keychain Access on macOS or the matching entry in your Linux keyring. A downloaded update stays in `~/Library/Caches/mrstreamer-updater` on macOS, `%LOCALAPPDATA%\mrstreamer-updater` on Windows or `~/.cache/mrstreamer-updater` on Linux until you delete that folder.
 - **Statistics already sent** stay with PostHog when you turn the setting off. Email privacy@mrstreamer.app with the `installationId` from `analytics.json` in your data folder, so we can find them.
 
 ## Retention

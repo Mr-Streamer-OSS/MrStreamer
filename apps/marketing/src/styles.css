@@ -531,7 +531,7 @@ footer p {
  *   button pops, its line rises and the hero's window stands up, or rises while stacked.
  * - As a part scrolls into view, main.ts adds `revealed` to it and takes it off when its
  *   animation ends: a feature's text slides in from the page's edge while a black panel wipes
- *   off its window, and What you need, the FAQ link and each download row come in after it.
+ *   off its window, and What you need and each download row come in after it.
  * - As the page scrolls, main.ts sets --tilt on the hero's window and marks it `tipped`: 0 tips
  *   it back 20 degrees, and at 1 it loses both and stands upright with no transform, which is
  *   also how it stands without the script. The stand-up ends on that tilt, so the two never jump.

@@ -271,8 +271,8 @@ export function renderPage(
     .replaceAll("<!-- title -->", escapeHtml(title))
     .replaceAll("<!-- description -->", escapeHtml(page.description))
     .replaceAll("<!-- address -->", SITE + page.address)
-    .replace("<!-- content -->", () => crumb + content + other)
-    .replaceAll(`href="${guide ? "/docs" : page.address}"`, `$& aria-current="page"`);
+    .replaceAll(`href="${guide ? "/docs" : page.address}"`, `$& aria-current="page"`)
+    .replace("<!-- content -->", () => crumb + content + other);
   if (page.address === "/download")
     html = html
       .replace("<title>", "<title data-download-title>")
