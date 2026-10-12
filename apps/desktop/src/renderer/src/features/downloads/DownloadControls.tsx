@@ -4,6 +4,7 @@
 // Watch offline once it is on this computer, with Delete in the menu beside it. There is no
 // automatic download of future episodes.
 import { Menu } from "@base-ui/react/menu";
+import type { ReactNode } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
   ArrowDownToLine,
@@ -63,10 +64,70 @@ export function MovieDownload({ title }: { title: TitleRef }) {
   const { download, busy, add, remove, retry, error } = useDownload(title);
   return (
     <>
-      <span className="flex w-[200px] flex-none [&>button]:w-full [&>button]:px-4">
-        <MovieState download={download} busy={busy} add={add} remove={remove} retry={retry} />
-      </span>
+      <DownloadPill faces={<MovieFaces />}>
+        <span className="flex min-w-0 [&>button]:w-full [&>button]:px-4">
+          <MovieState download={download} busy={busy} add={add} remove={remove} retry={retry} />
+        </span>
+      </DownloadPill>
       {error && <p className="order-last basis-full text-sm text-destructive">{error}</p>}
+    </>
+  );
+}
+
+/** The widest translated face reserves space, so changing state never moves Save. */
+export function DownloadPill({ faces, children }: { faces: ReactNode; children: ReactNode }) {
+  return (
+    <span className="inline-grid min-w-[200px] max-w-full flex-none grid-cols-[minmax(0,1fr)] [&>*]:[grid-area:1/1]">
+      <span aria-hidden className="invisible grid min-w-0 overflow-hidden [&>*]:[grid-area:1/1]">
+        {faces}
+      </span>
+      {children}
+    </span>
+  );
+}
+
+/** These spans use the real control styles and never receive input or accessibility focus. */
+function MovieFaces() {
+  return (
+    <>
+      <Button render={<span />} size="lg" className="px-4">
+        <ArrowDownToLine />
+        {t("Download")}
+      </Button>
+      {(["Queued", "Waiting for playback"] as const).map((label) => (
+        <Button key={label} render={<span />} size="lg" className="px-4">
+          {t(label)} · {t("Cancel")}
+        </Button>
+      ))}
+      <Button render={<span />} size="lg" className="px-4 tabular-nums">
+        <Progress value={1} className="w-12" />
+        {formatPercent(1)}
+      </Button>
+      <Button render={<span />} size="lg" className="px-4">
+        {t("Downloading")}
+      </Button>
+      {(["Disk full", "Can't write", "Refused", "Stopped"] as const).map((label) => (
+        <Button key={label} render={<span />} size="lg" variant="destructive" className="px-4">
+          <RotateCw />
+          {t(label)} · {t("Retry")}
+        </Button>
+      ))}
+      <Button render={<span />} size="lg" variant="destructive" className="px-4">
+        {t("File missing")} · {t("Delete")}
+      </Button>
+      <span className="flex">
+        <Button render={<span />} size="lg" className="rounded-r-none px-3">
+          <Play className="fill-current" />
+          {t("Watch offline")}
+        </Button>
+        <Button
+          render={<span />}
+          size="lg"
+          className="rounded-l-none border-l border-black/40 px-3"
+        >
+          <ChevronDown />
+        </Button>
+      </span>
     </>
   );
 }

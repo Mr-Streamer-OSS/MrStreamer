@@ -1153,8 +1153,14 @@ export const en = {
   // Whole-series downloads.
   "Downloading {percent}": "Downloading {percent}",
   "{done} of {count}": "{done} of {count}",
-  "{done} of {count} · {failed} failed": "{done} of {count} · {failed} failed",
-  "Download {count} new": "Download {count} new",
+  "{done} of {total} · {count} failed": {
+    one: "{done} of {total} · {count} failed",
+    other: "{done} of {total} · {count} failed",
+  },
+  "Download {count} new": {
+    one: "Download {count} new",
+    other: "Download {count} new",
+  },
   "To download": "To download",
   "Already downloaded": "Already downloaded",
   "Already queued": "Already queued",
@@ -1165,8 +1171,10 @@ export const en = {
   "Retry failed": "Retry failed",
   "Cancel the rest": "Cancel the rest",
   "Open Downloads": "Open Downloads",
-  "Queued {added} of {count}. {failed} couldn't be added: {episodes}.":
-    "Queued {added} of {count}. {failed} couldn't be added: {episodes}.",
+  "Queued {added} of {attempted}. {count} couldn't be added: {episodes}.": {
+    one: "Queued {added} of {attempted}. {count} couldn't be added: {episodes}.",
+    other: "Queued {added} of {attempted}. {count} couldn't be added: {episodes}.",
+  },
   "Queued {count} episodes. {complete} already downloaded, {queued} already queued.": {
     one: "Queued {count} episode. {complete} already downloaded, {queued} already queued.",
     other: "Queued {count} episodes. {complete} already downloaded, {queued} already queued.",

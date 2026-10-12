@@ -458,3 +458,67 @@ it("filters the tab search while global search remains unfiltered and filter-but
     field.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   });
 });
+
+const second: Title = {
+  ...film,
+  id: "second",
+  key: "movie:second",
+  versions: [{ subscriptionId: SUBSCRIPTION, id: "second", tags: ["4K", "EN"] }],
+};
+
+it("Shift+ArrowRight on a closed filter control stays out of the grid", async () => {
+  const page = await mount();
+  ipc.always("ondemand.collection", {
+    name: "All",
+    titles: [film, second],
+    total: 2,
+    unfiltered: 10,
+  });
+  await page.client.invalidateQueries({ queryKey: ["ondemand", "collection"] });
+  await page.until(() => expect(page.container.textContent).toContain("2 of 10"));
+  const control = page.group("Quality").querySelector<HTMLButtonElement>("button")!;
+  await act(async () => {
+    control.focus();
+    control.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowRight", shiftKey: true, bubbles: true }),
+    );
+  });
+  control.blur();
+  await act(async () => {
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  });
+  // The grid's own selection should still be the first poster.
+  expect(useUi.getState().details?.id).toBe("4k");
+});
+
+it("Shift+Enter inside an open filter menu does not open a poster", async () => {
+  const page = await mount();
+  ipc.always("ondemand.collection", {
+    name: "All",
+    titles: [film, second],
+    total: 2,
+    unfiltered: 10,
+  });
+  await page.client.invalidateQueries({ queryKey: ["ondemand", "collection"] });
+  await page.until(() => expect(page.container.textContent).toContain("2 of 10"));
+  const trigger = page.group("Quality").querySelector<HTMLButtonElement>("button")!;
+  await act(async () => trigger.click());
+  await page.until(() => expect(document.querySelector('[role="menu"]')).not.toBeNull());
+  await act(async () => {
+    document
+      .querySelector<HTMLElement>('[role="menuitemradio"]')!
+      .dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true }));
+  });
+  expect(useUi.getState().details).toBeNull();
+});
+
+it("announces a collection's count when filtering changes it", async () => {
+  const page = await mount();
+  await act(async () => openCollection("movie", "genre:Drama"));
+  const count = page.container.querySelector<HTMLElement>('[aria-live="polite"]');
+  expect(count).not.toBeNull();
+  await page.until(() => expect(count?.textContent).toBe("10 of 10"));
+  ipc.always("ondemand.collection", { name: "Drama", titles: [], total: 2, unfiltered: 10 });
+  await page.click("4K", "Quality");
+  await page.until(() => expect(count?.textContent).toBe("2 of 10"));
+});

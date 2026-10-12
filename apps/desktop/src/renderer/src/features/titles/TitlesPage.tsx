@@ -436,7 +436,7 @@ function Collection({
     <div className="flex min-h-0 flex-1 flex-col pt-2 pl-10">
       <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 pr-8">
         <h1 className="text-2xl font-semibold tracking-tight">{listed.name}</h1>
-        <span className="text-sm text-muted-foreground tabular-nums">
+        <span className="text-sm text-muted-foreground tabular-nums" aria-live="polite">
           {listed.total === null || listed.unfiltered === null
             ? null
             : t("{shown} of {total}", { shown: listed.total, total: listed.unfiltered })}

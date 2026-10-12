@@ -40,7 +40,6 @@ export interface TitleFilterControls {
 
 /** Keep control navigation out of the grid while leaving application shortcuts available. */
 function stopGridKeys(event: KeyboardEvent) {
-  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
   if (
     [
       "ArrowUp",

@@ -1242,8 +1242,14 @@ export const fr: Translation = {
   // Whole-series downloads.
   "Downloading {percent}": "Téléchargement {percent}",
   "{done} of {count}": "{done} sur {count}",
-  "{done} of {count} · {failed} failed": "{done} sur {count} · {failed} en échec",
-  "Download {count} new": "Télécharger {count} nouveaux",
+  "{done} of {total} · {count} failed": {
+    one: "{done} sur {total} · {count} en échec",
+    other: "{done} sur {total} · {count} en échec",
+  },
+  "Download {count} new": {
+    one: "Télécharger {count} nouveau",
+    other: "Télécharger {count} nouveaux",
+  },
   "To download": "À télécharger",
   "Already downloaded": "Déjà téléchargés",
   "Already queued": "Déjà en attente",
@@ -1254,8 +1260,10 @@ export const fr: Translation = {
   "Retry failed": "Réessayer les échecs",
   "Cancel the rest": "Annuler le reste",
   "Open Downloads": "Ouvrir les téléchargements",
-  "Queued {added} of {count}. {failed} couldn't be added: {episodes}.":
-    "{added} sur {count} en attente. {failed} n’ont pas pu être ajoutés : {episodes}.",
+  "Queued {added} of {attempted}. {count} couldn't be added: {episodes}.": {
+    one: "{added} sur {attempted} en attente. {count} n’a pas pu être ajouté : {episodes}.",
+    other: "{added} sur {attempted} en attente. {count} n’ont pas pu être ajoutés : {episodes}.",
+  },
   "Queued {count} episodes. {complete} already downloaded, {queued} already queued.": {
     one: "{count} épisode en attente. Déjà téléchargés : {complete}. Déjà en attente : {queued}.",
     other:

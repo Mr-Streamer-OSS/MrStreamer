@@ -18,6 +18,7 @@ import { downloadsQuery, transferred, useDownloads } from "../../lib/downloads.t
 import { appError, describeError } from "../../lib/errors.ts";
 import { call } from "../../lib/ipc.ts";
 import { episodeRef } from "../../player/title-player.ts";
+import { DownloadPill } from "./DownloadControls.tsx";
 
 const queued = (download: Download) =>
   ["queued", "waiting", "transferring"].includes(download.status.kind);
@@ -193,7 +194,11 @@ export function SeriesDownload({
   const label =
     active > 0 || failed > 0
       ? failed > 0
-        ? t("{done} of {count} · {failed} failed", { done: complete, count: titles.length, failed })
+        ? t("{done} of {total} · {count} failed", {
+            done: complete,
+            total: titles.length,
+            count: failed,
+          })
         : t("{done} of {count}", { done: complete, count: titles.length })
       : complete === titles.length && titles.length > 0
         ? t("Downloaded")
@@ -210,28 +215,30 @@ export function SeriesDownload({
   return (
     <>
       <Menu.Root>
-        <Menu.Trigger
-          render={
-            <Button
-              variant={failed > 0 ? "destructive" : "secondary"}
-              size="lg"
-              disabled={disabled}
-              className="w-[200px] flex-none px-4"
-              aria-label={`${t("Download options")}: ${label}`}
-              title={label}
-            />
-          }
-        >
-          {complete === titles.length && titles.length > 0 ? (
-            <Check />
-          ) : active > 0 ? (
-            <Progress value={done} className="w-8 flex-none" />
-          ) : (
-            <ArrowDownToLine />
-          )}
-          <span className="min-w-0 truncate tabular-nums">{label}</span>
-          <ChevronDown className="flex-none" />
-        </Menu.Trigger>
+        <DownloadPill faces={<SeriesFaces count={titles.length} />}>
+          <Menu.Trigger
+            render={
+              <Button
+                variant={failed > 0 ? "destructive" : "secondary"}
+                size="lg"
+                disabled={disabled}
+                className="w-full min-w-0 px-4"
+                aria-label={`${t("Download options")}: ${label}`}
+                title={label}
+              />
+            }
+          >
+            {complete === titles.length && titles.length > 0 ? (
+              <Check />
+            ) : active > 0 ? (
+              <Progress value={done} className="w-8 flex-none" />
+            ) : (
+              <ArrowDownToLine />
+            )}
+            <span className="min-w-0 truncate tabular-nums">{label}</span>
+            <ChevronDown className="flex-none" />
+          </Menu.Trigger>
+        </DownloadPill>
         <Menu.Portal>
           <Menu.Positioner side="bottom" align="start" sideOffset={8} className="z-[60]">
             <Menu.Popup className="max-h-[min(60vh,var(--available-height))] w-[min(20rem,calc(100vw-2rem))] overflow-y-auto bg-black p-2 text-sm text-white ring-1 ring-white/20 outline-none">
@@ -304,10 +311,10 @@ export function SeriesDownload({
       {result && (
         <p role="status" className="order-last basis-full text-[0.8125rem] text-white/70">
           {result.failures.length > 0
-            ? t("Queued {added} of {count}. {failed} couldn't be added: {episodes}.", {
+            ? t("Queued {added} of {attempted}. {count} couldn't be added: {episodes}.", {
                 added: result.added,
-                count: result.attempted,
-                failed: result.failures.length,
+                attempted: result.attempted,
+                count: result.failures.length,
                 episodes: result.failures
                   .map(({ title }) => episodeLabel(title.season, title.episode))
                   .join(", "),
@@ -333,6 +340,33 @@ export function SeriesDownload({
           {error}
         </p>
       )}
+    </>
+  );
+}
+
+/** All figures fit the selected version's episode count; state changes keep the same width. */
+function SeriesFaces({ count }: { count: number }) {
+  return (
+    <>
+      {[
+        {
+          label: t("{done} of {total} · {count} failed", { done: count, total: count, count }),
+          mark: <Progress value={1} className="w-8 flex-none" />,
+        },
+        {
+          label: t("{done} of {count}", { done: count, count }),
+          mark: <Progress value={1} className="w-8 flex-none" />,
+        },
+        { label: t("Downloaded"), mark: <Check /> },
+        { label: t("Download {count} new", { count }), mark: <ArrowDownToLine /> },
+        { label: t("Download"), mark: <ArrowDownToLine /> },
+      ].map(({ label, mark }) => (
+        <Button key={label} render={<span />} size="lg" className="px-4 tabular-nums">
+          {mark}
+          <span>{label}</span>
+          <ChevronDown className="flex-none" />
+        </Button>
+      ))}
     </>
   );
 }

@@ -1178,8 +1178,14 @@ export const nl: Translation = {
   // Whole-series downloads.
   "Downloading {percent}": "Downloaden {percent}",
   "{done} of {count}": "{done} van {count}",
-  "{done} of {count} · {failed} failed": "{done} van {count} · {failed} mislukt",
-  "Download {count} new": "{count} nieuwe downloaden",
+  "{done} of {total} · {count} failed": {
+    one: "{done} van {total} · {count} mislukt",
+    other: "{done} van {total} · {count} mislukt",
+  },
+  "Download {count} new": {
+    one: "{count} nieuwe downloaden",
+    other: "{count} nieuwe downloaden",
+  },
   "To download": "Te downloaden",
   "Already downloaded": "Al gedownload",
   "Already queued": "Al in wachtrij",
@@ -1190,8 +1196,11 @@ export const nl: Translation = {
   "Retry failed": "Mislukte opnieuw proberen",
   "Cancel the rest": "De rest annuleren",
   "Open Downloads": "Downloads openen",
-  "Queued {added} of {count}. {failed} couldn't be added: {episodes}.":
-    "{added} van {count} in wachtrij. {failed} konden niet worden toegevoegd: {episodes}.",
+  "Queued {added} of {attempted}. {count} couldn't be added: {episodes}.": {
+    one: "{added} van {attempted} in wachtrij. {count} kon niet worden toegevoegd: {episodes}.",
+    other:
+      "{added} van {attempted} in wachtrij. {count} konden niet worden toegevoegd: {episodes}.",
+  },
   "Queued {count} episodes. {complete} already downloaded, {queued} already queued.": {
     one: "{count} aflevering in wachtrij. {complete} al gedownload, {queued} al in wachtrij.",
     other: "{count} afleveringen in wachtrij. {complete} al gedownload, {queued} al in wachtrij.",
