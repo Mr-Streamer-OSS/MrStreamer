@@ -1265,6 +1265,8 @@ export const es: Translation = {
   "Open Downloads": "Abrir descargas",
   "Queued {added} of {count}. {failed} couldn't be added: {episodes}.":
     "{added} de {count} en cola. No se pudieron añadir {failed}: {episodes}.",
-  "Queued {count} episodes. {complete} already downloaded, {queued} already queued.":
-    "{count} episodios en cola. {complete} ya descargados, {queued} ya en cola.",
+  "Queued {count} episodes. {complete} already downloaded, {queued} already queued.": {
+    one: "{count} episodio en cola. Ya descargados: {complete}. Ya en cola: {queued}.",
+    other: "{count} episodios en cola. Ya descargados: {complete}. Ya en cola: {queued}.",
+  },
 };

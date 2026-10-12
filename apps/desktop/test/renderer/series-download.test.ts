@@ -238,7 +238,9 @@ it("skips copies and every in-flight state, retries failed files and prevents du
   );
   await act(async () => held.resolve(null));
   await until(() =>
-    expect(page.container.textContent).toContain("1 already downloaded, 3 already queued"),
+    expect(page.container.querySelector('[role="status"]')?.textContent).toContain(
+      "Queued 1 episode. 1 already downloaded, 3 already queued.",
+    ),
   );
   expect(ipc.argsOf("downloads.retry")).toHaveLength(1);
   expect(ipc.argsOf("downloads.add")).toHaveLength(0);

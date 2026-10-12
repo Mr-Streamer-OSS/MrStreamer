@@ -1256,6 +1256,9 @@ export const fr: Translation = {
   "Open Downloads": "Ouvrir les téléchargements",
   "Queued {added} of {count}. {failed} couldn't be added: {episodes}.":
     "{added} sur {count} en attente. {failed} n’ont pas pu être ajoutés : {episodes}.",
-  "Queued {count} episodes. {complete} already downloaded, {queued} already queued.":
-    "{count} épisodes en attente. {complete} déjà téléchargés, {queued} déjà en attente.",
+  "Queued {count} episodes. {complete} already downloaded, {queued} already queued.": {
+    one: "{count} épisode en attente. Déjà téléchargés : {complete}. Déjà en attente : {queued}.",
+    other:
+      "{count} épisodes en attente. Déjà téléchargés : {complete}. Déjà en attente : {queued}.",
+  },
 };

@@ -1192,6 +1192,8 @@ export const nl: Translation = {
   "Open Downloads": "Downloads openen",
   "Queued {added} of {count}. {failed} couldn't be added: {episodes}.":
     "{added} van {count} in wachtrij. {failed} konden niet worden toegevoegd: {episodes}.",
-  "Queued {count} episodes. {complete} already downloaded, {queued} already queued.":
-    "{count} afleveringen in wachtrij. {complete} al gedownload, {queued} al in wachtrij.",
+  "Queued {count} episodes. {complete} already downloaded, {queued} already queued.": {
+    one: "{count} aflevering in wachtrij. {complete} al gedownload, {queued} al in wachtrij.",
+    other: "{count} afleveringen in wachtrij. {complete} al gedownload, {queued} al in wachtrij.",
+  },
 };

@@ -23,6 +23,19 @@ vi.mock("../src/i18n/nl.ts", async (original) => {
 
 afterEach(() => setLanguage({ locale: "en-US", formats: "en-US" }));
 
+it.each([
+  ["en-US", "Queued 1 episode.", "Queued 2 episodes."],
+  ["de-DE", "1 Folge eingereiht.", "2 Folgen eingereiht."],
+  ["es-ES", "1 episodio en cola.", "2 episodios en cola."],
+  ["fr-FR", "1 épisode en attente.", "2 épisodes en attente."],
+  ["nl-NL", "1 aflevering in wachtrij.", "2 afleveringen in wachtrij."],
+] as const)("%s pluralises the number of episodes actually queued", (locale, one, other) => {
+  setLanguage({ locale, formats: locale });
+  const key = "Queued {count} episodes. {complete} already downloaded, {queued} already queued.";
+  expect(t(key, { count: 1, complete: 0, queued: 4 })).toContain(one);
+  expect(t(key, { count: 2, complete: 0, queued: 4 })).toContain(other);
+});
+
 describe("the interface language", () => {
   it("follows the system's first language the app speaks, by its language alone", () => {
     expect(resolveLanguage(undefined, ["ja-JP", "nl-BE", "de-DE"])).toEqual({

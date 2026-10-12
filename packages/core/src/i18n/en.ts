@@ -1167,6 +1167,8 @@ export const en = {
   "Open Downloads": "Open Downloads",
   "Queued {added} of {count}. {failed} couldn't be added: {episodes}.":
     "Queued {added} of {count}. {failed} couldn't be added: {episodes}.",
-  "Queued {count} episodes. {complete} already downloaded, {queued} already queued.":
-    "Queued {count} episodes. {complete} already downloaded, {queued} already queued.",
+  "Queued {count} episodes. {complete} already downloaded, {queued} already queued.": {
+    one: "Queued {count} episode. {complete} already downloaded, {queued} already queued.",
+    other: "Queued {count} episodes. {complete} already downloaded, {queued} already queued.",
+  },
 } as const satisfies Readonly<Record<string, string | Plural>>;
