@@ -18,18 +18,20 @@ Most of what the app handles never reaches us. It stays in its data folder ([whe
 - copies of each provider's channel, guide, movie and series lists, and what TMDB said about them
 - downloaded movies and episodes, with their details, pictures, subtitles and progress
 - subtitle-service settings and saved subtitles, if you turn subtitle search on
-- the statistics setting, its installation identifier and up to eight observations waiting to be sent
+- the statistics setting, its installation identifier, up to eight statistics waiting to be sent, and the counts for the current day and at most one earlier day
 - a diagnostics log with no addresses, logins or channel names
 
 We can't see, copy or delete any of it. **Diagnostics…** in Settings > About shows you the text before you save it and uploads nothing.
 
 ### Usage statistics
 
-**Share basic usage statistics** is on by default, in new and existing profiles, without a prompt. While it's on, the app records observations only while its main window is in the foreground: one the first time it observes this profile, and at most one per UTC day after that. It sends each to PostHog straight away and tries up to three times in all, so a retry can happen with the window in the background, as you quit or after the next start. Builds without our project configuration send nothing.
+**Share basic usage statistics** is on by default, in new and existing profiles, without a prompt. While it's on, the app counts on your computer how often you open each part of the app, from a fixed list: Home, Live TV, Movies, Series, Watchlist, Downloads, Search, Settings, the player and title details. It counts how many playback requests, download runs and update checks started, succeeded, failed or were interrupted, with one of six fixed reasons for each failure, such as "network" or "disk". A playback request succeeds when the app gets the stream ready to play. It doesn't show whether picture or sound played. An update check succeeds when it gets an answer, even with no new version, and installing an update isn't counted. The app also counts how often its window started and how often it stopped unexpectedly. Closing the window or quitting doesn't count, and a crash of the whole app or a power cut can't be counted.
 
-Each observation carries a random installation identifier, an event identifier, the time, the app version, build and update channel, operating system, processor type, and whether the app came from the Microsoft Store or our download. Each one also says whether the profile looked new, upgraded or unknown when the app first observed it.
+Counting also runs with the window in the background, for example during downloads and update checks. The app queues statistics only while its main window is in the foreground: an observation the first time it observes this profile, at most one per UTC day after that, and with it one summary of the most recent earlier day's counts. It sends each to PostHog straight away and tries up to three times in all, so a retry can happen with the window in the background, as you quit or after the next start. Up to eight wait on your computer. Beyond that the oldest are dropped, keeping the first observation. Only the most recent earlier day is kept, so counts for older days that were never queued are dropped. If the app version or update channel changes during a day, that day's counts start again from zero. Builds without our project configuration count and send nothing.
 
-Statistics never include what you watch, title or channel names, your provider or its address, stream addresses, logins, searches, file paths, logs or error messages. There is no autocapture, session replay or crash upload. The identifier doesn't name you but links your observations, so the data is pseudonymous, not anonymous. Person profiles and location lookup are off in PostHog, but PostHog still receives your IP address with each request.
+Each observation and summary carries a random installation identifier, an event identifier, the time it was queued, the app version, build and update channel, operating system, processor type, whether the app came from the Microsoft Store or our download, and whether the profile looked new, upgraded or unknown when the app first observed it. A summary also has the UTC day it counts, with the version, channels and system it was counted under.
+
+Statistics never include what you watch, title or channel names, your provider or its address, stream addresses, logins, searches, file paths, logs or error messages. There is no autocapture, session replay, crash dump or log upload. The identifier doesn't name you but links your observations and summaries, so the data is pseudonymous, not anonymous. Person profiles and location lookup are off in PostHog, but PostHog still receives your IP address with each request.
 
 ### The website
 
@@ -43,7 +45,7 @@ Email to privacy@, hello@ or security@mrstreamer.app, and issues you open on Git
 
 ## How we use it
 
-- **Usage statistics**, to count which versions, builds and systems are in use, so we know what to fix and support.
+- **Usage statistics**, to count which versions, builds, systems and features are in use, and how often playback, downloads, update checks and the app's window fail, so we know what to fix and support.
 - **Website analytics**, to see which pages people read.
 - **Messages**, to answer you and fix what you report.
 
@@ -75,7 +77,7 @@ Your network operator and DNS provider can see which servers the app contacts.
 
 ## Your choices
 
-- **Statistics.** Turn off **Share basic usage statistics** in Settings > General > Privacy. New observations stop, any waiting to be sent are cleared, and it stays off after a restart. Turning it back on keeps the same identifier and sends nothing about the time it was off.
+- **Statistics.** Turn off **Share basic usage statistics** in Settings > General > Privacy. Counting stops, statistics waiting to be sent and unsent counts are cleared, and it stays off after a restart. Turning it back on keeps the same identifier, starts counting from zero and sends nothing about the time it was off.
 - **Subtitle search** is off until you turn it on.
 - **Casting** happens only after you open the receiver list and pick a device.
 - **TMDB and update checks** have no off switch. Settings only lets you choose whose TMDB key the app uses.
