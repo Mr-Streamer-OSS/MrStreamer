@@ -7,7 +7,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import type { FilterOptions } from "@mrstreamer/contracts/title-filters";
 import type { Title, TitleKind, MovieDetails } from "@mrstreamer/contracts/ondemand";
 import { defaultSubscriptionPreferences } from "@mrstreamer/contracts/preferences";
-import { TitlesPage } from "../../src/renderer/src/features/titles/TitlesPage.tsx";
+import { openCollection, TitlesPage } from "../../src/renderer/src/features/titles/TitlesPage.tsx";
 import { useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { queries } from "../../src/renderer/src/lib/queries.ts";
 import { DetailsView } from "../../src/renderer/src/features/titles/DetailsView.tsx";
@@ -167,6 +167,69 @@ it("keeps additional languages reachable in one menu and returns keyboard focus 
   await page.click("Any", "Language");
   await page.until(() => expect(trigger.textContent).toBe("Language"));
 });
+
+it.each(["Quality", "Sort"])(
+  "leaves a collection with Escape from a closed %s control",
+  async (label) => {
+    const page = await mount();
+    await act(async () => openCollection("movie", "genre:Drama"));
+    const back = () =>
+      [...page.container.querySelectorAll("button")].find(
+        (button) => button.textContent === "Back",
+      );
+    await page.until(() => expect(back()).toBeDefined());
+    const trigger = page.group(label).querySelector<HTMLButtonElement>("button")!;
+    await act(async () => {
+      trigger.focus();
+      trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    await page.until(() => expect(back()).toBeUndefined());
+  },
+);
+
+it("closes the popup on the first Escape and leaves the collection on the next", async () => {
+  const page = await mount();
+  await act(async () => openCollection("movie", "genre:Drama"));
+  const trigger = page.group("Quality").querySelector<HTMLButtonElement>("button")!;
+  await act(async () => trigger.click());
+  await page.until(() => expect(document.querySelector('[role="menu"]')).not.toBeNull());
+  await act(async () => {
+    document
+      .querySelector<HTMLElement>('[role="menuitemradio"]')!
+      .dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  });
+  await page.until(() => expect(document.querySelector('[role="menu"]')).toBeNull());
+  expect(page.container.textContent).toContain("Back");
+  expect(document.activeElement).toBe(trigger);
+  await act(async () =>
+    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })),
+  );
+  await page.until(() => expect(page.container.textContent).not.toContain("Back"));
+});
+
+it.each(["Quality", "Sort"])(
+  "lets application modifier shortcuts pass the closed %s control",
+  async (label) => {
+    const page = await mount();
+    const trigger = page.group(label).querySelector<HTMLButtonElement>("button")!;
+    const shortcut = vi.fn();
+    window.addEventListener("keydown", shortcut);
+    try {
+      await act(async () => {
+        trigger.focus();
+        trigger.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }),
+        );
+        trigger.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true }),
+        );
+      });
+      expect(shortcut).toHaveBeenCalledTimes(2);
+    } finally {
+      window.removeEventListener("keydown", shortcut);
+    }
+  },
+);
 
 it.each(["filter", "4k tab", "normal list"] as const)(
   "opens the correct version over a remembered choice from %s and keeps menu alternatives",

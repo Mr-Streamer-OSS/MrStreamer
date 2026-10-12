@@ -3,7 +3,7 @@
 import { Menu } from "@base-ui/react/menu";
 import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronDown } from "lucide-react";
-import type { ReactNode } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import type { TitleKind } from "@mrstreamer/contracts/ondemand";
 import {
   QUALITY_HINTS,
@@ -38,6 +38,26 @@ export interface TitleFilterControls {
   readonly onFilters: (filters: TitleFilters) => void;
 }
 
+/** Keep control navigation out of the grid while leaving application shortcuts available. */
+function stopGridKeys(event: KeyboardEvent) {
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+  if (
+    [
+      "ArrowUp",
+      "ArrowDown",
+      "ArrowLeft",
+      "ArrowRight",
+      "Home",
+      "End",
+      "PageUp",
+      "PageDown",
+      "Enter",
+      " ",
+    ].includes(event.key)
+  )
+    event.stopPropagation();
+}
+
 /** A scrollable choice menu, shared by sort and filters. Native menu keys stay out of the grid. */
 export function TitleChoiceMenu<V extends string>({
   label,
@@ -60,7 +80,7 @@ export function TitleChoiceMenu<V extends string>({
 }) {
   const selected = choices.find((choice) => choice.value === value);
   return (
-    <div role="group" aria-label={label} onKeyDown={(event) => event.stopPropagation()}>
+    <div role="group" aria-label={label} onKeyDown={stopGridKeys}>
       <Menu.Root>
         <Menu.Trigger
           disabled={disabled}
@@ -77,7 +97,10 @@ export function TitleChoiceMenu<V extends string>({
             <Menu.Popup
               aria-label={label}
               className="max-h-[min(60vh,var(--available-height))] w-[min(18rem,calc(100vw-2rem))] overflow-y-auto bg-black p-2 text-[0.8125rem] text-white ring-1 ring-white/20 outline-none"
-              onKeyDown={(event) => event.stopPropagation()}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") event.stopPropagation();
+                else stopGridKeys(event);
+              }}
             >
               <Menu.RadioGroup
                 value={value ?? ""}
@@ -154,10 +177,7 @@ export function TitleFilterBar({
     onFilters(next);
   }
   return (
-    <div
-      className="mb-4 flex-none pr-8 text-[0.8125rem] text-white"
-      onKeyDown={(event) => event.stopPropagation()}
-    >
+    <div className="mb-4 flex-none pr-8 text-[0.8125rem] text-white" onKeyDown={stopGridKeys}>
       {!hideCount && total !== null && unfiltered !== null && (
         <p className="mb-2 text-white/60 tabular-nums" aria-live="polite">
           {t("{shown} of {total}", { shown: total, total: unfiltered })}
