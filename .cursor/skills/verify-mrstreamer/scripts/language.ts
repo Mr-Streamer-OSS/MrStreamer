@@ -330,6 +330,9 @@ async function liveTv(d: Driver, locale: Locale) {
     `More menu in ${locale}`,
     more,
   );
+  // Popup rows can exist before its initial-focus effect runs. Send navigation only once
+  // keyboard focus has actually entered the open menu.
+  await d.wait(() => d.evaluate("!!document.activeElement?.closest('[data-item]')"));
   await d.key("ArrowDown", 40);
   await d.key("ArrowDown", 40);
   d.observed[`moreFocus-${locale}`] = await d.evaluate<string | null>(
