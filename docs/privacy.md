@@ -18,16 +18,16 @@ Most of what the app handles never reaches us. It stays in its data folder ([whe
 - copies of each provider's channel, guide, movie and series lists, and what TMDB said about them
 - downloaded movies and episodes, with their details, pictures, subtitles and progress
 - subtitle-service settings and saved subtitles, if you turn subtitle search on
-- the statistics setting and its installation identifier
+- the statistics setting, its installation identifier and up to eight observations waiting to be sent
 - a diagnostics log with no addresses, logins or channel names
 
 We can't see, copy or delete any of it. **Diagnostics…** in Settings > About shows you the text before you save it and uploads nothing.
 
 ### Usage statistics
 
-**Share basic usage statistics** is on by default, in new and existing profiles, without a prompt. While it's on, the app sends observations to PostHog only when its main window is in the foreground: one the first time it observes this profile, and at most one a day after that. Builds without our project configuration send nothing.
+**Share basic usage statistics** is on by default, in new and existing profiles, without a prompt. While it's on, the app records observations only while its main window is in the foreground: one the first time it observes this profile, and at most one per UTC day after that. It sends each to PostHog straight away and tries up to three times in all, so a retry can happen with the window in the background, as you quit or after the next start. Builds without our project configuration send nothing.
 
-Each observation carries a random installation identifier, an event identifier, the time, the app version, build and update channel, operating system, processor type, and whether the app came from the Microsoft Store or our download. The first one also says whether the profile looked new, upgraded or unknown.
+Each observation carries a random installation identifier, an event identifier, the time, the app version, build and update channel, operating system, processor type, and whether the app came from the Microsoft Store or our download. Each one also says whether the profile looked new, upgraded or unknown when the app first observed it.
 
 Statistics never include what you watch, title or channel names, your provider or its address, stream addresses, logins, searches, file paths, logs or error messages. There is no autocapture, session replay or crash upload. The identifier doesn't name you but links your observations, so the data is pseudonymous, not anonymous. Person profiles and location lookup are off in PostHog, but PostHog still receives your IP address with each request.
 
