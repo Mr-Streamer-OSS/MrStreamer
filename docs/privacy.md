@@ -112,4 +112,4 @@ You can complain to the Belgian [Data Protection Authority](https://www.dataprot
 
 ## Changes
 
-We update this page when what Mr. Streamer stores or sends changes. The [history on GitHub](https://github.com/Mr-Streamer-OSS/MrStreamer/commits/main/docs/privacy.md) keeps every version.
+We update this page when what Mr. Streamer stores or sends changes. We may change it at any time without prior notice, except where the law requires notice or consent. This doesn't limit your rights under data protection law. The [history on GitHub](https://github.com/Mr-Streamer-OSS/MrStreamer/commits/main/docs/privacy.md) keeps every version.
