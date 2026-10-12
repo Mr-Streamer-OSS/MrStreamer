@@ -185,14 +185,14 @@ export async function liveCategoriesScenario(
     for (let index = 0; index < 2; index++) {
       const item = `document.querySelectorAll('main section > ul > li')[${index}]`;
       const before = await d.evaluate<string>(`${item}.innerText`);
-      if (!(await d.exists(`${item}.querySelector('button[aria-label=\"Refresh channels\"]')`)))
+      if (!(await d.exists(`${item}.querySelector('button[aria-label="Refresh channels"]')`)))
         await d.click(`Open subscription ${index + 1}`, `${item}.querySelector('button')`);
       const stamp = await d.evaluate<number>(
         `(async () => { const result=await window.mrStreamer.invoke('library.status'); return result.ok ? result.value[${index}].fetchedAt : 0; })()`,
       );
       await d.click(
         `Refresh subscription ${index + 1}`,
-        `${item}.querySelector('button[aria-label=\"Refresh channels\"]')`,
+        `${item}.querySelector('button[aria-label="Refresh channels"]')`,
       );
       await d.wait(() =>
         d.evaluate<boolean>(
