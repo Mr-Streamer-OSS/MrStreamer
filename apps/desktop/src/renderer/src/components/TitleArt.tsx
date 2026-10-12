@@ -67,7 +67,7 @@ export function Artwork({
   );
 }
 
-/** The frame and bounded two-line caption used by poster rows and virtual grids. */
+/** The shared frame ratio and minimum name/caption allowance for poster rows and grids. */
 export const POSTER_ASPECT_RATIO = 2 / 3;
 export const POSTER_CAPTION_HEIGHT_REM = 2.75;
 

@@ -6,7 +6,7 @@ import { cn } from "../lib/utils.ts";
 
 /**
  * A sheet over the page it was opened from, which stays in view behind it: a title's details, or
- * what was kept of a saved one. It rises from the foot of the window to under the top bar, or
+ * what was kept of a saved one, or a Settings playlist/guide mapping. It rises from the foot of the window to under the top bar, or
  * only as far as its content needs when `short`. `overSettings` puts it above the Settings page
  * it was opened from. Its content names it with a `Dialog.Title`. Escape, Close and a click
  * outside call `onClose`. The keyboard starts on the content's first control, or on
@@ -43,7 +43,7 @@ export function Sheet({
           )}
         >
           {/* The outer frame clips the scrollbar as well as the content at its rounded edge. */}
-          <div className="relative min-h-0 overflow-y-auto overscroll-contain">
+          <div className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain">
             {children}
             {/* After the content, so focus starts on its main action rather than on Close. */}
             <Dialog.Close
