@@ -162,10 +162,13 @@ app.on('window-all-closed', () => app.quit());
     );
     await doctor();
     let lastCapture = "";
+    let pageScriptsDisabled = false;
     const capture = async (name: string) => {
-      await livePage.evaluate(
-        "document.fonts.ready.then(async () => { await Promise.all(document.getAnimations().filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => undefined))); await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); })",
-      );
+      // Script-disabled pages cannot schedule the animation-frame callback.
+      if (!pageScriptsDisabled)
+        await livePage.evaluate(
+          "document.fonts.ready.then(async () => { await Promise.all(document.getAnimations().filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => undefined))); await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); })",
+        );
       await delay(500, undefined, { signal: abort.signal });
       const screenshot = await send("Page.captureScreenshot", { format: "png" });
       if (!record(screenshot) || typeof screenshot["data"] !== "string")
@@ -305,6 +308,7 @@ app.on('window-all-closed', () => app.quit());
     await visit("/releases", "Releases", "releases");
     await visit("/privacy", "Privacy", "privacy");
     await send("Emulation.setScriptExecutionDisabled", { value: true });
+    pageScriptsDisabled = true;
     await send("Page.navigate", { url: origin + "/faq" });
     await wait(() =>
       livePage.evaluate<boolean>(
