@@ -18,6 +18,7 @@ import {
   type TitleKind,
 } from "@mrstreamer/contracts/ondemand";
 import { ownedId, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
+import { collectionSort } from "@mrstreamer/core/ondemand/collections";
 import type { TitleFilters } from "@mrstreamer/contracts/title-filters";
 import { formatDecimal, formatNumber, type PlainKey, t } from "@mrstreamer/core/i18n";
 import { isMac, isTyping } from "../../app/platform.ts";
@@ -433,7 +434,7 @@ function Collection({
   const listed = useCollection(kind, id, sort ?? undefined, filters);
   return (
     <div className="flex min-h-0 flex-1 flex-col pt-2 pl-10">
-      <div className="mb-3 flex items-baseline gap-3">
+      <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 pr-8">
         <h1 className="text-2xl font-semibold tracking-tight">{listed.name}</h1>
         <span className="text-sm text-muted-foreground tabular-nums">
           {listed.total === null || listed.unfiltered === null
@@ -448,7 +449,7 @@ function Collection({
         active={active}
         filters={filters}
         onFilters={onFilters}
-        sortControl={<SortMenu value={sort} onChange={onSort} />}
+        sortControl={<SortMenu value={sort ?? collectionSort(id)} onChange={onSort} />}
         hideCount
       />
     </div>
