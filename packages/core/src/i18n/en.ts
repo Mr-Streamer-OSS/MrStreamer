@@ -45,6 +45,7 @@ export const en = {
   "{name} is no longer listed. Showing all channels.":
     "{name} is no longer listed. Showing all channels.",
   "Live TV": "Live TV",
+  Sort: "Sort",
   Quality: "Quality",
   "Automatic tries the nearest if one fails": "Automatic tries the nearest if one fails",
   "Channels with their own quality": "Channels with their own quality",

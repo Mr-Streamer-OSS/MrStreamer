@@ -45,6 +45,7 @@ export const fr: Translation = {
   "{name} is no longer listed. Showing all channels.":
     "{name} n’est plus proposée. Toutes les chaînes sont affichées.",
   "Live TV": "TV en direct",
+  Sort: "Tri",
   Quality: "Qualité",
   "Automatic tries the nearest if one fails":
     "En automatique, la plus proche est essayée en cas d'échec",

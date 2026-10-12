@@ -45,6 +45,7 @@ export const nl: Translation = {
   "{name} is no longer listed. Showing all channels.":
     "{name} is niet meer vermeld. Alle zenders worden getoond.",
   "Live TV": "Live-tv",
+  Sort: "Sorteren",
   Quality: "Kwaliteit",
   "Automatic tries the nearest if one fails":
     "Automatisch probeert de dichtstbijzijnde als er een faalt",
