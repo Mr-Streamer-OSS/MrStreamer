@@ -1,23 +1,36 @@
+import { mkdtemp, readdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { gzipSync } from "node:zlib";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { guideAddress } from "../src/guide/address.ts";
 import { xmltvDocument } from "../src/guide/document.ts";
-import { GUIDE_LIMITS } from "../src/guide/limits.ts";
 import {
-  indexProgrammes,
-  mappedChannels,
-  type CatalogueChannels,
-} from "../src/guide/programmes.ts";
+  buildGuideIndex,
+  openGuideIndex,
+  type GuideBuild,
+  type GuideIndex,
+} from "../src/guide/index-file.ts";
+import { GUIDE_LIMITS } from "../src/guide/limits.ts";
+import { mappedChannels, type CatalogueChannels } from "../src/guide/programmes.ts";
+import { xmltvReader, type XmltvChannel, type XmltvProgramme } from "../src/guide/xmltv.ts";
 
 /** Noon on a day in October 2026, in UTC. */
 const NOON = Date.UTC(2026, 9, 2, 12);
 const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
 
 /** `bytes` as a sender splits them: in pieces of `size`. */
 async function* pieces(bytes: Uint8Array | string, size = 64 * 1024): AsyncGenerator<Uint8Array> {
   const all = typeof bytes === "string" ? Buffer.from(bytes) : bytes;
+  for (let at = 0; at < all.length; at += size) yield all.subarray(at, at + size);
+}
+
+/** `document` as a sender splits it, all at once: in pieces of `size`. */
+function* slices(document: string, size: number): Generator<Uint8Array> {
+  const all = Buffer.from(document);
   for (let at = 0; at < all.length; at += size) yield all.subarray(at, at + size);
 }
 
@@ -105,69 +118,164 @@ describe("an XMLTV document as it arrives", () => {
   });
 });
 
-describe("indexing a guide", () => {
-  const index = (
-    document: string,
-    options?: Parameters<typeof indexProgrammes>[2],
-    size = 64 * 1024,
-  ) => indexProgrammes(pieces(document, size), NOON, options);
+describe("reading XMLTV as it arrives", () => {
+  /** How a document ends and how many programmes it lists, read in pieces of `size`. */
+  const read = (document: string, size: number) => {
+    let programmes = 0;
+    const reader = xmltvReader({ programme: () => programmes++, channel: () => {} }, 1024 * 1024);
+    for (const piece of slices(document, size)) reader.push(piece);
+    return { ending: reader.end(), programmes };
+  };
 
-  it.each([
-    ["  News\t from\n abroad  ", "News from abroad"],
-    ["  News <b>from</b> &amp; <![CDATA[<abroad>]]>  ", "News from & <abroad>"],
-  ])("keeps text and the last used attribute when elements are split: %s", async (raw, shown) => {
-    const guide = await index(
-      tv(
+  it("keeps text and the last used attribute when elements are split anywhere", () => {
+    for (const [raw, shown] of [
+      ["  News\t from\n abroad  ", "News from abroad"],
+      ["  News <b>from</b> &amp; <![CDATA[<abroad>]]>  ", "News from & <abroad>"],
+    ] as const) {
+      const found: XmltvProgramme[] = [];
+      const channels: XmltvChannel[] = [];
+      const reader = xmltvReader(
+        { programme: (entry) => found.push(entry), channel: (entry) => channels.push(entry) },
+        1024 * 1024,
+      );
+      const document = tv(
         '<channel ignored="unused" id="wrong" id="one&amp;only"><display-name>One</display-name></channel>',
         `<programme stop='20261002140000 +0000' ignored='unused' channel='wrong' start='20261002130000 +0000' channel='one&amp;only'><title>${raw}</title><desc>${raw}</desc></programme>`,
-      ),
-      undefined,
-      7,
-    );
-    expect(guide.channels.get("one&only")?.name).toBe("One");
-    expect(guide.byChannel.get("one&only")).toEqual([
-      { start: NOON + HOUR, stop: NOON + 2 * HOUR, title: shown, description: shown },
-    ]);
-    expect(guide.byChannel.has("wrong")).toBe(false);
+      );
+      for (const piece of slices(document, 7)) reader.push(piece);
+
+      expect(channels).toEqual([{ id: "one&only", name: "One" }]);
+      expect(found).toEqual([
+        {
+          channel: "one&only",
+          start: NOON + HOUR,
+          stop: NOON + 2 * HOUR,
+          title: shown,
+          description: shown,
+        },
+      ]);
+    }
   });
 
-  it("lists every channel the guide names with its name, and by its id where it names none", async () => {
-    const guide = await index(
+  describe("as one whole <tv> and nothing that only reads like one", () => {
+    const one = later("one.test");
+    /** A programme whose description is `text`, as a CDATA section holds it. */
+    const described = (text: string) =>
+      later("two.test").replace("</programme>", `<desc><![CDATA[${text}]]></desc></programme>`);
+
+    it.each<[what: string, document: string, ending: string, programmes: number]>([
+      ["no opening tag", `${one}</tv>`, "not-xmltv", 1],
+      ["an opening tag only in a comment", `<!-- <tv> -->${one}</tv>`, "not-xmltv", 1],
+      ["another element that starts alike", `<tvirus>${one}</tv>`, "not-xmltv", 1],
+      ["a guide inside a page", `<html><tv>${one}</tv></html>`, "not-xmltv", 1],
+      ["a programme before it", `${one}<tv>${one}</tv>`, "not-xmltv", 2],
+      ["a programme after it", `<tv>${one}</tv>${one}`, "not-xmltv", 2],
+      ["a second document after it", `<tv>${one}</tv><tv>${one}</tv>`, "not-xmltv", 2],
+      ["a closing tag cut short", `<tv>${one}</tv`, "incomplete", 1],
+      ["another element's closing tag", `<tv>${one}</tvirus>`, "incomplete", 1],
+      ["a closing tag with more in it", `<tv>${one}</tv x="1">`, "incomplete", 1],
+      ["a closing tag only in a comment", `<tv>${one}<!-- </tv> -->`, "incomplete", 1],
+      ["a closing tag only in CDATA", `<tv>${one}<![CDATA[</tv>]]>`, "incomplete", 1],
+      [
+        "cut in a description that reads like the end",
+        `<tv>${one}${described("</programme></tv>").slice(0, -"]]></desc></programme>".length)}`,
+        "incomplete",
+        1,
+      ],
+      ["a second <tv> that never closes", `<tv><tv>${one}</tv>`, "incomplete", 1],
+      ["an empty element for a document", '<?xml version="1.0"?><tv/>', "whole", 0],
+      [
+        "comments and descriptions that read like the end, before the end",
+        `<tv>${one}<!-- </tv> -->${described("</programme></tv>")}</tv>`,
+        "whole",
+        2,
+      ],
+      [
+        "space in the closing tag and a comment after it",
+        `<tv>${one}</tv\n>\n<!-- </tv> -->`,
+        "whole",
+        1,
+      ],
+      [
+        "a declaration and a DOCTYPE before it",
+        `<?xml version="1.0"?>\n<!DOCTYPE tv SYSTEM "xmltv.dtd">\n<tv date="2026">${one}</tv>`,
+        "whole",
+        1,
+      ],
+    ])("%s", (_what, document, ending, programmes) => {
+      // However the sender splits it: a byte at a time, mid-tag, or all at once.
+      for (const size of [1, 7, 64 * 1024]) {
+        expect(read(document, size)).toEqual({ ending, programmes });
+      }
+    });
+  });
+});
+
+describe("indexing a guide", () => {
+  /** Indexes `document` as of NOON, as an own guide unless `strict`, and opens what it wrote. */
+  const index = async (document: string | Uint8Array, build: Partial<GuideBuild> = {}) => {
+    const dir = await mkdtemp(join(tmpdir(), "mr-streamer-guide-index-"));
+    const target = join(dir, `${Math.random()}.sqlite`);
+    await writeFile(join(dir, "document"), document);
+    const told: number[] = [];
+    const summary = await buildGuideIndex(
+      {
+        document: join(dir, "document"),
+        target,
+        previous: null,
+        since: NOON,
+        archive: DAY,
+        strict: false,
+        ...build,
+      },
+      (programmes) => told.push(programmes),
+    );
+    const guide = await openGuideIndex(target);
+    if (!guide) throw new Error("The index can't be opened.");
+    opened.push(guide);
+    return { guide, summary, told, target };
+  };
+  const opened: GuideIndex[] = [];
+  afterEach(async () => {
+    await Promise.all(opened.splice(0).map((guide) => guide.release()));
+  });
+
+  /** Every programme of a guide channel the index keeps, as [title, start, stop]. */
+  const of = (guide: GuideIndex, id: string) => {
+    const channel = guide.channels.get(id);
+    return channel
+      ? guide
+          .range(channel, 0, Number.MAX_SAFE_INTEGER)
+          .map(({ title, start, stop }) => [title, start, stop])
+      : undefined;
+  };
+
+  it("lists every channel the guide names with its name, and by its id where it names none, by name", async () => {
+    const { guide } = await index(
       tv(
         '<channel id="one.test"><display-name lang="en">One &amp; Only</display-name><display-name>1</display-name><icon src="http://x/1.png"/></channel>',
         "<channel id='quiet.test'><display-name><![CDATA[Quiet <TV>]]></display-name></channel>",
         '<channel id="bare.test"/>',
         later("one.test"),
         later("unnamed.test"),
-        // Ended: nothing of it is kept, and its channel isn't one the guide has anything for.
-        programme("past.test", "20261002090000 +0000", "20261002100000 +0000", "Earlier"),
+        // A name given after the programmes, as some guides write their channels last.
+        later("late.test"),
+        '<channel id="late.test"><display-name>Late</display-name></channel>',
       ),
-      {},
-      // In pieces that split every tag.
-      5,
     );
 
-    expect([...guide.channels].map(([id, { name }]) => [id, name])).toEqual([
-      ["one.test", "One & Only"],
-      ["quiet.test", "Quiet <TV>"],
-      ["bare.test", "bare.test"],
-      ["unnamed.test", "unnamed.test"],
+    expect([...guide.channels.values()].map(({ id, name, until }) => [id, name, until])).toEqual([
+      ["bare.test", "bare.test", null],
+      ["late.test", "Late", NOON + 2 * HOUR],
+      ["one.test", "One & Only", NOON + 2 * HOUR],
+      ["quiet.test", "Quiet <TV>", null],
+      ["unnamed.test", "unnamed.test", NOON + 2 * HOUR],
     ]);
-    // A channel without programmes to come is still one the guide lists.
-    expect([...guide.byChannel.keys()]).toEqual(["one.test", "unnamed.test"]);
     expect(guide.until).toBe(NOON + 2 * HOUR);
   });
 
-  it("takes a name the guide gives after the programmes, as some write their channels last", async () => {
-    const guide = await index(
-      tv(later("late.test"), '<channel id="late.test"><display-name>Late</display-name></channel>'),
-    );
-
-    expect(guide.channels.get("late.test")?.name).toBe("Late");
-  });
-
   it("reads each time by its own offset, UTC without one, across midnight and a change of clocks", async () => {
-    const guide = await index(
+    const { guide } = await index(
       tv(
         // The same instant written four ways.
         programme("offset.test", "20261002230000 +0200", "20261003000000 +0200", "Plus two"),
@@ -184,123 +292,188 @@ describe("indexing a guide", () => {
         // The hour Europe has twice as summer time ends: 02:30 at +0200, then 02:30 at +0100.
         programme("clocks.test", "20261025023000 +0200", "20261025030000 +0200", "Before"),
         programme("clocks.test", "20261025023000 +0100", "20261025030000 +0100", "After"),
-        // The last minute without a stop: it runs until the next programme starts.
-        programme("open.test", "20261002235900 +0000", null, "Late news"),
-        programme("open.test", "20261003000000 +0000", "20261003003000 +0000", "Night"),
       ),
     );
-    const of = (channel: string) =>
-      guide.byChannel.get(channel)?.map(({ start, stop, title }) => [title, start, stop]);
     const nine = Date.UTC(2026, 9, 2, 21);
 
-    expect(of("offset.test")).toEqual([["Plus two", nine, nine + HOUR]]);
-    expect(of("colon.test")).toEqual([["Colon", nine, nine + HOUR]]);
-    expect(of("none.test")).toEqual([["No offset", nine, nine + HOUR]]);
-    expect(of("minus.test")).toEqual([["Minus", nine, nine + HOUR]]);
-    expect(of("midnight.test")).toEqual([
+    expect(of(guide, "offset.test")).toEqual([["Plus two", nine, nine + HOUR]]);
+    expect(of(guide, "colon.test")).toEqual([["Colon", nine, nine + HOUR]]);
+    expect(of(guide, "none.test")).toEqual([["No offset", nine, nine + HOUR]]);
+    expect(of(guide, "minus.test")).toEqual([["Minus", nine, nine + HOUR]]);
+    expect(of(guide, "midnight.test")).toEqual([
       ["After midnight", Date.UTC(2026, 9, 2, 22, 30), Date.UTC(2026, 9, 2, 23, 30)],
     ]);
-    expect(of("clocks.test")).toEqual([
+    expect(of(guide, "clocks.test")).toEqual([
       ["Before", Date.UTC(2026, 9, 25, 0, 30), Date.UTC(2026, 9, 25, 1)],
       ["After", Date.UTC(2026, 9, 25, 1, 30), Date.UTC(2026, 9, 25, 2)],
     ]);
-    expect(of("open.test")).toEqual([
-      ["Late news", Date.UTC(2026, 9, 2, 23, 59), Date.UTC(2026, 9, 3)],
-      ["Night", Date.UTC(2026, 9, 3), Date.UTC(2026, 9, 3, 0, 30)],
+  });
+
+  it("lays each channel out in time order without overlaps, whatever order the guide lists it in", async () => {
+    const { guide } = await index(
+      tv(
+        programme("one.test", stamp(NOON + 3 * HOUR), stamp(NOON + 4 * HOUR), "Third"),
+        // Without an end: it runs until the next one starts.
+        programme("one.test", stamp(NOON + HOUR), null, "First"),
+        // Runs into the next one, which cuts it short.
+        programme("one.test", stamp(NOON + 2 * HOUR), stamp(NOON + 5 * HOUR), "Second"),
+        // The same start again counts once: the first one listed.
+        programme("one.test", stamp(NOON + 2 * HOUR), stamp(NOON + 3 * HOUR), "Again"),
+        // The last without an end has nothing to end it, and is left out.
+        programme("one.test", stamp(NOON + 6 * HOUR), null, "Open"),
+      ),
+    );
+
+    expect(of(guide, "one.test")).toEqual([
+      ["First", NOON + HOUR, NOON + 2 * HOUR],
+      ["Second", NOON + 2 * HOUR, NOON + 3 * HOUR],
+      ["Third", NOON + 3 * HOUR, NOON + 4 * HOUR],
     ]);
   });
 
+  it("answers now and next, a schedule and a stretch of time from the programmes on then", async () => {
+    const { guide } = await index(
+      tv(
+        programme("one.test", stamp(NOON - 2 * HOUR), stamp(NOON - HOUR), "Morning"),
+        programme("one.test", stamp(NOON - HOUR), stamp(NOON + HOUR), "Lunch"),
+        programme("one.test", stamp(NOON + HOUR), stamp(NOON + 2 * HOUR), "Afternoon"),
+        // A gap, then the evening.
+        programme("one.test", stamp(NOON + 3 * HOUR), stamp(NOON + 4 * HOUR), "Evening"),
+      ),
+    );
+    const channel = guide.channels.get("one.test");
+    if (!channel) throw new Error("No channel.");
+    const titles = (programmes: readonly { title: string }[]) =>
+      programmes.map((each) => each.title);
+
+    expect(guide.listing(channel, NOON)).toMatchObject({
+      now: { title: "Lunch" },
+      next: { title: "Afternoon" },
+    });
+    expect(guide.listing(channel, NOON + 2.5 * HOUR)).toMatchObject({
+      now: null,
+      next: { title: "Evening" },
+    });
+    expect(guide.listing(channel, NOON + 4 * HOUR)).toBeNull();
+    expect(titles(guide.schedule(channel, NOON))).toEqual(["Lunch", "Afternoon", "Evening"]);
+    // The past it keeps, from the programme on at the start of the stretch.
+    expect(titles(guide.range(channel, NOON - 1.5 * HOUR, NOON + HOUR))).toEqual([
+      "Morning",
+      "Lunch",
+    ]);
+    expect(titles(guide.range(channel, NOON + 2 * HOUR, NOON + 3 * HOUR))).toEqual([]);
+  });
+
+  it("keeps ended programmes for the archive window, and drops what ended before it", async () => {
+    const { guide } = await index(
+      tv(
+        programme("one.test", stamp(NOON - DAY - 2 * HOUR), stamp(NOON - DAY - HOUR), "Too old"),
+        programme("one.test", stamp(NOON - DAY + HOUR), stamp(NOON - DAY + 2 * HOUR), "Yesterday"),
+        later("one.test"),
+        // Programmes alone name a channel: one with nothing in the window isn't listed.
+        programme("old.test", stamp(NOON - 2 * DAY), stamp(NOON - 2 * DAY + HOUR), "Gone"),
+      ),
+    );
+
+    expect(of(guide, "one.test")).toEqual([
+      ["Yesterday", NOON - DAY + HOUR, NOON - DAY + 2 * HOUR],
+      ["Later", NOON + HOUR, NOON + 2 * HOUR],
+    ]);
+    expect(guide.channels.has("old.test")).toBe(false);
+  });
+
+  it("brings along the past the next download of the same source no longer lists, for the channels it still has", async () => {
+    const before = await index(
+      tv(
+        programme("one.test", stamp(NOON - 3 * HOUR), stamp(NOON - 2 * HOUR), "Earlier"),
+        programme("one.test", stamp(NOON - 2 * HOUR), stamp(NOON), "Before noon"),
+        programme("gone.test", stamp(NOON - 2 * HOUR), stamp(NOON - HOUR), "Gone"),
+      ),
+    );
+    // Six hours on, the source lists from an hour ago only, and no longer lists one channel.
+    const { guide } = await index(
+      tv(
+        programme("one.test", stamp(NOON - HOUR), stamp(NOON + 7 * HOUR), "Long"),
+        programme("one.test", stamp(NOON + 7 * HOUR), stamp(NOON + 8 * HOUR), "Evening"),
+      ),
+      { previous: before.target, since: NOON + 6 * HOUR },
+    );
+
+    expect(of(guide, "one.test")).toEqual([
+      ["Earlier", NOON - 3 * HOUR, NOON - 2 * HOUR],
+      // Cut short where the new document's first programme there begins.
+      ["Before noon", NOON - 2 * HOUR, NOON - HOUR],
+      ["Long", NOON - HOUR, NOON + 7 * HOUR],
+      ["Evening", NOON + 7 * HOUR, NOON + 8 * HOUR],
+    ]);
+    expect(guide.channels.has("gone.test")).toBe(false);
+  });
+
+  it("finds programmes whose title has every word, as far as it is asked to look", async () => {
+    const { guide } = await index(
+      tv(
+        programme("one.test", stamp(NOON - HOUR), stamp(NOON + HOUR), "Évening News"),
+        programme("one.test", stamp(NOON + HOUR), stamp(NOON + 2 * HOUR), "Sport"),
+        programme("two.test", stamp(NOON + 2 * DAY), stamp(NOON + 2 * DAY + HOUR), "Late news"),
+        programme("two.test", stamp(NOON - 3 * HOUR), stamp(NOON - 2 * HOUR), "Old news"),
+      ),
+    );
+    const found = async (words: string[], before = Number.POSITIVE_INFINITY) => {
+      const titles: string[] = [];
+      await guide.matching(
+        words,
+        NOON,
+        () => before,
+        (programme) => titles.push(programme.title),
+      );
+      return titles.sort();
+    };
+
+    expect(await found(["news"])).toEqual(["Late news", "Évening News"]);
+    expect(await found(["evening", "news"])).toEqual(["Évening News"]);
+    expect(await found(["news"], NOON + DAY)).toEqual(["Évening News"]);
+    expect(await found(["weather"])).toEqual([]);
+  });
+
   it("refuses an address's answer that isn't a whole XMLTV guide with something still to come", async () => {
-    const strict = (document: string, size?: number) =>
-      refusal(index(document, { strict: true }, size));
+    const strict = (document: string) => refusal(index(document, { strict: true }));
     const whole = tv(later("one.test"));
 
     expect(await strict("<!doctype html><html><body>Sign in</body></html>")).toEqual({
       kind: "not-xmltv",
     });
     expect(await strict('{"error":"no such guide"}')).toEqual({ kind: "not-xmltv" });
-    // Cut off anywhere: inside a programme, between two, or just before the end.
     expect(await strict(whole.slice(0, -30))).toEqual({ kind: "incomplete" });
     expect(await strict(whole.slice(0, -"</tv>".length))).toEqual({ kind: "incomplete" });
-    expect(await strict(whole.slice(0, -2), 3)).toEqual({ kind: "incomplete" });
     expect(await strict(tv())).toEqual({ kind: "empty" });
     expect(await strict(tv('<channel id="one.test"/>'))).toEqual({ kind: "empty" });
+    // Ended, though within the archive window.
     expect(
       await strict(
         tv(programme("one.test", "20261002090000 +0000", "20261002100000 +0000", "Past")),
       ),
     ).toEqual({ kind: "ended" });
-    expect(
-      (await index(`${whole}\n<!-- generated -->\n`, { strict: true }, 4)).byChannel.size,
-    ).toBe(1);
+    expect((await index(`${whole}\n<!-- generated -->\n`, { strict: true })).guide.until).toBe(
+      NOON + 2 * HOUR,
+    );
   });
 
-  describe("from an address, as one whole <tv> and nothing that only reads like one", () => {
-    const one = later("one.test");
-    /** A programme whose description is `text`, as a CDATA section holds it. */
-    const described = (text: string) =>
-      later("two.test").replace("</programme>", `<desc><![CDATA[${text}]]></desc></programme>`);
-    /** How many programmes the document's guide has, or why it is refused. */
-    const read = async (document: string, size: number) => {
-      const guide = index(document, { strict: true }, size);
-      return (await refusal(guide)) ?? (await guide).titles.length;
-    };
-
-    it.each<[what: string, document: string, answer: number | { kind: string }]>([
-      ["no opening tag", `${one}</tv>`, { kind: "not-xmltv" }],
-      ["an opening tag only in a comment", `<!-- <tv> -->${one}</tv>`, { kind: "not-xmltv" }],
-      ["another element that starts alike", `<tvirus>${one}</tv>`, { kind: "not-xmltv" }],
-      ["a guide inside a page", `<html><tv>${one}</tv></html>`, { kind: "not-xmltv" }],
-      ["a programme before it", `${one}<tv>${one}</tv>`, { kind: "not-xmltv" }],
-      ["a programme after it", `<tv>${one}</tv>${one}`, { kind: "not-xmltv" }],
-      ["a second document after it", `<tv>${one}</tv><tv>${one}</tv>`, { kind: "not-xmltv" }],
-      ["a closing tag cut short", `<tv>${one}</tv`, { kind: "incomplete" }],
-      ["another element's closing tag", `<tv>${one}</tvirus>`, { kind: "incomplete" }],
-      ["a closing tag with more in it", `<tv>${one}</tv x="1">`, { kind: "incomplete" }],
-      ["a closing tag only in a comment", `<tv>${one}<!-- </tv> -->`, { kind: "incomplete" }],
-      ["a closing tag only in CDATA", `<tv>${one}<![CDATA[</tv>]]>`, { kind: "incomplete" }],
-      [
-        "cut in a description that reads like the end",
-        `<tv>${one}${described("</programme></tv>").slice(0, -"]]></desc></programme>".length)}`,
-        { kind: "incomplete" },
-      ],
-      ["a second <tv> that never closes", `<tv><tv>${one}</tv>`, { kind: "incomplete" }],
-      ["an empty element for a document", '<?xml version="1.0"?><tv/>', { kind: "empty" }],
-      [
-        "comments and descriptions that read like the end, before the end",
-        `<tv>${one}<!-- </tv> -->${described("</programme></tv>")}</tv>`,
-        2,
-      ],
-      ["space in the closing tag and a comment after it", `<tv>${one}</tv\n>\n<!-- </tv> -->`, 1],
-      [
-        "a declaration and a DOCTYPE before it",
-        `<?xml version="1.0"?>\n<!DOCTYPE tv SYSTEM "xmltv.dtd">\n<tv date="2026">${one}</tv>`,
-        1,
-      ],
-    ])("%s", async (_what, document, answer) => {
-      // However the sender splits it: a byte at a time, mid-tag, or all at once.
-      for (const size of [1, 7, 64 * 1024]) expect(await read(document, size)).toEqual(answer);
-    });
-  });
-
-  it("takes an own guide as its provider sends it, cut short or ended, and refuses only one without programmes", async () => {
+  it("takes an own guide as its provider sends it, packed, cut short or ended, and refuses only one without programmes", async () => {
     const whole = tv(later("one.test"));
 
-    expect((await index(whole.slice(0, -"</tv>".length))).byChannel.size).toBe(1);
+    expect((await index(gzipSync(whole))).guide.until).toBe(NOON + 2 * HOUR);
+    expect((await index(whole.slice(0, -"</tv>".length))).guide.until).toBe(NOON + 2 * HOUR);
     // Without a `<tv>` around its programmes, too.
-    expect((await index(`${later("one.test")}</tvirus>`)).byChannel.size).toBe(1);
+    expect((await index(`${later("one.test")}</tvirus>`)).guide.until).toBe(NOON + 2 * HOUR);
     const ended = await index(
       tv(programme("one.test", "20261002090000 +0000", "20261002100000 +0000", "Past")),
     );
-    expect(ended.byChannel.size).toBe(0);
-    expect(ended.until).toBeNull();
+    expect(ended.guide.until).toBe(NOON - 2 * HOUR);
     expect(await refusal(index(tv()))).toEqual({ kind: "empty" });
   });
 
-  it("refuses a guide past a limit whole, and reads one that is exactly at it", async () => {
-    const limits = { ...GUIDE_LIMITS, elementBytes: 2048, channels: 3, programmes: 4 };
-    const under = (document: string, size?: number) => index(document, { limits }, size);
-    const over = (document: string, size?: number) => refusal(under(document, size));
+  it("refuses a guide past a limit whole, writing nothing, and reads one at it, however many programmes it has", async () => {
+    const limits = { ...GUIDE_LIMITS, elementBytes: 2048, channels: 3 };
     const channels = (count: number) =>
       Array.from({ length: count }, (_, at) => `<channel id="c${at}.test"/>`);
     /** Half-hour programmes from one o'clock on, an hour apart: all still to come. */
@@ -310,39 +483,48 @@ describe("indexing a guide", () => {
         return programme(channel(), stamp(start), stamp(start + HOUR / 2), `Programme ${at}`);
       });
 
-    expect((await under(tv(...channels(3), ...programmes(4)))).channels.size).toBe(3);
-    expect(await over(tv(...channels(4), ...programmes(1)))).toEqual({
+    const many = await index(tv(...channels(3), ...programmes(5_000)), { limits });
+    expect(many.summary).toMatchObject({ channels: 3, programmes: 5_000 });
+    // It says how far it got as it reads.
+    expect(many.told.at(-1)).toBe(5_000);
+    expect(await refusal(index(tv(...channels(4), ...programmes(1)), { limits }))).toEqual({
       kind: "too-large",
       limit: "channels",
     });
     // Channels the guide never names count too: programmes alone list them.
     let named = 0;
-    expect(await over(tv(...programmes(4, () => `p${named++}.test`)))).toEqual({
-      kind: "too-large",
-      limit: "channels",
-    });
-    expect(await over(tv(...channels(1), ...programmes(5)))).toEqual({
-      kind: "too-large",
-      limit: "programmes",
-    });
-    // Programmes that ended aren't kept, so they don't count.
-    const past = Array.from({ length: 9 }, (_, at) => {
-      const start = NOON - (at + 2) * HOUR;
-      return programme("c0.test", stamp(start), stamp(start + HOUR / 2), `Past ${at}`);
-    });
-    expect((await under(tv(...past, ...programmes(4)))).byChannel.get("c0.test")).toHaveLength(4);
+    expect(
+      await refusal(index(tv(...programmes(4, () => `p${named++}.test`)), { limits })),
+    ).toEqual({ kind: "too-large", limit: "channels" });
 
     const long = (bytes: number) => {
       const element = programme("c0.test", "20261002130000 +0000", "20261002140000 +0000", "");
       return element.replace("<title>", `<title>${"t".repeat(bytes - Buffer.byteLength(element))}`);
     };
-    expect((await under(tv(long(2048)), 300)).byChannel.size).toBe(1);
-    expect(await over(tv(long(2049)), 300)).toEqual({ kind: "too-large", limit: "element" });
-    // One that never closes stops where the limit is, long before the document ends.
-    expect(await over(`<tv><programme channel="c0.test">${"x".repeat(100_000)}`, 300)).toEqual({
+    expect((await index(tv(long(2048)), { limits })).guide.until).toBe(NOON + 2 * HOUR);
+    expect(await refusal(index(tv(long(2049)), { limits }))).toEqual({
       kind: "too-large",
       limit: "element",
     });
+    expect(
+      await refusal(
+        index(gzipSync(tv(later("one.test"), "x".repeat(4096))), {
+          limits: { ...limits, bytes: 1024 },
+        }),
+      ),
+    ).toEqual({ kind: "too-large", limit: "bytes" });
+  });
+
+  it("leaves nothing where it was to write when it fails", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mr-streamer-guide-index-"));
+    await writeFile(join(dir, "document"), tv());
+    const target = join(dir, "index.sqlite");
+    const build = { document: join(dir, "document"), target, previous: null, since: NOON };
+
+    expect(
+      await refusal(buildGuideIndex({ ...build, archive: DAY, strict: false }, () => {})),
+    ).toEqual({ kind: "empty" });
+    expect(await readdir(dir)).toEqual(["document"]);
   });
 });
 

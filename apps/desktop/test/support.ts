@@ -122,6 +122,10 @@ const catalogueWorker: MainConfig["catalogueWorker"] = (setup) =>
     workerData: setup,
   });
 
+/** The guide's indexing worker from its source file, as Node runs TypeScript without a build. */
+export const guideIndexWorker: MainConfig["guideIndexWorker"] = (options) =>
+  new Worker(new URL("../src/main/guide/index-worker.ts", import.meta.url), options);
+
 /** What the app gives `mainLayer`, for tests: the test keychain, no ffmpeg, no releases. */
 export function testConfig(dataDir: string): MainConfig {
   return {
@@ -130,6 +134,7 @@ export function testConfig(dataDir: string): MainConfig {
     userAgent,
     ffmpeg: null,
     catalogueWorker,
+    guideIndexWorker,
     tmdbKey: null,
     region: "NL",
     updates: {

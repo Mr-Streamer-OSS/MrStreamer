@@ -18,6 +18,7 @@ import type { Result } from "./errors.ts";
 import type { DiagnosticsPreview } from "./diagnostics.ts";
 import type { CopySession, Download, DownloadList } from "./downloads.ts";
 import {
+  GUIDE_RANGE,
   MAP_FILTERS,
   type GuideCandidate,
   type GuideChannelPage,
@@ -142,6 +143,17 @@ export const ipcInputs = {
   "library.refresh": () => type({ subscriptionId: "string > 0" }),
   "guide.listings": () => type({ channels: owned().array() }),
   "guide.schedule": () => type({ channel: owned() }),
+  /**
+   * Programmes over a stretch of time, past ones the guide still keeps among them, for a page of
+   * a grid's channels: `GUIDE_RANGE.channels` of them and `GUIDE_RANGE.hours` at most, a grid
+   * reading one page at a time as it scrolls.
+   */
+  "guide.range": () =>
+    type({
+      channels: owned().array().atMostLength(GUIDE_RANGE.channels),
+      from: "number",
+      to: "number",
+    }).narrow(({ from, to }) => to > from && to - from <= GUIDE_RANGE.hours * 60 * 60 * 1000),
   "guide.search": () => type({ query: "string" }),
   /**
    * Searches the programmes of one list's channels, named as `library.channels` names a list: a
@@ -494,6 +506,11 @@ export interface IpcOutputs {
   "guide.listings": Readonly<Record<string, Listing>>;
   /** The channel's programme on now and the rest the guide knows, in time order. */
   "guide.schedule": readonly Programme[];
+  /**
+   * Per channel asked for, by its `ownedKey`, the programmes that overlap the stretch, in time
+   * order. Channels without guide data are left out.
+   */
+  "guide.range": Readonly<Record<string, readonly Programme[]>>;
   /** Programmes on now or later whose title matches, on now first. */
   "guide.search": readonly ProgrammeMatch[];
   /**

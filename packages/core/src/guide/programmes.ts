@@ -1,15 +1,13 @@
-// The programme guide in memory: programmes per guide channel, and the lookups the UI asks for.
-// Built from an XMLTV document as it streams in, dropping programmes that already ended.
+// What the UI asks of a guide, over a subscription's catalogue: now and next for a screen of
+// channels, a schedule, a page of a grid, searches, and the lists for mapping channels by hand.
+// The programmes are read from the guide's index on disk (index-file.ts), a few at a time.
 //
 // A catalogue channel shows the programmes of the guide channel its own guide id names, when the
 // guide has that id exactly; or of the one the viewer mapped it to by hand, which then counts
 // alone. Nothing is ever matched by name. `mappedChannels` lays the viewer's mappings over a
 // catalogue's guide ids, both ways, so every lookup here reads one and the same answer.
-import { AppFailure } from "@mrstreamer/contracts/errors";
 import type {
-  GuideChannel,
   GuideChannelPage,
-  GuideFailure,
   Listing,
   ListingMatch,
   MapChannel,
@@ -19,16 +17,10 @@ import type {
 } from "@mrstreamer/contracts/guide";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { normalize, searchWords } from "../text.ts";
-import { GUIDE_LIMITS, type GuideLimits } from "./limits.ts";
-import { xmltvReader, type XmltvProgramme } from "./xmltv.ts";
+import type { FoundProgramme, GuideIndex, IndexedChannel } from "./index-file.ts";
 
 /** How many programmes a search returns. */
 export const SEARCH_LIMIT = 50;
-/**
- * Indexing pauses for other work once it has put this many programmes in order: fifty channels
- * of a guide that lists a day and a half ahead, and fewer of one that lists a week.
- */
-const YIELD_EVERY_PROGRAMMES = 2_000;
 
 /** How catalogue channels map to the guide. */
 export interface GuideChannels {
@@ -126,181 +118,126 @@ export function mappedChannels(
   };
 }
 
-interface Titled {
-  readonly guideId: string;
-  /** The title as search compares it. */
-  readonly folded: string;
-  readonly programme: Programme;
-}
-
-export interface ProgrammeIndex {
-  /** Programmes per guide channel, in time order and without overlaps. */
-  readonly byChannel: ReadonlyMap<string, readonly Programme[]>;
-  /** Every programme with its title as search compares it, each guide channel's in time order. */
-  readonly titles: readonly Titled[];
-  /**
-   * Every channel the guide lists, by its id: those it names in a `<channel>`, and those it only
-   * lists programmes for, which go by their id. `folded` is what search compares and orders it
-   * by: its name folded, then its id in lower case, on a line of its own so that "Canal Nord"
-   * comes before "Canal Nord +1".
-   */
-  readonly channels: ReadonlyMap<string, { readonly name: string; readonly folded: string }>;
-  /** When its last programme ends, or null without one that hasn't ended. */
-  readonly until: number | null;
-}
-
-/**
- * Indexes an XMLTV document, leaving out programmes that ended before `since`. Reads it chunk by
- * chunk and pauses between channels at the end, so no step holds the process for long. Fails when
- * the document lists no programmes at all, or is past one of `limits`.
- *
- * `strict` is for a document as it downloads from an address the viewer gave: it also fails
- * unless the document is one whole `<tv>` from its opening tag to its closing one, and unless a
- * programme of it is still to come. A document read from disk was whole when it was saved, and
- * an own guide is taken as its provider sends it, as it always was.
- */
-export async function indexProgrammes(
-  document: AsyncIterable<Uint8Array>,
-  since: number,
-  { strict = false, limits = GUIDE_LIMITS }: { strict?: boolean; limits?: GuideLimits } = {},
-): Promise<ProgrammeIndex> {
-  const raw = new Map<string, XmltvProgramme[]>();
-  const channels = new Map<string, { readonly name: string; readonly folded: string }>();
-  // Titles folded for search as they arrive, once per distinct title, to keep the last step short.
-  const folded = new Map<string, string>();
-  let read = 0;
-  let kept = 0;
-  /**
-   * Counts a guide channel the first time the document names it, and folds its name for search
-   * then, as it arrives: thousands of names folded at once would hold the process.
-   */
-  const listed = (id: string, name: string | null) => {
-    const known = channels.get(id);
-    if (!known && channels.size === limits.channels) throw unusable("channels");
-    // A name given later, or again, stands; programmes alone name a channel by its id.
-    if (known && name === null) return;
-    const shown = name ?? id;
-    channels.set(id, { name: shown, folded: `${normalize(shown)}\n${id.toLowerCase()}` });
-  };
-  const reader = xmltvReader(
-    {
-      channel: ({ id, name }) => listed(id, name),
-      programme(entry) {
-        read++;
-        if (entry.stop !== null && entry.stop <= since) return;
-        if (++kept > limits.programmes) throw unusable("programmes");
-        if (!channels.has(entry.channel)) listed(entry.channel, null);
-        const list = raw.get(entry.channel);
-        if (list) list.push(entry);
-        else raw.set(entry.channel, [entry]);
-        if (!folded.has(entry.title)) folded.set(entry.title, normalize(entry.title));
-      },
-    },
-    limits.elementBytes,
-  );
-  for await (const chunk of document) reader.push(chunk);
-  const ending = reader.end();
-  if (strict && ending !== "whole") throw failure({ kind: ending });
-  if (read === 0) throw failure({ kind: "empty" });
-  const byChannel = new Map<string, readonly Programme[]>();
-  const titles: Titled[] = [];
-  let until: number | null = null;
-  let ordered = 0;
-  for (const [guideId, entries] of raw) {
-    // Lets other work in between, every so many programmes.
-    if ((ordered += entries.length) >= YIELD_EVERY_PROGRAMMES) {
-      ordered = 0;
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    const programmes = timeline(entries).filter((programme) => programme.stop > since);
-    const last = programmes.at(-1);
-    if (!last) continue;
-    byChannel.set(guideId, programmes);
-    until = Math.max(until ?? 0, last.stop);
-    for (const programme of programmes) {
-      titles.push({ guideId, folded: folded.get(programme.title) ?? "", programme });
-    }
-  }
-  if (strict && byChannel.size === 0) throw failure({ kind: "ended" });
-  return { byChannel, titles, channels, until };
-}
-
-function failure(failure: GuideFailure): AppFailure {
-  return new AppFailure({ kind: "guide", failure });
-}
-
-function unusable(limit: "channels" | "programmes"): AppFailure {
-  return failure({ kind: "too-large", limit });
-}
-
 /** What each channel shows now and next at `at`. Channels without guide data are left out. */
 export function listingsAt(
-  index: ProgrammeIndex,
+  index: GuideIndex,
   channels: GuideChannels,
   channelIds: readonly string[],
   at: number,
 ): Record<string, Listing> {
   const result: Record<string, Listing> = {};
   for (const channelId of channelIds) {
-    const programmes = programmesOf(index, channels, channelId);
-    const from = firstUnfinished(programmes, at);
-    const first = programmes[from];
-    if (!first) continue;
-    result[channelId] =
-      first.start <= at
-        ? { now: first, next: programmes[from + 1] ?? null }
-        : { now: null, next: first };
+    const shown = shownChannel(index, channels, channelId);
+    const listing = shown && index.listing(shown, at);
+    if (listing) result[channelId] = listing;
   }
   return result;
 }
 
 /** How many of the catalogue's channels the guide has programmes for. */
-export function channelsCovered(index: ProgrammeIndex, channels: GuideChannels): number {
-  let count = 0;
-  for (const guideId of index.byChannel.keys()) {
-    for (const channel of channels.channelsOf(guideId)) {
-      if (shownGuideId(index, channels, channel.id) === guideId) count++;
+export function channelsCovered(index: GuideIndex, channels: GuideChannels): number {
+  return remembered(covered, index, channels, () => {
+    let count = 0;
+    for (const { id, until } of index.channels.values()) {
+      if (until === null) continue;
+      for (const channel of channels.channelsOf(id)) {
+        if (shownGuideId(index, channels, channel.id) === id) count++;
+      }
     }
-  }
-  return count;
+    return count;
+  });
 }
+
+const covered = new WeakMap<GuideIndex, WeakMap<GuideChannels, number>>();
 
 /** The channel's programme on now and everything after it that the guide knows. */
 export function scheduleAt(
-  index: ProgrammeIndex,
+  index: GuideIndex,
   channels: GuideChannels,
   channelId: string,
   at: number,
 ): readonly Programme[] {
-  const programmes = programmesOf(index, channels, channelId);
-  return programmes.slice(firstUnfinished(programmes, at));
+  const shown = shownChannel(index, channels, channelId);
+  return shown ? index.schedule(shown, at) : [];
+}
+
+/**
+ * Each channel's programmes that overlap [from, to), past ones the guide keeps among them, by
+ * channel id. Channels without guide data are left out.
+ */
+export function rangeAt(
+  index: GuideIndex,
+  channels: GuideChannels,
+  channelIds: readonly string[],
+  from: number,
+  to: number,
+): Record<string, readonly Programme[]> {
+  const result: Record<string, readonly Programme[]> = {};
+  for (const channelId of channelIds) {
+    const shown = shownChannel(index, channels, channelId);
+    if (shown) result[channelId] = index.range(shown, from, to);
+  }
+  return result;
 }
 
 /**
  * Programmes on now or later whose title has every word of `query`, on the first channel in the
  * catalogue that shows them. On now comes first, then by start time.
  */
-export function searchAt(
-  index: ProgrammeIndex,
+export async function searchAt(
+  index: GuideIndex,
   channels: GuideChannels,
   query: string,
   at: number,
-): readonly ProgrammeMatch[] {
+): Promise<readonly ProgrammeMatch[]> {
   const words = searchWords(query);
   if (words.length === 0) return [];
-  const matches: ProgrammeMatch[] = [];
-  for (const { guideId, folded, programme } of index.titles) {
-    if (programme.stop <= at || !words.every((word) => folded.includes(word))) continue;
-    // Channels for adults show only in Live TV's lists, never in search.
-    const channel = channels
-      .channelsOf(guideId)
-      .find((each) => !each.adult && shownGuideId(index, channels, each.id) === guideId);
-    if (channel) matches.push({ channel, programme });
-  }
-  const onNow = (match: ProgrammeMatch) => (match.programme.start <= at ? 0 : 1);
-  matches.sort((a, b) => onNow(a) - onNow(b) || a.programme.start - b.programme.start);
-  return matches.slice(0, SEARCH_LIMIT);
+  const shown = searchable(index, channels);
+  /** The best found so far, best first: on now, then by start time. */
+  const best: { readonly found: FoundProgramme; readonly channel: LiveChannel }[] = [];
+  const rank = (found: FoundProgramme) => (found.start <= at ? 0 : 1);
+  const before = (a: FoundProgramme, b: FoundProgramme) =>
+    rank(a) - rank(b) || a.start - b.start || a.channel - b.channel;
+  await index.matching(
+    words,
+    at,
+    // Once fifty are in, only one that starts before the last of them can take its place.
+    () => best.at(SEARCH_LIMIT - 1)?.found.start ?? Number.POSITIVE_INFINITY,
+    (found) => {
+      const channel = shown.get(found.channel);
+      if (!channel) return;
+      let place = best.length;
+      while (place > 0 && before(found, best[place - 1]!.found) < 0) place--;
+      if (place >= SEARCH_LIMIT) return;
+      best.splice(place, 0, { found, channel });
+      if (best.length > SEARCH_LIMIT) best.pop();
+    },
+  );
+  return best.flatMap(({ found, channel }) => {
+    const programme = index.programme(found);
+    return programme ? [{ channel, programme }] : [];
+  });
 }
+
+/**
+ * The catalogue channel a search names for each guide channel the guide has programmes for:
+ * the first that shows it, leaving out channels for adults, which show only in Live TV's lists.
+ */
+function searchable(index: GuideIndex, channels: GuideChannels): ReadonlyMap<number, LiveChannel> {
+  return remembered(shownBy, index, channels, () => {
+    const shown = new Map<number, LiveChannel>();
+    for (const { key, id, until } of index.channels.values()) {
+      if (until === null) continue;
+      const channel = channels
+        .channelsOf(id)
+        .find((each) => !each.adult && shownGuideId(index, channels, each.id) === id);
+      if (channel) shown.set(key, channel);
+    }
+    return shown;
+  });
+}
+
+const shownBy = new WeakMap<GuideIndex, WeakMap<GuideChannels, ReadonlyMap<number, LiveChannel>>>();
 
 /**
  * What a search for `query` finds in the programmes of `channelIds`, by channel id: whether the
@@ -309,42 +246,41 @@ export function searchAt(
  * it shows, so channels that share one are each found and nothing is cut off; those for adults
  * count like any other, as a list holds them only while the catalogue shows them.
  */
-export function searchChannelsAt(
-  index: ProgrammeIndex,
+export async function searchChannelsAt(
+  index: GuideIndex,
   channels: GuideChannels,
   channelIds: readonly string[],
   query: string,
   at: number,
   until: number,
-): Record<string, ListingMatch> {
+): Promise<Record<string, ListingMatch>> {
   const words = searchWords(query);
   if (words.length === 0) return {};
-  const showing = new Map<string, string[]>();
+  const showing = new Map<number, string[]>();
   for (const channelId of channelIds) {
-    const guideId = shownGuideId(index, channels, channelId);
-    if (guideId === undefined) continue;
-    const ids = showing.get(guideId);
+    const shown = shownChannel(index, channels, channelId);
+    if (!shown) continue;
+    const ids = showing.get(shown.key);
     if (ids) ids.push(channelId);
-    else showing.set(guideId, [channelId]);
+    else showing.set(shown.key, [channelId]);
   }
-  const found = new Map<string, ListingMatch>();
-  for (const { guideId, folded, programme } of index.titles) {
-    if (programme.stop <= at || programme.start >= until || !showing.has(guideId)) continue;
-    const match = found.get(guideId);
-    const onNow = programme.start <= at;
-    // A guide channel's titles come in time order, so its first later match is the earliest.
-    if (onNow ? match?.now : match?.later) continue;
-    if (!words.every((word) => folded.includes(word))) continue;
-    found.set(
-      guideId,
-      onNow
-        ? { now: true, later: match?.later ?? null }
-        : { now: match?.now ?? false, later: { start: programme.start, title: programme.title } },
-    );
-  }
+  const found = new Map<number, { now: boolean; later: FoundProgramme | null }>();
+  await index.matching(
+    words,
+    at,
+    () => until,
+    (programme) => {
+      if (!showing.has(programme.channel)) return;
+      const match = found.get(programme.channel) ?? { now: false, later: null };
+      if (programme.start <= at) match.now = true;
+      else if (!match.later || programme.start < match.later.start) match.later = programme;
+      found.set(programme.channel, match);
+    },
+  );
   const result: Record<string, ListingMatch> = {};
-  for (const [guideId, match] of found) {
-    for (const channelId of showing.get(guideId) ?? []) result[channelId] = match;
+  for (const [key, { now, later }] of found) {
+    const match = { now, later: later && { start: later.start, title: later.title } };
+    for (const channelId of showing.get(key) ?? []) result[channelId] = match;
   }
   return result;
 }
@@ -353,7 +289,7 @@ export function searchChannelsAt(
  * How many of the viewer's mappings lead nowhere: the provider no longer lists the channel, or
  * the guide no longer lists the guide channel it was mapped to.
  */
-export function unresolvedMappings(index: ProgrammeIndex | null, channels: MappedChannels): number {
+export function unresolvedMappings(index: GuideIndex | null, channels: MappedChannels): number {
   let count = channels.unlisted.size;
   if (!index) return count;
   for (const guideId of channels.mapped.values()) if (!index.channels.has(guideId)) count++;
@@ -362,7 +298,7 @@ export function unresolvedMappings(index: ProgrammeIndex | null, channels: Mappe
 
 /** One of a catalogue's channels as the mapping list shows it. */
 export function mapChannel(
-  index: ProgrammeIndex,
+  index: GuideIndex,
   channels: MappedChannels,
   channel: LiveChannel,
 ): MapChannel {
@@ -383,7 +319,7 @@ export function mapChannel(
  * last among the mapped ones, under the name they had.
  */
 export function mapChannelsAt(
-  index: ProgrammeIndex,
+  index: GuideIndex,
   channels: MappedChannels,
   { filter, query }: { readonly filter: MapFilter; readonly query: string },
   offset: number,
@@ -420,38 +356,20 @@ export function mapChannelsAt(
   return { total, channels: rows };
 }
 
-/** The guide's channels as its picker lists them, kept while the guide is the same one. */
-const guideChannels = new WeakMap<
-  ProgrammeIndex,
-  readonly (GuideChannel & { readonly folded: string })[]
->();
-
 /**
  * A page of the channels a guide lists, by name: all of them, or those whose name or id has
  * every word of `query`, with the ones that begin with it first. Each says whether the guide has
  * programmes for it; none of the programmes come along.
  */
 export function guideChannelsAt(
-  index: ProgrammeIndex,
+  index: GuideIndex,
   query: string,
   offset: number,
   limit: number,
 ): GuideChannelPage {
-  let all = guideChannels.get(index);
-  if (!all) {
-    all = [...index.channels]
-      .map(([id, { name, folded }]) => ({
-        id,
-        name,
-        programmes: index.byChannel.has(id),
-        folded,
-      }))
-      // By name, whatever its case and accents, then by id.
-      .sort((a, b) => (a.folded < b.folded ? -1 : a.folded > b.folded ? 1 : 0));
-    guideChannels.set(index, all);
-  }
   const words = searchWords(query);
   const whole = words.join(" ");
+  const all = [...index.channels.values()];
   const matches =
     words.length === 0
       ? all
@@ -465,66 +383,48 @@ export function guideChannelsAt(
     total: matches.length,
     channels: matches
       .slice(offset, offset + limit)
-      .map(({ id, name, programmes }) => ({ id, name, programmes })),
+      .map(({ id, name, until }) => ({ id, name, programmes: until !== null })),
   };
 }
 
-function programmesOf(
-  index: ProgrammeIndex,
+/**
+ * The guide channel whose programmes a channel shows: the first of its ids the guide has
+ * programmes for, past ones it keeps among them. So a spelling the guide doesn't know never
+ * hides one it does, wherever the provider lists it, and a channel shows, counts and is found
+ * once when the guide knows several.
+ */
+function shownChannel(
+  index: GuideIndex,
   channels: GuideChannels,
   channelId: string,
-): readonly Programme[] {
-  const guideId = shownGuideId(index, channels, channelId);
-  return (guideId && index.byChannel.get(guideId)) || [];
+): IndexedChannel | undefined {
+  for (const guideId of channels.guideIdsOf(channelId)) {
+    const channel = index.channels.get(guideId);
+    if (channel && channel.until !== null) return channel;
+  }
+  return undefined;
 }
 
-/**
- * The guide id whose programmes a channel shows: the first of its ids the guide has programmes
- * for. So a spelling the guide doesn't know never hides one it does, wherever the provider lists
- * it, and a channel shows, counts and is found once when the guide knows several.
- */
 function shownGuideId(
-  index: ProgrammeIndex,
+  index: GuideIndex,
   channels: GuideChannels,
   channelId: string,
 ): string | undefined {
-  return channels.guideIdsOf(channelId).find((guideId) => index.byChannel.has(guideId));
+  return shownChannel(index, channels, channelId)?.id;
 }
 
-/** The position of the first programme that hasn't ended at `at`. */
-function firstUnfinished(programmes: readonly Programme[], at: number): number {
-  let low = 0;
-  let high = programmes.length;
-  while (low < high) {
-    const middle = (low + high) >> 1;
-    if ((programmes[middle]?.stop ?? 0) <= at) low = middle + 1;
-    else high = middle;
-  }
-  return low;
-}
-
-/**
- * One channel's programmes in time order, without overlaps: a programme without an end runs until
- * the next one starts, a programme that starts before the previous one ends cuts it short, and
- * duplicates of a start time count once.
- */
-function timeline(entries: readonly XmltvProgramme[]): Programme[] {
-  const sorted = entries.toSorted((a, b) => a.start - b.start);
-  const result: Programme[] = [];
-  for (const [position, entry] of sorted.entries()) {
-    const previous = result.at(-1);
-    if (previous?.start === entry.start) continue;
-    if (previous && previous.stop > entry.start) {
-      result[result.length - 1] = { ...previous, stop: entry.start };
-    }
-    const stop = entry.stop ?? sorted[position + 1]?.start;
-    if (stop === undefined || stop <= entry.start) continue;
-    result.push({
-      start: entry.start,
-      stop,
-      title: entry.title,
-      description: entry.description,
-    });
-  }
-  return result;
+/** What `work` makes of a guide and a catalogue's channels, kept while both are the same. */
+function remembered<A>(
+  cache: WeakMap<GuideIndex, WeakMap<GuideChannels, A>>,
+  index: GuideIndex,
+  channels: GuideChannels,
+  work: () => A,
+): A {
+  let byChannels = cache.get(index);
+  if (!byChannels) cache.set(index, (byChannels = new WeakMap()));
+  const kept = byChannels.get(channels);
+  if (kept !== undefined) return kept;
+  const made = work();
+  byChannels.set(channels, made);
+  return made;
 }
