@@ -1,8 +1,8 @@
 // Indexes guide documents in worker threads (../guide/index-worker.ts), one per document. Reading
-// a large guide is a minute of steady work, and SQLite holds whichever thread writes to it: on
-// the main process, single writes of a few thousand programmes took up to 600 ms on the
-// measured 1.2-million-programme guide. In a worker the main process only hears how far it got.
-// Stopping one ends its thread, and what it had written goes with it.
+// the 1.2-million-programme guide the budgets are measured with is half a minute of steady work,
+// and SQLite holds whichever thread writes to it: on the main process of a busy machine, single
+// writes of a few thousand programmes took up to 600 ms. In a worker the main process only hears
+// how far it got. Stopping one ends its thread, and what it had written goes with it.
 import { rm } from "node:fs/promises";
 import type { Worker, WorkerOptions } from "node:worker_threads";
 import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";

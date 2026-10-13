@@ -55,6 +55,8 @@ const MAPPED = 300;
 /** A generated guide stays within what a guide may unpack to, at about 450 bytes a programme. */
 const GENERATED_PROGRAMMES = 4_000_000;
 const HOUR = 60 * 60 * 1000;
+/** How long the event loop is watched with nothing to do, before anything is measured. */
+const IDLE_MS = 3000;
 
 const { values } = parseArgs({
   options: {
@@ -251,6 +253,14 @@ try {
   await settled();
   const rssBefore = process.memoryUsage.rss();
 
+  // What the machine itself costs the event loop with nothing to do: the floor under every
+  // stall measured after it.
+  stalls.reset();
+  stalls.enable();
+  await new Promise((resolve) => setTimeout(resolve, IDLE_MS));
+  stalls.disable();
+  const idleStall = stalls.max / 1e6;
+
   stalls.enable();
   await new Promise((resolve) => setTimeout(resolve, 10));
   stalls.reset();
@@ -405,6 +415,7 @@ try {
   const answerStall = stalls.max / 1e6;
 
   const metrics: Measurement["metrics"] = {
+    "longest stall while idle": metric("ms", [idleStall]),
     "download and index": metric("ms", [downloadMs]),
     "download and index per subscription": metric("ms", subscriptionDownloadSamples, 3000),
     "longest stall while downloading": metric("ms", [downloadStall], 50),

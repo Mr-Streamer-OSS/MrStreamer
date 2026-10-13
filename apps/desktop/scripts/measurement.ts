@@ -522,6 +522,7 @@ export function electronVersion(executable: string): string {
 /** The most programmes a generated guide has: about what a guide may unpack to, 2 GiB. */
 const GENERATED_GUIDE_PROGRAMMES = 4_000_000;
 const GUIDE_METRICS = {
+  "longest stall while idle": "ms",
   "download and index": "ms",
   "download and index per subscription": "ms",
   "longest stall while downloading": "ms",
@@ -557,6 +558,7 @@ const VIEWING_METRICS = {
 } as const;
 
 const GUIDE_SAMPLE_COUNTS: Record<string, number> = {
+  "longest stall while idle": 1,
   "download and index": 1,
   "longest stall while downloading": 1,
   "read from disk after a restart": 1,
