@@ -177,6 +177,8 @@ jobs:
     uses: ./.github/workflows/upgrade-check.yml
     with:
       candidate: ${{ needs.plan.outputs.promoted }}
+      # The commit the release builds, so the check proves that source.
+      sha: ${{ needs.plan.outputs.sha }}
 
   publish:
     name: Publish

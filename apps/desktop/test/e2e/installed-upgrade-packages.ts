@@ -173,22 +173,36 @@ async function newestStable(github: GitHub): Promise<string> {
 }
 
 /**
- * Resolves and downloads the newest published stable and the candidate nightly `candidateTag`, or
- * throws on the first doubt. The tag's form is checked before GitHub is asked anything. `now`
- * stamps the receipt.
+ * Resolves and downloads the newest published stable and the candidate nightly `candidate.tag`, or
+ * throws on the first doubt. The tag's form is checked before GitHub is asked anything. With
+ * `candidate.sha`, the commit a stable release run planned to promote, the tag must name exactly
+ * that commit, so the check proves the source the release builds; without it, as when dispatched
+ * alone, the tag's commit is taken. `now` stamps the receipt.
  */
-export async function resolvePackages(github: GitHub, candidateTag: string, now = Date.now()) {
+export async function resolvePackages(
+  github: GitHub,
+  candidate: { readonly tag: string; readonly sha?: string | undefined },
+  now = Date.now(),
+) {
+  const candidateTag = candidate.tag;
   check(tagVersion(candidateTag, "nightly"), `${candidateTag} is not a canonical nightly tag.`);
+  if (candidate.sha !== undefined)
+    check(FullSha.allows(candidate.sha), `${candidate.sha} is not a full commit SHA.`);
   const branch = type({ default_branch: "string" }).assert(await github.json("")).default_branch;
   check(branch === "main", "The installed upgrade check requires this repository's main branch.");
   const stableTag = await newestStable(github);
   const commitOf = async (tag: string) =>
     type({ sha: FullSha }).assert(await github.json(`/commits/${encodeURIComponent(tag)}`)).sha;
+  const candidateSha = await commitOf(candidateTag);
+  check(
+    candidate.sha === undefined || candidateSha === candidate.sha,
+    `${candidateTag} names ${candidateSha}, not ${candidate.sha}, the commit the release planned.`,
+  );
   const resolved = checkPair({
     stableTag,
     stableSha: await commitOf(stableTag),
     candidateTag,
-    candidateSha: await commitOf(candidateTag),
+    candidateSha,
   });
   for (const source of [resolved.stableSha, resolved.candidateSha]) {
     const onMain = Ancestry.assert(await github.json(`/compare/${source}...main?per_page=1`));

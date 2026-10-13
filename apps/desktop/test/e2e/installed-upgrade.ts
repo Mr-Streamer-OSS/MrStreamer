@@ -26,7 +26,7 @@
 // the profile; on failure it keeps them and their lock for the workflow to upload, and changes
 // nothing more.
 //
-//   node apps/desktop/test/e2e/installed-upgrade.ts resolve --candidate <nightly tag> --out <new folder>
+//   node apps/desktop/test/e2e/installed-upgrade.ts resolve --candidate <nightly tag> [--sha <its commit>] --out <new folder>
 //   node apps/desktop/test/e2e/installed-upgrade.ts run --packages <folder> --root <new folder under RUNNER_TEMP>
 //
 // `resolve` needs GH_TOKEN and GITHUB_REPOSITORY and runs anywhere; installed-upgrade-packages.ts
@@ -939,7 +939,7 @@ export async function restartCandidate(
 // Commands
 
 const usage = `Usage:
-  node apps/desktop/test/e2e/installed-upgrade.ts resolve --candidate <nightly tag> --out <new folder>
+  node apps/desktop/test/e2e/installed-upgrade.ts resolve --candidate <nightly tag> [--sha <its commit>] --out <new folder>
   node apps/desktop/test/e2e/installed-upgrade.ts run --packages <folder> --root <new folder under RUNNER_TEMP>`;
 
 /**
@@ -949,12 +949,15 @@ const usage = `Usage:
 async function resolveCommand(args: string[]) {
   const { values } = parseArgs({
     args,
-    options: { candidate: { type: "string" }, out: { type: "string" } },
+    options: { candidate: { type: "string" }, sha: { type: "string" }, out: { type: "string" } },
   });
   const [token, repository] = [process.env["GH_TOKEN"], process.env["GITHUB_REPOSITORY"]];
   if (!token || !repository) throw new Error("Set GH_TOKEN and GITHUB_REPOSITORY.");
   if (!values.candidate || !values.out || !isAbsolute(values.out)) throw new Error(usage);
-  const { receipt, files } = await resolvePackages(restGitHub(repository, token), values.candidate);
+  const { receipt, files } = await resolvePackages(restGitHub(repository, token), {
+    tag: values.candidate,
+    sha: values.sha || undefined,
+  });
   await mkdir(values.out);
   for (const [name, bytes] of files) await writeFile(join(values.out, name), bytes);
   await writeFile(join(values.out, "receipt.json"), JSON.stringify(receipt, null, 2));

@@ -125,7 +125,7 @@ function published() {
     diff,
     onMain,
     replace,
-    resolve: (tag = EXPECTED.candidateTag) => resolvePackages(api, tag),
+    resolve: (tag = EXPECTED.candidateTag, sha?: string) => resolvePackages(api, { tag, sha }),
   };
 }
 
@@ -207,6 +207,22 @@ describe("the candidate and both published packages", () => {
     const world = published();
     await expect(world.resolve(tag)).rejects.toThrow(/canonical nightly tag/);
     expect(world.api.json).not.toHaveBeenCalled();
+  });
+
+  it("is the commit a stable release planned, when the release names one, and its tag's otherwise", async () => {
+    const planned = await published().resolve(EXPECTED.candidateTag, EXPECTED.candidateSha);
+    expect(planned.receipt.resolved.candidateSha).toBe(EXPECTED.candidateSha);
+
+    const moved = published();
+    await expect(moved.resolve(EXPECTED.candidateTag, "f".repeat(40))).rejects.toThrow(
+      `${EXPECTED.candidateTag} names ${EXPECTED.candidateSha}, not ${"f".repeat(40)}, the commit the release planned.`,
+    );
+
+    const short = published();
+    await expect(short.resolve(EXPECTED.candidateTag, "abc123")).rejects.toThrow(
+      "abc123 is not a full commit SHA.",
+    );
+    expect(short.api.json).not.toHaveBeenCalled();
   });
 
   it.each(["stable", "candidate"] as const)(

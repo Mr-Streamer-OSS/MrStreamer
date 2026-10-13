@@ -4,9 +4,9 @@
 # from the network. apps/desktop/test/e2e/installed-upgrade.ts runs it;
 # docs/contributing/testing.md#installed-upgrade describes it.
 #
-# - A stable release run calls it with the nightly it promotes, alongside packaging, and publishes
-#   only once it passed.
-# - By hand, from main, with the nightly to check.
+# - A stable release run calls it with the nightly it promotes and the commit it planned, alongside
+#   packaging, and publishes only once it passed. The nightly's tag must name exactly that commit.
+# - By hand, from main, with the nightly to check; its tag gives the commit.
 #
 # It reads releases and publishes nothing: no release, feed, Store or tag, and it holds no secret.
 # The run's evidence is kept 14 days; a failed run's profile 7.
@@ -17,6 +17,10 @@ on:
     inputs:
       candidate:
         description: The published nightly to upgrade to, by tag
+        type: string
+        required: true
+      sha:
+        description: The commit the release planned, which the candidate's tag must name
         type: string
         required: true
   workflow_dispatch:
@@ -36,10 +40,11 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 90
     # One at a time, and never cancelled: a run cut short could leave its firewall rules on its
-    # runner.
+    # runner. Every request waits its turn, so one by hand never replaces a release's.
     concurrency:
       group: upgrade-check
       cancel-in-progress: false
+      queue: max
     defaults:
       run:
         shell: bash
@@ -60,9 +65,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE: ${{ inputs.candidate }}
+          SHA: ${{ inputs.sha }}
         run: |
-          node apps/desktop/test/e2e/installed-upgrade.ts resolve --candidate "$CANDIDATE" \
-            --out "$RUNNER_TEMP/installed-upgrade-packages"
+          args=(--candidate "$CANDIDATE" --out "$RUNNER_TEMP/installed-upgrade-packages")
+          [ -n "$SHA" ] && args+=(--sha "$SHA")
+          node apps/desktop/test/e2e/installed-upgrade.ts resolve "${args[@]}"
       - name: Install, retain state and check offline copies
         run: |
           node apps/desktop/test/e2e/installed-upgrade.ts run \
