@@ -48,6 +48,7 @@ const guide: GuideStatus = {
   unresolved: 0,
   failure: null,
   failedAt: null,
+  processing: { state: "ready" },
 };
 
 const channel = (id: string, title: string, mappedTo: string | null = null): MapChannel => ({
