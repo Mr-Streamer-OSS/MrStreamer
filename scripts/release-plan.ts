@@ -15,9 +15,9 @@
 // counting from that package.json or the
 // newest stable release, whichever is newer, so a stable release that main has not recorded yet
 // never makes later nightlies sort below it. A stable release rebuilds the commit of the tested
-// nightly it is given, as the version that nightly previewed unless another is given. A nightly
-// from before the newest stable release qualifies only when it holds that release's commit, such
-// as the nightly a stable run publishes first, and needs a version given. When main
+// nightly it is given, as the version that nightly previewed unless another is given. The nightly
+// must sort above the newest stable release and strictly descend from its commit, the rule
+// packages/contracts/src/promotion.ts holds for the plan and the upgrade check alike. When main
 // has commits no published nightly holds, the stable run publishes a nightly of main first, so
 // Nightly users have every change before Stable users get any of it.
 //
@@ -36,6 +36,7 @@ import {
   type Channel,
   type Version,
 } from "../packages/contracts/src/version.ts";
+import { promotionProblem } from "../packages/contracts/src/promotion.ts";
 import { releaseFiles } from "../packages/contracts/src/release-files.ts";
 import {
   buildFeed,
@@ -265,35 +266,16 @@ export async function planStable(repo: Repository, request: StableRequest): Prom
     })
     .sort(compareVersions)
     .at(-1);
-  // Nightlies count from the newest stable release, so one sorting before it was planned before
-  // that release was out and can hold older code than stable users have. The nightly a stable run
-  // publishes first sorts before that release too, yet holds its commit and more: what decides is
-  // whether the nightly's commit contains the stable release's.
+  // The upgrade check installs the newest stable release and upgrades it to this nightly, so the
+  // plan holds the nightly to the same rule before any release work starts.
   if (previousStable) {
     const stableTag = tagOf(previousStable);
-    const holds = await repo.compare(stableTag, nightly.tag);
-    // The same source as the newest stable release, under a newer version, would ship nothing
-    // new, and the upgrade check, which needs the candidate to descend from that release, would
-    // refuse it after packaging.
-    if (holds === "identical") {
-      throw new Error(
-        `${nightly.tag} was built from the same commit as ${stableTag}, so it holds nothing new. Promote a nightly with changes since ${stableTag}.`,
-      );
-    }
-    if (compareVersions(previewed, previousStable) < 0) {
-      if (holds !== "ahead") {
-        throw new Error(
-          `${nightly.tag} came before ${stableTag} and lacks its commit, so it can hold older code. Promote a nightly that contains ${stableTag}.`,
-        );
-      }
-      // The version it previewed is out already, or sorts before one that is.
-      if (!request.version) {
-        const next = { ...previousStable, patch: previousStable.patch + 1 };
-        throw new Error(
-          `${stableTag} is out already, so enter the version to release ${nightly.tag} as, such as ${formatVersion(next)}.`,
-        );
-      }
-    }
+    const problem = promotionProblem(
+      { tag: nightly.tag, version: previewed },
+      { tag: stableTag, version: previousStable },
+      await repo.compare(stableTag, nightly.tag),
+    );
+    if (problem) throw new Error(problem);
   }
 
   const version = request.version ? parseVersion(request.version) : { ...previewed, nightly: null };

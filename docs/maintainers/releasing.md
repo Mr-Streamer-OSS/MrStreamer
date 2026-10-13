@@ -63,7 +63,7 @@ Releases come from `.github/workflows/release.yml`, which plans them, builds eac
 1. Test a nightly: install it, update an existing install to it, and play a few channels.
 2. Run the Release workflow on `main` with channel **stable**. Enter the nightly you tested, such as `0.0.2-nightly.20260930.30` or its tag. It's required: the plan refuses a stable run without it, so a nightly published after your test can't ship untested.
 3. Leave the version empty to release the version the nightly previewed (`0.0.2-nightly.*` ships as `0.0.2`), or enter one that sorts after it and every stable release, such as `0.1.0`.
-   A nightly from before the newest stable release can ship only when it holds that release's commit, like the nightly a stable run publishes first: 0.0.4's run published `0.0.4-nightly.20261002.117` from a newer commit than 0.0.4. The version it previewed is out by then, so enter one, such as `0.0.5`.
+   The nightly must sort above the newest stable release and strictly descend from its commit, the rule `packages/contracts/src/promotion.ts` holds for the plan and the upgrade check alike. A nightly from before the newest stable release never ships, whatever version you enter, and neither does one built from that release's own commit: test a fresh nightly published after it. The nightly a stable run publishes first qualifies until that stable release is out; after it, it sorts below it.
 4. When `main` has commits the latest published nightly doesn't, the run first publishes a nightly of `main`, without waiting five hours, and updates the feed. Nightly users then have every change before Stable users get any of it. That nightly previews the patch after the newest stable release, usually the same version as the one you tested, such as `0.0.2-nightly.20261002.31`, so it sorts after it and before the stable release. Its notes list the changes since the previous nightly. The stable release builds only once that nightly is published and the feed names it. When the latest nightly already has `main`'s commit, the run skips this step.
 5. The run rebuilds the tested nightly's exact commit with the stable version, never that of the nightly it just published. The nightly's files carry the nightly version, so they're never reused. Merges to `main` since the tested nightly don't reach the build. Beside the build, the [upgrade check](../contributing/testing.md#installed-upgrade) installs the newest stable release on Windows and upgrades it to the tested nightly; the release publishes only once that passed.
 6. It publishes the release as latest and updates the feed. Stable users are offered it from then on. Nightly users aren't: the feed's `nightly` keeps naming the newest nightly, the one published before the stable release when the run published one.
@@ -75,9 +75,12 @@ The plan refuses a stable release when:
 - no nightly is entered
 - the nightly entered is a draft, has no release, or isn't a nightly version
 - `main` doesn't contain the nightly's commit
-- the nightly came before the newest stable release and lacks its commit, so it can hold older code
-- the nightly was built from the newest stable release's own commit, so it holds nothing new, and the upgrade check could never pass for it
-- the nightly came before the newest stable release and no version is entered
+- the nightly sorts below the newest stable release, such as one published before it: the upgrade check can't install it over that release
+- the nightly was built from the newest stable release's own commit, so it holds nothing new
+- the nightly's commit doesn't descend from the newest stable release's, so it can hold older code
+
+Each of these needs a fresh tested nightly. The upgrade check applies the same rule, so a stable run the plan accepts never fails it for eligibility after packaging.
+
 - the version is already released or would sort before the nightly
 - the nightly to publish first would sort after the stable release, which happens only when `package.json` on `main` records a version no release has
 

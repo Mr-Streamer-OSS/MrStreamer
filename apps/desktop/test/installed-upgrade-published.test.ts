@@ -182,17 +182,31 @@ describe("the newest published stable release", () => {
     await expect(world.resolve()).rejects.toThrow(/no published stable release/);
   });
 
-  it("refuses a candidate no newer than the newest stable", async () => {
+  // The release plan's rule (packages/contracts/src/promotion.ts), so a promotion the plan
+  // accepts is one this check accepts too.
+  it("refuses a candidate no newer than the newest stable, whatever it holds", async () => {
     const world = published();
+    const newer = "c".repeat(40);
     world.releases.unshift(listed("v0.0.12"));
-    world.json["/commits/v0.0.12"] = { sha: "c".repeat(40) };
-    await expect(world.resolve()).rejects.toThrow(/not newer than stable v0\.0\.12/);
+    world.json["/commits/v0.0.12"] = { sha: newer };
+    world.json[`/compare/${newer}...main?per_page=1`] = world.onMain;
+    world.json[`/compare/${newer}...${EXPECTED.candidateSha}?per_page=1`] = world.diff;
+    await expect(world.resolve()).rejects.toThrow(
+      `${EXPECTED.candidateTag} sorts below v0.0.12, the newest stable release, so the upgrade check can't install it over that release. A stable release needs a fresh tested nightly: test one published after v0.0.12.`,
+    );
   });
 
   it("refuses tags that name the same commit", async () => {
     const world = published();
     world.json[`/commits/${EXPECTED.candidateTag}`] = { sha: EXPECTED.stableSha };
-    await expect(world.resolve()).rejects.toThrow(/different source commit/);
+    world.json[`/compare/${EXPECTED.stableSha}...${EXPECTED.stableSha}?per_page=1`] = {
+      status: "identical",
+      ahead_by: 0,
+      behind_by: 0,
+    };
+    await expect(world.resolve()).rejects.toThrow(
+      `${EXPECTED.candidateTag} was built from the same commit as ${EXPECTED.stableTag}, so it holds nothing new.`,
+    );
   });
 });
 
@@ -251,8 +265,16 @@ describe("the candidate and both published packages", () => {
 
   it("rejects non-descendants and sources absent from main", async () => {
     const world = published();
-    world.diff.status = "diverged";
+    for (const status of ["diverged", "behind"]) {
+      world.diff.status = status;
+      await expect(world.resolve()).rejects.toThrow(
+        `${EXPECTED.candidateTag} doesn't contain ${EXPECTED.stableTag}'s commit (${status})`,
+      );
+    }
+    world.diff.status = "ahead";
+    world.diff.ahead_by = 0;
     await expect(world.resolve()).rejects.toThrow(/strictly descend/);
+    world.diff.ahead_by = 8;
     world.diff.status = "ahead";
     world.onMain.status = "behind";
     await expect(world.resolve()).rejects.toThrow(/main does not contain/);

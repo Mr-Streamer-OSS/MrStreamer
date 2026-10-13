@@ -24,6 +24,7 @@ import {
   type Channel,
 } from "../packages/contracts/src/version.ts";
 import { newestOn, type Offer } from "../packages/core/src/updates/feed.ts";
+import { promotionProblem } from "../packages/contracts/src/promotion.ts";
 import {
   buildFeed,
   mergeFeeds,
@@ -484,62 +485,73 @@ describe("stable releases", () => {
         [`${latest}...head`]: "ahead",
       },
     }).repo;
+  const FRESH = "A stable release needs a fresh tested nightly: test one published after v0.0.1.";
 
-  it("are refused for a nightly from before the newest stable release that lacks its commit, whatever the version", async () => {
-    for (const holds of ["behind", "diverged"] as const) {
-      await expect(
-        planStable(afterStable(holds), promote(latest, { version: "0.1.0" })),
-      ).rejects.toThrow(`${latest} came before v0.0.1 and lacks its commit`);
+  it("are refused for a nightly that sorts below the newest stable release, whatever it holds or the version entered", async () => {
+    // The upgrade check installs the newest stable release, then the nightly: it can't go down.
+    for (const holds of ["ahead", "identical", "behind", "diverged"] as const) {
+      for (const version of [undefined, "0.0.2", "0.1.0"]) {
+        await expect(planStable(afterStable(holds), promote(latest, { version }))).rejects.toThrow(
+          `${latest} sorts below v0.0.1, the newest stable release, so the upgrade check can't install it over that release. ${FRESH}`,
+        );
+      }
     }
   });
 
-  it("promote a nightly from before the newest stable release that contains its commit", async () => {
-    expect(await planStable(afterStable("ahead"), promote(latest, { version: "0.0.2" }))).toEqual({
+  // A nightly planned after 0.0.1 shipped, which previews 0.0.2. `holds` says how it relates to
+  // 0.0.1's commit.
+  const fresh = "v0.0.2-nightly.20261002.35";
+  const afterRelease = (holds: History) =>
+    repository({
+      releases: [published("v0.0.1", 10, false), published(fresh, 8)],
+      commits: { [fresh]: "fresh-commit" },
+      histories: {
+        "fresh-commit...main": "ahead",
+        [`v0.0.1...${fresh}`]: holds,
+        [`${fresh}...head`]: "identical",
+      },
+    }).repo;
+
+  it("promote a fresh nightly that sorts above the newest stable release and holds its commit and more", async () => {
+    expect(await planStable(afterRelease("ahead"), promote(fresh))).toEqual({
       channel: "stable",
       version: "0.0.2",
       tag: "v0.0.2",
-      sha: "nightly-commit",
+      sha: "fresh-commit",
       previousTag: "v0.0.1",
-      nightlyFirst: {
-        channel: "nightly",
-        version: "0.0.2-nightly.20261002.40",
-        tag: "v0.0.2-nightly.20261002.40",
-        sha: "head",
-        previousTag: latest,
-      },
+      nightlyFirst: null,
     });
   });
 
-  it("are refused for a nightly built from the newest stable release's own commit, before packaging", async () => {
-    // Promoting the same source again would ship nothing new, and the upgrade check would refuse
-    // a candidate that doesn't descend from that release.
-    await expect(
-      planStable(afterStable("identical"), promote(latest, { version: "0.0.2" })),
-    ).rejects.toThrow(
-      `${latest} was built from the same commit as v0.0.1, so it holds nothing new. Promote a nightly with changes since v0.0.1.`,
+  it("are refused, before packaging, for a fresh nightly that doesn't strictly descend from the newest stable release", async () => {
+    await expect(planStable(afterRelease("identical"), promote(fresh))).rejects.toThrow(
+      `${fresh} was built from the same commit as v0.0.1, so it holds nothing new. ${FRESH}`,
     );
-
-    // A nightly planned after the release, from that same commit, is refused the same way.
-    const later = "v0.0.2-nightly.20261002.35";
-    const { repo } = repository({
-      releases: [published("v0.0.1", 10, false), published(later, 8)],
-      commits: { [later]: "stable-commit" },
-      histories: { "stable-commit...main": "ahead", [`v0.0.1...${later}`]: "identical" },
-    });
-    await expect(planStable(repo, promote(later))).rejects.toThrow(
-      `${later} was built from the same commit as v0.0.1`,
-    );
+    for (const holds of ["behind", "diverged"] as const) {
+      await expect(planStable(afterRelease(holds), promote(fresh))).rejects.toThrow(
+        `${fresh} doesn't contain v0.0.1's commit (${holds}), so it can hold older code than 0.0.1. ${FRESH}`,
+      );
+    }
   });
 
-  it("need the version entered to promote a nightly from before the newest stable release", async () => {
-    const repo = afterStable("ahead");
+  it("hold the tested nightly to the upgrade check's rule while a nightly of main goes first", async () => {
+    // Stable 0.0.0 is out, main is ahead of the tested nightly, so the run publishes a nightly of
+    // main first. The upgrade check runs while the stable release builds, when 0.0.0 is still the
+    // newest stable release: the tested nightly the plan accepted passes the same rule there.
+    const { repo } = promotion([published("v0.0.0", 50, false)], "ahead");
+    const plan = await planStable(repo, promote(older));
+    const stable = { tag: "v0.0.0", version: parseVersion("0.0.0")! };
 
-    await expect(planStable(repo, promote(latest))).rejects.toThrow(
-      `v0.0.1 is out already, so enter the version to release ${latest} as, such as 0.0.2`,
-    );
-    await expect(planStable(repo, promote(latest, { version: "0.0.1" }))).rejects.toThrow(
-      "v0.0.1 already exists",
-    );
+    expect(plan.nightlyFirst).toMatchObject({ previousTag: latest });
+    expect(
+      promotionProblem({ tag: older, version: parseVersion(older)! }, stable, "ahead"),
+    ).toBeNull();
+    // The nightly published first sorts above 0.0.0 and is built from main, which holds 0.0.0:
+    // until the stable release after it is out, it qualifies too.
+    const first = plan.nightlyFirst!;
+    expect(
+      promotionProblem({ tag: first.tag, version: parseVersion(first.version)! }, stable, "ahead"),
+    ).toBeNull();
   });
 });
 

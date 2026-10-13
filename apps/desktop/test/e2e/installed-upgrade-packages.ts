@@ -20,6 +20,12 @@ import {
   parseVersion,
   type Version,
 } from "../../../../packages/contracts/src/version.ts";
+import {
+  promotionProblem,
+  type Ancestry as History,
+} from "../../../../packages/contracts/src/promotion.ts";
+
+const ANCESTRIES: readonly History[] = ["ahead", "identical", "behind", "diverged"];
 
 /** The read-only GitHub REST answers the check takes. Tests answer from fixtures. */
 export interface GitHub {
@@ -198,13 +204,8 @@ export async function resolvePackages(
     candidate.sha === undefined || candidateSha === candidate.sha,
     `${candidateTag} names ${candidateSha}, not ${candidate.sha}, the commit the release planned.`,
   );
-  const resolved = checkPair({
-    stableTag,
-    stableSha: await commitOf(stableTag),
-    candidateTag,
-    candidateSha,
-  });
-  for (const source of [resolved.stableSha, resolved.candidateSha]) {
+  const stableSha = await commitOf(stableTag);
+  for (const source of [stableSha, candidateSha]) {
     const onMain = Ancestry.assert(await github.json(`/compare/${source}...main?per_page=1`));
     check(
       (onMain.status === "ahead" || onMain.status === "identical") && onMain.behind_by === 0,
@@ -212,12 +213,22 @@ export async function resolvePackages(
     );
   }
   const diff = Ancestry.assert(
-    await github.json(`/compare/${resolved.stableSha}...${resolved.candidateSha}?per_page=1`),
+    await github.json(`/compare/${stableSha}...${candidateSha}?per_page=1`),
   );
+  // The release plan's own rule for which nightly a stable release may promote.
+  const ancestry = ANCESTRIES.find((known) => known === diff.status);
+  check(ancestry, `GitHub compared ${stableTag} and ${candidateTag} as "${diff.status}".`);
+  const problem = promotionProblem(
+    { tag: candidateTag, version: tagVersion(candidateTag, "nightly")! },
+    { tag: stableTag, version: tagVersion(stableTag, "stable")! },
+    ancestry,
+  );
+  check(!problem, problem ?? "");
   check(
-    diff.status === "ahead" && diff.ahead_by > 0 && diff.behind_by === 0,
+    diff.ahead_by > 0 && diff.behind_by === 0,
     "The candidate does not strictly descend from stable.",
   );
+  const resolved = checkPair({ stableTag, stableSha, candidateTag, candidateSha });
 
   const files = new Map<string, Uint8Array>();
   const resolve = async (stage: Package["stage"], tag: string, source: string) => {
