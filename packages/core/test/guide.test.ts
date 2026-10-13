@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
@@ -14,7 +14,14 @@ import {
   type GuideIndex,
 } from "../src/guide/index-file.ts";
 import { GUIDE_LIMITS } from "../src/guide/limits.ts";
-import { mappedChannels, type CatalogueChannels } from "../src/guide/programmes.ts";
+import {
+  channelsCovered,
+  listingsAt,
+  mappedChannels,
+  rangeAt,
+  searchAt,
+  type CatalogueChannels,
+} from "../src/guide/programmes.ts";
 import { xmltvReader, type XmltvChannel, type XmltvProgramme } from "../src/guide/xmltv.ts";
 
 /** Noon on a day in October 2026, in UTC. */
@@ -211,6 +218,19 @@ describe("reading XMLTV as it arrives", () => {
   });
 });
 
+/** A catalogue channel by its id. */
+const liveChannel = (id: string): LiveChannel => ({
+  subscriptionId: "s",
+  id,
+  name: `Channel ${id}`,
+  title: `Channel ${id}`,
+  tags: [],
+  number: null,
+  logoUrl: null,
+  categoryIds: [],
+  variants: [{ id, name: `Channel ${id}`, tags: [], quality: null }],
+});
+
 describe("indexing a guide", () => {
   /** Indexes `document` as of NOON, as an own guide unless `strict`, and opens what it wrote. */
   const index = async (document: string | Uint8Array, build: Partial<GuideBuild> = {}) => {
@@ -237,7 +257,7 @@ describe("indexing a guide", () => {
   };
   const opened: GuideIndex[] = [];
   afterEach(async () => {
-    await Promise.all(opened.splice(0).map((guide) => guide.release()));
+    await Promise.all(opened.splice(0).map((guide) => guide.retire()));
   });
 
   /** Every programme of a guide channel the index keeps, as [title, start, stop]. */
@@ -407,6 +427,130 @@ describe("indexing a guide", () => {
       ["Evening", NOON + 7 * HOUR, NOON + 8 * HOUR],
     ]);
     expect(guide.channels.has("gone.test")).toBe(false);
+  });
+
+  it("brings along no past that ends before the archive window once cut short", async () => {
+    const before = await index(
+      tv(programme("one.test", stamp(NOON - 10 * DAY), stamp(NOON + HOUR), "Old long")),
+      { archive: 7 * DAY },
+    );
+    // The next download begins the channel eight days ago: what came before it ends then.
+    const { guide, summary } = await index(
+      tv(programme("one.test", stamp(NOON - 8 * DAY), stamp(NOON + 2 * HOUR), "New long")),
+      { previous: before.target, archive: 7 * DAY },
+    );
+
+    expect(of(guide, "one.test")).toEqual([["New long", NOON - 8 * DAY, NOON + 2 * HOUR]]);
+    expect(summary.programmes).toBe(1);
+  });
+
+  it("fails rather than bring nothing along when the index before is gone", async () => {
+    const before = await index(tv(later("one.test")));
+    await rm(before.target);
+
+    expect(await refusal(index(tv(later("one.test")), { previous: before.target }))).toBeInstanceOf(
+      Error,
+    );
+    // Nothing was made where the index before was.
+    await expect(readFile(before.target)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("keeps the first entry of a start time, also one without an end before one with an end", async () => {
+    const { guide } = await index(
+      tv(
+        programme("one.test", stamp(NOON), null, "No end"),
+        programme("one.test", stamp(NOON), stamp(NOON + HOUR), "Timed again"),
+        programme("one.test", stamp(NOON + 2 * HOUR), stamp(NOON + 3 * HOUR), "Later"),
+      ),
+    );
+
+    // It runs until the next start. Releases before 0.0.13 showed the timed one instead.
+    expect(of(guide, "one.test")).toEqual([
+      ["No end", NOON, NOON + 2 * HOUR],
+      ["Later", NOON + 2 * HOUR, NOON + 3 * HOUR],
+    ]);
+  });
+
+  it("stays open for a read that holds it, after it is retired, and closes once the last lets go", async () => {
+    const { guide } = await index(tv(later("one.test")));
+    const channel = guide.channels.get("one.test");
+    if (!channel) throw new Error("No channel.");
+    const letGo = guide.hold();
+    if (!letGo) throw new Error("No hold.");
+    let closed = false;
+    const retired = guide.retire().then(() => (closed = true));
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(closed).toBe(false);
+    expect(guide.schedule(channel, NOON)).toMatchObject([{ title: "Later" }]);
+    letGo();
+    await retired;
+    expect(guide.hold()).toBeNull();
+  });
+
+  it("shows each channel from a guide id with programmes still to come, and a stretch of the past from the one that had them then", async () => {
+    const { guide } = await index(
+      tv(
+        programme("past.test", stamp(NOON - 2 * HOUR), stamp(NOON - HOUR), "Old news"),
+        programme("future.test", stamp(NOON - HOUR), stamp(NOON + HOUR), "Current news"),
+        // A channel the guide only keeps the past of.
+        programme("over.test", stamp(NOON - 3 * HOUR), stamp(NOON - 2 * HOUR), "Ended news"),
+      ),
+    );
+    const one = liveChannel("1");
+    const two = liveChannel("2");
+    // One names an id that ended before the one on now; Two names only an ended one.
+    const ids: Record<string, readonly string[]> = {
+      "1": ["past.test", "future.test"],
+      "2": ["over.test"],
+    };
+    const catalogue = {
+      guideIdsOf: (id: string) => ids[id] ?? [],
+      channelsOf: (guideId: string) =>
+        guideId === "over.test"
+          ? [two]
+          : guideId === "past.test" || guideId === "future.test"
+            ? [one]
+            : [],
+    };
+
+    expect(listingsAt(guide, catalogue, ["1", "2"], NOON)).toEqual({
+      "1": { now: expect.objectContaining({ title: "Current news" }), next: null },
+    });
+    expect(
+      (await searchAt(guide, catalogue, "news", NOON)).map((match) => match.programme.title),
+    ).toEqual(["Current news"]);
+    // Only what has programmes to come is covered.
+    expect(channelsCovered(guide, catalogue, NOON)).toBe(1);
+    // Two and a half hours ago, both ended ids still had programmes to come.
+    expect(channelsCovered(guide, catalogue, NOON - 2.5 * HOUR)).toBe(2);
+    expect(
+      rangeAt(guide, catalogue, ["1", "2"], NOON - 2.5 * HOUR, NOON - 1.5 * HOUR),
+    ).toMatchObject({
+      "1": [{ title: "Old news" }],
+      "2": [{ title: "Ended news" }],
+    });
+  });
+
+  it("lets other work in while it compares many titles, though none of them match", async () => {
+    // More titles than one page of a search compares at once, all of them different.
+    const titles = Array.from({ length: 25_000 }, (_, at) => {
+      const start = NOON + at * 60_000;
+      return programme("one.test", stamp(start), stamp(start + 60_000), `Episode ${at}`);
+    });
+    const { guide } = await index(tv(...titles));
+    const channels = new Set([guide.channels.get("one.test")?.key ?? 0]);
+    let otherWork = false;
+    setImmediate(() => (otherWork = true));
+    let found = 0;
+
+    await guide.matching(
+      { words: ["weather"], at: NOON, channels, before: () => Number.POSITIVE_INFINITY },
+      () => found++,
+    );
+
+    expect(found).toBe(0);
+    expect(otherWork).toBe(true);
   });
 
   it("finds programmes whose title has every word, as far as it is asked to look", async () => {

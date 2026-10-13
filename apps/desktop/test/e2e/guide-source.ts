@@ -334,9 +334,12 @@ try {
     if ((await nowOn(page, subscriptionId, picked.id)) !== undefined) {
       back.push("the channel that was mapped still shows programmes");
     }
-    if (guideFiles().join() !== "guide-index.*.sqlite,guide.json") {
-      back.push(`the profile keeps ${guideFiles().join(", ")}`);
+    // The address's index goes once nothing reads it: a few seconds at most.
+    const kept = ["guide-index.*.sqlite", "guide.json"].join();
+    for (let waited = 0; guideFiles().join() !== kept && waited < 5000; waited += 100) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
     }
+    if (guideFiles().join() !== kept) back.push(`the profile keeps ${guideFiles().join(", ")}`);
     report("Use provider guide goes back, and drops the address", back);
   }
   page.close();

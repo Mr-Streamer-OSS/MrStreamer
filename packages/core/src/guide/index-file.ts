@@ -18,6 +18,7 @@
 // other work in, finds it as it was.
 import { rename, rm } from "node:fs/promises";
 import { createReadStream } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import type { GuideFailure, Listing, Programme } from "@mrstreamer/contracts/guide";
@@ -39,7 +40,9 @@ const SLICE_MS = 8;
 /** How far past `at` each stretch a search reads ends: six hours, a day, four days, then all. */
 const STRETCHES = [6, 24, 96].map((hours) => hours * 60 * 60 * 1000);
 /** Titles one read of a search looks up together. */
-const TITLES_AT_ONCE = 1_000;
+const TITLES_AT_ONCE = 250;
+/** Titles one step of a search compares with its words, matching or not. */
+const TITLES_PER_PAGE = 10_000;
 /**
  * Programmes longer than this are indexed apart for searches: a search reads what began this long
  * before now for what is on now, and the few longer ones, a day's coverage or a four-day event,
@@ -156,7 +159,9 @@ export async function buildGuideIndex(
       titles.set(text, key);
       return key;
     };
-    // Duplicates of a start time count once: the first the document lists.
+    // Duplicates of a start time count once: the first the document lists, also when it has no
+    // end and a later one does, so it runs until the next start. Releases before 0.0.13 kept the
+    // later one then, as they dropped an entry whose end the next start would make empty.
     const insertProgramme = db.prepare("insert or ignore into programme values (?, ?, ?, ?, ?)");
     let batch: XmltvProgramme[] = [];
     let read = 0;
@@ -260,11 +265,12 @@ function timeline(db: DatabaseSync, cutoff: number) {
  * Brings along what the index before, at `previous`, keeps of the past that the new document no
  * longer lists: on each channel the document has programmes for, what starts before its first
  * one there, cut short where that one begins. A channel the document no longer has programmes
- * for goes, past and all: the guide no longer vouches for it. An index of another layout brings
- * nothing.
+ * for goes, past and all: the guide no longer vouches for it, and so does what ends before
+ * `cutoff` once cut short. An index of another layout brings nothing. The index before is read,
+ * never written, and one that is gone fails the build rather than bringing nothing.
  */
 function carry(db: DatabaseSync, previous: string, cutoff: number) {
-  db.prepare("attach database ? as old").run(previous);
+  db.prepare("attach database ? as old").run(`${pathToFileURL(previous).href}?mode=ro`);
   try {
     if (db.prepare("pragma old.user_version").get()?.["user_version"] !== VERSION) return;
     db.exec(`
@@ -291,7 +297,7 @@ function carry(db: DatabaseSync, previous: string, cutoff: number) {
       join old.programme as programme on programme.channel = was.key
       join old.title as named on named.key = programme.title
       join title on title.text = named.text
-      where programme.stop > ? and programme.start < opening.start
+      where min(programme.stop, opening.start) > ? and programme.start < opening.start
     `,
     ).run(cutoff);
     db.exec("drop table temp.opening; commit;");
@@ -352,7 +358,11 @@ export interface FoundProgramme {
   readonly title: string;
 }
 
-/** An index opened to read. */
+/**
+ * An index opened to read. Its reads need the file open: whoever reads takes a hold first and
+ * lets go once done with all it read, however long that takes, and `retire` closes the file only
+ * once every hold has ended.
+ */
 export interface GuideIndex {
   /** Every channel the guide lists, by its id, in name order. */
   readonly channels: ReadonlyMap<string, IndexedChannel>;
@@ -373,8 +383,9 @@ export interface GuideIndex {
    * The programmes on `channels` whose title has each of `words`, that haven't ended at `at`
    * and start before `before()`, handed to `visit` in no particular order. `before` is asked
    * again between stretches of time, so a search that has found enough reads no further. Lets
-   * other work in now and then: it holds the process a few milliseconds at a time, however much
-   * it finds.
+   * other work in between pages of titles, whether any matched, and every few milliseconds
+   * between the programmes it reads, however much it finds. It holds the file itself while it
+   * reads; a caller that reads the programmes it found holds it too.
    */
   matching(
     search: {
@@ -386,8 +397,13 @@ export interface GuideIndex {
     },
     visit: (found: FoundProgramme) => void,
   ): Promise<void>;
-  /** Closes the file once the reads under way are done, so it can go. */
-  release(): Promise<void>;
+  /**
+   * Keeps the file open for a read until the function answered is called, once. Null once the
+   * file is closed. Once retired, it stays open only while the holds taken before last.
+   */
+  hold(): (() => void) | null;
+  /** Takes no more holds, and closes the file once every hold has ended, so it can go. */
+  retire(): Promise<void>;
 }
 
 /**
@@ -466,13 +482,25 @@ function reader(
     select programme.start, programme.stop, title.text as title, programme.description
     from programme join title on title.key = programme.title
     where programme.channel = ? and programme.start = ?`);
-  /** Reads under way, and whether the file closes once they are done. */
-  let active = 0;
+  /** Holds not yet let go of, and whether the file closes once they are. */
+  let holds = 0;
   let closing: PromiseWithResolvers<void> | null = null;
   const closed = () => {
-    if (active > 0 || !closing) return;
+    if (holds > 0 || !closing) return;
     if (db.isOpen) db.close();
     closing.resolve();
+  };
+  const hold = () => {
+    // Retired, a file stays open for whoever still holds it, and those reads may take more.
+    if (!db.isOpen) return null;
+    holds++;
+    let held = true;
+    return () => {
+      if (!held) return;
+      held = false;
+      holds--;
+      closed();
+    };
   };
   const unended = (rows: Record<string, unknown>[], at: number) =>
     rows.map(programmeOf).filter((programme) => programme.stop > at);
@@ -493,17 +521,23 @@ function reader(
       return row ? programmeOf(row) : null;
     },
     async matching({ words, at, channels, before }, visit) {
-      if (words.length === 0 || channels.size === 0 || closing) return;
-      active++;
+      if (words.length === 0 || channels.size === 0) return;
+      const letGo = hold();
+      if (!letGo) return;
       try {
         const slice = slicer();
+        // The titles that match, a page of keys at a time, so that comparing them holds the
+        // process no longer than a page takes, however few of them match.
         const titles: number[] = [];
+        const last = Number(db.prepare("select max(key) as last from title").get()?.["last"] ?? 0);
         const which = db.prepare(
-          `select key from title where ${words.map(() => "instr(folded, ?) > 0").join(" and ")}`,
+          `select key from title where key > ? and key <= ? and ${words.map(() => "instr(folded, ?) > 0").join(" and ")}`,
         );
-        for (const row of which.iterate(...words)) {
-          titles.push(Number(row["key"]));
-          if (slice.due()) await slice.rest();
+        for (let after = 0; after < last; after += TITLES_PER_PAGE) {
+          for (const row of which.iterate(after, after + TITLES_PER_PAGE, ...words)) {
+            titles.push(Number(row["key"]));
+          }
+          await slice.rest();
         }
         if (titles.length === 0) return;
         // Few of the guide's channels: the file leaves out the others' before reading a row.
@@ -555,11 +589,11 @@ function reader(
           if (slice.due()) await slice.rest();
         }
       } finally {
-        active--;
-        closed();
+        letGo();
       }
     },
-    release() {
+    hold,
+    retire() {
       closing ??= Promise.withResolvers();
       closed();
       return closing.promise;

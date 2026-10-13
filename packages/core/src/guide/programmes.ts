@@ -127,28 +127,31 @@ export function listingsAt(
 ): Record<string, Listing> {
   const result: Record<string, Listing> = {};
   for (const channelId of channelIds) {
-    const shown = shownChannel(index, channels, channelId);
+    const shown = shownChannel(index, channels, channelId, at);
     const listing = shown && index.listing(shown, at);
     if (listing) result[channelId] = listing;
   }
   return result;
 }
 
-/** How many of the catalogue's channels the guide has programmes for. */
-export function channelsCovered(index: GuideIndex, channels: GuideChannels): number {
-  return remembered(covered, index, channels, () => {
+/**
+ * How many of the catalogue's channels the guide has programmes for that haven't ended at `at`.
+ * A channel the guide only keeps the past of isn't covered.
+ */
+export function channelsCovered(index: GuideIndex, channels: GuideChannels, at: number): number {
+  return remembered(covered, index, channels, at, () => {
     let count = 0;
     for (const { id, until } of index.channels.values()) {
-      if (until === null) continue;
+      if (until === null || until <= at) continue;
       for (const channel of channels.channelsOf(id)) {
-        if (shownGuideId(index, channels, channel.id) === id) count++;
+        if (shownGuideId(index, channels, channel.id, at) === id) count++;
       }
     }
     return count;
   });
 }
 
-const covered = new WeakMap<GuideIndex, WeakMap<GuideChannels, number>>();
+const covered = new WeakMap<GuideIndex, WeakMap<GuideChannels, Remembered<number>>>();
 
 /** The channel's programme on now and everything after it that the guide knows. */
 export function scheduleAt(
@@ -157,13 +160,14 @@ export function scheduleAt(
   channelId: string,
   at: number,
 ): readonly Programme[] {
-  const shown = shownChannel(index, channels, channelId);
+  const shown = shownChannel(index, channels, channelId, at);
   return shown ? index.schedule(shown, at) : [];
 }
 
 /**
  * Each channel's programmes that overlap [from, to), past ones the guide keeps among them, by
- * channel id. Channels without guide data are left out.
+ * channel id: of the guide channel that still has programmes at `from`, so a grid scrolled back
+ * shows what the guide kept of then. Channels without guide data are left out.
  */
 export function rangeAt(
   index: GuideIndex,
@@ -174,7 +178,7 @@ export function rangeAt(
 ): Record<string, readonly Programme[]> {
   const result: Record<string, readonly Programme[]> = {};
   for (const channelId of channelIds) {
-    const shown = shownChannel(index, channels, channelId);
+    const shown = shownChannel(index, channels, channelId, from);
     if (shown) result[channelId] = index.range(shown, from, to);
   }
   return result;
@@ -182,7 +186,8 @@ export function rangeAt(
 
 /**
  * Programmes on now or later whose title has every word of `query`, on the first channel in the
- * catalogue that shows them. On now comes first, then by start time.
+ * catalogue that shows them. On now comes first, then by start time. The caller holds the index
+ * throughout: the programmes found are read whole at the end.
  */
 export async function searchAt(
   index: GuideIndex,
@@ -192,7 +197,7 @@ export async function searchAt(
 ): Promise<readonly ProgrammeMatch[]> {
   const words = searchWords(query);
   if (words.length === 0) return [];
-  const shown = searchable(index, channels);
+  const shown = searchable(index, channels, at);
   /** The best found so far, best first: on now, then by start time. */
   const best: { readonly found: FoundProgramme; readonly channel: LiveChannel }[] = [];
   const rank = (found: FoundProgramme) => (found.start <= at ? 0 : 1);
@@ -223,24 +228,32 @@ export async function searchAt(
 }
 
 /**
- * The catalogue channel a search names for each guide channel the guide has programmes for:
- * the first that shows it, leaving out channels for adults, which show only in Live TV's lists.
+ * The catalogue channel a search names for each guide channel with programmes that haven't
+ * ended at `at`: the first that shows it, leaving out channels for adults, which show only in
+ * Live TV's lists.
  */
-function searchable(index: GuideIndex, channels: GuideChannels): ReadonlyMap<number, LiveChannel> {
-  return remembered(shownBy, index, channels, () => {
+function searchable(
+  index: GuideIndex,
+  channels: GuideChannels,
+  at: number,
+): ReadonlyMap<number, LiveChannel> {
+  return remembered(shownBy, index, channels, at, () => {
     const shown = new Map<number, LiveChannel>();
     for (const { key, id, until } of index.channels.values()) {
-      if (until === null) continue;
+      if (until === null || until <= at) continue;
       const channel = channels
         .channelsOf(id)
-        .find((each) => !each.adult && shownGuideId(index, channels, each.id) === id);
+        .find((each) => !each.adult && shownGuideId(index, channels, each.id, at) === id);
       if (channel) shown.set(key, channel);
     }
     return shown;
   });
 }
 
-const shownBy = new WeakMap<GuideIndex, WeakMap<GuideChannels, ReadonlyMap<number, LiveChannel>>>();
+const shownBy = new WeakMap<
+  GuideIndex,
+  WeakMap<GuideChannels, Remembered<ReadonlyMap<number, LiveChannel>>>
+>();
 
 /**
  * What a search for `query` finds in the programmes of `channelIds`, by channel id: whether the
@@ -261,7 +274,7 @@ export async function searchChannelsAt(
   if (words.length === 0) return {};
   const showing = new Map<number, string[]>();
   for (const channelId of channelIds) {
-    const shown = shownChannel(index, channels, channelId);
+    const shown = shownChannel(index, channels, channelId, at);
     if (!shown) continue;
     const ids = showing.get(shown.key);
     if (ids) ids.push(channelId);
@@ -296,17 +309,18 @@ export function unresolvedMappings(index: GuideIndex | null, channels: MappedCha
   return count;
 }
 
-/** One of a catalogue's channels as the mapping list shows it. */
+/** One of a catalogue's channels as the mapping list shows it at `at`. */
 export function mapChannel(
   index: GuideIndex,
   channels: MappedChannels,
   channel: LiveChannel,
+  at: number,
 ): MapChannel {
   return {
     id: channel.id,
     number: channel.number,
     title: channel.title,
-    guideId: shownGuideId(index, channels, channel.id) ?? null,
+    guideId: shownGuideId(index, channels, channel.id, at) ?? null,
     mappedTo: channels.mapped.get(channel.id) ?? null,
     listed: true,
   };
@@ -314,9 +328,9 @@ export function mapChannel(
 
 /**
  * A page of the catalogue's channels for the mapping list, in the lists' order: those without
- * programmes, those mapped by hand, or all, and of those the ones whose names have every word of
- * `query`, or whose number is one of them. Mapped channels the provider no longer lists come
- * last among the mapped ones, under the name they had.
+ * programmes still to come at `at`, those mapped by hand, or all, and of those the ones whose
+ * names have every word of `query`, or whose number is one of them. Mapped channels the provider
+ * no longer lists come last among the mapped ones, under the name they had.
  */
 export function mapChannelsAt(
   index: GuideIndex,
@@ -324,6 +338,7 @@ export function mapChannelsAt(
   { filter, query }: { readonly filter: MapFilter; readonly query: string },
   offset: number,
   limit: number,
+  at: number,
 ): { readonly total: number; readonly channels: readonly MapChannel[] } {
   const words = searchWords(query);
   const found = (name: string, number: number | null) =>
@@ -334,11 +349,13 @@ export function mapChannelsAt(
     if (total >= offset && rows.length < limit) rows.push(row());
     total++;
   };
-  for (const [at, channel] of channels.all.entries()) {
-    if (!found(channels.searchNames[at] ?? "", channel.number)) continue;
+  for (const [position, channel] of channels.all.entries()) {
+    if (!found(channels.searchNames[position] ?? "", channel.number)) continue;
     if (filter === "mapped" && !channels.mapped.has(channel.id)) continue;
-    if (filter === "without" && shownGuideId(index, channels, channel.id) !== undefined) continue;
-    take(() => mapChannel(index, channels, channel));
+    if (filter === "without" && shownGuideId(index, channels, channel.id, at) !== undefined) {
+      continue;
+    }
+    take(() => mapChannel(index, channels, channel, at));
   }
   if (filter === "mapped") {
     for (const [id, mapping] of channels.unlisted) {
@@ -359,13 +376,14 @@ export function mapChannelsAt(
 /**
  * A page of the channels a guide lists, by name: all of them, or those whose name or id has
  * every word of `query`, with the ones that begin with it first. Each says whether the guide has
- * programmes for it; none of the programmes come along.
+ * programmes for it that haven't ended at `at`; none of the programmes come along.
  */
 export function guideChannelsAt(
   index: GuideIndex,
   query: string,
   offset: number,
   limit: number,
+  at: number,
 ): GuideChannelPage {
   const words = searchWords(query);
   const whole = words.join(" ");
@@ -383,24 +401,25 @@ export function guideChannelsAt(
     total: matches.length,
     channels: matches
       .slice(offset, offset + limit)
-      .map(({ id, name, until }) => ({ id, name, programmes: until !== null })),
+      .map(({ id, name, until }) => ({ id, name, programmes: until !== null && until > at })),
   };
 }
 
 /**
- * The guide channel whose programmes a channel shows: the first of its ids the guide has
- * programmes for, past ones it keeps among them. So a spelling the guide doesn't know never
- * hides one it does, wherever the provider lists it, and a channel shows, counts and is found
- * once when the guide knows several.
+ * The guide channel whose programmes a channel shows from `after` on: the first of its ids the
+ * guide has programmes for that haven't ended by then. So a spelling the guide doesn't know, or
+ * only keeps the past of, never hides one it has programmes for, wherever the provider lists it,
+ * and a channel shows, counts and is found once when the guide knows several.
  */
 function shownChannel(
   index: GuideIndex,
   channels: GuideChannels,
   channelId: string,
+  after: number,
 ): IndexedChannel | undefined {
   for (const guideId of channels.guideIdsOf(channelId)) {
     const channel = index.channels.get(guideId);
-    if (channel && channel.until !== null) return channel;
+    if (channel && channel.until !== null && channel.until > after) return channel;
   }
   return undefined;
 }
@@ -409,22 +428,57 @@ function shownGuideId(
   index: GuideIndex,
   channels: GuideChannels,
   channelId: string,
+  after: number,
 ): string | undefined {
-  return shownChannel(index, channels, channelId)?.id;
+  return shownChannel(index, channels, channelId, after)?.id;
 }
 
-/** What `work` makes of a guide and a catalogue's channels, kept while both are the same. */
+/** What `remembered` keeps: an answer, and how long it holds. */
+interface Remembered<A> {
+  readonly value: A;
+  /** How many of the guide's channels had no programmes left then: it holds while as many have. */
+  readonly ended: number;
+}
+
+/** When each of a guide's channels' programmes end, in order: what decides which still have any. */
+const ends = new WeakMap<GuideIndex, readonly number[]>();
+
+/** How many of a guide's channels have no programmes left at `at`, the guide's last ones among them. */
+function endedBy(index: GuideIndex, at: number): number {
+  let sorted = ends.get(index);
+  if (!sorted) {
+    sorted = [...index.channels.values()]
+      .flatMap(({ until }) => (until === null ? [] : [until]))
+      .sort((a, b) => a - b);
+    ends.set(index, sorted);
+  }
+  let low = 0;
+  let high = sorted.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if ((sorted[middle] ?? 0) <= at) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
+/**
+ * What `work` makes of a guide and a catalogue's channels at `at`, kept while both are the same
+ * and the same channels still have programmes to come.
+ */
 function remembered<A>(
-  cache: WeakMap<GuideIndex, WeakMap<GuideChannels, A>>,
+  cache: WeakMap<GuideIndex, WeakMap<GuideChannels, Remembered<A>>>,
   index: GuideIndex,
   channels: GuideChannels,
+  at: number,
   work: () => A,
 ): A {
   let byChannels = cache.get(index);
   if (!byChannels) cache.set(index, (byChannels = new WeakMap()));
+  const ended = endedBy(index, at);
   const kept = byChannels.get(channels);
-  if (kept !== undefined) return kept;
-  const made = work();
-  byChannels.set(channels, made);
-  return made;
+  if (kept?.ended === ended) return kept.value;
+  const value = work();
+  byChannels.set(channels, { value, ended });
+  return value;
 }

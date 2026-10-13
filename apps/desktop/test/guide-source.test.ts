@@ -127,7 +127,10 @@ async function app(dataDir: string, secrets: Secrets = testSecrets) {
   };
 }
 
-/** What is kept of guides in a folder, by name, each index's id as "*". */
+/**
+ * What is kept of guides in a folder, by name, each index's id as "*". A file replaced goes once
+ * nothing reads it, so what a test expects of these it waits for.
+ */
 async function guideFiles(dir: string): Promise<string[]> {
   const names = await readdir(dir).catch(() => []);
   return names
@@ -274,7 +277,7 @@ describe("a guide from an address of the viewer's own", () => {
     expect(await nowOn(first)).toBe("External");
     // The provider's guide wasn't asked for in its place.
     expect(provider.guideRequests()).toBe(asked);
-    expect(await guideFiles(dataDir)).toHaveLength(4);
+    await vi.waitFor(async () => expect(await guideFiles(dataDir)).toHaveLength(4));
 
     const restarted = await app(dataDir);
     expect(await restarted.status(id)).toMatchObject(failing);
@@ -285,7 +288,7 @@ describe("a guide from an address of the viewer's own", () => {
     await restarted.run(restarted.guide.refresh(id));
     expect(await restarted.nowOn(first)).toBe("External again");
     expect(await restarted.status(id)).toMatchObject({ failure: null, failedAt: null });
-    expect(await guideFiles(dataDir)).toHaveLength(4);
+    await vi.waitFor(async () => expect(await guideFiles(dataDir)).toHaveLength(4));
     expect(provider.guideRequests()).toBe(asked);
   });
 
@@ -305,7 +308,7 @@ describe("a guide from an address of the viewer's own", () => {
     });
     expect(await nowOn(first)).toBe("Provider");
     expect(provider.guideRequests()).toBe(asked);
-    expect(await guideFiles(dataDir)).toEqual(OWN_ONLY);
+    await vi.waitFor(async () => expect(await guideFiles(dataDir)).toEqual(OWN_ONLY));
     expect(await (await app(dataDir)).nowOn(first)).toBe("Provider");
   });
 
@@ -393,7 +396,7 @@ describe("a guide from an address of the viewer's own", () => {
     await refused();
     expect(await nowOn(first)).toBe("Provider");
     expect(await status(id)).toMatchObject({ source: { kind: "own" }, failure: null });
-    expect(await guideFiles(dataDir)).toEqual(OWN_ONLY);
+    await vi.waitFor(async () => expect(await guideFiles(dataDir)).toEqual(OWN_ONLY));
 
     // And one in place of an address in use leaves that address, with what it downloaded.
     await attach(id, host.address());
@@ -408,7 +411,7 @@ describe("a guide from an address of the viewer's own", () => {
       source: { kind: "external", origin: host.origin },
       failure: null,
     });
-    expect(await guideFiles(dataDir)).toEqual(kept);
+    await vi.waitFor(async () => expect(await guideFiles(dataDir)).toEqual(kept));
     // Two dozen checks, each indexed in a worker of its own.
   }, 60_000);
 
@@ -479,8 +482,10 @@ describe("the guides of two subscriptions that use the same ids", () => {
     expect(await status(a)).toMatchObject({ source: { kind: "own" }, channels: 1 });
     expect(await status(b)).toMatchObject({ source: { kind: "external" }, channels: 1 });
     // Each keeps its own in its own folder, and reads it from there after a restart.
-    expect(await guideFiles(dataDir)).toEqual(OWN_ONLY);
-    expect(await guideFiles(join(dataDir, "subscriptions", b))).toHaveLength(4);
+    await vi.waitFor(async () => expect(await guideFiles(dataDir)).toEqual(OWN_ONLY));
+    await vi.waitFor(async () =>
+      expect(await guideFiles(join(dataDir, "subscriptions", b))).toHaveLength(4),
+    );
     expect(await shows((await app(dataDir)).guide)).toEqual(["Journaal", "Elsewhere"]);
 
     await run(roster.remove(b, false));
@@ -643,7 +648,7 @@ describe("channels mapped to a guide's by hand", () => {
     const { revision: now } = await list("mapped");
     expect(await run(guide.map(id, loose.id, null, now))).toBeNull();
     expect(await status(id)).toMatchObject({ mapped: 0, unresolved: 0 });
-    expect(await guideFiles(dataDir)).toEqual(OWN_ONLY);
+    await vi.waitFor(async () => expect(await guideFiles(dataDir)).toEqual(OWN_ONLY));
   });
 
   it("starts without them on another guide, keeps them for the same address, and drops them on the way back", async () => {
@@ -726,12 +731,12 @@ describe("work that finishes after what it was for changed", () => {
     held.release();
     const found = await latest;
     // What a check found waits in one file, until it is used or dropped.
-    expect(await guideFiles(dataDir)).toHaveLength(3);
+    await vi.waitFor(async () => expect(await guideFiles(dataDir)).toHaveLength(3));
 
     await run(guide.cancelCheck(id));
 
     expect(await failureOf(run(guide.use(id, found.id)))).toEqual(changed);
-    expect(await guideFiles(dataDir)).toEqual(OWN_ONLY);
+    await vi.waitFor(async () => expect(await guideFiles(dataDir)).toEqual(OWN_ONLY));
     expect(await nowOn(first)).toBe("Provider");
   });
 
@@ -749,7 +754,7 @@ describe("work that finishes after what it was for changed", () => {
     expect(await late).toEqual(changed);
     expect(await nowOn(first)).toBe("Provider");
     expect(await status(id)).toMatchObject({ source: { kind: "own" }, failure: null });
-    expect(await guideFiles(dataDir)).toEqual(OWN_ONLY);
+    await vi.waitFor(async () => expect(await guideFiles(dataDir)).toEqual(OWN_ONLY));
   });
 
   it("keeps nothing for a subscription that went, whatever of it was still under way", async () => {
@@ -784,12 +789,12 @@ describe("work that finishes after what it was for changed", () => {
 
     expect(await Promise.all(downloads)).toEqual([changed, changed]);
     expect(await stat(folder).catch(() => null)).toBeNull();
-    expect(await guideFiles(dataDir)).toEqual([]);
+    await vi.waitFor(async () => expect(await guideFiles(dataDir)).toEqual([]));
     // A start afterwards finds nothing to bring back.
     const restarted = await app(dataDir);
     expect(await restarted.run(restarted.guide.status)).toEqual([]);
     expect(await stat(folder).catch(() => null)).toBeNull();
-    expect(await guideFiles(dataDir)).toEqual([]);
+    await vi.waitFor(async () => expect(await guideFiles(dataDir)).toEqual([]));
   });
 });
 
@@ -1130,12 +1135,14 @@ describe("a guide kept by 0.0.12", () => {
       processing: { state: "ready" },
     });
     // The address's document is an index now; the provider's waits until it is wanted.
-    expect(await guideFiles(dataDir)).toEqual([
-      "guide-index.*.sqlite",
-      "guide-source.json",
-      "guide.json",
-      "guide.xml",
-    ]);
+    await vi.waitFor(async () =>
+      expect(await guideFiles(dataDir)).toEqual([
+        "guide-index.*.sqlite",
+        "guide-source.json",
+        "guide.json",
+        "guide.xml",
+      ]),
+    );
     expect(JSON.parse(await readFile(join(dataDir, "guide-source.json"), "utf8"))).toEqual({
       ...source,
       external: {
@@ -1146,7 +1153,7 @@ describe("a guide kept by 0.0.12", () => {
 
     await upgraded.run(upgraded.guide.restore(id));
     expect(await upgraded.nowOn(first)).toBe("Provider");
-    expect(await guideFiles(dataDir)).toEqual(OWN_ONLY);
+    await vi.waitFor(async () => expect(await guideFiles(dataDir)).toEqual(OWN_ONLY));
     expect([host.requests().length, provider.guideRequests()]).toEqual(asked);
   });
 });

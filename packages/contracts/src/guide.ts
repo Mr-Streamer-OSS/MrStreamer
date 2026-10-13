@@ -205,7 +205,7 @@ export interface GuideChannel {
   readonly id: string;
   /** The name the guide gives it, or its id where the guide names none. */
   readonly name: string;
-  /** Whether the guide has programmes for it, ended ones it still keeps among them. */
+  /** Whether the guide has programmes for it that haven't ended. */
   readonly programmes: boolean;
 }
 
