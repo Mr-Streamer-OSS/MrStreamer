@@ -237,7 +237,8 @@ function callInputs(publish: Workflow, given: Record<string, Value>) {
     if (input) {
       if (name in given) return given[name]!;
       if ("default" in input) return input.default as Value;
-      return input.type === "boolean" ? false : "";
+      // GitHub's own defaults for an omitted input without one.
+      return input.type === "boolean" ? false : input.type === "number" ? 0 : "";
     }
     if (name in byHand) return null;
     return unmodelled(`inputs.${name}`);
