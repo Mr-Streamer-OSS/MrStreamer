@@ -433,6 +433,9 @@ describe("a playlist's catch-up", () => {
 
   it.each([
     ["shift", 'catchup="shift"', "https://iptv.test/live.ts#player-options"],
+    ["shift with a utc of its own", 'catchup="shift"', "https://iptv.test/live.ts?utc=1"],
+    ["shift with an encoded utc", 'catchup="shift"', "https://iptv.test/live.ts?a=b&%75tc=1"],
+    ["shift with an LUTC of its own", 'catchup="timeshift"', "https://iptv.test/live.ts?LUTC=1"],
     ["append", 'catchup="append" catchup-source="?utc={utc}"', "https://iptv.test/live.ts#top"],
     ["flussonic", 'catchup="flussonic"', "https://iptv.test/name/mpegts#top"],
     ["xc", 'catchup="xc"', "https://user:pass@iptv.test/live/user/pass/1.ts"],
@@ -449,8 +452,8 @@ describe("a playlist's catch-up", () => {
     [
       "shift",
       'catchup="shift"',
-      "https://iptv.test/live.ts?token=t",
-      `https://iptv.test/live.ts?token=t&utc=${S}&lutc=${N}`,
+      "https://iptv.test/live.ts?token=t&utcoffset=2",
+      `https://iptv.test/live.ts?token=t&utcoffset=2&utc=${S}&lutc=${N}`,
     ],
     [
       "append",

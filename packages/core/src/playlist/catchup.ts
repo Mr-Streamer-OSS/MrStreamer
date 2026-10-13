@@ -10,7 +10,9 @@
 //   #EXTM3U line's:
 //   - `default`: `catchup-source` is the recording's whole http(s) address.
 //   - `append`: `catchup-source` goes after the stream's address.
-//   - `shift`, or `timeshift`: `utc={utc}&lutc={lutc}` goes after it as a query (SIPTV's way).
+//   - `shift`, or `timeshift`: `utc={utc}&lutc={lutc}` goes after it as a query (SIPTV's way),
+//     unless its query has a `utc` or `lutc` already, however spelt, which a provider could read
+//     instead: then none.
 //   - `flussonic`, or `fs`: Flussonic's archive addresses beside the stream's. `…/name/mpegts`
 //     gives `…/name/timeshift_abs-{utc}.ts`, which plays on from that moment with no end, as
 //     Kodi asks for it (playback stops it at the window's end), and `…/name/index.m3u8` (or
@@ -176,7 +178,9 @@ function templateOf(mode: string, url: string, source: string | null): string | 
       return source ? url + source : null;
     case "shift":
     case "timeshift":
-      return `${url}${url.includes("?") ? "&" : "?"}utc={utc}&lutc={lutc}`;
+      return added(url, ["utc", "lutc"])
+        ? `${url}${url.includes("?") ? "&" : "?"}utc={utc}&lutc={lutc}`
+        : null;
     case "flussonic":
     case "fs":
       return flussonic(url);
@@ -185,6 +189,15 @@ function templateOf(mode: string, url: string, source: string | null): string | 
     default:
       return null;
   }
+}
+
+/**
+ * Whether a mode can add query keys `keys` to the stream address `url`: none of them is in its
+ * query yet, however spelt or encoded, which a provider could read in place of the one added.
+ */
+function added(url: string, keys: readonly string[]): boolean {
+  const query = URL.parse(url)?.searchParams;
+  return !!query && ![...query.keys()].some((key) => keys.includes(key.toLowerCase()));
 }
 
 /** Flussonic's archive address beside a stream's: MPEG-TS from a moment on, or an HLS stretch. */
