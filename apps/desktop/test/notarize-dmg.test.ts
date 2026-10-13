@@ -12,6 +12,7 @@ const fs = await import("node:fs");
 const args = process.argv.slice(2);
 const calls = fs.existsSync(process.env.STAPLE_CALLS) ? fs.readFileSync(process.env.STAPLE_CALLS, "utf8") : "";
 const staples = calls.split("\\n").filter((line) => line === "staple").length;
+const validations = calls.split("\\n").filter((line) => line === "validate").length;
 fs.appendFileSync(process.env.STAPLE_CALLS, args[1] + "\\n");
 if (args[0] === "notarytool") {
   process.stdout.write(JSON.stringify({ id: "accepted-id", status: "Accepted" }));
@@ -35,6 +36,26 @@ if (args[0] === "notarytool") {
     process.exitCode = 68;
   } else {
     process.stdout.write("The staple and validate action worked!\\n");
+  }
+} else if (args[1] === "validate") {
+  if (process.env.VALIDATE_SCENARIO === "hang") {
+    fs.writeFileSync(process.env.STAPLE_PID, String(process.pid));
+    process.on("SIGTERM", () => {});
+    setTimeout(() => {}, 120000);
+  } else if (process.env.VALIDATE_SCENARIO === "exhaust" ||
+    (process.env.VALIDATE_SCENARIO === "recover" && validations === 0)) {
+    process.stderr.write('error is Error Domain=NSURLErrorDomain Code=-1005 "The network connection was lost."\\n');
+    process.stderr.write("NSErrorFailingURLStringKey=https://api.apple-cloudkit.com/database/1/com.apple.gk.ticket-delivery/production/public/records/lookup\\n");
+    process.exitCode = 68;
+  } else if (process.env.VALIDATE_SCENARIO === "permanent") {
+    process.stderr.write("The ticket is invalid. The validate action failed! Error 68.\\n");
+    process.exitCode = 68;
+  } else if (process.env.VALIDATE_SCENARIO === "other-network") {
+    process.stderr.write("Error Domain=NSURLErrorDomain Code=-1005\\n");
+    process.stderr.write("NSErrorFailingURLStringKey=https://example.com/unrelated\\n");
+    process.exitCode = 68;
+  } else {
+    process.stdout.write("The validate action worked!\\n");
   }
 }
 `;
@@ -111,7 +132,7 @@ describe.skipIf(process.platform === "win32")("notarizing and stapling a release
 
   it("rejects a permanent ticket failure immediately", async () => {
     process.env.STAPLE_SCENARIO = "permanent";
-    await expect(run()).rejects.toThrow("DMG stapling failed on attempt 1: exit 68");
+    await expect(run()).rejects.toThrow("staple failed for");
     expect(commands()).toEqual(["submit", "staple"]);
     expect(readFileSync(metadata, "utf8")).toContain("sha512: old");
     expect(readFileSync(`${dmg}.blockmap`, "utf8")).toBe("stale");
@@ -119,13 +140,13 @@ describe.skipIf(process.platform === "win32")("notarizing and stapling a release
 
   it("does not retry a lost connection outside ticket delivery", async () => {
     process.env.STAPLE_SCENARIO = "other-network";
-    await expect(run()).rejects.toThrow("DMG stapling failed on attempt 1: exit 68");
+    await expect(run()).rejects.toThrow("staple failed for");
     expect(commands()).toEqual(["submit", "staple"]);
   });
 
   it("stops after the bounded ticket-retrieval retry budget", async () => {
     process.env.STAPLE_SCENARIO = "exhaust";
-    await expect(run()).rejects.toThrow("failed after 4 attempts: retry budget exhausted");
+    await expect(run()).rejects.toThrow("after 4 attempts: retry budget exhausted");
     expect(commands()).toEqual(["submit", "staple", "staple", "staple", "staple"]);
     expect(readFileSync(metadata, "utf8")).toContain("sha512: old");
   });
@@ -133,12 +154,62 @@ describe.skipIf(process.platform === "win32")("notarizing and stapling a release
   it("stops a hanging stapler at the subprocess deadline", async () => {
     process.env.STAPLE_SCENARIO = "hang";
     const started = performance.now();
-    await expect(run()).rejects.toThrow("DMG stapling failed on attempt 1");
+    await expect(run()).rejects.toThrow("staple failed for");
     const elapsed = performance.now() - started;
     expect(elapsed).toBeLessThan(70_000);
     expect(commands()).toEqual(["submit", "staple"]);
     expect(readFileSync(metadata, "utf8")).toContain("sha512: old");
     const pid = assertStaplerExited();
     console.log(`Ignored-SIGTERM stapler PID ${pid} absent after ${Math.round(elapsed)} ms.`);
+  }, 75_000);
+
+  it("recovers a lost validation lookup before changing release metadata", async () => {
+    process.env.VALIDATE_SCENARIO = "recover";
+    await run();
+
+    expect(commands()).toEqual(["submit", "staple", "validate", "validate"]);
+    expect(readFileSync(metadata, "utf8")).not.toContain("sha512: old");
+    expect(() => readFileSync(`${dmg}.blockmap`)).toThrow();
+  });
+
+  it("rejects a permanent validation failure without retry or metadata changes", async () => {
+    process.env.VALIDATE_SCENARIO = "permanent";
+    await expect(run()).rejects.toThrow("validate failed for");
+    expect(commands()).toEqual(["submit", "staple", "validate"]);
+    expect(readFileSync(metadata, "utf8")).toContain("sha512: old");
+    expect(readFileSync(`${dmg}.blockmap`, "utf8")).toBe("stale");
+  });
+
+  it("does not retry an unrelated validation network failure", async () => {
+    process.env.VALIDATE_SCENARIO = "other-network";
+    await expect(run()).rejects.toThrow("validate failed for");
+    expect(commands()).toEqual(["submit", "staple", "validate"]);
+  });
+
+  it("fails after four lost validation lookups and leaves metadata untouched", async () => {
+    process.env.VALIDATE_SCENARIO = "exhaust";
+    await expect(run()).rejects.toThrow("after 4 attempts: retry budget exhausted");
+    expect(commands()).toEqual([
+      "submit",
+      "staple",
+      "validate",
+      "validate",
+      "validate",
+      "validate",
+    ]);
+    expect(readFileSync(metadata, "utf8")).toContain("sha512: old");
+    expect(readFileSync(`${dmg}.blockmap`, "utf8")).toBe("stale");
+  });
+
+  it("kills validation that ignores SIGTERM and leaves metadata untouched", async () => {
+    process.env.VALIDATE_SCENARIO = "hang";
+    const started = performance.now();
+    await expect(run()).rejects.toThrow("validate failed for");
+    const elapsed = performance.now() - started;
+    expect(elapsed).toBeLessThan(70_000);
+    expect(commands()).toEqual(["submit", "staple", "validate"]);
+    expect(readFileSync(metadata, "utf8")).toContain("sha512: old");
+    const pid = assertStaplerExited();
+    console.log(`Ignored-SIGTERM validation PID ${pid} absent after ${Math.round(elapsed)} ms.`);
   }, 75_000);
 });
