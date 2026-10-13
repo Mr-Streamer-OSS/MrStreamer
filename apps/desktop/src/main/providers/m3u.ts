@@ -266,9 +266,10 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
 
     async archiveStream(channelId, window, signal) {
       const stream = await streamOf(channelId, signal);
-      const url = stream.catchup ? archiveAddress(stream.catchup, window, Date.now()) : null;
-      if (!url) throw new AppFailure({ kind: "catch-up", reason: "none" });
-      return { url, format: streamFormat(url) ?? stream.format, headers: stream.headers };
+      const recording = stream.catchup && archiveAddress(stream.catchup, window, Date.now());
+      if (!recording) throw new AppFailure({ kind: "catch-up", reason: "none" });
+      const { url, start } = recording;
+      return { url, start, format: streamFormat(url) ?? stream.format, headers: stream.headers };
     },
 
     request(url, init) {

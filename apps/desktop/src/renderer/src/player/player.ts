@@ -36,9 +36,10 @@ import { PlaybackObservation, playbackFailure, streamFailure } from "./analytics
 // the provider's status, never the words an engine or the provider used for it.
 //
 // A programme the provider keeps in its catch-up archive plays the same way, as the channel's
-// stream, from the programme's start (`playArchive`). It is a stream that ends: at its end the
-// channel stops, as after Stop. A reconnect, or another sound track, opens the recording again
-// where it got to. Playing or switching to a channel plays it live; going back to Watch on the
+// stream, from the programme's start (`playArchive`). It is a stream that ends: at the
+// programme's end the channel stops, as after Stop. A reconnect, or another sound track, opens
+// the recording again where it got to, or on the minute before where the provider counts in
+// minutes; what plays is counted from where the provider's recording starts. Playing or switching to a channel plays it live; going back to Watch on the
 // one that plays keeps the recording, as it keeps a live stream. Catch-up plays on this computer
 // only.
 import { createStore, useStore } from "zustand";
@@ -267,8 +268,8 @@ let selection = 0;
  */
 let quiet = false;
 /**
- * A programme playing from the archive, and where in it the next stream opens, in epoch ms: its
- * start, then as far as the streams before played.
+ * A programme playing from the archive, and where in it the next stream opens, in whole epoch ms:
+ * its start, then as far as the streams before played.
  */
 interface Recording {
   readonly programme: Programme;
@@ -276,11 +277,18 @@ interface Recording {
 }
 /** The recording that plays; null while the channel plays live. */
 let archived: Recording | null = null;
-/** The open stream, and for a recording, which and from where it opened. */
+/**
+ * The open stream, and for a recording, which, from where the provider's recording starts, and
+ * for how long it plays.
+ */
 let current: {
   readonly sessionId: string;
   readonly engine: Engine;
-  readonly archived: { readonly of: Recording; readonly from: number } | null;
+  readonly archived: {
+    readonly of: Recording;
+    readonly from: number;
+    readonly length: number;
+  } | null;
 } | null = null;
 let volumeSave: ReturnType<typeof setTimeout> | null = null;
 let zapTimer: ReturnType<typeof setTimeout> | null = null;
@@ -349,9 +357,9 @@ function cancelZap(): void {
 function release(): void {
   if (!current) return;
   if (sameOwned(tuned, store.getState().channel)) channelPlayed += current.engine.played();
-  // The recording goes on from where this stream got to.
+  // The recording goes on from where this stream got to, counted from where it started.
   const recording = current.archived;
-  if (recording) recording.of.at = recording.from + current.engine.played();
+  if (recording) recording.of.at = recording.from + Math.round(current.engine.played());
   observation.unbind();
   current.engine.destroy();
   clearSubtitles(video);
@@ -436,8 +444,8 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
   if (first) tune(channel);
   release();
   // A recording opens where the streams before got to, and one played to its end is over.
-  const recording = archived && { of: archived, from: archived.at };
-  if (recording && recording.from >= recording.of.programme.stop) return player.stop();
+  const recording = archived;
+  if (recording && recording.at >= recording.programme.stop) return player.stop();
   store.setState({
     channel,
     phase: first ? { kind: "tuning", since: Date.now() } : reconnecting(null),
@@ -460,9 +468,7 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
     session = await call("playback.open", {
       ...(measurement ? { measurement } : {}),
       channel: ownedId(channel),
-      ...(recording
-        ? { archive: { start: recording.from, end: recording.of.programme.stop } }
-        : {}),
+      ...(recording ? { archive: { start: recording.at, end: recording.programme.stop } } : {}),
       decoders: [...decoders],
       repair,
       ...(sound.audio !== null ? { audio: sound.audio } : {}),
@@ -484,8 +490,13 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
   }
 
   observation.bind(session.sessionId);
-  let engine = createEngine(session.format, video, session.url, sound, recording !== null);
-  current = { sessionId: session.sessionId, engine, archived: recording };
+  // The provider's recording can start before the moment asked for, as Xtream's start on a whole
+  // minute: what plays is counted from where it starts, and lasts to the window's end.
+  const span = session.archive;
+  const opened =
+    recording && span ? { of: recording, from: span.start, length: span.end - span.start } : null;
+  let engine = createEngine(session.format, video, session.url, sound, opened?.length ?? null);
+  current = { sessionId: session.sessionId, engine, archived: opened };
   engine.onPlayback?.((state) => {
     if (mine === selection) observation.note(state);
   });
@@ -517,8 +528,8 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
   // Some "live" channels are raw audio (AAC radio) rather than MPEG-TS. Chromium plays those itself.
   if (failure?.kind === "wrong-container" && mine === selection) {
     engine.destroy();
-    engine = nativeEngine(video, session.url, recording !== null);
-    current = { sessionId: session.sessionId, engine, archived: recording };
+    engine = nativeEngine(video, session.url, opened?.length ?? null);
+    current = { sessionId: session.sessionId, engine, archived: opened };
     engine.onPlayback?.((state) => {
       if (mine === selection) observation.note(state);
     });

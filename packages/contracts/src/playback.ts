@@ -35,6 +35,12 @@ export interface StreamSession {
   /** Loopback URL that proxies the provider stream. Carries no credentials. */
   readonly url: string;
   readonly format: StreamFormat;
+  /**
+   * For a recording from the catch-up archive, the stretch it plays: from where the provider's
+   * recording begins, which can be up to a minute before the start asked for when the provider
+   * counts in whole minutes, to the end asked for, where the stream stops.
+   */
+  readonly archive?: ArchiveWindow;
 }
 
 /**

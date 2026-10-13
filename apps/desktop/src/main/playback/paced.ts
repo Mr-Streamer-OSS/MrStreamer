@@ -4,6 +4,9 @@
 // program clock references (PCR) of its MPEG-TS packets, says how far into it each chunk is; a
 // chunk more than `leadS` seconds ahead of the time it has been playing waits for that time.
 //
+// It also ends the recording once that clock passes `endS`, as a catch-up address that names no
+// end plays on into the programmes after; returning closes the provider's connection.
+//
 // Only the first PID that carries a PCR counts. A jump of the clock, backwards or by more than a
 // few seconds, is a cut in the recording rather than time passing, and adds nothing.
 const PACKET = 188;
@@ -15,13 +18,14 @@ const MAX_STEP_S = 5;
 
 /**
  * `chunks` as they come, each held back until it is at most `leadS` seconds ahead of how long the
- * stream has been sent. `now` gives milliseconds; `signal` ends a wait.
+ * stream has been sent, and none after the one that reaches `endS` seconds of the recording.
+ * `now` gives milliseconds; `signal` ends a wait.
  */
 export async function* paced(
   chunks: AsyncIterable<Uint8Array>,
   leadS: number,
   signal: AbortSignal,
-  now: () => number = () => performance.now(),
+  { endS = Infinity, now = () => performance.now() }: { endS?: number; now?: () => number } = {},
 ): AsyncGenerator<Uint8Array> {
   /** Bytes of a packet that continues in the next chunk. */
   let carry = new Uint8Array(0);
@@ -55,6 +59,7 @@ export async function* paced(
     if (ahead > leadS) await wait((ahead - leadS) * 1000, signal);
     if (signal.aborted) return;
     yield chunk;
+    if (media >= endS) return;
   }
 }
 

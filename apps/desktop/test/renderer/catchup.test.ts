@@ -1,13 +1,15 @@
 // @vitest-environment happy-dom
 // Catch-up in Live TV's rest of the day: the programmes that aired today, where the provider
-// keeps them, play from their start in Watch, and choosing the channel again plays it live.
+// keeps them, play from their start in Watch, and choosing the channel again plays it live. A
+// recording that plays opens again where it got to, and stops at the programme's end.
 import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Programme } from "@mrstreamer/contracts/guide";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
+import type { StreamSession } from "@mrstreamer/contracts/playback";
 import { useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { GuidePage } from "../../src/renderer/src/features/live/GuidePage.tsx";
 import { canRetry, failureCopy } from "../../src/renderer/src/features/watch/problems.ts";
@@ -192,6 +194,88 @@ describe("catch-up in the rest of the day", () => {
     });
     // Trying again can't bring it back.
     expect(canRetry(phase.problem)).toBe(false);
+    expect(ipc.argsOf("playback.open")).toHaveLength(1);
+  });
+});
+
+describe("a recording that plays", () => {
+  const een = channel("1", "Één", 2);
+  // Half a minute past, as a guide can start a programme; the provider's recording starts on the
+  // minute before, as Xtream's do.
+  const start = Date.UTC(2026, 9, 13, 12, 0, 30);
+  const minute = start - 30_000;
+  const video = player.element;
+  /** What the main process answers for a recording that starts at `from` and ends at `end`. */
+  const session = (from: number, end: number): StreamSession => ({
+    sessionId: "recording",
+    channel: own("1"),
+    url: "http://127.0.0.1/recording.m3u8",
+    format: "hls",
+    archive: { start: from, end },
+  });
+  /** Plays `programme` and lets its clock run to `seconds`, a fraction of a millisecond in. */
+  const playing = async (programme: Programme, seconds: number) => {
+    ipc.always("playback.open", session(minute, programme.stop));
+    player.playArchive(een, programme);
+    await vi.advanceTimersByTimeAsync(0);
+    video.currentTime = seconds;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(player.state().phase.kind).toBe("playing");
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    ipc.reset();
+    player.reset();
+    video.currentTime = 0;
+    player.setAudible(true);
+    ipc.always("playback.failure", { kind: "network", detail: "The connection dropped." });
+    ipc.always("playback.playing", { variantId: "1", failed: [] });
+  });
+  afterEach(() => {
+    player.reset();
+    vi.useRealTimers();
+  });
+
+  it("opens again where it got to, in whole milliseconds from where the provider's starts", async () => {
+    const lunch = at(start, "Lunch");
+    await playing(lunch, 0.876543);
+    expect(ipc.argsOf("playback.open")[0]?.archive).toEqual({ start, end: lunch.stop });
+
+    // The stream breaks, and the reconnect asks for the recording from where it got to.
+    video.dispatchEvent(new Event("error"));
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(ipc.argsOf("playback.open")).toHaveLength(2);
+    expect(ipc.argsOf("playback.open")[1]?.archive).toEqual({
+      start: minute + 877,
+      end: lunch.stop,
+    });
+    video.currentTime = 1.5;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(player.state().phase.kind).toBe("playing");
+
+    // So does another quality. The provider's recording started on the minute again, and what
+    // played of it since counts from there.
+    player.reopen();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ipc.argsOf("playback.open")[2]?.archive).toEqual({
+      start: minute + 623,
+      end: lunch.stop,
+    });
+    expect(player.state().phase.kind).not.toBe("failed");
+  });
+
+  it("stops at the programme's end, though the stream plays on, and closes it", async () => {
+    // Three seconds of programme.
+    const short = { ...at(minute, "Short"), stop: minute + 3000 };
+    await playing(short, 0.5);
+    for (let second = 1; second <= 6; second++) {
+      video.currentTime = 0.5 + second;
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    expect(player.state()).toMatchObject({ phase: { kind: "idle" }, stopped: true });
+    expect(player.state().archive?.title).toBe("Short");
+    expect(ipc.argsOf("playback.close")).toEqual([{ sessionId: "recording" }]);
     expect(ipc.argsOf("playback.open")).toHaveLength(1);
   });
 });

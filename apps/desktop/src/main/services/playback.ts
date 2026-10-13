@@ -15,7 +15,9 @@
 //
 // Catch-up plays a channel's past the same way, from the provider's archive in place of its live
 // stream: a stream that ends. An MPEG-TS recording goes on no faster than it plays, as a provider
-// may send it as fast as it can (see ../playback/paced.ts).
+// may send it as fast as it can, and ends once its own clock passes the window's end, closing the
+// provider's connection, as an address without an end plays on (see ../playback/paced.ts). An HLS
+// recording's player stops it there.
 //
 // Movies and episodes (see ../playback/title.ts): the proxy serves the provider's file to ffprobe
 // and ffmpeg over loopback, answering byte ranges, one upstream request at a time. Each request
@@ -426,7 +428,10 @@ interface LiveSession extends SessionBase {
     readonly url: string;
     readonly headers: Readonly<Record<string, string>>;
   }[];
-  /** The stretch of the past it plays from the provider's catch-up archive; null for live. */
+  /**
+   * The stretch of the past it plays from the provider's catch-up archive, from where the
+   * recording starts (`ArchiveStream.start`) to the end asked for; null for live.
+   */
   readonly archive: ArchiveWindow | null;
   /** Which stream plays, and those that failed before it: see `Playback.playing`. */
   delivered: LivePlaying;
@@ -1009,8 +1014,13 @@ function make(deps: PlaybackDeps) {
       session.layout = layout;
       session.captions = [];
       const video = layout?.video;
-      const read = session.archive
-        ? paced(replay(start, reader), ARCHIVE_LEAD_S, signal)
+      // A recording plays no faster than it plays out, and stops at the window's end, also where
+      // the provider would send on.
+      const recording = session.archive;
+      const read = recording
+        ? paced(replay(start, reader), ARCHIVE_LEAD_S, signal, {
+            endS: (recording.end - recording.start) / 1000,
+          })
         : replay(start, reader);
       const cleaned =
         video && video.codec !== "unknown" && CLEAN_START_CODECS.has(video.codec)
@@ -3550,10 +3560,10 @@ function make(deps: PlaybackDeps) {
           options.variants?.length ? options.variants : [channel.id],
           (id) =>
             Effect.tryPromise({
-              try: (signal) =>
+              try: async (signal) =>
                 archive
-                  ? source.provider.archiveStream(id, archive, signal)
-                  : source.provider.liveStream(id, signal),
+                  ? await source.provider.archiveStream(id, archive, signal)
+                  : { ...(await source.provider.liveStream(id, signal)), start: null },
               catch: failedWith,
             }).pipe(Effect.map((stream) => ({ id, ...stream }))),
         );
@@ -3567,6 +3577,11 @@ function make(deps: PlaybackDeps) {
         const variants = streams.flatMap(({ id, url, format: other, headers }) =>
           other === format ? [{ id, url, headers: headers ?? {} }] : [],
         );
+        // A recording starts where its provider's address says; a channel's streams are all of
+        // one provider, which counts in the same unit for each.
+        const first = streams[0];
+        const recording =
+          archive && first?.start != null ? { start: first.start, end: archive.end } : null;
         const id = randomUUID();
         const { closed, scope: forked, lan } = yield* sessionScope(id, receiver);
         const token = randomBytes(18).toString("base64url");
@@ -3587,7 +3602,7 @@ function make(deps: PlaybackDeps) {
           token,
           channel,
           variants,
-          archive,
+          archive: recording,
           delivered: { variantId: null, failed: [] },
           request: source.provider.request,
           format,
@@ -3910,6 +3925,7 @@ function make(deps: PlaybackDeps) {
               channel,
               url: `${base}/stream/${session.token}.${extension}`,
               format: session.format,
+              ...(session.archive ? { archive: session.archive } : {}),
             };
           }),
         ),

@@ -1,6 +1,8 @@
 // Catch-up: which channels a provider keeps programmes of after they aired, and what reaches the
 // provider when one plays from its archive, for an Xtream panel and for the conventions playlists
 // describe it in.
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import * as Layer from "effect/Layer";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Codec } from "@mrstreamer/contracts/playback";
@@ -134,19 +136,88 @@ describe("an Xtream panel's catch-up", () => {
     await dispose();
   });
 
-  it("tells the time in UTC when the panel names no time zone, from the minute the window starts", async () => {
-    const { provider, playback, own, dispose } = await connected({ timeZone: null });
-    const start = EVENING + 30 * 1000;
-    const session = await playback.open(own("1000"), LINUX, {
-      variants: ["1000"],
-      archive: { start, end: start + 30 * MINUTE },
+  it("says where each recording starts, on the minute the panel counts from", async () => {
+    const { provider, playback, own, dispose } = await connected({
+      timeZone: null,
+      // One for each, so none is refused while the one before is let go of.
+      maxConnections: 3,
     });
-    await whole(session.url);
-    // From 18:00 on, so the half minute before the end is in it too.
+    const end = EVENING + 30 * MINUTE;
+    const open = async (start: number, until = end) => {
+      const session = await playback.open(own("1000"), LINUX, {
+        variants: ["1000"],
+        archive: { start, end: until },
+      });
+      await whole(session.url);
+      return session.archive;
+    };
+    // A programme on the minute starts there; resuming 45.5 s in starts on that minute again,
+    // and says so, as does a programme half a minute past, whose end is in it too.
+    expect(await open(EVENING)).toEqual({ start: EVENING, end });
+    expect(await open(EVENING + 45_500)).toEqual({ start: EVENING, end });
+    expect(await open(EVENING + 30_000, end + 30_000)).toEqual({
+      start: EVENING,
+      end: end + 30_000,
+    });
+    // Times in UTC, as the panel names no time zone.
     expect(provider.archiveRequests()).toEqual([
+      { streamId: "1000", minutes: 30, start: "2026-10-13:18-00" },
+      { streamId: "1000", minutes: 30, start: "2026-10-13:18-00" },
       { streamId: "1000", minutes: 31, start: "2026-10-13:18-00" },
     ]);
     await dispose();
+  });
+
+  it("ends a recording at the window's end though the provider sends on, and lets go of it", async () => {
+    // Forty seconds of recording, then nothing, the connection held open: as an archive whose
+    // address names no end plays on into what came after.
+    const recording = fixture("recording-long-subtitles.mpegts");
+    let open = 0;
+    const server = createServer((request, response) => {
+      if (request.url?.startsWith("/list.m3u")) {
+        return response.end(
+          [
+            "#EXTM3U",
+            '#EXTINF:-1 tvg-id="fs" catchup="flussonic" catchup-days="2",Flussonic',
+            `http://127.0.0.1:${(server.address() as AddressInfo).port}/fs/mpegts`,
+            "",
+          ].join("\n"),
+        );
+      }
+      open++;
+      request.on("close", () => open--);
+      response.writeHead(200, { "Content-Type": "video/mp2t" });
+      response.write(recording);
+    });
+    await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
+    const dataDir = await tempDir();
+    const runtime = runtimeFor(
+      Playback.layer({ userAgent, ffmpeg: null }).pipe(
+        Layer.provide(PlaybackCoordination.layer),
+        Layer.provideMerge(
+          Subscriptions.layer({ dataDir, secrets: testSecrets, providerOptions: { userAgent } }),
+        ),
+      ),
+    );
+    const subscriptions = await promised(runtime, Subscriptions);
+    const playback = await promised(runtime, Playback);
+    const { id: subscriptionId } = await subscriptions.add({
+      server: `http://127.0.0.1:${(server.address() as AddressInfo).port}/list.m3u`,
+      username: "",
+      password: "",
+    });
+    // Ten seconds of programme.
+    const session = await playback.open({ subscriptionId, id: "fs" }, LINUX, {
+      archive: { start: EVENING, end: EVENING + 10_000 },
+    });
+    expect(session.archive).toEqual({ start: EVENING, end: EVENING + 10_000 });
+    const received = await whole(session.url);
+    expect(received.length).toBeGreaterThan(recording.length * 0.15);
+    expect(received.length).toBeLessThan(recording.length * 0.5);
+    await vi.waitFor(() => expect(open).toBe(0));
+    await runtime.dispose();
+    server.closeAllConnections();
+    await new Promise((closed) => server.close(closed));
   });
 });
 
@@ -248,6 +319,19 @@ describe("a playlist's catch-up", () => {
     ]);
     // As the recording's own address says, whatever the channel's live stream is.
     expect(formats).toMatchObject({ inherited: "hls", dollar: "mpegts", "fs-ts": "mpegts" });
+  });
+
+  it("counts an address that names the minute only from that minute, to the window's end", async () => {
+    const { provider: list, asked } = provider(LIST);
+    await list.liveCatalogue();
+    // Half a minute past to half a minute past.
+    const window = { start: EVENING + 30_000, end: EVENING + 30 * MINUTE + 30_000 };
+    const xc = await list.archiveStream("xc", window);
+    await list.request(xc.url);
+    expect(asked).toEqual(["https://iptv.test/timeshift/user/pass/31/2026-10-13:18-00/42.ts"]);
+    expect(xc.start).toBe(EVENING);
+    // One that names the second starts on it.
+    expect((await list.archiveStream("braces", window)).start).toBe(EVENING + 30_000);
   });
 
   it("finds no catch-up where a playlist's attributes don't agree on one, and plays none", async () => {

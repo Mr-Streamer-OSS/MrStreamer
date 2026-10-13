@@ -12,8 +12,9 @@
 //   - `append`: `catchup-source` goes after the stream's address.
 //   - `shift`, or `timeshift`: `utc={utc}&lutc={lutc}` goes after it as a query (SIPTV's way).
 //   - `flussonic`, or `fs`: Flussonic's archive addresses beside the stream's. `…/name/mpegts`
-//     gives `…/name/timeshift_abs-{utc}.ts`, and `…/name/index.m3u8` (or another playlist name)
-//     gives `…/name/index-{utc}-{duration}.m3u8`, with the stream's query.
+//     gives `…/name/timeshift_abs-{utc}.ts`, which plays on from that moment with no end, as
+//     Kodi asks for it (playback stops it at the window's end), and `…/name/index.m3u8` (or
+//     another playlist name) gives `…/name/index-{utc}-{duration}.m3u8`, with the stream's query.
 //   - `xc`: an Xtream Codes stream address, `…/[live/]user/pass/id[.ext]`, gives
 //     `…/timeshift/user/pass/{duration:60}/{Y}-{m}-{d}:{H}-{M}/id.ext`, `.ts` without one.
 // - The days, from `catchup-days`, else `tvg-rec` or `timeshift`, whole days above zero; the
@@ -23,7 +24,10 @@
 //   and `${timestamp}` the moment asked. `{duration}` and `${duration}` the length in seconds,
 //   `{duration:N}` that divided by N; `{offset}`, `{offset:N}` and `${offset}` how long ago the
 //   start was, the same way. `{Y}`, `{m}`, `{d}`, `{H}`, `{M}` and `{S}` the start's year, month,
-//   day, hour, minute and second, in UTC. Divisions round up, so the end is never cut short.
+//   day, hour, minute and second, in UTC. An address that names the start to the minute only,
+//   with `{M}` and no second (`{S}`, `{utc}`, `${start}`, an offset), as `xc`'s does, starts on
+//   the minute before the window's start; the length counts from there, and divisions round up,
+//   so the end is never cut short.
 //
 // Not supported, so no catch-up: a mode without days or days without a mode, whose meaning players
 // don't agree on; `vod` and modes not named here; a source a mode needs that is missing; a stream
@@ -61,19 +65,22 @@ export function playlistCatchup(
 }
 
 /**
- * The address of the recording in `window`, asked at `now`: the template with its placeholders
- * filled in. Null when that is no http(s) address.
+ * The address of the recording in `window`, asked at `now`, with the moment in epoch ms the
+ * recording it names starts at: the template with its placeholders filled in. Null when that is
+ * no http(s) address.
  */
 export function archiveAddress(
   catchup: PlaylistCatchup,
   window: ArchiveWindow,
   now: number,
-): string | null {
-  const start = Math.floor(window.start / 1000);
+): { readonly url: string; readonly start: number } | null {
+  const unit = byMinute(catchup.template) ? 60_000 : 1000;
+  const from = window.start - (window.start % unit);
+  const start = from / 1000;
   const end = Math.ceil(window.end / 1000);
   const asked = Math.floor(now / 1000);
   const duration = end - start;
-  const clock = wallClock(window.start, null);
+  const clock = wallClock(from, null);
   const divided = (seconds: number, by: string | undefined) =>
     String(Math.max(0, Math.ceil(seconds / (by ? Math.max(1, Number(by)) : 1))));
   const filled = catchup.template
@@ -114,7 +121,16 @@ export function archiveAddress(
       }
     });
   const url = URL.parse(filled);
-  return url && (url.protocol === "http:" || url.protocol === "https:") ? filled : null;
+  return url && (url.protocol === "http:" || url.protocol === "https:")
+    ? { url: filled, start: from }
+    : null;
+}
+
+/** Whether a template names its start to the minute only: `{M}`, and no second of it. */
+function byMinute(template: string): boolean {
+  return (
+    template.includes("{M}") && !/\{(S|utc|offset(:\d+)?)\}|\$\{(start|offset)\}/.test(template)
+  );
 }
 
 /** The recording address with placeholders that `mode` makes for the stream at `url`. */

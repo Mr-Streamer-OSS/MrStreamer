@@ -119,6 +119,15 @@ export interface LiveStream {
   readonly headers?: Readonly<Record<string, string>>;
 }
 
+/** A recording from the catch-up archive: where it streams from, and the moment it starts at. */
+export interface ArchiveStream extends LiveStream {
+  /**
+   * Epoch milliseconds the recording starts at: the start asked for, or the whole minute or
+   * second before it where the provider's address counts in those.
+   */
+  readonly start: number;
+}
+
 /** What a subscription answers when asked for its programme guide. */
 export type LiveGuide =
   /** An XMLTV document, as it downloads. */
@@ -143,7 +152,8 @@ export interface Provider {
   liveStream(channelId: string, signal?: AbortSignal): Promise<LiveStream>;
   /**
    * Upstream location of a channel's recorded past in `window`, from the provider's catch-up
-   * archive: a stream that ends. Contains credentials, so it stays in the main process. Whether
+   * archive. Some addresses name no end, and the provider then sends on past the window: playback
+   * stops it there. Contains credentials, so it stays in the main process. Whether
    * the channel keeps that window is the caller's to check first (see ./catchup.ts); a playlist
    * channel without catch-up fails with `catch-up`.
    */
@@ -151,7 +161,7 @@ export interface Provider {
     channelId: string,
     window: ArchiveWindow,
     signal?: AbortSignal,
-  ): Promise<LiveStream>;
+  ): Promise<ArchiveStream>;
   /**
    * Requests an address `liveStream` or `titleFile` gave, the way `providerFetch` does: never
    * sending the login unencrypted after an https address.

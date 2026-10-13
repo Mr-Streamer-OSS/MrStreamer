@@ -60,8 +60,8 @@ export interface Engine {
   /** Called at most once, when playback breaks after it started. */
   onFailure(listener: (error: EngineError) => void): void;
   /**
-   * Called at most once, when a stream that ends (see `createEngine`) played to its end. A live
-   * stream never does: the end of its data is a break.
+   * Called at most once, when a stream that ends (see `createEngine`) played to its end, or for as
+   * long as it lasts. A live stream never does: the end of its data is a break.
    */
   onEnded(listener: () => void): void;
   /**
@@ -93,23 +93,24 @@ export interface Engine {
 
 /**
  * An engine for a stream in `format`. `sound` is the sound to start with where the engine picks
- * it: the main process picked it already for the streams it reads. `ends` is a stream that ends,
- * as a catch-up recording does: its data stops and it plays on to the end of what arrived, which
- * the engine says, where a live stream's stopping data is a break.
+ * it: the main process picked it already for the streams it reads. `ends` is the milliseconds a
+ * stream that ends lasts, as a catch-up recording does: it is over once it played that long, or
+ * at the end of what arrived when its data stops first, which the engine says, where a live
+ * stream's stopping data is a break. Null for a live stream.
  */
 export function createEngine(
   format: StreamFormat,
   video: HTMLVideoElement,
   url: string,
   sound: SoundChoice,
-  ends = false,
+  ends: number | null = null,
 ): Engine {
   if (format === "mpegts") return mpegtsEngine(video, url, ends);
   if (Hls.isSupported()) return hlsEngine(video, url, sound, ends);
   return nativeEngine(video, url, ends);
 }
 
-function mpegtsEngine(video: HTMLVideoElement, url: string, ends: boolean): Engine {
+function mpegtsEngine(video: HTMLVideoElement, url: string, ends: number | null): Engine {
   if (!mpegts.getFeatureList().mseLivePlayback) {
     return failedEngine("mpegts.js", video, {
       kind: "unsupported",
@@ -126,7 +127,7 @@ function mpegtsEngine(video: HTMLVideoElement, url: string, ends: boolean): Engi
       // picture behind live. Jump forward when that exceeds the maximum, keeping some buffer,
       // rather than play faster: a faster rate is audible and visible for half a minute. A
       // recording plays every second it has, however far ahead the data is.
-      liveBufferLatencyChasing: !ends,
+      liveBufferLatencyChasing: ends === null,
       liveBufferLatencyMaxLatency: LIVE_MAX_LATENCY_S,
       liveBufferLatencyMinRemain: LIVE_KEEP_BUFFER_S,
     },
@@ -146,7 +147,7 @@ function mpegtsEngine(video: HTMLVideoElement, url: string, ends: boolean): Engi
   });
   // A recording's end plays out what arrived, and the element says when it is over.
   player.on(mpegts.Events.LOADING_COMPLETE, () => {
-    if (!ends) life.fail({ kind: "network", detail: t("The provider ended the stream.") });
+    if (ends === null) life.fail({ kind: "network", detail: t("The provider ended the stream.") });
   });
   let privateData: ((pid: number, data: Uint8Array, at: number) => void) | null = null;
   // mpegts.js times private data in milliseconds on the timeline it gives the element.
@@ -200,7 +201,7 @@ function hlsEngine(
   video: HTMLVideoElement,
   url: string,
   sound: SoundChoice,
-  ends: boolean,
+  ends: number | null,
 ): Engine {
   // hls.js puts no subtitles on the element by itself: their lines go to the player as events,
   // only for the track the viewer chose (see ./hls-tracks.ts).
@@ -246,7 +247,11 @@ function hlsEngine(
 }
 
 /** Chromium's own player. Plays progressive files and raw audio streams such as AAC radio. */
-export function nativeEngine(video: HTMLVideoElement, url: string, ends = false): Engine {
+export function nativeEngine(
+  video: HTMLVideoElement,
+  url: string,
+  ends: number | null = null,
+): Engine {
   const life = lifecycle(video, () => {}, ends);
   video.src = url;
   void video.play().catch(() => {});
@@ -260,7 +265,7 @@ export function nativeEngine(video: HTMLVideoElement, url: string, ends = false)
 }
 
 function failedEngine(name: EngineName, video: HTMLVideoElement, error: EngineError): Engine {
-  const life = lifecycle(video, () => {}, false);
+  const life = lifecycle(video, () => {}, null);
   life.fail(error);
   return {
     name,
@@ -279,10 +284,10 @@ function failedEngine(name: EngineName, video: HTMLVideoElement, error: EngineEr
  * that cannot handle the audio shows one frame and then freezes. A watchdog tells the cases apart:
  * data piling up without playback means the format is unplayable, no data means the network.
  *
- * A stream that `ends` is over when the element reaches its end, which no watchdog counts as a
- * stall: the engine says it ended instead.
+ * A stream that `ends` is over once it played that many milliseconds, or when the element reaches
+ * the end of what arrived, which no watchdog counts as a stall: the engine says it ended instead.
  */
-function lifecycle(video: HTMLVideoElement, teardown: () => void, ends: boolean) {
+function lifecycle(video: HTMLVideoElement, teardown: () => void, ends: number | null) {
   const observation = observeMediaPlayback(video);
   let settled = false;
   let finished = false;
@@ -314,6 +319,7 @@ function lifecycle(video: HTMLVideoElement, teardown: () => void, ends: boolean)
       lastTime = video.currentTime;
       lastProgressAt = now;
       wait(false);
+      if (ends !== null && played >= ends) onEnded();
       return;
     }
     if (!settled) {
@@ -394,7 +400,7 @@ function lifecycle(video: HTMLVideoElement, teardown: () => void, ends: boolean)
     if (endedListener) endedListener();
     else pendingEnd = true;
   };
-  if (ends) video.addEventListener("ended", onEnded);
+  if (ends !== null) video.addEventListener("ended", onEnded);
 
   function detach(): void {
     observation.stop();

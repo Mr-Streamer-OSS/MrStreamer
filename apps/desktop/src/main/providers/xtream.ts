@@ -396,7 +396,8 @@ export function xtreamProvider(account: XtreamAccount, options: ProviderOptions)
     /**
      * The panel's timeshift address: `/timeshift/user/pass/<minutes>/<YYYY-MM-DD:HH-MM>/<id>.ts`,
      * the start on the panel's own clock (`server_info.timezone`), else in UTC. Panels start on a
-     * whole minute, so the stream starts up to a minute early and runs on to the window's end.
+     * whole minute, so the recording starts on the minute before the window's start, which it
+     * says, and runs on to the window's end.
      */
     async archiveStream(channelId, window, signal) {
       const user = encodeURIComponent(account.username);
@@ -408,6 +409,7 @@ export function xtreamProvider(account: XtreamAccount, options: ProviderOptions)
       return {
         url: `${account.server}/timeshift/${user}/${pass}/${minutes}/${time}/${encodeURIComponent(channelId)}.ts`,
         format: "mpegts",
+        start,
       };
     },
   };
