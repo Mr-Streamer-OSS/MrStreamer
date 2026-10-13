@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("node:timers/promises", () => ({ setTimeout: async () => undefined }));
@@ -16,6 +17,8 @@ if (args[0] === "notarytool") {
   process.stdout.write(JSON.stringify({ id: "accepted-id", status: "Accepted" }));
 } else if (args[1] === "staple") {
   if (process.env.STAPLE_SCENARIO === "hang") {
+    fs.writeFileSync(process.env.STAPLE_PID, String(process.pid));
+    process.on("SIGTERM", () => {});
     setTimeout(() => {}, 120000);
   } else if (process.env.STAPLE_SCENARIO === "exhaust" ||
     (process.env.STAPLE_SCENARIO === "recover" && staples === 0)) {
@@ -36,10 +39,11 @@ if (args[0] === "notarytool") {
 }
 `;
 
-describe("notarizing and stapling a release DMG", () => {
+describe.skipIf(process.platform === "win32")("notarizing and stapling a release DMG", () => {
   let directory: string;
   let dmg: string;
   let calls: string;
+  let staplePid: string;
   let metadata: string;
   let originalArgv: string[];
   let originalEnv: NodeJS.ProcessEnv;
@@ -48,6 +52,7 @@ describe("notarizing and stapling a release DMG", () => {
     directory = mkdtempSync(join(tmpdir(), "mrstreamer-dmg-staple-"));
     dmg = join(directory, "release.dmg");
     calls = join(directory, "calls.txt");
+    staplePid = join(directory, "stapler.pid");
     metadata = join(directory, "latest-mac.yml");
     const fakeXcrun = join(directory, "xcrun");
     writeFileSync(fakeXcrun, xcrun);
@@ -66,6 +71,7 @@ describe("notarizing and stapling a release DMG", () => {
     process.env.APPLE_API_KEY_ID = "test-key";
     process.env.APPLE_API_ISSUER = "test-issuer";
     process.env.STAPLE_CALLS = calls;
+    process.env.STAPLE_PID = staplePid;
     vi.resetModules();
   });
 
@@ -78,6 +84,18 @@ describe("notarizing and stapling a release DMG", () => {
 
   const run = () => import("../scripts/notarize-dmg.ts");
   const commands = () => readFileSync(calls, "utf8").trim().split("\n");
+  const assertStaplerExited = (): number => {
+    const pid = Number(readFileSync(staplePid, "utf8"));
+    expect(pid).toBeGreaterThan(0);
+    let error: unknown;
+    try {
+      process.kill(pid, 0);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({ code: "ESRCH" });
+    return pid;
+  };
 
   it("recovers a lost ticket connection and still validates and updates the release metadata", async () => {
     process.env.STAPLE_SCENARIO = "recover";
@@ -114,8 +132,13 @@ describe("notarizing and stapling a release DMG", () => {
 
   it("stops a hanging stapler at the subprocess deadline", async () => {
     process.env.STAPLE_SCENARIO = "hang";
+    const started = performance.now();
     await expect(run()).rejects.toThrow("DMG stapling failed on attempt 1");
+    const elapsed = performance.now() - started;
+    expect(elapsed).toBeLessThan(70_000);
     expect(commands()).toEqual(["submit", "staple"]);
     expect(readFileSync(metadata, "utf8")).toContain("sha512: old");
+    const pid = assertStaplerExited();
+    console.log(`Ignored-SIGTERM stapler PID ${pid} absent after ${Math.round(elapsed)} ms.`);
   }, 75_000);
 });

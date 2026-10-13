@@ -32,6 +32,7 @@ async function stapleDmg(dmg: string): Promise<void> {
       encoding: "utf8",
       stdio: ["inherit", "pipe", "pipe"],
       timeout: Math.min(STAPLE_ATTEMPT_MS, remaining),
+      killSignal: "SIGKILL",
     });
     if (result.stdout) process.stdout.write(result.stdout);
     if (result.stderr) process.stderr.write(result.stderr);

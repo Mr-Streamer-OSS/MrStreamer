@@ -2,6 +2,7 @@ import { createRequire } from "node:module";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Resolve the exact patched copy that electron-builder loads for signed Mac apps.
@@ -35,6 +36,8 @@ if (command === "find") {
 } else if (command !== "staple") {
   process.exitCode = 0;
 } else if (process.env.STAPLE_SCENARIO === "hang") {
+  fs.writeFileSync(process.env.STAPLE_PID, String(process.pid));
+  process.on("SIGTERM", () => {});
   setTimeout(() => {}, 120000);
 } else if (process.env.STAPLE_SCENARIO === "exhaust" ||
   (process.env.STAPLE_SCENARIO === "recover" && attempt === 0)) {
@@ -53,16 +56,18 @@ if (command === "find") {
 }
 `;
 
-describe("stapling the notarized release app", () => {
+describe.skipIf(process.platform === "win32")("stapling the notarized release app", () => {
   let directory: string;
   let appPath: string;
   let calls: string;
+  let staplePid: string;
   let originalEnv: NodeJS.ProcessEnv;
 
   beforeEach(() => {
     directory = mkdtempSync(join(tmpdir(), "mrstreamer-app-staple-"));
     appPath = join(directory, "Mr. Streamer.app");
     calls = join(directory, "calls.txt");
+    staplePid = join(directory, "stapler.pid");
     mkdirSync(appPath);
     for (const tool of ["xcrun", "codesign", "ditto"]) {
       const path = join(directory, tool);
@@ -72,6 +77,7 @@ describe("stapling the notarized release app", () => {
     originalEnv = { ...process.env };
     process.env.PATH = `${directory}:${process.env.PATH ?? ""}`;
     process.env.STAPLE_CALLS = calls;
+    process.env.STAPLE_PID = staplePid;
   });
 
   afterEach(() => {
@@ -83,6 +89,18 @@ describe("stapling the notarized release app", () => {
   const commands = () => readFileSync(calls, "utf8").trim().split("\n");
   const attempts = () => commands().filter((command) => command === "staple").length;
   const submissions = () => commands().filter((command) => command === "submit").length;
+  const assertStaplerExited = (): number => {
+    const pid = Number(readFileSync(staplePid, "utf8"));
+    expect(pid).toBeGreaterThan(0);
+    let error: unknown;
+    try {
+      process.kill(pid, 0);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({ code: "ESRCH" });
+    return pid;
+  };
   const run = () =>
     notarizeApp({
       appPath,
@@ -136,8 +154,13 @@ describe("stapling the notarized release app", () => {
 
   it("kills a hanging stapler at the subprocess deadline", async () => {
     process.env.STAPLE_SCENARIO = "hang";
+    const started = performance.now();
     await expect(run()).rejects.toThrow("code: unknown");
+    const elapsed = performance.now() - started;
+    expect(elapsed).toBeLessThan(70_000);
     expect(attempts()).toBe(1);
     expect(submissions()).toBe(1);
+    const pid = assertStaplerExited();
+    console.log(`Ignored-SIGTERM stapler PID ${pid} absent after ${Math.round(elapsed)} ms.`);
   }, 75_000);
 });
