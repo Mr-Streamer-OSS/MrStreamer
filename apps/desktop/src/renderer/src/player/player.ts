@@ -34,8 +34,16 @@ import { PlaybackObservation, playbackFailure, streamFailure } from "./analytics
 // off again uses them up and fails, rather than reconnecting for ever. Choosing the channel
 // again, or Retry, starts afresh. What a failure says is the kind of thing that went wrong and
 // the provider's status, never the words an engine or the provider used for it.
+//
+// A programme the provider keeps in its catch-up archive plays the same way, as the channel's
+// stream, from the programme's start (`playArchive`). It is a stream that ends: at its end the
+// channel stops, as after Stop. A reconnect, or another sound track, opens the recording again
+// where it got to. Playing or switching to a channel plays it live; going back to Watch on the
+// one that plays keeps the recording, as it keeps a live stream. Catch-up plays on this computer
+// only.
 import { createStore, useStore } from "zustand";
 import type { AppError } from "@mrstreamer/contracts/errors";
+import type { Programme } from "@mrstreamer/contracts/guide";
 import type {
   OutputFailure,
   OutputStatus,
@@ -167,6 +175,8 @@ type PlayerPhase =
 
 export interface PlayerState {
   readonly channel: LiveChannel | null;
+  /** The programme of `channel` that plays from the provider's catch-up archive; null for live. */
+  readonly archive: Programme | null;
   readonly phase: PlayerPhase;
   /** The channel that played before the current one. Back returns to it, like a TV remote. */
   readonly previous: LiveChannel | null;
@@ -207,6 +217,7 @@ export interface PlayerState {
 
 const store = createStore<PlayerState>(() => ({
   channel: null,
+  archive: null,
   phase: { kind: "idle" },
   previous: null,
   volume: 1,
@@ -255,7 +266,22 @@ let selection = 0;
  * connection another device holds is not fought over.
  */
 let quiet = false;
-let current: { readonly sessionId: string; readonly engine: Engine } | null = null;
+/**
+ * A programme playing from the archive, and where in it the next stream opens, in epoch ms: its
+ * start, then as far as the streams before played.
+ */
+interface Recording {
+  readonly programme: Programme;
+  at: number;
+}
+/** The recording that plays; null while the channel plays live. */
+let archived: Recording | null = null;
+/** The open stream, and for a recording, which and from where it opened. */
+let current: {
+  readonly sessionId: string;
+  readonly engine: Engine;
+  readonly archived: { readonly of: Recording; readonly from: number } | null;
+} | null = null;
 let volumeSave: ReturnType<typeof setTimeout> | null = null;
 let zapTimer: ReturnType<typeof setTimeout> | null = null;
 /** The channel the last stream was opened for. It becomes `previous` when another channel tunes. */
@@ -323,6 +349,9 @@ function cancelZap(): void {
 function release(): void {
   if (!current) return;
   if (sameOwned(tuned, store.getState().channel)) channelPlayed += current.engine.played();
+  // The recording goes on from where this stream got to.
+  const recording = current.archived;
+  if (recording) recording.of.at = recording.from + current.engine.played();
   observation.unbind();
   current.engine.destroy();
   clearSubtitles(video);
@@ -333,6 +362,12 @@ function release(): void {
   // Nothing loads the chosen subtitles any more, and no picture is left to stand still.
   const { subtitleLoading, waiting } = store.getState();
   if (subtitleLoading || waiting) store.setState({ subtitleLoading: false, waiting: false });
+}
+
+/** The channel plays live from now on: a recording that played is forgotten. */
+function live(): void {
+  archived = null;
+  if (store.getState().archive) store.setState({ archive: null });
 }
 
 /** The phase of a channel that failed with `problem`, after what it went through. */
@@ -400,6 +435,9 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
   if (first) quiet = preview || !store.getState().audible;
   if (first) tune(channel);
   release();
+  // A recording opens where the streams before got to, and one played to its end is over.
+  const recording = archived && { of: archived, from: archived.at };
+  if (recording && recording.from >= recording.of.programme.stop) return player.stop();
   store.setState({
     channel,
     phase: first ? { kind: "tuning", since: Date.now() } : reconnecting(null),
@@ -422,6 +460,9 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
     session = await call("playback.open", {
       ...(measurement ? { measurement } : {}),
       channel: ownedId(channel),
+      ...(recording
+        ? { archive: { start: recording.from, end: recording.of.programme.stop } }
+        : {}),
       decoders: [...decoders],
       repair,
       ...(sound.audio !== null ? { audio: sound.audio } : {}),
@@ -443,8 +484,8 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
   }
 
   observation.bind(session.sessionId);
-  let engine = createEngine(session.format, video, session.url, sound);
-  current = { sessionId: session.sessionId, engine };
+  let engine = createEngine(session.format, video, session.url, sound, recording !== null);
+  current = { sessionId: session.sessionId, engine, archived: recording };
   engine.onPlayback?.((state) => {
     if (mine === selection) observation.note(state);
   });
@@ -476,8 +517,8 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
   // Some "live" channels are raw audio (AAC radio) rather than MPEG-TS. Chromium plays those itself.
   if (failure?.kind === "wrong-container" && mine === selection) {
     engine.destroy();
-    engine = nativeEngine(video, session.url);
-    current = { sessionId: session.sessionId, engine };
+    engine = nativeEngine(video, session.url, recording !== null);
+    current = { sessionId: session.sessionId, engine, archived: recording };
     engine.onPlayback?.((state) => {
       if (mine === selection) observation.note(state);
     });
@@ -510,6 +551,10 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
     brokeOff(playing.played());
     void recover(mine, channel, session, error, repair);
   });
+  // A recording played to its end stops the channel.
+  playing.onEnded(() => {
+    if (mine === selection) player.stop();
+  });
 }
 
 /**
@@ -523,6 +568,8 @@ async function startOnReceiver(channel: LiveChannel): Promise<void> {
   quiet = false;
   if (first) tune(channel);
   release();
+  // A receiver plays the channel live: catch-up plays on this computer only.
+  live();
   declaredTracks = null;
   recentSubtitlePackets = [];
   onReceiver = { load: null, started: false, played: 0, since: null };
@@ -1015,17 +1062,33 @@ export const player = {
     setSubtitleLook(preferences.subtitleLook ?? DEFAULT_SUBTITLE_LOOK);
   },
 
+  /** Plays a channel live. */
   play(channel: LiveChannel): void {
     selectForWatching(channel);
     liveStarts?.();
     cancelZap();
+    live();
     store.setState({ stopped: false });
     void begin(channel);
   },
 
   /**
-   * Plays a channel to watch it, keeping the stream when a preview already shows it. From then on
-   * a failure reconnects as usual.
+   * Plays a programme of `channel` from the provider's catch-up archive, from its start, as `play`
+   * plays the channel live. Nothing opens while a receiver has playback: it plays channels live.
+   */
+  playArchive(channel: LiveChannel, programme: Programme): void {
+    if (outputs.remote()) return;
+    selectForWatching(channel);
+    liveStarts?.();
+    cancelZap();
+    archived = { programme, at: programme.start };
+    store.setState({ stopped: false, archive: programme });
+    void begin(channel);
+  },
+
+  /**
+   * Plays a channel to watch it, keeping the stream when a preview already shows it, a recording's
+   * too. From then on a failure reconnects as usual.
    */
   watch(channel: LiveChannel): void {
     const { channel: selected, phase } = store.getState();
@@ -1049,6 +1112,8 @@ export const player = {
     if (outputs.receiver()) return;
     if (stopped || (sameOwned(current, channel) && phase.kind !== "idle")) return;
     cancelZap();
+    // Another channel previews live. The one that played a recording goes on with it.
+    if (!sameOwned(current, channel)) live();
     void begin(channel, true);
   },
 
@@ -1087,6 +1152,7 @@ export const player = {
     cancelZap();
     selection++;
     release();
+    live();
     // What a receiver says of the channel before is no word on this one.
     if (onReceiver) onReceiver.load = null;
     tune(channel);
@@ -1177,6 +1243,7 @@ export const player = {
     selection++;
     tune(channel);
     recovery = UNTRIED;
+    live();
     onReceiver = { load: media.generation, started: false, played: 0, since: null };
     store.setState({ channel, stopped: false, phase: { kind: "tuning", since: media.at } });
     followReceiver(media);
@@ -1188,6 +1255,7 @@ export const player = {
     explicitlySelected = null;
     onReceiver = null;
     player.suspend();
+    live();
     tuned = null;
     provenSubtitles.clear();
     declaredTracks = null;

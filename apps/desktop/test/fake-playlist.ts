@@ -8,6 +8,8 @@
 // - "TEST | Captions in the picture" declares nothing: its four seconds carry "HELLO CAPTIONS"
 //   as closed captions, from 1 to 3 s.
 // - "TEST | One sound" is a stream without anything to choose.
+// - With `catchup`, "TEST | Catch-up" too: Flussonic's catch-up for two days. Its recordings,
+//   `/catchup/index-<start>-<seconds>.m3u8`, play the clip of "TEST | One sound".
 //
 // Every stream ends, so a line shows at the same second each time. The playlist's first line
 // names a guide only once `nameGuide` says so, as a publisher adds one later; the guide then
@@ -23,6 +25,8 @@ export const PLAYLIST_CHANNELS = {
   tracks: { id: "tracks.test", name: "TEST | Two sounds and subtitles" },
   captions: { id: "captions.test", name: "TEST | Captions in the picture" },
   plain: { id: "plain.test", name: "TEST | One sound" },
+  /** Listed with `catchup` only. */
+  catchup: { id: "catchup.test", name: "TEST | Catch-up" },
 } as const;
 
 const TYPES: Readonly<Record<string, string>> = {
@@ -42,7 +46,9 @@ export interface FakePlaylist {
   close(): Promise<void>;
 }
 
-export async function startFakePlaylist(): Promise<FakePlaylist> {
+export async function startFakePlaylist(
+  options: { readonly catchup?: boolean } = {},
+): Promise<FakePlaylist> {
   const asked: string[] = [];
   let guideNamed = false;
   const hls = (file: string) =>
@@ -75,6 +81,8 @@ export async function startFakePlaylist(): Promise<FakePlaylist> {
       else if (folder === "captions" && file === "clip.mpegts")
         body = fixture("h264-subtitles.mpegts");
       else if (folder === "plain" && file === "clip.mpegts") body = fixture("h264-aac.mpegts");
+      else if (folder === "catchup" && /^index-\d+-\d+\.m3u8$/.test(file)) body = single(3);
+      else if (folder === "catchup" && file === "clip.mpegts") body = fixture("h264-aac.mpegts");
     } catch {
       // A file the stream doesn't have.
     }
@@ -95,6 +103,12 @@ export async function startFakePlaylist(): Promise<FakePlaylist> {
       `${origin}/captions/index.m3u8`,
       `#EXTINF:-1 tvg-id="${PLAYLIST_CHANNELS.plain.id}" group-title="Test",${PLAYLIST_CHANNELS.plain.name}`,
       `${origin}/plain/index.m3u8`,
+      ...(options.catchup
+        ? [
+            `#EXTINF:-1 tvg-id="${PLAYLIST_CHANNELS.catchup.id}" catchup="flussonic" catchup-days="2" group-title="Test",${PLAYLIST_CHANNELS.catchup.name}`,
+            `${origin}/catchup/index.m3u8`,
+          ]
+        : []),
       "",
     ].join("\n");
 

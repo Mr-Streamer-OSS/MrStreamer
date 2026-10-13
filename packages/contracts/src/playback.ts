@@ -61,6 +61,16 @@ export interface TitleSession {
 }
 
 /**
+ * A stretch of a channel's past, in epoch milliseconds, to play from the provider's catch-up
+ * archive: a programme from its start, or from where playback reached in it. `end` may lie ahead
+ * for a programme still on; the provider sends what it has.
+ */
+export interface ArchiveWindow {
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
  * Which of a channel's streams a live session plays. Auto tries the next stream when the provider
  * doesn't deliver one; a chosen stream is the only one tried.
  */

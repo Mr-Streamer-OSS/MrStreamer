@@ -13,6 +13,10 @@
 // playlists list them, passes through playlist by playlist and segment by segment, its addresses
 // replaced by the proxy's (see ../playback/hls.ts).
 //
+// Catch-up plays a channel's past the same way, from the provider's archive in place of its live
+// stream: a stream that ends. An MPEG-TS recording goes on no faster than it plays, as a provider
+// may send it as fast as it can (see ../playback/paced.ts).
+//
 // Movies and episodes (see ../playback/title.ts): the proxy serves the provider's file to ffprobe
 // and ffmpeg over loopback, answering byte ranges, one upstream request at a time. Each request
 // from the player runs ffmpeg from a position with the chosen tracks, and replaces the run before.
@@ -58,6 +62,7 @@ import type { CopySession } from "@mrstreamer/contracts/downloads";
 import type { RawTitleRef, TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { OwnedId } from "@mrstreamer/contracts/subscription";
 import type {
+  ArchiveWindow,
   AudioTrack,
   ChannelTracks,
   Codec,
@@ -85,6 +90,7 @@ import { fileRequest } from "../playback/file-source.ts";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { createCleanStart } from "../playback/clean-start.ts";
+import { paced } from "../playback/paced.ts";
 import { ffmpegArguments, planConversion, type Conversion } from "../playback/convert.ts";
 import { createInspector, type Inspection, type StreamLayout } from "../playback/inspect.ts";
 import { CAPTION_PID, createCaptionCopy } from "../playback/caption-stream.ts";
@@ -176,6 +182,11 @@ const REFUSED_RETRY_DELAYS_MS = [500, 1500];
  * closes one request and opens the next at once, so the first retry comes sooner.
  */
 const FILE_RETRY_DELAYS_MS = [150, 400, 1000, 2000];
+/**
+ * How far a catch-up recording may run ahead of the time it has played, in seconds: what a live
+ * stream's player keeps buffered, and some to spare against a slow provider.
+ */
+const ARCHIVE_LEAD_S = 30;
 /** Video codecs whose streams start on a keyframe; see ../playback/clean-start.ts. */
 const CLEAN_START_CODECS: ReadonlySet<Codec> = new Set(["h264", "hevc", "hevc-10bit"]);
 /** The longest HLS playlist the proxy reads; live ones are a few kilobytes. */
@@ -415,6 +426,8 @@ interface LiveSession extends SessionBase {
     readonly url: string;
     readonly headers: Readonly<Record<string, string>>;
   }[];
+  /** The stretch of the past it plays from the provider's catch-up archive; null for live. */
+  readonly archive: ArchiveWindow | null;
   /** Which stream plays, and those that failed before it: see `Playback.playing`. */
   delivered: LivePlaying;
   readonly format: StreamFormat;
@@ -695,6 +708,10 @@ export class Playback extends Context.Service<
      * too, for a broadcast the player failed to decode: ffmpeg conceals damage that stops the
      * player.
      *
+     * `archive` plays that stretch of the channel's past from the provider's catch-up archive in
+     * place of the channel live: the same delivery, of a stream that ends. Whether the streams
+     * keep it is the caller's to check (see @mrstreamer/core/catchup).
+     *
      * `preview` says nobody chose to watch it, as a page's muted preview. It closes nothing a
      * receiver plays: the open fails while a receiver's session is open, and that is looked at
      * when the open takes its turn, so a receiver that began after it was asked for keeps its
@@ -705,6 +722,7 @@ export class Playback extends Context.Service<
       decoders: readonly Codec[],
       options?: {
         readonly variants?: readonly string[];
+        readonly archive?: ArchiveWindow | null;
         readonly repair?: boolean;
         readonly audio?: number | null;
         readonly audioLanguage?: string | null;
@@ -991,10 +1009,13 @@ function make(deps: PlaybackDeps) {
       session.layout = layout;
       session.captions = [];
       const video = layout?.video;
+      const read = session.archive
+        ? paced(replay(start, reader), ARCHIVE_LEAD_S, signal)
+        : replay(start, reader);
       const cleaned =
         video && video.codec !== "unknown" && CLEAN_START_CODECS.has(video.codec)
-          ? cleanStart(replay(start, reader), createCleanStart(video.pid, video.codec))
-          : replay(start, reader);
+          ? cleanStart(read, createCleanStart(video.pid, video.codec))
+          : read;
       // The track asked for, else the sound in the viewer's language, else the channel's first.
       const chosen =
         layout?.audio.find((track) => track.pid === session.audio) ??
@@ -3507,6 +3528,7 @@ function make(deps: PlaybackDeps) {
       decoders: readonly Codec[],
       options: {
         readonly variants?: readonly string[];
+        readonly archive?: ArchiveWindow | null;
         readonly repair?: boolean;
         readonly audio?: number | null;
         readonly audioLanguage?: string | null;
@@ -3520,6 +3542,7 @@ function make(deps: PlaybackDeps) {
 
         const now = Date.now();
         for (const [url, at] of failedAt) if (now - at > FAILED_STREAM_MS) failedAt.delete(url);
+        const archive = options.archive ?? null;
         // Streams that failed lately go last, in the order they came. The player picks its
         // engine by the format before the stream starts, so those of another format than the
         // first's stay out.
@@ -3527,7 +3550,10 @@ function make(deps: PlaybackDeps) {
           options.variants?.length ? options.variants : [channel.id],
           (id) =>
             Effect.tryPromise({
-              try: (signal) => source.provider.liveStream(id, signal),
+              try: (signal) =>
+                archive
+                  ? source.provider.archiveStream(id, archive, signal)
+                  : source.provider.liveStream(id, signal),
               catch: failedWith,
             }).pipe(Effect.map((stream) => ({ id, ...stream }))),
         );
@@ -3561,6 +3587,7 @@ function make(deps: PlaybackDeps) {
           token,
           channel,
           variants,
+          archive,
           delivered: { variantId: null, failed: [] },
           request: source.provider.request,
           format,
@@ -3857,6 +3884,7 @@ function make(deps: PlaybackDeps) {
         decoders: readonly Codec[],
         options: {
           readonly variants?: readonly string[];
+          readonly archive?: ArchiveWindow | null;
           readonly repair?: boolean;
           readonly audio?: number | null;
           readonly audioLanguage?: string | null;
