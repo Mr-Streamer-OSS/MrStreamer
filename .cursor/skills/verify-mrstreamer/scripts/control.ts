@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { catchupScenario, CLOCK_LEAD_MS } from "./catchup.ts";
+import { catchupHlsScenario, catchupScenario, CLOCK_LEAD_MS } from "./catchup.ts";
 import { runDownloads } from "./downloads.ts";
 import { homeStageScenario, stageChannel, stageLogo } from "./home-stage.ts";
 import { startFakePlaylist } from "../../../../apps/desktop/test/fake-playlist.ts";
@@ -37,6 +37,7 @@ const scenarios = [
   "background-refresh",
   "live-tv",
   "catch-up",
+  "catch-up-hls",
   "live-categories",
   "titles",
   "watchlist",
@@ -148,6 +149,10 @@ async function run(scenario: Scenario) {
         ),
       );
     if (scenario === "home-stage-live-only") playlist = await startFakePlaylist();
+    if (scenario === "catch-up-hls") {
+      playlist = await startFakePlaylist({ catchup: true });
+      playlist.nameGuide(true);
+    }
     if (scenario === "home-stage")
       other = await startFakeProvider({
         channels: 60,
@@ -564,6 +569,24 @@ async function run(scenario: Scenario) {
           }),
         },
       );
+    } else if (scenario === "catch-up-hls") {
+      await catchupHlsScenario(
+        {
+          profile,
+          observed,
+          evaluate: livePage.evaluate,
+          send,
+          wait,
+          exists,
+          click,
+          key,
+          capture,
+          action,
+          launch,
+          quit,
+        },
+        playlist!,
+      );
     } else if (scenario === "live-tv") {
       await click("Open global Search", "document.querySelector('button[aria-label=Search]')");
       action("Search TEST | H.264 + AAC");
@@ -746,10 +769,12 @@ async function run(scenario: Scenario) {
             "Development build; no installer/update proof",
             "Decoded audio does not prove audible output",
             "No hardware acceleration, TV receiver or performance claim",
-            ...(scenario === "catch-up"
+            ...(scenario === "catch-up" || scenario === "catch-up-hls"
               ? [
                   `Window clock ${CLOCK_LEAD_MS / 60_000} min ahead of the main process: the guide keeps no ended programme yet, so the one on now counts as aired`,
-                  "Xtream timeshift only; playlist conventions are covered by apps/desktop/test/catchup.test.ts",
+                  scenario === "catch-up"
+                    ? "Xtream timeshift only; playlist conventions are covered by apps/desktop/test/catchup.test.ts"
+                    : "Playlist Flussonic HLS only; Xtream timeshift is the catch-up scenario",
                 ]
               : []),
           ],

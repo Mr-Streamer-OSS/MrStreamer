@@ -35,6 +35,7 @@ pnpm verify:desktop --help
 pnpm verify:desktop subscriptions
 pnpm verify:desktop live-tv
 pnpm verify:desktop catch-up
+pnpm verify:desktop catch-up-hls
 pnpm verify:desktop titles
 pnpm verify:desktop watchlist
 pnpm verify:desktop downloads

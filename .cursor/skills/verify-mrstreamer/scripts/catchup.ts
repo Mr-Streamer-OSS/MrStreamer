@@ -1,13 +1,18 @@
-// Catch-up through Live TV's rest of the day: a programme that aired plays from the fake panel's
-// timeshift archive in Watch, which says it aired earlier. The panel breaks the connection two
-// seconds in and the player reconnects to the recording; it ends, and Watch then plays the
-// channel live. The panel's record of the timeshift addresses is the proof of the windows asked
-// for.
+// Catch-up through Live TV's rest of the day.
+//
+// `catch-up`: a programme that aired plays from the fake panel's timeshift archive in Watch,
+// which says it aired earlier. The panel breaks the connection two seconds in and the player
+// reconnects to the recording; it ends, and Watch then plays the channel live. The panel's record
+// of the timeshift addresses is the proof of the windows asked for.
+//
+// `catch-up-hls`: the same from a playlist's Flussonic catch-up, whose recording is an HLS
+// playlist that names no end yet. The playlist host's record of the parts asked for is the proof
+// that it plays from its first part, not from near its newest as a live playlist would.
 //
 // The guide keeps no programme that has ended until its on-disk index lands, so the window's own
 // clock runs `CLOCK_LEAD_MS` ahead of the main process's: the programme on now has aired by the
-// window's clock, which is what lists it, and the main process asks the panel for it on its own
-// clock, which accepts a programme that has started.
+// window's clock, which is what lists it, and the main process asks for it on its own clock,
+// which accepts a programme that has started.
 import type { ArchiveRequest } from "../../../../apps/desktop/test/fake-provider.ts";
 import type { Driver } from "./language.ts";
 
@@ -15,7 +20,6 @@ import type { Driver } from "./language.ts";
 export const CLOCK_LEAD_MS = 45 * 60 * 1000;
 /** The time zone the fake panel names, whose clock its timeshift addresses tell. */
 const PANEL_ZONE = "Europe/Amsterdam";
-const CHANNEL = "H.264 + AAC";
 
 /** What the fake panel was asked for, for the scenario's checks. */
 export interface CatchupFake {
@@ -33,8 +37,6 @@ const SHIFTED_CLOCK = `(() => {
   };
 })();`;
 
-const row = `[...document.querySelectorAll('[data-index]')].find(r => r.querySelector('[title]')?.firstElementChild?.textContent === ${JSON.stringify(CHANNEL)})`;
-const lines = `[...(${row})?.querySelectorAll('.rounded-b-xl > button') ?? []]`;
 const video = `(() => {
   const v = document.querySelector('video');
   return { time: v?.currentTime ?? 0, width: v?.videoWidth ?? 0, ended: v?.ended ?? false,
@@ -59,10 +61,18 @@ function panelTime(time: number): string {
   return `${parts["year"]}-${parts["month"]}-${parts["day"]}:${parts["hour"]}-${parts["minute"]}`;
 }
 
-export async function catchupScenario(d: Driver, fake: CatchupFake): Promise<void> {
-  const expect = (ok: boolean, message: string) => {
-    if (!ok) throw new Error(message);
-  };
+const expect = (ok: boolean, message: string) => {
+  if (!ok) throw new Error(message);
+};
+
+/**
+ * Runs the window's clock ahead, opens Live TV's `category` and the rest of the day of the channel
+ * whose name has `channel` in it, and gives the first programme that aired, with the steps that
+ * play and watch it.
+ */
+async function airedProgramme(d: Driver, category: string, channel: string) {
+  const row = `[...document.querySelectorAll('[data-index]')].find(r => r.querySelector('[title]')?.firstElementChild?.textContent.includes(${JSON.stringify(channel)}))`;
+  const lines = `[...(${row})?.querySelectorAll('.rounded-b-xl > button') ?? []]`;
   const playback = () =>
     d.evaluate<{ time: number; width: number; ended: boolean; audio: number; watching: boolean }>(
       video,
@@ -95,12 +105,12 @@ export async function catchupScenario(d: Driver, fake: CatchupFake): Promise<voi
     "[...document.querySelectorAll('header button')].find(b => b.textContent.trim() === 'Live TV')",
   );
   await d.click(
-    "Open the TEST category",
-    "[...document.querySelectorAll('button')].find(b => b.textContent.trim().startsWith('TEST | Formats'))",
+    `Open the ${category} category`,
+    `[...document.querySelectorAll('button')].find(b => b.textContent.trim().startsWith(${JSON.stringify(category)}))`,
   );
   await d.wait(() => d.exists(row));
   await d.click(
-    `Open the rest of ${CHANNEL}'s day`,
+    `Open the rest of ${channel}'s day`,
     `(${row})?.querySelector('button[aria-label="Later programmes"]')`,
   );
   await d.wait(() => d.evaluate<boolean>(`${lines}.length > 1`));
@@ -114,20 +124,37 @@ export async function catchupScenario(d: Driver, fake: CatchupFake): Promise<voi
   expect(!!aired && !aired.onNow, "The rest of the day lists no programme that aired.");
   await d.capture("catchup-schedule");
 
+  return {
+    title: aired!.title,
+    playback,
+    nowPlaying,
+    wake,
+    /** Plays the programme that aired, and waits for its picture and sound to play. */
+    async play() {
+      await d.click(`Play ${aired!.title}, which aired`, `${lines}[0]`);
+      await d.wait(async () => {
+        const v = await playback();
+        return v.watching && v.time >= 1 && v.width > 0 && v.audio > 0;
+      });
+      d.observed["archivePlayback"] = await playback();
+      const shown = await nowPlaying();
+      d.observed["archiveNowPlaying"] = shown;
+      expect(
+        shown.includes(aired!.title) && shown.includes("Aired"),
+        "Watch doesn't say the programme aired.",
+      );
+    },
+  };
+}
+
+export async function catchupScenario(d: Driver, fake: CatchupFake): Promise<void> {
+  const channel = "H.264 + AAC";
+  const aired = await airedProgramme(d, "TEST | Formats", channel);
+  const { playback, nowPlaying, wake } = aired;
+
   // The panel's first answer breaks off two seconds in, as a dropped connection does.
   fake.breakNextArchive(20);
-  await d.click(`Play ${aired!.title}, which aired`, `${lines}[0]`);
-  await d.wait(async () => {
-    const v = await playback();
-    return v.watching && v.time >= 1 && v.width > 0 && v.audio > 0;
-  });
-  d.observed["archivePlayback"] = await playback();
-  const shown = await nowPlaying();
-  d.observed["archiveNowPlaying"] = shown;
-  expect(
-    shown.includes(aired!.title) && shown.includes("Aired"),
-    "Watch doesn't say the programme aired.",
-  );
+  await aired.play();
 
   // The player reconnects to the recording where it got to, and it plays again.
   await d.wait(async () => {
@@ -146,14 +173,14 @@ export async function catchupScenario(d: Driver, fake: CatchupFake): Promise<voi
   const schedule = await d.evaluate<
     { start: number; stop: number; title: string }[]
   >(`(async () => {
-    const read = await window.mrStreamer.invoke('library.channels', { query: ${JSON.stringify(CHANNEL)} });
+    const read = await window.mrStreamer.invoke('library.channels', { query: ${JSON.stringify(channel)} });
     const channel = read.ok ? read.value[0] : null;
     if (!channel) return [];
     const day = await window.mrStreamer.invoke('guide.schedule',
       { channel: { subscriptionId: channel.subscriptionId, id: channel.id } });
     return day.ok ? day.value : [];
   })()`);
-  const programme = schedule.find((each) => each.title === aired!.title);
+  const programme = schedule.find((each) => each.title === aired.title);
   expect(!!programme, "The guide no longer lists the programme played.");
   const expected = {
     streamId: "1000",
@@ -175,7 +202,7 @@ export async function catchupScenario(d: Driver, fake: CatchupFake): Promise<voi
   await d.capture("catchup-ended");
 
   await d.click(
-    `Watch ${CHANNEL} live`,
+    `Watch ${channel} live`,
     "document.querySelector('[data-view=watch] [data-retry]')",
   );
   await d.wait(async () => {
@@ -189,4 +216,25 @@ export async function catchupScenario(d: Driver, fake: CatchupFake): Promise<voi
   expect(fake.archiveRequests().length === 2, "The recording was asked for again.");
   await wake();
   await d.capture("catchup-live-again");
+}
+
+/**
+ * A playlist channel's recording that names no end yet, four three-second parts: Watch plays it
+ * from its first part.
+ */
+export async function catchupHlsScenario(
+  d: Driver,
+  host: { requests(): readonly string[] },
+): Promise<void> {
+  const aired = await airedProgramme(d, "Test", "Catch-up");
+  await aired.play();
+  const asked = host.requests();
+  const recording = asked.find((path) => /^\/catchup\/index-\d+-\d+\.m3u8$/.test(path));
+  const parts = asked.filter((path) => /^\/catchup\/part-\d\.mpegts$/.test(path));
+  d.observed["recordingAsked"] = recording;
+  d.observed["partsAsked"] = parts;
+  expect(!!recording, "The playlist's recording wasn't asked for.");
+  expect(parts[0] === "/catchup/part-0.mpegts", "The recording didn't start at its first part.");
+  await aired.wake();
+  await d.capture("catchup-hls-playing");
 }
