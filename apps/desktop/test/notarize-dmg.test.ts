@@ -7,6 +7,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("node:timers/promises", () => ({ setTimeout: async () => undefined }));
 
+/**
+ * The time each stapler attempt was given, as the script asked. While `scale` is below 1, an
+ * attempt runs for that share of it, so a minute's cap ends a hanging attempt in moments.
+ */
+const attempts = vi.hoisted(() => ({ given: [] as (number | undefined)[], scale: 1 }));
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  const spawnSync = ((command: string, args: readonly string[], options: { timeout?: number }) => {
+    attempts.given.push(options.timeout);
+    const timeout = options.timeout && Math.round(options.timeout * attempts.scale);
+    return actual.spawnSync(command, args, { ...options, timeout });
+  }) as typeof actual.spawnSync;
+  return { ...actual, spawnSync };
+});
+
 const xcrun = `#!/usr/bin/env node
 const fs = await import("node:fs");
 const args = process.argv.slice(2);
@@ -89,6 +104,8 @@ describe.skipIf(process.platform === "win32")("notarizing and stapling a release
   });
 
   afterEach(() => {
+    attempts.given = [];
+    attempts.scale = 1;
     process.argv = originalArgv;
     process.env = originalEnv;
     rmSync(directory, { recursive: true, force: true });
@@ -152,6 +169,20 @@ describe.skipIf(process.platform === "win32")("notarizing and stapling a release
     const started = performance.now();
     await expect(run()).rejects.toThrow("staple failed for");
     const elapsed = performance.now() - started;
+    expect(elapsed).toBeLessThan(20_000);
+    expect(commands()).toEqual(["submit", "staple"]);
+    expect(readFileSync(metadata, "utf8")).toContain("sha512: old");
+    assertStaplerExited();
+  }, 25_000);
+
+  it("kills a hanging stapler at its minute, with the five minutes far from spent", async () => {
+    process.env.STAPLE_SCENARIO = "hang";
+    attempts.scale = 0.01;
+    const started = performance.now();
+    await expect(run()).rejects.toThrow("staple failed for");
+    const elapsed = performance.now() - started;
+    // The attempt's own minute ended it, not the hang's two and not the overall deadline.
+    expect(attempts.given).toEqual([60_000]);
     expect(elapsed).toBeLessThan(20_000);
     expect(commands()).toEqual(["submit", "staple"]);
     expect(readFileSync(metadata, "utf8")).toContain("sha512: old");

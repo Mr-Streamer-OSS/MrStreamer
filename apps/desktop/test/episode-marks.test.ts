@@ -769,27 +769,35 @@ describe("marks on disk", { timeout: 20_000 }, () => {
     await viewing.episodes(of(a, ALONE)),
   ];
 
-  it("keeps them, where each series goes on and their Undo across a restart, and adds up to the same when the record is rebuilt from its events", async () => {
+  it("keeps them, where each series goes on and their Undo across a restart, and adds up to the same, Undo too, when the record is rebuilt from its events", async () => {
     const app = await marksApp();
-    const { viewing, a, database } = app;
+    const { viewing, a, database, moveOn } = app;
     const last = await history(app);
     const before = await read(viewing, a);
     // Every episode it lists now is watched but the first, which was marked unwatched.
     expect(await goesOn(viewing)).toEqual([[NL, "1:1"]]);
     expect(before[1]).toMatchObject({ progress: [{ position: 900 }, { position: 2690 }] });
+    /** The marks of the series once its latest mark was taken back: as they were before it. */
+    const undone = [
+      { season: 1, episode: 1, watched: false },
+      { season: 1, episode: 2, watched: true },
+    ];
 
     const restarted = (await app.start()).viewing;
     expect(await read(restarted, a)).toEqual(before);
+    // The latest mark can still be taken back, to what it replaced.
+    await restarted.undoMark(randomUUID(), of(a, NL), last?.revision ?? 0);
+    expect((await restarted.episodes(of(a, NL))).marks).toMatchObject(undone);
+    // Marked again, so the events the record is rebuilt from hold a mark taken back too.
+    moveOn();
+    const again = await mark(restarted, episode(a, 1, 3), true);
+    const marked = await read(restarted, a);
 
     database(dropState);
     const rebuilt = (await app.start()).viewing;
-    expect(await read(rebuilt, a)).toEqual(before);
-    // The latest mark can still be taken back, to what it replaced.
-    await rebuilt.undoMark(randomUUID(), of(a, NL), last?.revision ?? 0);
-    expect((await rebuilt.episodes(of(a, NL))).marks).toMatchObject([
-      { season: 1, episode: 1, watched: false },
-      { season: 1, episode: 2, watched: true },
-    ]);
+    expect(await read(rebuilt, a)).toEqual(marked);
+    await rebuilt.undoMark(randomUUID(), of(a, NL), again?.revision ?? 0);
+    expect((await rebuilt.episodes(of(a, NL))).marks).toMatchObject(undone);
   });
 
   it("survive a build from before marks, whose later play of the episode takes over", async () => {

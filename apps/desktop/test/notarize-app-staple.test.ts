@@ -167,4 +167,31 @@ describe.skipIf(process.platform === "win32")("stapling the notarized release ap
     expect(submissions()).toBe(1);
     assertStaplerExited();
   }, 25_000);
+
+  it("kills a hanging stapler at its minute, with the five minutes far from spent", async () => {
+    process.env.STAPLE_SCENARIO = "hang";
+    // The patched package calls spawnSync on Node's own module. Each stapler attempt runs for a
+    // hundredth of the time the package gives it, so a minute's cap ends the hang in moments.
+    const childProcess = require("node:child_process") as typeof import("node:child_process");
+    const spawnSync = childProcess.spawnSync;
+    const given: (number | undefined)[] = [];
+    vi.spyOn(childProcess, "spawnSync").mockImplementation(((
+      command: string,
+      args: readonly string[],
+      options: { timeout?: number },
+    ) => {
+      if (args[0] === "stapler") given.push(options.timeout);
+      const timeout = args[0] === "stapler" ? options.timeout && options.timeout / 100 : undefined;
+      return spawnSync(command, args, { ...options, ...(timeout ? { timeout } : {}) });
+    }) as typeof spawnSync);
+    const started = performance.now();
+    await expect(run()).rejects.toThrow("code: unknown");
+    const elapsed = performance.now() - started;
+    // The attempt's own minute ended it, not the hang's two and not the overall deadline.
+    expect(given).toEqual([60_000]);
+    expect(elapsed).toBeLessThan(20_000);
+    expect(attempts()).toBe(1);
+    expect(submissions()).toBe(1);
+    assertStaplerExited();
+  }, 25_000);
 });
