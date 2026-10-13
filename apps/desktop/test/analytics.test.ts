@@ -1063,14 +1063,30 @@ describe("completed daily product and reliability capture", () => {
     const stored = await saved(dataDir);
     if (!stored.summary) throw new Error("No counts.");
     stored.summary.counts.features.home = 1_000_000;
+    stored.summary.counts.actions.favourite_added = 1_000_000;
+    stored.summary.counts.settings.title_language = 1_000_000;
+    stored.summary.counts.playback.live.starts = 1_000_000;
     await analyticsStore(dataDir).save(stored);
     const restarted = await start({ dataDir });
     restarted.owner.noteFeature("home");
+    restarted.owner.noteAction("favourite_added");
+    restarted.owner.noteSetting("title_language");
+    const token = restarted.owner.beginPlayback("live")!;
+    const binding = restarted.owner.bindPlayback(token, "local")!;
+    restarted.owner.notePlaybackState(token, binding, 1, "playing");
     await nextDay(restarted.owner);
     await until(() => restarted.events.length === 2);
     const event = restarted.events[1];
     expect(event).toMatchObject({
-      properties: { counts: { saturated: true, features: { home: 1_000_000 } } },
+      properties: {
+        counts: {
+          saturated: true,
+          features: { home: 1_000_000 },
+          actions: { favourite_added: 1_000_000 },
+          settings: { title_language: 1_000_000 },
+          playback: { live: { starts: 1_000_000 } },
+        },
+      },
     });
     const capture = await captureServer();
     const transport = localCapture(capture.endpoint);
@@ -1209,5 +1225,401 @@ it("cannot restore a loaded aggregate after opt-out was requested during startup
   expect(events[1]).toMatchObject({
     event: "app_summary_day",
     properties: { counts: { features: { home: 0, settings: 1 } } },
+  });
+});
+
+describe("confirmed daily playback measurements", () => {
+  function playbackClock(at = "2026-10-11T12:00:00Z") {
+    vi.useFakeTimers({
+      toFake: ["Date", "performance", "setTimeout", "clearTimeout", "setInterval", "clearInterval"],
+    });
+    vi.setSystemTime(new Date(at));
+  }
+  async function measuring() {
+    const result = await start({ store: memoryStore() });
+    result.owner.setForeground(true);
+    await vi.advanceTimersByTimeAsync(0);
+    return result;
+  }
+  async function playing(
+    owner: Analytics,
+    token: string,
+    binding: string,
+    seconds: number,
+    sequence = 0,
+  ) {
+    for (let second = 0; second < seconds; second++) {
+      owner.notePlaybackState(token, binding, ++sequence, "playing");
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    return sequence;
+  }
+  async function complete(owner: Analytics) {
+    owner.setForeground(false);
+    vi.setSystemTime(new Date("2026-10-12T12:00:00Z"));
+    owner.setForeground(true);
+    await vi.advanceTimersByTimeAsync(0);
+  }
+
+  it("requires confirmed playback, rounds many intervals once, and keeps one start across replacement and output moves", async () => {
+    playbackClock();
+    const { owner, events } = await measuring();
+    const token = owner.beginPlayback("vod")!;
+    let binding = owner.bindPlayback(token, "local")!;
+    owner.notePlaybackState(token, binding, 1, "paused");
+    await vi.advanceTimersByTimeAsync(90_000);
+    for (let run = 0; run < 6; run++) {
+      binding = owner.bindPlayback(token, run % 2 ? "remote" : "local")!;
+      const sequence = await playing(owner, token, binding, 6);
+      owner.notePlaybackState(token, binding, sequence + 1, "seeking");
+      await vi.advanceTimersByTimeAsync(10_000);
+    }
+    owner.endPlayback(token);
+    await complete(owner);
+    expect(events.find((event) => event.event === "app_summary_day")).toMatchObject({
+      properties: {
+        counts: {
+          playback: {
+            vod: { starts: 1, errors: 0, watch_minutes: 1 },
+            live: { starts: 0, watch_minutes: 0 },
+          },
+        },
+      },
+    });
+    expect(JSON.stringify(events)).not.toMatch(/watch_ms|sessionId|binding|position/);
+  });
+
+  it("splits confirmed monotonic time before UTC foreground rollover without starting again at midnight", async () => {
+    playbackClock("2026-10-11T23:59:20Z");
+    const { owner, events } = await measuring();
+    const token = owner.beginPlayback("live")!;
+    const binding = owner.bindPlayback(token, "local")!;
+    const sequence = await playing(owner, token, binding, 80);
+    owner.notePlaybackState(token, binding, sequence + 1, "paused");
+    owner.setForeground(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(events.find((event) => event.event === "app_summary_day")).toMatchObject({
+      properties: {
+        summary_date: "2026-10-11",
+        counts: { playback: { live: { starts: 1, watch_minutes: 1 } } },
+      },
+    });
+    owner.setForeground(false);
+    vi.setSystemTime(new Date("2026-10-13T12:00:00Z"));
+    owner.setForeground(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(events.filter((event) => event.event === "app_summary_day")[1]).toMatchObject({
+      properties: {
+        summary_date: "2026-10-12",
+        counts: { playback: { live: { starts: 0, watch_minutes: 1 } } },
+      },
+    });
+  });
+
+  it("excludes preview intervals and deduplicates an incident until successful recovery", async () => {
+    playbackClock();
+    const { owner, events } = await measuring();
+    const token = owner.beginPlayback("live")!;
+    const binding = owner.bindPlayback(token, "local")!;
+    owner.setPlaybackEligible(token, false);
+    await playing(owner, token, binding, 60);
+    owner.notePlaybackFailure(token, binding, "network");
+    owner.setPlaybackEligible(token, true);
+    let sequence = await playing(owner, token, binding, 20, 60);
+    owner.notePlaybackFailure(token, binding, "network");
+    owner.notePlaybackFailure(token, null, "unsupported");
+    await vi.advanceTimersByTimeAsync(60_000);
+    sequence = await playing(owner, token, binding, 20, sequence);
+    owner.notePlaybackFailure(token, binding, "credentials");
+    sequence = await playing(owner, token, binding, 20, sequence);
+    owner.setPlaybackEligible(token, false);
+    await playing(owner, token, binding, 60, sequence);
+    owner.endPlayback(token);
+    await complete(owner);
+    expect(events.find((event) => event.event === "app_summary_day")).toMatchObject({
+      properties: {
+        counts: {
+          playback: {
+            live: {
+              starts: 1,
+              errors: 2,
+              watch_minutes: 1,
+              failures: { network: 1, credentials: 1, unsupported: 0 },
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it("bounds missing renderer heartbeats, suspend and wall-clock jumps, while remote playback survives renderer loss", async () => {
+    playbackClock();
+    const { owner, events } = await measuring();
+    let token = owner.beginPlayback("live")!;
+    let binding = owner.bindPlayback(token, "local")!;
+    owner.notePlaybackState(token, binding, 1, "playing");
+    await vi.advanceTimersByTimeAsync(3600_000);
+    owner.rendererGone();
+    owner.notePlaybackState(token, binding, 2, "playing");
+    token = owner.beginPlayback("vod")!;
+    binding = owner.bindPlayback(token, "remote")!;
+    let sequence = await playing(owner, token, binding, 20);
+    owner.rendererGone();
+    sequence = await playing(owner, token, binding, 20, sequence);
+    owner.suspendPlayback();
+    await vi.advanceTimersByTimeAsync(3600_000);
+    sequence = await playing(owner, token, binding, 20, sequence);
+    vi.setSystemTime(new Date(Date.now() + 3600_000));
+    owner.noteFeature("home");
+    owner.notePlaybackState(token, binding, ++sequence, "paused");
+    owner.endPlayback(token);
+    await complete(owner);
+    expect(events.find((event) => event.event === "app_summary_day")).toMatchObject({
+      properties: {
+        counts: {
+          playback: { live: { starts: 1, watch_minutes: 0 }, vod: { starts: 1, watch_minutes: 1 } },
+        },
+      },
+    });
+  });
+
+  it("invalidates old bindings across opt-out/on and dimension ABA, with no disabled-period backfill or historical start", async () => {
+    playbackClock();
+    const { owner, events } = await measuring();
+    const old = owner.beginPlayback("live")!;
+    const binding = owner.bindPlayback(old, "local")!;
+    await playing(owner, old, binding, 40);
+    await owner.configure(false);
+    await vi.advanceTimersByTimeAsync(3600_000);
+    await owner.configure(true);
+    owner.notePlaybackState(old, binding, 100, "playing");
+    owner.notePlaybackFailure(old, null, "network");
+    const ongoing = owner.beginPlayback("live", true)!;
+    const renewed = owner.bindPlayback(ongoing, "local")!;
+    await playing(owner, ongoing, renewed, 40);
+    owner.setUpdateChannel("nightly");
+    owner.setUpdateChannel("stable");
+    owner.notePlaybackState(ongoing, renewed, 100, "playing");
+    const future = owner.beginPlayback("live", true)!;
+    const fresh = owner.bindPlayback(future, "local")!;
+    await playing(owner, future, fresh, 40);
+    owner.endPlayback(future);
+    await complete(owner);
+    expect(events.find((event) => event.event === "app_summary_day")).toMatchObject({
+      properties: { counts: { playback: { live: { starts: 0, errors: 0, watch_minutes: 1 } } } },
+    });
+  });
+
+  it("drops old binding sequences without creating playback counts", async () => {
+    playbackClock();
+    const { owner, events } = await measuring();
+    const token = owner.beginPlayback("vod")!;
+    const old = owner.bindPlayback(token, "local")!;
+    const binding = owner.bindPlayback(token, "local")!;
+    owner.noteFeature("home");
+    owner.notePlaybackState(token, old, 999, "playing");
+    owner.notePlaybackState(token, binding, 2, "paused");
+    owner.notePlaybackState(token, binding, 1, "playing");
+    owner.notePlaybackFailure(token, old, "network");
+    await vi.advanceTimersByTimeAsync(60_000);
+    owner.endPlayback(token);
+    await complete(owner);
+    expect(events.find((event) => event.event === "app_summary_day")).toMatchObject({
+      properties: { counts: { playback: { vod: { starts: 0, errors: 0, watch_minutes: 0 } } } },
+    });
+  });
+});
+
+it("migrates populated legacy current/ready buckets without changing a pending retry envelope", async () => {
+  vi.useFakeTimers({
+    toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"],
+  });
+  vi.setSystemTime(new Date("2026-10-12T12:00:00Z"));
+  const dataDir = await tempDir();
+  const {
+    playback: _playback,
+    actions: _actions,
+    settings: _settings,
+    ...legacy
+  } = emptySummaryCounts();
+  legacy.features.home = 7;
+  legacy.playback_open.success = 3;
+  const id = "11111111-1111-4111-8111-111111111111";
+  const pending = {
+    uuid: "22222222-2222-4222-8222-222222222222",
+    distinct_id: id,
+    timestamp: "2026-10-10T12:00:00.000Z",
+    event: "app_summary_day" as const,
+    properties: {
+      ...properties,
+      profile_origin: "upgrading" as const,
+      $process_person_profile: false as const,
+      $geoip_disable: true as const,
+      summary_date: "2026-10-09",
+      counts: legacy,
+    },
+  };
+  await writeFile(
+    join(dataDir, "analytics.json"),
+    JSON.stringify({
+      format: 1,
+      enabled: true,
+      installationId: id,
+      profileOrigin: "upgrading",
+      firstSeen: true,
+      lastDay: "2026-10-11",
+      summary: {
+        day: "2026-10-11",
+        properties,
+        counts: legacy,
+        ready: { day: "2026-10-09", properties, counts: legacy },
+        reportedDay: "2026-10-09",
+      },
+      pending: [{ event: pending, attempts: 1 }],
+    }),
+  );
+  const loaded = await analyticsStore(dataDir).load();
+  expect(loaded?.summary?.counts).toMatchObject({
+    features: { home: 7 },
+    playback_open: { success: 3 },
+    playback: { live: { starts: 0, watch_minutes: 0 } },
+    actions: { favourite_added: 0 },
+    settings: { home_rows: 0 },
+  });
+  expect(loaded?.summary?.ready?.counts.features.home).toBe(7);
+  expect(loaded?.pending[0]).toEqual({ event: pending, attempts: 1 });
+  const { owner, events } = await start({ dataDir });
+  owner.setForeground(true);
+  await vi.advanceTimersByTimeAsync(0);
+  await until(() => events.length === 3);
+  expect(events[0]).toEqual(pending);
+  expect(events[2]).toMatchObject({
+    properties: {
+      summary_date: "2026-10-11",
+      counts: { features: { home: 7 }, playback: { vod: { starts: 0 } } },
+    },
+  });
+});
+
+it("validates and strips every new nested capture dictionary without normalizing a pending snapshot", async () => {
+  const counts = emptySummaryCounts();
+  const capture = await captureServer();
+  const transport = localCapture(capture.endpoint)!;
+  const event = {
+    uuid: "22222222-2222-4222-8222-222222222222",
+    distinct_id: "11111111-1111-4111-8111-111111111111",
+    timestamp: "2026-10-11T12:00:00.000Z",
+    event: "app_summary_day" as const,
+    properties: {
+      ...properties,
+      profile_origin: "fresh" as const,
+      $process_person_profile: false as const,
+      $geoip_disable: true as const,
+      summary_date: "2026-10-11",
+      counts,
+    },
+  };
+  const raw = {
+    ...event,
+    properties: {
+      ...event.properties,
+      counts: {
+        ...counts,
+        playback: {
+          ...counts.playback,
+          PRIVATE: "SECRET",
+          live: {
+            ...counts.playback.live,
+            title: "SECRET",
+            failures: { ...counts.playback.live.failures, PRIVATE: "SECRET" },
+          },
+        },
+        actions: { ...counts.actions, PRIVATE: "SECRET" },
+        settings: { ...counts.settings, PRIVATE: "SECRET" },
+        watch_ms: { live: 99, PRIVATE: "SECRET" },
+      },
+    },
+  };
+  expect(await transport.send(raw, new AbortController().signal)).toBe("accepted");
+  expect(capture.payloads[0]).toEqual({ api_key: "mrstreamer-local-verification", ...event });
+  for (const invalid of [-1, 1.5, 1_000_001, NaN]) {
+    expect(
+      await transport.send(
+        {
+          ...event,
+          properties: {
+            ...event.properties,
+            counts: {
+              ...counts,
+              actions: { ...counts.actions, search_used: invalid },
+            },
+          },
+        },
+        new AbortController().signal,
+      ),
+    ).toBe("discard");
+  }
+  expect(
+    await transport.send(
+      {
+        ...event,
+        properties: {
+          ...event.properties,
+          counts: {
+            ...counts,
+            playback: {
+              ...counts.playback,
+              live: { ...counts.playback.live, watch_minutes: 1441 },
+            },
+          },
+        },
+      },
+      new AbortController().signal,
+    ),
+  ).toBe("discard");
+  expect(capture.payloads).toHaveLength(1);
+});
+
+it("rejects stale logical request tokens and stopped receiver observations across consent changes", async () => {
+  vi.useFakeTimers({
+    toFake: ["Date", "performance", "setTimeout", "clearTimeout", "setInterval", "clearInterval"],
+  });
+  vi.setSystemTime(new Date("2026-10-11T12:00:00Z"));
+  const { owner, events } = await start({ store: memoryStore() });
+  owner.setForeground(true);
+  await vi.advanceTimersByTimeAsync(0);
+  await until(() => events.length === 2);
+  const stale = owner.beginPlayback("live")!;
+  const fail = owner.playbackFailureObserver(stale);
+  const current = owner.beginPlayback("live")!;
+  fail("network");
+  const staleRemote = owner.remotePlayback("live", stale);
+  staleRemote.state("playing");
+  staleRemote.failure("network");
+  staleRemote.stop();
+  const remote = owner.remotePlayback("live", current);
+  remote.state("playing");
+  await owner.configure(false);
+  await owner.configure(true);
+  await vi.advanceTimersByTimeAsync(0);
+  staleRemote.state("playing");
+  staleRemote.failure("network");
+  remote.state("playing");
+  expect(owner.resumePlayback("live")).not.toBeNull();
+  remote.stop();
+  const replacement = owner.remotePlayback("live", current);
+  replacement.state("playing");
+  replacement.failure("network");
+  replacement.stop();
+  owner.noteFeature("home");
+  owner.setForeground(false);
+  vi.setSystemTime(new Date("2026-10-12T12:00:00Z"));
+  owner.setForeground(true);
+  await vi.advanceTimersByTimeAsync(0);
+  await until(() => events.some((event) => event.event === "app_summary_day"));
+  expect(events.find((event) => event.event === "app_summary_day")).toMatchObject({
+    properties: {
+      counts: { playback: { live: { starts: 0, errors: 1, failures: { network: 1 } } } },
+    },
   });
 });

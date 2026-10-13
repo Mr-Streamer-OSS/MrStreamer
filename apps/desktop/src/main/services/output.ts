@@ -1,3 +1,5 @@
+import type { RemotePlaybackObservers, RemotePlaybackObserver } from "../analytics/observers.ts";
+import { streamFailure, appFailure } from "../analytics/operations.ts";
 // Where playback goes: this computer, or a receiver on the local network, a TV the viewer sends
 // it to with Google Cast or AirPlay.
 //
@@ -86,6 +88,7 @@ const REOPENED = "reopened";
 const CLOSED = "closed";
 
 export interface OutputDeps {
+  readonly observePlayback?: RemotePlaybackObservers;
   /** The ways this build reaches receivers: Google Cast, AirPlay, both or none. */
   readonly adapters: readonly ReceiverAdapter[];
   /** This computer's addresses on the local network, likeliest first, when not the system's. */
@@ -111,6 +114,7 @@ export interface Shown {
 
 /** What plays on the receiver, with what this service needs to follow it. */
 interface Playing {
+  readonly measurement: RemotePlaybackObserver | undefined;
   readonly generation: number;
   readonly sessionId: string;
   readonly item: RemoteItem;
@@ -126,6 +130,7 @@ interface Playing {
 
 /** A title opened for the receiver. */
 interface OpenedTitle {
+  readonly measurement: string | null;
   readonly info: RemoteTitle;
   /** Seconds between the start of the title and where a receiver's clock starts. */
   readonly offset: number;
@@ -176,6 +181,7 @@ export class Output extends Context.Service<
     playChannel(
       channel: OwnedId,
       options: {
+        readonly measurement?: string | undefined;
         readonly variants: readonly string[];
         readonly audio?: number | null;
         readonly audioLanguage?: string | null;
@@ -196,7 +202,7 @@ export class Output extends Context.Service<
       title: TitleRef,
       upstreamUrl: string,
       since: number,
-      asked?: Asked,
+      asked?: Asked & { readonly measurement?: string | undefined },
     ): Effect.Effect<RemoteTitle, Failed>;
     /** Plays an opened title on the receiver from `position` seconds with these tracks. */
     playTitle(
@@ -329,6 +335,7 @@ function make(deps: OutputDeps) {
       Effect.gen(function* () {
         const was = playing;
         playing = null;
+        was?.measurement?.stop();
         was?.watch.abort();
         yield* checkpoint(was);
         if (was && close) yield* playback.close(was.sessionId);
@@ -338,6 +345,7 @@ function make(deps: OutputDeps) {
     const mediaFailed = (failure: OutputFailure, stop: boolean) =>
       Effect.gen(function* () {
         const was = playing;
+        was?.measurement?.failure(appFailure({ kind: "output", failure }));
         yield* drop(true);
         if (stop && was && connected) {
           yield* Effect.promise(() => connected!.connection.stop(was.generation).catch(() => {}));
@@ -387,6 +395,7 @@ function make(deps: OutputDeps) {
           const was = connected;
           if (was?.adapter !== adapter || output.kind !== "receiver") return;
           const { receiver } = output;
+          playing?.measurement?.failure(appFailure({ kind: "output", failure: event.failure }));
           return later(
             one(
               Effect.gen(function* () {
@@ -414,6 +423,7 @@ function make(deps: OutputDeps) {
             const stream =
               now.item.kind === "channel" ? yield* playback.failure(now.sessionId) : null;
             if (playing !== now) return;
+            if (stream) now.measurement?.failure(streamFailure(stream));
             yield* drop(true);
             if (output.kind !== "receiver") return;
             output = {
@@ -425,6 +435,15 @@ function make(deps: OutputDeps) {
           }),
         );
       }
+      now.measurement?.state(
+        said.state === "playing"
+          ? "playing"
+          : said.state === "paused"
+            ? "paused"
+            : said.state === "ended"
+              ? "stopped"
+              : "waiting",
+      );
       const before = now.media.state;
       now.media = {
         ...now.media,
@@ -497,12 +516,17 @@ function make(deps: OutputDeps) {
       tracks: Playing["tracks"],
       media: Omit<ReceiverMedia, "generation" | "metadata">,
       shown: Shown,
+      measurement: string | null,
     ) =>
       Effect.gen(function* () {
         const mine = ++generation;
         const watch = new AbortController();
         const offset = title?.offset ?? 0;
         const now: Playing = {
+          measurement: deps.observePlayback?.(
+            item.kind === "channel" ? "live" : "vod",
+            measurement,
+          ),
           generation: mine,
           sessionId,
           item,
@@ -796,6 +820,7 @@ function make(deps: OutputDeps) {
       playChannel: (
         channel: OwnedId,
         options: {
+          readonly measurement?: string | undefined;
           readonly variants: readonly string[];
           readonly audio?: number | null;
           readonly audioLanguage?: string | null;
@@ -831,11 +856,17 @@ function make(deps: OutputDeps) {
                 subtitles: false,
               },
               options.shown,
+              options.measurement ?? null,
             );
           }),
         ),
 
-      openTitle: (title: TitleRef, upstreamUrl: string, since: number, asked: Asked = {}) =>
+      openTitle: (
+        title: TitleRef,
+        upstreamUrl: string,
+        since: number,
+        asked: Asked & { readonly measurement?: string | undefined } = {},
+      ) =>
         one(
           Effect.gen(function* () {
             const connection = yield* receiver;
@@ -856,7 +887,12 @@ function make(deps: OutputDeps) {
               subtitles: session.subtitles,
               shows: ["text"],
             };
-            opened.set(session.sessionId, { info, offset: session.offset, since });
+            opened.set(session.sessionId, {
+              info,
+              offset: session.offset,
+              since,
+              measurement: asked.measurement ?? null,
+            });
             return info;
           }),
         ),
@@ -901,6 +937,7 @@ function make(deps: OutputDeps) {
                 subtitles: loaded.subtitles,
               },
               options.shown,
+              title.measurement,
             );
           }),
         ),
@@ -917,6 +954,7 @@ function make(deps: OutputDeps) {
               case "pause":
                 return yield* told(() => connection.pause(mine));
               case "seek":
+                now.measurement?.state("seeking");
                 // Where it was before the skip, as the UI's player saves it.
                 yield* checkpoint(now);
                 return yield* told(() =>

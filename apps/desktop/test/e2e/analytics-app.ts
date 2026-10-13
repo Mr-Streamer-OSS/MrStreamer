@@ -57,12 +57,27 @@ const capture = createServer(async (req, res) => {
 });
 let endpoint = "";
 let rejectUpdate = false;
+let offerUpdate = false;
 let updateEndpoint = "";
 const updateFeed = createServer((_req, res) => {
   res.statusCode = rejectUpdate ? 503 : 200;
   res.setHeader("Content-Type", "application/json");
   res.end(
-    JSON.stringify({ schema: 1, generated: new Date().toISOString(), stable: null, nightly: null }),
+    JSON.stringify({
+      schema: 1,
+      generated: new Date().toISOString(),
+      stable: offerUpdate
+        ? {
+            version: "99.0.0",
+            published: new Date().toISOString(),
+            page: "https://example.test/release",
+            files: updateEndpoint + "/files/",
+            notes: "Loopback fixture release",
+            platforms: ["latest-linux.yml", "latest-mac.yml", "latest.yml"],
+          }
+        : null,
+      nightly: null,
+    }),
   );
 });
 const actions: { action: string; at: string }[] = [];
@@ -72,6 +87,7 @@ let app: ChildProcess | undefined;
 let page: Page | undefined;
 let mainPage: Page | undefined;
 let debuggingPort = 0;
+const broadcasts = new Set<ChildProcess>();
 let failure: unknown;
 const cleanupErrors: string[] = [];
 
@@ -194,6 +210,7 @@ async function click(selector: string, index = 0) {
   const point = await live().evaluate<{ x: number; y: number }>(
     `(() => { const r=${element}.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`,
   );
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
   for (const event of ["mousePressed", "mouseReleased"])
     await send("Input.dispatchMouseEvent", {
       type: event,
@@ -278,6 +295,57 @@ async function analyticsState() {
 async function productPaths() {
   await keyEscape();
   await namedButton("header button", "Live TV");
+  // Actual guide expansion/favourite/search use, without treating schedule queries as actions.
+  await click('button[aria-label="Later programmes"]');
+  await click('button[aria-label="Add to favourites"]');
+  await waitFor(async () => (await analyticsState()).summary?.counts.actions.favourite_added === 1);
+  await click('button[aria-label="Search"]');
+  await send("Input.insertText", { text: "TEST | H.264 + AAC" });
+  await waitFor(() =>
+    live().evaluate<boolean>(
+      "document.querySelector('[aria-label=\"Search results\"] [aria-selected=true]')?.textContent.includes('H.264 + AAC') ?? false",
+    ),
+  );
+  await send("Input.dispatchKeyEvent", {
+    type: "rawKeyDown",
+    key: "Enter",
+    code: "Enter",
+    windowsVirtualKeyCode: 13,
+  });
+  await send("Input.dispatchKeyEvent", {
+    type: "keyUp",
+    key: "Enter",
+    code: "Enter",
+    windowsVirtualKeyCode: 13,
+  });
+  await waitFor(async () => (await analyticsState()).summary?.counts.playback.live.starts === 1);
+  await waitFor(() =>
+    live().evaluate<boolean>(
+      "!!document.querySelector('[data-view=watch]') && document.querySelector('video').videoWidth > 0",
+    ),
+  );
+  // Real eligible elapsed time, rather than media position or an injected duration.
+  await waitFor(async () => ((await analyticsState()).summary?.watch_ms.live ?? 0) >= 32_000);
+  await snapshot("confirmed-live-watch");
+  await keyEscape();
+  await namedButton("header button", "Home");
+  await waitFor(() =>
+    live().evaluate<boolean>(
+      "!document.querySelector('[data-view=watch]') && document.querySelector('video').muted && !document.querySelector('video').paused",
+    ),
+  );
+  await delay(1500);
+  const previewTime = (await analyticsState()).summary?.watch_ms.live ?? 0;
+  await delay(3500);
+  const afterPreview = (await analyticsState()).summary?.watch_ms.live ?? 0;
+  if (afterPreview !== previewTime) throw new Error("Home preview accrued watch time.");
+  await snapshot("excluded-home-preview");
+  await namedButton("button", "Watch");
+  await delay(2500);
+  if ((await analyticsState()).summary?.counts.playback.live.starts !== 1)
+    throw new Error("Preview promotion counted another start.");
+  await keyEscape();
+  observations["previewExclusion"] = { previewTime, afterPreview, starts: 1 };
   await namedButton("header button", "Movies");
   await namedButton("nav button", "All movies");
   await namedButton("button[title]", "Index at the end", true);
@@ -291,7 +359,18 @@ async function productPaths() {
   await waitFor(
     async () => ((await analyticsState()).summary?.counts.playback_open.success ?? 0) >= 1,
   );
+  await waitFor(async () => (await analyticsState()).summary?.counts.playback.vod.starts === 1);
   await snapshot("provider-title-open");
+  await click('button[aria-label="Pause"]');
+  await click('button[aria-label="Forward 10 seconds"]');
+  await delay(1200);
+  if ((await analyticsState()).summary?.counts.playback.vod.starts !== 1)
+    throw new Error("Paused seek created another start.");
+  await click('[data-view="title"] button[aria-label="Play"]');
+  await delay(1500);
+  if ((await analyticsState()).summary?.counts.playback.vod.starts !== 1)
+    throw new Error("Resume created another start.");
+  await snapshot("vod-paused-seek-resume");
   await keyEscape();
   await keyEscape();
   await namedButton("header button", "Downloads");
@@ -299,6 +378,7 @@ async function productPaths() {
   await waitFor(() =>
     live().evaluate<boolean>("!!document.querySelector('[data-view=title] video')"),
   );
+  await waitFor(async () => (await analyticsState()).summary?.counts.playback.vod.starts === 2);
   await snapshot("copy-playing");
   await keyEscape();
   await namedButton("header button", "Movies");
@@ -337,8 +417,20 @@ async function productPaths() {
   await snapshot("search-entry");
   await keyEscape();
   await settings();
+  await click('[role="checkbox"][aria-label="Next episode"]');
+  await waitFor(async () => (await analyticsState()).summary?.counts.settings.autoplay_next === 1);
+  offerUpdate = true;
   await namedButton("button", "Check now");
   await waitFor(async () => (await analyticsState()).summary?.counts.update_check.success === 1);
+  await keyEscape();
+  await click("[data-update-notice]");
+  await waitFor(async () => (await analyticsState()).summary?.counts.actions.update_seen === 1);
+  await namedButton("button", "Not now");
+  await waitFor(
+    async () => (await analyticsState()).summary?.counts.actions.update_dismissed === 1,
+  );
+  await snapshot("update-panel-dismissed");
+  await settings();
   rejectUpdate = true;
   await namedButton("button", "Check now");
   await waitFor(async () => (await analyticsState()).summary?.counts.update_check.failed === 1);
@@ -376,7 +468,7 @@ async function productPaths() {
     const observed = await analyticsState();
     return (
       (observed.summary?.counts.features.home ?? 0) >= 3 &&
-      (observed.summary?.counts.features.settings ?? 0) >= 3
+      (observed.summary?.counts.features.settings ?? 0) >= 4
     );
   });
   const before = await analyticsState();
@@ -434,9 +526,39 @@ async function productPaths() {
   const summary = enabled.find((event) => event.event === "app_summary_day");
   if (!summary || summary.event !== "app_summary_day")
     throw new Error("No actual summary capture.");
-  if (!isDeepStrictEqual(summary.properties.counts, before.summary.counts))
+  const completedCounts = structuredClone(before.summary.counts);
+  for (const kind of ["live", "vod"] as const)
+    completedCounts.playback[kind].watch_minutes = Math.floor(
+      (before.summary.watch_ms[kind] + 30_000) / 60_000,
+    );
+  if (!isDeepStrictEqual(summary.properties.counts, completedCounts))
     throw new Error("Capture lost observed counts.");
   const operations = summary.properties.counts;
+  if (
+    (operations.playback?.live?.watch_minutes ?? 0) < 1 ||
+    operations.playback?.live?.starts !== 1 ||
+    (operations.playback?.vod?.starts ?? 0) < 2 ||
+    (operations.playback?.vod?.errors ?? 0) < 1
+  )
+    throw new Error("Missing expanded playback capture.");
+  for (const action of [
+    "playlist_added",
+    "playlist_refreshed",
+    "favourite_added",
+    "epg_opened",
+    "search_used",
+    "update_seen",
+    "update_dismissed",
+  ] as const)
+    if ((operations.actions?.[action] ?? 0) < 1)
+      throw new Error(`Missing expanded action ${action}.`);
+  if (operations.settings?.autoplay_next !== 1)
+    throw new Error("Missing committed setting capture.");
+  observations["expandedCapture"] = {
+    playback: operations.playback,
+    actions: operations.actions,
+    settings: operations.settings,
+  };
   observations["rates"] = Object.fromEntries(
     (["playback_open", "download_transfer", "update_check"] as const).map((name) => [
       name,
@@ -458,7 +580,38 @@ async function productPaths() {
 try {
   profile = await mkdtemp(join(tmpdir(), "mrstreamer-analytics-"));
   profiles.push(profile);
-  provider = await startFakeProvider({ channels: 3, titles: 3 });
+  provider = await startFakeProvider({
+    channels: 3,
+    titles: 3,
+    streams: (_channel, out, signal) => {
+      // A continuous fake broadcast is needed to observe a real rounded watch minute. The usual
+      // three-second fixture deliberately stalls, which is useful for recovery tests instead.
+      const stream = spawn(
+        process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg",
+        [
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-re",
+          "-stream_loop",
+          "-1",
+          "-i",
+          join(desktop, "test/fixtures/h264-aac.mpegts"),
+          "-c",
+          "copy",
+          "-f",
+          "mpegts",
+          "pipe:1",
+        ],
+        { detached: process.platform !== "win32", stdio: ["ignore", "pipe", "ignore"] },
+      );
+      broadcasts.add(stream);
+      stream.once("close", () => broadcasts.delete(stream));
+      stream.once("error", () => out.destroy(new Error("Fixture broadcast unavailable.")));
+      stream.stdout.pipe(out);
+      signal.addEventListener("abort", () => stream.kill("SIGTERM"), { once: true });
+    },
+  });
   tmdb = await startFakeTmdb();
   await new Promise<void>((resolve) => capture.listen(0, "127.0.0.1", resolve));
   const address = capture.address();
@@ -636,6 +789,7 @@ try {
   };
   await clean(quit);
   if (provider) await clean(() => provider!.close());
+  for (const broadcast of broadcasts) await clean(() => stop(broadcast, undefined));
   if (tmdb) await clean(() => tmdb!.close());
   if (updateFeed.listening)
     await clean(async () => {
@@ -670,6 +824,7 @@ try {
         cleanup: {
           appExited,
           fixturesClosed: cleanupErrors.length === 0 && !capture.listening,
+          broadcastsExited: broadcasts.size === 0,
           profileRemoved: (
             await Promise.all(
               profiles.map((owned) =>

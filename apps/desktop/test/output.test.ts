@@ -1,3 +1,4 @@
+import type { RemotePlaybackObservers } from "../src/main/analytics/observers.ts";
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
@@ -54,7 +55,13 @@ const eventually = <T>(check: () => T | Promise<T>) =>
  * fake TV that takes Cast and a fake helper for AirPlay. The TV fetches nothing by itself: a test
  * that wants it to play asks for the stream as a TV does, with `fetches`.
  */
-async function casting(options: { fetchMs?: number; checkpointMs?: number } = {}) {
+async function casting(
+  options: {
+    fetchMs?: number;
+    checkpointMs?: number;
+    observePlayback?: RemotePlaybackObservers;
+  } = {},
+) {
   const provider = await fakeProvider({ maxConnections: 1, slotReleaseMs: 50 });
   const tv = await startFakeCastReceiver();
   const helper = await startFakeAirplayHelper();
@@ -64,6 +71,7 @@ async function casting(options: { fetchMs?: number; checkpointMs?: number } = {}
       ffmpeg: FFMPEG,
       ffprobe: FFPROBE,
       output: {
+        ...(options.observePlayback ? { observePlayback: options.observePlayback } : {}),
         adapters: [
           castAdapter({
             discovery: tv.discovery,
@@ -1003,3 +1011,54 @@ describe.skipIf(!hasTools)("playback through the system's list of receivers", ()
     expect(helper.commands.filter((command) => command.cmd === "showPicker")).toHaveLength(0);
   });
 });
+
+it.skipIf(!hasTools)(
+  "projects receiver-confirmed states through the active load only, without counting preparation or accepting an old receiver generation",
+  async () => {
+    const observations: { kind: string; states: string[]; failures: string[]; stops: number }[] =
+      [];
+    const { output, tv, connect, play } = await casting({
+      observePlayback: (kind) => {
+        const item = { kind, states: [] as string[], failures: [] as string[], stops: 0 };
+        observations.push(item);
+        return {
+          state: (state) => {
+            item.states.push(state);
+          },
+          failure: (failure) => {
+            item.failures.push(failure);
+          },
+          stop: () => {
+            item.stops++;
+          },
+        };
+      },
+    });
+    await connect();
+    await play(10);
+    expect(observations).toHaveLength(1);
+    expect(observations[0]?.states).not.toContain("playing");
+    tv.status({ playerState: "PLAYING", currentTime: 12 });
+    await eventually(() => expect(observations[0]?.states.at(-1)).toBe("playing"));
+    tv.status({ playerState: "PAUSED", currentTime: 14 });
+    await eventually(() => expect(observations[0]?.states.at(-1)).toBe("paused"));
+    await play(20);
+    expect(observations).toHaveLength(2);
+    expect(observations[0]?.stops).toBe(1);
+    const oldCount = observations[0]!.states.length;
+    tv.send({
+      type: "MEDIA_STATUS",
+      status: [{ mediaSessionId: 1, playerState: "PLAYING", currentTime: 150 }],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(observations[0]?.states).toHaveLength(oldCount);
+    expect(observations[1]?.states).not.toContain("playing");
+    tv.status({ playerState: "PLAYING", currentTime: 22 });
+    await eventually(() => expect(observations[1]?.states.at(-1)).toBe("playing"));
+    await output.disconnect();
+    expect(observations[1]?.stops).toBe(1);
+    expect(observations.every((item) => item.kind === "vod" && item.failures.length === 0)).toBe(
+      true,
+    );
+  },
+);

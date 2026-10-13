@@ -39,7 +39,10 @@ export function registerIpc(
     let validate: ((data: unknown) => unknown) | null = null;
 
     ipcMain.handle(method, async (event, raw: unknown): Promise<Result<unknown>> => {
-      if (!isTrusted(event.sender)) {
+      if (
+        !isTrusted(event.sender) ||
+        (method.startsWith("analytics.") && event.senderFrame !== event.sender.mainFrame)
+      ) {
         return {
           ok: false,
           error: { kind: "unexpected", detail: "IPC call from an unknown window." },
@@ -50,7 +53,12 @@ export function registerIpc(
       if (input instanceof type.errors) {
         return {
           ok: false,
-          error: { kind: "invalid-input", detail: `${method}: ${input.summary}` },
+          error: {
+            kind: "invalid-input",
+            detail: method.startsWith("analytics.")
+              ? "Invalid analytics observation."
+              : `${method}: ${input.summary}`,
+          },
         };
       }
       const exit = await run(

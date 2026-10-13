@@ -5,6 +5,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   app,
+  powerMonitor,
   autoUpdater,
   BrowserWindow,
   dialog,
@@ -381,6 +382,9 @@ async function start(): Promise<void> {
   });
   const analytics = new Analytics({
     dataDir,
+    playbackReset: () => {
+      if (mainWindow) emit(mainWindow.webContents, "analytics.reset", null);
+    },
     origin: initialProfileOrigin,
     properties: {
       ...buildProperties,
@@ -403,23 +407,36 @@ async function start(): Promise<void> {
       localEndpoint,
     }),
   });
+  powerMonitor.on("suspend", () => analytics.suspendPlayback());
+  powerMonitor.on("resume", () => analytics.suspendPlayback());
   let dimensionsReady = storeCopy;
-  const observeOperation = (operation: SummaryOperation) => () => {
+  const observeOperation = (operation: SummaryOperation, playbackToken?: string) => () => {
     const generation = dimensionsReady ? analytics.noteOperationStarted(operation) : null;
-    return (outcome: SummaryOutcome, failure?: SummaryFailure) =>
+    const failedPlayback =
+      operation === "playback_open" ? analytics.playbackFailureObserver(playbackToken) : null;
+    return (outcome: SummaryOutcome, failure?: SummaryFailure) => {
       analytics.noteOperationFinished(operation, generation, outcome, failure);
+      if (outcome === "failed") failedPlayback?.(failure ?? "app");
+    };
   };
 
   const runtime = ManagedRuntime.make(
     mainLayer({
       dataDir,
+      usage: {
+        action: (action) => analytics.actionObserver(action),
+        setting: (setting) => analytics.settingObserver(setting),
+      },
       downloads: { observeTransfer: observeOperation("download_transfer") },
       secrets: keychainSecrets,
       userAgent,
       ffmpeg: toolPath("ffmpeg"),
       ffprobe: toolPath("ffprobe"),
       catalogueWorker: (setup) => createCatalogueWorker({ workerData: setup }),
-      output: { adapters: receiverAdapters() },
+      output: {
+        adapters: receiverAdapters(),
+        observePlayback: (kind, control) => analytics.remotePlayback(kind, control),
+      },
       // MR_STREAMER_TMDB_KEY at run time overrides the key built in, for testing.
       tmdbKey: process.env["MR_STREAMER_TMDB_KEY"] || __TMDB_KEY__ || null,
       region: app.getLocaleCountryCode() || "US",
@@ -431,6 +448,10 @@ async function start(): Promise<void> {
         ? { installed: app.getVersion(), openStore: () => shell.openExternal(STORE_PAGE) }
         : {
             installed: app.getVersion(),
+            onChannelChanged: (channel) => {
+              analytics.setUpdateChannel(channel);
+              analytics.noteSetting("update_channel");
+            },
             observeCheck: (channel) => {
               analytics.setUpdateChannel(channel);
               dimensionsReady = true;
@@ -697,10 +718,11 @@ async function start(): Promise<void> {
         audio,
         audioLanguage,
         preview,
+        measurement,
       }) =>
         observeOpen(
           coordination,
-          observeOperation("playback_open"),
+          observeOperation("playback_open", measurement),
           (turn) =>
             Effect.gen(function* () {
               const channel = yield* library.channel(named);
@@ -739,8 +761,8 @@ async function start(): Promise<void> {
       "subtitles.hide": ({ sessionId }) => Effect.as(onlineSubtitles.hide(sessionId), null),
       "subtitles.forget": ({ sessionId }) => Effect.as(onlineSubtitles.forget(sessionId), null),
       "subtitles.cancel": ({ sessionId }) => Effect.as(onlineSubtitles.cancel(sessionId), null),
-      "playback.openTitle": ({ title, decoders }) =>
-        observeOpen(coordination, observeOperation("playback_open"), (turn) =>
+      "playback.openTitle": ({ title, decoders, measurement }) =>
+        observeOpen(coordination, observeOperation("playback_open", measurement), (turn) =>
           Effect.gen(function* () {
             // What plays goes first, whichever subscription it is of, so no provider sees a
             // connection beside the one about to open.
@@ -754,8 +776,8 @@ async function start(): Promise<void> {
             });
           }),
         ),
-      "playback.openCopy": ({ copy, decoders }) =>
-        observeOpen(coordination, observeOperation("playback_open"), (turn) =>
+      "playback.openCopy": ({ copy, decoders, measurement }) =>
+        observeOpen(coordination, observeOperation("playback_open", measurement), (turn) =>
           Effect.gen(function* () {
             return yield* playback.openCopy(yield* downloads.copy(copy), decoders, turn);
           }),
@@ -805,8 +827,15 @@ async function start(): Promise<void> {
         }),
       "output.closePicker": ({ request }) => Effect.as(output.closePicker(request), null),
       "output.disconnect": () => Effect.as(output.disconnect, null),
-      "output.playChannel": ({ channel: named, variant, audio, audioLanguage, name }) =>
-        observeOpen(coordination, observeOperation("playback_open"), (turn) =>
+      "output.playChannel": ({
+        channel: named,
+        variant,
+        audio,
+        audioLanguage,
+        name,
+        measurement,
+      }) =>
+        observeOpen(coordination, observeOperation("playback_open", measurement), (turn) =>
           Effect.gen(function* () {
             const channel = yield* library.channel(named);
             const variants = yield* streamsOf(channel, variant);
@@ -816,15 +845,17 @@ async function start(): Promise<void> {
               audioLanguage: audioLanguage ?? null,
               shown: { name },
               turn,
+              measurement,
             });
           }),
         ),
-      "output.openTitle": ({ title, since }) =>
-        observeOpen(coordination, observeOperation("playback_open"), (turn) =>
+      "output.openTitle": ({ title, since, measurement }) =>
+        observeOpen(coordination, observeOperation("playback_open", measurement), (turn) =>
           Effect.gen(function* () {
             const { url, revision, headers, listingKey } = yield* onDemand.file(title);
             return yield* output.openTitle(title, url, since, {
               turn,
+              measurement,
               revision,
               headers,
               listingKey,
@@ -859,6 +890,40 @@ async function start(): Promise<void> {
           language = languageFor(choice);
           applyLanguage(language);
           return language;
+        }),
+      "analytics.action": (action) =>
+        Effect.sync(() => {
+          analytics.noteAction(action);
+          return null;
+        }),
+      "analytics.playbackBegin": ({ kind, ongoing }) =>
+        Effect.sync(() => analytics.beginPlayback(kind, ongoing)),
+      "analytics.playbackResume": ({ kind }) => Effect.sync(() => analytics.resumePlayback(kind)),
+      "analytics.playbackBind": ({ token, sessionId }) =>
+        Effect.gen(function* () {
+          const session = yield* playback.measurement(sessionId);
+          if (!session || session.closed.aborted) return null;
+          return analytics.bindPlayback(token, "local", session.kind, session.closed);
+        }),
+      "analytics.playbackState": ({ token, binding, sequence, state }) =>
+        Effect.sync(() => {
+          analytics.notePlaybackState(token, binding, sequence, state);
+          return null;
+        }),
+      "analytics.playbackFailure": ({ token, binding, failure }) =>
+        Effect.sync(() => {
+          analytics.notePlaybackFailure(token, binding, failure);
+          return null;
+        }),
+      "analytics.playbackEligible": ({ token, eligible }) =>
+        Effect.sync(() => {
+          analytics.setPlaybackEligible(token, eligible);
+          return null;
+        }),
+      "analytics.playbackEnd": ({ token }) =>
+        Effect.sync(() => {
+          analytics.endPlayback(token);
+          return null;
         }),
       "analytics.feature": (feature) =>
         Effect.sync(() => {
@@ -1025,9 +1090,11 @@ async function start(): Promise<void> {
     });
     window.webContents.on("did-start-loading", () => {
       requestedClose = false;
+      analytics.rendererGone();
       analytics.noteRenderer("starts");
     });
     window.webContents.on("render-process-gone", (_event, details) => {
+      analytics.rendererGone();
       if (leaving || requestedClose || details.reason === "clean-exit") return;
       analytics.noteRenderer(
         details.reason === "crashed" ? "crashed" : details.reason === "killed" ? "killed" : "other",
@@ -1053,6 +1120,7 @@ async function start(): Promise<void> {
   };
   const leave = () => {
     leaving = true;
+    analytics.rendererGone();
     analytics.setForeground(false);
     // No list opens from a window on its way out.
     closeList();

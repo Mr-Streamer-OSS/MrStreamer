@@ -3,7 +3,7 @@
 // Add a method by giving it an input schema in `ipcInputs` and a result type in `IpcOutputs`.
 // The main process refuses to start unless every method has a handler (see src/main/ipc.ts).
 import { type } from "arktype";
-import { analyticsFeatures } from "./analytics.ts";
+import { analyticsFeatures, analyticsFailures } from "./analytics.ts";
 import {
   OnlineSubtitlePreferences,
   SubtitleCredentialInput,
@@ -248,6 +248,8 @@ export const ipcInputs = {
        * playback, whose connection to the provider it would take.
        */
       "preview?": "boolean",
+      /** Main-issued logical playback token. Control metadata only, never captured. */
+      "measurement?": "string.uuid",
     }),
   "subtitles.settings": none,
   "subtitles.configure": () =>
@@ -261,9 +263,11 @@ export const ipcInputs = {
   "subtitles.hide": () => type({ sessionId: "string > 0" }),
   "subtitles.forget": () => type({ sessionId: "string > 0" }),
   "subtitles.cancel": () => type({ sessionId: "string > 0" }),
-  "playback.openTitle": () => type({ title: TitleRef, decoders: decoders() }),
+  "playback.openTitle": () =>
+    type({ title: TitleRef, decoders: decoders(), "measurement?": "string.uuid" }),
   /** A downloaded copy by its id, from this computer: no subscription or network is asked. */
-  "playback.openCopy": () => type({ copy: "string > 0", decoders: decoders() }),
+  "playback.openCopy": () =>
+    type({ copy: "string > 0", decoders: decoders(), "measurement?": "string.uuid" }),
   "playback.close": () => type({ sessionId: "string" }),
   "playback.closeAll": none,
   "playback.failure": () => type({ sessionId: "string" }),
@@ -300,13 +304,15 @@ export const ipcInputs = {
       "audioLanguage?": "string",
       /** What the receiver may show about it: the channel's name. */
       name: "string",
+      "measurement?": "string.uuid",
     }),
   /**
    * `since` is when the viewer began this play of the title, in epoch milliseconds, which its
    * progress is saved with: a play that moves to a receiver, or on to another one, is still the
    * play it was.
    */
-  "output.openTitle": () => type({ title: TitleRef, since: "number" }),
+  "output.openTitle": () =>
+    type({ title: TitleRef, since: "number", "measurement?": "string.uuid" }),
   "output.playTitle": () =>
     type({
       sessionId: "string",
@@ -327,6 +333,26 @@ export const ipcInputs = {
       .or({ generation: "number.integer", command: "'subtitles'", on: "boolean" }),
   "output.volume": () => type({ "level?": "0 <= number <= 1", "muted?": "boolean" }),
   "output.playingTitle": none,
+  "analytics.action": () =>
+    type.enumerated("channel_changed", "epg_opened", "search_used", "update_seen"),
+  "analytics.playbackBegin": () => type({ kind: "'live' | 'vod'", ongoing: "boolean" }),
+  "analytics.playbackResume": () => type({ kind: "'live' | 'vod'" }),
+  "analytics.playbackBind": () => type({ token: "string.uuid", sessionId: "string" }),
+  "analytics.playbackState": () =>
+    type({
+      token: "string.uuid",
+      binding: "string.uuid",
+      sequence: "0 <= number.integer <= 1000000000",
+      state: "'playing' | 'paused' | 'waiting' | 'seeking' | 'stopped'",
+    }),
+  "analytics.playbackFailure": () =>
+    type({
+      token: "string.uuid",
+      binding: "string.uuid | null",
+      failure: type.enumerated(...analyticsFailures),
+    }),
+  "analytics.playbackEligible": () => type({ token: "string.uuid", eligible: "boolean" }),
+  "analytics.playbackEnd": () => type({ token: "string.uuid" }),
   "analytics.feature": () => type.enumerated(...analyticsFeatures),
   "preferences.get": none,
   // Only the preferences' own keys: the interface language changes through `language.set` alone.
@@ -586,6 +612,14 @@ export interface IpcOutputs {
    * opened while it plays. Null for a channel, or when it plays nothing.
    */
   "output.playingTitle": RemotePlayingTitle | null;
+  "analytics.action": null;
+  "analytics.playbackBegin": string | null;
+  "analytics.playbackResume": string | null;
+  "analytics.playbackBind": string | null;
+  "analytics.playbackState": null;
+  "analytics.playbackFailure": null;
+  "analytics.playbackEligible": null;
+  "analytics.playbackEnd": null;
   "analytics.feature": null;
   "preferences.get": Preferences;
   "preferences.update": Preferences;
@@ -703,6 +737,7 @@ export type IpcArgs<M extends IpcMethod> =
 
 /** Events the main process pushes to the UI. */
 export interface IpcEvents {
+  "analytics.reset": null;
   /** A subscription's catalogue refresh finished, or failed and kept the previous channels. */
   "library.updated": CatalogueStatus;
   /**
