@@ -267,10 +267,13 @@ export function validateMeasurement(input: unknown): Measurement {
     const programmes = positiveCount(
       String(result.workload["programmesPerChannel"]),
       "programmesPerChannel",
-      500000,
+      GENERATED_GUIDE_PROGRAMMES,
     );
-    if (result.workload["source"] === "synthetic" && channels * programmes > 500000)
-      throw new Error("Generated guide exceeds 500000 total programmes per subscription");
+    if (
+      result.workload["source"] === "synthetic" &&
+      channels * programmes > GENERATED_GUIDE_PROGRAMMES
+    )
+      throw new Error(`Generated guide exceeds ${GENERATED_GUIDE_PROGRAMMES} total programmes`);
     positiveCount(
       String(result.workload["documentBytes"]),
       "documentBytes",
@@ -516,13 +519,18 @@ export function electronVersion(executable: string): string {
   }).trim();
 }
 
+/** The most programmes a generated guide has: about what a guide may unpack to, 2 GiB. */
+const GENERATED_GUIDE_PROGRAMMES = 4_000_000;
 const GUIDE_METRICS = {
   "download and index": "ms",
   "download and index per subscription": "ms",
   "longest stall while downloading": "ms",
   "read from disk after a restart": "ms",
   "longest stall while reading": "ms",
+  "longest stall while answering": "ms",
   "now and next for 60 channels": "ms",
+  "now and next for 60 guided channels": "ms",
+  "range 30 channels by 6 hours": "ms",
   "search news": "ms",
   "list search news": "ms",
   "mapping list": "ms",
@@ -530,6 +538,8 @@ const GUIDE_METRICS = {
   "guide channels searched": "ms",
   "now and next channels mapped": "ms",
   "memory held by guide": "MB",
+  "resident memory added": "MB",
+  "peak resident memory while indexing": "MB",
 } as const;
 const VIEWING_METRICS = {
   watch: "ms",
@@ -551,22 +561,30 @@ const GUIDE_SAMPLE_COUNTS: Record<string, number> = {
   "longest stall while downloading": 1,
   "read from disk after a restart": 1,
   "longest stall while reading": 1,
+  "longest stall while answering": 1,
   "now and next for 60 channels": 100,
-  "search news": 1,
+  "now and next for 60 guided channels": 100,
+  "range 30 channels by 6 hours": 20,
+  "search news": 5,
   "list search news": 20,
   "mapping list": 20,
   "mapping list searched": 20,
   "guide channels searched": 20,
   "now and next channels mapped": 100,
   "memory held by guide": 1,
+  "resident memory added": 1,
+  "peak resident memory while indexing": 1,
 };
 const GUIDE_BUDGETS = {
   "download and index per subscription": 3000,
   "longest stall while downloading": 50,
   "longest stall while reading": 50,
+  "longest stall while answering": 50,
   "now and next for 60 channels": 5,
+  "now and next for 60 guided channels": 5,
   "now and next channels mapped": 5,
   "memory held by guide": 80,
+  "resident memory added": 150,
 };
 const VIEWING_SAMPLE_COUNTS: Record<string, number> = {
   watch: 1000,
