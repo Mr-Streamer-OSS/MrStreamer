@@ -380,12 +380,15 @@ Use the platform's normal display and mock keychain arguments on macOS. For chan
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every pull request and push to `main`, in two jobs:
+`.github/workflows/checks.yml` runs on every pull request and push to `main`; [CI](../maintainers/ci.md) shows how it fits with the release workflows.
 
-- **Check:** unused files, exports and dependencies (`pnpm knip`), lint (`pnpm lint`), format, typecheck and the production build. Lint, typecheck and tests cover the website's code too.
+- **Check:** unused files, exports and dependencies (`pnpm knip`), lint (`pnpm lint`), format, typecheck, the workflows (`pnpm actionlint`) and the production build. Lint, typecheck and tests cover the website's code too.
 - **Test:** installs Ubuntu's complete ffmpeg and ffprobe (`apps/desktop/scripts/ci-ffmpeg.sh` fails unless both run and their codecs are there), runs the suite with Vitest's JSON reporter, keeps the report and checks it.
+- **Website:** on pull requests, builds the website, installing only what `apps/marketing` declares. On `main`, `publish.yml` builds it after every change to what the page is built from; [the website's README](../../apps/marketing/README.md#how-it-gets-published) describes publishing.
 
-The [release workflow](../maintainers/releasing.md) runs both jobs on the exact commit it releases, next to the packaged-app test on every installed package. There the production build is the release's own bundle job, so Check leaves it out. CI needs no secrets, so pull requests from forks run it too.
+The [release workflow](../maintainers/releasing.md) runs Check and Test on the exact commit it releases, next to the packaged-app test on every installed package. There the production build is the release's own bundle job, the workflows are main's, and the website has no say, so those are left out. CI needs no secrets, so pull requests from forks run it too.
+
+`pnpm actionlint` (`scripts/actionlint.ts`) downloads actionlint and shellcheck at pinned versions, checks them against pinned SHA-256s, keeps them in `node_modules/.cache/actionlint` and lints `.github/workflows` the same way on any machine. `test/publication-guard.test.ts` holds the workflows to one rule actionlint can't: nothing a pull request or a dry run starts publishes.
 
 ### The test report
 
@@ -407,8 +410,6 @@ jq -r '.testResults[] | "\(.endTime - .startTime | floor) ms \(.name)"' .local/c
 ```
 
 Files run in parallel, so their times overlap and don't add up to the job's. When no report was written, the tests never ran: the upload warns that it found no file, and the check fails on the missing report.
-
-`.github/workflows/marketing.yml` builds the website on every pull request, also without secrets, installing only what `apps/marketing` declares. On `main` the publishing workflow builds it after every change to what the page is built from. It is apart from CI, so a page that doesn't build never holds back an app release. `.github/workflows/marketing-deploy.yml` publishes the page from `main`; [the website's README](../../apps/marketing/README.md#how-it-gets-published) describes it.
 
 ## Bounded release UI proof
 
