@@ -46,22 +46,16 @@ export function guideIndexerLayer(
           stderr: true,
         });
         let ended = false;
-        /** Ends the worker once, and then settles: a worker stopped half way leaves no file. */
+        /**
+         * Ends the worker once, and then settles once: a worker stopped half way leaves no file,
+         * or one the store's next sweep takes.
+         */
         const end = (settle: () => void, unfinished: boolean) => {
           if (ended) return;
           ended = true;
           signal.removeEventListener("abort", stop);
-          void worker
-            .terminate()
-            .then(() =>
-              unfinished
-                ? Promise.all([
-                    rm(`${build.target}.part`, { force: true }),
-                    rm(build.target, { force: true }),
-                  ])
-                : undefined,
-            )
-            .finally(settle);
+          const leftovers = unfinished ? [`${build.target}.part`, build.target] : [];
+          void cleanUp(worker, leftovers).then(settle);
         };
         const stop = () => end(() => reject(signal.reason), true);
         signal.addEventListener("abort", stop, { once: true });
@@ -76,4 +70,19 @@ export function guideIndexerLayer(
         );
       }),
   });
+}
+
+/**
+ * Ends `worker` and then removes `leftovers`, its unfinished files. It never fails: what can't be
+ * ended or removed is told, and a file left stays for the guide store's next sweep.
+ */
+async function cleanUp(worker: Worker, leftovers: readonly string[]): Promise<void> {
+  const problems: unknown[] = [];
+  await worker.terminate().catch((cause: unknown) => problems.push(cause));
+  for (const path of leftovers) {
+    await rm(path, { force: true }).catch((cause: unknown) => problems.push(cause));
+  }
+  if (problems.length > 0) {
+    console.warn("[guide] an indexing worker left what the next sweep takes", problems);
+  }
 }
