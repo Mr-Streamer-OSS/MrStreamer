@@ -24,24 +24,20 @@
 //   and `${timestamp}` the moment asked. `{duration}` and `${duration}` the length in seconds,
 //   `{duration:N}` that divided by N; `{offset}`, `{offset:N}` and `${offset}` how long ago the
 //   start was, the same way. `{Y}`, `{m}`, `{d}`, `{H}`, `{M}` and `{S}` the start's year, month,
-//   day, hour, minute and second, in UTC. The recording starts where the address names it: an
-//   address that names the start to the minute only, with `{M}` and no second, as `xc`'s does,
-//   starts on the minute before the window's start. The length counts from there, and divisions
-//   round up, so the end is never cut short.
-// - An address that names the start only as an offset, how long before the moment it is asked,
-//   is `relative`: the same address names a later start the later it is asked. Playback never
-//   falls back to one from a stream that names its start absolutely, and plays a channel whose
-//   streams are all relative from its first stream alone, its address made again right before
-//   each request (see Playback). An offset counts from this computer's clock, so the provider's
-//   own can put the start a moment off.
+//   day, hour, minute and second, in UTC.
+// - The start, which an address has to name completely: by `{utc}` or `${start}`, to the second,
+//   or by its date and time, `{Y}`, `{m}`, `{d}`, `{H}` and `{M}`, to the minute, or to the second
+//   with `{S}` too. An address named to the minute, as `xc`'s is, starts on the minute before the
+//   window's start; the length counts from there, and divisions round up, so the end is never cut
+//   short. Offsets and the moment asked can go in an address beside its start.
 //
 // Not supported, so no catch-up: a mode without days or days without a mode, whose meaning players
 // don't agree on; `vod` and modes not named here; a source a mode needs that is missing; a stream
-// address a derived mode can't read; an offset in steps of more than a second, `{offset:N}`
-// with N above 1, and no absolute start, whose address can't name the start asked for again
-// once a moment has passed. Ignored: `catchup-correction`, and date formats such as
-// `{(b)YmdHMS}` and `${(b)yyyy-MM-dd}`. A playlist doesn't say an `xc` server's time zone, so its
-// times are taken as UTC.
+// address a derived mode can't read; an address that doesn't name its start completely, such as
+// one that names it only as an offset before the moment it is asked (`{offset}`, `{offset:N}`,
+// `${offset}`), which names another start the later it is asked, or by a part of its date alone.
+// Ignored: `catchup-correction`, and date formats such as `{(b)YmdHMS}` and `${(b)yyyy-MM-dd}`.
+// A playlist doesn't say an `xc` server's time zone, so its times are taken as UTC.
 import type { ArchiveWindow } from "@mrstreamer/contracts/playback";
 import { wallClock } from "../catchup.ts";
 import type { PlaylistEntry } from "./m3u.ts";
@@ -68,8 +64,8 @@ export function playlistCatchup(
   const source = read("catchup-source")?.trim() ?? null;
   const template = templateOf(mode, entry.url, source);
   // A template that doesn't make an address once filled in is none.
-  if (!template || !archiveAddress({ days, template }, { start: 0, end: 1 }, 1)) return null;
-  if (relative(template) && /\{offset:(?!0*1\})\d+\}/.test(template)) return null;
+  if (!template || !origin(template)) return null;
+  if (!archiveAddress({ days, template }, { start: 0, end: 1 }, 1)) return null;
   return { days, template };
 }
 
@@ -82,9 +78,10 @@ export function archiveAddress(
   catchup: PlaylistCatchup,
   window: ArchiveWindow,
   now: number,
-): { readonly url: string; readonly start: number; readonly relative: boolean } | null {
+): { readonly url: string; readonly start: number } | null {
   const asked = Math.floor(now / 1000);
-  const start = originOf(catchup.template, window.start, asked);
+  const second = Math.floor(window.start / 1000);
+  const start = origin(catchup.template) === "minute" ? second - (second % 60) : second;
   const end = Math.ceil(window.end / 1000);
   const duration = end - start;
   const clock = wallClock(start * 1000, null);
@@ -129,38 +126,19 @@ export function archiveAddress(
     });
   const url = URL.parse(filled);
   return url && (url.protocol === "http:" || url.protocol === "https:")
-    ? { url: filled, start: start * 1000, relative: relative(catchup.template) }
+    ? { url: filled, start: start * 1000 }
     : null;
 }
 
-/** Whether a template names its start only as how long before the moment it is asked. */
-function relative(template: string): boolean {
-  return (
-    /\{offset(:\d+)?\}|\$\{offset\}/.test(template) &&
-    !/\{(utc|Y|m|d|H|M|S)\}|\$\{start\}/.test(template)
-  );
-}
-
 /**
- * Where, in Unix seconds, the recording a template asks for from `from` (epoch ms) at `asked`
- * (Unix seconds) starts, as its placeholders name the start:
- * - to the second, by `{utc}`, `${start}` or `{S}`: the second `from` is in;
- * - else as how long ago, by `{offset:N}` (or `{offset}` and `${offset}`, N 1): N seconds a step,
- *   rounded up, so the start is that many steps before the moment asked, as early as `from` or
- *   before it;
- * - else to the minute, by `{M}`: the minute `from` is in;
- * - else, naming none, the second `from` is in.
+ * How completely a template names the start of its recording: to the second, by `{utc}`,
+ * `${start}` or its date and time with `{S}`; to the minute, by its date and time down to `{M}`;
+ * or not at all, null, for anything less.
  */
-function originOf(template: string, from: number, asked: number): number {
-  const second = Math.floor(from / 1000);
-  if (/\{(utc|S)\}|\$\{start\}/.test(template)) return second;
-  const offset = /\{offset(?::(\d+))?\}|\$\{offset\}/.exec(template);
-  if (offset) {
-    const step = Math.max(1, Number(offset[1] ?? 1));
-    return asked - Math.max(0, Math.ceil((asked - second) / step)) * step;
-  }
-  if (template.includes("{M}")) return second - (((second % 60) + 60) % 60);
-  return second;
+function origin(template: string): "second" | "minute" | null {
+  if (/\{utc\}|\$\{start\}/.test(template)) return "second";
+  if (!["{Y}", "{m}", "{d}", "{H}", "{M}"].every((part) => template.includes(part))) return null;
+  return template.includes("{S}") ? "second" : "minute";
 }
 
 /** The recording address with placeholders that `mode` makes for the stream at `url`. */

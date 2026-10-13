@@ -268,11 +268,10 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
       const stream = await streamOf(channelId, signal);
       const recording = stream.catchup && archiveAddress(stream.catchup, window, Date.now());
       if (!recording) throw new AppFailure({ kind: "catch-up", reason: "none" });
-      const { url, start, relative } = recording;
+      const { url, start } = recording;
       return {
         url,
         start,
-        relative,
         format: streamFormat(url) ?? stream.format,
         headers: stream.headers,
       };

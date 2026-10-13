@@ -126,12 +126,6 @@ export interface ArchiveStream extends LiveStream {
    * second before it where the provider's address counts in those.
    */
   readonly start: number;
-  /**
-   * The address names the start as time before the moment it is asked, as a playlist's
-   * `{offset}` does, so the later it is asked, the later the recording it names starts: it is good
-   * only for the moment it was made for.
-   */
-  readonly relative?: boolean;
 }
 
 /** What a subscription answers when asked for its programme guide. */

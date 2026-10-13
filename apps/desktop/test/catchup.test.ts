@@ -4,8 +4,11 @@
 import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import * as Layer from "effect/Layer";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Codec } from "@mrstreamer/contracts/playback";
+import { normalizeCatalogue } from "@mrstreamer/core/catalogue/normalize";
+import { liveChannels } from "@mrstreamer/core/catalogue/variants";
+import { archiveVariants } from "@mrstreamer/core/catchup";
 import { playlistProvider } from "../src/main/providers/m3u.ts";
 import { Library } from "../src/main/services/library.ts";
 import { PlaybackCoordination } from "../src/main/services/playback-coordination.ts";
@@ -264,6 +267,14 @@ describe("a playlist's catch-up", () => {
     "https://iptv.test/channel/index.m3u8",
     '#EXTINF:-1 tvg-id="coarse" catchup="default" catchup-days="3" catchup-source="https://archive.test/{offset:60}.ts",Minutes before now only',
     "https://iptv.test/coarse.ts",
+    '#EXTINF:-1 tvg-id="seconds" catchup="default" catchup-days="3" catchup-source="https://archive.test/{offset}.ts",Seconds before now only',
+    "https://iptv.test/seconds.ts",
+    '#EXTINF:-1 tvg-id="dollar-offset" catchup="append" catchup-days="3" catchup-source="?ago=${offset}",Seconds before now, appended',
+    "https://iptv.test/dollar-offset.ts",
+    '#EXTINF:-1 tvg-id="year" catchup="default" catchup-days="3" catchup-source="https://archive.test/{Y}/{offset:60}.ts",A year and minutes before now',
+    "https://iptv.test/year.ts",
+    '#EXTINF:-1 tvg-id="day" catchup="default" catchup-days="3" catchup-source="https://archive.test/{Y}{m}{d}.ts",A day alone',
+    "https://iptv.test/day.ts",
     "",
   ].join("\n");
 
@@ -336,18 +347,35 @@ describe("a playlist's catch-up", () => {
     expect((await list.archiveStream("braces", window)).start).toBe(EVENING + 30_000);
   });
 
+  it("plays a channel's recordings from its streams that name their start alone", async () => {
+    const { provider: list } = provider(
+      [
+        "#EXTM3U",
+        '#EXTINF:-1 catchup="default" catchup-days="2" catchup-source="https://archive.test/{utc}.ts",Example FHD',
+        "https://iptv.test/fhd.ts",
+        '#EXTINF:-1 catchup="default" catchup-days="2" catchup-source="https://archive.test/{offset}.ts",Example HD',
+        "https://iptv.test/hd.ts",
+        '#EXTINF:-1 catchup="xc" catchup-days="2",Example SD',
+        "https://iptv.test/live/user/pass/7.ts",
+        "",
+      ].join("\n"),
+    );
+    const [channel, ...others] = liveChannels(
+      normalizeCatalogue(await list.liveCatalogue()).streams,
+    ).channels;
+    expect(others).toEqual([]);
+    expect(channel?.catchupDays).toBe(2);
+    expect(archiveVariants(channel!, WINDOW, NOW).map(({ id }) => id)).toEqual([
+      "Example FHD",
+      "Example SD",
+    ]);
+  });
+
   it("finds no catch-up where a playlist's attributes don't agree on one, and plays none", async () => {
     const { provider: list, asked } = provider(NONE);
     const { channels } = await list.liveCatalogue();
-    expect(channels.map((each) => each.catchupDays)).toEqual([
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-    ]);
+    expect(channels).toHaveLength(11);
+    expect(channels.map((each) => each.catchupDays)).toEqual(channels.map(() => null));
     await expect(list.archiveStream("plain", WINDOW)).rejects.toMatchObject({
       error: { kind: "catch-up", reason: "none" },
     });
@@ -552,104 +580,4 @@ describe("a recording's stretch", () => {
       await host.close();
     },
   );
-
-  describe("with a stream that names its start as time before now", () => {
-    /** HD to the second, failing a moment after it is asked; SD as seconds before now. */
-    const mixed = (origin: string) => [
-      `#EXTINF:-1 catchup="default" catchup-days="2" catchup-source="${origin}/precise/{utc}.ts",Example HD`,
-      `${origin}/precise.ts`,
-      `#EXTINF:-1 catchup="default" catchup-days="2" catchup-source="${origin}/offset/{offset}.ts",Example SD`,
-      `${origin}/offset.ts`,
-    ];
-    const answer = (path: string, response: ServerResponse) => {
-      if (path.startsWith("/precise/"))
-        return void setTimeout(() => response.writeHead(502).end(), 300);
-      trickle(RECORDING, response);
-    };
-    const window = { start: EVENING + 30_000, end: EVENING + 40_000 };
-
-    beforeEach(() => {
-      // Asked at 18:01:15.
-      vi.useFakeTimers({ toFake: ["Date"] });
-      vi.setSystemTime(EVENING + 75_000);
-    });
-
-    it("never falls back to it from a stream that names its start, and fails instead", async () => {
-      const host = await hostedPlaylist(mixed, answer);
-      const session = await host.playback.open(host.own("Example HD"), LINUX, {
-        variants: ["Example HD", "Example SD"],
-        archive: window,
-      });
-      expect(session.archive).toEqual(window);
-      expect((await fetch(session.url)).status).toBe(502);
-      expect(await host.playback.failure(session.sessionId)).toEqual({
-        kind: "provider-error",
-        status: 502,
-      });
-      expect(host.asked).toEqual([`/precise/${window.start / 1000}.ts`]);
-      await host.close();
-    });
-
-    it("plays a stream that names its start after one that fails, and never the relative one", async () => {
-      const host = await hostedPlaylist(
-        (origin) => [
-          ...mixed(origin),
-          '#EXTINF:-1 catchup="xc" catchup-days="2",Example LQ',
-          `${origin}/live/demo/demo/1.ts`,
-        ],
-        answer,
-      );
-      const session = await host.playback.open(host.own("Example HD"), LINUX, {
-        variants: ["Example HD", "Example SD", "Example LQ"],
-        archive: window,
-      });
-      expect(session.archive).toEqual({ start: EVENING, end: window.end });
-      const reader = (await fetch(session.url)).body!.getReader();
-      await reader.read();
-      expect(await host.playback.playing(session.sessionId)).toMatchObject({
-        variantId: "Example LQ",
-      });
-      await reader.cancel();
-      expect(host.asked).toEqual([
-        `/precise/${EVENING / 1000}.ts`,
-        "/timeshift/demo/demo/1/2026-10-13:18-00/1.ts",
-      ]);
-      await vi.waitFor(() => expect(host.open()).toBe(0));
-      await host.close();
-    });
-
-    it("plays a channel whose streams all name it so from the first, asked for the moment it asks", async () => {
-      const host = await hostedPlaylist(
-        (origin) => [
-          `#EXTINF:-1 catchup="default" catchup-days="2" catchup-source="${origin}/offset/{offset}.ts",Example SD`,
-          `${origin}/offset.ts`,
-          `#EXTINF:-1 catchup="default" catchup-days="2" catchup-source="${origin}/other/\${offset}.ts",Example LQ`,
-          `${origin}/other.ts`,
-        ],
-        (_path, response) => trickle(RECORDING, response),
-      );
-      const open = async (start: number) => {
-        const session = await host.playback.open(host.own("Example SD"), LINUX, {
-          variants: ["Example SD", "Example LQ"],
-          archive: { start, end: window.end },
-        });
-        // The player asks for the recording ten seconds after it opened.
-        vi.setSystemTime(Date.now() + 10_000);
-        const reader = (await fetch(session.url)).body!.getReader();
-        await reader.read();
-        await reader.cancel();
-        return session.archive;
-      };
-      // From 18:00:30, asked at 18:01:25: 55 seconds before.
-      expect(await open(window.start)).toEqual(window);
-      // Reconnecting from 18:00:35, opened at 18:01:25 and asked at 18:01:35: 60 seconds before.
-      expect(await open(window.start + 5_000)).toEqual({
-        start: window.start + 5_000,
-        end: window.end,
-      });
-      expect(host.asked).toEqual(["/offset/55.ts", "/offset/60.ts"]);
-      await vi.waitFor(() => expect(host.open()).toBe(0));
-      await host.close();
-    });
-  });
 });
