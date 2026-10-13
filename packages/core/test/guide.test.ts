@@ -420,13 +420,15 @@ describe("indexing a guide", () => {
         programme("three.test", stamp(NOON - 20 * HOUR), stamp(NOON + 4 * HOUR), "Rolling news"),
       ),
     );
-    const found = async (words: string[], before = Number.POSITIVE_INFINITY) => {
+    const found = async (
+      words: string[],
+      before = Number.POSITIVE_INFINITY,
+      ids = ["one.test", "two.test", "three.test"],
+    ) => {
       const titles: string[] = [];
-      await guide.matching(
-        words,
-        NOON,
-        () => before,
-        (programme) => titles.push(programme.title),
+      const channels = new Set(ids.map((id) => guide.channels.get(id)?.key ?? 0));
+      await guide.matching({ words, at: NOON, channels, before: () => before }, (programme) =>
+        titles.push(programme.title),
       );
       return titles.sort();
     };
@@ -435,6 +437,11 @@ describe("indexing a guide", () => {
     expect(await found(["evening", "news"])).toEqual(["Évening News"]);
     expect(await found(["news"], NOON + DAY)).toEqual(["Rolling news", "Évening News"]);
     expect(await found(["weather"])).toEqual([]);
+    // Only the channels asked for: the others' programmes aren't read.
+    expect(await found(["news"], Number.POSITIVE_INFINITY, ["two.test"])).toEqual(["Late news"]);
+    expect(await found(["news"], Number.POSITIVE_INFINITY, ["three.test"])).toEqual([
+      "Rolling news",
+    ]);
   });
 
   it("refuses an address's answer that isn't a whole XMLTV guide with something still to come", async () => {

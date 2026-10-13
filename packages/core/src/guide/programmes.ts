@@ -199,10 +199,13 @@ export async function searchAt(
   const before = (a: FoundProgramme, b: FoundProgramme) =>
     rank(a) - rank(b) || a.start - b.start || a.channel - b.channel;
   await index.matching(
-    words,
-    at,
-    // Once fifty are in, only one that starts before the last of them can take its place.
-    () => best.at(SEARCH_LIMIT - 1)?.found.start ?? Number.POSITIVE_INFINITY,
+    {
+      words,
+      at,
+      channels: new Set(shown.keys()),
+      // Once fifty are in, only one that starts before the last of them can take its place.
+      before: () => best.at(SEARCH_LIMIT - 1)?.found.start ?? Number.POSITIVE_INFINITY,
+    },
     (found) => {
       const channel = shown.get(found.channel);
       if (!channel) return;
@@ -266,11 +269,8 @@ export async function searchChannelsAt(
   }
   const found = new Map<number, { now: boolean; later: FoundProgramme | null }>();
   await index.matching(
-    words,
-    at,
-    () => until,
+    { words, at, channels: new Set(showing.keys()), before: () => until },
     (programme) => {
-      if (!showing.has(programme.channel)) return;
       const match = found.get(programme.channel) ?? { now: false, later: null };
       if (programme.start <= at) match.now = true;
       else if (!match.later || programme.start < match.later.start) match.later = programme;

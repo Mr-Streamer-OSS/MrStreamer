@@ -370,15 +370,20 @@ export interface GuideIndex {
   /** The programme `found` names, whole. */
   programme(found: FoundProgramme): Programme | null;
   /**
-   * The programmes whose title has each of `words`, that haven't ended at `at` and start before
-   * `before()`, handed to `visit` in no particular order. `before` is asked again between
-   * stretches of time, so a search that has found enough reads no further. Lets other work in
-   * now and then: it holds the process a few milliseconds at a time, however much it finds.
+   * The programmes on `channels` whose title has each of `words`, that haven't ended at `at`
+   * and start before `before()`, handed to `visit` in no particular order. `before` is asked
+   * again between stretches of time, so a search that has found enough reads no further. Lets
+   * other work in now and then: it holds the process a few milliseconds at a time, however much
+   * it finds.
    */
   matching(
-    words: readonly string[],
-    at: number,
-    before: () => number,
+    search: {
+      readonly words: readonly string[];
+      readonly at: number;
+      /** The channels searched, by key. */
+      readonly channels: ReadonlySet<number>;
+      readonly before: () => number;
+    },
     visit: (found: FoundProgramme) => void,
   ): Promise<void>;
   /** Closes the file once the reads under way are done, so it can go. */
@@ -404,6 +409,7 @@ export async function openGuideIndex(path: string): Promise<GuideIndex | null> {
     const meta = db.prepare("select programmes, until from meta").get();
     const channels = new Map<string, IndexedChannel>();
     const byKey: IndexedChannel[] = [];
+    let listing = 0;
     const slice = slicer();
     for (const row of db
       .prepare("select key, id, name, folded, until from channel order by position")
@@ -417,11 +423,13 @@ export async function openGuideIndex(path: string): Promise<GuideIndex | null> {
       };
       channels.set(channel.id, channel);
       byKey[channel.key] = channel;
+      if (channel.until !== null) listing++;
       if (slice.due()) await slice.rest();
     }
     return reader(db, {
       channels,
       byKey,
+      listing,
       programmes: Number(meta?.["programmes"] ?? 0),
       until: typeof meta?.["until"] === "number" ? meta["until"] : null,
     });
@@ -436,6 +444,8 @@ function reader(
   read: {
     channels: Map<string, IndexedChannel>;
     byKey: readonly IndexedChannel[];
+    /** How many channels have programmes. */
+    listing: number;
     programmes: number;
     until: number | null;
   },
@@ -482,8 +492,8 @@ function reader(
       const row = one.get(found.channel, found.start);
       return row ? programmeOf(row) : null;
     },
-    async matching(words, at, before, visit) {
-      if (words.length === 0 || closing) return;
+    async matching({ words, at, channels, before }, visit) {
+      if (words.length === 0 || channels.size === 0 || closing) return;
       active++;
       try {
         const slice = slicer();
@@ -496,6 +506,10 @@ function reader(
           if (slice.due()) await slice.rest();
         }
         if (titles.length === 0) return;
+        // Few of the guide's channels: the file leaves out the others' before reading a row.
+        const only = channels.size * 2 < read.listing ? JSON.stringify([...channels]) : null;
+        const within =
+          only === null ? "" : "and programme.channel in (select value from json_each(?))";
         const found = (row: Record<string, unknown>): FoundProgramme => ({
           channel: Number(row["channel"]),
           start: Number(row["start"]),
@@ -510,7 +524,7 @@ function reader(
           from programme join title on title.key = programme.title
           where programme.title in (select value from json_each(?))
             and programme.start >= ? and programme.start < ? and programme.stop > ?
-            and programme.stop - programme.start <= ${LONG_MS}`);
+            and programme.stop - programme.start <= ${LONG_MS} ${within}`);
         // A search bounded from the start reads its one stretch.
         const ahead = Number.isFinite(before()) ? [] : STRETCHES.map((each) => at + each);
         const edges = [at - LONG_MS, ...ahead];
@@ -519,8 +533,9 @@ function reader(
           if (from >= to) break;
           for (let first = 0; first < titles.length; first += TITLES_AT_ONCE) {
             const some = JSON.stringify(titles.slice(first, first + TITLES_AT_ONCE));
-            for (const row of rows.iterate(some, from, to, at)) {
-              visit(found(row));
+            for (const row of rows.iterate(some, from, to, at, ...(only === null ? [] : [only]))) {
+              const programme = found(row);
+              if (channels.has(programme.channel)) visit(programme);
               if (slice.due()) await slice.rest();
             }
             if (slice.due()) await slice.rest();
@@ -534,7 +549,9 @@ function reader(
           from programme indexed by programme_long
           where stop - start > ${LONG_MS} and stop > ? and start < ?`);
         for (const row of long.iterate(at, Math.min(before(), Number.MAX_SAFE_INTEGER))) {
-          if (wanted.has(Number(row["title"]))) visit(found(row));
+          if (wanted.has(Number(row["title"])) && channels.has(Number(row["channel"]))) {
+            visit(found(row));
+          }
           if (slice.due()) await slice.rest();
         }
       } finally {
