@@ -256,6 +256,11 @@ export interface FakeProvider {
   streamRequests(): number;
   /** The timeshift requests that reached the provider, in order, refused ones too. */
   archiveRequests(): readonly ArchiveRequest[];
+  /**
+   * Breaks off the next timeshift answer sent at its real-time rate after `pieces` tenths of a
+   * second of it, as a connection that drops does.
+   */
+  breakNextArchive(pieces: number): void;
   close(): Promise<void>;
 }
 
@@ -341,6 +346,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
   let guideCount = 0;
   let streamCount = 0;
   const archiveAsked: ArchiveRequest[] = [];
+  let archiveBreak: number | null = null;
   const timeZone = options.timeZone === undefined ? "Europe/Amsterdam" : options.timeZone;
   /** What a test asked to keep waiting, until it releases each. */
   const held = new Map<Held, { readonly arrived: () => void; readonly released: Promise<void> }>();
@@ -657,11 +663,14 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     response.writeHead(200, { "Content-Type": "video/mp2t" });
     const recording = fixture(channel.fixture);
     if (!options.live) return void response.end(recording);
-    // A tenth of a second at a time, as `liveStreams` sends it.
+    // A tenth of a second at a time, as `liveStreams` sends it, unless the connection breaks.
     const pieces = chunked(recording, Math.ceil(recording.length / 30));
+    const breaks = archiveBreak;
+    archiveBreak = null;
     const sent = Readable.from(
       (async function* () {
-        for (const piece of pieces) {
+        for (const [index, piece] of pieces.entries()) {
+          if (index === breaks) return void response.destroy();
           yield piece;
           await new Promise((resolve) => setTimeout(resolve, 100));
         }
@@ -836,6 +845,9 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     },
     streamRequests: () => streamCount,
     archiveRequests: () => archiveAsked,
+    breakNextArchive(pieces) {
+      archiveBreak = pieces;
+    },
     close: () =>
       new Promise((resolve) => {
         server.closeAllConnections();

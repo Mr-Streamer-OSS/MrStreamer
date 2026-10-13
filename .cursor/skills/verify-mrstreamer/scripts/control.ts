@@ -557,6 +557,7 @@ async function run(scenario: Scenario) {
         },
         {
           archiveRequests: () => provider!.archiveRequests(),
+          breakNextArchive: (pieces) => provider!.breakNextArchive(pieces),
           streams: () => ({
             requests: provider!.streamRequests(),
             active: provider!.activeStreams(),

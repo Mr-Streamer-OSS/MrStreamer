@@ -1,6 +1,8 @@
 // Catch-up through Live TV's rest of the day: a programme that aired plays from the fake panel's
-// timeshift archive in Watch, which says it aired earlier; it ends, and Watch then plays the
-// channel live. The panel's record of the timeshift address is the proof of the window asked for.
+// timeshift archive in Watch, which says it aired earlier. The panel breaks the connection two
+// seconds in and the player reconnects to the recording; it ends, and Watch then plays the
+// channel live. The panel's record of the timeshift addresses is the proof of the windows asked
+// for.
 //
 // The guide keeps no programme that has ended until its on-disk index lands, so the window's own
 // clock runs `CLOCK_LEAD_MS` ahead of the main process's: the programme on now has aired by the
@@ -18,6 +20,7 @@ const CHANNEL = "H.264 + AAC";
 /** What the fake panel was asked for, for the scenario's checks. */
 export interface CatchupFake {
   archiveRequests(): readonly ArchiveRequest[];
+  breakNextArchive(pieces: number): void;
   streams(): { readonly requests: number; readonly active: number };
 }
 
@@ -111,6 +114,8 @@ export async function catchupScenario(d: Driver, fake: CatchupFake): Promise<voi
   expect(!!aired && !aired.onNow, "The rest of the day lists no programme that aired.");
   await d.capture("catchup-schedule");
 
+  // The panel's first answer breaks off two seconds in, as a dropped connection does.
+  fake.breakNextArchive(20);
   await d.click(`Play ${aired!.title}, which aired`, `${lines}[0]`);
   await d.wait(async () => {
     const v = await playback();
@@ -123,10 +128,21 @@ export async function catchupScenario(d: Driver, fake: CatchupFake): Promise<voi
     shown.includes(aired!.title) && shown.includes("Aired"),
     "Watch doesn't say the programme aired.",
   );
+
+  // The player reconnects to the recording where it got to, and it plays again.
+  await d.wait(async () => {
+    if (fake.archiveRequests().length < 2) return false;
+    const v = await playback();
+    return v.time >= 1 && v.width > 0 && v.audio > 0;
+  });
+  d.observed["reconnectedPlayback"] = await playback();
+  d.observed["reconnectedNowPlaying"] = await nowPlaying();
+  expect((await nowPlaying()).includes("Aired"), "The reconnect lost the programme.");
   await wake();
   await d.capture("catchup-playing");
 
-  // The panel was asked for that programme, from its start on its own clock, and for nothing live.
+  // The panel was asked for that programme, from its start on its own clock, and again, after the
+  // break, from the minute it had got to, which is the same; and for nothing live.
   const schedule = await d.evaluate<
     { start: number; stop: number; title: string }[]
   >(`(async () => {
@@ -147,8 +163,8 @@ export async function catchupScenario(d: Driver, fake: CatchupFake): Promise<voi
   d.observed["archiveRequested"] = fake.archiveRequests();
   d.observed["archiveExpected"] = expected;
   expect(
-    JSON.stringify(fake.archiveRequests()) === JSON.stringify([expected]),
-    "The panel wasn't asked for exactly the programme's window.",
+    JSON.stringify(fake.archiveRequests()) === JSON.stringify([expected, expected]),
+    "The panel wasn't asked for exactly the programme's window, once and after the break.",
   );
   expect(fake.streams().requests === 0, "Catch-up asked the panel for the channel live.");
 
@@ -170,7 +186,7 @@ export async function catchupScenario(d: Driver, fake: CatchupFake): Promise<voi
   d.observed["liveNowPlaying"] = await nowPlaying();
   expect(!(await nowPlaying()).includes("Aired"), "The channel still says it aired.");
   expect(fake.streams().requests === 1, "Watch didn't play the channel live.");
-  expect(fake.archiveRequests().length === 1, "The recording was asked for again.");
+  expect(fake.archiveRequests().length === 2, "The recording was asked for again.");
   await wake();
   await d.capture("catchup-live-again");
 }
