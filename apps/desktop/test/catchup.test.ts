@@ -371,7 +371,17 @@ describe("a playlist's catch-up", () => {
     ]);
   });
 
+  /** One playlist channel with `attributes`, streaming from `url`. */
+  const single = (attributes: string, url = "https://iptv.test/one.ts") =>
+    provider(
+      ["#EXTM3U", `#EXTINF:-1 tvg-id="one" ${attributes} catchup-days="2",One`, url, ""].join("\n"),
+    );
+
   it.each([
+    [
+      "a literal that looks like a placeholder, beside a start in the fragment",
+      'catchup="default" catchup-source="https://archive.test/{offset}.ts?ignored=catchupplaceholder1end#{utc}"',
+    ],
     [
       "a start in the fragment",
       'catchup="default" catchup-source="https://archive.test/{offset}.ts#start={utc}"',
@@ -385,44 +395,88 @@ describe("a playlist's catch-up", () => {
       'catchup="default" catchup-source="https://archive.test/{offset}.ts#{Y}/{m}/{d}/{H}/{M}"',
     ],
     [
-      "a start in a segment the address leaves",
+      "a fragment after a complete start",
+      'catchup="default" catchup-source="https://archive.test/{utc}.ts#top"',
+    ],
+    [
+      "a .. segment",
       'catchup="default" catchup-source="https://archive.test/anchor/{utc}/../../{offset}.ts"',
     ],
+    ["a . segment", 'catchup="default" catchup-source="https://archive.test/./{utc}.ts"'],
+    [
+      "an encoded .. segment",
+      'catchup="default" catchup-source="https://archive.test/a/%2E%2e/{utc}.ts"',
+    ],
+    [
+      "a login before the host",
+      'catchup="default" catchup-source="https://user:pass@archive.test/{utc}.ts"',
+    ],
+    [
+      "a placeholder in the host",
+      'catchup="default" catchup-source="https://{utc}.archive.test/one.ts"',
+    ],
+    [
+      "a placeholder in the port",
+      'catchup="default" catchup-source="https://archive.test:{offset}/{utc}.ts"',
+    ],
+    ["a backslash", 'catchup="default" catchup-source="https://archive.test/a\\..\\{utc}.ts"'],
+    ["no http(s) address", 'catchup="default" catchup-source="ftp://archive.test/{utc}.ts"'],
+  ])("finds no catch-up for an address with %s", async (_, attributes) => {
+    const { provider: list, asked } = single(attributes);
+    const { channels } = await list.liveCatalogue();
+    expect(channels.map((each) => each.catchupDays)).toEqual([null]);
+    await expect(list.archiveStream("one", WINDOW)).rejects.toMatchObject({
+      error: { kind: "catch-up", reason: "none" },
+    });
+    expect(asked).toEqual([]);
+  });
+
+  it.each([
+    ["shift", 'catchup="shift"', "https://iptv.test/live.ts#player-options"],
+    ["append", 'catchup="append" catchup-source="?utc={utc}"', "https://iptv.test/live.ts#top"],
+    ["flussonic", 'catchup="flussonic"', "https://iptv.test/name/mpegts#top"],
+    ["xc", 'catchup="xc"', "https://user:pass@iptv.test/live/user/pass/1.ts"],
   ])(
-    "finds no catch-up where only what is never sent names the start: %s",
-    async (_, attributes) => {
-      const { provider: list, asked } = provider(
-        [
-          "#EXTM3U",
-          `#EXTINF:-1 tvg-id="one" ${attributes} catchup-days="2",One`,
-          "https://iptv.test/one.ts",
-          "",
-        ].join("\n"),
-      );
+    "finds no catch-up for %s from a stream address that sends otherwise than it reads",
+    async (_, attributes, url) => {
+      const { provider: list } = single(attributes, url);
       const { channels } = await list.liveCatalogue();
       expect(channels.map((each) => each.catchupDays)).toEqual([null]);
-      await expect(list.archiveStream("one", WINDOW)).rejects.toMatchObject({
-        error: { kind: "catch-up", reason: "none" },
-      });
-      expect(asked).toEqual([]);
     },
   );
 
-  it("asks for a shifted recording before the stream address's fragment, which it drops", async () => {
+  it.each([
+    [
+      "shift",
+      'catchup="shift"',
+      "https://iptv.test/live.ts?token=t",
+      `https://iptv.test/live.ts?token=t&utc=${S}&lutc=${N}`,
+    ],
+    [
+      "append",
+      'catchup="append" catchup-source="&utc={utc}"',
+      "https://iptv.test/live.m3u8?token=t",
+      `https://iptv.test/live.m3u8?token=t&utc=${S}`,
+    ],
+    [
+      "flussonic",
+      'catchup="flussonic"',
+      "https://iptv.test:8080/name/mpegts",
+      `https://iptv.test:8080/name/timeshift_abs-${S}.ts`,
+    ],
+    [
+      "xc",
+      'catchup="xc"',
+      "https://iptv.test/live/user/pass/42.ts",
+      "https://iptv.test/timeshift/user/pass/45/2026-10-13:18-00/42.ts",
+    ],
+  ])("keeps %s catch-up on an ordinary stream address", async (_, attributes, url, recording) => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(NOW);
-    const { provider: list, asked } = provider(
-      [
-        "#EXTM3U",
-        '#EXTINF:-1 tvg-id="one" catchup="shift" catchup-days="2",One',
-        "https://iptv.test/live.ts#player-options",
-        "",
-      ].join("\n"),
-    );
-    const [channel] = (await list.liveCatalogue()).channels;
-    expect(channel?.catchupDays).toBe(2);
+    const { provider: list, asked } = single(attributes, url);
+    expect((await list.liveCatalogue()).channels.map((each) => each.catchupDays)).toEqual([2]);
     await list.request((await list.archiveStream("one", WINDOW)).url);
-    expect(asked).toEqual([`https://iptv.test/live.ts?utc=${S}&lutc=${N}`]);
+    expect(asked).toEqual([recording]);
   });
 
   it("finds no catch-up where a playlist's attributes don't agree on one, and plays none", async () => {

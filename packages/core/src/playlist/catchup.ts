@@ -29,9 +29,11 @@
 //   or by its date and time, `{Y}`, `{m}`, `{d}`, `{H}` and `{M}`, to the minute, or to the second
 //   with `{S}` too. An address named to the minute, as `xc`'s is, starts on the minute before the
 //   window's start; the length counts from there, and divisions round up, so the end is never cut
-//   short. Offsets and the moment asked can go in an address beside its start. Only what is sent
-//   counts: the address's path and query once `new URL` has resolved its dot segments, never its
-//   fragment, which is dropped, as the stream address's is before a mode adds to it.
+//   short. Offsets and the moment asked can go in an address beside its start. The placeholders
+//   are read as the address is written, which is how it is sent: an address with a fragment, a
+//   `.` or `..` path segment, a login before its host, a placeholder in its scheme, host or port,
+//   whitespace or a backslash, which `new URL` would send otherwise, has no catch-up, whatever
+//   its mode made it from.
 //
 // Not supported, so no catch-up: a mode without days or days without a mode, whose meaning players
 // don't agree on; `vod` and modes not named here; a source a mode needs that is missing; a stream
@@ -64,10 +66,11 @@ export function playlistCatchup(
   const days = Number(read("catchup-days", "tvg-rec", "timeshift")?.trim());
   if (!mode || !Number.isInteger(days) || days <= 0) return null;
   const source = read("catchup-source")?.trim() ?? null;
-  const template = sent(templateOf(mode, entry.url.split("#")[0] ?? "", source));
-  // A template that doesn't make an address once filled in is none.
-  if (!template || !origin(template.target)) return null;
-  const catchup = { days, template: template.address };
+  const template = templateOf(mode, entry.url, source);
+  // A template whose placeholders can sit elsewhere than its path and query is none, and so is
+  // one that doesn't name its start completely there.
+  if (!template || !plain(template) || !origin(template)) return null;
+  const catchup = { days, template };
   return archiveAddress(catchup, { start: 0, end: 1 }, 1) ? catchup : null;
 }
 
@@ -136,27 +139,21 @@ export function archiveAddress(
 const PLACEHOLDER = /\$\{[a-z]+\}|\{[a-zA-Z]+(?::\d+)?\}/g;
 
 /**
- * A template as it is sent: its address as `new URL` makes it, without the fragment, which is
- * never sent, and with dot segments resolved, which can take placeholders out of it; and its
- * target, the path and query of that, where alone its placeholders reach the provider. Null for
- * none, or no http(s) address. Placeholders stand in for themselves through the parsing, as
- * tokens that the URL rules leave alone.
+ * Whether a template is an address whose every placeholder is sent, in its path or query, as it
+ * is written: an absolute http(s) address, once its placeholders are filled in, with no fragment,
+ * which is never sent; no `.` or `..` path segment, which takes the segment before it out; no
+ * login before its host; nothing but a host and port, without placeholders, in its authority; and
+ * no whitespace or backslash, which addresses read otherwise than they are written.
  */
-function sent(
-  template: string | null,
-): { readonly address: string; readonly target: string } | null {
-  if (!template) return null;
-  const placeholders: string[] = [];
-  const tokened = template.replaceAll(PLACEHOLDER, (placeholder) => {
-    placeholders.push(placeholder);
-    return `catchupplaceholder${placeholders.length - 1}end`;
-  });
-  const url = URL.parse(tokened);
-  if (!url || (url.protocol !== "http:" && url.protocol !== "https:")) return null;
-  url.hash = "";
-  const restored = (text: string) =>
-    text.replaceAll(/catchupplaceholder(\d+)end/g, (_, at: string) => placeholders[Number(at)]!);
-  return { address: restored(url.href), target: restored(url.pathname + url.search) };
+function plain(template: string): boolean {
+  if (/[#\s\\]/.test(template)) return false;
+  const parts = /^https?:\/\/([^/?]*)([^?]*)/i.exec(template);
+  if (!parts) return false;
+  const [, authority = "", path = ""] = parts;
+  if (!authority || /[@{}$]/.test(authority)) return false;
+  const dot = (segment: string) => /^(\.|%2e){1,2}$/i.test(segment);
+  if (path.split("/").some(dot)) return false;
+  return URL.canParse(template.replaceAll(PLACEHOLDER, "1"));
 }
 
 /**
