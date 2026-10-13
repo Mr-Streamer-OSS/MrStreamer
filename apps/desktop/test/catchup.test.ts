@@ -371,6 +371,60 @@ describe("a playlist's catch-up", () => {
     ]);
   });
 
+  it.each([
+    [
+      "a start in the fragment",
+      'catchup="default" catchup-source="https://archive.test/{offset}.ts#start={utc}"',
+    ],
+    [
+      "a ${start} in the fragment",
+      'catchup="default" catchup-source="https://archive.test/{offset}.ts#${start}"',
+    ],
+    [
+      "a date in the fragment",
+      'catchup="default" catchup-source="https://archive.test/{offset}.ts#{Y}/{m}/{d}/{H}/{M}"',
+    ],
+    [
+      "a start in a segment the address leaves",
+      'catchup="default" catchup-source="https://archive.test/anchor/{utc}/../../{offset}.ts"',
+    ],
+  ])(
+    "finds no catch-up where only what is never sent names the start: %s",
+    async (_, attributes) => {
+      const { provider: list, asked } = provider(
+        [
+          "#EXTM3U",
+          `#EXTINF:-1 tvg-id="one" ${attributes} catchup-days="2",One`,
+          "https://iptv.test/one.ts",
+          "",
+        ].join("\n"),
+      );
+      const { channels } = await list.liveCatalogue();
+      expect(channels.map((each) => each.catchupDays)).toEqual([null]);
+      await expect(list.archiveStream("one", WINDOW)).rejects.toMatchObject({
+        error: { kind: "catch-up", reason: "none" },
+      });
+      expect(asked).toEqual([]);
+    },
+  );
+
+  it("asks for a shifted recording before the stream address's fragment, which it drops", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+    const { provider: list, asked } = provider(
+      [
+        "#EXTM3U",
+        '#EXTINF:-1 tvg-id="one" catchup="shift" catchup-days="2",One',
+        "https://iptv.test/live.ts#player-options",
+        "",
+      ].join("\n"),
+    );
+    const [channel] = (await list.liveCatalogue()).channels;
+    expect(channel?.catchupDays).toBe(2);
+    await list.request((await list.archiveStream("one", WINDOW)).url);
+    expect(asked).toEqual([`https://iptv.test/live.ts?utc=${S}&lutc=${N}`]);
+  });
+
   it("finds no catch-up where a playlist's attributes don't agree on one, and plays none", async () => {
     const { provider: list, asked } = provider(NONE);
     const { channels } = await list.liveCatalogue();
