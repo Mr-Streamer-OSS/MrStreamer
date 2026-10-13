@@ -1,7 +1,8 @@
 // A guide from an XMLTV address of the viewer's own, for one subscription, and channels mapped
 // to a guide's by hand: through the guide service as the window calls it, on the app's runtime,
 // against the fake provider, the fake playlist and a host for guides.
-import { readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { AppFailure } from "@mrstreamer/contracts/errors";
@@ -1070,6 +1071,79 @@ describe("a guide address across starts", () => {
     // The provider's is what the older release left, read when it is asked for.
     await back.run(back.guide.restore(id));
     expect(await back.nowOn(first)).toBe("From before");
+  });
+});
+
+describe("a guide kept by 0.0.12", () => {
+  it("comes over with its address and its mappings, each document indexed once when it is wanted, asking nobody", async () => {
+    const { run, guide, host, provider, dataDir, id, first, attach, channel } = await connected();
+    const external = tv(
+      named("aac.test", "AAC"),
+      named("spare.test", "Spare"),
+      slot("aac.test", "External"),
+      slot("spare.test", "Spare"),
+    );
+    host.serve("/guide.xml", external);
+    await attach(id, host.address());
+    const page = await run(
+      guide.mapChannels({ subscriptionId: id, filter: "without", query: "", offset: 0, limit: 1 }),
+    );
+    const loose = channel(page.channels[0]?.id ?? "");
+    await run(guide.map(id, loose.id, "spare.test", page.revision));
+    // What 0.0.12 kept instead: the documents themselves, named as it named them.
+    const { key, fetchedAt } = JSON.parse(await readFile(join(dataDir, "guide.json"), "utf8"));
+    const source = JSON.parse(await readFile(join(dataDir, "guide-source.json"), "utf8"));
+    const document = `guide-external.${randomUUID()}.xml`;
+    for (const name of await readdir(dataDir)) {
+      if (name.startsWith("guide-index.")) await rm(join(dataDir, name));
+    }
+    await writeFile(join(dataDir, "guide.json"), JSON.stringify({ key, fetchedAt }));
+    await writeFile(
+      join(dataDir, "guide.xml"),
+      tv(named("aac.test", "AAC"), slot("aac.test", "Provider")),
+    );
+    await writeFile(join(dataDir, document), external);
+    await writeFile(
+      join(dataDir, "guide-source.json"),
+      JSON.stringify({
+        ...source,
+        external: { ...source.external, document: { file: document, fetchedAt } },
+      }),
+    );
+    const asked = [host.requests().length, provider.guideRequests()];
+
+    const upgraded = await app(dataDir);
+    // Indexed in the background; a refresh that finds the guide recent waits for it.
+    await upgraded.run(upgraded.guide.refreshIfStale(id));
+
+    expect(await upgraded.nowOn(first)).toBe("External");
+    expect(await upgraded.nowOn(loose)).toBe("Spare");
+    expect(await upgraded.status(id)).toMatchObject({
+      source: { kind: "external", origin: host.origin, since: NOW, locked: false },
+      mapped: 1,
+      unresolved: 0,
+      fetchedAt: NOW,
+      processing: { state: "ready" },
+    });
+    // The address's document is an index now; the provider's waits until it is wanted.
+    expect(await guideFiles(dataDir)).toEqual([
+      "guide-index.*.sqlite",
+      "guide-source.json",
+      "guide.json",
+      "guide.xml",
+    ]);
+    expect(JSON.parse(await readFile(join(dataDir, "guide-source.json"), "utf8"))).toEqual({
+      ...source,
+      external: {
+        ...source.external,
+        document: { file: expect.stringMatching(/^guide-index\./), fetchedAt },
+      },
+    });
+
+    await upgraded.run(upgraded.guide.restore(id));
+    expect(await upgraded.nowOn(first)).toBe("Provider");
+    expect(await guideFiles(dataDir)).toEqual(OWN_ONLY);
+    expect([host.requests().length, provider.guideRequests()]).toEqual(asked);
   });
 });
 

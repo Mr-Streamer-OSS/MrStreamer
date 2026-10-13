@@ -604,6 +604,10 @@ describe("the guides of several subscriptions", () => {
     };
     expect(await shows(guide)).toEqual(["Journaal", "Journal"]);
     expect(await run(guide.schedule(channel(b)))).toMatchObject([{ title: "Journal" }]);
+    expect(await run(guide.range([channel(a), channel(b)], at("19:00"), at("23:00")))).toEqual({
+      [ownedKey(channel(a))]: [expect.objectContaining({ title: "Journaal" })],
+      [ownedKey(channel(b))]: [expect.objectContaining({ title: "Journal" })],
+    });
     expect(await run(guide.searchChannels("jour", [channel(a), channel(b)], at("23:00")))).toEqual({
       [ownedKey(channel(a))]: { now: true, later: null },
       [ownedKey(channel(b))]: { now: true, later: null },
