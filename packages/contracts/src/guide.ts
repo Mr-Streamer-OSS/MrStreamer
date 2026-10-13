@@ -13,7 +13,18 @@ export interface Programme {
  * How much a grid reads at once with `guide.range`: a page of channels over a few hours. A grid
  * shows about thirty channels by six hours and reads the next page as it scrolls.
  */
-export const GUIDE_RANGE = { channels: 100, hours: 24 } as const;
+export const GUIDE_RANGE = {
+  channels: 100,
+  hours: 24,
+  /** Programmes per channel a page holds at most: a stretch that has more is cut there. */
+  programmes: 500,
+} as const;
+
+/**
+ * What `guide.schedule` answers of a channel: the programme on now and those that start before
+ * `until`, and at least `atLeast` when fewer do, never more than `most`.
+ */
+export const GUIDE_SCHEDULE = { atLeast: 6, most: 500 } as const;
 
 /** What a channel shows now and next. Either is null where the guide has a gap or ends. */
 export interface Listing {

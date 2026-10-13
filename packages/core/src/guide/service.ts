@@ -8,13 +8,15 @@
 // guide in use keeps answering throughout. The new one replaces it only once it is whole, in one
 // write of what the store keeps. Each index keeps ended programmes for the subscription's archive
 // window (`archive`), and the next download of the same source brings along the past that its
-// document no longer lists. Searches read the index in a worker of their own (`GuideSearcher`).
+// document no longer lists. Searches read the index in a worker of their own (`GuideSearcher`),
+// stopped with their subscription; what the main process reads itself, a schedule or a grid's
+// stretch, it reads no further than asked, and a list's channels in slices (`slicer`).
 //
 // Two rules keep the files whole. Every file of a guide has holders (files.ts): the guide loaded
 // from it, a read under way, a build reading the past from it, a check's candidate, a use that
 // opened one, the download or build writing it, and what is kept naming it. A file goes only
-// once nothing holds it, and a stopped build lets go of what it held only once its worker has
-// ended. And whatever decides which guide is current, what is set for it and which files are
+// once nothing holds it, a stopped build lets go of what it held only once its worker has
+// ended, and a download lets go of what it wrote however it ends, once it handed that on. And whatever decides which guide is current, what is set for it and which files are
 // kept, runs in the subscription's turn (`turn`): one at a time, to its end once begun, checking
 // there whether it still applies. The sweep of what a run before left runs in that turn too,
 // before anything else of the guide.
@@ -106,6 +108,7 @@ import {
   searchAt,
   searchChannelsAt,
   SEARCH_LIMIT,
+  slicer,
   unresolvedMappings,
   type CatalogueChannels,
   type GuideMapping,
@@ -370,8 +373,11 @@ export class Guide extends Context.Service<
      * left out.
      */
     listings(channels: readonly OwnedId[]): Effect.Effect<Record<string, Listing>>;
-    /** The channel's programme on now and the rest the guide knows. */
-    schedule(channel: OwnedId): Effect.Effect<readonly Programme[]>;
+    /**
+     * The channel's programme on now and those after it that start before `until`, at least
+     * `GUIDE_SCHEDULE.atLeast` and at most `GUIDE_SCHEDULE.most`.
+     */
+    schedule(channel: OwnedId, until: number): Effect.Effect<readonly Programme[]>;
     /**
      * The programmes of each channel that overlap [from, to), by its `ownedKey`, past ones the
      * guide keeps among them: a page of a grid. Channels without guide data are left out.
@@ -700,6 +706,9 @@ function make() {
       failures.delete(id);
     };
 
+    /** Readers handed on to a guide, which their opener then doesn't let go of. */
+    const adopted = new WeakSet<Reader>();
+
     /**
      * Opens the index `document` names and hands it to `use`, which may make it a guide with
      * `adopt`. Unless adopted, it closes again however `use` ends, stopped too; once adopted, the
@@ -733,8 +742,6 @@ function make() {
             if (reader && !adopted.delete(reader)) reader.release();
           }),
       );
-    /** Readers handed on to a guide, which their opener then doesn't let go of. */
-    const adopted = new WeakSet<Reader>();
 
     /**
      * A saved subscription's guide: from memory, or opened from what is kept, once. Null while a
@@ -847,9 +854,10 @@ function make() {
 
     /**
      * Downloads what `fetch` answers into the guide's folder and indexes it into a new file
-     * there, telling `report` how far each step got; the download goes once read. Answers null
-     * when the own guide answers it has none. The new index is claimed for `use`, which hands it
-     * on or not, and let go of after: what `use` didn't hand on goes.
+     * there, telling `report` how far each step got, then hands the index to `use`. Answers
+     * `none` when the own guide answers it has none. The download and the index are claimed for
+     * this work from before they are written until it ends, however it ends: the download goes
+     * then, and so does the index unless `use` handed it to another holder.
      */
     const fetchAndIndex = <A>(
       subscription: GuideSubscription,
@@ -859,65 +867,59 @@ function make() {
       { strict, previous }: { strict: boolean; previous: string | null },
       report: (progress: Progress) => void,
       use: (indexed: Indexed) => Effect.Effect<A, Failed>,
-    ): Effect.Effect<A | null, Failed> =>
+    ): Effect.Effect<
+      { readonly none: true } | { readonly none: false; readonly used: A },
+      Failed
+    > =>
       Effect.gen(function* () {
         const fetchedAt = yield* Clock.currentTimeMillis;
         const name = store.newDownload();
-        const downloaded = yield* Effect.acquireUseRelease(
-          Effect.andThen(
-            Effect.sync(() => claimNew(subscription, name)),
-            (release) =>
-              store.download(subscription, name).pipe(
-                Effect.map((download) => ({ download, release })),
-                Effect.tapError(() => Effect.sync(release)),
-              ),
-          ),
-          ({ download }) =>
-            Effect.gen(function* () {
-              const got = yield* Effect.tryPromise({
-                try: async (signal) => {
-                  const answer = await fetch(signal);
-                  if (!answer) return false;
-                  let bytes = 0;
-                  report({ state: "downloading", bytes, total: answer.size });
-                  for await (const chunk of answer.body) {
-                    bytes += chunk.byteLength;
-                    // Packed or not, nothing larger than the guide may unpack to is kept.
-                    if (bytes > GUIDE_LIMITS.bytes) {
-                      throw new AppFailure({
-                        kind: "guide",
-                        failure: { kind: "too-large", limit: "bytes" },
-                      });
-                    }
-                    await download.write(chunk);
-                    report({ state: "downloading", bytes, total: answer.size });
-                  }
-                  await download.close();
-                  return true;
-                },
-                catch: failedWith,
-              });
-              if (!got) return null;
-              const file = store.newIndex();
-              const output = claimNew(subscription, file);
-              return yield* indexed(subscription, {
-                document: download.file,
-                file,
-                previous,
-                since: fetchedAt,
-                strict,
-                report,
-              }).pipe(
-                Effect.map((summary) => ({ file, fetchedAt, summary, output })),
-                Effect.tapError(() => Effect.sync(output)),
-                Effect.onInterrupt(() => Effect.sync(output)),
-              );
-            }),
-          ({ download, release }) =>
-            Effect.promise(() => download.discard()).pipe(Effect.ensuring(Effect.sync(release))),
+        const file = store.newIndex();
+        return yield* Effect.acquireUseRelease(
+          Effect.sync(() => [claimNew(subscription, name), claimNew(subscription, file)]),
+          () =>
+            Effect.acquireUseRelease(
+              store.download(subscription, name),
+              (download) =>
+                Effect.gen(function* () {
+                  const got = yield* Effect.tryPromise({
+                    try: async (signal) => {
+                      const answer = await fetch(signal);
+                      if (!answer) return false;
+                      let bytes = 0;
+                      report({ state: "downloading", bytes, total: answer.size });
+                      for await (const chunk of answer.body) {
+                        bytes += chunk.byteLength;
+                        // Packed or not, nothing larger than the guide may unpack to is kept.
+                        if (bytes > GUIDE_LIMITS.bytes) {
+                          throw new AppFailure({
+                            kind: "guide",
+                            failure: { kind: "too-large", limit: "bytes" },
+                          });
+                        }
+                        await download.write(chunk);
+                        report({ state: "downloading", bytes, total: answer.size });
+                      }
+                      await download.close();
+                      return true;
+                    },
+                    catch: failedWith,
+                  });
+                  if (!got) return { none: true } as const;
+                  const summary = yield* indexed(subscription, {
+                    document: download.file,
+                    file,
+                    previous,
+                    since: fetchedAt,
+                    strict,
+                    report,
+                  });
+                  return { none: false, used: yield* use({ file, fetchedAt, summary }) } as const;
+                }),
+              (download) => Effect.promise(() => download.discard()),
+            ),
+          (claims) => Effect.sync(() => claims.forEach((release) => release())),
         );
-        if (!downloaded) return null;
-        return yield* use(downloaded).pipe(Effect.ensuring(Effect.sync(downloaded.output)));
       });
 
     /**
@@ -1015,7 +1017,7 @@ function make() {
                 ),
             ),
         );
-        if (answer === null) {
+        if (answer.none) {
           // It answered that it has none. Asked again and still none: nothing is told.
           let told = false;
           yield* change(
@@ -1033,7 +1035,7 @@ function make() {
           if (told) yield* published;
           return;
         }
-        if (answer) yield* published;
+        if (answer.used) yield* published;
       });
 
     /**
@@ -1089,7 +1091,7 @@ function make() {
                 ),
             ),
         );
-        if (before) yield* published;
+        if (!before.none && before.used) yield* published;
       });
 
     /**
@@ -1106,45 +1108,53 @@ function make() {
       Effect.gen(function* () {
         const { id } = subscription;
         const file = store.newIndex();
-        const output = claimNew(subscription, file);
-        const kept = yield* Effect.gen(function* () {
-          yield* indexed(subscription, {
-            document: document.file,
-            file,
-            previous: null,
-            since: yield* Clock.currentTimeMillis,
-            strict: false,
-            report,
-          });
-          const index: GuideDocument = { file, fetchedAt: document.fetchedAt, kind: "index" };
-          return yield* opening(subscription, index, ({ adopt }) =>
-            change(
-              subscription,
-              started,
-              (was) => {
-                const { external } = was.config;
-                // Still the document kept: no download took its place meanwhile.
-                if (external) {
-                  return Effect.succeed(
-                    external.document.file === document.file
-                      ? {
-                          ...was,
-                          config: { ...was.config, external: { ...external, document: index } },
-                        }
-                      : null,
-                  );
-                }
-                return Effect.succeed(
-                  was.own?.file === document.file ? { ...was, own: index } : null,
-                );
-              },
-              () => {
-                unread.delete(id);
-                setLoaded(id, adopt());
-              },
-            ),
-          );
-        }).pipe(Effect.ensuring(Effect.sync(output)));
+        const kept = yield* Effect.acquireUseRelease(
+          Effect.sync(() => [
+            claimNew(subscription, file),
+            files.claim(subscription.store, document.file),
+          ]),
+          ([, input]) =>
+            Effect.gen(function* () {
+              if (!input) return null;
+              yield* indexed(subscription, {
+                document: document.file,
+                file,
+                previous: null,
+                since: yield* Clock.currentTimeMillis,
+                strict: false,
+                report,
+              });
+              const index: GuideDocument = { file, fetchedAt: document.fetchedAt, kind: "index" };
+              return yield* opening(subscription, index, ({ adopt }) =>
+                change(
+                  subscription,
+                  started,
+                  (was) => {
+                    const { external } = was.config;
+                    // Still the document kept: no download took its place meanwhile.
+                    if (external) {
+                      return Effect.succeed(
+                        external.document.file === document.file
+                          ? {
+                              ...was,
+                              config: { ...was.config, external: { ...external, document: index } },
+                            }
+                          : null,
+                      );
+                    }
+                    return Effect.succeed(
+                      was.own?.file === document.file ? { ...was, own: index } : null,
+                    );
+                  },
+                  () => {
+                    unread.delete(id);
+                    setLoaded(id, adopt());
+                  },
+                ),
+              );
+            }),
+          (claims) => Effect.sync(() => claims.forEach((release) => release?.())),
+        );
         if (kept) yield* published;
       }).pipe(
         downloadOne,
@@ -1359,7 +1369,7 @@ function make() {
                 }),
             ),
         );
-        return found ?? (yield* changed);
+        return (!found.none && found.used) || (yield* changed);
       }).pipe(downloadOne, diagnosed("guide"));
 
     // Checks now and then; the app asks for the first downloads itself, after its own start.
@@ -1409,9 +1419,16 @@ function make() {
       read: (found: Found) => Effect.Effect<A, E>,
     ): Effect.Effect<A | null, E> =>
       Effect.gen(function* () {
-        const guide = yield* current(subscription);
-        const reader = guide && files.share(subscription.store, guide.file);
+        // The guide current when the claim is taken: one replaced just before has closed.
+        let guide: Loaded | null = null;
+        let reader: Reader | null = null;
+        for (let tries = 0; tries < 3 && !reader; tries++) {
+          guide = yield* current(subscription);
+          if (!guide) return null;
+          reader = files.share(subscription.store, guide.file);
+        }
         if (!guide || !reader) return null;
+        const held = reader;
         return yield* Effect.gen(function* () {
           const channels = yield* channelsOf(subscription);
           if (!channels) return null;
@@ -1421,23 +1438,39 @@ function make() {
             channels,
             at: yield* Clock.currentTimeMillis,
           });
-        }).pipe(Effect.ensuring(Effect.sync(reader.release)));
+        }).pipe(Effect.ensuring(Effect.sync(held.release)));
       });
 
     /**
      * A search in the search worker, answering `fallback` when it fails. Stopped, it waits for
      * the worker's answer all the same, so the file it reads is held until the worker is done.
      */
-    const searching = <A>(search: () => Promise<A>, fallback: A) =>
+    const searching = <A>(
+      subscriptionId: string,
+      search: (signal: AbortSignal) => Promise<A>,
+      fallback: A,
+    ) =>
       Effect.suspend(() => {
-        const answer = search().catch((cause: unknown) => {
-          console.warn("[guide] a search failed", cause);
-          return fallback;
-        });
+        const stop = new AbortController();
+        const under = searches.get(subscriptionId) ?? new Set<AbortController>();
+        searches.set(subscriptionId, under.add(stop));
+        const answer = search(stop.signal)
+          .catch((cause: unknown) => {
+            if (!stop.signal.aborted) console.warn("[guide] a search failed", cause);
+            return fallback;
+          })
+          .finally(() => under.delete(stop));
         return Effect.promise(() => answer).pipe(
-          Effect.onInterrupt(() => Effect.promise(() => answer)),
+          Effect.onInterrupt(() =>
+            Effect.promise(() => {
+              stop.abort();
+              return answer;
+            }),
+          ),
         );
       });
+    /** Each subscription's searches under way, which `forget` stops. */
+    const searches = new Map<string, Set<AbortController>>();
 
     /**
      * What `lookup` answers per channel id, in each subscription's own guide, for those of
@@ -1448,19 +1481,27 @@ function make() {
       lookup: (found: Found, ids: readonly string[]) => Effect.Effect<Record<string, A>>,
     ) =>
       Effect.gen(function* () {
+        // A list may hold tens of thousands of channels: other work gets its turn between slices.
+        const slice = slicer();
+        const rest = (wait: Promise<void> | undefined) =>
+          wait ? Effect.promise(() => wait) : Effect.void;
         const asked = new Map<string, string[]>();
         for (const { subscriptionId, id } of channels) {
           const ids = asked.get(subscriptionId);
           if (ids) ids.push(id);
           else asked.set(subscriptionId, [id]);
+          yield* rest(slice());
         }
         const answers: Record<string, A> = {};
         for (const subscription of yield* source.saved) {
           const ids = asked.get(subscription.id);
           if (!ids) continue;
           const found = yield* withContext(subscription, (context) => lookup(context, ids));
-          for (const [id, answer] of Object.entries(found ?? {})) {
-            answers[ownedKey({ subscriptionId: subscription.id, id })] = answer;
+          for (const id in found) {
+            const answer = found[id];
+            if (answer !== undefined)
+              answers[ownedKey({ subscriptionId: subscription.id, id })] = answer;
+            yield* rest(slice());
           }
         }
         return answers;
@@ -1529,14 +1570,14 @@ function make() {
         perChannel(channels, (found, ids) =>
           Effect.sync(() => listingsAt(found.guide.index, found.channels, ids, found.at)),
         ),
-      schedule: (channel: OwnedId) =>
+      schedule: (channel: OwnedId, until: number) =>
         Effect.gen(function* () {
           const subscription = yield* savedAs(channel.subscriptionId);
           const found =
             subscription &&
             (yield* withContext(subscription, (context) =>
               Effect.sync(() =>
-                scheduleAt(context.guide.index, context.channels, channel.id, context.at),
+                scheduleAt(context.guide.index, context.channels, channel.id, context.at, until),
               ),
             ));
           return found ?? [];
@@ -1554,7 +1595,8 @@ function make() {
             const found = yield* withContext(subscription, (context) =>
               Effect.map(
                 searching(
-                  () =>
+                  subscription.id,
+                  (signal) =>
                     searchAt(
                       context.guide.index,
                       context.path,
@@ -1562,6 +1604,7 @@ function make() {
                       query,
                       context.at,
                       searcher,
+                      signal,
                     ),
                   [],
                 ),
@@ -1580,7 +1623,8 @@ function make() {
       searchChannels: (query: string, channels: readonly OwnedId[], until: number) =>
         perChannel(channels, (found, ids) =>
           searching(
-            () =>
+            found.guide.subscriptionId,
+            (signal) =>
               searchChannelsAt(
                 found.guide.index,
                 found.path,
@@ -1590,6 +1634,7 @@ function make() {
                 found.at,
                 until,
                 searcher,
+                signal,
               ),
             {},
           ),
@@ -1814,6 +1859,8 @@ function make() {
           );
           yield* stopDownload(id);
           yield* dropCandidate(subscription);
+          // Its searches stop, their worker with them.
+          for (const search of searches.get(id) ?? []) search.abort();
           // Once no file of it is held or going, nothing of it is left to write or read.
           yield* Effect.promise(() => files.settled(subscription.store));
           yield* turn(id, store.erase(subscription));

@@ -63,6 +63,11 @@ const failureOf = (promise: Promise<unknown>) =>
     (cause: unknown) => (cause instanceof Failed ? cause.error : cause),
   );
 
+/** Everything kept of a guide in `dir`, by name: what is set, documents, indexes, downloads. */
+async function guideFilesIn(dir: string): Promise<string[]> {
+  return (await readdir(dir).catch(() => [])).filter((name) => name.startsWith("guide")).sort();
+}
+
 /** The guide indexes kept in `dir`, by name. */
 async function indexesIn(dir: string): Promise<string[]> {
   return (await readdir(dir)).filter((name) => name.endsWith(".sqlite"));
@@ -109,15 +114,18 @@ function catalogue(count = 1): CatalogueChannels {
 }
 
 /**
- * A worker that reads the past from the index it is given and never ends on its own, as a build
- * of a large guide stopped half way; ending it waits for `ended`.
+ * A worker that opens what it builds from, the index before or else the document, and never ends
+ * on its own, as a build of a large guide stopped half way; ending it waits for `ended`.
  */
 function stubbornWorker(options: WorkerOptions, ended: Promise<void>, attached: () => void) {
   const worker = new Worker(
     `const { workerData, parentPort } = require("node:worker_threads");
     const { DatabaseSync } = require("node:sqlite");
-    const db = new DatabaseSync(workerData.previous, { readOnly: true });
-    db.prepare("select count(*) from programme").get();
+    const { openSync } = require("node:fs");
+    if (workerData.previous) {
+      const db = new DatabaseSync(workerData.previous, { readOnly: true });
+      db.prepare("select count(*) from programme").get();
+    } else openSync(workerData.document, "r");
     parentPort.postMessage({ kind: "progress", programmes: 1 });
     setInterval(() => {}, 1000);`,
     { ...options, eval: true },
@@ -145,7 +153,20 @@ function held() {
   };
 }
 
-async function standalone({ channels = 1 }: { readonly channels?: number } = {}) {
+/** A search worker that takes searches and never answers. */
+const silentSearchWorker = (options: WorkerOptions) =>
+  new Worker(`setInterval(() => {}, 1000);`, { ...options, eval: true });
+
+async function standalone({
+  channels = 1,
+  searchWorker = guideSearchWorker,
+  searchTimeout,
+}: {
+  readonly channels?: number;
+  /** Starts the search worker, as the app does unless a test says otherwise. */
+  readonly searchWorker?: (options: WorkerOptions) => Worker;
+  readonly searchTimeout?: number;
+} = {}) {
   const dir = await tempDir();
   /** What the own guide answers next: a document's bytes as the test sends them, or a failure. */
   let answer: () => Promise<{ body: ReadableStream<Uint8Array>; size: number | null }>;
@@ -158,7 +179,8 @@ async function standalone({ channels = 1 }: { readonly channels?: number } = {})
   let ownWriting: ReturnType<typeof held> | null = null;
   let sealing: ReturnType<typeof held> | null = null;
   let sweeping: ReturnType<typeof held> | null = null;
-  let stubborn: ReturnType<typeof held> | null = null;
+  let stubborn: { hold: ReturnType<typeof held>; any: boolean } | null = null;
+  let discarding: ReturnType<typeof held> | null = null;
   const indexer = Layer.effect(
     GuideIndexer,
     Effect.map(GuideIndexer, (worker) => ({
@@ -177,11 +199,12 @@ async function standalone({ channels = 1 }: { readonly channels?: number } = {})
   ).pipe(
     Layer.provide(
       guideIndexerLayer((options) => {
-        // The next build that reads the past from an index runs in a worker that won't end.
-        const waiting = options.workerData.previous === null ? null : stubborn;
+        // The next build, or the next that reads the past from an index, runs in a worker that
+        // won't end.
+        const waiting = stubborn?.any || options.workerData.previous !== null ? stubborn : null;
         if (!waiting) return guideIndexWorker(options);
         stubborn = null;
-        return stubbornWorker(options, waiting.wait(), () => {});
+        return stubbornWorker(options, waiting.hold.wait(), () => {});
       }),
     ),
   );
@@ -205,6 +228,16 @@ async function standalone({ channels = 1 }: { readonly channels?: number } = {})
           Effect.suspend(() => once(ownWriting, () => (ownWriting = null))),
           kept.setOwn(...write),
         ),
+      download: (...made: Parameters<typeof kept.download>) =>
+        Effect.map(kept.download(...made), (download) => ({
+          ...download,
+          discard: async () => {
+            const waiting = discarding;
+            discarding = null;
+            await waiting?.wait();
+            await download.discard();
+          },
+        })),
       sweep: (...sweep: Parameters<typeof kept.sweep>) =>
         Effect.andThen(
           Effect.suspend(() => once(sweeping, () => (sweeping = null))),
@@ -216,7 +249,7 @@ async function standalone({ channels = 1 }: { readonly channels?: number } = {})
   const ports = Layer.mergeAll(
     store,
     indexer,
-    guideSearcherLayer(guideSearchWorker),
+    guideSearcherLayer(searchWorker, searchTimeout),
     Layer.succeed(GuideSource, {
       saved: Effect.succeed([
         {
@@ -289,12 +322,19 @@ async function standalone({ channels = 1 }: { readonly channels?: number } = {})
       return sweeping;
     },
     /**
-     * Makes the next build that reads the past from an index run in a worker that won't end:
-     * `arrived` once the build begins, and stopping it waits for `release`.
+     * Makes the next build that reads the past from an index, or with `any` the next build, run
+     * in a worker that won't end: `arrived` once the build begins, and stopping it waits for
+     * `release`.
      */
-    holdStubborn() {
-      stubborn = held();
-      return stubborn;
+    holdStubborn(any = false) {
+      const hold = held();
+      stubborn = { hold, any };
+      return hold;
+    },
+    /** Holds the next removal of a download, once it is read, until `release`. */
+    holdDiscard() {
+      discarding = held();
+      return discarding;
     },
     /** What the address answers from now on. */
     serveElsewhere(document: string) {
@@ -709,5 +749,139 @@ describe("a search of a large guide", () => {
     expect(found).toHaveLength(50);
     // What the main thread did was ask, and read the answer.
     expect((used.user + used.system) / 1000).toBeLessThan(50);
+  });
+});
+
+describe("work stopped on its way to becoming the guide", () => {
+  it.each(["indexing", "own write", "download removal"] as const)(
+    "lets go of what it holds when stopped at its %s, so forgetting the subscription finishes",
+    async (point) => {
+      const { dir, run, guide, serve, holdIndexing, holdOwnWrite, holdDiscard } =
+        await standalone();
+      serve(tv(programme("one.test", "2000", "2100", "Stopped")));
+      const holding =
+        point === "indexing"
+          ? holdIndexing()
+          : point === "own write"
+            ? holdOwnWrite()
+            : holdDiscard();
+      const refreshed = failureOf(run(guide.refresh(ID)));
+      await holding.arrived;
+      const forgotten = run(guide.forget({ id: ID, store: dir }));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      holding.release();
+
+      await forgotten;
+      await refreshed;
+      expect(await guideFilesIn(dir)).toEqual([]);
+    },
+  );
+
+  it("hands an address its turn while a download kept before it is still being cleaned up, and forgets both", async () => {
+    const { dir, run, guide, serve, serveElsewhere, holdDiscard, nowOn } = await standalone();
+    serveElsewhere(tv(programme("one.test", "2000", "2100", "External")));
+    const { id } = await run(guide.check(ID, ADDRESS));
+    serve(tv(programme("one.test", "2000", "2100", "Own")));
+    const removing = holdDiscard();
+    const refreshed = failureOf(run(guide.refresh(ID)));
+    await removing.arrived;
+    const used = run(guide.use(ID, id));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    removing.release();
+    await used;
+    await refreshed;
+
+    expect(await nowOn()).toBe("External");
+    await run(guide.forget({ id: ID, store: dir }));
+    expect(await guideFilesIn(dir)).toEqual([]);
+  });
+
+  it("keeps the document an older release left while the build reading it is stopped, until its worker has ended", async () => {
+    const { dir, run, guide, holdStubborn } = await standalone();
+    // What 0.0.12 kept: the document itself.
+    await writeFile(join(dir, "guide.xml"), tv(programme("one.test", "2000", "2100", "Kept")));
+    await writeFile(join(dir, "guide.json"), JSON.stringify({ key: "account", fetchedAt: NOW }));
+    const ending = holdStubborn(true);
+    await run(guide.status);
+    await ending.arrived;
+
+    const forgotten = run(guide.forget({ id: ID, store: dir }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(await readdir(dir)).toContain("guide.xml");
+    ending.release();
+    await forgotten;
+    expect(await guideFilesIn(dir)).toEqual([]);
+  });
+});
+
+describe("a search that doesn't answer", () => {
+  it("is given up after its time, its worker ended, and the next search starts another", async () => {
+    let started = 0;
+    const { run, guide, serve } = await standalone({
+      searchWorker: (options) => {
+        started++;
+        return silentSearchWorker(options);
+      },
+      searchTimeout: 200,
+    });
+    serve(tv(programme("one.test", "2000", "2100", "News")));
+    await run(guide.refresh(ID));
+
+    expect(await run(guide.search("news"))).toEqual([]);
+    expect(await run(guide.search("news"))).toEqual([]);
+    expect(started).toBe(2);
+  });
+
+  it("is stopped with its worker when its subscription is forgotten, or the app quits", async () => {
+    const { dir, runtime, run, guide, serve } = await standalone({
+      searchWorker: silentSearchWorker,
+    });
+    serve(tv(programme("one.test", "2000", "2100", "News")));
+    await run(guide.refresh(ID));
+
+    const searched = run(guide.search("news"));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await run(guide.forget({ id: ID, store: dir }));
+    expect(await searched).toEqual([]);
+    expect(await guideFilesIn(dir)).toEqual([]);
+
+    // Searching again, as the app quits.
+    serve(tv(programme("one.test", "2000", "2100", "News")));
+    await run(guide.refresh(ID));
+    void run(guide.search("news")).catch(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await runtime.dispose();
+    expect(await openIn(dir)).toEqual([]);
+  });
+});
+
+describe("a search of many matching titles", () => {
+  it("finds the first fifty, reading a page of them at a time within a small heap", async () => {
+    // Every programme its own title, every title found.
+    const minute = 60_000;
+    const stamp = (time: number) =>
+      `${new Date(time).toISOString().slice(0, 19).replace(/[-T:]/g, "")} +0000`;
+    const { run, guide, serve } = await standalone({
+      searchWorker: (options) =>
+        guideSearchWorker({
+          ...options,
+          resourceLimits: { maxOldGenerationSizeMb: 12, maxYoungGenerationSizeMb: 4 },
+        }),
+    });
+    serve(
+      tv(
+        Array.from(
+          { length: 150_000 },
+          (_, at) =>
+            `<programme start="${stamp(NOW + at * minute)}" stop="${stamp(NOW + (at + 1) * minute)}" channel="one.test"><title>Ordinary show ${at}</title></programme>`,
+        ).join(""),
+      ),
+    );
+    await run(guide.refresh(ID));
+
+    const found = await run(guide.search("ordinary"));
+    expect(found).toHaveLength(50);
+    expect(found[0]?.programme.title).toBe("Ordinary show 0");
+    expect(found[49]?.programme.title).toBe("Ordinary show 49");
   });
 });

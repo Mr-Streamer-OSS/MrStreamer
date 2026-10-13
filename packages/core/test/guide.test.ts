@@ -4,11 +4,13 @@ import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 import { AppFailure } from "@mrstreamer/contracts/errors";
+import { GUIDE_RANGE, GUIDE_SCHEDULE } from "@mrstreamer/contracts/guide";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { guideAddress } from "../src/guide/address.ts";
 import { xmltvDocument } from "../src/guide/document.ts";
 import {
   buildGuideIndex,
+  eachMatch,
   openGuideIndex,
   searchEach,
   searchFirst,
@@ -234,6 +236,9 @@ const liveChannel = (id: string): LiveChannel => ({
   variants: [{ id, name: `Channel ${id}`, tags: [], quality: null }],
 });
 
+/** A search that nothing stops. */
+const stopNever = new AbortController().signal;
+
 /** Searches run where the test runs, as the app's search worker runs them. */
 const inProcess: GuideSearching = {
   first: async (search) => searchFirst(search),
@@ -384,13 +389,43 @@ describe("indexing a guide", () => {
       next: { title: "Evening" },
     });
     expect(guide.listing(channel, NOON + 4 * HOUR)).toBeNull();
-    expect(titles(guide.schedule(channel, NOON))).toEqual(["Lunch", "Afternoon", "Evening"]);
+    expect(titles(guide.schedule(channel, NOON, NOON + DAY))).toEqual([
+      "Lunch",
+      "Afternoon",
+      "Evening",
+    ]);
     // The past it keeps, from the programme on at the start of the stretch.
     expect(titles(guide.range(channel, NOON - 1.5 * HOUR, NOON + HOUR))).toEqual([
       "Morning",
       "Lunch",
     ]);
     expect(titles(guide.range(channel, NOON + 2 * HOUR, NOON + 3 * HOUR))).toEqual([]);
+  });
+
+  it("reads a schedule and a stretch of time no further than they are asked, however much the guide holds", async () => {
+    const minute = 60_000;
+    const { guide } = await index(
+      tv(
+        ...Array.from({ length: 2_000 }, (_, at) =>
+          programme(
+            "one.test",
+            stamp(NOON + at * minute),
+            stamp(NOON + (at + 1) * minute),
+            `Minute ${at}`,
+          ),
+        ),
+      ),
+    );
+    const channel = guide.channels.get("one.test");
+    if (!channel) throw new Error("No channel.");
+
+    // Those that start before the end asked for, from the one on now.
+    expect(guide.schedule(channel, NOON, NOON + 10 * minute)).toHaveLength(10);
+    // At least a few more when fewer do.
+    expect(guide.schedule(channel, NOON, NOON + 2 * minute)).toHaveLength(GUIDE_SCHEDULE.atLeast);
+    // Never more than a schedule may hold, nor a page of a grid.
+    expect(guide.schedule(channel, NOON, NOON + DAY)).toHaveLength(GUIDE_SCHEDULE.most);
+    expect(guide.range(channel, NOON, NOON + DAY)).toHaveLength(GUIDE_RANGE.programmes);
   });
 
   it("keeps ended programmes for the archive window, and drops what ended before it", async () => {
@@ -510,7 +545,7 @@ describe("indexing a guide", () => {
       "1": { now: expect.objectContaining({ title: "Current news" }), next: null },
     });
     expect(
-      (await searchAt(guide, target, catalogue, "news", NOON, inProcess)).map(
+      (await searchAt(guide, target, catalogue, "news", NOON, inProcess, stopNever)).map(
         (match) => match.programme.title,
       ),
     ).toEqual(["Current news"]);
@@ -545,9 +580,12 @@ describe("indexing a guide", () => {
       );
     const each = (words: string[], until: number, ids = all) =>
       Object.fromEntries(
-        searchEach({ path: target, words, at: NOON, until, channels: keys(ids) }).map(
-          ({ channel, now, later }) => [guide.channel(channel)?.id, { now, later: later?.title }],
-        ),
+        [
+          ...eachMatch(searchEach({ path: target, words, at: NOON, until, channels: keys(ids) })),
+        ].map(({ channel, now, later }) => [
+          guide.channel(channel)?.id,
+          { now, later: later?.title },
+        ]),
       );
 
     // On now first, then by start.

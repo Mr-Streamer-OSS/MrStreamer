@@ -77,7 +77,7 @@ async function connectedGuide(options: FakeProviderOptions = {}) {
       refreshIfStale: () => run(guide.refreshIfStale(owner)),
       listings: async (channelIds: readonly string[]) =>
         byId(await run(guide.listings(channelIds.map(own)))),
-      schedule: (channelId: string) => run(guide.schedule(own(channelId))),
+      schedule: (channelId: string) => run(guide.schedule(own(channelId), NOW + 24 * HOUR)),
       search: (query: string) => run(guide.search(query)),
       searchChannels: async (query: string, channelIds: readonly string[], until: number) =>
         byId(await run(guide.searchChannels(query, channelIds.map(own), until))),
@@ -607,7 +607,9 @@ describe("the guides of several subscriptions", () => {
       return [channel(a), channel(b)].map((each) => listings[ownedKey(each)]?.now?.title);
     };
     expect(await shows(guide)).toEqual(["Journaal", "Journal"]);
-    expect(await run(guide.schedule(channel(b)))).toMatchObject([{ title: "Journal" }]);
+    expect(await run(guide.schedule(channel(b), NOW + 24 * HOUR))).toMatchObject([
+      { title: "Journal" },
+    ]);
     expect(await run(guide.range([channel(a), channel(b)], at("19:00"), at("23:00")))).toEqual({
       [ownedKey(channel(a))]: [expect.objectContaining({ title: "Journaal" })],
       [ownedKey(channel(b))]: [expect.objectContaining({ title: "Journal" })],

@@ -146,10 +146,11 @@ export const queries = {
       refetchInterval: LISTINGS_REFRESH_MS,
       placeholderData: (previous) => previous,
     }),
-  schedule: (channel: OwnedId) =>
+  /** A channel's programmes from the one on now until `until`, and at least a few more. */
+  schedule: (channel: OwnedId, until: number) =>
     queryOptions({
-      queryKey: ["guide", "schedule", ownedKey(channel)],
-      queryFn: () => call("guide.schedule", { channel: ownedId(channel) }),
+      queryKey: ["guide", "schedule", ownedKey(channel), until],
+      queryFn: () => call("guide.schedule", { channel: ownedId(channel), until }),
       staleTime: LISTINGS_REFRESH_MS,
     }),
   programmes: (query: string) =>

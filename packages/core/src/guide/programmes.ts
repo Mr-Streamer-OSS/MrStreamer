@@ -17,7 +17,12 @@ import type {
 } from "@mrstreamer/contracts/guide";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { normalize, searchWords } from "../text.ts";
-import type { GuideIndex, GuideSearching, IndexedChannel } from "./index-file.ts";
+import {
+  eachMatch,
+  type GuideIndex,
+  type GuideSearching,
+  type IndexedChannel,
+} from "./index-file.ts";
 
 /** How many programmes a search returns. */
 export const SEARCH_LIMIT = 50;
@@ -153,15 +158,19 @@ export function channelsCovered(index: GuideIndex, channels: GuideChannels, at: 
 
 const covered = new WeakMap<GuideIndex, WeakMap<GuideChannels, Remembered<number>>>();
 
-/** The channel's programme on now and everything after it that the guide knows. */
+/**
+ * The channel's programme on now and those after it that start before `until`, as
+ * `GuideIndex.schedule` bounds them.
+ */
 export function scheduleAt(
   index: GuideIndex,
   channels: GuideChannels,
   channelId: string,
   at: number,
+  until: number,
 ): readonly Programme[] {
   const shown = shownChannel(index, channels, channelId, at);
-  return shown ? index.schedule(shown, at) : [];
+  return shown ? index.schedule(shown, at, until) : [];
 }
 
 /**
@@ -196,17 +205,21 @@ export async function searchAt(
   query: string,
   at: number,
   search: GuideSearching,
+  signal: AbortSignal,
 ): Promise<readonly ProgrammeMatch[]> {
   const words = searchWords(query);
   if (words.length === 0) return [];
   const shown = searchable(index, channels, at);
-  const found = await search.first({
-    path,
-    words,
-    at,
-    channels: [...shown.keys()],
-    limit: SEARCH_LIMIT,
-  });
+  const found = await search.first(
+    {
+      path,
+      words,
+      at,
+      channels: [...shown.keys()],
+      limit: SEARCH_LIMIT,
+    },
+    signal,
+  );
   return found.flatMap(({ channel, programme }) => {
     const shownOn = shown.get(channel);
     return shownOn ? [{ channel: shownOn, programme }] : [];
@@ -258,22 +271,34 @@ export async function searchChannelsAt(
   at: number,
   until: number,
   search: GuideSearching,
+  signal: AbortSignal,
 ): Promise<Record<string, ListingMatch>> {
   const words = searchWords(query);
   if (words.length === 0) return {};
+  // A list may hold tens of thousands of channels: what is worked out of each, before and after
+  // the worker searches, lets other work in between slices.
+  const slice = slicer();
   const showing = new Map<number, string[]>();
   for (const channelId of channelIds) {
     const shown = shownChannel(index, channels, channelId, at);
-    if (!shown) continue;
-    const ids = showing.get(shown.key);
-    if (ids) ids.push(channelId);
-    else showing.set(shown.key, [channelId]);
+    if (shown) {
+      const ids = showing.get(shown.key);
+      if (ids) ids.push(channelId);
+      else showing.set(shown.key, [channelId]);
+    }
+    const rest = slice();
+    if (rest) await rest;
   }
   if (showing.size === 0) return {};
-  const found = await search.each({ path, words, at, until, channels: [...showing.keys()] });
+  const found = await search.each(
+    { path, words, at, until, channels: [...showing.keys()] },
+    signal,
+  );
   const result: Record<string, ListingMatch> = {};
-  for (const { channel, now, later } of found) {
+  for (const { channel, now, later } of eachMatch(found)) {
     for (const channelId of showing.get(channel) ?? []) result[channelId] = { now, later };
+    const rest = slice();
+    if (rest) await rest;
   }
   return result;
 }
@@ -461,4 +486,25 @@ function remembered<A>(
   const value = work();
   byChannels.set(channels, { value, ended });
   return value;
+}
+
+/** A read on the main process lets other work in once it has run this long. */
+const SLICE_MS = 8;
+
+/**
+ * Lets other work in when the slice under way has run `SLICE_MS`: awaited after each step of a
+ * long loop on the main process, it looks at the clock every eighth step and costs nothing else.
+ */
+export function slicer(): () => Promise<void> | undefined {
+  let began = performance.now();
+  let count = 0;
+  return () => {
+    if ((++count & 7) !== 0 || performance.now() - began < SLICE_MS) return undefined;
+    return new Promise<void>((resolve) =>
+      setImmediate(() => {
+        began = performance.now();
+        resolve();
+      }),
+    );
+  };
 }

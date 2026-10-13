@@ -22,7 +22,13 @@ import { createReadStream } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { AppFailure } from "@mrstreamer/contracts/errors";
-import type { GuideFailure, Listing, Programme } from "@mrstreamer/contracts/guide";
+import {
+  GUIDE_RANGE,
+  GUIDE_SCHEDULE,
+  type GuideFailure,
+  type Listing,
+  type Programme,
+} from "@mrstreamer/contracts/guide";
 import { normalize } from "../text.ts";
 import { xmltvDocument } from "./document.ts";
 import { GUIDE_LIMITS, type GuideLimits } from "./limits.ts";
@@ -38,6 +44,8 @@ const PROGRESS_MS = 200;
 const TITLE_CACHE = 100_000;
 /** Opening an index on the main process lets other work in once it has run this long. */
 const SLICE_MS = 8;
+/** Title keys one step of a search compares with its words, matching or not. */
+const TITLES_PER_PAGE = 10_000;
 /** How far past `at` each stretch a search reads ends: six hours, a day, four days, then all. */
 const STRETCHES = [6, 24, 96].map((hours) => hours * 60 * 60 * 1000);
 /**
@@ -362,9 +370,15 @@ export interface GuideIndex {
   readonly until: number | null;
   /** What `channel` shows at `at` and next, or null when it shows nothing from then on. */
   listing(channel: IndexedChannel, at: number): Listing | null;
-  /** The programme on `channel` at `at`, if any, and every one after it. */
-  schedule(channel: IndexedChannel, at: number): readonly Programme[];
-  /** The programmes on `channel` that overlap [from, to), in time order. */
+  /**
+   * The programme on `channel` at `at`, if any, and those after it that start before `until`:
+   * at least `GUIDE_SCHEDULE.atLeast` when fewer do, and at most `GUIDE_SCHEDULE.most`.
+   */
+  schedule(channel: IndexedChannel, at: number, until: number): readonly Programme[];
+  /**
+   * The programmes on `channel` that overlap [from, to), in time order: the first
+   * `GUIDE_RANGE.programmes` of them.
+   */
   range(channel: IndexedChannel, from: number, to: number): readonly Programme[];
   close(): void;
 }
@@ -438,9 +452,17 @@ function reader(
         (select max(start) from programme where channel = :channel and start <= :at),
         -9007199254740991
       )`;
+  // Every read is bounded in SQL, before a row is made: the one that may have ended comes first.
   const listing = db.prepare(`${from} order by programme.start limit 3`);
-  const schedule = db.prepare(`${from} order by programme.start`);
-  const range = db.prepare(`${from} and programme.start < :to order by programme.start`);
+  const schedule = db.prepare(
+    `${from} and programme.start < :until order by programme.start limit ${GUIDE_SCHEDULE.most + 1}`,
+  );
+  const scheduleTail = db.prepare(
+    `${from} order by programme.start limit ${GUIDE_SCHEDULE.atLeast + 1}`,
+  );
+  const range = db.prepare(
+    `${from} and programme.start < :to order by programme.start limit ${GUIDE_RANGE.programmes + 1}`,
+  );
   const unended = (rows: Record<string, unknown>[], at: number) =>
     rows.map(programmeOf).filter((programme) => programme.stop > at);
   return {
@@ -453,8 +475,16 @@ function reader(
       if (!first) return null;
       return first.start <= at ? { now: first, next: second } : { now: null, next: first };
     },
-    schedule: (channel, at) => unended(schedule.all({ channel: channel.key, at }), at),
-    range: (channel, at, to) => unended(range.all({ channel: channel.key, at, to }), at),
+    schedule(channel, at, until) {
+      const today = unended(schedule.all({ channel: channel.key, at, until }), at);
+      if (today.length >= GUIDE_SCHEDULE.atLeast) return today.slice(0, GUIDE_SCHEDULE.most);
+      return unended(scheduleTail.all({ channel: channel.key, at }), at).slice(
+        0,
+        GUIDE_SCHEDULE.atLeast,
+      );
+    },
+    range: (channel, at, to) =>
+      unended(range.all({ channel: channel.key, at, to }), at).slice(0, GUIDE_RANGE.programmes),
     close: () => {
       if (db.isOpen) db.close();
     },
@@ -487,18 +517,51 @@ export interface EachSearch extends Search {
 
 /**
  * What an `EachSearch` found, per channel that has a match: whether the one on now matches, and
- * the first later one that does.
+ * the first later one that does. A list of tens of thousands of channels may each have one, so
+ * the matches come packed, in a few arrays and one string, which the main process takes in from
+ * the worker at once without building anything per channel; `eachMatch` reads them in turn.
  */
-export type EachFound = readonly {
+export interface EachFound {
+  /** Each match's channel, by the file's key. */
+  readonly channels: Float64Array;
+  /** 1 where the one on now matches. */
+  readonly now: Uint8Array;
+  /** When the first later match starts, or NaN where none does. */
+  readonly later: Float64Array;
+  /** The later matches' titles, one after another. */
+  readonly titles: string;
+  /** Where in `titles` each match's later title ends. */
+  readonly titleEnds: Uint32Array;
+}
+
+/** One channel's match, as an `EachFound` holds it. */
+export interface EachMatch {
   readonly channel: number;
   readonly now: boolean;
   readonly later: Pick<Programme, "start" | "title"> | null;
-}[];
+}
 
-/** Searches of index files, run away from the main process. */
+/** The matches `found` holds, one at a time. */
+export function* eachMatch(found: EachFound): Generator<EachMatch> {
+  for (let at = 0; at < found.channels.length; at++) {
+    const start = found.later[at] ?? Number.NaN;
+    yield {
+      channel: found.channels[at] ?? 0,
+      now: found.now[at] === 1,
+      later: Number.isNaN(start)
+        ? null
+        : { start, title: found.titles.slice(found.titleEnds[at - 1] ?? 0, found.titleEnds[at]) },
+    };
+  }
+}
+
+/**
+ * Searches of index files, run away from the main process. `signal` stops one: it settles once
+ * nothing reads the file for it any more.
+ */
 export interface GuideSearching {
-  first(search: FirstSearch): Promise<FirstFound>;
-  each(search: EachSearch): Promise<EachFound>;
+  first(search: FirstSearch, signal: AbortSignal): Promise<FirstFound>;
+  each(search: EachSearch, signal: AbortSignal): Promise<EachFound>;
 }
 
 /**
@@ -563,11 +626,26 @@ export function searchEach(search: EachSearch): EachFound {
         found.set(programme.channel, match);
       },
     );
-    return [...found].map(([channel, { now, later }]) => ({
-      channel,
-      now,
-      later: later && { start: later.start, title: later.title },
-    }));
+    const packed = {
+      channels: new Float64Array(found.size),
+      now: new Uint8Array(found.size),
+      later: new Float64Array(found.size),
+      titleEnds: new Uint32Array(found.size),
+    };
+    const titles: string[] = [];
+    let end = 0;
+    let place = 0;
+    for (const [channel, { now, later }] of found) {
+      packed.channels[place] = channel;
+      packed.now[place] = now ? 1 : 0;
+      packed.later[place] = later?.start ?? Number.NaN;
+      if (later) {
+        titles.push(later.title);
+        end += later.title.length;
+      }
+      packed.titleEnds[place++] = end;
+    }
+    return { ...packed, titles: titles.join("") };
   });
 }
 
@@ -592,7 +670,8 @@ interface FoundProgramme {
 /**
  * Hands `visit` the programmes on `search.channels` whose title has each of its words, that
  * haven't ended at `at` and start before `before()`, in no particular order. `before` is asked
- * again between stretches of time, so a search that has found enough reads no further.
+ * again between steps, so a search that has found enough reads no further. Whatever it reads, it
+ * reads in pages, so however many titles or programmes match, it holds only a page of them.
  */
 function matching(
   db: DatabaseSync,
@@ -602,11 +681,6 @@ function matching(
 ) {
   if (words.length === 0 || keys.length === 0) return;
   const channels = new Set(keys);
-  const titles = db
-    .prepare(`select key from title where ${words.map(() => "instr(folded, ?) > 0").join(" and ")}`)
-    .all(...words)
-    .map((row) => Number(row["key"]));
-  if (titles.length === 0) return;
   const listing = Number(
     db.prepare("select count(*) as n from channel where until is not null").get()?.["n"] ?? 0,
   );
@@ -619,37 +693,50 @@ function matching(
     stop: Number(row["stop"]),
     title: String(row["text"]),
   });
-  // In stretches of time, from what can still be on at `at`: a search that found enough in the
-  // first reads no later one.
+  const last = Number(db.prepare("select max(key) as last from title").get()?.["last"] ?? 0);
+  // The titles that match, a page of title keys at a time.
+  const titles = db.prepare(
+    `select key from title where key > ? and key <= ? and ${words.map(() => "instr(folded, ?) > 0").join(" and ")}`,
+  );
+  // The programmes of a page of titles in a stretch of time.
   const rows = db.prepare(`
     select programme.channel, programme.start, programme.stop, title.text
     from programme indexed by programme_title join title on title.key = programme.title
     where programme.title in (select value from json_each(?))
       and programme.start >= ? and programme.start < ? and programme.stop > ?
       and programme.stop - programme.start <= ${LONG_MS} ${within}`);
-  // A search bounded from the start reads its one stretch.
+  // In stretches of time, from what can still be on at `at`: a search that found enough in the
+  // first reads no later one. A search bounded from the start reads its one stretch.
   const ahead = Number.isFinite(before()) ? [] : STRETCHES.map((each) => at + each);
   const edges = [at - LONG_MS, ...ahead];
-  const all = JSON.stringify(titles);
   for (const [step, from] of edges.entries()) {
-    const to = Math.min(edges[step + 1] ?? Number.MAX_SAFE_INTEGER, before());
-    if (from >= to) break;
-    for (const row of rows.iterate(all, from, to, at, ...(only === null ? [] : [only]))) {
-      const programme = found(row);
-      if (channels.has(programme.channel)) visit(programme);
+    if (from >= Math.min(edges[step + 1] ?? Number.MAX_SAFE_INTEGER, before())) break;
+    for (let after = 0; after < last; after += TITLES_PER_PAGE) {
+      const page: number[] = [];
+      for (const row of titles.iterate(after, after + TITLES_PER_PAGE, ...words)) {
+        page.push(Number(row["key"]));
+      }
+      if (page.length === 0) continue;
+      // Asked again for each page: what was found meanwhile narrows the stretch.
+      const to = Math.min(edges[step + 1] ?? Number.MAX_SAFE_INTEGER, before());
+      if (from >= to) break;
+      const args = [JSON.stringify(page), from, to, at, ...(only === null ? [] : [only])];
+      for (const row of rows.iterate(...args)) {
+        const programme = found(row);
+        if (channels.has(programme.channel)) visit(programme);
+      }
     }
   }
-  // Then the long ones, which may have begun long before what is on now, of the few that start
-  // before what was found.
-  const wanted = new Set(titles);
+  // Then the long ones, which may have begun long before what is on now: few, so read whole,
+  // their titles compared in the same statement.
   const long = db.prepare(`
-    select channel, start, stop, title, (select text from title where key = programme.title) as text
-    from programme indexed by programme_long
-    where stop - start > ${LONG_MS} and stop > ? and start < ?`);
-  for (const row of long.iterate(at, Math.min(before(), Number.MAX_SAFE_INTEGER))) {
-    if (wanted.has(Number(row["title"])) && channels.has(Number(row["channel"]))) {
-      visit(found(row));
-    }
+    select programme.channel, programme.start, programme.stop, title.text
+    from programme indexed by programme_long join title on title.key = programme.title
+    where programme.stop - programme.start > ${LONG_MS} and programme.stop > ? and programme.start < ?
+      and ${words.map(() => "instr(title.folded, ?) > 0").join(" and ")}`);
+  for (const row of long.iterate(at, Math.min(before(), Number.MAX_SAFE_INTEGER), ...words)) {
+    const programme = found(row);
+    if (channels.has(programme.channel)) visit(programme);
   }
 }
 

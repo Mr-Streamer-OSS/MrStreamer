@@ -676,7 +676,7 @@ async function start(): Promise<void> {
             : yield* library.refresh(subscriptionId);
         }),
       "guide.listings": ({ channels }) => guide.listings(channels),
-      "guide.schedule": ({ channel }) => guide.schedule(channel),
+      "guide.schedule": ({ channel, until }) => guide.schedule(channel, until),
       "guide.range": ({ channels, from, to }) => guide.range(channels, from, to),
       "guide.search": ({ query }) => guide.search(query),
       "guide.searchList": ({ query, until, ...list }) =>
