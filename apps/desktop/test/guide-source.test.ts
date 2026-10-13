@@ -22,7 +22,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { guideIndexerLayer } from "../src/main/platform/guide-indexer.ts";
 import { guideStoreLayer } from "../src/main/platform/guide-store.ts";
 import type { Secrets } from "../src/main/platform/secrets.ts";
@@ -43,6 +43,10 @@ import {
   testSecrets,
   userAgent,
 } from "./support.ts";
+
+// Each guide download is indexed in a worker thread started from source, which strips the types
+// of what it imports anew: a few hundred milliseconds each on a busy machine.
+vi.setConfig({ testTimeout: 20_000 });
 
 const HOUR = 60 * 60 * 1000;
 /** 20:10 at +02:00, where every guide here writes its times. */
@@ -405,8 +409,8 @@ describe("a guide from an address of the viewer's own", () => {
       failure: null,
     });
     expect(await guideFiles(dataDir)).toEqual(kept);
-    // Each of the two dozen checks indexes in a worker thread of its own, started from source.
-  }, 30_000);
+    // Two dozen checks, each indexed in a worker of its own.
+  }, 60_000);
 
   it("gives a playlist that names no guide one, and says it has none again once it goes back", async () => {
     const playlist = await startFakePlaylist();

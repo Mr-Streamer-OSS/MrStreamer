@@ -23,6 +23,10 @@ import { guideIndexerLayer } from "../src/main/platform/guide-indexer.ts";
 import { guideStoreLayer } from "../src/main/platform/guide-store.ts";
 import { guideIndexWorker, runtimeFor, tempDir } from "./support.ts";
 
+// Each guide download is indexed in a worker thread started from source, which strips the types
+// of what it imports anew: a few hundred milliseconds each on a busy machine.
+vi.setConfig({ testTimeout: 20_000 });
+
 const ID = "own";
 const HOUR = 60 * 60 * 1000;
 /** 20:10 at +02:00, where the guides here write their times. */

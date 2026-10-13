@@ -18,6 +18,10 @@ import {
 } from "./fake-provider.ts";
 import { fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 
+// Each guide download is indexed in a worker thread started from source, which strips the types
+// of what it imports anew: a few hundred milliseconds each on a busy machine.
+vi.setConfig({ testTimeout: 20_000 });
+
 const HOUR = 60 * 60 * 1000;
 const QUARTER = HOUR / 4;
 /** 20:10 in the fake guide's +02:00. */
