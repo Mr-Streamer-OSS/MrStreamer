@@ -891,8 +891,10 @@ async function start(): Promise<void> {
           measurement && analytics.isPlaybackControlCurrent(measurement.control, frame)
             ? measurement.control
             : undefined;
+        const failedBeforeLoad = analytics.receiverLoadFailureObserver(control, frame);
         return output.playTitle(sessionId, {
           measurement: control,
+          onPreloadFailure: failedBeforeLoad,
           position,
           audio,
           subtitle,

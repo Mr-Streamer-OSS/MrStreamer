@@ -42,6 +42,7 @@ import type {
   RemotePlayingTitle,
   RemoteTitle,
 } from "@mrstreamer/contracts/output";
+import type { AnalyticsFailure } from "@mrstreamer/contracts/analytics";
 import { randomUUID } from "node:crypto";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { StreamFailure } from "@mrstreamer/contracts/playback";
@@ -131,6 +132,8 @@ interface Playing {
 /** A title opened for the receiver. */
 interface OpenedTitle {
   readonly measurement: string | null;
+  /** The public open turn that prepared this session, when one was supplied. */
+  readonly turn: number | undefined;
   readonly info: RemoteTitle;
   /** Seconds between the start of the title and where a receiver's clock starts. */
   readonly offset: number;
@@ -214,6 +217,8 @@ export class Output extends Context.Service<
         readonly paused?: boolean | undefined;
         readonly shown: Shown;
         readonly measurement?: string | undefined;
+        /** A failed request before this load has a physical observer; fixed category only. */
+        readonly onPreloadFailure?: ((failure: AnalyticsFailure) => void) | undefined;
       },
     ): Effect.Effect<RemoteMedia, Failed>;
     /** Tells the receiver. Does nothing when `generation` is no longer what it plays. */
@@ -269,6 +274,8 @@ function make(deps: OutputDeps) {
       null;
     let playing: Playing | null = null;
     let generation = 0;
+    /** New receiver title requests retire an older load's pre-observer failure callback. */
+    let titleLoadRequest = 0;
     /** Which of this computer's addresses the next load is served on, counted round. */
     let addressTurn = 0;
     /** Titles opened for the receiver, by session. */
@@ -748,6 +755,7 @@ function make(deps: OutputDeps) {
 
     /** Ends what the receiver plays and lets go of it, the session first. */
     const release = Effect.gen(function* () {
+      titleLoadRequest++;
       connecting?.abort();
       yield* drop(true);
       const was = connected;
@@ -867,8 +875,9 @@ function make(deps: OutputDeps) {
         upstreamUrl: string,
         since: number,
         asked: Asked & { readonly measurement?: string | undefined } = {},
-      ) =>
-        one(
+      ) => {
+        titleLoadRequest++;
+        return one(
           Effect.gen(function* () {
             const connection = yield* receiver;
             yield* inTurn(asked.turn);
@@ -893,10 +902,12 @@ function make(deps: OutputDeps) {
               offset: session.offset,
               since,
               measurement: asked.measurement ?? null,
+              turn: asked.turn,
             });
             return info;
           }),
-        ),
+        );
+      },
 
       playTitle: (
         sessionId: string,
@@ -907,42 +918,63 @@ function make(deps: OutputDeps) {
           readonly paused?: boolean | undefined;
           readonly shown: Shown;
           readonly measurement?: string | undefined;
+          readonly onPreloadFailure?: ((failure: AnalyticsFailure) => void) | undefined;
         },
-      ) =>
-        one(
+      ) => {
+        const request = ++titleLoadRequest;
+        const turn = opened.get(sessionId)?.turn;
+        return one(
           Effect.gen(function* () {
-            const connection = yield* receiver;
-            const title = opened.get(sessionId);
-            const loaded = title
-              ? yield* playback.loadReceiverTitle(sessionId, {
-                  audio: options.audio,
-                  subtitle: options.subtitle,
-                })
-              : null;
-            if (!title || !loaded) {
-              return yield* failed({ kind: "stream", failure: STOPPED });
-            }
-            // The same session with other tracks or from another position: only its load changes.
-            yield* drop(false);
+            const prepared = yield* Effect.gen(function* () {
+              const connection = yield* receiver;
+              const title = opened.get(sessionId);
+              const loaded = title
+                ? yield* playback.loadReceiverTitle(sessionId, {
+                    audio: options.audio,
+                    subtitle: options.subtitle,
+                  })
+                : null;
+              if (!title || !loaded) {
+                return yield* failed({ kind: "stream", failure: STOPPED });
+              }
+              // The same session with other tracks or from another position: only its load changes.
+              yield* drop(false);
+              return { connection, title, loaded };
+            }).pipe(
+              Effect.tapError((failure) =>
+                Effect.gen(function* () {
+                  if (
+                    request !== titleLoadRequest ||
+                    (turn !== undefined && (yield* coordination.passed(turn)))
+                  )
+                    return;
+                  options.onPreloadFailure?.(appFailure(failure.error));
+                }),
+              ),
+            );
             return yield* load(
-              connection,
+              prepared.connection,
               sessionId,
-              { kind: "title", title: title.info.title },
-              title,
-              { audio: options.audio, subtitle: loaded.subtitles ? options.subtitle : null },
+              { kind: "title", title: prepared.title.info.title },
+              prepared.title,
               {
-                url: loaded.url,
+                audio: options.audio,
+                subtitle: prepared.loaded.subtitles ? options.subtitle : null,
+              },
+              {
+                url: prepared.loaded.url,
                 live: false,
-                position: Math.max(0, options.position - title.offset),
+                position: Math.max(0, options.position - prepared.title.offset),
                 paused: options.paused === true,
-                duration: title.info.duration,
-                subtitles: loaded.subtitles,
+                duration: prepared.title.info.duration,
+                subtitles: prepared.loaded.subtitles,
               },
               options.shown,
-              options.measurement ?? title.measurement,
+              options.measurement ?? prepared.title.measurement,
             );
           }),
-        ),
+        );
+      },
 
       command: (mine: number, command: RemoteCommand) =>
         one(

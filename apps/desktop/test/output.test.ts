@@ -12,6 +12,7 @@ import { castAdapter } from "../src/main/receivers/cast/adapter.ts";
 import { mainLayer } from "../src/main/runtime.ts";
 import { Output } from "../src/main/services/output.ts";
 import { Playback } from "../src/main/services/playback.ts";
+import { PlaybackCoordination } from "../src/main/services/playback-coordination.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { startFakeAirplayHelper } from "./fake-airplay-helper.ts";
 import { startFakeCastReceiver } from "./fake-cast-receiver.ts";
@@ -101,6 +102,7 @@ async function casting(
   await subscriptions.add({ server: provider.url, username: "demo", password: "demo" });
   const [source] = await subscriptions.sources();
   const playback = await promised(runtime, Playback);
+  const coordination = await promised(runtime, PlaybackCoordination);
   const output = await promised(runtime, Output);
   const viewing = await promised(runtime, ViewingRecord);
   const changes = await collect(runtime, (await runtime.runPromise(Output)).changes);
@@ -180,6 +182,7 @@ async function casting(
     helper,
     subscriptions,
     playback,
+    coordination,
     output,
     viewing,
     changes,
@@ -204,6 +207,68 @@ const failure = (call: Promise<unknown>) =>
   );
 
 describe.skipIf(!hasTools)("playback on a receiver", () => {
+  it("reports a failed prepared title before observation, leaving adapter load failure to its observer", async () => {
+    const early: string[] = [];
+    const physical: string[] = [];
+    const { output, playback, coordination, tv, connect, title, file } = await casting({
+      observePlayback: () => ({
+        state() {},
+        failure: (code) => physical.push(code),
+        stop() {},
+      }),
+    });
+    await connect();
+    const prepared = await output.openTitle(title, file, Date.now());
+    await playback.close(prepared.sessionId);
+    expect(
+      await failure(
+        output.playTitle(prepared.sessionId, {
+          position: 0,
+          audio: null,
+          subtitle: null,
+          shown: SHOWN,
+          onPreloadFailure: (code) => early.push(code),
+        }),
+      ),
+    ).toMatchObject({ kind: "output", failure: { kind: "stream" } });
+    expect(early).toEqual(["network"]);
+    expect(physical).toEqual([]);
+
+    const next = await output.openTitle(title, file, Date.now());
+    tv.answers.load = "refuse";
+    expect(
+      await failure(
+        output.playTitle(next.sessionId, {
+          position: 0,
+          audio: null,
+          subtitle: null,
+          shown: SHOWN,
+          onPreloadFailure: (code) => early.push(code),
+        }),
+      ),
+    ).toMatchObject({ kind: "output" });
+    expect(early).toEqual(["network"]);
+    expect(physical).toHaveLength(1);
+
+    tv.answers.load = "take";
+    const turn = await coordination.begin();
+    const superseded = await output.openTitle(title, file, Date.now(), { turn });
+    await coordination.begin();
+    await playback.close(superseded.sessionId);
+    expect(
+      await failure(
+        output.playTitle(superseded.sessionId, {
+          position: 0,
+          audio: null,
+          subtitle: null,
+          shown: SHOWN,
+          onPreloadFailure: (code) => early.push(code),
+        }),
+      ),
+    ).toMatchObject({ kind: "output", failure: { kind: "stream" } });
+    expect(early).toEqual(["network"]);
+  });
+
   it("leaves what plays here alone while receivers are looked for and one is connected", async () => {
     const { provider, tv, playback, output, connect, channel } = await casting();
     const local = await playback.open(channel, LOCAL);

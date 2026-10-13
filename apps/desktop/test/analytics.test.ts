@@ -1262,6 +1262,104 @@ describe("confirmed daily playback measurements", () => {
     await vi.advanceTimersByTimeAsync(0);
   }
 
+  it("counts a receiver title's pre-observer load failure once without a second open operation", async () => {
+    playbackClock();
+    const { owner, events } = await measuring();
+    const frame = "current-frame";
+    const hint = { control: randomUUID(), order: 1, ongoing: false };
+    const token = owner.admitPlayback("vod", hint, frame)!;
+    const preparation = owner.noteOperationStarted("playback_open");
+    owner.noteOperationFinished("playback_open", preparation, "success");
+    const failedLoad = owner.receiverLoadFailureObserver(hint.control, frame);
+    failedLoad("network");
+    failedLoad("network");
+    // A later physical failure is the same incident until receiver-confirmed recovery.
+    const physical = owner.remotePlayback("vod", hint.control);
+    physical.failure("credentials");
+    physical.stop();
+    owner.endPlayback(token);
+    await complete(owner);
+    expect(events.find((event) => event.event === "app_summary_day")).toMatchObject({
+      properties: {
+        counts: {
+          playback_open: { started: 1, success: 1, failed: 0 },
+          playback: {
+            vod: {
+              starts: 0,
+              errors: 1,
+              failures: { network: 1, credentials: 0 },
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it("rejects a superseded receiver load failure and old physical callback after a new run", async () => {
+    playbackClock();
+    const { owner, events } = await measuring();
+    const frame = "current-frame";
+    const old = { control: randomUUID(), order: 1, ongoing: false };
+    owner.admitPlayback("vod", old, frame);
+    const staleFailure = owner.receiverLoadFailureObserver(old.control, frame);
+    const stalePhysical = owner.remotePlayback("vod", old.control);
+    const current = { control: randomUUID(), order: 2, ongoing: false };
+    owner.admitPlayback("vod", current, frame);
+    staleFailure("credentials");
+    stalePhysical.failure("credentials");
+    const freshFailure = owner.receiverLoadFailureObserver(current.control, frame);
+    freshFailure("network");
+    const currentPhysical = owner.remotePlayback("vod", current.control);
+    currentPhysical.failure("network");
+    currentPhysical.failure("credentials");
+    owner.endControlledPlayback(current.control, frame);
+    await complete(owner);
+    expect(events.find((event) => event.event === "app_summary_day")).toMatchObject({
+      properties: {
+        counts: {
+          playback: {
+            vod: { starts: 0, errors: 1, failures: { network: 1, credentials: 0 } },
+          },
+        },
+      },
+    });
+  });
+
+  it.each(["consent", "dimensions"] as const)(
+    "rejects a pre-reset receiver load callback after %s changes, while a current continuation can fail",
+    async (reset) => {
+      playbackClock();
+      const { owner, events } = await measuring();
+      await until(() => events.length === 2);
+      const frame = "current-frame";
+      const hint = { control: randomUUID(), order: 1, ongoing: false };
+      owner.admitPlayback("vod", hint, frame);
+      const stale = owner.receiverLoadFailureObserver(hint.control, frame);
+      if (reset === "consent") {
+        await owner.configure(false);
+        await owner.configure(true);
+        await vi.advanceTimersByTimeAsync(0);
+      } else {
+        owner.setUpdateChannel("nightly");
+        owner.setUpdateChannel("stable");
+      }
+      stale("credentials");
+      owner.admitPlayback("vod", hint, frame);
+      owner.receiverLoadFailureObserver(hint.control, frame)("network");
+      owner.endControlledPlayback(hint.control, frame);
+      await complete(owner);
+      expect(events.filter((event) => event.event === "app_summary_day").at(-1)).toMatchObject({
+        properties: {
+          counts: {
+            playback: {
+              vod: { starts: 0, errors: 1, failures: { network: 1, credentials: 0 } },
+            },
+          },
+        },
+      });
+    },
+  );
+
   it("measures receiver replay with a fresh load control and rejects the old load's facts", async () => {
     playbackClock();
     const { owner, events } = await measuring();

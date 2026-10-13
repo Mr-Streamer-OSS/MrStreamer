@@ -559,6 +559,21 @@ export class Analytics {
     };
   }
 
+  /** A receiver load failed before Output could create its physical observation. */
+  receiverLoadFailureObserver(
+    control: string | undefined,
+    frame: string | null,
+  ): (failure: SummaryFailure) => void {
+    const token = control ? this.controlledPlayback(control, frame) : null;
+    return (failure) => {
+      if (!token || !control || this.controlledPlayback(control, frame) !== token) return;
+      // An earlier receiver load may still own the binding until this load takes its place.
+      // The run's incident guard merges that failure with any later physical callback.
+      const binding = this.binding;
+      this.notePlaybackFailure(token, binding?.token ?? null, failure);
+    };
+  }
+
   noteOperationStarted(operation: SummaryOperation): OperationGeneration | null {
     if (!this.transport || !this.canCapture() || this.closing) return null;
     const observed = this.note((counts) => {
