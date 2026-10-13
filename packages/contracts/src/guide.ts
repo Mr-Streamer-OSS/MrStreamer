@@ -67,19 +67,36 @@ export type GuideSource =
     };
 
 /**
- * What a subscription's guide is doing in the background. The guide it had keeps answering
- * throughout, until a new one is read whole.
+ * What a subscription's guide is doing, as its Settings row shows it: each state holds all the
+ * row needs. The guide it had keeps answering throughout, until a new one is read whole.
  *   - `downloading`: `bytes` of the document have arrived, of `total` when the server says.
- *   - `reading`: the document is being indexed, `programmes` of it so far.
- *   - `ready`: nothing is under way, and the latest download didn't fail. Whether there is a
- *     guide at all is `GuideStatus.availability`.
- *   - `failed`: nothing is under way, and downloads have failed `since` then, for `reason`.
+ *   - `reading`: the document is being indexed, `programmes` of it so far, since `since`.
+ *   - `ready`: nothing is under way and a guide is in use: `channels` of the catalogue it covers,
+ *     the `programmes` it keeps, until when they run, and when it was downloaded.
+ *   - `failed`: nothing is under way, and downloads have failed `since` then, for `reason`. The
+ *     last download that worked stays in use: `kept` says when it arrived, or null without one.
+ *   - `empty`: nothing is under way, no guide is in use and none failed. Whether one is to come
+ *     is `GuideStatus.availability`.
  */
 export type GuideProcessing =
   | { readonly state: "downloading"; readonly bytes: number; readonly total: number | null }
-  | { readonly state: "reading"; readonly programmes: number }
-  | { readonly state: "ready" }
-  | { readonly state: "failed"; readonly reason: AppError; readonly since: number };
+  | { readonly state: "reading"; readonly programmes: number; readonly since: number }
+  | {
+      readonly state: "ready";
+      readonly channels: number;
+      readonly programmes: number;
+      /** Epoch milliseconds its last programme ends, or null without one. */
+      readonly until: number | null;
+      readonly fetchedAt: number;
+    }
+  | {
+      readonly state: "failed";
+      readonly reason: AppError;
+      readonly since: number;
+      /** Epoch milliseconds the guide still in use was downloaded, or null without one. */
+      readonly kept: number | null;
+    }
+  | { readonly state: "empty" };
 
 /** A subscription's guide as Settings shows it: where from, what it covers, and since when. */
 export interface GuideStatus {
@@ -104,7 +121,10 @@ export interface GuideStatus {
   readonly failure: AppError | null;
   /** Since when downloads have failed: the first failure after the last that worked. */
   readonly failedAt: number | null;
-  /** What is under way, as it goes: published on each step, a few times a second at most. */
+  /**
+   * What is under way and how the latest download ended, as it goes: `guide.updated` tells each
+   * step at once, and progress within one a few times a second at most.
+   */
   readonly processing: GuideProcessing;
 }
 

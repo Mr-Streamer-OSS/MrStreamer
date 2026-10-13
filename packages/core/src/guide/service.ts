@@ -824,25 +824,27 @@ function make() {
         strict: boolean;
         report: (progress: Progress) => void;
       },
-    ) => {
-      report({ state: "reading", programmes: 0 });
-      return Effect.tryPromise({
-        try: (signal) =>
-          indexer.build(
-            {
-              document: store.path(subscription, document),
-              target: store.path(subscription, file),
-              previous: previous === null ? null : store.path(subscription, previous),
-              since,
-              archive: subscription.archive,
-              strict,
-            },
-            (programmes) => report({ state: "reading", programmes }),
-            signal,
-          ),
-        catch: failedWith,
+    ) =>
+      Effect.gen(function* () {
+        const began = yield* Clock.currentTimeMillis;
+        report({ state: "reading", programmes: 0, since: began });
+        return yield* Effect.tryPromise({
+          try: (signal) =>
+            indexer.build(
+              {
+                document: store.path(subscription, document),
+                target: store.path(subscription, file),
+                previous: previous === null ? null : store.path(subscription, previous),
+                since,
+                archive: subscription.archive,
+                strict,
+              },
+              (programmes) => report({ state: "reading", programmes, since: began }),
+              signal,
+            ),
+          catch: failedWith,
+        });
       });
-    };
 
     /**
      * Keeps a new index of a subscription's only when `keep` answers something, and drops its
@@ -1326,6 +1328,31 @@ function make() {
         return answers;
       });
 
+    /** What a subscription's Settings row shows of its guide's work, and how the latest ended. */
+    const processingOf = (
+      id: string,
+      guide: Loaded | null,
+      channels: MappedChannels | null,
+      failure: { readonly error: AppError; readonly at: number } | undefined,
+    ): GuideProcessing =>
+      progress.get(id) ??
+      (failure
+        ? {
+            state: "failed",
+            reason: failure.error,
+            since: failure.at,
+            kept: guide?.fetchedAt ?? null,
+          }
+        : guide
+          ? {
+              state: "ready",
+              channels: channels ? channelsCovered(guide.index, channels) : 0,
+              programmes: guide.index.programmes,
+              until: guide.index.until,
+              fetchedAt: guide.fetchedAt,
+            }
+          : { state: "empty" });
+
     const statusOf = (subscription: GuideSubscription) =>
       Effect.gen(function* () {
         const { id } = subscription;
@@ -1353,11 +1380,7 @@ function make() {
           unresolved: channels ? unresolvedMappings(guide?.index ?? null, channels) : 0,
           failure: failure?.error ?? null,
           failedAt: failure?.at ?? null,
-          processing:
-            progress.get(id) ??
-            (failure
-              ? { state: "failed", reason: failure.error, since: failure.at }
-              : { state: "ready" }),
+          processing: processingOf(id, guide, channels, failure),
         } satisfies GuideStatus;
       });
 

@@ -17,6 +17,7 @@ import {
 } from "@mrstreamer/core/guide/service";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { describe, expect, it, vi } from "vitest";
 import { guideIndexerLayer } from "../src/main/platform/guide-indexer.ts";
@@ -117,11 +118,22 @@ async function standalone() {
   const runtime = runtimeFor(Guide.layer.pipe(Layer.provide(ports), Layer.provideMerge(clock)));
   const guide = await runtime.runPromise(Guide);
   const run = <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect);
+  /** Each step the status was at when a change was told, a step once however often it was told. */
+  const told: string[] = [];
+  runtime.runFork(
+    Stream.runForEach(guide.changes, () =>
+      Effect.map(guide.status, ([status]) => {
+        const step = status?.processing.state ?? "none";
+        if (told.at(-1) !== step) told.push(step);
+      }),
+    ),
+  );
   const one: OwnedId = { subscriptionId: ID, id: "1" };
   return {
     run,
     guide,
     one,
+    told,
     /** The own guide's next answer: `document` whole, at once. */
     serve(document: string) {
       answer = async () => ({ body: new Blob([document]).stream(), size: document.length });
@@ -161,7 +173,7 @@ async function standalone() {
 
 describe("a guide as it downloads and is indexed", () => {
   it("says what it is doing at each step, while the guide before answers until the new one is whole", async () => {
-    const { run, guide, serve, serveHalf, holdIndexing, status, nowOn } = await standalone();
+    const { run, guide, serve, serveHalf, holdIndexing, status, nowOn, told } = await standalone();
     serve(tv(programme("one.test", "2000", "2100", "Before")));
     await run(guide.refresh(ID));
     expect(await status()).toMatchObject({ processing: { state: "ready" }, fetchedAt: NOW });
@@ -172,6 +184,7 @@ describe("a guide as it downloads and is indexed", () => {
     );
     const download = serveHalf(next);
     const indexing = holdIndexing();
+    told.length = 0;
     const refreshed = run(guide.refresh(ID));
 
     await download.arrived;
@@ -186,17 +199,26 @@ describe("a guide as it downloads and is indexed", () => {
 
     download.release();
     await indexing.arrived;
-    expect((await status())?.processing).toEqual({ state: "reading", programmes: 2 });
+    expect((await status())?.processing).toEqual({ state: "reading", programmes: 2, since: NOW });
     expect(await nowOn()).toBe("Before");
 
     indexing.release();
     await refreshed;
+    // Everything Settings shows of it comes with the status.
     expect(await status()).toMatchObject({
-      processing: { state: "ready" },
+      processing: {
+        state: "ready",
+        channels: 1,
+        programmes: 2,
+        until: NOW - 10 * 60 * 1000 + 2 * HOUR,
+        fetchedAt: NOW,
+      },
       availability: "available",
       failure: null,
     });
     expect(await nowOn()).toBe("After");
+    // Each step was told as it came, for Settings to show it live.
+    await vi.waitFor(() => expect(told).toEqual(["downloading", "reading", "ready"]));
   });
 
   it("says since when downloads fail and why, and keeps the guide it has", async () => {
@@ -209,7 +231,8 @@ describe("a guide as it downloads and is indexed", () => {
 
     const failure = { kind: "provider-error", status: 503 };
     expect(await status()).toMatchObject({
-      processing: { state: "failed", reason: failure, since: NOW },
+      // The guide downloaded before stays in use, and says since when.
+      processing: { state: "failed", reason: failure, since: NOW, kept: NOW },
       failure,
       failedAt: NOW,
       fetchedAt: NOW,

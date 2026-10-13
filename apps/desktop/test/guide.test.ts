@@ -248,7 +248,7 @@ describe("programme guide", () => {
       unresolved: 0,
       failure: null,
       failedAt: null,
-      processing: { state: "ready" },
+      processing: { state: "empty" },
     });
 
     await guide.refresh();

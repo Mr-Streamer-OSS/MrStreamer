@@ -78,7 +78,7 @@ const guideOf = (subscription: SubscriptionSummary, status: Partial<GuideStatus>
   unresolved: 0,
   failure: null,
   failedAt: null,
-  processing: { state: "ready" },
+  processing: { state: "empty" },
   ...status,
 });
 
