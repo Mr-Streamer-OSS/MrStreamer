@@ -82,6 +82,7 @@ describe.skipIf(process.platform === "win32")("stapling the notarized release ap
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
     process.env = originalEnv;
     rmSync(directory, { recursive: true, force: true });
   });
@@ -152,15 +153,18 @@ describe.skipIf(process.platform === "win32")("stapling the notarized release ap
     expect(submissions()).toBe(1);
   });
 
-  it("kills a hanging stapler at the subprocess deadline", async () => {
+  it("kills a hanging stapler that ignores SIGTERM at its deadline", async () => {
     process.env.STAPLE_SCENARIO = "hang";
+    // Each clock reading jumps 295 s, so the deadline read just before the first attempt leaves
+    // it 5 s of the five minutes: the hang is cut there, as it would be at a minute.
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => (now += 295_000));
     const started = performance.now();
     await expect(run()).rejects.toThrow("code: unknown");
     const elapsed = performance.now() - started;
-    expect(elapsed).toBeLessThan(70_000);
+    expect(elapsed).toBeLessThan(20_000);
     expect(attempts()).toBe(1);
     expect(submissions()).toBe(1);
-    const pid = assertStaplerExited();
-    console.log(`Ignored-SIGTERM stapler PID ${pid} absent after ${Math.round(elapsed)} ms.`);
-  }, 75_000);
+    assertStaplerExited();
+  }, 25_000);
 });
