@@ -126,6 +126,10 @@ const catalogueWorker: MainConfig["catalogueWorker"] = (setup) =>
 export const guideIndexWorker: MainConfig["guideIndexWorker"] = (options) =>
   new Worker(new URL("../src/main/guide/index-worker.ts", import.meta.url), options);
 
+/** The guide's search worker from its source file. */
+export const guideSearchWorker: MainConfig["guideSearchWorker"] = (options) =>
+  new Worker(new URL("../src/main/guide/search-worker.ts", import.meta.url), options);
+
 /** What the app gives `mainLayer`, for tests: the test keychain, no ffmpeg, no releases. */
 export function testConfig(dataDir: string): MainConfig {
   return {
@@ -135,6 +139,7 @@ export function testConfig(dataDir: string): MainConfig {
     ffmpeg: null,
     catalogueWorker,
     guideIndexWorker,
+    guideSearchWorker,
     tmdbKey: null,
     region: "NL",
     updates: {

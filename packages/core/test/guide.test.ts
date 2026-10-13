@@ -10,8 +10,11 @@ import { xmltvDocument } from "../src/guide/document.ts";
 import {
   buildGuideIndex,
   openGuideIndex,
+  searchEach,
+  searchFirst,
   type GuideBuild,
   type GuideIndex,
+  type GuideSearching,
 } from "../src/guide/index-file.ts";
 import { GUIDE_LIMITS } from "../src/guide/limits.ts";
 import {
@@ -231,6 +234,12 @@ const liveChannel = (id: string): LiveChannel => ({
   variants: [{ id, name: `Channel ${id}`, tags: [], quality: null }],
 });
 
+/** Searches run where the test runs, as the app's search worker runs them. */
+const inProcess: GuideSearching = {
+  first: async (search) => searchFirst(search),
+  each: async (search) => searchEach(search),
+};
+
 describe("indexing a guide", () => {
   /** Indexes `document` as of NOON, as an own guide unless `strict`, and opens what it wrote. */
   const index = async (document: string | Uint8Array, build: Partial<GuideBuild> = {}) => {
@@ -257,7 +266,7 @@ describe("indexing a guide", () => {
   };
   const opened: GuideIndex[] = [];
   afterEach(async () => {
-    await Promise.all(opened.splice(0).map((guide) => guide.retire()));
+    for (const guide of opened.splice(0)) guide.close();
   });
 
   /** Every programme of a guide channel the index keeps, as [title, start, stop]. */
@@ -471,25 +480,8 @@ describe("indexing a guide", () => {
     ]);
   });
 
-  it("stays open for a read that holds it, after it is retired, and closes once the last lets go", async () => {
-    const { guide } = await index(tv(later("one.test")));
-    const channel = guide.channels.get("one.test");
-    if (!channel) throw new Error("No channel.");
-    const letGo = guide.hold();
-    if (!letGo) throw new Error("No hold.");
-    let closed = false;
-    const retired = guide.retire().then(() => (closed = true));
-
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(closed).toBe(false);
-    expect(guide.schedule(channel, NOON)).toMatchObject([{ title: "Later" }]);
-    letGo();
-    await retired;
-    expect(guide.hold()).toBeNull();
-  });
-
   it("shows each channel from a guide id with programmes still to come, and a stretch of the past from the one that had them then", async () => {
-    const { guide } = await index(
+    const { guide, target } = await index(
       tv(
         programme("past.test", stamp(NOON - 2 * HOUR), stamp(NOON - HOUR), "Old news"),
         programme("future.test", stamp(NOON - HOUR), stamp(NOON + HOUR), "Current news"),
@@ -518,7 +510,9 @@ describe("indexing a guide", () => {
       "1": { now: expect.objectContaining({ title: "Current news" }), next: null },
     });
     expect(
-      (await searchAt(guide, catalogue, "news", NOON)).map((match) => match.programme.title),
+      (await searchAt(guide, target, catalogue, "news", NOON, inProcess)).map(
+        (match) => match.programme.title,
+      ),
     ).toEqual(["Current news"]);
     // Only what has programmes to come is covered.
     expect(channelsCovered(guide, catalogue, NOON)).toBe(1);
@@ -532,29 +526,8 @@ describe("indexing a guide", () => {
     });
   });
 
-  it("lets other work in while it compares many titles, though none of them match", async () => {
-    // More titles than one page of a search compares at once, all of them different.
-    const titles = Array.from({ length: 25_000 }, (_, at) => {
-      const start = NOON + at * 60_000;
-      return programme("one.test", stamp(start), stamp(start + 60_000), `Episode ${at}`);
-    });
-    const { guide } = await index(tv(...titles));
-    const channels = new Set([guide.channels.get("one.test")?.key ?? 0]);
-    let otherWork = false;
-    setImmediate(() => (otherWork = true));
-    let found = 0;
-
-    await guide.matching(
-      { words: ["weather"], at: NOON, channels, before: () => Number.POSITIVE_INFINITY },
-      () => found++,
-    );
-
-    expect(found).toBe(0);
-    expect(otherWork).toBe(true);
-  });
-
-  it("finds programmes whose title has every word, as far as it is asked to look", async () => {
-    const { guide } = await index(
+  it("finds programmes whose title has every word, on the channels asked, on now first and as far as it is asked to look", async () => {
+    const { guide, target } = await index(
       tv(
         programme("one.test", stamp(NOON - HOUR), stamp(NOON + HOUR), "Évening News"),
         programme("one.test", stamp(NOON + HOUR), stamp(NOON + 2 * HOUR), "Sport"),
@@ -564,28 +537,33 @@ describe("indexing a guide", () => {
         programme("three.test", stamp(NOON - 20 * HOUR), stamp(NOON + 4 * HOUR), "Rolling news"),
       ),
     );
-    const found = async (
-      words: string[],
-      before = Number.POSITIVE_INFINITY,
-      ids = ["one.test", "two.test", "three.test"],
-    ) => {
-      const titles: string[] = [];
-      const channels = new Set(ids.map((id) => guide.channels.get(id)?.key ?? 0));
-      await guide.matching({ words, at: NOON, channels, before: () => before }, (programme) =>
-        titles.push(programme.title),
+    const keys = (ids: string[]) => ids.map((id) => guide.channels.get(id)?.key ?? 0);
+    const all = ["one.test", "two.test", "three.test"];
+    const first = (words: string[], ids = all, limit = 50) =>
+      searchFirst({ path: target, words, at: NOON, channels: keys(ids), limit }).map(
+        (found) => found.programme.title,
       );
-      return titles.sort();
-    };
+    const each = (words: string[], until: number, ids = all) =>
+      Object.fromEntries(
+        searchEach({ path: target, words, at: NOON, until, channels: keys(ids) }).map(
+          ({ channel, now, later }) => [guide.channel(channel)?.id, { now, later: later?.title }],
+        ),
+      );
 
-    expect(await found(["news"])).toEqual(["Late news", "Rolling news", "Évening News"]);
-    expect(await found(["evening", "news"])).toEqual(["Évening News"]);
-    expect(await found(["news"], NOON + DAY)).toEqual(["Rolling news", "Évening News"]);
-    expect(await found(["weather"])).toEqual([]);
-    // Only the channels asked for: the others' programmes aren't read.
-    expect(await found(["news"], Number.POSITIVE_INFINITY, ["two.test"])).toEqual(["Late news"]);
-    expect(await found(["news"], Number.POSITIVE_INFINITY, ["three.test"])).toEqual([
-      "Rolling news",
-    ]);
+    // On now first, then by start.
+    expect(first(["news"])).toEqual(["Rolling news", "Évening News", "Late news"]);
+    expect(first(["evening", "news"])).toEqual(["Évening News"]);
+    expect(first(["news"], all, 1)).toEqual(["Rolling news"]);
+    expect(first(["weather"])).toEqual([]);
+    // Only the channels asked for.
+    expect(first(["news"], ["two.test"])).toEqual(["Late news"]);
+    expect(first(["news"], ["three.test"])).toEqual(["Rolling news"]);
+    // Each channel's on now and first later one, as far as `until`.
+    expect(each(["news"], NOON + DAY)).toEqual({
+      "one.test": { now: true, later: undefined },
+      "three.test": { now: true, later: undefined },
+    });
+    expect(each(["news"], NOON + 3 * DAY)).toMatchObject({ "two.test": { later: "Late news" } });
   });
 
   it("refuses an address's answer that isn't a whole XMLTV guide with something still to come", async () => {

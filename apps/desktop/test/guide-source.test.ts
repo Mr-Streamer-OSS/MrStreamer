@@ -2,7 +2,7 @@
 // to a guide's by hand: through the guide service as the window calls it, on the app's runtime,
 // against the fake provider, the fake playlist and a host for guides.
 import { randomUUID } from "node:crypto";
-import { readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { readdir, readFile, readlink, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { AppFailure } from "@mrstreamer/contracts/errors";
@@ -24,6 +24,7 @@ import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { guideIndexerLayer } from "../src/main/platform/guide-indexer.ts";
+import { guideSearcherLayer } from "../src/main/platform/guide-searcher.ts";
 import { guideStoreLayer } from "../src/main/platform/guide-store.ts";
 import type { Secrets } from "../src/main/platform/secrets.ts";
 import { xmltvFetch } from "../src/main/providers/xmltv.ts";
@@ -37,6 +38,7 @@ import type { FakeProvider } from "./fake-provider.ts";
 import {
   fakeProvider,
   guideIndexWorker,
+  guideSearchWorker,
   runtimeFor,
   tempDir,
   testConfig,
@@ -105,6 +107,8 @@ async function app(dataDir: string, secrets: Secrets = testSecrets) {
   return {
     run,
     guide,
+    /** Quits the app: what it had open closes. */
+    close: () => runtime.dispose(),
     library: await runtime.runPromise(Library),
     roster: await runtime.runPromise(Roster),
     subscriptions: await runtime.runPromise(Subscriptions),
@@ -125,6 +129,18 @@ async function app(dataDir: string, secrets: Secrets = testSecrets) {
     /** Moves the clock on, short of the service's own quarter-hourly look at the guides. */
     advance: (ms: number) => run(TestClock.adjust(ms)),
   };
+}
+
+/**
+ * The files of `dir` the process holds open, by name, where the system says (Linux's /proc);
+ * none elsewhere.
+ */
+async function openIn(dir: string): Promise<string[]> {
+  const fds = await readdir("/proc/self/fd").catch(() => []);
+  const paths = await Promise.all(fds.map((fd) => readlink(`/proc/self/fd/${fd}`).catch(() => "")));
+  return paths
+    .filter((path) => path.startsWith(`${dir}/`))
+    .map((path) => path.slice(dir.length + 1));
 }
 
 /**
@@ -857,6 +873,7 @@ describe("a mapping whose channels or guide changed under it", () => {
   }) {
     const dir = await tempDir();
     const writes = gate();
+    const ownWrites = gate();
     const lists = gate();
     const store = Layer.effect(
       GuideStore,
@@ -864,6 +881,8 @@ describe("a mapping whose channels or guide changed under it", () => {
         ...kept,
         setConfig: (...write: Parameters<typeof kept.setConfig>) =>
           Effect.andThen(writes.pass, kept.setConfig(...write)),
+        setOwn: (...write: Parameters<typeof kept.setOwn>) =>
+          Effect.andThen(ownWrites.pass, kept.setOwn(...write)),
       })),
     ).pipe(Layer.provide(guideStoreLayer));
     const ports = Layer.mergeAll(
@@ -897,6 +916,7 @@ describe("a mapping whose channels or guide changed under it", () => {
         fetch: async () => ({ body: new Blob([given.elsewhere ?? ""]).stream(), size: null }),
       }),
       guideIndexerLayer(guideIndexWorker),
+      guideSearcherLayer(guideSearchWorker),
     );
     const runtime = runtimeFor(Guide.layer.pipe(Layer.provide(ports), Layer.provideMerge(clock())));
     const guide = await runtime.runPromise(Guide);
@@ -905,6 +925,7 @@ describe("a mapping whose channels or guide changed under it", () => {
       guide,
       run: <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect),
       holdWrite: writes.hold,
+      holdOwnWrite: ownWrites.hold,
       holdChannels: lists.hold,
     };
   }
@@ -913,23 +934,25 @@ describe("a mapping whose channels or guide changed under it", () => {
     const guides = (...ids: string[]) =>
       tv(...ids.map((id) => named(id, id)), ...ids.map((id) => slot(id, id)));
     const given = { channels: listing("1", "2", "3"), document: guides("a.test", "b.test") };
-    const { dir, guide, run, holdWrite } = await held(given);
+    const { dir, guide, run, holdOwnWrite } = await held(given);
     await run(guide.refresh(ID));
     const page = { subscriptionId: ID, query: "", offset: 0, limit: 10 };
     const { revision } = await run(guide.mapChannels({ ...page, filter: "all" }));
 
-    // One mapping is being written, and two more wait behind it.
-    const writing = holdWrite();
+    // A download that no longer lists a guide channel is being kept, and three mappings made
+    // from the list before wait behind it for the subscription's turn.
+    given.document = guides("a.test");
+    const keeping = holdOwnWrite();
+    const refreshed = run(guide.refresh(ID));
+    await keeping.arrived;
     const first = run(guide.map(ID, "1", "a.test", revision));
-    await writing.arrived;
     const second = failureOf(run(guide.map(ID, "2", "a.test", revision)));
     const third = failureOf(run(guide.map(ID, "3", "b.test", revision)));
     await new Promise((resolve) => setTimeout(resolve, 20));
-    // Meanwhile the provider stops listing a channel, and the guide a guide channel.
+    // Meanwhile the provider stops listing a channel.
     given.channels = listing("1", "3");
-    given.document = guides("a.test");
-    await run(guide.refresh(ID));
-    writing.release();
+    keeping.release();
+    await refreshed;
 
     expect(await first).toMatchObject({ id: "1", mappedTo: "a.test" });
     expect(await second).toEqual({ kind: "channel-not-found", channelId: "2" });
@@ -992,7 +1015,7 @@ describe("the guide store", () => {
         }),
       ),
     );
-    const download = failureOf(runtime.runPromise(store.download(place)));
+    const download = failureOf(runtime.runPromise(store.download(place, store.newDownload())));
 
     expect(await set).toMatchObject({ kind: "unexpected" });
     expect(await download).toMatchObject({ kind: "unexpected" });
@@ -1085,7 +1108,8 @@ describe("a guide address across starts", () => {
 
 describe("a guide kept by 0.0.12", () => {
   it("comes over with its address and its mappings, each document indexed once when it is wanted, asking nobody", async () => {
-    const { run, guide, host, provider, dataDir, id, first, attach, channel } = await connected();
+    const { run, guide, host, provider, dataDir, id, first, attach, channel, close } =
+      await connected();
     const external = tv(
       named("aac.test", "AAC"),
       named("spare.test", "Spare"),
@@ -1100,6 +1124,9 @@ describe("a guide kept by 0.0.12", () => {
     const loose = channel(page.channels[0]?.id ?? "");
     await run(guide.map(id, loose.id, "spare.test", page.revision));
     // What 0.0.12 kept instead: the documents themselves, named as it named them.
+    // The app quits before its profile is made what 0.0.12 left: nothing of it is open then.
+    await close();
+    expect(await openIn(dataDir)).toEqual([]);
     const { key, fetchedAt } = JSON.parse(await readFile(join(dataDir, "guide.json"), "utf8"));
     const source = JSON.parse(await readFile(join(dataDir, "guide-source.json"), "utf8"));
     const document = `guide-external.${randomUUID()}.xml`;

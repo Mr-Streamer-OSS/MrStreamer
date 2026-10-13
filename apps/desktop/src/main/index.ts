@@ -57,6 +57,8 @@ import { castAdapter } from "./receivers/cast/adapter.ts";
 import createCatalogueWorker from "./ondemand/catalogue-worker.ts?nodeWorker";
 // oxlint-disable-next-line import/default
 import createGuideIndexWorker from "./guide/index-worker.ts?nodeWorker";
+// oxlint-disable-next-line import/default
+import createGuideSearchWorker from "./guide/search-worker.ts?nodeWorker";
 import { mainLayer } from "./runtime.ts";
 import { Downloads } from "./services/downloads.ts";
 import { Library } from "./services/library.ts";
@@ -438,6 +440,7 @@ async function start(): Promise<void> {
       ffprobe: toolPath("ffprobe"),
       catalogueWorker: (setup) => createCatalogueWorker({ workerData: setup }),
       guideIndexWorker: (options) => createGuideIndexWorker(options),
+      guideSearchWorker: (options) => createGuideSearchWorker(options),
       output: {
         adapters: receiverAdapters(),
         observePlayback: (kind, control) => analytics.remotePlayback(kind, control),

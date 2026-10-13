@@ -46,6 +46,7 @@ import {
   type Measurement,
 } from "./measurement.ts";
 import { guideIndexerLayer } from "../src/main/platform/guide-indexer.ts";
+import { guideSearcherLayer } from "../src/main/platform/guide-searcher.ts";
 import { guideStoreLayer } from "../src/main/platform/guide-store.ts";
 
 const CHANNELS = 13_000;
@@ -165,6 +166,11 @@ try {
             }),
             guideStoreLayer,
             // The app's own indexing worker, from source as Node runs TypeScript.
+            // And its search worker.
+            guideSearcherLayer(
+              (options) =>
+                new Worker(new URL("../src/main/guide/search-worker.ts", import.meta.url), options),
+            ),
             guideIndexerLayer(
               (options) =>
                 new Worker(new URL("../src/main/guide/index-worker.ts", import.meta.url), options),

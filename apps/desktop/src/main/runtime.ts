@@ -26,6 +26,7 @@ import { databaseLayer } from "./platform/database.ts";
 import { diagnosticsLogLayer } from "./platform/diagnostics-log.ts";
 import { downloadStoreLayer } from "./platform/downloads-store.ts";
 import { guideIndexerLayer } from "./platform/guide-indexer.ts";
+import { guideSearcherLayer } from "./platform/guide-searcher.ts";
 import { guideStoreLayer } from "./platform/guide-store.ts";
 import type { Secrets } from "./platform/secrets.ts";
 import { VerifiedFiles, verifiedFilesLayer } from "./platform/verified-files.ts";
@@ -62,6 +63,8 @@ export interface MainConfig {
   readonly catalogueWorker: OnDemandDeps["worker"];
   /** Starts a worker thread that indexes one guide document. */
   readonly guideIndexWorker: Parameters<typeof guideIndexerLayer>[0];
+  /** Starts the worker thread that searches guides. */
+  readonly guideSearchWorker: Parameters<typeof guideSearcherLayer>[0];
   /** The app's TMDB key, or null in builds without one. */
   readonly tmdbKey: string | null;
   /** The country whose streaming services to follow. */
@@ -222,6 +225,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
         ),
         guideStoreLayer,
         guideIndexerLayer(config.guideIndexWorker),
+        guideSearcherLayer(config.guideSearchWorker),
         // An address a viewer gave for a guide is sealed as a login's secret is, and requested
         // as the app, never as a provider's login.
         Layer.succeed(GuideAddresses, {

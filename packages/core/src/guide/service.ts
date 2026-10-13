@@ -6,9 +6,18 @@
 // A download runs in the background in two steps, both told in the status as they go: the
 // document is saved as it arrives, then indexed in a worker thread into a file of its own. The
 // guide in use keeps answering throughout. The new one replaces it only once it is whole, in one
-// write of what the store keeps, and the old one's file goes once no read is left on it. Each
-// index keeps ended programmes for the subscription's archive window (`archive`), and the next
-// download of the same source brings along the past that its document no longer lists.
+// write of what the store keeps. Each index keeps ended programmes for the subscription's archive
+// window (`archive`), and the next download of the same source brings along the past that its
+// document no longer lists. Searches read the index in a worker of their own (`GuideSearcher`).
+//
+// Two rules keep the files whole. Every file of a guide has holders (files.ts): the guide loaded
+// from it, a read under way, a build reading the past from it, a check's candidate, a use that
+// opened one, the download or build writing it, and what is kept naming it. A file goes only
+// once nothing holds it, and a stopped build lets go of what it held only once its worker has
+// ended. And whatever decides which guide is current, what is set for it and which files are
+// kept, runs in the subscription's turn (`turn`): one at a time, to its end once begun, checking
+// there whether it still applies. The sweep of what a run before left runs in that turn too,
+// before anything else of the guide.
 //
 // Channels are asked for with the subscription they belong to, and answers name them the same
 // way (`ownedKey`): a guide id means something only within the subscription whose guide lists it.
@@ -38,16 +47,15 @@
 // indexed in the background, as a download is, and then dropped; addresses and mappings stay.
 //
 // The app supplies the ports: the subscriptions and their downloads, each catalogue's channels,
-// a store for the documents and for what is set, the worker that indexes, and the addresses'
-// keychain and network. Downloads and checks run in the service's scope, so `forget` and
+// a store for the documents and for what is set, the workers that index and search, and the
+// addresses' keychain and network. Downloads and checks run in the service's scope, so `forget` and
 // shutdown stop them. Whatever work finishes late changes nothing: not after its subscription
 // went, not under a login that changed since, and not once the guide's source did. Each write
-// is checked for that when its turn at the files comes, so one that waited can't bring back
-// what was removed meanwhile. A mapping reads the channels and the guide in that turn too, so it
+// is checked for that in its turn, so one that waited can't bring back what was removed
+// meanwhile. A mapping reads the channels and the guide in that turn too, so it
 // is made for none that either stopped listing while it waited. One subscription's guide failing
 // leaves every other as it is.
 import { randomUUID } from "node:crypto";
-import { basename } from "node:path";
 import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
 import type {
   GuideCandidate,
@@ -78,11 +86,12 @@ import { diagnosed } from "../diagnostics.ts";
 import { Failed, failedWith } from "../failure.ts";
 import type { LiveGuide } from "../provider.ts";
 import { guideAddress, type GuideAddress } from "./address.ts";
+import { guideFiles, type Reader, type Release } from "./files.ts";
 import {
-  openGuideIndex,
   type GuideBuild,
   type GuideIndex,
   type GuideIndexSummary,
+  type GuideSearching,
 } from "./index-file.ts";
 import { GUIDE_LIMITS } from "./limits.ts";
 import {
@@ -232,17 +241,26 @@ export class GuideStore extends Context.Service<
      * It never makes the subscription's folder, so one that went is not brought back.
      */
     readonly setConfig: (place: GuidePlace, config: GuideConfig) => Effect.Effect<void, Failed>;
-    /** A file to save a document into as it downloads. Fails where the folder went. */
-    readonly download: (place: GuidePlace) => Effect.Effect<GuideDownload, Failed>;
+    /**
+     * Makes `file`, named by `newDownload`, to save a document into as it downloads. Fails
+     * where the folder went.
+     */
+    readonly download: (place: GuidePlace, file: string) => Effect.Effect<GuideDownload, Failed>;
+    /** A name for a new download. */
+    readonly newDownload: () => string;
     /** A name for a new index. */
     readonly newIndex: () => string;
     /** Where a file of the guide's is, to read it or write it. */
     readonly path: (place: Pick<GuidePlace, "store">, file: string) => string;
+    /** Removes a file of the guide's. It doesn't fail: one it can't remove is swept later. */
     readonly discard: (place: Pick<GuidePlace, "store">, file: string) => Effect.Effect<void>;
-    /** Drops every index and download but those in `keep`: what work cut short left behind. */
+    /**
+     * Drops every index and download `known` doesn't know, each asked just before it goes:
+     * what work cut short left behind.
+     */
     readonly sweep: (
       place: Pick<GuidePlace, "store">,
-      keep: readonly string[],
+      known: (file: string) => boolean,
     ) => Effect.Effect<void>;
     /** Drops everything kept of a guide: its files, and what was set for it. */
     readonly erase: (place: Pick<GuidePlace, "store">) => Effect.Effect<void>;
@@ -283,14 +301,23 @@ export class GuideIndexer extends Context.Service<
   }
 >()("mrstreamer/GuideIndexer") {}
 
+/**
+ * Searches index files away from the main process (`searchFirst`, `searchEach`), however many
+ * programmes a search reads. The caller keeps the file until the search answers.
+ */
+export class GuideSearcher extends Context.Service<GuideSearcher, GuideSearching>()(
+  "mrstreamer/GuideSearcher",
+) {}
+
 interface Loaded {
   /** The subscription it is the guide of. */
   readonly subscriptionId: string;
   readonly fetchedAt: number;
-  /** Its index's file, as the store names it, and where that is. */
+  /** Its index's file, as the store names it. */
   readonly file: string;
-  readonly path: string;
   readonly index: GuideIndex;
+  /** Lets go of the guide's claim on its index. */
+  readonly release: Release;
 }
 
 /** What is set for a subscription's guide, as read this run. */
@@ -299,6 +326,8 @@ interface Settings {
   readonly config: GuideConfig;
   /** The external address itself; null for an own guide, and while the keychain won't open it. */
   readonly address: string | null;
+  /** The own guide kept, or null: kept while an address is in use too. */
+  readonly own: GuideDocument | null;
 }
 
 /** What a check found, until it is used or dropped. Its index waits in the store. */
@@ -310,11 +339,15 @@ interface Candidate {
   readonly address: GuideAddress;
   readonly file: string;
   readonly fetchedAt: number;
+  /** Lets go of the candidate's claim on its index. */
+  readonly release: Release;
 }
 
 /** A loaded guide, its subscription's channels and the time: what a lookup reads. */
 interface Found {
   readonly guide: Loaded;
+  /** Where its index is, for the search worker. */
+  readonly path: string;
   readonly channels: MappedChannels;
   readonly at: number;
 }
@@ -322,12 +355,12 @@ interface Found {
 /** A step of work under way, as the status tells it. */
 type Progress = Extract<GuideProcessing, { state: "downloading" | "reading" }>;
 
-/** What a download and its index came to: the index's file, or that the own guide has none. */
-type Indexed = {
+/** What a download and its index came to: the index's file. */
+interface Indexed {
   readonly file: string;
   readonly fetchedAt: number;
   readonly summary: GuideIndexSummary;
-} | null;
+}
 
 export class Guide extends Context.Service<
   Guide,
@@ -445,12 +478,33 @@ function make() {
     const store = yield* GuideStore;
     const addresses = yield* GuideAddresses;
     const indexer = yield* GuideIndexer;
+    const searcher = yield* GuideSearcher;
     const scope = yield* Effect.scope;
     const updates = yield* PubSub.unbounded<void>();
-    const loadOne = yield* Semaphore.make(1);
     const downloadOne = (yield* Semaphore.make(DOWNLOADS_AT_ONCE)).withPermits(1);
-    /** What is set for the guides is read and changed one at a time. */
-    const setOne = (yield* Semaphore.make(1)).withPermits(1);
+
+    /** Every file of the guides the service knows, and who holds each: nothing else deletes one. */
+    const files = guideFiles({
+      path: (folder, file) => store.path({ store: folder }, file),
+      remove: (folder, file) => Effect.runPromise(store.discard({ store: folder }, file)),
+    });
+    // Shutting down closes every index. What is kept stays on disk for the next start.
+    yield* Effect.addFinalizer(() => Effect.sync(() => files.closeAll()));
+
+    /** Each subscription's turn at what decides its guide, by its id. */
+    const turns = new Map<string, Semaphore.Semaphore>();
+    /**
+     * Runs `change` in the subscription's turn: one at a time per subscription, and once begun,
+     * to its end, also when what asked for it is stopped. Whatever changes which guide is
+     * current, what is set for it or which files are kept runs here, and checks in the turn
+     * whether it still applies. A turn never waits for another turn, or for work that does.
+     */
+    const turn = <A, E>(id: string, change: Effect.Effect<A, E>) =>
+      Effect.suspend(() => {
+        let one = turns.get(id);
+        if (!one) turns.set(id, (one = Semaphore.makeUnsafe(1)));
+        return one.withPermits(1)(Effect.uninterruptible(change));
+      });
 
     /** Each subscription's guide, by its id. */
     const loaded = new Map<string, Loaded>();
@@ -460,12 +514,12 @@ function make() {
     const unread = new Set<string>();
     /** What is set for each subscription's guide, by its id, once read. */
     const settings = new Map<string, Settings>();
+    /** The files what is kept for each subscription names, by id, each with its claim. */
+    const kept = new Map<string, Map<string, Release>>();
     /** Why a subscription's downloads fail, and since when, until one works. */
     const failures = new Map<string, { readonly error: AppError; readonly at: number }>();
     /** What each subscription's work under way is doing, while it runs. */
     const progress = new Map<string, Progress>();
-    /** Indexes no longer read, by path, until they have closed and their file can go. */
-    const closing = new Map<string, Promise<void>>();
     /** A subscription's channels with its mappings over them, while both are the same. */
     const overlays = new Map<
       string,
@@ -507,14 +561,6 @@ function make() {
     const published = PubSub.publish(updates, undefined);
     let toldAt = Number.NEGATIVE_INFINITY;
 
-    // Shutting down closes every index, so its file can go.
-    yield* Effect.addFinalizer(() =>
-      Effect.promise(async () => {
-        await Promise.all([...loaded.values()].map((guide) => guide.index.retire()));
-        loaded.clear();
-      }),
-    );
-
     /** Whether `other` is `subscription` with the login or link it had then. */
     const same = (subscription: GuideSubscription, other: GuideSubscription | null | undefined) =>
       other?.id === subscription.id && other.revision === subscription.revision;
@@ -531,127 +577,59 @@ function make() {
     /** Names the guide a list of channels was read from, for a change made from that list. */
     const revisionOf = ({ id, revision }: GuideSubscription) => `${revision}.${generationOf(id)}`;
 
-    /**
-     * Makes `next` a subscription's guide, or none, and retires the one before: it closes once
-     * every read that holds it is done.
-     */
+    /** Makes `next` a subscription's guide, or none, and lets go of the one before. */
     const setLoaded = (id: string, next: Loaded | null) => {
       const before = loaded.get(id);
       if (next) loaded.set(id, next);
       else loaded.delete(id);
-      if (!before || before === next) return;
-      const done = before.index.retire().finally(() => {
-        if (closing.get(before.path) === done) closing.delete(before.path);
-      });
-      closing.set(before.path, done);
+      if (before && before !== next) before.release();
     };
 
     /**
-     * The index files builds read the past from, by path, with how many builds read each: none
-     * goes while one does, queued or under way.
+     * Claims the files `now` names for the subscription, and lets go of those it no longer
+     * names: what is kept holds what it names. Only runs in the subscription's turn.
      */
-    const pins = new Map<string, { count: number; free: PromiseWithResolvers<void> }>();
-
-    /** Runs a build that reads `file` of a guide's, keeping that file until the build is done. */
-    const pinning = <A, E, R>(
-      place: Pick<GuidePlace, "store">,
-      file: string | null,
-      build: Effect.Effect<A, E, R>,
-    ) => {
-      if (file === null) return build;
-      const path = store.path(place, file);
-      return Effect.acquireUseRelease(
-        Effect.sync(() => {
-          const pin = pins.get(path) ?? { count: 0, free: Promise.withResolvers<void>() };
-          pin.count++;
-          pins.set(path, pin);
-        }),
-        () => build,
-        () =>
-          Effect.sync(() => {
-            const pin = pins.get(path);
-            if (!pin || --pin.count > 0) return;
-            pins.delete(path);
-            pin.free.resolve();
-          }),
+    const keep = (subscription: Pick<GuideSubscription, "id" | "store">, now: Settings | null) => {
+      const named = new Set(
+        [now?.config.external?.document.file, now?.own?.file].filter((file) => file !== undefined),
       );
+      const held = kept.get(subscription.id) ?? new Map<string, Release>();
+      for (const [file, release] of held) {
+        if (named.has(file)) continue;
+        held.delete(file);
+        release();
+      }
+      for (const file of named) {
+        if (held.has(file)) continue;
+        const release = files.claim(subscription.store, file);
+        if (release) held.set(file, release);
+      }
+      kept.set(subscription.id, held);
     };
 
-    /** The files of a folder that builds still read, by name. */
-    const pinnedIn = (place: Pick<GuidePlace, "store">) =>
-      [...pins.keys()].flatMap((path) => {
-        const name = basename(path);
-        return store.path(place, name) === path ? [name] : [];
-      });
-
-    /** Waits until nothing reads a file of a guide's, held or built from. */
-    const unused = (path: string) =>
-      Effect.promise(async () => {
-        for (;;) {
-          const reading = closing.get(path);
-          const building = pins.get(path)?.free.promise;
-          if (!reading && !building) return;
-          await Promise.all([reading, building]);
-        }
-      });
-
-    /** Drops a file of a guide's, once nothing reads it, held or built from. */
-    const discard = (place: Pick<GuidePlace, "store">, file: string) =>
-      Effect.andThen(unused(store.path(place, file)), store.discard(place, file));
-
-    /**
-     * Drops a file of a guide's in the background, once nothing reads it: what replaced it needn't
-     * wait for a read or a build of the old one.
-     */
-    const discardLater = (place: Pick<GuidePlace, "store">, file: string) =>
-      Effect.asVoid(Effect.forkIn(discard(place, file), scope));
-
-    /**
-     * Opens the index `document` names and hands it to `keep`, which makes it a guide and answers
-     * what it did, or answers null to leave it. Unless kept, it closes again, whether `keep`
-     * leaves it, fails or is stopped: the file holds nothing open once no one owns it.
-     */
-    const keeping = <A, E, R>(
-      subscription: GuideSubscription,
-      document: Omit<GuideDocument, "kind">,
-      keep: (guide: Loaded) => Effect.Effect<A | null, E, R>,
-    ) =>
-      Effect.acquireUseRelease(
-        Effect.gen(function* () {
-          const path = store.path(subscription, document.file);
-          const index = yield* Effect.promise(() => openGuideIndex(path));
-          if (!index) return null;
-          return {
-            subscriptionId: subscription.id,
-            fetchedAt: document.fetchedAt,
-            file: document.file,
-            path,
-            index,
-          } satisfies Loaded;
-        }),
-        (guide) => (guide ? keep(guide) : Effect.succeed(null)),
-        (guide, exit) =>
-          guide && !(Exit.isSuccess(exit) && exit.value !== null)
-            ? Effect.promise(() => guide.index.retire())
-            : Effect.void,
-      );
+    /** Claims a file a producer is about to write: it stays, and isn't swept, until let go. */
+    const claimNew = (subscription: GuideSubscription, file: string): Release =>
+      files.claim(subscription.store, file) ?? (() => {});
 
     /** What is set for a subscription's guide: from memory, or read once from the store. */
     const settingsOf = (subscription: GuideSubscription) =>
       Effect.suspend(() => {
-        const kept = settings.get(subscription.id);
-        return kept?.key === subscription.key
-          ? Effect.succeed(kept)
-          : setOne(readSettings(subscription));
+        const read = settings.get(subscription.id);
+        return read?.key === subscription.key
+          ? Effect.succeed(read)
+          : turn(subscription.id, readSettings(subscription));
       });
 
-    /** Only runs in `setOne`. */
+    /**
+     * Reads what is set for a subscription's guide and the own guide kept, claims the files they
+     * name, and sweeps away the guide files no one holds: what work cut short in a run before
+     * left behind. Only runs in the subscription's turn, so the sweep ends before any other change.
+     */
     const readSettings = (subscription: GuideSubscription) =>
       Effect.gen(function* () {
         const { id, key } = subscription;
-        const kept = settings.get(id);
-        if (kept?.key === key) return kept;
-        const started = generationOf(id);
+        const known = settings.get(id);
+        if (known?.key === key) return known;
         const stored = yield* store
           .config(subscription)
           .pipe(
@@ -665,39 +643,30 @@ function make() {
         const address = config.external
           ? yield* addresses.open(config.external.sealedAddress)
           : null;
-        const own = yield* ownOf(subscription);
-        // What a check or a download cut short left behind, but for what builds still read.
-        yield* store.sweep(subscription, [
-          ...[config.external?.document.file, own?.file].filter((file) => file !== undefined),
-          ...pinnedIn(subscription),
-        ]);
-        const read: Settings = { key, config, address };
-        // Forgotten while it was read: nothing is kept of it.
-        if (generationOf(id) !== started) return read;
+        const own = yield* store
+          .own(subscription)
+          .pipe(
+            Effect.catchDefect((defect) =>
+              Effect.logWarning("[guide] can't read the guide on disk", defect).pipe(
+                Effect.as(null),
+              ),
+            ),
+          );
+        const read: Settings = { key, config, address, own };
+        keep(subscription, read);
+        yield* store.sweep(subscription, (file) => files.known(subscription.store, file));
         settings.set(id, read);
         if (config.external?.failure) failures.set(id, config.external.failure);
         return read;
       });
 
-    /** The own guide kept for a subscription, or null, also when it can't be read. */
-    const ownOf = (subscription: GuideSubscription) =>
-      store
-        .own(subscription)
-        .pipe(
-          Effect.catchDefect((defect) =>
-            Effect.logWarning("[guide] can't read the guide on disk", defect).pipe(Effect.as(null)),
-          ),
-        );
-
     /**
-     * Changes what is set for a subscription's guide, when the change's turn at the files comes
-     * and only while it still applies: the subscription is saved with the login it had, and its
-     * guide's source is the one `started` names. `next` gives what to set from what is set then,
-     * or null to leave it. It runs in that turn, so what it reads there is as the change finds
-     * it, whatever arrived while it waited; it reads nothing that is set, which would wait for
-     * this same turn. `applied` runs once the change is kept, before anything else has a turn.
-     * Answers what was set before, or null when nothing changed. A change that began can't be
-     * stopped halfway.
+     * Changes what is set for a subscription's guide, in its turn and only while the change
+     * still applies: the subscription is saved with the login it had, and its guide's source is
+     * the one `started` names. `next` gives what to set from what is set then, or null to leave
+     * it. What it changes is written, own guide and what is set alike, the files it names are
+     * claimed and those it no longer names let go of. `applied` runs then, still in the turn.
+     * Answers what was set before, or null when nothing changed.
      */
     const change = (
       subscription: GuideSubscription,
@@ -705,19 +674,22 @@ function make() {
       next: (now: Settings) => Effect.Effect<Settings | null, Failed>,
       applied: () => void = () => {},
     ) =>
-      setOne(
+      turn(
+        subscription.id,
         Effect.gen(function* () {
           const { id } = subscription;
           if (generationOf(id) !== started || !same(subscription, yield* savedAs(id))) return null;
           const now = yield* readSettings(subscription);
           const then = yield* next(now);
           if (!then) return null;
+          if (then.own !== now.own) yield* store.setOwn(subscription, then.own);
           if (then.config !== now.config) yield* store.setConfig(subscription, then.config);
           settings.set(id, then);
+          keep(subscription, then);
           applied();
           return now;
         }),
-      ).pipe(Effect.uninterruptible);
+      );
 
     /** A subscription's guide becomes another's: what was loaded and known of it goes. */
     const turned = (id: string) => {
@@ -729,22 +701,58 @@ function make() {
     };
 
     /**
-     * A saved subscription's guide: from memory, or opened from the store once. Null while a
+     * Opens the index `document` names and hands it to `use`, which may make it a guide with
+     * `adopt`. Unless adopted, it closes again however `use` ends, stopped too; once adopted, the
+     * guide owns it, whatever happens after.
+     */
+    const opening = <A, E>(
+      subscription: GuideSubscription,
+      document: Omit<GuideDocument, "kind">,
+      use: (opened: { readonly index: GuideIndex; adopt(): Loaded }) => Effect.Effect<A, E>,
+    ): Effect.Effect<A, E | Failed> =>
+      Effect.acquireUseRelease(
+        Effect.promise(() => files.open(subscription.store, document.file)),
+        (reader): Effect.Effect<A, E | Failed> => {
+          if (!reader) return Effect.fail(failedWith(new Error("The guide can't be read.")));
+          return use({
+            index: reader.index,
+            adopt: () => {
+              adopted.add(reader);
+              return {
+                subscriptionId: subscription.id,
+                fetchedAt: document.fetchedAt,
+                file: document.file,
+                index: reader.index,
+                release: reader.release,
+              };
+            },
+          });
+        },
+        (reader) =>
+          Effect.sync(() => {
+            if (reader && !adopted.delete(reader)) reader.release();
+          }),
+      );
+    /** Readers handed on to a guide, which their opener then doesn't let go of. */
+    const adopted = new WeakSet<Reader>();
+
+    /**
+     * A saved subscription's guide: from memory, or opened from what is kept, once. Null while a
      * document an older release kept is indexed: lookups don't wait for that.
      */
     const current = (subscription: GuideSubscription) =>
       Effect.suspend(() => {
         const { id } = subscription;
+        const guide = loaded.get(id);
         // Nothing is kept for a subscription without a guide, so there is nothing to read.
-        if (absent.has(id) || unread.has(id) || jobs.get(id)?.kind === "reindex") {
-          return Effect.succeed(loaded.get(id) ?? null);
+        if (guide || absent.has(id) || unread.has(id) || jobs.get(id)?.kind === "reindex") {
+          return Effect.succeed(guide ?? null);
         }
-        const kept = loaded.get(id);
-        return kept ? Effect.succeed(kept) : loadOne.withPermits(1)(readStored(subscription));
+        return turn(id, readStored(subscription));
       });
 
     /** `current`, once the indexing of what an older release kept is done, when it is under way. */
-    const kept = (subscription: GuideSubscription) =>
+    const keptGuide = (subscription: GuideSubscription) =>
       Effect.gen(function* () {
         const guide = yield* current(subscription);
         const job = jobs.get(subscription.id);
@@ -753,45 +761,42 @@ function make() {
         return loaded.get(subscription.id) ?? null;
       });
 
+    /** Only runs in the subscription's turn. */
     const readStored = (subscription: GuideSubscription) =>
       Effect.gen(function* () {
         const { id } = subscription;
-        const kept = loaded.get(id);
-        if (kept) return kept;
-        const { config } = yield* settingsOf(subscription);
-        const started = generationOf(id);
-        const document = config.external ? config.external.document : yield* ownOf(subscription);
+        const known = loaded.get(id);
+        if (known) return known;
+        if (absent.has(id) || unread.has(id)) return null;
+        const read = yield* readSettings(subscription);
+        const document = read.config.external ? read.config.external.document : read.own;
         if (document?.kind === "xmltv") {
           // Indexed in the background, unless a download already brings a new one.
           if (!jobs.has(id)) {
+            const started = generationOf(id);
             yield* startJob(subscription, "reindex", (report) =>
               reindex(subscription, document, started, report),
             );
           }
           return null;
         }
-        /** Whether nothing changed while it was read, so what was found counts. */
-        const counts = () => generationOf(id) === started && !absent.has(id) && !loaded.has(id);
-        if (!document) {
-          if (counts()) unread.add(id);
-          return loaded.get(id) ?? null;
-        }
-        let read = false;
-        const guide = yield* keeping(subscription, document, (opened) =>
-          Effect.sync(() => {
-            read = true;
-            // Its source changed, it was dropped or it answered it has none, while it was read.
-            if (!counts()) return null;
-            loaded.set(id, opened);
-            return opened;
-          }),
-        );
-        if (guide) return guide;
-        if (!read && counts()) {
-          yield* Effect.logWarning("[guide] ignoring the guide on disk");
+        const reader = document
+          ? yield* Effect.promise(() => files.open(subscription.store, document.file))
+          : null;
+        if (!document || !reader) {
+          if (document) yield* Effect.logWarning("[guide] ignoring the guide on disk");
           unread.add(id);
+          return null;
         }
-        return loaded.get(id) ?? null;
+        const guide: Loaded = {
+          subscriptionId: id,
+          fetchedAt: document.fetchedAt,
+          file: document.file,
+          index: reader.index,
+          release: reader.release,
+        };
+        loaded.set(id, guide);
+        return guide;
       });
 
     /**
@@ -825,24 +830,49 @@ function make() {
       });
 
     /**
+     * Keeps the index file `previous` while `build` runs, which reads the past from it. Taken
+     * from what is set for the subscription when the build begins, at once; a file that went
+     * meanwhile is none.
+     */
+    const pinning = <A, E, R>(
+      subscription: GuideSubscription,
+      previous: string | null,
+      build: (previous: string | null) => Effect.Effect<A, E, R>,
+    ) =>
+      Effect.acquireUseRelease(
+        Effect.sync(() => (previous === null ? null : files.claim(subscription.store, previous))),
+        (pin) => build(pin ? previous : null),
+        (pin) => Effect.sync(() => pin?.()),
+      );
+
+    /**
      * Downloads what `fetch` answers into the guide's folder and indexes it into a new file
      * there, telling `report` how far each step got; the download goes once read. Answers null
-     * when the own guide answers it has none. Nothing of it is left when it fails or is stopped,
-     * and the index is left only for the caller to keep or discard.
+     * when the own guide answers it has none. The new index is claimed for `use`, which hands it
+     * on or not, and let go of after: what `use` didn't hand on goes.
      */
-    const fetchAndIndex = (
+    const fetchAndIndex = <A>(
       subscription: GuideSubscription,
       fetch: (
         signal: AbortSignal,
       ) => Promise<{ body: AsyncIterable<Uint8Array>; size: number | null } | null>,
       { strict, previous }: { strict: boolean; previous: string | null },
       report: (progress: Progress) => void,
-    ): Effect.Effect<Indexed, Failed> =>
+      use: (indexed: Indexed) => Effect.Effect<A, Failed>,
+    ): Effect.Effect<A | null, Failed> =>
       Effect.gen(function* () {
         const fetchedAt = yield* Clock.currentTimeMillis;
-        return yield* Effect.acquireUseRelease(
-          store.download(subscription),
-          (download) =>
+        const name = store.newDownload();
+        const downloaded = yield* Effect.acquireUseRelease(
+          Effect.andThen(
+            Effect.sync(() => claimNew(subscription, name)),
+            (release) =>
+              store.download(subscription, name).pipe(
+                Effect.map((download) => ({ download, release })),
+                Effect.tapError(() => Effect.sync(release)),
+              ),
+          ),
+          ({ download }) =>
             Effect.gen(function* () {
               const got = yield* Effect.tryPromise({
                 try: async (signal) => {
@@ -869,21 +899,32 @@ function make() {
               });
               if (!got) return null;
               const file = store.newIndex();
-              const summary = yield* indexed(subscription, {
+              const output = claimNew(subscription, file);
+              return yield* indexed(subscription, {
                 document: download.file,
                 file,
                 previous,
                 since: fetchedAt,
                 strict,
                 report,
-              });
-              return { file, fetchedAt, summary };
+              }).pipe(
+                Effect.map((summary) => ({ file, fetchedAt, summary, output })),
+                Effect.tapError(() => Effect.sync(output)),
+                Effect.onInterrupt(() => Effect.sync(output)),
+              );
             }),
-          (download) => Effect.promise(() => download.discard()),
+          ({ download, release }) =>
+            Effect.promise(() => download.discard()).pipe(Effect.ensuring(Effect.sync(release))),
         );
+        if (!downloaded) return null;
+        return yield* use(downloaded).pipe(Effect.ensuring(Effect.sync(downloaded.output)));
       });
 
-    /** Indexes a document of the guide's folder into `file` there, in the worker. */
+    /**
+     * Indexes a document of the guide's folder into `file` there, in the worker. Stopped, it
+     * waits for the worker to have ended before it ends itself, so whatever the build read or
+     * wrote is let go of only once the worker no longer has it open.
+     */
     const indexed = (
       subscription: GuideSubscription,
       {
@@ -905,43 +946,36 @@ function make() {
       Effect.gen(function* () {
         const began = yield* Clock.currentTimeMillis;
         report({ state: "reading", programmes: 0, since: began });
-        return yield* Effect.tryPromise({
-          try: (signal) =>
-            indexer.build(
-              {
-                document: store.path(subscription, document),
-                target: store.path(subscription, file),
-                previous: previous === null ? null : store.path(subscription, previous),
-                since,
-                archive: subscription.archive,
-                strict,
-              },
-              (programmes) => report({ state: "reading", programmes, since: began }),
-              signal,
-            ),
-          catch: failedWith,
-        });
+        const stop = new AbortController();
+        const built = indexer.build(
+          {
+            document: store.path(subscription, document),
+            target: store.path(subscription, file),
+            previous: previous === null ? null : store.path(subscription, previous),
+            since,
+            archive: subscription.archive,
+            strict,
+          },
+          (programmes) => report({ state: "reading", programmes, since: began }),
+          stop.signal,
+        );
+        return yield* Effect.tryPromise({ try: () => built, catch: failedWith }).pipe(
+          Effect.onInterrupt(() =>
+            Effect.promise(() => {
+              stop.abort();
+              return built.then(
+                () => {},
+                () => {},
+              );
+            }),
+          ),
+        );
       });
 
     /**
-     * Keeps a new index of a subscription's only when `keep` answers something, and drops its
-     * file otherwise: when `keep` answers null or fails, or the work is stopped.
-     */
-    const keepOrDiscard = <A, E, R>(
-      subscription: GuideSubscription,
-      file: string,
-      keep: Effect.Effect<A | null, E, R>,
-    ) =>
-      keep.pipe(
-        Effect.onExit((exit) =>
-          Exit.isSuccess(exit) && exit.value !== null ? Effect.void : discard(subscription, file),
-        ),
-      );
-
-    /**
      * Asks the subscription for its own guide and downloads and indexes it; the new guide
-     * replaces the old only once whole, and only while its answer still counts. A subscription
-     * that has none leaves none behind, in memory or on disk.
+     * replaces the old only once whole, and only while its answer still counts, checked in the
+     * subscription's turn. A subscription that has none leaves none behind, in memory or on disk.
      */
     const downloadOwn = (
       subscription: GuideSubscription,
@@ -951,64 +985,55 @@ function make() {
     ) =>
       Effect.gen(function* () {
         const { id } = subscription;
-        /** Whether the answer still counts: its guide is still this one, under the same login. */
-        const counts = Effect.map(
-          savedAs(id),
-          (now) => generationOf(id) === started && same(subscription, now),
-        );
-        const before = yield* ownOf(subscription);
-        const previous = before?.kind === "index" ? before.file : null;
-        const result = yield* pinning(
+        const before = (yield* settingsOf(subscription)).own;
+        const answer = yield* pinning(
           subscription,
-          previous,
-          fetchAndIndex(
-            subscription,
-            async (signal) => {
-              const guide = await ask(signal);
-              return guide.kind === "none" ? null : { body: guide.body, size: guide.size };
-            },
-            { strict: false, previous },
-            report,
-          ),
+          before?.kind === "index" ? before.file : null,
+          (previous) =>
+            fetchAndIndex(
+              subscription,
+              async (signal) => {
+                const guide = await ask(signal);
+                return guide.kind === "none" ? null : { body: guide.body, size: guide.size };
+              },
+              { strict: false, previous },
+              report,
+              ({ file, fetchedAt }) =>
+                opening(subscription, { file, fetchedAt }, ({ adopt }) =>
+                  // Kept only when it is also the guide to show: the next start reads what is kept.
+                  change(
+                    subscription,
+                    started,
+                    (now) => Effect.succeed({ ...now, own: { file, fetchedAt, kind: "index" } }),
+                    () => {
+                      failures.delete(id);
+                      absent.delete(id);
+                      unread.delete(id);
+                      setLoaded(id, adopt());
+                    },
+                  ),
+                ),
+            ),
         );
-        if (result === null) {
-          if (!(yield* counts)) return;
-          failures.delete(id);
-          const known = absent.has(id);
-          absent.add(id);
-          // Asked again and still none: nothing changed, so nothing is told.
-          if (known) return;
-          // A guide loaded before is the one the subscription had before.
-          const was = yield* ownOf(subscription);
-          setLoaded(id, null);
-          yield* store.setOwn(subscription, null);
-          if (was) yield* discardLater(subscription, was.file);
-          yield* published;
+        if (answer === null) {
+          // It answered that it has none. Asked again and still none: nothing is told.
+          let told = false;
+          yield* change(
+            subscription,
+            started,
+            (now) => Effect.succeed({ ...now, own: null }),
+            () => {
+              failures.delete(id);
+              told = !absent.has(id);
+              absent.add(id);
+              // A guide loaded before is the one the subscription had before.
+              setLoaded(id, null);
+            },
+          );
+          if (told) yield* published;
           return;
         }
-        const { file, fetchedAt } = result;
-        const replaced = yield* keepOrDiscard(
-          subscription,
-          file,
-          keeping(subscription, { file, fetchedAt }, (guide) =>
-            // Saved only when it is also the guide to show: the next start reads what is saved.
-            Effect.gen(function* () {
-              if (!(yield* counts)) return null;
-              const was = yield* ownOf(subscription);
-              yield* store.setOwn(subscription, { file, fetchedAt, kind: "index" });
-              failures.delete(id);
-              absent.delete(id);
-              unread.delete(id);
-              setLoaded(id, guide);
-              return { was };
-            }).pipe(Effect.uninterruptible),
-          ),
-        );
-        if (!replaced) return;
-        if (replaced.was && replaced.was.file !== file) {
-          yield* discardLater(subscription, replaced.was.file);
-        }
-        yield* published;
+        if (answer) yield* published;
       });
 
     /**
@@ -1025,53 +1050,46 @@ function make() {
     ) =>
       Effect.gen(function* () {
         const { id } = subscription;
-        const previous = external.document.kind === "index" ? external.document.file : null;
-        const result = yield* pinning(
+        const before = yield* pinning(
           subscription,
-          previous,
-          fetchAndIndex(
-            subscription,
-            (signal) => addresses.fetch(address, signal),
-            { strict: true, previous },
-            report,
-          ),
-        );
-        if (!result) return;
-        const { file, fetchedAt } = result;
-        const before = yield* keepOrDiscard(
-          subscription,
-          file,
-          keeping(subscription, { file, fetchedAt }, (guide) =>
-            change(
+          external.document.kind === "index" ? external.document.file : null,
+          (previous) =>
+            fetchAndIndex(
               subscription,
-              started,
-              (now) =>
-                Effect.succeed(
-                  now.config.external?.identity === external.identity
-                    ? {
-                        ...now,
-                        config: {
-                          ...now.config,
-                          external: {
-                            ...now.config.external,
-                            document: { file, fetchedAt, kind: "index" },
-                            failure: null,
-                          },
-                        },
-                      }
-                    : null,
+              (signal) => addresses.fetch(address, signal),
+              { strict: true, previous },
+              report,
+              ({ file, fetchedAt }) =>
+                opening(subscription, { file, fetchedAt }, ({ adopt }) =>
+                  change(
+                    subscription,
+                    started,
+                    (now) =>
+                      Effect.succeed(
+                        now.config.external?.identity === external.identity
+                          ? {
+                              ...now,
+                              config: {
+                                ...now.config,
+                                external: {
+                                  ...now.config.external,
+                                  document: { file, fetchedAt, kind: "index" },
+                                  failure: null,
+                                },
+                              },
+                            }
+                          : null,
+                      ),
+                    () => {
+                      failures.delete(id);
+                      unread.delete(id);
+                      setLoaded(id, adopt());
+                    },
+                  ),
                 ),
-              () => {
-                failures.delete(id);
-                unread.delete(id);
-                setLoaded(id, guide);
-              },
             ),
-          ),
         );
-        if (!before?.config.external) return;
-        yield* discardLater(subscription, before.config.external.document.file);
-        yield* published;
+        if (before) yield* published;
       });
 
     /**
@@ -1088,48 +1106,46 @@ function make() {
       Effect.gen(function* () {
         const { id } = subscription;
         const file = store.newIndex();
-        yield* indexed(subscription, {
-          document: document.file,
-          file,
-          previous: null,
-          since: yield* Clock.currentTimeMillis,
-          strict: false,
-          report,
-        });
-        const index: GuideDocument = { file, fetchedAt: document.fetchedAt, kind: "index" };
-        const kept = yield* keepOrDiscard(
-          subscription,
-          file,
-          keeping(subscription, index, (guide) =>
+        const output = claimNew(subscription, file);
+        const kept = yield* Effect.gen(function* () {
+          yield* indexed(subscription, {
+            document: document.file,
+            file,
+            previous: null,
+            since: yield* Clock.currentTimeMillis,
+            strict: false,
+            report,
+          });
+          const index: GuideDocument = { file, fetchedAt: document.fetchedAt, kind: "index" };
+          return yield* opening(subscription, index, ({ adopt }) =>
             change(
               subscription,
               started,
-              (was) =>
-                Effect.gen(function* () {
-                  const { external } = was.config;
-                  // Still the document kept: no download took its place meanwhile.
-                  if (external) {
-                    return external.document.file === document.file
+              (was) => {
+                const { external } = was.config;
+                // Still the document kept: no download took its place meanwhile.
+                if (external) {
+                  return Effect.succeed(
+                    external.document.file === document.file
                       ? {
                           ...was,
                           config: { ...was.config, external: { ...external, document: index } },
                         }
-                      : null;
-                  }
-                  if ((yield* ownOf(subscription))?.file !== document.file) return null;
-                  yield* store.setOwn(subscription, index);
-                  return was;
-                }),
+                      : null,
+                  );
+                }
+                return Effect.succeed(
+                  was.own?.file === document.file ? { ...was, own: index } : null,
+                );
+              },
               () => {
                 unread.delete(id);
-                setLoaded(id, guide);
+                setLoaded(id, adopt());
               },
             ),
-          ),
-        );
-        if (!kept) return;
-        yield* discardLater(subscription, document.file);
-        yield* published;
+          );
+        }).pipe(Effect.ensuring(Effect.sync(output)));
+        if (kept) yield* published;
       }).pipe(
         downloadOne,
         Effect.catchTag("Failed", (failure) =>
@@ -1238,13 +1254,16 @@ function make() {
       Effect.gen(function* () {
         // Known to have none: asking again every check would only read the playlist over and over.
         if (absent.has(subscription.id)) return;
-        const guide = yield* kept(subscription);
+        const guide = yield* keptGuide(subscription);
         const now = yield* Clock.currentTimeMillis;
         if (guide && now - guide.fetchedAt < MAX_AGE_MS) return;
         yield* refreshOf(subscription);
       });
 
-    /** Stops a subscription's work under way, when there is some. */
+    /**
+     * Stops a subscription's work under way, when there is some, and waits until it has ended:
+     * its worker too, and what it held let go of.
+     */
     const stopDownload = (id: string) =>
       Effect.suspend(() => {
         const running = jobs.get(id);
@@ -1253,82 +1272,92 @@ function make() {
         return running ? Fiber.interrupt(running.fiber) : Effect.void;
       });
 
-    /** Stops a subscription's check, and drops what its last one found. */
-    const dropCandidate = (id: string) =>
+    /**
+     * Stops a subscription's check, waiting until it has ended, and drops what its last one
+     * found: in its turn, so no use of it is half way.
+     */
+    const dropCandidate = (subscription: Pick<GuideSubscription, "id">) =>
       Effect.gen(function* () {
+        const { id } = subscription;
         const running = checking.get(id);
         checking.delete(id);
         if (running) yield* Fiber.interrupt(running.fiber);
-        const candidate = candidates.get(id);
-        candidates.delete(id);
-        if (candidate) yield* discard(candidate.subscription, candidate.file);
+        yield* turn(
+          id,
+          Effect.sync(() => {
+            const candidate = candidates.get(id);
+            candidates.delete(id);
+            candidate?.release();
+          }),
+        );
       });
 
     /**
      * Downloads the guide at `address` and says what it found, changing nothing but the
-     * subscription's candidate.
+     * subscription's candidate, which holds its index until it is used or dropped.
      */
     const checked = (subscription: GuideSubscription, address: GuideAddress, started: number) =>
       Effect.gen(function* () {
         const { id } = subscription;
         const { config } = yield* settingsOf(subscription);
         const sameSource = config.external?.identity === address.identity;
-        const previous =
+        const found = yield* pinning(
+          subscription,
           sameSource && config.external?.document.kind === "index"
             ? config.external.document.file
-            : null;
-        const result = yield* pinning(
-          subscription,
-          previous,
-          fetchAndIndex(
-            subscription,
-            (signal) => addresses.fetch(address.href, signal),
-            { strict: true, previous },
-            () => {},
-          ),
-        );
-        if (!result) return yield* changed;
-        const { file, fetchedAt, summary } = result;
-        const found = yield* keepOrDiscard(
-          subscription,
-          file,
-          Effect.gen(function* () {
-            const channels = yield* catalogue
-              .channels(id)
-              .pipe(Effect.catchTag("Failed", () => Effect.succeed(null)));
-            if (generationOf(id) !== started || !same(subscription, yield* savedAs(id))) {
-              return null;
-            }
-            // By the channels' own guide ids: what the guide covers before anything is mapped.
-            let matched = 0;
-            if (channels) {
-              const at = yield* Clock.currentTimeMillis;
-              yield* keeping(subscription, { file, fetchedAt }, (guide) =>
-                Effect.sync(() => {
-                  matched = channelsCovered(guide.index, channels, at);
-                  return null;
-                }),
-              );
-            }
-            const candidate: Candidate = {
-              id: randomUUID(),
+            : null,
+          (previous) =>
+            fetchAndIndex(
               subscription,
-              generation: started,
-              address,
-              file,
-              fetchedAt,
-            };
-            candidates.set(id, candidate);
-            return {
-              id: candidate.id,
-              origin: address.origin,
-              guideChannels: summary.channels,
-              matched,
-              listed: channels?.all.length ?? 0,
-              until: summary.until ?? fetchedAt,
-              sameSource,
-            } satisfies GuideCandidate;
-          }),
+              (signal) => addresses.fetch(address.href, signal),
+              { strict: true, previous },
+              () => {},
+              ({ file, fetchedAt, summary }) =>
+                Effect.gen(function* () {
+                  const channels = yield* catalogue
+                    .channels(id)
+                    .pipe(Effect.catchTag("Failed", () => Effect.succeed(null)));
+                  // By the channels' own guide ids: what the guide covers before anything is mapped.
+                  const at = yield* Clock.currentTimeMillis;
+                  const matched = channels
+                    ? yield* opening(subscription, { file, fetchedAt }, ({ index }) =>
+                        Effect.sync(() => channelsCovered(index, channels, at)),
+                      )
+                    : 0;
+                  const candidate = yield* turn(
+                    id,
+                    Effect.gen(function* () {
+                      if (generationOf(id) !== started || !same(subscription, yield* savedAs(id))) {
+                        return null;
+                      }
+                      const release = files.claim(subscription.store, file);
+                      if (!release) return null;
+                      const candidate: Candidate = {
+                        id: randomUUID(),
+                        subscription,
+                        generation: started,
+                        address,
+                        file,
+                        fetchedAt,
+                        release,
+                      };
+                      candidates.get(id)?.release();
+                      candidates.set(id, candidate);
+                      return candidate;
+                    }),
+                  );
+                  if (!candidate) return null;
+                  return {
+                    id: candidate.id,
+                    origin: address.origin,
+                    guideChannels: summary.channels,
+                    matched,
+                    listed: channels?.all.length ?? 0,
+                    until: summary.until ?? fetchedAt,
+                    sameSource,
+                  } satisfies GuideCandidate;
+                }),
+            ),
         );
         return found ?? (yield* changed);
       }).pipe(downloadOne, diagnosed("guide"));
@@ -1362,8 +1391,8 @@ function make() {
           .pipe(Effect.catchTag("Failed", () => Effect.succeed(null)));
         if (!base) return null;
         const { mappings } = (yield* settingsOf(subscription)).config;
-        const kept = overlays.get(id);
-        if (kept?.base === base && kept.mappings === mappings) return kept.channels;
+        const overlay = overlays.get(id);
+        if (overlay?.base === base && overlay.mappings === mappings) return overlay.channels;
         const channels = mappedChannels(base, mappings);
         overlays.set(id, { base, mappings, channels });
         return channels;
@@ -1371,28 +1400,43 @@ function make() {
 
     /**
      * Runs `read` on a subscription's loaded guide, with its catalogue's channels and the time,
-     * holding the guide's index from before anything else is waited for until `read` is done: a
-     * guide that takes its place meanwhile retires it, and it closes only after. Null without a
-     * guide or a catalogue.
+     * reading its index under a claim of its own taken before anything else is waited for and
+     * let go of once `read` is done: a guide that takes its place meanwhile leaves this one open
+     * until then. Null without a guide or a catalogue.
      */
     const withContext = <A, E>(
       subscription: GuideSubscription,
       read: (found: Found) => Effect.Effect<A, E>,
     ): Effect.Effect<A | null, E> =>
       Effect.gen(function* () {
-        // The guide current then: one retired as it was read is closed, and the next is current.
-        for (let tries = 0; tries < 3; tries++) {
-          const guide = yield* current(subscription);
-          if (!guide) return null;
-          const letGo = guide.index.hold();
-          if (!letGo) continue;
-          return yield* Effect.gen(function* () {
-            const channels = yield* channelsOf(subscription);
-            if (!channels) return null;
-            return yield* read({ guide, channels, at: yield* Clock.currentTimeMillis });
-          }).pipe(Effect.ensuring(Effect.sync(letGo)));
-        }
-        return null;
+        const guide = yield* current(subscription);
+        const reader = guide && files.share(subscription.store, guide.file);
+        if (!guide || !reader) return null;
+        return yield* Effect.gen(function* () {
+          const channels = yield* channelsOf(subscription);
+          if (!channels) return null;
+          return yield* read({
+            guide,
+            path: store.path(subscription, guide.file),
+            channels,
+            at: yield* Clock.currentTimeMillis,
+          });
+        }).pipe(Effect.ensuring(Effect.sync(reader.release)));
+      });
+
+    /**
+     * A search in the search worker, answering `fallback` when it fails. Stopped, it waits for
+     * the worker's answer all the same, so the file it reads is held until the worker is done.
+     */
+    const searching = <A>(search: () => Promise<A>, fallback: A) =>
+      Effect.suspend(() => {
+        const answer = search().catch((cause: unknown) => {
+          console.warn("[guide] a search failed", cause);
+          return fallback;
+        });
+        return Effect.promise(() => answer).pipe(
+          Effect.onInterrupt(() => Effect.promise(() => answer)),
+        );
       });
 
     /**
@@ -1506,12 +1550,20 @@ function make() {
           const matches: ProgrammeMatch[] = [];
           let at = 0;
           for (const subscription of yield* source.saved) {
-            // Each guide's own first fifty hold every one of the first fifty of them all. Held
-            // until they are read whole.
+            // Each guide's own first fifty hold every one of the first fifty of them all.
             const found = yield* withContext(subscription, (context) =>
               Effect.map(
-                Effect.promise(() =>
-                  searchAt(context.guide.index, context.channels, query, context.at),
+                searching(
+                  () =>
+                    searchAt(
+                      context.guide.index,
+                      context.path,
+                      context.channels,
+                      query,
+                      context.at,
+                      searcher,
+                    ),
+                  [],
                 ),
                 (programmes) => ({ at: context.at, programmes }),
               ),
@@ -1527,8 +1579,19 @@ function make() {
         }),
       searchChannels: (query: string, channels: readonly OwnedId[], until: number) =>
         perChannel(channels, (found, ids) =>
-          Effect.promise(() =>
-            searchChannelsAt(found.guide.index, found.channels, ids, query, found.at, until),
+          searching(
+            () =>
+              searchChannelsAt(
+                found.guide.index,
+                found.path,
+                found.channels,
+                ids,
+                query,
+                found.at,
+                until,
+                searcher,
+              ),
+            {},
           ),
         ),
       status: Effect.flatMap(source.saved, (saved) => Effect.forEach(saved, statusOf)),
@@ -1544,7 +1607,7 @@ function make() {
           const again = typed.trim() === "" && config.external !== null;
           const address = guideAddress(again ? (inUse ?? "") : typed);
           if (!address) return yield* failed({ kind: again ? "locked" : "address" });
-          yield* dropCandidate(id);
+          yield* dropCandidate(subscription);
           const token = {};
           const fiber = yield* Effect.forkIn(
             checked(subscription, address, generationOf(id)).pipe(
@@ -1560,7 +1623,7 @@ function make() {
           return yield* joined(fiber, { kind: "cancelled" });
         }),
 
-      cancelCheck: (subscriptionId: string) => dropCandidate(subscriptionId),
+      cancelCheck: (subscriptionId: string) => dropCandidate({ id: subscriptionId }),
 
       use: (subscriptionId: string, candidateId: string) =>
         Effect.gen(function* () {
@@ -1574,14 +1637,14 @@ function make() {
             candidate.generation === generationOf(id);
           /** Drops the candidate, unless a later check already took its place. */
           const dropped = Effect.suspend(() =>
-            candidates.get(id) === candidate ? dropCandidate(id) : Effect.void,
+            candidates.get(id) === candidate ? dropCandidate(subscription) : Effect.void,
           );
           if (!stands()) return yield* Effect.andThen(dropped, changed);
           const { address, file, fetchedAt } = candidate;
           const now = yield* Clock.currentTimeMillis;
-          // The candidate becomes the guide only once what is set names it; until then, failing
-          // or stopped, it closes again.
-          const before = yield* keeping(subscription, { file, fetchedAt }, (guide) =>
+          // The candidate's index becomes the guide only once what is set names it; it stays
+          // open for this use, whatever drops the candidate meanwhile.
+          const before = yield* opening(subscription, { file, fetchedAt }, ({ adopt }) =>
             Effect.gen(function* () {
               const sealedAddress = yield* addresses.seal(address.href);
               return yield* change(
@@ -1593,6 +1656,7 @@ function make() {
                   const sameSource = previous?.identity === address.identity;
                   return Effect.succeed({
                     key: was.key,
+                    own: was.own,
                     address: address.href,
                     config: {
                       external: {
@@ -1610,16 +1674,15 @@ function make() {
                 },
                 () => {
                   candidates.delete(id);
+                  candidate.release();
                   turned(id);
-                  loaded.set(id, guide);
+                  setLoaded(id, adopt());
                 },
               );
             }),
           );
           if (!before) return yield* Effect.andThen(dropped, changed);
           yield* stopDownload(id);
-          const replaced = before.config.external?.document.file;
-          if (replaced !== undefined) yield* discardLater(subscription, replaced);
           yield* published;
           return yield* statusOf(subscription);
         }),
@@ -1631,14 +1694,13 @@ function make() {
           const before = yield* change(
             subscription,
             generationOf(id),
-            (was) => Effect.succeed({ key: was.key, address: null, config: NOTHING_SET }),
+            (was) =>
+              Effect.succeed({ key: was.key, own: was.own, address: null, config: NOTHING_SET }),
             () => turned(id),
           );
           if (!before) return yield* changed;
-          yield* dropCandidate(id);
+          yield* dropCandidate(subscription);
           yield* stopDownload(id);
-          const dropped = before.config.external?.document.file;
-          if (dropped !== undefined) yield* discardLater(subscription, dropped);
           yield* published;
           // Its own guide: what was kept of it while that still holds, else asked for now. One
           // that can't be had says why in its status.
@@ -1652,7 +1714,7 @@ function make() {
           const { id } = subscription;
           const started = generationOf(id);
           // Loads the guide where this run hasn't yet: the change reads it from memory.
-          const read = yield* kept(subscription);
+          const read = yield* keptGuide(subscription);
           if (!read || revision !== revisionOf(subscription)) return yield* changed;
           const before = yield* change(subscription, started, (was) =>
             Effect.gen(function* () {
@@ -1739,22 +1801,22 @@ function make() {
       forget: (subscription: Pick<GuideSubscription, "id" | "store">) =>
         Effect.gen(function* () {
           const { id } = subscription;
-          turned(id);
-          overlays.delete(id);
-          yield* stopDownload(id);
-          yield* dropCandidate(id);
-          // After whatever change still had its turn: nothing of it is left, and none comes later.
-          yield* setOne(
-            Effect.gen(function* () {
+          // In its turn: whatever change still had one is done, and none after it applies.
+          yield* turn(
+            id,
+            Effect.sync(() => {
+              turned(id);
+              overlays.delete(id);
               settings.delete(id);
-              // Once nothing reads its files, held or built from.
-              yield* Effect.promise(() => Promise.all(closing.values()));
-              yield* Effect.forEach(pinnedIn(subscription), (name) =>
-                unused(store.path(subscription, name)),
-              );
-              yield* store.erase(subscription);
+              keep(subscription, null);
+              kept.delete(id);
             }),
           );
+          yield* stopDownload(id);
+          yield* dropCandidate(subscription);
+          // Once no file of it is held or going, nothing of it is left to write or read.
+          yield* Effect.promise(() => files.settled(subscription.store));
+          yield* turn(id, store.erase(subscription));
         }),
       changes: Stream.fromPubSub(updates),
     };

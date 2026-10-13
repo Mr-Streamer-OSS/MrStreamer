@@ -4,9 +4,9 @@
 // @mrstreamer/core/guide/index-file), named by one small record: the own guide's, the
 // provider's or the one its playlist names, by guide.json with the account and time it belongs
 // to; an XMLTV address of the viewer's own by guide-source.json, sealed, with the channels mapped
-// by hand. A switch is one write of that small file: cut short, it leaves the one before whole,
-// and an index nothing names is swept away, as is a download (guide-download.<id>.part) that
-// was never indexed.
+// by hand. A switch is one write of that small file: cut short, it leaves the one before whole.
+// The service decides when a file goes (core/guide/files.ts); its sweep, at the first start of a
+// guide each run, takes the indexes and downloads (guide-download.<id>.part) it doesn't know.
 //
 // Releases before 0.0.13 kept the documents themselves: guide.xml, named by a guide.json without
 // an index, and guide-external.<id>.xml, named by guide-source.json. They are read as such and
@@ -161,10 +161,9 @@ export const guideStoreLayer: Layer.Layer<GuideStore> = Layer.succeed(GuideStore
       },
       catch: failedWith,
     }),
-  download: ({ store }) =>
+  download: ({ store }, name) =>
     Effect.tryPromise({
       try: async () => {
-        const name = `guide-download.${randomUUID()}.part`;
         const path = join(store, name);
         // Fails where the folder went: nothing is kept for a subscription that did.
         const file = await open(path, "wx");
@@ -188,13 +187,24 @@ export const guideStoreLayer: Layer.Layer<GuideStore> = Layer.succeed(GuideStore
       },
       catch: failedWith,
     }),
+  newDownload: () => `guide-download.${randomUUID()}.part`,
   newIndex: () => `guide-index.${randomUUID()}.sqlite`,
   path: ({ store }, file) => join(store, file),
-  discard: ({ store }, file) => Effect.promise(() => removeFile(join(store, file))),
-  sweep: ({ store }, keep) =>
+  discard: ({ store }, file) =>
+    Effect.promise(() =>
+      removeFile(join(store, file)).catch((cause: unknown) =>
+        console.warn("[guide] a file left for the next sweep", cause),
+      ),
+    ),
+  sweep: ({ store }, known) =>
     Effect.promise(async () => {
-      const others = (await guideFilesIn(store)).filter((name) => !keep.includes(name));
-      await Promise.all(others.map((name) => removeFile(join(store, name))));
+      for (const name of await guideFilesIn(store)) {
+        // Asked just before it goes: work that began meanwhile claims its files first.
+        if (known(name)) continue;
+        await removeFile(join(store, name)).catch((cause: unknown) =>
+          console.warn("[guide] a file left for the next sweep", cause),
+        );
+      }
     }),
   erase: ({ store }) =>
     Effect.promise(async () => {

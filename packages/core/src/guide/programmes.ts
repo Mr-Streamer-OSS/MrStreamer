@@ -17,7 +17,7 @@ import type {
 } from "@mrstreamer/contracts/guide";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { normalize, searchWords } from "../text.ts";
-import type { FoundProgramme, GuideIndex, IndexedChannel } from "./index-file.ts";
+import type { GuideIndex, GuideSearching, IndexedChannel } from "./index-file.ts";
 
 /** How many programmes a search returns. */
 export const SEARCH_LIMIT = 50;
@@ -186,44 +186,30 @@ export function rangeAt(
 
 /**
  * Programmes on now or later whose title has every word of `query`, on the first channel in the
- * catalogue that shows them. On now comes first, then by start time. The caller holds the index
- * throughout: the programmes found are read whole at the end.
+ * catalogue that shows them. On now comes first, then by start time. `search` reads the index's
+ * file, at `path`, away from the main process; the caller keeps the file until it answers.
  */
 export async function searchAt(
   index: GuideIndex,
+  path: string,
   channels: GuideChannels,
   query: string,
   at: number,
+  search: GuideSearching,
 ): Promise<readonly ProgrammeMatch[]> {
   const words = searchWords(query);
   if (words.length === 0) return [];
   const shown = searchable(index, channels, at);
-  /** The best found so far, best first: on now, then by start time. */
-  const best: { readonly found: FoundProgramme; readonly channel: LiveChannel }[] = [];
-  const rank = (found: FoundProgramme) => (found.start <= at ? 0 : 1);
-  const before = (a: FoundProgramme, b: FoundProgramme) =>
-    rank(a) - rank(b) || a.start - b.start || a.channel - b.channel;
-  await index.matching(
-    {
-      words,
-      at,
-      channels: new Set(shown.keys()),
-      // Once fifty are in, only one that starts before the last of them can take its place.
-      before: () => best.at(SEARCH_LIMIT - 1)?.found.start ?? Number.POSITIVE_INFINITY,
-    },
-    (found) => {
-      const channel = shown.get(found.channel);
-      if (!channel) return;
-      let place = best.length;
-      while (place > 0 && before(found, best[place - 1]!.found) < 0) place--;
-      if (place >= SEARCH_LIMIT) return;
-      best.splice(place, 0, { found, channel });
-      if (best.length > SEARCH_LIMIT) best.pop();
-    },
-  );
-  return best.flatMap(({ found, channel }) => {
-    const programme = index.programme(found);
-    return programme ? [{ channel, programme }] : [];
+  const found = await search.first({
+    path,
+    words,
+    at,
+    channels: [...shown.keys()],
+    limit: SEARCH_LIMIT,
+  });
+  return found.flatMap(({ channel, programme }) => {
+    const shownOn = shown.get(channel);
+    return shownOn ? [{ channel: shownOn, programme }] : [];
   });
 }
 
@@ -260,15 +246,18 @@ const shownBy = new WeakMap<
  * one on now has every word in its title, and the first later one starting before `until` that
  * does. Channels without a match are left out. Every channel given is searched, on the guide id
  * it shows, so channels that share one are each found and nothing is cut off; those for adults
- * count like any other, as a list holds them only while the catalogue shows them.
+ * count like any other, as a list holds them only while the catalogue shows them. `search` reads
+ * the index's file, at `path`, away from the main process.
  */
 export async function searchChannelsAt(
   index: GuideIndex,
+  path: string,
   channels: GuideChannels,
   channelIds: readonly string[],
   query: string,
   at: number,
   until: number,
+  search: GuideSearching,
 ): Promise<Record<string, ListingMatch>> {
   const words = searchWords(query);
   if (words.length === 0) return {};
@@ -280,20 +269,11 @@ export async function searchChannelsAt(
     if (ids) ids.push(channelId);
     else showing.set(shown.key, [channelId]);
   }
-  const found = new Map<number, { now: boolean; later: FoundProgramme | null }>();
-  await index.matching(
-    { words, at, channels: new Set(showing.keys()), before: () => until },
-    (programme) => {
-      const match = found.get(programme.channel) ?? { now: false, later: null };
-      if (programme.start <= at) match.now = true;
-      else if (!match.later || programme.start < match.later.start) match.later = programme;
-      found.set(programme.channel, match);
-    },
-  );
+  if (showing.size === 0) return {};
+  const found = await search.each({ path, words, at, until, channels: [...showing.keys()] });
   const result: Record<string, ListingMatch> = {};
-  for (const [key, { now, later }] of found) {
-    const match = { now, later: later && { start: later.start, title: later.title } };
-    for (const channelId of showing.get(key) ?? []) result[channelId] = match;
+  for (const { channel, now, later } of found) {
+    for (const channelId of showing.get(channel) ?? []) result[channelId] = { now, later };
   }
   return result;
 }
