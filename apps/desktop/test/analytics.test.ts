@@ -1261,6 +1261,151 @@ describe("confirmed daily playback measurements", () => {
     await vi.advanceTimersByTimeAsync(0);
   }
 
+  it("measures receiver replay with a fresh load control and rejects the old load's facts", async () => {
+    playbackClock();
+    const { owner, events } = await measuring();
+    const first = owner.beginPlayback("vod")!;
+    const old = owner.remotePlayback("vod", first);
+    for (let i = 0; i < 20; i++) {
+      old.state("playing");
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    old.state("stopped");
+    const replay = owner.beginPlayback("vod")!;
+    const fresh = owner.remotePlayback("vod", replay);
+    old.state("playing");
+    old.failure("credentials");
+    for (let i = 0; i < 20; i++) {
+      fresh.state("playing");
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    fresh.failure("network");
+    fresh.failure("network");
+    fresh.stop();
+    owner.endPlayback(replay);
+    await complete(owner);
+    expect(events.find((event) => event.event === "app_summary_day")).toMatchObject({
+      properties: {
+        counts: {
+          playback: {
+            vod: {
+              starts: 2,
+              errors: 1,
+              watch_minutes: 1,
+              failures: { network: 1, credentials: 0 },
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it.each(["consent", "dimensions"] as const)(
+    "resolves fresh receiver open failures after %s reset but rejects callbacks created before the reset",
+    async (reset) => {
+      playbackClock();
+      const { owner, events } = await measuring();
+      await until(() => events.length === 2);
+      const control = owner.beginPlayback("vod")!;
+      const remote = owner.remotePlayback("vod", control);
+      remote.state("playing");
+      const stale = owner.playbackFailureObserver(control);
+      if (reset === "consent") {
+        await owner.configure(false);
+        await owner.configure(true);
+        await vi.advanceTimersByTimeAsync(0);
+      } else {
+        owner.setUpdateChannel("nightly");
+        owner.setUpdateChannel("stable");
+      }
+      remote.state("playing");
+      remote.stop();
+      stale("credentials");
+      owner.playbackFailureObserver(control)("network");
+      owner.playbackFailureObserver(control)("network");
+      await complete(owner);
+      const summaries = events.filter((event) => event.event === "app_summary_day");
+      expect(summaries.at(-1)).toMatchObject({
+        properties: {
+          counts: {
+            playback: {
+              vod: {
+                starts: 0,
+                errors: 1,
+                failures: { network: 1, credentials: 0 },
+              },
+            },
+          },
+        },
+      });
+    },
+  );
+
+  it.each(["consent", "dimensions", "end"] as const)(
+    "rejects a delayed closed-binding failure after %s reset",
+    async (reset) => {
+      playbackClock();
+      const { owner, events } = await measuring();
+      await until(() => events.length === 2);
+      const token = owner.beginPlayback("live")!;
+      const closed = new AbortController();
+      const binding = owner.bindPlayback(token, "local", "live", closed.signal)!;
+      owner.notePlaybackState(token, binding, 1, "playing");
+      closed.abort();
+      if (reset === "consent") {
+        await owner.configure(false);
+        await owner.configure(true);
+        await vi.advanceTimersByTimeAsync(0);
+      } else if (reset === "dimensions") {
+        owner.setUpdateChannel("nightly");
+        owner.setUpdateChannel("stable");
+      } else owner.endPlayback(token);
+      owner.beginPlayback("live", true);
+      owner.notePlaybackFailure(token, binding, "credentials");
+      owner.noteFeature("home");
+      await complete(owner);
+      expect(events.filter((event) => event.event === "app_summary_day").at(-1)).toMatchObject({
+        properties: { counts: { playback: { live: { errors: 0, failures: { credentials: 0 } } } } },
+      });
+    },
+  );
+
+  it("exports late terminal failure once, excluding closed generations after a newer bind and run", async () => {
+    playbackClock();
+    const { owner, events } = await measuring();
+    const token = owner.beginPlayback("live")!;
+    const closed = new AbortController();
+    const first = owner.bindPlayback(token, "local", "live", closed.signal)!;
+    owner.notePlaybackState(token, first, 1, "playing");
+    closed.abort();
+    await Promise.resolve();
+    owner.notePlaybackFailure(token, first, "network");
+    owner.notePlaybackFailure(token, first, "network");
+    const replacement = owner.bindPlayback(token, "local")!;
+    owner.notePlaybackState(token, replacement, 1, "playing");
+    owner.notePlaybackFailure(token, first, "credentials");
+    owner.stopPlaybackBinding(replacement);
+    owner.notePlaybackFailure(token, first, "credentials");
+    owner.notePlaybackFailure(token, replacement, "unsupported");
+    const fresh = owner.beginPlayback("live")!;
+    owner.notePlaybackFailure(token, replacement, "credentials");
+    owner.endPlayback(fresh);
+    await complete(owner);
+    expect(events.find((event) => event.event === "app_summary_day")).toMatchObject({
+      properties: {
+        counts: {
+          playback: {
+            live: {
+              starts: 1,
+              errors: 2,
+              failures: { network: 1, unsupported: 1, credentials: 0 },
+            },
+          },
+        },
+      },
+    });
+  });
+
   it("requires confirmed playback, rounds many intervals once, and keeps one start across replacement and output moves", async () => {
     playbackClock();
     const { owner, events } = await measuring();

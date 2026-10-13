@@ -864,6 +864,7 @@ async function start(): Promise<void> {
         ),
       "output.playTitle": ({
         sessionId,
+        measurement,
         position,
         audio,
         subtitle,
@@ -873,6 +874,7 @@ async function start(): Promise<void> {
         artworkUrl,
       }) =>
         output.playTitle(sessionId, {
+          measurement,
           position,
           audio,
           subtitle,

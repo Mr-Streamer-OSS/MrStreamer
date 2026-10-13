@@ -316,6 +316,7 @@ export const ipcInputs = {
   "output.playTitle": () =>
     type({
       sessionId: "string",
+      "measurement?": "string.uuid",
       /** Seconds into the title to start at. */
       position: "number >= 0",
       audio: "number.integer >= 0 | null",

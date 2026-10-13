@@ -50,6 +50,20 @@ describe("committed fixed usage observations", () => {
     await viewing.setFavourite("same-channel", own, true);
     expect((await viewing.state()).favourites.length).toBeGreaterThan(0);
     expect(actions.filter((key) => key === "favourite_added")).toHaveLength(1);
+    const other = (await library.channels({})).find((candidate) => candidate.id !== channel.id)!;
+    await viewing.setFavourite("other", { subscriptionId: source.id, id: other.id }, true);
+    const original = (await viewing.state()).favourites;
+    const order = original.toReversed();
+    expect((await viewing.reorderFavourites("reorder", { original, order })).favourites).toEqual(
+      order,
+    );
+    await viewing.reorderFavourites("reorder", { original, order });
+    await viewing.reorderFavourites("already-ordered", { original: order, order });
+    expect(actions.filter((key) => key === "favourite_added")).toHaveLength(2);
+    await viewing.setFavourite("remove", own, false);
+    expect(actions.filter((key) => key === "favourite_added")).toHaveLength(2);
+    await viewing.setFavourite("re-add", own, true);
+    expect(actions.filter((key) => key === "favourite_added")).toHaveLength(3);
     await preferences.update({
       autoplayNext: true,
       titleLanguage: "en",

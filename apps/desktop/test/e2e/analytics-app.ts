@@ -82,6 +82,7 @@ const updateFeed = createServer((_req, res) => {
 });
 const actions: { action: string; at: string }[] = [];
 const observations: Record<string, unknown> = {};
+const pointerInputs: Record<string, unknown>[] = [];
 const log: string[] = [];
 let app: ChildProcess | undefined;
 let page: Page | undefined;
@@ -202,22 +203,82 @@ async function quit() {
   mainPage = undefined;
 }
 
-/** Pointer input, with the element located from the current DOM rather than guessed coordinates. */
-async function click(selector: string, index = 0) {
-  const element = `document.querySelectorAll(${JSON.stringify(selector)})[${index}]`;
-  await waitFor(() => live().evaluate<boolean>(`!!(${element})`));
-  await live().evaluate(`${element}.scrollIntoView({block:'center'})`);
-  const point = await live().evaluate<{ x: number; y: number }>(
-    `(() => { const r=${element}.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`,
-  );
-  await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
-  for (const event of ["mousePressed", "mouseReleased"])
+/** Re-resolve named targets and require settled geometry and a hit before actual pointer input. */
+async function click(selector: string, index = 0, match?: { name: string; title: boolean }) {
+  const elements = `[...document.querySelectorAll(${JSON.stringify(selector)})]`;
+  const element = match
+    ? `${elements}.find(b => ${match.title ? `b.title.includes(${JSON.stringify(match.name)})` : `b.textContent.trim() === ${JSON.stringify(match.name)}`})`
+    : `${elements}[${index}]`;
+  const frame = `new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`;
+  let point = { x: 0, y: 0 };
+  await waitFor(async () => {
+    if (!(await live().evaluate<boolean>(`!!(${element})`))) return false;
+    await live().evaluate(`(async () => {
+      (${element}).scrollIntoView({behavior:'instant',block:'center'});
+      await ${frame};
+    })()`);
+    const before = await live().evaluate<{ x: number; y: number }>(
+      `(() => { const r=(${element}).getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`,
+    );
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...before });
+    // Hover, scrolling and the preceding action can all change layout. Check again before down.
+    const settled = await live().evaluate<{ x: number; y: number } | null>(`(async () => {
+      await ${frame};
+      const target=(${element});
+      if (!target || target.disabled || target.getAttribute('aria-disabled') === 'true') return null;
+      const r=target.getBoundingClientRect(), x=r.x+r.width/2, y=r.y+r.height/2;
+      const hit=document.elementFromPoint(x,y);
+      if (r.width<=0 || r.height<=0 || Math.abs(x-${before.x})>.25 || Math.abs(y-${before.y})>.25 || !hit || !target.contains(hit)) return null;
+      const describe=e => e ? {tag:e.tagName, text:(e.textContent||'').trim().slice(0,80), title:e.getAttribute('title'), label:e.getAttribute('aria-label')} : null;
+      window.__analyticsPointer={intended:describe(target), hit:describe(hit), point:{x,y}, actual:null};
+      const down=e => {
+        const matched=e.target instanceof Node && target.contains(e.target);
+        window.__analyticsPointer.actual={target:describe(e.target), x:e.clientX, y:e.clientY, matched};
+        if (!matched) { e.preventDefault(); e.stopImmediatePropagation(); }
+      };
+      const guard=e => {
+        if (!window.__analyticsPointer.actual?.matched) { e.preventDefault(); e.stopImmediatePropagation(); }
+      };
+      document.addEventListener('mousedown',down,{capture:true,once:true});
+      document.addEventListener('click',guard,true);
+      window.__analyticsPointerCleanup=() => {
+        document.removeEventListener('mousedown',down,true);
+        document.removeEventListener('click',guard,true);
+      };
+      return {x,y};
+    })()`);
+    if (!settled) return false;
+    point = settled;
+    return true;
+  });
+  try {
     await send("Input.dispatchMouseEvent", {
-      type: event,
+      type: "mousePressed",
       ...point,
       button: "left",
       clickCount: 1,
     });
+  } finally {
+    await send("Input.dispatchMouseEvent", {
+      type: "mouseReleased",
+      ...point,
+      button: "left",
+      clickCount: 1,
+    });
+  }
+  const input = await live().evaluate<{ actual: { matched: boolean } | null }>(`(() => {
+    window.__analyticsPointerCleanup();
+    return window.__analyticsPointer;
+  })()`);
+  pointerInputs.push({
+    selector,
+    index: match ? undefined : index,
+    match,
+    at: new Date().toISOString(),
+    ...input,
+  });
+  if (!input.actual?.matched)
+    throw new Error(`Pointer target changed before pressing ${match?.name ?? selector}.`);
 }
 
 async function settings() {
@@ -278,9 +339,7 @@ async function keyEscape() {
 }
 
 async function namedButton(selector: string, name: string, title = false) {
-  const expression = `[...document.querySelectorAll(${JSON.stringify(selector)})].findIndex(b => ${title ? `b.title.includes(${JSON.stringify(name)})` : `b.textContent.trim() === ${JSON.stringify(name)}`})`;
-  await waitFor(async () => (await live().evaluate<number>(expression)) >= 0);
-  await click(selector, await live().evaluate<number>(expression));
+  await click(selector, 0, { name, title });
   actions.push({ action: `Pressed ${name}`, at: new Date().toISOString() });
 }
 
@@ -816,6 +875,7 @@ try {
         status: failure ? "failed" : "passed",
         error: failure instanceof Error ? failure.message : undefined,
         actions,
+        pointerInputs,
         scenario: "analytics",
         build: packagedExecutable ? undefined : build,
         verificationSource: packagedExecutable ? build : undefined,

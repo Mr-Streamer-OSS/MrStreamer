@@ -792,11 +792,12 @@ async function loadOnReceiver(start: number, paused = false): Promise<void> {
   confirmedMedia = null;
   store.setState({ phase: { kind: "starting" }, position: start, confirmed: null });
   try {
-    await observation.ready();
+    const measurement = await observation.ready();
     if (mine !== generation || !receiver) return;
     observation.remote();
     const media = await call("output.playTitle", {
       sessionId: receiver.sessionId,
+      ...(measurement ? { measurement } : {}),
       position: start,
       audio: audioId,
       subtitle: subtitle?.id ?? null,

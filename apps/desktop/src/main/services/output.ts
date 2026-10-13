@@ -213,6 +213,7 @@ export class Output extends Context.Service<
         readonly subtitle: number | null;
         readonly paused?: boolean | undefined;
         readonly shown: Shown;
+        readonly measurement?: string | undefined;
       },
     ): Effect.Effect<RemoteMedia, Failed>;
     /** Tells the receiver. Does nothing when `generation` is no longer what it plays. */
@@ -905,6 +906,7 @@ function make(deps: OutputDeps) {
           readonly subtitle: number | null;
           readonly paused?: boolean | undefined;
           readonly shown: Shown;
+          readonly measurement?: string | undefined;
         },
       ) =>
         one(
@@ -937,7 +939,7 @@ function make(deps: OutputDeps) {
                 subtitles: loaded.subtitles,
               },
               options.shown,
-              title.measurement,
+              options.measurement ?? title.measurement,
             );
           }),
         ),

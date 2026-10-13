@@ -65,6 +65,8 @@ export class Analytics {
     output: "local" | "remote";
     sequence: number;
   } | null = null;
+  // One just-closed generation may report its terminal failure after synchronous teardown.
+  private lastClosedBinding: string | null = null;
   private bindingClosed: { signal: AbortSignal; listener: () => void } | null = null;
   private interval: { wall: number; mono: number; until: number } | null = null;
   private readonly store: ReturnType<typeof analyticsStore>;
@@ -268,6 +270,7 @@ export class Analytics {
     this.clearBindingListener();
     if (closed?.aborted) return null;
     const binding = randomUUID();
+    this.lastClosedBinding = null;
     this.binding = { token: binding, output, sequence: -1 };
     this.interval = null;
     if (closed) {
@@ -324,7 +327,10 @@ export class Analytics {
   notePlaybackFailure(token: string, binding: string | null, failure: SummaryFailure): void {
     if (
       this.run?.token !== token ||
-      (binding === null ? this.binding !== null : this.binding?.token !== binding) ||
+      (binding === null
+        ? this.binding !== null
+        : this.binding?.token !== binding &&
+          (this.binding !== null || this.lastClosedBinding !== binding)) ||
       this.run.incident ||
       !this.run.eligible ||
       !this.canCapture() ||
@@ -352,6 +358,7 @@ export class Analytics {
     if (this.binding?.token !== binding) return;
     this.settlePlayback();
     this.clearBindingListener();
+    this.lastClosedBinding = binding;
     this.binding = null;
     this.interval = null;
   }
@@ -407,6 +414,7 @@ export class Analytics {
   private invalidatePlayback(): void {
     this.clearBindingListener();
     this.run = null;
+    this.lastClosedBinding = null;
     this.binding = null;
     this.interval = null;
   }
@@ -456,7 +464,12 @@ export class Analytics {
   }
 
   /** A terminal result can count only in the enabled generation that observed its start. */
-  playbackFailureObserver(token: string | undefined): (failure: SummaryFailure) => void {
+  playbackFailureObserver(control: string | undefined): (failure: SummaryFailure) => void {
+    // Resolve a receiver alias now, then retain the exact run through asynchronous completion.
+    const token =
+      control && (this.run?.token === control || this.run?.remoteControl === control)
+        ? this.run.token
+        : null;
     return (failure) => {
       if (token) this.notePlaybackFailure(token, null, failure);
     };

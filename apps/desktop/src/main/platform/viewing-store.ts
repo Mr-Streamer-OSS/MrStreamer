@@ -838,7 +838,18 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
           const events = decide(read(accounts), look);
           // Thrown, so the transaction ends with nothing written.
           if (events instanceof Failed) throw events;
-          favouriteAdded = events.some(({ event }) => event.type === "favourite-added");
+          // Reordering writes remove/add pairs. Only a net addition is a viewer action.
+          const removed = new Map<string, Set<string>>();
+          for (const { account, event } of events) {
+            if (event.type !== "favourite-removed") continue;
+            const channels = removed.get(account) ?? new Set<string>();
+            channels.add(event.channelId);
+            removed.set(account, channels);
+          }
+          favouriteAdded = events.some(
+            ({ account, event }) =>
+              event.type === "favourite-added" && !removed.get(account)?.has(event.channelId),
+          );
           statements.receipt.run(commandId);
           return append(commandId, at, events);
         });

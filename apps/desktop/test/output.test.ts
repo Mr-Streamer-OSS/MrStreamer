@@ -1015,11 +1015,16 @@ describe.skipIf(!hasTools)("playback through the system's list of receivers", ()
 it.skipIf(!hasTools)(
   "projects receiver-confirmed states through the active load only, without counting preparation or accepting an old receiver generation",
   async () => {
-    const observations: { kind: string; states: string[]; failures: string[]; stops: number }[] =
-      [];
+    const observations: {
+      control: string | null;
+      kind: string;
+      states: string[];
+      failures: string[];
+      stops: number;
+    }[] = [];
     const { output, tv, connect, play } = await casting({
-      observePlayback: (kind) => {
-        const item = { kind, states: [] as string[], failures: [] as string[], stops: 0 };
+      observePlayback: (kind, control) => {
+        const item = { control, kind, states: [] as string[], failures: [] as string[], stops: 0 };
         observations.push(item);
         return {
           state: (state) => {
@@ -1035,14 +1040,22 @@ it.skipIf(!hasTools)(
       },
     });
     await connect();
-    await play(10);
+    const { opened } = await play(10);
     expect(observations).toHaveLength(1);
     expect(observations[0]?.states).not.toContain("playing");
     tv.status({ playerState: "PLAYING", currentTime: 12 });
     await eventually(() => expect(observations[0]?.states.at(-1)).toBe("playing"));
     tv.status({ playerState: "PAUSED", currentTime: 14 });
     await eventually(() => expect(observations[0]?.states.at(-1)).toBe("paused"));
-    await play(20);
+    const replay = "22222222-2222-4222-8222-222222222222";
+    await output.playTitle(opened.sessionId, {
+      position: 20,
+      audio: null,
+      subtitle: null,
+      shown: SHOWN,
+      measurement: replay,
+    });
+    expect(observations.map((item) => item.control)).toEqual([null, replay]);
     expect(observations).toHaveLength(2);
     expect(observations[0]?.stops).toBe(1);
     const oldCount = observations[0]!.states.length;

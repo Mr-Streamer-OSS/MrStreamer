@@ -1185,6 +1185,8 @@ export const player = {
 
   /** Stops and forgets the selected channel, for when the subscription changes. */
   reset(): void {
+    observation.end();
+    explicitlySelected = null;
     onReceiver = null;
     player.suspend();
     tuned = null;
