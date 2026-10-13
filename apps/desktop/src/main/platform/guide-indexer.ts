@@ -37,7 +37,14 @@ export function guideIndexerLayer(
     build: (build, progress, signal) =>
       new Promise<GuideIndexSummary>((resolve, reject) => {
         if (signal.aborted) return reject(signal.reason);
-        const worker = start({ workerData: build, resourceLimits: WORKER_LIMITS });
+        // Its own output, not piped to the main process's: starting it never sets that up, and
+        // what it has to say comes as a message.
+        const worker = start({
+          workerData: build,
+          resourceLimits: WORKER_LIMITS,
+          stdout: true,
+          stderr: true,
+        });
         let ended = false;
         /** Ends the worker once, and then settles: a worker stopped half way leaves no file. */
         const end = (settle: () => void, unfinished: boolean) => {

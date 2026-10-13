@@ -8,6 +8,7 @@
 // and without overlaps, as `timeline` below lays them out. Titles are kept once each, folded for
 // search, and the (title, start) index finds a search's programmes in time order without reading
 // the others.
+//
 // Ended programmes stay for the guide's archive window, so catch-up and a grid can show the
 // past; the next download of the same source brings along the past its document no longer
 // lists, on the channels it still has, and drops what fell out of the window.
@@ -61,6 +62,7 @@ export interface GuideBuild {
    * taken as it is sent, as it always was.
    */
   readonly strict: boolean;
+  /** What it is read under: `GUIDE_LIMITS`, unless a test reads under smaller ones. */
   readonly limits?: GuideLimits;
 }
 
@@ -131,15 +133,20 @@ export async function buildGuideIndex(
     const insertTitle = db.prepare("insert into title (text, folded) values (?, ?)");
     const findTitle = db.prepare("select key from title where text = ?");
     const titles = new Map<string, number>();
+    /** Whether `titles` holds every title written so far: then one it lacks is new. */
+    let whole = true;
     const titleKey = (text: string) => {
       const cached = titles.get(text);
       if (cached !== undefined) return cached;
-      const found = findTitle.get(text)?.["key"];
+      const found = whole ? undefined : findTitle.get(text)?.["key"];
       const key =
         typeof found === "number"
           ? found
           : Number(insertTitle.run(text, normalize(text)).lastInsertRowid);
-      if (titles.size === TITLE_CACHE) titles.clear();
+      if (titles.size === TITLE_CACHE) {
+        titles.clear();
+        whole = false;
+      }
       titles.set(text, key);
       return key;
     };
@@ -306,6 +313,7 @@ function finish(db: DatabaseSync) {
   db.exec(`
     commit;
     create index programme_title on programme (title, start);
+    create index channel_position on channel (position);
     insert into meta select count(*), max(stop), max(stop - start) from programme;
     pragma user_version = ${VERSION};
   `);
