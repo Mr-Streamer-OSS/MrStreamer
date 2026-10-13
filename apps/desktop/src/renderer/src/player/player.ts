@@ -393,7 +393,7 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
     return;
   }
   const mine = ++selection;
-  const measurementReady = observation.ready();
+  const measurement = preview ? null : observation.measurement();
   const first = recovery.reconnects === 0;
   // A stream nobody listens to, such as one a channel switch opens just after leaving Watch, is
   // a preview: it doesn't reconnect against another device.
@@ -418,7 +418,7 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
       // The sound in the viewer's language, when the channel has it; the original is its own.
       audioLanguage: preferred && preferred !== ORIGINAL_SOUND ? preferred : null,
     };
-    const measurement = preview ? null : await measurementReady;
+    if (!preview && mine !== selection) return;
     session = await call("playback.open", {
       ...(measurement ? { measurement } : {}),
       channel: ownedId(channel),
@@ -518,7 +518,7 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
  */
 async function startOnReceiver(channel: LiveChannel): Promise<void> {
   const mine = ++selection;
-  const measurementReady = observation.ready();
+  const measurement = observation.measurement();
   const first = recovery.reconnects === 0;
   quiet = false;
   if (first) tune(channel);
@@ -535,7 +535,6 @@ async function startOnReceiver(channel: LiveChannel): Promise<void> {
   try {
     const { audioId } = store.getState();
     const preferred = (await call("preferences.get").catch(() => null))?.audioLanguage;
-    const measurement = await measurementReady;
     if (mine !== selection) return;
     observation.remote();
     const media = await call("output.playChannel", {

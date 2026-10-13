@@ -7,6 +7,7 @@ import type {
   AnalyticsPlaybackState,
   AnalyticsFeature,
   AnalyticsSettings,
+  PlaybackControl,
 } from "@mrstreamer/contracts/analytics";
 import {
   AnalyticsRecord,
@@ -36,6 +37,15 @@ interface OperationGeneration {
   readonly dimensions: number;
 }
 
+interface PlaybackIntent {
+  readonly control: string;
+  readonly order: number;
+  readonly kind: AnalyticsPlaybackKind;
+  readonly frame: string;
+  ended: boolean;
+  remoteControl?: string | null;
+}
+
 interface AnalyticsOptions {
   readonly dataDir: string;
   readonly origin: Promise<ProfileOrigin>;
@@ -52,6 +62,7 @@ export class Analytics {
   private readonly monotonic: () => number;
   private readonly playbackReset: (() => void) | undefined;
   private playbackTimer: ReturnType<typeof setInterval> | undefined;
+  private intent: PlaybackIntent | null = null;
   private run: {
     token: string;
     kind: AnalyticsPlaybackKind;
@@ -59,6 +70,7 @@ export class Analytics {
     incident: boolean;
     eligible: boolean;
     remoteControl?: string | null;
+    intent?: PlaybackIntent;
   } | null = null;
   private binding: {
     token: string;
@@ -228,11 +240,59 @@ export class Analytics {
     });
   }
 
+  /** Admission uses the same hint whether its advisory RPC answered, failed or never arrived. */
+  admitPlayback(
+    kind: AnalyticsPlaybackKind,
+    hint: PlaybackControl | undefined,
+    frame: string | null,
+  ): string | null {
+    if (!hint || !frame || this.closing) return null;
+    const prior = this.intent;
+    if (prior && (prior.frame !== frame || hint.order < prior.order)) return null;
+    const fresh = !prior || hint.order > prior.order;
+    if (!fresh && (prior.control !== hint.control || prior.kind !== kind || prior.ended))
+      return null;
+    const intent: PlaybackIntent = fresh
+      ? { control: hint.control, order: hint.order, kind, frame, ended: false }
+      : prior;
+    this.intent = intent;
+    if (fresh && (!hint.ongoing || this.run?.kind !== kind)) {
+      this.beginPlayback(kind, hint.ongoing);
+    } else if (!this.run) {
+      // Recollection after consent/dimension reset belongs to the current continuation.
+      this.beginPlayback(kind, fresh ? hint.ongoing : true);
+    }
+    if (this.run?.kind !== kind) return null;
+    intent.remoteControl = this.run.remoteControl ?? null;
+    this.run.intent = intent;
+    return this.run.token;
+  }
+
+  /** Acceptance remains meaningful while consent is off and no run has been minted. */
+  isPlaybackControlCurrent(control: string, frame: string | null): boolean {
+    const intent = this.intent;
+    return !!intent && !intent.ended && intent.frame === frame && intent.control === control;
+  }
+
+  /** Resolve only the current trusted renderer control; callers retain this exact run token. */
+  controlledPlayback(control: string, frame: string | null): string | null {
+    return this.isPlaybackControlCurrent(control, frame) && this.run?.intent === this.intent
+      ? this.run.token
+      : null;
+  }
+
+  endControlledPlayback(control: string, frame: string | null): void {
+    const token = this.controlledPlayback(control, frame);
+    if (token) this.endPlayback(token);
+    else if (this.intent && this.isPlaybackControlCurrent(control, frame)) this.intent.ended = true;
+  }
+
   /** Logical intent is ephemeral. Opening media does not establish that it played. */
   beginPlayback(
     kind: AnalyticsPlaybackKind,
     ongoing = false,
     remoteControl?: string | null,
+    intent?: PlaybackIntent,
   ): string | null {
     this.settlePlayback();
     this.invalidatePlayback();
@@ -245,6 +305,7 @@ export class Analytics {
       incident: false,
       eligible: true,
       ...(remoteControl !== undefined ? { remoteControl } : {}),
+      ...(intent ? { intent } : {}),
     };
     return token;
   }
@@ -351,6 +412,7 @@ export class Analytics {
   endPlayback(token: string): void {
     if (this.run?.token !== token) return;
     this.settlePlayback();
+    if (this.run.intent) this.run.intent.ended = true;
     this.invalidatePlayback();
   }
 
@@ -364,6 +426,7 @@ export class Analytics {
   }
 
   rendererGone(): void {
+    this.intent = null;
     if (this.binding?.output !== "remote") {
       this.settlePlayback();
       this.invalidatePlayback();
@@ -377,20 +440,41 @@ export class Analytics {
 
   /** Output's generation guard owns this callback, independently of the renderer lifetime. */
   remotePlayback(kind: AnalyticsPlaybackKind, control: string | null = this.run?.token ?? null) {
+    const requested =
+      this.intent?.kind === kind && this.intent.control === control && !this.intent.ended
+        ? this.intent
+        : undefined;
     let token =
-      this.run?.kind === kind && (this.run.token === control || this.run.remoteControl === control)
+      this.run?.kind === kind &&
+      (this.run.token === control ||
+        this.run.remoteControl === control ||
+        (requested && this.run.intent === requested))
         ? this.run.token
         : null;
-    if (token && this.run) this.run.remoteControl = control;
+    const authorized = token !== null || requested !== undefined;
+    if (requested) requested.remoteControl = control;
+    if (token && this.run) {
+      this.run.remoteControl = control;
+      if (this.run.intent) this.run.intent.remoteControl = control;
+    }
     let binding: string | null = token ? this.bindPlayback(token, "remote") : null;
+    let intent = requested ?? this.run?.intent;
     let sequence = 0;
     let active = true;
     return {
       state: (state: AnalyticsPlaybackState) => {
         // Consent/dimension changes require a fresh trusted observation, with no historical start.
-        if (!active) return;
+        if (!active || !authorized) return;
         if (!this.run) {
-          token = this.beginPlayback(kind, true, control);
+          if (this.intent?.remoteControl === control && this.intent.kind === kind)
+            intent = this.intent;
+          if (intent && (intent.ended || (this.intent && this.intent !== intent))) return;
+          token = this.beginPlayback(
+            kind,
+            true,
+            control,
+            this.intent === intent ? intent : undefined,
+          );
           binding = token ? this.bindPlayback(token, "remote") : null;
         }
         if (token && binding) this.notePlaybackState(token, binding, ++sequence, state);

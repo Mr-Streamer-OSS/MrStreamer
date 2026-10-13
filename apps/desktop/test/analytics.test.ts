@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -1403,6 +1404,229 @@ describe("confirmed daily playback measurements", () => {
           },
         },
       },
+    });
+  });
+
+  it("admits gameplay hints without advisory registration, preserves reconnects and rejects superseded controls", async () => {
+    playbackClock();
+    const { owner, events } = await measuring();
+    const frame = "current-frame";
+    const first = { control: randomUUID(), order: 1, ongoing: false };
+    const token = owner.admitPlayback("live", first, frame)!;
+    expect(token).not.toBe(first.control);
+    expect(owner.admitPlayback("live", first, frame)).toBe(token);
+    expect(owner.controlledPlayback(first.control, frame)).toBe(token);
+    expect(owner.controlledPlayback(first.control, "other-frame")).toBeNull();
+    expect(owner.admitPlayback("vod", first, frame)).toBeNull();
+    expect(owner.admitPlayback("live", { ...first, control: randomUUID() }, frame)).toBeNull();
+    let binding = owner.bindPlayback(token, "local", "live")!;
+    await playing(owner, token, binding, 20);
+    owner.stopPlaybackBinding(binding);
+    expect(owner.admitPlayback("live", first, frame)).toBe(token);
+    binding = owner.bindPlayback(token, "local", "live")!;
+    await playing(owner, token, binding, 20);
+    const replay = { control: randomUUID(), order: 2, ongoing: false };
+    const second = owner.admitPlayback("live", replay, frame)!;
+    expect(second).not.toBe(token);
+    expect(owner.admitPlayback("live", first, frame)).toBeNull();
+    expect(owner.controlledPlayback(first.control, frame)).toBeNull();
+    owner.notePlaybackState(token, binding, 100, "playing");
+    owner.notePlaybackFailure(token, binding, "credentials");
+    const fresh = owner.bindPlayback(second, "local", "live")!;
+    await playing(owner, second, fresh, 10);
+    owner.notePlaybackFailure(second, fresh, "network");
+    owner.endPlayback(second);
+    expect(owner.admitPlayback("live", replay, frame)).toBeNull();
+    expect(owner.admitPlayback("live", first, frame)).toBeNull();
+    await complete(owner);
+    expect(events.find((event) => event.event === "app_summary_day")).toMatchObject({
+      properties: {
+        counts: {
+          playback: {
+            live: {
+              starts: 2,
+              watch_minutes: 1,
+              errors: 1,
+              failures: { network: 1, credentials: 0 },
+            },
+          },
+        },
+      },
+    });
+    expect(JSON.stringify(events)).not.toMatch(/control|order|frame|watch_ms/);
+  });
+
+  it("keeps a remote run across frame adoption and output moves, and renews only its current lineage after resets", async () => {
+    playbackClock();
+    const { owner, events } = await measuring();
+    await until(() => events.length === 2);
+    const first = { control: randomUUID(), order: 1, ongoing: false };
+    const token = owner.admitPlayback("vod", first, "old-frame")!;
+    const remote = owner.remotePlayback("vod", token);
+    remote.state("playing");
+    await vi.advanceTimersByTimeAsync(1000);
+    owner.rendererGone();
+    expect(owner.controlledPlayback(first.control, "old-frame")).toBeNull();
+    const adopted = { control: randomUUID(), order: 1, ongoing: true };
+    expect(owner.admitPlayback("vod", adopted, "new-frame")).toBe(token);
+    expect(owner.admitPlayback("vod", first, "old-frame")).toBeNull();
+    await owner.configure(false);
+    await owner.configure(true);
+    await vi.advanceTimersByTimeAsync(0);
+    remote.state("playing");
+    const renewed = owner.controlledPlayback(adopted.control, "new-frame")!;
+    expect(renewed).not.toBeNull();
+    expect(renewed).not.toBe(token);
+    remote.state("paused");
+    remote.stop();
+    // Current normal media admission can return a paused receiver here without another poll.
+    expect(owner.admitPlayback("vod", adopted, "new-frame")).toBe(renewed);
+    let binding = owner.bindPlayback(renewed, "local", "vod")!;
+    await playing(owner, renewed, binding, 35);
+    owner.setUpdateChannel("nightly");
+    owner.setUpdateChannel("stable");
+    const continued = owner.admitPlayback("vod", adopted, "new-frame")!;
+    binding = owner.bindPlayback(continued, "local", "vod")!;
+    await playing(owner, continued, binding, 35);
+    owner.notePlaybackFailure(renewed, null, "credentials");
+    owner.notePlaybackFailure(continued, binding, "network");
+    owner.endPlayback(continued);
+    await complete(owner);
+    expect(events.filter((event) => event.event === "app_summary_day").at(-1)).toMatchObject({
+      properties: {
+        counts: {
+          playback: {
+            vod: {
+              starts: 0,
+              watch_minutes: 1,
+              errors: 1,
+              failures: { network: 1, credentials: 0 },
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it("promotes an admitted preview session and replays an existing local session through independent binding admission", async () => {
+    playbackClock();
+    const { owner, events } = await measuring();
+    expect(owner.admitPlayback("live", undefined, "frame")).toBeNull();
+    const hint = { control: randomUUID(), order: 1, ongoing: false };
+    const token = owner.admitPlayback("live", hint, "frame")!;
+    const binding = owner.bindPlayback(token, "local", "live")!;
+    owner.setPlaybackEligible(token, false);
+    await playing(owner, token, binding, 40);
+    owner.setPlaybackEligible(token, true);
+    await playing(owner, token, binding, 20, 40);
+    owner.endPlayback(token);
+    const replay = { control: randomUUID(), order: 2, ongoing: false };
+    const renewed = owner.admitPlayback("live", replay, "frame")!;
+    const next = owner.bindPlayback(renewed, "local", "live")!;
+    await playing(owner, renewed, next, 20);
+    owner.endPlayback(renewed);
+    await complete(owner);
+    expect(events.find((event) => event.event === "app_summary_day")).toMatchObject({
+      properties: { counts: { playback: { live: { starts: 2, watch_minutes: 1, errors: 0 } } } },
+    });
+  });
+
+  it("does not revive an obsolete remote intent after a newer selection ended or consent changed", async () => {
+    playbackClock();
+    const { owner, events } = await measuring();
+    await until(() => events.length === 2);
+    const old = { control: randomUUID(), order: 1, ongoing: false };
+    const token = owner.admitPlayback("live", old, "frame")!;
+    const stale = owner.remotePlayback("live", token);
+    stale.state("playing");
+    const current = { control: randomUUID(), order: 2, ongoing: false };
+    const next = owner.admitPlayback("vod", current, "frame")!;
+    owner.endPlayback(next);
+    await owner.configure(false);
+    await owner.configure(true);
+    await vi.advanceTimersByTimeAsync(0);
+    stale.state("playing");
+    stale.failure("credentials");
+    expect(owner.resumePlayback("live")).toBeNull();
+    expect(owner.admitPlayback("live", old, "frame")).toBeNull();
+    owner.noteFeature("home");
+    await complete(owner);
+    expect(events.find((event) => event.event === "app_summary_day")).toMatchObject({
+      properties: { counts: { playback: { live: { starts: 0, watch_minutes: 0, errors: 0 } } } },
+    });
+  });
+
+  it("observes a receiver admitted while consent was off, then rejects its hint after a newer disabled-period load", async () => {
+    playbackClock();
+    const { owner, events } = await measuring();
+    await until(() => events.length === 2);
+    await owner.configure(false);
+    const old = { control: randomUUID(), order: 1, ongoing: false };
+    expect(owner.admitPlayback("live", old, "frame")).toBeNull();
+    const obsolete = owner.remotePlayback("live", old.control);
+    obsolete.state("playing");
+    const hint = { control: randomUUID(), order: 2, ongoing: false };
+    expect(owner.admitPlayback("live", hint, "frame")).toBeNull();
+    const current = owner.remotePlayback("live", hint.control);
+    current.state("playing");
+    await vi.advanceTimersByTimeAsync(60_000);
+    await owner.configure(true);
+    await vi.advanceTimersByTimeAsync(0);
+    obsolete.state("playing");
+    obsolete.failure("credentials");
+    for (let second = 0; second < 35; second++) {
+      current.state("playing");
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    expect(owner.controlledPlayback(hint.control, "frame")).not.toBeNull();
+    expect(owner.controlledPlayback(old.control, "frame")).toBeNull();
+    current.failure("network");
+    current.stop();
+    await complete(owner);
+    expect(events.find((event) => event.event === "app_summary_day")).toMatchObject({
+      properties: {
+        counts: {
+          playback: {
+            live: {
+              starts: 0,
+              watch_minutes: 1,
+              errors: 1,
+              failures: { network: 1, credentials: 0 },
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it("retires stopped controls while sharing is off so a late advisory or media request cannot revive them", async () => {
+    playbackClock();
+    const { owner, events } = await measuring();
+    await until(() => events.length === 2);
+    await owner.configure(false);
+    const hint = { control: randomUUID(), order: 1, ongoing: false };
+    expect(owner.admitPlayback("live", hint, "frame")).toBeNull();
+    expect(owner.isPlaybackControlCurrent(hint.control, "frame")).toBe(true);
+    owner.endControlledPlayback(hint.control, "other-frame");
+    expect(owner.isPlaybackControlCurrent(hint.control, "frame")).toBe(true);
+    owner.endControlledPlayback(hint.control, "frame");
+    expect(owner.isPlaybackControlCurrent(hint.control, "frame")).toBe(false);
+    await owner.configure(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(owner.admitPlayback("live", hint, "frame")).toBeNull();
+    const stale = owner.remotePlayback("live", hint.control);
+    stale.state("playing");
+    stale.failure("credentials");
+    const current = { control: randomUUID(), order: 2, ongoing: false };
+    const token = owner.admitPlayback("live", current, "frame")!;
+    const binding = owner.bindPlayback(token, "local", "live")!;
+    await playing(owner, token, binding, 35);
+    owner.endControlledPlayback(hint.control, "frame");
+    expect(owner.controlledPlayback(current.control, "frame")).toBe(token);
+    owner.endControlledPlayback(current.control, "frame");
+    await complete(owner);
+    expect(events.find((event) => event.event === "app_summary_day")).toMatchObject({
+      properties: { counts: { playback: { live: { starts: 1, watch_minutes: 1, errors: 0 } } } },
     });
   });
 

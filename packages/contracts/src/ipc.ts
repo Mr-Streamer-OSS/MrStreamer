@@ -3,7 +3,7 @@
 // Add a method by giving it an input schema in `ipcInputs` and a result type in `IpcOutputs`.
 // The main process refuses to start unless every method has a handler (see src/main/ipc.ts).
 import { type } from "arktype";
-import { analyticsFeatures, analyticsFailures } from "./analytics.ts";
+import { analyticsFeatures, analyticsFailures, PlaybackControl } from "./analytics.ts";
 import {
   OnlineSubtitlePreferences,
   SubtitleCredentialInput,
@@ -248,8 +248,8 @@ export const ipcInputs = {
        * playback, whose connection to the provider it would take.
        */
       "preview?": "boolean",
-      /** Main-issued logical playback token. Control metadata only, never captured. */
-      "measurement?": "string.uuid",
+      /** Transient gameplay intent, independent of optional analytics replies. Never captured. */
+      "measurement?": PlaybackControl,
     }),
   "subtitles.settings": none,
   "subtitles.configure": () =>
@@ -264,10 +264,10 @@ export const ipcInputs = {
   "subtitles.forget": () => type({ sessionId: "string > 0" }),
   "subtitles.cancel": () => type({ sessionId: "string > 0" }),
   "playback.openTitle": () =>
-    type({ title: TitleRef, decoders: decoders(), "measurement?": "string.uuid" }),
+    type({ title: TitleRef, decoders: decoders(), "measurement?": PlaybackControl }),
   /** A downloaded copy by its id, from this computer: no subscription or network is asked. */
   "playback.openCopy": () =>
-    type({ copy: "string > 0", decoders: decoders(), "measurement?": "string.uuid" }),
+    type({ copy: "string > 0", decoders: decoders(), "measurement?": PlaybackControl }),
   "playback.close": () => type({ sessionId: "string" }),
   "playback.closeAll": none,
   "playback.failure": () => type({ sessionId: "string" }),
@@ -304,7 +304,7 @@ export const ipcInputs = {
       "audioLanguage?": "string",
       /** What the receiver may show about it: the channel's name. */
       name: "string",
-      "measurement?": "string.uuid",
+      "measurement?": PlaybackControl,
     }),
   /**
    * `since` is when the viewer began this play of the title, in epoch milliseconds, which its
@@ -312,11 +312,11 @@ export const ipcInputs = {
    * play it was.
    */
   "output.openTitle": () =>
-    type({ title: TitleRef, since: "number", "measurement?": "string.uuid" }),
+    type({ title: TitleRef, since: "number", "measurement?": PlaybackControl }),
   "output.playTitle": () =>
     type({
       sessionId: "string",
-      "measurement?": "string.uuid",
+      "measurement?": PlaybackControl,
       /** Seconds into the title to start at. */
       position: "number >= 0",
       audio: "number.integer >= 0 | null",
@@ -336,9 +336,10 @@ export const ipcInputs = {
   "output.playingTitle": none,
   "analytics.action": () =>
     type.enumerated("channel_changed", "epg_opened", "search_used", "update_seen"),
-  "analytics.playbackBegin": () => type({ kind: "'live' | 'vod'", ongoing: "boolean" }),
-  "analytics.playbackResume": () => type({ kind: "'live' | 'vod'" }),
-  "analytics.playbackBind": () => type({ token: "string.uuid", sessionId: "string" }),
+  "analytics.playbackBegin": () => type({ kind: "'live' | 'vod'", measurement: PlaybackControl }),
+  "analytics.playbackResume": () => type({ kind: "'live' | 'vod'", measurement: PlaybackControl }),
+  "analytics.playbackBind": () =>
+    type({ kind: "'live' | 'vod'", measurement: PlaybackControl, sessionId: "string" }),
   "analytics.playbackState": () =>
     type({
       token: "string.uuid",

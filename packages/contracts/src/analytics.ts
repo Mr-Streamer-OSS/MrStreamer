@@ -1,3 +1,5 @@
+import { type } from "arktype";
+
 /** Only these screen-entry literals may cross the renderer collection boundary. */
 export const analyticsFeatures = [
   "home",
@@ -56,3 +58,11 @@ export const analyticsFailures = [
   "app",
 ] as const;
 export type AnalyticsFailure = (typeof analyticsFailures)[number];
+
+/** Ephemeral gameplay correlation only. Main mints runs, owns clocks and counts. */
+export const PlaybackControl = type({
+  control: "string.uuid",
+  order: "number.integer > 0",
+  ongoing: "boolean",
+});
+export type PlaybackControl = typeof PlaybackControl.infer;

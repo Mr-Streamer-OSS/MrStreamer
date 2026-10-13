@@ -732,15 +732,14 @@ async function openOnReceiver(
   receiver = { sessionId: null, load: null, subtitle: null, paused };
   confirmedMedia = null;
   try {
+    const measurement = observation.measurement();
+    observation.remote();
     const [opened, preferences] = await Promise.all([
       // The play the viewer began, wherever it played until now.
-      observation.ready().then((measurement) => {
-        observation.remote();
-        return call("output.openTitle", {
-          title: now.title,
-          since: openedAt,
-          ...(measurement ? { measurement } : {}),
-        });
+      call("output.openTitle", {
+        title: now.title,
+        since: openedAt,
+        ...(measurement ? { measurement } : {}),
       }),
       call("preferences.get").catch((): Preferences | null => null),
     ]);
@@ -792,7 +791,7 @@ async function loadOnReceiver(start: number, paused = false): Promise<void> {
   confirmedMedia = null;
   store.setState({ phase: { kind: "starting" }, position: start, confirmed: null });
   try {
-    const measurement = await observation.ready();
+    const measurement = observation.measurement();
     if (mine !== generation || !receiver) return;
     observation.remote();
     const media = await call("output.playTitle", {
@@ -995,7 +994,7 @@ async function moveHere(): Promise<void> {
   convertSound = false;
   store.setState({ phase: { kind: "opening" }, shows: null, confirmed: null });
   try {
-    const measurement = await observation.ready();
+    const measurement = observation.measurement();
     const opened = await call("playback.openTitle", {
       title: now.title,
       decoders: [...titleDecoders],
@@ -1169,7 +1168,7 @@ export const titlePlayer = {
     });
     // Which episode comes next, the record says: none is offered until it has.
     void refreshNext();
-    const measurement = await observation.ready();
+    const measurement = observation.measurement();
     if (mine !== generation) return;
     if (outputs.remote() && now.kind === "provider") {
       observation.remote();

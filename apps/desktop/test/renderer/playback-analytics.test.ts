@@ -61,7 +61,7 @@ it("sends only guarded fixed facts and a main-issued binding, discarding a delay
   ipc.always("analytics.playbackBind", binding);
   const observed = new PlaybackObservation("vod");
   observed.begin();
-  await observed.ready();
+  expect(observed.measurement()).toEqual(ipc.argsOf("analytics.playbackBegin")[0]?.measurement);
   observed.bind("old-session");
   await Promise.resolve();
   observed.note("playing");
@@ -127,8 +127,9 @@ it("ends the live measurement on reset and treats the next selection as the firs
   });
   player.watch(channel("first"));
   await vi.waitFor(() => expect(ipc.argsOf("analytics.playbackBegin")).toHaveLength(1));
+  const control = ipc.argsOf("analytics.playbackBegin")[0]!.measurement.control;
   player.reset();
-  await vi.waitFor(() => expect(ipc.argsOf("analytics.playbackEnd")).toEqual([{ token }]));
+  await vi.waitFor(() => expect(ipc.argsOf("analytics.playbackEnd")).toEqual([{ token: control }]));
   ipc.emit("analytics.reset", null);
   expect(ipc.argsOf("analytics.playbackBegin")).toHaveLength(1);
   player.watch(channel("first"));
@@ -187,6 +188,9 @@ it("reports a live mid-play network failure on its closed binding while recovery
   });
   await act(async () => vi.advanceTimersByTimeAsync(0));
   expect(ipc.argsOf("playback.close")).toContainEqual({ sessionId: "session" });
-  expect(ipc.argsOf("analytics.playbackFailure")).toEqual([{ token, binding, failure: "network" }]);
+  const control = ipc.argsOf("analytics.playbackBegin")[0]!.measurement.control;
+  expect(ipc.argsOf("analytics.playbackFailure")).toEqual([
+    { token: control, binding, failure: "network" },
+  ]);
   player.reset();
 });

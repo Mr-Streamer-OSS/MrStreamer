@@ -710,19 +710,14 @@ async function start(): Promise<void> {
       "ondemand.recommendations": ({ seeds }) => onDemand.recommendations(seeds),
       "ondemand.tiles": ({ kind, of }) => onDemand.tiles(kind, of),
       "ondemand.collection": (query) => onDemand.collection(query),
-      "playback.open": ({
-        channel: named,
-        variant,
-        decoders,
-        repair,
-        audio,
-        audioLanguage,
-        preview,
-        measurement,
-      }) =>
-        observeOpen(
+      "playback.open": (
+        { channel: named, variant, decoders, repair, audio, audioLanguage, preview, measurement },
+        frame,
+      ) => {
+        const token = analytics.admitPlayback("live", preview ? undefined : measurement, frame);
+        return observeOpen(
           coordination,
-          observeOperation("playback_open", measurement),
+          observeOperation("playback_open", token ?? undefined),
           (turn) =>
             Effect.gen(function* () {
               const channel = yield* library.channel(named);
@@ -746,7 +741,8 @@ async function start(): Promise<void> {
               });
             }
           }),
-        ),
+        );
+      },
       "subtitles.settings": () => onlineSubtitles.settings,
       "subtitles.configure": ({ preferences, credentials }) =>
         onlineSubtitles.configure(preferences, credentials),
@@ -761,27 +757,37 @@ async function start(): Promise<void> {
       "subtitles.hide": ({ sessionId }) => Effect.as(onlineSubtitles.hide(sessionId), null),
       "subtitles.forget": ({ sessionId }) => Effect.as(onlineSubtitles.forget(sessionId), null),
       "subtitles.cancel": ({ sessionId }) => Effect.as(onlineSubtitles.cancel(sessionId), null),
-      "playback.openTitle": ({ title, decoders, measurement }) =>
-        observeOpen(coordination, observeOperation("playback_open", measurement), (turn) =>
-          Effect.gen(function* () {
-            // What plays goes first, whichever subscription it is of, so no provider sees a
-            // connection beside the one about to open.
-            yield* playback.closeAll;
-            const { url, revision, headers, listingKey } = yield* onDemand.file(title);
-            return yield* playback.openTitle(title, url, decoders, {
-              turn,
-              revision,
-              headers,
-              listingKey,
-            });
-          }),
-        ),
-      "playback.openCopy": ({ copy, decoders, measurement }) =>
-        observeOpen(coordination, observeOperation("playback_open", measurement), (turn) =>
-          Effect.gen(function* () {
-            return yield* playback.openCopy(yield* downloads.copy(copy), decoders, turn);
-          }),
-        ),
+      "playback.openTitle": ({ title, decoders, measurement }, frame) => {
+        const token = analytics.admitPlayback("vod", measurement, frame);
+        return observeOpen(
+          coordination,
+          observeOperation("playback_open", token ?? undefined),
+          (turn) =>
+            Effect.gen(function* () {
+              // What plays goes first, whichever subscription it is of, so no provider sees a
+              // connection beside the one about to open.
+              yield* playback.closeAll;
+              const { url, revision, headers, listingKey } = yield* onDemand.file(title);
+              return yield* playback.openTitle(title, url, decoders, {
+                turn,
+                revision,
+                headers,
+                listingKey,
+              });
+            }),
+        );
+      },
+      "playback.openCopy": ({ copy, decoders, measurement }, frame) => {
+        const token = analytics.admitPlayback("vod", measurement, frame);
+        return observeOpen(
+          coordination,
+          observeOperation("playback_open", token ?? undefined),
+          (turn) =>
+            Effect.gen(function* () {
+              return yield* playback.openCopy(yield* downloads.copy(copy), decoders, turn);
+            }),
+        );
+      },
       "playback.close": ({ sessionId }) => Effect.as(playback.close(sessionId), null),
       "playback.closeAll": () =>
         Effect.andThen(coordination.begin, Effect.as(playback.closeAll, null)),
@@ -827,60 +833,73 @@ async function start(): Promise<void> {
         }),
       "output.closePicker": ({ request }) => Effect.as(output.closePicker(request), null),
       "output.disconnect": () => Effect.as(output.disconnect, null),
-      "output.playChannel": ({
-        channel: named,
-        variant,
-        audio,
-        audioLanguage,
-        name,
-        measurement,
-      }) =>
-        observeOpen(coordination, observeOperation("playback_open", measurement), (turn) =>
-          Effect.gen(function* () {
-            const channel = yield* library.channel(named);
-            const variants = yield* streamsOf(channel, variant);
-            return yield* output.playChannel(ownedId(channel), {
-              variants,
-              audio: audio ?? null,
-              audioLanguage: audioLanguage ?? null,
-              shown: { name },
-              turn,
-              measurement,
-            });
-          }),
-        ),
-      "output.openTitle": ({ title, since, measurement }) =>
-        observeOpen(coordination, observeOperation("playback_open", measurement), (turn) =>
-          Effect.gen(function* () {
-            const { url, revision, headers, listingKey } = yield* onDemand.file(title);
-            return yield* output.openTitle(title, url, since, {
-              turn,
-              measurement,
-              revision,
-              headers,
-              listingKey,
-            });
-          }),
-        ),
-      "output.playTitle": ({
-        sessionId,
-        measurement,
-        position,
-        audio,
-        subtitle,
-        paused,
-        name,
-        detail,
-        artworkUrl,
-      }) =>
-        output.playTitle(sessionId, {
-          measurement,
+      "output.playChannel": (
+        { channel: named, variant, audio, audioLanguage, name, measurement },
+        frame,
+      ) => {
+        const token = analytics.admitPlayback("live", measurement, frame);
+        const control =
+          measurement && analytics.isPlaybackControlCurrent(measurement.control, frame)
+            ? measurement.control
+            : undefined;
+        return observeOpen(
+          coordination,
+          observeOperation("playback_open", token ?? undefined),
+          (turn) =>
+            Effect.gen(function* () {
+              const channel = yield* library.channel(named);
+              const variants = yield* streamsOf(channel, variant);
+              return yield* output.playChannel(ownedId(channel), {
+                variants,
+                audio: audio ?? null,
+                audioLanguage: audioLanguage ?? null,
+                shown: { name },
+                turn,
+                measurement: control,
+              });
+            }),
+        );
+      },
+      "output.openTitle": ({ title, since, measurement }, frame) => {
+        const token = analytics.admitPlayback("vod", measurement, frame);
+        const control =
+          measurement && analytics.isPlaybackControlCurrent(measurement.control, frame)
+            ? measurement.control
+            : undefined;
+        return observeOpen(
+          coordination,
+          observeOperation("playback_open", token ?? undefined),
+          (turn) =>
+            Effect.gen(function* () {
+              const { url, revision, headers, listingKey } = yield* onDemand.file(title);
+              return yield* output.openTitle(title, url, since, {
+                turn,
+                measurement: control,
+                revision,
+                headers,
+                listingKey,
+              });
+            }),
+        );
+      },
+      "output.playTitle": (
+        { sessionId, measurement, position, audio, subtitle, paused, name, detail, artworkUrl },
+        frame,
+      ) => {
+        analytics.admitPlayback("vod", measurement, frame);
+        const control =
+          measurement && analytics.isPlaybackControlCurrent(measurement.control, frame)
+            ? measurement.control
+            : undefined;
+        return output.playTitle(sessionId, {
+          measurement: control,
           position,
           audio,
           subtitle,
           paused,
           shown: { name, detail, artworkUrl },
-        }),
+        });
+      },
       "output.command": ({ generation, ...command }) =>
         Effect.as(output.command(generation, command), null),
       "output.volume": (volume) => Effect.as(output.setVolume(volume), null),
@@ -898,35 +917,51 @@ async function start(): Promise<void> {
           analytics.noteAction(action);
           return null;
         }),
-      "analytics.playbackBegin": ({ kind, ongoing }) =>
-        Effect.sync(() => analytics.beginPlayback(kind, ongoing)),
-      "analytics.playbackResume": ({ kind }) => Effect.sync(() => analytics.resumePlayback(kind)),
-      "analytics.playbackBind": ({ token, sessionId }) =>
-        Effect.gen(function* () {
+      // Registration happens at invocation, never when an optional reply later settles.
+      "analytics.playbackBegin": ({ kind, measurement }, frame) =>
+        Effect.succeed(analytics.admitPlayback(kind, measurement, frame)),
+      "analytics.playbackResume": ({ kind, measurement }, frame) =>
+        Effect.succeed(analytics.admitPlayback(kind, measurement, frame)),
+      "analytics.playbackBind": ({ kind, measurement, sessionId }, frame) => {
+        const token = analytics.admitPlayback(kind, measurement, frame);
+        return Effect.gen(function* () {
           const session = yield* playback.measurement(sessionId);
-          if (!session || session.closed.aborted) return null;
+          if (
+            !token ||
+            !session ||
+            session.kind !== kind ||
+            session.closed.aborted ||
+            analytics.controlledPlayback(measurement.control, frame) !== token
+          )
+            return null;
           return analytics.bindPlayback(token, "local", session.kind, session.closed);
-        }),
-      "analytics.playbackState": ({ token, binding, sequence, state }) =>
-        Effect.sync(() => {
-          analytics.notePlaybackState(token, binding, sequence, state);
+        });
+      },
+      "analytics.playbackState": ({ token: control, binding, sequence, state }, frame) => {
+        const token = analytics.controlledPlayback(control, frame);
+        return Effect.sync(() => {
+          if (token) analytics.notePlaybackState(token, binding, sequence, state);
           return null;
-        }),
-      "analytics.playbackFailure": ({ token, binding, failure }) =>
-        Effect.sync(() => {
-          analytics.notePlaybackFailure(token, binding, failure);
+        });
+      },
+      "analytics.playbackFailure": ({ token: control, binding, failure }, frame) => {
+        const token = analytics.controlledPlayback(control, frame);
+        return Effect.sync(() => {
+          if (token) analytics.notePlaybackFailure(token, binding, failure);
           return null;
-        }),
-      "analytics.playbackEligible": ({ token, eligible }) =>
-        Effect.sync(() => {
-          analytics.setPlaybackEligible(token, eligible);
+        });
+      },
+      "analytics.playbackEligible": ({ token: control, eligible }, frame) => {
+        const token = analytics.controlledPlayback(control, frame);
+        return Effect.sync(() => {
+          if (token) analytics.setPlaybackEligible(token, eligible);
           return null;
-        }),
-      "analytics.playbackEnd": ({ token }) =>
-        Effect.sync(() => {
-          analytics.endPlayback(token);
-          return null;
-        }),
+        });
+      },
+      "analytics.playbackEnd": ({ token: control }, frame) => {
+        analytics.endControlledPlayback(control, frame);
+        return Effect.succeed(null);
+      },
       "analytics.feature": (feature) =>
         Effect.sync(() => {
           analytics.noteFeature(feature);

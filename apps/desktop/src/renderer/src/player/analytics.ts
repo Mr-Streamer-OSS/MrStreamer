@@ -2,14 +2,17 @@ import type {
   AnalyticsPlaybackKind,
   AnalyticsPlaybackState,
   AnalyticsFailure,
+  PlaybackControl,
 } from "@mrstreamer/contracts/analytics";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import type { StreamFailure } from "@mrstreamer/contracts/playback";
 import { call, listen } from "../lib/ipc.ts";
 
+let controlOrder = 0;
+
 /** One controller's current run/binding only. Main owns all counters, clocks and consent. */
 export class PlaybackObservation {
-  private token: Promise<string | null> = Promise.resolve(null);
+  private control: PlaybackControl | null = null;
   private binding: Promise<string | null> = Promise.resolve(null);
   private generation = 0;
   private sequence = 0;
@@ -45,29 +48,35 @@ export class PlaybackObservation {
     this.session = null;
     this.state = "waiting";
     this.binding = Promise.resolve(null);
-    this.token = call("analytics.playbackBegin", { kind: this.kind, ongoing }).catch(() => null);
+    this.control = { control: crypto.randomUUID(), order: ++controlOrder, ongoing };
+    void call("analytics.playbackBegin", { kind: this.kind, measurement: this.control }).catch(
+      () => {},
+    );
   }
 
-  ready(): Promise<string | null> {
-    return this.token;
+  /** Gameplay carries this immediately; optional observation responses never gate it. */
+  measurement(): PlaybackControl | null {
+    return this.control;
   }
   hasRun(): boolean {
     return this.active;
   }
 
   bind(session: string): void {
-    if (this.onRemote)
-      this.token = call("analytics.playbackResume", { kind: this.kind }).catch(() => null);
     this.generation++;
     this.sequence = 0;
     this.session = session;
     this.onRemote = false;
     const generation = this.generation;
-    this.binding = this.token.then(async (token) => {
-      if (!token || generation !== this.generation) return null;
-      const binding = await call("analytics.playbackBind", { token, sessionId: session }).catch(
-        () => null,
-      );
+    const measurement = this.control;
+    this.binding = (async () => {
+      if (!measurement || generation !== this.generation) return null;
+      const token = measurement.control;
+      const binding = await call("analytics.playbackBind", {
+        kind: this.kind,
+        measurement,
+        sessionId: session,
+      }).catch(() => null);
       if (generation !== this.generation) return null;
       if (binding) {
         await call("analytics.playbackEligible", { token, eligible: this.eligible }).catch(
@@ -76,7 +85,7 @@ export class PlaybackObservation {
         this.note(this.state);
       }
       return binding;
-    });
+    })();
   }
 
   adoptRemote(): void {
@@ -85,7 +94,10 @@ export class PlaybackObservation {
     this.onRemote = true;
     this.session = null;
     this.binding = Promise.resolve(null);
-    this.token = call("analytics.playbackResume", { kind: this.kind }).catch(() => null);
+    this.control = { control: crypto.randomUUID(), order: ++controlOrder, ongoing: true };
+    void call("analytics.playbackResume", { kind: this.kind, measurement: this.control }).catch(
+      () => {},
+    );
   }
 
   remote(): void {
@@ -95,7 +107,8 @@ export class PlaybackObservation {
 
   unbind(): void {
     const sequence = ++this.sequence;
-    void Promise.all([this.token, this.binding]).then(([token, binding]) => {
+    const token = this.control?.control;
+    void this.binding.then((binding) => {
       if (token && binding)
         return call("analytics.playbackState", {
           token,
@@ -114,10 +127,9 @@ export class PlaybackObservation {
   setEligible(eligible: boolean): void {
     this.eligible = eligible;
     const generation = this.generation;
-    void this.token.then((token) => {
-      if (token && generation === this.generation && !this.onRemote)
-        return call("analytics.playbackEligible", { token, eligible }).catch(() => {});
-    });
+    const token = this.control?.control;
+    if (token && generation === this.generation && !this.onRemote)
+      void call("analytics.playbackEligible", { token, eligible }).catch(() => {});
   }
 
   note(state: AnalyticsPlaybackState): void {
@@ -132,8 +144,9 @@ export class PlaybackObservation {
     const note = this.pendingState;
     this.pendingState = null;
     this.sendingState = true;
-    void Promise.all([this.token, this.binding])
-      .then(async ([token, binding]) => {
+    const token = this.control?.control;
+    void this.binding
+      .then(async (binding) => {
         if (token && binding && note.generation === this.generation && !this.onRemote)
           await call("analytics.playbackState", {
             token,
@@ -149,20 +162,19 @@ export class PlaybackObservation {
   }
 
   failure(failure: AnalyticsFailure): void {
-    void Promise.all([this.token, this.binding]).then(([token, binding]) => {
+    const token = this.control?.control;
+    void this.binding.then((binding) => {
       if (token && !this.onRemote)
         return call("analytics.playbackFailure", { token, binding, failure }).catch(() => {});
     });
   }
 
   end(): void {
-    const token = this.token;
+    const token = this.control?.control;
     this.unbind();
     this.active = false;
-    void token.then((token) => {
-      if (token) return call("analytics.playbackEnd", { token }).catch(() => {});
-    });
-    this.token = Promise.resolve(null);
+    if (token) void call("analytics.playbackEnd", { token }).catch(() => {});
+    this.control = null;
   }
 }
 
