@@ -4,7 +4,7 @@
 import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import * as Layer from "effect/Layer";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Codec } from "@mrstreamer/contracts/playback";
 import { playlistProvider } from "../src/main/providers/m3u.ts";
 import { Library } from "../src/main/services/library.ts";
@@ -481,49 +481,132 @@ describe("a recording's stretch", () => {
     await host.close();
   });
 
-  it("counts a jump of the clock the stream marks as a discontinuity as no time played", async () => {
-    // The recording's PCRs four seconds ahead from five seconds in, the first of them marked as a
-    // discontinuity: its pictures play on as before.
-    const recording = Buffer.from(RECORDING);
-    let first: number | null = null;
-    let marked = false;
-    for (let at = 0; at + 188 <= recording.length; at += 188) {
-      const packet = recording.subarray(at, at + 188);
-      if (packet[0] !== 0x47 || !(packet[3]! & 0x20) || packet[4]! < 7 || !(packet[5]! & 0x10))
-        continue;
-      const pcr =
-        packet[6]! * 2 ** 25 +
-        (packet[7]! << 17) +
-        (packet[8]! << 9) +
-        (packet[9]! << 1) +
-        (packet[10]! >> 7);
-      first ??= pcr;
-      if ((pcr - first) / 90_000 < 5) continue;
-      if (!marked) packet[5]! |= 0x80;
-      marked = true;
-      const shifted = pcr + 4 * 90_000;
-      packet[6] = Math.floor(shifted / 2 ** 25) & 0xff;
-      packet[7] = Math.floor(shifted / 2 ** 17) & 0xff;
-      packet[8] = Math.floor(shifted / 2 ** 9) & 0xff;
-      packet[9] = Math.floor(shifted / 2) & 0xff;
-      packet[10] = (packet[10]! & 0x7f) | ((shifted & 1) << 7);
-    }
-    expect(marked).toBe(true);
-    const host = await hostedPlaylist(
-      (origin) => [
-        '#EXTINF:-1 tvg-id="fs" catchup="flussonic" catchup-days="2",Flussonic',
-        `${origin}/fs/mpegts`,
-      ],
-      (_path, response) => trickle(recording, response),
-    );
-    const session = await host.playback.open(host.own("fs"), LINUX, {
-      archive: { start: EVENING, end: EVENING + 10_000 },
+  it.each(["on the PCR's own packet", "on a packet of its PID before it"] as const)(
+    "counts a jump of the clock the stream marks as a discontinuity %s as no time played",
+    async (where) => {
+      // The recording's PCRs four seconds ahead from five seconds in, the first of them marked as
+      // a discontinuity, or an adaptation-only packet of their PID just before it: its pictures
+      // play on as before.
+      const shifted = Buffer.from(RECORDING);
+      let first: number | null = null;
+      let jump: number | null = null;
+      for (let at = 0; at + 188 <= shifted.length; at += 188) {
+        const packet = shifted.subarray(at, at + 188);
+        if (packet[0] !== 0x47 || !(packet[3]! & 0x20) || packet[4]! < 7 || !(packet[5]! & 0x10))
+          continue;
+        const pcr =
+          packet[6]! * 2 ** 25 +
+          (packet[7]! << 17) +
+          (packet[8]! << 9) +
+          (packet[9]! << 1) +
+          (packet[10]! >> 7);
+        first ??= pcr;
+        if ((pcr - first) / 90_000 < 5) continue;
+        jump ??= at;
+        const ahead = pcr + 4 * 90_000;
+        packet[6] = Math.floor(ahead / 2 ** 25) & 0xff;
+        packet[7] = Math.floor(ahead / 2 ** 17) & 0xff;
+        packet[8] = Math.floor(ahead / 2 ** 9) & 0xff;
+        packet[9] = Math.floor(ahead / 2) & 0xff;
+        packet[10] = (packet[10]! & 0x7f) | ((ahead & 1) << 7);
+      }
+      expect(jump).not.toBeNull();
+      const at = jump!;
+      let recording = shifted;
+      if (where === "on the PCR's own packet") shifted[at + 5]! |= 0x80;
+      else {
+        const marker = Buffer.alloc(188, 0xff);
+        marker[0] = 0x47;
+        marker[1] = shifted[at + 1]! & 0x1f;
+        marker[2] = shifted[at + 2]!;
+        marker[3] = 0x20 | (shifted[at + 3]! & 0x0f);
+        marker[4] = 183;
+        marker[5] = 0x80;
+        recording = Buffer.concat([shifted.subarray(0, at), marker, shifted.subarray(at)]);
+      }
+      const host = await hostedPlaylist(
+        (origin) => [
+          '#EXTINF:-1 tvg-id="fs" catchup="flussonic" catchup-days="2",Flussonic',
+          `${origin}/fs/mpegts`,
+        ],
+        (_path, response) => trickle(recording, response),
+      );
+      const session = await host.playback.open(host.own("fs"), LINUX, {
+        archive: { start: EVENING, end: EVENING + 10_000 },
+      });
+      const received = await whole(session.url);
+      // Ten seconds of the forty, not the six the jump would leave.
+      expect(received.length).toBeGreaterThan(RECORDING.length * 0.23);
+      expect(received.length).toBeLessThan(RECORDING.length * 0.35);
+      await vi.waitFor(() => expect(host.open()).toBe(0));
+      await host.close();
+    },
+  );
+
+  describe("with a stream that names its start as steps before now", () => {
+    /** HD to the second, SD as minutes before now, LQ to the minute; HD fails. */
+    const channel = (origin: string) => [
+      `#EXTINF:-1 catchup="default" catchup-days="2" catchup-source="${origin}/precise/{utc}.ts",Example HD`,
+      `${origin}/precise.ts`,
+      `#EXTINF:-1 catchup="default" catchup-days="2" catchup-source="${origin}/offset/{offset:60}.ts",Example SD`,
+      `${origin}/offset.ts`,
+      '#EXTINF:-1 catchup="xc" catchup-days="2",Example LQ',
+      `${origin}/live/demo/demo/1.ts`,
+    ];
+    const answer = (path: string, response: ServerResponse) => {
+      if (path.startsWith("/precise/")) return void response.writeHead(502).end();
+      trickle(RECORDING, response);
+    };
+
+    beforeEach(() => {
+      // Asked at 18:01:15.
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(EVENING + 75_000);
     });
-    const received = await whole(session.url);
-    // Ten seconds of the forty, not the six the jump would leave.
-    expect(received.length).toBeGreaterThan(RECORDING.length * 0.23);
-    expect(received.length).toBeLessThan(RECORDING.length * 0.35);
-    await vi.waitFor(() => expect(host.open()).toBe(0));
-    await host.close();
+
+    it("starts where those steps put it, and plays from there", async () => {
+      const host = await hostedPlaylist(channel, answer);
+      // Ten seconds from 18:00:30: one minute before 18:01:15 is 18:00:15, where SD starts.
+      const window = { start: EVENING + 30_000, end: EVENING + 40_000 };
+      const session = await host.playback.open(host.own("Example HD"), LINUX, {
+        variants: ["Example HD", "Example SD"],
+        archive: window,
+      });
+      expect(session.archive).toEqual({ start: EVENING + 15_000, end: window.end });
+      const received = await whole(session.url);
+      expect(await host.playback.playing(session.sessionId)).toMatchObject({
+        variantId: "Example SD",
+      });
+      expect(host.asked).toEqual([`/precise/${EVENING / 1000 + 15}.ts`, "/offset/1.ts"]);
+      // The twenty-five seconds from 18:00:15 to the window's end.
+      expect(received.length).toBeGreaterThan(RECORDING.length * 0.58);
+      expect(received.length).toBeLessThan(RECORDING.length * 0.72);
+      await vi.waitFor(() => expect(host.open()).toBe(0));
+      await host.close();
+    });
+
+    it("leaves it out of a recording whose start it can't name", async () => {
+      const host = await hostedPlaylist(channel, answer);
+      // From 18:00:30 LQ starts on 18:00, which SD's whole minutes before 18:01:15 can't name.
+      const window = { start: EVENING + 30_000, end: EVENING + 35_000 };
+      const session = await host.playback.open(host.own("Example HD"), LINUX, {
+        variants: ["Example HD", "Example SD", "Example LQ"],
+        archive: window,
+      });
+      expect(session.archive).toEqual({ start: EVENING, end: window.end });
+      const reader = (await fetch(session.url)).body!.getReader();
+      await reader.read();
+      expect(await host.playback.playing(session.sessionId)).toMatchObject({
+        variantId: "Example LQ",
+      });
+      await reader.cancel();
+      // SD was never asked for.
+      expect(host.asked).toEqual([
+        `/precise/${EVENING / 1000}.ts`,
+        "/timeshift/demo/demo/1/2026-10-13:18-00/1.ts",
+      ]);
+      await vi.waitFor(() => expect(host.open()).toBe(0));
+      await host.close();
+    });
   });
 });

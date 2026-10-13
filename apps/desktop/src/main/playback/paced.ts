@@ -8,9 +8,10 @@
 // end plays on into the programmes after; returning closes the provider's connection.
 //
 // Only the first PID that carries a PCR counts. A jump of the clock, backwards or by more than a
-// few seconds, is a cut in the recording rather than time passing, and adds nothing; so is any
-// step the stream marks as a discontinuity (the adaptation field's discontinuity_indicator),
-// from where the clock counts anew.
+// few seconds, is a cut in the recording rather than time passing, and adds nothing; so is the
+// step to the first PCR at or after a packet of that PID that the stream marks as a
+// discontinuity (the adaptation field's discontinuity_indicator), with a PCR or without one: the
+// clock counts anew from there.
 const PACKET = 188;
 const SYNC = 0x47;
 const PCR_HZ = 90_000;
@@ -33,6 +34,8 @@ export async function* paced(
   let carry = new Uint8Array(0);
   let pid: number | null = null;
   let previous: number | null = null;
+  /** The stream marked a discontinuity since the last PCR: the next one counts anew. */
+  let cut = false;
   /** Seconds of the recording sent so far, by its clock. */
   let media = 0;
   let started: number | null = null;
@@ -46,15 +49,19 @@ export async function* paced(
         continue;
       }
       const clock = pcrOf(data, offset);
-      const cut = clock !== null && (data[offset + 5]! & 0x80) !== 0;
+      const marked = discontinuity(data, offset);
       const packetPid = ((data[offset + 1]! & 0x1f) << 8) | data[offset + 2]!;
       offset += PACKET;
-      if (clock === null || (pid ??= packetPid) !== packetPid) continue;
+      if (clock !== null) pid ??= packetPid;
+      if (packetPid !== pid) continue;
+      cut ||= marked;
+      if (clock === null) continue;
       if (previous !== null && !cut) {
         const step = ((clock - previous + PCR_WRAP) % PCR_WRAP) / PCR_HZ;
         if (step <= MAX_STEP_S) media += step;
       }
       previous = clock;
+      cut = false;
     }
     carry = data.slice(offset);
     started ??= now();
@@ -64,6 +71,12 @@ export async function* paced(
     yield chunk;
     if (media >= endS) return;
   }
+}
+
+/** Whether the packet at `offset` has an adaptation field that marks a discontinuity. */
+function discontinuity(data: Uint8Array, offset: number): boolean {
+  const adaptation = (data[offset + 3]! >> 4) & 0x02;
+  return adaptation !== 0 && data[offset + 4]! > 0 && (data[offset + 5]! & 0x80) !== 0;
 }
 
 /** The 90 kHz base of the PCR in the packet at `offset`, or null when it carries none. */
