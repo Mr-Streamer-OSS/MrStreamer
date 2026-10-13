@@ -8,7 +8,9 @@
 // end plays on into the programmes after; returning closes the provider's connection.
 //
 // Only the first PID that carries a PCR counts. A jump of the clock, backwards or by more than a
-// few seconds, is a cut in the recording rather than time passing, and adds nothing.
+// few seconds, is a cut in the recording rather than time passing, and adds nothing; so is any
+// step the stream marks as a discontinuity (the adaptation field's discontinuity_indicator),
+// from where the clock counts anew.
 const PACKET = 188;
 const SYNC = 0x47;
 const PCR_HZ = 90_000;
@@ -44,10 +46,11 @@ export async function* paced(
         continue;
       }
       const clock = pcrOf(data, offset);
+      const cut = clock !== null && (data[offset + 5]! & 0x80) !== 0;
       const packetPid = ((data[offset + 1]! & 0x1f) << 8) | data[offset + 2]!;
       offset += PACKET;
       if (clock === null || (pid ??= packetPid) !== packetPid) continue;
-      if (previous !== null) {
+      if (previous !== null && !cut) {
         const step = ((clock - previous + PCR_WRAP) % PCR_WRAP) / PCR_HZ;
         if (step <= MAX_STEP_S) media += step;
       }

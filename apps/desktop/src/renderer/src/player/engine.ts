@@ -204,8 +204,15 @@ function hlsEngine(
   ends: number | null,
 ): Engine {
   // hls.js puts no subtitles on the element by itself: their lines go to the player as events,
-  // only for the track the viewer chose (see ./hls-tracks.ts).
-  const hls = new Hls({ enableWorker: true, renderTextTracksNatively: false });
+  // only for the track the viewer chose (see ./hls-tracks.ts). A recording plays from its first
+  // segment, also when its playlist names no end yet, as one still being recorded or a provider's
+  // sliding archive does: hls.js would otherwise start such a playlist near its newest segment, as
+  // live. It doesn't chase that edge afterwards either way.
+  const hls = new Hls({
+    enableWorker: true,
+    renderTextTracksNatively: false,
+    ...(ends === null ? {} : { startPosition: 0 }),
+  });
   const tracks = hlsTracks(hls, video, sound);
   const life = lifecycle(
     video,

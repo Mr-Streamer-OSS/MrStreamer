@@ -3553,20 +3553,29 @@ function make(deps: PlaybackDeps) {
         const now = Date.now();
         for (const [url, at] of failedAt) if (now - at > FAILED_STREAM_MS) failedAt.delete(url);
         const archive = options.archive ?? null;
-        // Streams that failed lately go last, in the order they came. The player picks its
-        // engine by the format before the stream starts, so those of another format than the
-        // first's stay out.
-        const listed = yield* Effect.forEach(
-          options.variants?.length ? options.variants : [channel.id],
-          (id) =>
+        /** The channel's streams: live, or their recordings of `window`, with where each starts. */
+        const look = (window: ArchiveWindow | null) =>
+          Effect.forEach(options.variants?.length ? options.variants : [channel.id], (id) =>
             Effect.tryPromise({
               try: async (signal) =>
-                archive
-                  ? await source.provider.archiveStream(id, archive, signal)
+                window
+                  ? await source.provider.archiveStream(id, window, signal)
                   : { ...(await source.provider.liveStream(id, signal)), start: null },
               catch: failedWith,
             }).pipe(Effect.map((stream) => ({ id, ...stream }))),
-        );
+          );
+        const first = yield* look(archive);
+        // A channel's streams can name a recording's start in other units, as a playlist's HD
+        // stream to the second and its SD stream to the minute. They are asked again from the
+        // earliest start, which each of them can name, so the recording starts at one moment
+        // whichever stream plays, before and after a switch to another.
+        const starts = new Set(first.map((stream) => stream.start));
+        const earliest = Math.min(...first.flatMap((stream) => stream.start ?? []));
+        const listed =
+          archive && starts.size > 1 ? yield* look({ start: earliest, end: archive.end }) : first;
+        // Streams that failed lately go last, in the order they came. The player picks its
+        // engine by the format before the stream starts, so those of another format than the
+        // first's stay out.
         // Looked up under the login it had: with another by now, they are no longer its streams.
         yield* whileSaved(source);
         yield* coordination.whileAsked(options.turn);
@@ -3577,11 +3586,9 @@ function make(deps: PlaybackDeps) {
         const variants = streams.flatMap(({ id, url, format: other, headers }) =>
           other === format ? [{ id, url, headers: headers ?? {} }] : [],
         );
-        // A recording starts where its provider's address says; a channel's streams are all of
-        // one provider, which counts in the same unit for each.
-        const first = streams[0];
-        const recording =
-          archive && first?.start != null ? { start: first.start, end: archive.end } : null;
+        // A recording starts where its streams' addresses say, the same moment for each.
+        const origin = streams[0]?.start;
+        const recording = archive && origin != null ? { start: origin, end: archive.end } : null;
         const id = randomUUID();
         const { closed, scope: forked, lan } = yield* sessionScope(id, receiver);
         const token = randomBytes(18).toString("base64url");

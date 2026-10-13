@@ -1,7 +1,7 @@
 // Catch-up: which channels a provider keeps programmes of after they aired, and what reaches the
 // provider when one plays from its archive, for an Xtream panel and for the conventions playlists
 // describe it in.
-import { createServer } from "node:http";
+import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import * as Layer from "effect/Layer";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -369,10 +369,161 @@ describe("a playlist's catch-up", () => {
     );
     expect(session.format).toBe("hls");
     const list = await (await fetch(session.url)).text();
-    expect(list).toContain("#EXT-X-ENDLIST");
+    // The recording's four parts, through the proxy, in a playlist that names no end yet.
+    expect(list.match(/#EXTINF/g)).toHaveLength(4);
+    expect(list).not.toContain("#EXT-X-ENDLIST");
     expect(host.requests()).toContain(`/catchup/index-${S}-2700.m3u8`);
     expect(host.requests()).not.toContain("/catchup/index.m3u8");
     await runtime.dispose();
+    await host.close();
+  });
+});
+
+/**
+ * Playback on a playlist that the test's own host serves: `lines` are its entries, given the host's
+ * origin, and `answer` answers every other request. `asked` lists their paths, `open` how many are
+ * still connected.
+ */
+async function hostedPlaylist(
+  lines: (origin: string) => readonly string[],
+  answer: (path: string, response: ServerResponse) => void,
+) {
+  const asked: string[] = [];
+  let open = 0;
+  const server = createServer((request, response) => {
+    const path = new URL(request.url ?? "/", "http://host").pathname;
+    if (path === "/list.m3u")
+      return void response.end(["#EXTM3U", ...lines(origin), ""].join("\n"));
+    asked.push(path);
+    open++;
+    request.on("close", () => open--);
+    answer(path, response);
+  });
+  await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
+  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const dataDir = await tempDir();
+  const runtime = runtimeFor(
+    Playback.layer({ userAgent, ffmpeg: null }).pipe(
+      Layer.provide(PlaybackCoordination.layer),
+      Layer.provideMerge(
+        Subscriptions.layer({ dataDir, secrets: testSecrets, providerOptions: { userAgent } }),
+      ),
+    ),
+  );
+  const subscriptions = await promised(runtime, Subscriptions);
+  const { id: subscriptionId } = await subscriptions.add({
+    server: `${origin}/list.m3u`,
+    username: "",
+    password: "",
+  });
+  return {
+    asked,
+    open: () => open,
+    playback: await promised(runtime, Playback),
+    own: (id: string) => ({ subscriptionId, id }),
+    async close() {
+      await runtime.dispose();
+      server.closeAllConnections();
+      await new Promise((closed) => server.close(closed));
+    },
+  };
+}
+
+describe("a recording's stretch", () => {
+  /** Forty seconds of recording, ten frames a second, with a PCR in its packets. */
+  const RECORDING = fixture("recording-long-subtitles.mpegts");
+  /** Sends `recording` in small pieces, so where playback stops it shows to within one. */
+  const trickle = (recording: Buffer, response: ServerResponse) => {
+    response.writeHead(200, { "Content-Type": "video/mp2t" });
+    let offset = 0;
+    const timer = setInterval(() => {
+      response.write(recording.subarray(offset, offset + 32 * 188));
+      offset += 32 * 188;
+      if (offset >= recording.length) clearInterval(timer);
+    }, 15);
+    response.on("close", () => clearInterval(timer));
+  };
+
+  it("starts at one moment whichever of a channel's streams plays, and plays all of it", async () => {
+    // HD names its start to the second and fails; SD names it to the minute and plays.
+    const host = await hostedPlaylist(
+      (origin) => [
+        `#EXTINF:-1 catchup="default" catchup-days="2" catchup-source="${origin}/precise/{utc}.ts",Example HD`,
+        `${origin}/precise.ts`,
+        '#EXTINF:-1 catchup="xc" catchup-days="2",Example SD',
+        `${origin}/live/demo/demo/1.ts`,
+      ],
+      (path, response) => {
+        if (path.startsWith("/precise/")) return void response.writeHead(502).end();
+        trickle(RECORDING, response);
+      },
+    );
+    // Ten seconds of programme, from five seconds past.
+    const window = { start: EVENING + 5_000, end: EVENING + 15_000 };
+    const session = await host.playback.open(host.own("Example HD"), LINUX, {
+      variants: ["Example HD", "Example SD"],
+      archive: window,
+    });
+    // Both from the minute SD can name, which is where the recording starts, to its end.
+    expect(session.archive).toEqual({ start: EVENING, end: window.end });
+    const received = await whole(session.url);
+    expect(await host.playback.playing(session.sessionId)).toMatchObject({
+      variantId: "Example SD",
+    });
+    expect(host.asked).toEqual([
+      `/precise/${EVENING / 1000}.ts`,
+      "/timeshift/demo/demo/1/2026-10-13:18-00/1.ts",
+    ]);
+    // The fifteen seconds from the minute to the window's end, not the ten the window is long.
+    expect(received.length).toBeGreaterThan(RECORDING.length * 0.33);
+    expect(received.length).toBeLessThan(RECORDING.length * 0.45);
+    await vi.waitFor(() => expect(host.open()).toBe(0));
+    await host.close();
+  });
+
+  it("counts a jump of the clock the stream marks as a discontinuity as no time played", async () => {
+    // The recording's PCRs four seconds ahead from five seconds in, the first of them marked as a
+    // discontinuity: its pictures play on as before.
+    const recording = Buffer.from(RECORDING);
+    let first: number | null = null;
+    let marked = false;
+    for (let at = 0; at + 188 <= recording.length; at += 188) {
+      const packet = recording.subarray(at, at + 188);
+      if (packet[0] !== 0x47 || !(packet[3]! & 0x20) || packet[4]! < 7 || !(packet[5]! & 0x10))
+        continue;
+      const pcr =
+        packet[6]! * 2 ** 25 +
+        (packet[7]! << 17) +
+        (packet[8]! << 9) +
+        (packet[9]! << 1) +
+        (packet[10]! >> 7);
+      first ??= pcr;
+      if ((pcr - first) / 90_000 < 5) continue;
+      if (!marked) packet[5]! |= 0x80;
+      marked = true;
+      const shifted = pcr + 4 * 90_000;
+      packet[6] = Math.floor(shifted / 2 ** 25) & 0xff;
+      packet[7] = Math.floor(shifted / 2 ** 17) & 0xff;
+      packet[8] = Math.floor(shifted / 2 ** 9) & 0xff;
+      packet[9] = Math.floor(shifted / 2) & 0xff;
+      packet[10] = (packet[10]! & 0x7f) | ((shifted & 1) << 7);
+    }
+    expect(marked).toBe(true);
+    const host = await hostedPlaylist(
+      (origin) => [
+        '#EXTINF:-1 tvg-id="fs" catchup="flussonic" catchup-days="2",Flussonic',
+        `${origin}/fs/mpegts`,
+      ],
+      (_path, response) => trickle(recording, response),
+    );
+    const session = await host.playback.open(host.own("fs"), LINUX, {
+      archive: { start: EVENING, end: EVENING + 10_000 },
+    });
+    const received = await whole(session.url);
+    // Ten seconds of the forty, not the six the jump would leave.
+    expect(received.length).toBeGreaterThan(RECORDING.length * 0.23);
+    expect(received.length).toBeLessThan(RECORDING.length * 0.35);
+    await vi.waitFor(() => expect(host.open()).toBe(0));
     await host.close();
   });
 });
