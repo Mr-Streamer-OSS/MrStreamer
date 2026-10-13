@@ -294,10 +294,7 @@ export async function configureSubtitleUi(d: Driver) {
   const checkbox = labelled("Online subtitle search");
   // Limit this test to its one synthetic account; unrelated service searches remain unchanged.
   const services = labelled("Subtitle search services");
-  await d.click("Choose SubDL search", services);
-  await d.key("Home", 36);
-  await d.key("ArrowDown", 40);
-  await d.key("Enter", 13);
+  await d.select("Choose SubDL search", services, "subdl");
   await d.wait(
     async () => (await d.read("subtitles.settings")).service === "subdl",
     10_000,
@@ -316,14 +313,7 @@ export async function configureSubtitleUi(d: Driver) {
 export async function seedSubtitleUi(d: Driver) {
   await d.click("Open Subtitles", labelled("Subtitles"));
   const select = labelled("Subtitle search language");
-  await d.click("Choose English search", select);
-  const index = await d.page.evaluate<number>(
-    `[...(${select}).options].findIndex(o => o.value === 'en')`,
-  );
-  if (index < 0) throw new Error("No English subtitle language");
-  await d.key("Home", 36);
-  for (let i = 0; i < index; i++) await d.key("ArrowDown", 40);
-  await d.key("Enter", 13);
+  await d.select("Choose English search", select, "en");
   await d.wait(
     () => d.page.evaluate<boolean>(`(${select}).value === 'en'`),
     10_000,
@@ -374,17 +364,34 @@ export async function observeSavedSubtitle(d: Driver, context: "provider" | "cop
     throw new Error(`Saved subtitle timing changed: ${JSON.stringify(timing)}`);
   await d.capture(`saved-${context}-subtitle-timing`);
   await d.click("Close saved Subtitles", labelled("Close subtitles"));
-  for (let attempts = 0; (await d.video()).time > 38 && attempts < 15; attempts++)
-    await d.key("ArrowLeft", 37);
-  for (let attempts = 0; (await d.video()).time < 32 && attempts < 15; attempts++)
-    await d.key("ArrowRight", 39);
+  const seekDeadline = Date.now() + 45_000;
+  const skip = async (direction: -1 | 1) => {
+    const before = await d.video();
+    const target = Math.max(0, before.time + direction * 10);
+    await d.key(direction === -1 ? "ArrowLeft" : "ArrowRight", direction === -1 ? 37 : 39);
+    // Stream seeking briefly resets the video clock. Wait for the landing before another key.
+    await d.wait(
+      async () => {
+        const video = await d.video();
+        return !video.paused && video.width > 0 && Math.abs(video.time - target) < 2;
+      },
+      Math.max(1, seekDeadline - Date.now()),
+      `saved subtitle seek to ${target}`,
+    );
+  };
+  for (let attempts = 0; (await d.video()).time > 38 && attempts < 15; attempts++) await skip(-1);
+  for (let attempts = 0; (await d.video()).time < 32 && attempts < 15; attempts++) await skip(1);
   const start = SUBTITLE_CUE.start * timing.speed + timing.offset;
   const end = SUBTITLE_CUE.end * timing.speed + timing.offset;
   const caption = () =>
     d.page.evaluate<string>(
       "document.querySelector('[data-subtitle-text]')?.textContent?.trim() ?? ''",
     );
-  await d.wait(async () => (await d.video()).time >= 41, 45_000, "time before shifted cue");
+  await d.wait(
+    async () => (await d.video()).time >= 41,
+    Math.max(1, seekDeadline - Date.now()),
+    "time before shifted cue",
+  );
   const observe = () =>
     d.page.evaluate<{ time: number; caption: string }>(
       `({time: document.querySelector('video')?.currentTime ?? 0, caption: document.querySelector('[data-subtitle-text]')?.textContent?.trim() ?? ''})`,

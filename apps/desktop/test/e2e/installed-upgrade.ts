@@ -42,6 +42,8 @@ import { crc32, deflateSync } from "node:zlib";
 import { parseArgs } from "node:util";
 import type { Result } from "../../../../packages/contracts/src/errors.ts";
 import type { IpcArgs, IpcMethod, IpcOutput } from "../../../../packages/contracts/src/ipc.ts";
+import { installCatalogueWorkerProbe, type Evidence } from "./installed-catalogue-worker.ts";
+import { catalogueWorkerScripts } from "./installed-worker-scripts.ts";
 import {
   compareVersions,
   formatVersion,
@@ -368,6 +370,13 @@ export async function startServices() {
   const provider = await startFakeProvider({ channels: 20, titles: 10 });
   const tmdb = await startFakeTmdb();
   const picture = greyPicture(60, 90);
+  const catalogueRequests: {
+    action: string;
+    startedAt: string;
+    finishedAt?: string;
+    status?: number;
+    rows?: number;
+  }[] = [];
   let origin = "";
   const front: Server = createServer((request, response) => {
     void (async () => {
@@ -376,6 +385,16 @@ export async function startServices() {
         return;
       }
       const toTmdb = request.url?.startsWith("/3/") ?? false;
+      const action = new URL(request.url ?? "/", "http://fixture.local").searchParams.get("action");
+      const catalogue: (typeof catalogueRequests)[number] | undefined =
+        !toTmdb &&
+        action &&
+        ["get_vod_categories", "get_vod_streams", "get_series_categories", "get_series"].includes(
+          action,
+        )
+          ? { action, startedAt: new Date().toISOString() }
+          : undefined;
+      if (catalogue) catalogueRequests.push(catalogue);
       const headers = new Headers();
       for (const name of ["range", "if-range", "if-none-match", "if-modified-since"]) {
         const value = request.headers[name];
@@ -386,6 +405,14 @@ export async function startServices() {
         { method: request.method ?? "GET", headers, redirect: "manual" },
       );
       let body = Buffer.from(await upstream.arrayBuffer());
+      if (catalogue) {
+        const rows: unknown = upstream.headers.get("content-type")?.includes("json")
+          ? JSON.parse(body.toString())
+          : null;
+        catalogue.finishedAt = new Date().toISOString();
+        catalogue.status = upstream.status;
+        if (Array.isArray(rows)) catalogue.rows = rows.length;
+      }
       if (upstream.headers.get("content-type")?.includes("json")) {
         const text = JSON.stringify(
           JSON.parse(body.toString(), (key: string, value: unknown) =>
@@ -414,6 +441,8 @@ export async function startServices() {
     url: origin,
     tmdbApi: `${origin}/3`,
     titles: provider.titles,
+    // Action/count evidence only. Never retain provider login query strings.
+    catalogueRequests,
     /** Stops all three and checks nothing answers on their ports any more. */
     async stop() {
       if (stopped) return { ports, refused: true };
@@ -551,6 +580,41 @@ export function driver(page: Page, evidence: string, stage: RunStage) {
           code: name,
           windowsVirtualKeyCode: code,
         });
+    },
+    /** Uses the closed select's type-ahead instead of a platform-specific native popup. */
+    async select(action: string, element: string, value: string): Promise<void> {
+      await wait(() => exists(element), 30_000, action);
+      const label = await page.evaluate<string | null>(`(() => {
+        const select = (${element});
+        const options = [...(select?.options ?? [])].filter(o => o.value === ${JSON.stringify(value)} && !o.disabled);
+        if (options.length !== 1) return null;
+        const label = options[0].label.trim();
+        return [...select.options].filter(o => !o.disabled && o.label.trim() === label).length === 1 ? label : null;
+      })()`);
+      if (!label) throw new Error(`${action} offers no unique enabled ${value}.`);
+      did(`Focus ${action}`);
+      // Focusing changes no value and leaves the OS menu closed, as in the language verifier.
+      await page.evaluate(`(${element}).focus()`);
+      await wait(
+        () => page.evaluate<boolean>(`document.activeElement === (${element})`),
+        10_000,
+        `${action} focus`,
+      );
+      for (const character of label) {
+        did(`Type ${action}: ${character}`);
+        await page.send("Input.dispatchKeyEvent", {
+          type: "keyDown",
+          key: character,
+          text: character,
+        });
+        await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: character });
+      }
+      await d.key("Tab", 9);
+      await wait(
+        () => page.evaluate<boolean>(`(${element})?.value === ${JSON.stringify(value)}`),
+        10_000,
+        `${action} ${value}`,
+      );
     },
     async type(action: string, text: string) {
       did(action);
@@ -719,23 +783,6 @@ function retained(before: State, now: State, what: string) {
   };
 }
 
-/** Picks `value` in a native select by keys, as a viewer would. */
-async function pick(d: Driver, label: string, value: string) {
-  const select = labelled(label);
-  await d.click(`Focus ${label}`, select);
-  const options = await d.page.evaluate<string[]>(`[...(${select}).options].map(o => o.value)`);
-  const index = options.indexOf(value);
-  if (index < 0) throw new Error(`${label} offers no ${value}.`);
-  await d.key("Home", 36);
-  for (let i = 0; i < index; i++) await d.key("ArrowDown", 40);
-  await d.key("Enter", 13);
-  await d.wait(
-    () => d.page.evaluate<boolean>(`(${select})?.value === ${JSON.stringify(value)}`),
-    10_000,
-    `${label} ${value}`,
-  );
-}
-
 // ---------------------------------------------------------------------------------------------
 // The three stages
 
@@ -762,12 +809,16 @@ export async function seedStable(
   );
   await d.click("Open Settings", labelled("Settings"));
   await d.click("Open General", button("nav button", "General"));
-  await pick(d, "Quality", "hd");
-  await pick(d, "Audio in", "nl");
-  await pick(d, "Subtitles", "fr");
+  await d.select("Quality", labelled("Quality"), "hd");
+  await d.select("Audio in", labelled("Audio in"), "nl");
+  await d.select("Subtitles", labelled("Subtitles"), "fr");
   if (savedSubtitles) await configureSubtitleUi(d);
   await d.capture("settings");
-  await d.key("Escape", 27);
+  // Stable 0.0.11 keeps Escape in the focused subtitle opt-in checkbox.
+  await d.click(
+    "Leave Settings",
+    `[...document.querySelectorAll('header button')].findLast(b => b.textContent.trim() === 'Back')`,
+  );
   await d.click("Open Live TV", button("header button", "Live TV"));
   await d.click("Open All channels", listEntry("All channels"));
   for (let i = 1; i <= 2; i++) {
@@ -1244,18 +1295,54 @@ async function start(
   let verifiedPage: Page | undefined;
   let main: Page | undefined;
   let bootstrap: Awaited<ReturnType<typeof bootstrapSubtitles>> | undefined;
+  let workers: ReturnType<typeof installCatalogueWorkerProbe> | undefined;
+  let workerControl:
+    ReturnType<ReturnType<typeof installCatalogueWorkerProbe>["start"]> | undefined;
+  const workerDiagnostics: {
+    provenance?: Awaited<ReturnType<typeof catalogueWorkerScripts>>;
+    events: Evidence[];
+    startup?: Awaited<NonNullable<typeof workerControl>>;
+    cleanup?: Awaited<ReturnType<ReturnType<typeof installCatalogueWorkerProbe>["close"]>>;
+  } = { events: [] };
+  const closeWorkers = async () => {
+    if (!workers) return;
+    workerDiagnostics.cleanup = await workers.close();
+    if (workerControl) workerDiagnostics.startup = await workerControl;
+    if (workerDiagnostics.cleanup.errors.length)
+      throw new Error(`Catalogue worker cleanup: ${workerDiagnostics.cleanup.errors.join("; ")}`);
+  };
   const stop = async () => {
+    let workerError: unknown;
+    try {
+      await closeWorkers();
+    } catch (error) {
+      workerError = error;
+    }
     const exitedBeforeClose = app.exitCode !== null || app.signalCode !== null;
     main?.close();
-    const ended = await tree.stop(() => verifiedPage?.send("Browser.close") ?? Promise.resolve());
+    const ended = await tree
+      .stop(() => verifiedPage?.send("Browser.close") ?? Promise.resolve())
+      .catch((error: unknown) => {
+        if (workerError)
+          throw new AggregateError(
+            [workerError, error],
+            "Worker and installed process cleanup failed",
+          );
+        throw error;
+      });
     const exit = { code: app.exitCode, signal: app.signalCode };
     if (
       exitedBeforeClose ||
       (exit.code !== null && exit.code !== 0) ||
       (ended.forced.length === 0 && (exit.code !== 0 || exit.signal !== null)) ||
       (ended.forced.length > 0 && exit.signal !== null && exit.signal !== "SIGKILL")
-    )
-      throw new Error(`The installed app exited unexpectedly: ${JSON.stringify(exit)}.`);
+    ) {
+      const error = new Error(`The installed app exited unexpectedly: ${JSON.stringify(exit)}.`);
+      throw workerError
+        ? new AggregateError([workerError, error], "Worker cleanup and installed exit failed")
+        : error;
+    }
+    if (workerError) throw workerError;
     return {
       ...ended,
       exit,
@@ -1298,6 +1385,22 @@ async function start(
         throw new Error("Paused installed executable changed");
       bootstrap = await bootstrapSubtitles(paused, subtitleOrigin);
       if (bootstrap.pid !== app.pid) throw new Error("Subtitle bootstrap PID changed");
+      const provenance = await catalogueWorkerScripts(identity.resources, beforeLaunch.appAsar);
+      workerDiagnostics.provenance = provenance;
+      workers = installCatalogueWorkerProbe({
+        main,
+        expectedWorker: provenance.expectedWorker,
+        startupScriptURLs: provenance.startupScriptURLs,
+        verifiedMainPID: identity.pid,
+        evidence: (event) => {
+          workerDiagnostics.events.push(event);
+          return undefined;
+        },
+      });
+      const enabled = await workers.ready;
+      if (!enabled.ok) throw new Error(enabled.error);
+      // Join this control task after the UI stage, including Connect which creates the worker.
+      workerControl = workers.start(120_000);
       await resumeMain(main);
     }
     page = await connect(port);
@@ -1353,9 +1456,17 @@ async function start(
     return {
       d,
       tree,
+      async verifyWorker() {
+        if (!workers || !workerControl) return;
+        workerDiagnostics.startup = await workerControl;
+        await closeWorkers();
+        if (!workerDiagnostics.startup?.ok)
+          throw new Error(workerDiagnostics.startup?.error ?? "Worker startup was not verified");
+      },
       subtitleRequests: () => (main ? subtitleRequests(main) : Promise.resolve([])),
       identity: {
         subtitleBootstrap: bootstrap,
+        catalogueWorker: workerDiagnostics,
         rendererOwnerPid,
         language,
         beforeLaunch,
@@ -1377,8 +1488,13 @@ async function start(
       stop,
     };
   } catch (error) {
-    await stop().catch(() => undefined);
-    page?.close();
+    try {
+      await stop();
+    } catch (cleanup) {
+      throw new AggregateError([error, cleanup], "Installed startup and cleanup failed");
+    } finally {
+      page?.close();
+    }
     throw error;
   }
 }
@@ -1563,6 +1679,13 @@ export async function runCommand(args: string[], published = false) {
       runId: process.env["GITHUB_RUN_ID"] ?? null,
       runAttempt: process.env["GITHUB_RUN_ATTEMPT"] ?? null,
       driverSha256: sha256(await readFile(fileURLToPath(import.meta.url))),
+      workerHelperSha256: sha256(
+        await readFile(new URL("./installed-catalogue-worker.ts", import.meta.url)),
+      ),
+      workerScriptsHelperSha256: sha256(
+        await readFile(new URL("./installed-worker-scripts.ts", import.meta.url)),
+      ),
+      appHelperSha256: sha256(await readFile(new URL("./app.ts", import.meta.url))),
       subtitleHelperSha256: sha256(
         await readFile(new URL("./installed-subtitles.ts", import.meta.url)),
       ),
@@ -1746,6 +1869,7 @@ export async function runCommand(args: string[], published = false) {
             copies: afterA!.copies,
             after: afterA!.after,
           });
+        await session.verifyWorker();
         session.tree.sample();
       } catch (error) {
         await session.d.capture("failure").catch(() => undefined);
@@ -1763,7 +1887,9 @@ export async function runCommand(args: string[], published = false) {
           failed ??= new Error("Published installed app required forced termination.");
       } catch (error) {
         record(proof.ends, pkg.stage, `failed: ${String(error)}`);
-        failed ??= error;
+        failed = failed
+          ? new AggregateError([failed, error], "Installed stage and cleanup failed")
+          : error;
       }
       session.d.page.close();
       if (failed) break;
