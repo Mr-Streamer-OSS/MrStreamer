@@ -416,6 +416,8 @@ describe("indexing a guide", () => {
         programme("one.test", stamp(NOON + HOUR), stamp(NOON + 2 * HOUR), "Sport"),
         programme("two.test", stamp(NOON + 2 * DAY), stamp(NOON + 2 * DAY + HOUR), "Late news"),
         programme("two.test", stamp(NOON - 3 * HOUR), stamp(NOON - 2 * HOUR), "Old news"),
+        // On since long before the others: a day's rolling coverage.
+        programme("three.test", stamp(NOON - 20 * HOUR), stamp(NOON + 4 * HOUR), "Rolling news"),
       ),
     );
     const found = async (words: string[], before = Number.POSITIVE_INFINITY) => {
@@ -429,9 +431,9 @@ describe("indexing a guide", () => {
       return titles.sort();
     };
 
-    expect(await found(["news"])).toEqual(["Late news", "Évening News"]);
+    expect(await found(["news"])).toEqual(["Late news", "Rolling news", "Évening News"]);
     expect(await found(["evening", "news"])).toEqual(["Évening News"]);
-    expect(await found(["news"], NOON + DAY)).toEqual(["Évening News"]);
+    expect(await found(["news"], NOON + DAY)).toEqual(["Rolling news", "Évening News"]);
     expect(await found(["weather"])).toEqual([]);
   });
 

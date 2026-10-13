@@ -7,7 +7,7 @@
 // Programmes are kept by guide channel and start (`programme`, its primary key), in time order
 // and without overlaps, as `timeline` below lays them out. Titles are kept once each, folded for
 // search, and the (title, start) index finds a search's programmes in time order without reading
-// the others.
+// the others; programmes over six hours long have an index of their own.
 //
 // Ended programmes stay for the guide's archive window, so catch-up and a grid can show the
 // past; the next download of the same source brings along the past its document no longer
@@ -40,6 +40,12 @@ const SLICE_MS = 8;
 const STRETCHES = [6, 24, 96].map((hours) => hours * 60 * 60 * 1000);
 /** Titles one read of a search looks up together. */
 const TITLES_AT_ONCE = 1_000;
+/**
+ * Programmes longer than this are indexed apart for searches: a search reads what began this long
+ * before now for what is on now, and the few longer ones, a day's coverage or a four-day event,
+ * on their own.
+ */
+const LONG_MS = 6 * 60 * 60 * 1000;
 
 /** What `buildGuideIndex` reads and writes. Paths are absolute. */
 export interface GuideBuild {
@@ -113,7 +119,7 @@ export async function buildGuideIndex(
         description text,
         primary key (channel, start)
       ) without rowid;
-      create table meta (programmes integer not null, until integer, longest integer);
+      create table meta (programmes integer not null, until integer);
     `);
     const channels = new Map<string, { key: number; name: string | null }>();
     const listed = (id: string, name: string | null) => {
@@ -294,7 +300,7 @@ function carry(db: DatabaseSync, previous: string, cutoff: number) {
   }
 }
 
-/** Notes when each channel's last programme ends, orders the channels by name and indexes titles. */
+/** Notes when each channel's last programme ends, orders the channels by name, and indexes. */
 function finish(db: DatabaseSync) {
   db.exec(`
     begin;
@@ -313,8 +319,9 @@ function finish(db: DatabaseSync) {
   db.exec(`
     commit;
     create index programme_title on programme (title, start);
+    create index programme_long on programme (stop) where stop - start > ${LONG_MS};
     create index channel_position on channel (position);
-    insert into meta select count(*), max(stop), max(stop - start) from programme;
+    insert into meta select count(*), max(stop) from programme;
     pragma user_version = ${VERSION};
   `);
 }
@@ -394,7 +401,7 @@ export async function openGuideIndex(path: string): Promise<GuideIndex | null> {
       db.close();
       return null;
     }
-    const meta = db.prepare("select programmes, until, longest from meta").get();
+    const meta = db.prepare("select programmes, until from meta").get();
     const channels = new Map<string, IndexedChannel>();
     const byKey: IndexedChannel[] = [];
     const slice = slicer();
@@ -417,7 +424,6 @@ export async function openGuideIndex(path: string): Promise<GuideIndex | null> {
       byKey,
       programmes: Number(meta?.["programmes"] ?? 0),
       until: typeof meta?.["until"] === "number" ? meta["until"] : null,
-      longest: Number(meta?.["longest"] ?? 0),
     });
   } catch {
     db.close();
@@ -432,8 +438,6 @@ function reader(
     byKey: readonly IndexedChannel[];
     programmes: number;
     until: number | null;
-    /** How long the longest programme runs: one on at a time began no longer ago than that. */
-    longest: number;
   },
 ): GuideIndex {
   // From the programme on at `at`, if any: the last to start by then, which may have ended.
@@ -491,34 +495,47 @@ function reader(
           titles.push(Number(row["key"]));
           if (slice.due()) await slice.rest();
         }
-        // Read in stretches of time, from what can still be on at `at`: a search that found
-        // enough in the first reads no later one. Each read takes a slice of the titles, so none
-        // holds the process long, however many titles match.
+        if (titles.length === 0) return;
+        const found = (row: Record<string, unknown>): FoundProgramme => ({
+          channel: Number(row["channel"]),
+          start: Number(row["start"]),
+          stop: Number(row["stop"]),
+          title: String(row["text"]),
+        });
+        // In stretches of time, from what can still be on at `at`: a search that found enough in
+        // the first reads no later one. Each read takes a slice of the titles, so none holds the
+        // process long, however many titles match.
         const rows = db.prepare(`
-          select programme.channel, programme.start, programme.stop, title.text as title
+          select programme.channel, programme.start, programme.stop, title.text
           from programme join title on title.key = programme.title
           where programme.title in (select value from json_each(?))
-            and programme.start >= ? and programme.start < ?`);
+            and programme.start >= ? and programme.start < ? and programme.stop > ?
+            and programme.stop - programme.start <= ${LONG_MS}`);
         // A search bounded from the start reads its one stretch.
         const ahead = Number.isFinite(before()) ? [] : STRETCHES.map((each) => at + each);
-        const edges = [at - read.longest + 1, ...ahead];
+        const edges = [at - LONG_MS, ...ahead];
         for (const [step, from] of edges.entries()) {
           const to = Math.min(edges[step + 1] ?? Number.MAX_SAFE_INTEGER, before());
           if (from >= to) break;
           for (let first = 0; first < titles.length; first += TITLES_AT_ONCE) {
             const some = JSON.stringify(titles.slice(first, first + TITLES_AT_ONCE));
-            for (const row of rows.iterate(some, from, to)) {
-              const found = {
-                channel: Number(row["channel"]),
-                start: Number(row["start"]),
-                stop: Number(row["stop"]),
-                title: String(row["title"]),
-              };
-              if (found.stop > at) visit(found);
+            for (const row of rows.iterate(some, from, to, at)) {
+              visit(found(row));
               if (slice.due()) await slice.rest();
             }
             if (slice.due()) await slice.rest();
           }
+        }
+        // Then the long ones, which may have begun long before what is on now, of the few that
+        // start before what was found.
+        const wanted = new Set(titles);
+        const long = db.prepare(`
+          select channel, start, stop, title, (select text from title where key = programme.title) as text
+          from programme indexed by programme_long
+          where stop - start > ${LONG_MS} and stop > ? and start < ?`);
+        for (const row of long.iterate(at, Math.min(before(), Number.MAX_SAFE_INTEGER))) {
+          if (wanted.has(Number(row["title"]))) visit(found(row));
+          if (slice.due()) await slice.rest();
         }
       } finally {
         active--;
