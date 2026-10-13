@@ -269,20 +269,30 @@ export async function planStable(repo: Repository, request: StableRequest): Prom
   // that release was out and can hold older code than stable users have. The nightly a stable run
   // publishes first sorts before that release too, yet holds its commit and more: what decides is
   // whether the nightly's commit contains the stable release's.
-  if (previousStable && compareVersions(previewed, previousStable) < 0) {
+  if (previousStable) {
     const stableTag = tagOf(previousStable);
     const holds = await repo.compare(stableTag, nightly.tag);
-    if (holds !== "ahead" && holds !== "identical") {
+    // The same source as the newest stable release, under a newer version, would ship nothing
+    // new, and the upgrade check, which needs the candidate to descend from that release, would
+    // refuse it after packaging.
+    if (holds === "identical") {
       throw new Error(
-        `${nightly.tag} came before ${stableTag} and lacks its commit, so it can hold older code. Promote a nightly that contains ${stableTag}.`,
+        `${nightly.tag} was built from the same commit as ${stableTag}, so it holds nothing new. Promote a nightly with changes since ${stableTag}.`,
       );
     }
-    // The version it previewed is out already, or sorts before one that is.
-    if (!request.version) {
-      const next = { ...previousStable, patch: previousStable.patch + 1 };
-      throw new Error(
-        `${stableTag} is out already, so enter the version to release ${nightly.tag} as, such as ${formatVersion(next)}.`,
-      );
+    if (compareVersions(previewed, previousStable) < 0) {
+      if (holds !== "ahead") {
+        throw new Error(
+          `${nightly.tag} came before ${stableTag} and lacks its commit, so it can hold older code. Promote a nightly that contains ${stableTag}.`,
+        );
+      }
+      // The version it previewed is out already, or sorts before one that is.
+      if (!request.version) {
+        const next = { ...previousStable, patch: previousStable.patch + 1 };
+        throw new Error(
+          `${stableTag} is out already, so enter the version to release ${nightly.tag} as, such as ${formatVersion(next)}.`,
+        );
+      }
     }
   }
 

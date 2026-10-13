@@ -339,6 +339,9 @@ describe("stable releases", () => {
         "older-commit...main": "ahead",
         "nightly-commit...main": "ahead",
         [`${latest}...head`]: main,
+        // A stable release that came before both, as some tests add.
+        [`v0.0.0...${older}`]: "ahead",
+        [`v0.0.0...${latest}`]: "ahead",
       },
     });
 
@@ -491,22 +494,41 @@ describe("stable releases", () => {
   });
 
   it("promote a nightly from before the newest stable release that contains its commit", async () => {
-    for (const holds of ["ahead", "identical"] as const) {
-      expect(await planStable(afterStable(holds), promote(latest, { version: "0.0.2" }))).toEqual({
-        channel: "stable",
-        version: "0.0.2",
-        tag: "v0.0.2",
-        sha: "nightly-commit",
-        previousTag: "v0.0.1",
-        nightlyFirst: {
-          channel: "nightly",
-          version: "0.0.2-nightly.20261002.40",
-          tag: "v0.0.2-nightly.20261002.40",
-          sha: "head",
-          previousTag: latest,
-        },
-      });
-    }
+    expect(await planStable(afterStable("ahead"), promote(latest, { version: "0.0.2" }))).toEqual({
+      channel: "stable",
+      version: "0.0.2",
+      tag: "v0.0.2",
+      sha: "nightly-commit",
+      previousTag: "v0.0.1",
+      nightlyFirst: {
+        channel: "nightly",
+        version: "0.0.2-nightly.20261002.40",
+        tag: "v0.0.2-nightly.20261002.40",
+        sha: "head",
+        previousTag: latest,
+      },
+    });
+  });
+
+  it("are refused for a nightly built from the newest stable release's own commit, before packaging", async () => {
+    // Promoting the same source again would ship nothing new, and the upgrade check would refuse
+    // a candidate that doesn't descend from that release.
+    await expect(
+      planStable(afterStable("identical"), promote(latest, { version: "0.0.2" })),
+    ).rejects.toThrow(
+      `${latest} was built from the same commit as v0.0.1, so it holds nothing new. Promote a nightly with changes since v0.0.1.`,
+    );
+
+    // A nightly planned after the release, from that same commit, is refused the same way.
+    const later = "v0.0.2-nightly.20261002.35";
+    const { repo } = repository({
+      releases: [published("v0.0.1", 10, false), published(later, 8)],
+      commits: { [later]: "stable-commit" },
+      histories: { "stable-commit...main": "ahead", [`v0.0.1...${later}`]: "identical" },
+    });
+    await expect(planStable(repo, promote(later))).rejects.toThrow(
+      `${later} was built from the same commit as v0.0.1`,
+    );
   });
 
   it("need the version entered to promote a nightly from before the newest stable release", async () => {
@@ -544,6 +566,8 @@ describe("release notes", () => {
     "c5...main": "ahead",
     [`${promoted}...c5`]: "identical",
     [`${promoted}...c6`]: "ahead",
+    "v0.1.0...v0.1.1-nightly.20261001.2": "ahead",
+    [`v0.1.0...${promoted}`]: "ahead",
   };
 
   it("list every change since the previous stable release up to the promoted nightly, once each", async () => {
