@@ -24,16 +24,22 @@
 //   and `${timestamp}` the moment asked. `{duration}` and `${duration}` the length in seconds,
 //   `{duration:N}` that divided by N; `{offset}`, `{offset:N}` and `${offset}` how long ago the
 //   start was, the same way. `{Y}`, `{m}`, `{d}`, `{H}`, `{M}` and `{S}` the start's year, month,
-//   day, hour, minute and second, in UTC. The recording starts where the address names it, which
-//   can be before the window's start: an address that names the start to the minute only, with
-//   `{M}` and no second, as `xc`'s does, starts on the minute; one that names it as `{offset:N}`
-//   starts that many N-second steps before the moment asked, rounded up. The length counts from
-//   there, and divisions round up, so the end is never cut short. A relative offset counts from
-//   this computer's clock, so the provider's own can put the start a moment off.
+//   day, hour, minute and second, in UTC. The recording starts where the address names it: an
+//   address that names the start to the minute only, with `{M}` and no second, as `xc`'s does,
+//   starts on the minute before the window's start. The length counts from there, and divisions
+//   round up, so the end is never cut short.
+// - An address that names the start only as an offset, how long before the moment it is asked,
+//   is `relative`: the same address names a later start the later it is asked. Playback never
+//   falls back to one from a stream that names its start absolutely, and plays a channel whose
+//   streams are all relative from its first stream alone, its address made again right before
+//   each request (see Playback). An offset counts from this computer's clock, so the provider's
+//   own can put the start a moment off.
 //
 // Not supported, so no catch-up: a mode without days or days without a mode, whose meaning players
 // don't agree on; `vod` and modes not named here; a source a mode needs that is missing; a stream
-// address a derived mode can't read. Ignored: `catchup-correction`, and date formats such as
+// address a derived mode can't read; an offset in steps of more than a second, `{offset:N}`
+// with N above 1, and no absolute start, whose address can't name the start asked for again
+// once a moment has passed. Ignored: `catchup-correction`, and date formats such as
 // `{(b)YmdHMS}` and `${(b)yyyy-MM-dd}`. A playlist doesn't say an `xc` server's time zone, so its
 // times are taken as UTC.
 import type { ArchiveWindow } from "@mrstreamer/contracts/playback";
@@ -63,6 +69,7 @@ export function playlistCatchup(
   const template = templateOf(mode, entry.url, source);
   // A template that doesn't make an address once filled in is none.
   if (!template || !archiveAddress({ days, template }, { start: 0, end: 1 }, 1)) return null;
+  if (relative(template) && /\{offset:(?!0*1\})\d+\}/.test(template)) return null;
   return { days, template };
 }
 
@@ -75,7 +82,7 @@ export function archiveAddress(
   catchup: PlaylistCatchup,
   window: ArchiveWindow,
   now: number,
-): { readonly url: string; readonly start: number } | null {
+): { readonly url: string; readonly start: number; readonly relative: boolean } | null {
   const asked = Math.floor(now / 1000);
   const start = originOf(catchup.template, window.start, asked);
   const end = Math.ceil(window.end / 1000);
@@ -122,8 +129,16 @@ export function archiveAddress(
     });
   const url = URL.parse(filled);
   return url && (url.protocol === "http:" || url.protocol === "https:")
-    ? { url: filled, start: start * 1000 }
+    ? { url: filled, start: start * 1000, relative: relative(catchup.template) }
     : null;
+}
+
+/** Whether a template names its start only as how long before the moment it is asked. */
+function relative(template: string): boolean {
+  return (
+    /\{offset(:\d+)?\}|\$\{offset\}/.test(template) &&
+    !/\{(utc|Y|m|d|H|M|S)\}|\$\{start\}/.test(template)
+  );
 }
 
 /**

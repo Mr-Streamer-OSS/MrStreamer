@@ -427,6 +427,11 @@ interface LiveSession extends SessionBase {
     readonly id: string;
     readonly url: string;
     readonly headers: Readonly<Record<string, string>>;
+    /**
+     * A recording whose address names its start as time before the moment it is asked: its
+     * address made again for that moment, right before each request, so it names the same start.
+     */
+    readonly fresh?: (signal: AbortSignal) => Promise<string>;
   }[];
   /**
    * The stretch of the past it plays from the provider's catch-up archive, from where the
@@ -1088,6 +1093,14 @@ function make(deps: PlaybackDeps) {
      * time. A refusal ends the turn: it is the account's, such as another device on the
      * connection, so another stream would be refused too. `failed` hears each failed stream.
      */
+    /** Where to ask for a stream now: its address, or a recording's made again for this moment. */
+    async function addressOf(
+      variant: LiveSession["variants"][number],
+      signal: AbortSignal,
+    ): Promise<string> {
+      return variant.fresh ? variant.fresh(signal).catch(() => variant.url) : variant.url;
+    }
+
     async function openVariant(
       session: LiveSession,
       signal: AbortSignal,
@@ -1111,7 +1124,12 @@ function make(deps: PlaybackDeps) {
       const kept = session.delivered.variantId;
       const variants = kept ? session.variants.filter(({ id }) => id === kept) : session.variants;
       for (const variant of variants) {
-        const upstream = await connect(session, variant.url, variant.headers, signal);
+        const upstream = await connect(
+          session,
+          await addressOf(variant, signal),
+          variant.headers,
+          signal,
+        );
         const body = upstream.ok ? upstream.response.body : null;
         if (signal.aborted) {
           void body?.cancel().catch(() => {});
@@ -1219,8 +1237,9 @@ function make(deps: PlaybackDeps) {
           : session.variants;
         let failure: StreamFailure = noStream;
         for (const variant of variants) {
-          const upstream = await requestFor(variant.url, variant.headers);
-          const opened = upstream.ok ? await readStart(upstream.response, variant.url) : null;
+          const address = await addressOf(variant, signal);
+          const upstream = await requestFor(address, variant.headers);
+          const opened = upstream.ok ? await readStart(upstream.response, address) : null;
           if (signal.aborted) {
             void opened?.reader.cancel().catch(() => {});
             response.destroy();
@@ -3559,7 +3578,11 @@ function make(deps: PlaybackDeps) {
             try: async (signal) =>
               window
                 ? await source.provider.archiveStream(id, window, signal)
-                : { ...(await source.provider.liveStream(id, signal)), start: null },
+                : {
+                    ...(await source.provider.liveStream(id, signal)),
+                    start: null,
+                    relative: false,
+                  },
             catch: failedWith,
           }).pipe(Effect.map((stream) => ({ id, ...stream })));
         const first = yield* Effect.forEach(
@@ -3567,19 +3590,29 @@ function make(deps: PlaybackDeps) {
           (id) => ask(id, archive),
         );
         // A channel's streams can name a recording's start in other ways, as a playlist's HD
-        // stream to the second, its SD stream to the minute and another as steps before now. The
-        // recording starts at the earliest of them: the others are asked again from there, and
-        // one that can't name that very moment is no stream of this recording, so whichever plays,
-        // before and after a switch to another, starts where the session says.
-        const earliest = Math.min(...first.flatMap((stream) => stream.start ?? []));
+        // stream to the second and its SD stream to the minute. The recording starts at the
+        // earliest of them: the others are asked again from there, and one that can't name that
+        // very moment is no stream of this recording, so whichever plays, before and after a
+        // switch to another, starts where the session says.
+        //   An address that names the start as time before the moment it is asked (`relative`)
+        // names another start the later it is asked, as after another stream took its time to
+        // fail. It is no stream of a recording that another stream names absolutely. Where every
+        // stream is relative, the first alone plays it, its address made again right before each
+        // request (`fresh`), so it names the session's start whenever it is asked.
+        const candidates = !archive
+          ? first
+          : first.some((stream) => !stream.relative)
+            ? first.filter((stream) => !stream.relative)
+            : first.slice(0, 1);
+        const earliest = Math.min(...candidates.flatMap((stream) => stream.start ?? []));
         const listed =
-          archive && first.some((stream) => stream.start !== earliest)
-            ? (yield* Effect.forEach(first, (stream) =>
+          archive && candidates.some((stream) => stream.start !== earliest)
+            ? (yield* Effect.forEach(candidates, (stream) =>
                 stream.start === earliest
                   ? Effect.succeed(stream)
                   : ask(stream.id, { start: earliest, end: archive.end }),
               )).filter((stream) => stream.start === earliest)
-            : first;
+            : candidates;
         // Looked up under the login it had: with another by now, they are no longer its streams.
         yield* whileSaved(source);
         yield* coordination.whileAsked(options.turn);
@@ -3590,12 +3623,26 @@ function make(deps: PlaybackDeps) {
           (a, b) => Number(failedAt.has(a.url)) - Number(failedAt.has(b.url)),
         );
         const format = streams[0]?.format ?? "mpegts";
-        const variants = streams.flatMap(({ id, url, format: other, headers }) =>
-          other === format ? [{ id, url, headers: headers ?? {} }] : [],
-        );
         // A recording starts where its streams' addresses say, the same moment for each.
         const origin = streams[0]?.start;
         const recording = archive && origin != null ? { start: origin, end: archive.end } : null;
+        const variants = streams.flatMap(({ id, url, format: other, headers, relative }) =>
+          other !== format
+            ? []
+            : [
+                {
+                  id,
+                  url,
+                  headers: headers ?? {},
+                  ...(relative && recording
+                    ? {
+                        fresh: async (signal: AbortSignal) =>
+                          (await source.provider.archiveStream(id, recording, signal)).url,
+                      }
+                    : {}),
+                },
+              ],
+        );
         const id = randomUUID();
         const { closed, scope: forked, lan } = yield* sessionScope(id, receiver);
         const token = randomBytes(18).toString("base64url");
