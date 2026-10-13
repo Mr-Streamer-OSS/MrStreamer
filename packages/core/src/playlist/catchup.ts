@@ -10,9 +10,7 @@
 //   #EXTM3U line's:
 //   - `default`: `catchup-source` is the recording's whole http(s) address.
 //   - `append`: `catchup-source` goes after the stream's address.
-//   - `shift`, or `timeshift`: `utc={utc}&lutc={lutc}` goes after it as a query (SIPTV's way),
-//     unless its query has a `utc` or `lutc` already, however spelt, which a provider could read
-//     instead: then none.
+//   - `shift`, or `timeshift`: `utc={utc}&lutc={lutc}` goes after it as a query (SIPTV's way).
 //   - `flussonic`, or `fs`: Flussonic's archive addresses beside the stream's. `…/name/mpegts`
 //     gives `…/name/timeshift_abs-{utc}.ts`, which plays on from that moment with no end, as
 //     Kodi asks for it (playback stops it at the window's end), and `…/name/index.m3u8` (or
@@ -35,7 +33,9 @@
 //   are read as the address is written, which is how it is sent: an address with a fragment, a
 //   `.` or `..` path segment, a login before its host, a placeholder in its scheme, host or port,
 //   whitespace or a backslash, which `new URL` would send otherwise, has no catch-up, whatever
-//   its mode made it from.
+//   its mode made it from; and so has one whose query a provider could read otherwise than it
+//   was meant, with a `;` or a key twice, however spelt or encoded, as a `utc` of the stream's
+//   own beside the one a mode or source adds.
 //
 // Not supported, so no catch-up: a mode without days or days without a mode, whose meaning players
 // don't agree on; `vod` and modes not named here; a source a mode needs that is missing; a stream
@@ -145,7 +145,9 @@ const PLACEHOLDER = /\$\{[a-z]+\}|\{[a-zA-Z]+(?::\d+)?\}/g;
  * is written: an absolute http(s) address, once its placeholders are filled in, with no fragment,
  * which is never sent; no `.` or `..` path segment, which takes the segment before it out; no
  * login before its host; nothing but a host and port, without placeholders, in its authority; and
- * no whitespace or backslash, which addresses read otherwise than they are written.
+ * no whitespace or backslash, which addresses read otherwise than they are written; and a query
+ * without a `;`, which some providers separate keys by, and without a key twice, decoded, with
+ * `+` as a space and in any case, which a provider could read either of.
  */
 function plain(template: string): boolean {
   if (/[#\s\\]/.test(template)) return false;
@@ -155,6 +157,10 @@ function plain(template: string): boolean {
   if (!authority || /[@{}$]/.test(authority)) return false;
   const dot = (segment: string) => /^(\.|%2e){1,2}$/i.test(segment);
   if (path.split("/").some(dot)) return false;
+  const query = template.slice(parts[0].length + 1);
+  if (query.includes(";")) return false;
+  const keys = [...new URLSearchParams(query).keys()].map((key) => key.toLowerCase());
+  if (new Set(keys).size !== keys.length) return false;
   return URL.canParse(template.replaceAll(PLACEHOLDER, "1"));
 }
 
@@ -178,9 +184,7 @@ function templateOf(mode: string, url: string, source: string | null): string | 
       return source ? url + source : null;
     case "shift":
     case "timeshift":
-      return added(url, ["utc", "lutc"])
-        ? `${url}${url.includes("?") ? "&" : "?"}utc={utc}&lutc={lutc}`
-        : null;
+      return `${url}${url.includes("?") ? "&" : "?"}utc={utc}&lutc={lutc}`;
     case "flussonic":
     case "fs":
       return flussonic(url);
@@ -189,15 +193,6 @@ function templateOf(mode: string, url: string, source: string | null): string | 
     default:
       return null;
   }
-}
-
-/**
- * Whether a mode can add query keys `keys` to the stream address `url`: none of them is in its
- * query yet, however spelt or encoded, which a provider could read in place of the one added.
- */
-function added(url: string, keys: readonly string[]): boolean {
-  const query = URL.parse(url)?.searchParams;
-  return !!query && ![...query.keys()].some((key) => keys.includes(key.toLowerCase()));
 }
 
 /** Flussonic's archive address beside a stream's: MPEG-TS from a moment on, or an HLS stretch. */

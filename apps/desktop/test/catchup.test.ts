@@ -436,11 +436,42 @@ describe("a playlist's catch-up", () => {
     ["shift with a utc of its own", 'catchup="shift"', "https://iptv.test/live.ts?utc=1"],
     ["shift with an encoded utc", 'catchup="shift"', "https://iptv.test/live.ts?a=b&%75tc=1"],
     ["shift with an LUTC of its own", 'catchup="timeshift"', "https://iptv.test/live.ts?LUTC=1"],
+    ["shift with a utc after a ;", 'catchup="shift"', "https://iptv.test/live.ts?token=t;utc=1"],
+    [
+      "shift with an encoded utc after a ;",
+      'catchup="shift"',
+      "https://iptv.test/live.ts?token=t;%75tc=1",
+    ],
+    [
+      "append with a utc of its own",
+      'catchup="append" catchup-source="&utc={utc}&lutc={lutc}"',
+      "https://iptv.test/live.ts?utc=1791914426&token=t",
+    ],
+    [
+      "append with an encoded utc of its own",
+      'catchup="append" catchup-source="&utc={utc}&lutc={lutc}"',
+      "https://iptv.test/live.ts?%75tc=1791914426&token=t",
+    ],
+    [
+      "a source with a key twice, encoded once",
+      'catchup="default" catchup-source="https://archive.test/a.ts?utc=1791914426&%75tc={utc}"',
+      "https://iptv.test/live.ts",
+    ],
+    [
+      "a source with a key twice, in another case",
+      'catchup="default" catchup-source="https://archive.test/a.ts?Start={utc}&START=1"',
+      "https://iptv.test/live.ts",
+    ],
+    [
+      "a source with a key twice, spelt with + and %20",
+      'catchup="default" catchup-source="https://archive.test/a.ts?u+tc={utc}&u%20tc=1"',
+      "https://iptv.test/live.ts",
+    ],
     ["append", 'catchup="append" catchup-source="?utc={utc}"', "https://iptv.test/live.ts#top"],
     ["flussonic", 'catchup="flussonic"', "https://iptv.test/name/mpegts#top"],
     ["xc", 'catchup="xc"', "https://user:pass@iptv.test/live/user/pass/1.ts"],
   ])(
-    "finds no catch-up for %s from a stream address that sends otherwise than it reads",
+    "finds no catch-up for %s, which sends otherwise than it reads",
     async (_, attributes, url) => {
       const { provider: list } = single(attributes, url);
       const { channels } = await list.liveCatalogue();
