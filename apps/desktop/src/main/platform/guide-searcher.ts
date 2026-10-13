@@ -4,7 +4,8 @@
 //
 // A search settles only once the worker no longer reads its file, so whoever holds the file can
 // let go: with the worker's answer; or, when it is stopped, takes longer than `SEARCH_TIMEOUT_MS`
-// or the app quits, once the worker has been ended. A worker ended or stopped on its own fails
+// or the app quits, once the worker has been ended. Stops that come together wait for the same
+// end, and settle the search they stopped and no other. A worker ended or stopped on its own fails
 // what it had been asked; the next search starts another. A search waiting its turn is only
 // taken off the queue when stopped, and its time starts once it is the worker's.
 import type { Worker, WorkerOptions } from "node:worker_threads";
@@ -58,43 +59,66 @@ export function guideSearcherLayer(
     GuideSearcher,
     Effect.acquireRelease(
       Effect.sync(() => {
+        /** The worker that takes searches. Null once it is being ended: nothing of it counts then. */
         let worker: Worker | null = null;
+        /** The end of the worker being ended, until it has: every stop meanwhile waits for it. */
+        let ending: Promise<void> | null = null;
         /** The search the worker has, and when it is overdue. */
         let current: { readonly asked: Asked; readonly overdue: NodeJS.Timeout } | null = null;
         const queue: Asked[] = [];
         let next = 0;
         let quitting = false;
 
-        /** Ends the worker, and once it has ended, fails the search it had. */
-        const end = async (cause: Error) => {
-          const ending = worker;
+        /** Ends the worker, once, however many ask. */
+        const endWorker = () => {
+          if (ending) return ending;
+          const was = worker;
+          if (!was) return Promise.resolve();
           worker = null;
-          if (ending) await ending.terminate().catch(() => {});
-          finish(cause);
+          ending = was
+            .terminate()
+            .then(
+              () => {},
+              () => {},
+            )
+            .finally(() => {
+              ending = null;
+            });
+          return ending;
         };
-        /** Settles the search under way and gives the worker the next. */
-        const finish = (reply: GuideSearchReply | Error) => {
+        /**
+         * Ends the worker, and once it has ended, fails the search it had then: no other, also
+         * when several stop it together.
+         */
+        const stop = async (cause: Error) => {
           const done = current;
+          if (done) clearTimeout(done.overdue);
+          await endWorker();
+          if (done) finish(done, cause);
+        };
+        /** Settles `done`, while it is the search under way, and gives the worker the next. */
+        const finish = (done: NonNullable<typeof current>, reply: GuideSearchReply | Error) => {
+          if (current !== done) return;
           current = null;
-          if (done) {
-            clearTimeout(done.overdue);
-            done.asked.signal.removeEventListener("abort", stopCurrent);
-            done.asked.settle(reply);
-          }
+          clearTimeout(done.overdue);
+          done.asked.signal.removeEventListener("abort", stopCurrent);
+          done.asked.settle(reply);
           pump();
         };
-        const stopCurrent = () => void end(new Error("The guide's search was stopped."));
+        const stopCurrent = () => void stop(new Error("The guide's search was stopped."));
         /** The worker, started when none runs. */
         const running = () => {
           if (worker) return worker;
           const started = start({ resourceLimits: WORKER_LIMITS, stdout: true, stderr: true });
           started.on("message", (reply: GuideSearchReply) => {
-            if (current?.asked.request.id === reply.id) finish(reply);
+            // A worker being ended may still answer: it no longer counts.
+            if (worker === started && current?.asked.request.id === reply.id)
+              finish(current, reply);
           });
           const stopped = (cause: Error) => {
             if (worker !== started) return;
             worker = null;
-            finish(cause);
+            if (current) finish(current, cause);
           };
           started.on("error", stopped);
           started.on("exit", (code) =>
@@ -114,7 +138,7 @@ export function guideSearcherLayer(
           current = {
             asked,
             overdue: setTimeout(
-              () => void end(new Error("The guide's search took too long.")),
+              () => void stop(new Error("The guide's search took too long.")),
               timeout,
             ),
           };
@@ -166,7 +190,7 @@ export function guideSearcherLayer(
           quit: async () => {
             quitting = true;
             for (const asked of queue.splice(0)) asked.settle(new Error("The app is quitting."));
-            await end(new Error("The app is quitting."));
+            await stop(new Error("The app is quitting."));
           },
         };
       }),

@@ -26,22 +26,26 @@ import {
   GUIDE_RANGE,
   GUIDE_SCHEDULE,
   type GuideFailure,
+  type GuideSlot,
   type Listing,
   type Programme,
 } from "@mrstreamer/contracts/guide";
 import { normalize } from "../text.ts";
 import { xmltvDocument } from "./document.ts";
-import { GUIDE_LIMITS, type GuideLimits } from "./limits.ts";
-import { xmltvReader, type XmltvProgramme } from "./xmltv.ts";
+import { GUIDE_KEPT, GUIDE_LIMITS, type GuideLimits } from "./limits.ts";
+import { xmltvReader } from "./xmltv.ts";
 
-/** The layout of the files this release writes. A file of another is read as no guide. */
-const VERSION = 1;
-/** Programmes written per transaction while a document is read. */
-const BATCH = 5_000;
+/**
+ * The layout of the files this release writes. A file of another is read as no guide. 2: rows
+ * within `GUIDE_KEPT`.
+ */
+const VERSION = 2;
+/** Programmes written per transaction while a document is read, or text of this many bytes. */
+const BATCH = { programmes: 5_000, bytes: 8 * 1024 * 1024 };
 /** How often the build says how far it got. */
 const PROGRESS_MS = 200;
-/** Titles the build remembers the key of; past that it asks the file. */
-const TITLE_CACHE = 100_000;
+/** Titles the build remembers the key of, of this many bytes at most; past that it asks the file. */
+const TITLE_CACHE = { titles: 100_000, bytes: 8 * 1024 * 1024 };
 /** Opening an index on the main process lets other work in once it has run this long. */
 const SLICE_MS = 8;
 /** Title keys one step of a search compares with its words, matching or not. */
@@ -134,19 +138,24 @@ export async function buildGuideIndex(
       const known = channels.get(id);
       if (known) {
         // A name given later, or again, stands; programmes alone name a channel by its id.
-        if (name !== null) known.name = name;
+        if (name !== null) known.name = copied(kept(name, GUIDE_KEPT.nameChars));
         return known.key;
       }
       if (channels.size === limits.channels)
         throw failure({ kind: "too-large", limit: "channels" });
-      const entry = { key: channels.size + 1, name };
-      channels.set(id, entry);
+      const entry = {
+        key: channels.size + 1,
+        name: name && copied(kept(name, GUIDE_KEPT.nameChars)),
+      };
+      channels.set(copied(id), entry);
       return entry.key;
     };
 
     const insertTitle = db.prepare("insert into title (text, folded) values (?, ?)");
     const findTitle = db.prepare("select key from title where text = ?");
     const titles = new Map<string, number>();
+    /** About how many bytes the titles in `titles` take. */
+    let cachedBytes = 0;
     /** Whether `titles` holds every title written so far: then one it lacks is new. */
     let whole = true;
     const titleKey = (text: string) => {
@@ -157,55 +166,59 @@ export async function buildGuideIndex(
         typeof found === "number"
           ? found
           : Number(insertTitle.run(text, normalize(text)).lastInsertRowid);
-      if (titles.size === TITLE_CACHE) {
+      if (titles.size === TITLE_CACHE.titles || cachedBytes >= TITLE_CACHE.bytes) {
         titles.clear();
+        cachedBytes = 0;
         whole = false;
       }
-      titles.set(text, key);
+      titles.set(copied(text), key);
+      cachedBytes += text.length * 2;
       return key;
     };
     // Duplicates of a start time count once: the first the document lists, also when it has no
     // end and a later one does, so it runs until the next start. Releases before 0.0.13 kept the
     // later one then, as they dropped an entry whose end the next start would make empty.
     const insertProgramme = db.prepare("insert or ignore into programme values (?, ?, ?, ?, ?)");
-    let batch: XmltvProgramme[] = [];
+    // Each programme is written as it is read, so nothing of it stays in memory; a transaction
+    // ends every so many programmes or bytes.
+    let pending = { programmes: 0, bytes: 0 };
     let read = 0;
     let told = performance.now();
-    const flush = () => {
-      db.exec("begin");
-      for (const entry of batch) {
-        insertProgramme.run(
-          listed(entry.channel, null),
-          entry.start,
-          entry.stop,
-          titleKey(entry.title),
-          entry.description,
-        );
-      }
+    const commit = () => {
       db.exec("commit");
-      batch = [];
+      pending = { programmes: 0, bytes: 0 };
       if (performance.now() - told >= PROGRESS_MS) {
         told = performance.now();
         progress(read);
       }
+      db.exec("begin");
     };
     const reader = xmltvReader(
       {
-        channel: ({ id, name }) => void listed(id, name),
+        channel({ id, name }) {
+          if (id.length <= GUIDE_KEPT.idChars) listed(id, name);
+        },
         programme(entry) {
           read++;
           if (entry.stop !== null && entry.stop <= cutoff) return;
+          if (entry.channel.length > GUIDE_KEPT.idChars) return;
+          const title = kept(entry.title, GUIDE_KEPT.titleChars);
+          const description =
+            entry.description && kept(entry.description, GUIDE_KEPT.descriptionChars);
           // Counted as it comes, so a guide past the limit stops here rather than at its end.
-          listed(entry.channel, null);
-          batch.push(entry);
-          if (batch.length === BATCH) flush();
+          const channel = listed(entry.channel, null);
+          insertProgramme.run(channel, entry.start, entry.stop, titleKey(title), description);
+          pending.programmes++;
+          pending.bytes += 2 * (title.length + (description?.length ?? 0));
+          if (pending.programmes >= BATCH.programmes || pending.bytes >= BATCH.bytes) commit();
         },
       },
       limits.elementBytes,
     );
     const file = createReadStream(build.document, { highWaterMark: 64 * 1024 });
+    db.exec("begin");
     for await (const chunk of xmltvDocument(file, limits.bytes)) reader.push(chunk);
-    flush();
+    db.exec("commit");
     progress(read);
     const ending = reader.end();
     if (strict && ending !== "whole") throw failure({ kind: ending });
@@ -247,7 +260,7 @@ export async function buildGuideIndex(
  * Lays each channel's programmes out in time order, without overlaps: a programme without an
  * end runs until the next one starts, one that starts before the previous one ends cuts it
  * short, and one without an end and nothing after it is dropped. Then drops what ended before
- * `cutoff`.
+ * `cutoff`, and what is shorter than `GUIDE_KEPT.shortestMs`.
  */
 function timeline(db: DatabaseSync, cutoff: number) {
   db.exec("begin");
@@ -262,7 +275,10 @@ function timeline(db: DatabaseSync, cutoff: number) {
       and later.next is not null and (programme.stop is null or programme.stop > later.next)
   `,
   ).run();
-  db.prepare("delete from programme where stop is null or stop <= ?").run(cutoff);
+  db.prepare("delete from programme where stop is null or stop <= ? or stop - start < ?").run(
+    cutoff,
+    GUIDE_KEPT.shortestMs,
+  );
   db.exec("commit");
 }
 
@@ -303,8 +319,9 @@ function carry(db: DatabaseSync, previous: string, cutoff: number) {
       join old.title as named on named.key = programme.title
       join title on title.text = named.text
       where min(programme.stop, opening.start) > ? and programme.start < opening.start
+        and min(programme.stop, opening.start) - programme.start >= ?
     `,
-    ).run(cutoff);
+    ).run(cutoff, GUIDE_KEPT.shortestMs);
     db.exec("drop table temp.opening; commit;");
   } finally {
     db.exec("detach database old");
@@ -335,6 +352,24 @@ function finish(db: DatabaseSync) {
     insert into meta select count(*), max(stop) from programme;
     pragma user_version = ${VERSION};
   `);
+}
+
+/** `text`, cut to `chars` where a character ends. */
+function kept(text: string, chars: number): string {
+  if (text.length <= chars) return text;
+  return text.slice(0, isHighSurrogate(text.charCodeAt(chars - 1)) ? chars - 1 : chars);
+}
+
+function isHighSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff;
+}
+
+/**
+ * A copy of `text` that holds nothing else, for what the build keeps for long: what the reader
+ * hands on, and a cut of it, may be part of a whole element's text, which it would keep too.
+ */
+function copied(text: string): string {
+  return structuredClone(text);
 }
 
 function failure(failure: GuideFailure): AppFailure {
@@ -372,14 +407,17 @@ export interface GuideIndex {
   listing(channel: IndexedChannel, at: number): Listing | null;
   /**
    * The programme on `channel` at `at`, if any, and those after it that start before `until`:
-   * at least `GUIDE_SCHEDULE.atLeast` when fewer do, and at most `GUIDE_SCHEDULE.most`.
+   * at least `GUIDE_SCHEDULE.atLeast` when fewer do, and at most `GUIDE_SCHEDULE.most`, which
+   * holds a whole day.
    */
   schedule(channel: IndexedChannel, at: number, until: number): readonly Programme[];
   /**
-   * The programmes on `channel` that overlap [from, to), in time order: the first
-   * `GUIDE_RANGE.programmes` of them.
+   * The programmes on `channel` that overlap [from, to), in time order, without descriptions:
+   * a minute long at least, so a stretch of `GUIDE_RANGE.hours` holds a few hundred.
    */
-  range(channel: IndexedChannel, from: number, to: number): readonly Programme[];
+  range(channel: IndexedChannel, from: number, to: number): readonly GuideSlot[];
+  /** The programme on `channel` that starts at `start`, with its description, or null. */
+  programme(channel: IndexedChannel, start: number): Programme | null;
   close(): void;
 }
 
@@ -444,25 +482,33 @@ function reader(
   },
 ): GuideIndex {
   // From the programme on at `at`, if any: the last to start by then, which may have ended.
+  const columns = "programme.start, programme.stop, title.text as title";
   const from = `
-    select programme.start, programme.stop, title.text as title, programme.description
     from programme join title on title.key = programme.title
     where programme.channel = :channel
       and programme.start >= ifnull(
         (select max(start) from programme where channel = :channel and start <= :at),
         -9007199254740991
       )`;
+  const described = `select ${columns}, programme.description ${from}`;
   // Every read is bounded in SQL, before a row is made: the one that may have ended comes first.
-  const listing = db.prepare(`${from} order by programme.start limit 3`);
+  // A row is a few kilobytes at most and a minute of time at least (`GUIDE_KEPT`).
+  const listing = db.prepare(`${described} order by programme.start limit 3`);
   const schedule = db.prepare(
-    `${from} and programme.start < :until order by programme.start limit ${GUIDE_SCHEDULE.most + 1}`,
+    `${described} and programme.start < :until order by programme.start limit ${GUIDE_SCHEDULE.most + 1}`,
   );
   const scheduleTail = db.prepare(
-    `${from} order by programme.start limit ${GUIDE_SCHEDULE.atLeast + 1}`,
+    `${described} order by programme.start limit ${GUIDE_SCHEDULE.atLeast + 1}`,
   );
+  // A minute a programme at least: the stretch holds no more than this, the first one also.
+  const slots = (GUIDE_RANGE.hours * 60 * 60 * 1000) / GUIDE_KEPT.shortestMs + 2;
   const range = db.prepare(
-    `${from} and programme.start < :to order by programme.start limit ${GUIDE_RANGE.programmes + 1}`,
+    `select ${columns} ${from} and programme.start < :to order by programme.start limit ${slots}`,
   );
+  const detail = db.prepare(`
+    select ${columns}, programme.description
+    from programme join title on title.key = programme.title
+    where programme.channel = ? and programme.start = ?`);
   const unended = (rows: Record<string, unknown>[], at: number) =>
     rows.map(programmeOf).filter((programme) => programme.stop > at);
   return {
@@ -484,7 +530,14 @@ function reader(
       );
     },
     range: (channel, at, to) =>
-      unended(range.all({ channel: channel.key, at, to }), at).slice(0, GUIDE_RANGE.programmes),
+      range
+        .all({ channel: channel.key, at, to })
+        .map(slotOf)
+        .filter((slot) => slot.stop > at),
+    programme(channel, start) {
+      const row = detail.get(channel.key, start);
+      return row ? programmeOf(row) : null;
+    },
     close: () => {
       if (db.isOpen) db.close();
     },
@@ -579,8 +632,9 @@ export function searchFirst(search: FirstSearch): FirstFound {
     matching(
       db,
       search,
-      // Once `limit` are in, only one that starts before the last of them can take its place.
-      () => best.at(limit - 1)?.start ?? Number.POSITIVE_INFINITY,
+      // Once `limit` are in, only one that starts by the last of them can take its place: earlier,
+      // or as early on a channel the file keys first. Starts are whole milliseconds.
+      () => (best.at(limit - 1)?.start ?? Number.POSITIVE_INFINITY) + 1,
       (found) => {
         let place = best.length;
         while (place > 0 && before(found, best[place - 1]!) < 0) place--;
@@ -740,11 +794,13 @@ function matching(
   }
 }
 
+function slotOf(row: Record<string, unknown>): GuideSlot {
+  return { start: Number(row["start"]), stop: Number(row["stop"]), title: String(row["title"]) };
+}
+
 function programmeOf(row: Record<string, unknown>): Programme {
   return {
-    start: Number(row["start"]),
-    stop: Number(row["stop"]),
-    title: String(row["title"]),
+    ...slotOf(row),
     description: typeof row["description"] === "string" ? row["description"] : null,
   };
 }

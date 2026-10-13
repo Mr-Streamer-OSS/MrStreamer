@@ -28,3 +28,20 @@ export const GUIDE_LIMITS: GuideLimits = {
   elementBytes: 1024 * 1024,
   channels: 50_000,
 };
+
+/**
+ * What an index keeps of a guide that is read: past these, a guide isn't refused, its index keeps
+ * less. They bound every row, so whatever reads one reads a few kilobytes at most, and every
+ * stretch of time, so a day of one channel holds 1,440 programmes at most.
+ *   - A title of 300 characters and a description of 2,000, cut where a character ends.
+ *   - A channel's name of 128 characters. A channel whose id is longer is no channel the app
+ *     keeps: it and its programmes are passed over, as a programme it can't read is.
+ *   - Programmes a minute long or longer, once laid out in time: a shorter one is dropped.
+ */
+export const GUIDE_KEPT = {
+  titleChars: 300,
+  descriptionChars: 2_000,
+  nameChars: 128,
+  idChars: 128,
+  shortestMs: 60_000,
+} as const;

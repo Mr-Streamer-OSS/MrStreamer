@@ -22,6 +22,7 @@ import {
   MAP_FILTERS,
   type GuideCandidate,
   type GuideChannelPage,
+  type GuideSlot,
   type GuideStatus,
   type Listing,
   type ListingMatch,
@@ -155,6 +156,8 @@ export const ipcInputs = {
       from: "number",
       to: "number",
     }).narrow(({ from, to }) => to > from && to - from <= GUIDE_RANGE.hours * 60 * 60 * 1000),
+  /** One programme of a channel, by when it starts: what a grid's slot leaves out. */
+  "guide.programme": () => type({ channel: owned(), start: "number" }),
   "guide.search": () => type({ query: "string" }),
   /**
    * Searches the programmes of one list's channels, named as `library.channels` names a list: a
@@ -512,9 +515,14 @@ export interface IpcOutputs {
   "guide.schedule": readonly Programme[];
   /**
    * Per channel asked for, by its `ownedKey`, the programmes that overlap the stretch, in time
-   * order. Channels without guide data are left out.
+   * order, without descriptions. Channels without guide data are left out.
    */
-  "guide.range": Readonly<Record<string, readonly Programme[]>>;
+  "guide.range": Readonly<Record<string, readonly GuideSlot[]>>;
+  /**
+   * The programme on the channel that starts at `start`, with its description, from the guide
+   * channel the channel shows then; null when the guide has none there.
+   */
+  "guide.programme": Programme | null;
   /** Programmes on now or later whose title matches, on now first. */
   "guide.search": readonly ProgrammeMatch[];
   /**

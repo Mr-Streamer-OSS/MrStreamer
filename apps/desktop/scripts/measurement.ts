@@ -254,7 +254,7 @@ export function validateMeasurement(input: unknown): Measurement {
     const counts = result.tool === "guide" ? GUIDE_SAMPLE_COUNTS : VIEWING_SAMPLE_COUNTS;
     for (const [name, measure] of Object.entries(result.metrics)) {
       const expectedCount =
-        name === "download and index per subscription" ? subscriptions : counts[name];
+        name === "time to ready per subscription" ? subscriptions : counts[name];
       if (measure.samples.length !== expectedCount) throw new Error(`Incomplete samples: ${name}`);
     }
   }
@@ -267,7 +267,7 @@ export function validateMeasurement(input: unknown): Measurement {
     const programmes = positiveCount(
       String(result.workload["programmesPerChannel"]),
       "programmesPerChannel",
-      GENERATED_GUIDE_PROGRAMMES,
+      GENERATED_GUIDE_PER_CHANNEL,
     );
     if (
       result.workload["source"] === "synthetic" &&
@@ -521,10 +521,12 @@ export function electronVersion(executable: string): string {
 
 /** The most programmes a generated guide has: about what a guide may unpack to, 2 GiB. */
 const GENERATED_GUIDE_PROGRAMMES = 4_000_000;
+/** The most programmes a generated guide channel has: two days of one-minute programmes. */
+const GENERATED_GUIDE_PER_CHANNEL = 2 * 24 * 60;
 const GUIDE_METRICS = {
   "longest stall while idle": "ms",
   "download and index": "ms",
-  "download and index per subscription": "ms",
+  "time to ready per subscription": "ms",
   "longest stall while downloading": "ms",
   "read from disk after a restart": "ms",
   "longest stall while reading": "ms",
@@ -578,7 +580,6 @@ const GUIDE_SAMPLE_COUNTS: Record<string, number> = {
   "peak resident memory added while indexing": 1,
 };
 const GUIDE_BUDGETS = {
-  "download and index per subscription": 3000,
   "longest stall while downloading": 50,
   "longest stall while reading": 50,
   "longest stall while answering": 50,

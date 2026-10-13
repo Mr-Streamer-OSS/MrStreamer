@@ -64,6 +64,7 @@ import type {
   GuideChannelPage,
   GuideFailure,
   GuideProcessing,
+  GuideSlot,
   GuideStatus,
   Listing,
   ListingMatch,
@@ -103,6 +104,7 @@ import {
   mapChannel,
   mapChannelsAt,
   mappedChannels,
+  programmeAt,
   rangeAt,
   scheduleAt,
   searchAt,
@@ -386,7 +388,12 @@ export class Guide extends Context.Service<
       channels: readonly OwnedId[],
       from: number,
       to: number,
-    ): Effect.Effect<Record<string, readonly Programme[]>>;
+    ): Effect.Effect<Record<string, readonly GuideSlot[]>>;
+    /**
+     * The channel's programme that starts at `start`, with its description: what a slot of
+     * `range` leaves out. Null when the guide has none there.
+     */
+    programme(channel: OwnedId, start: number): Effect.Effect<Programme | null>;
     /** Programmes on now or later whose title matches, in any guide, on now first. */
     search(query: string): Effect.Effect<readonly ProgrammeMatch[]>;
     /**
@@ -1584,8 +1591,20 @@ function make() {
         }),
       range: (channels: readonly OwnedId[], from: number, to: number) =>
         perChannel(channels, (found, ids) =>
-          Effect.sync(() => rangeAt(found.guide.index, found.channels, ids, from, to)),
+          Effect.promise(() => rangeAt(found.guide.index, found.channels, ids, from, to)),
         ),
+      programme: (channel: OwnedId, start: number) =>
+        Effect.gen(function* () {
+          const subscription = yield* savedAs(channel.subscriptionId);
+          const found =
+            subscription &&
+            (yield* withContext(subscription, (context) =>
+              Effect.sync(() =>
+                programmeAt(context.guide.index, context.channels, channel.id, start),
+              ),
+            ));
+          return found ?? null;
+        }),
       search: (query: string) =>
         Effect.gen(function* () {
           const matches: ProgrammeMatch[] = [];

@@ -9,22 +9,22 @@ export interface Programme {
   readonly description: string | null;
 }
 
+/** A programme as a grid places it: without its description, which `guide.programme` reads. */
+export type GuideSlot = Omit<Programme, "description">;
+
 /**
  * How much a grid reads at once with `guide.range`: a page of channels over a few hours. A grid
- * shows about thirty channels by six hours and reads the next page as it scrolls.
+ * shows about 25 channels by six hours and reads the next page as it scrolls.
  */
-export const GUIDE_RANGE = {
-  channels: 100,
-  hours: 24,
-  /** Programmes per channel a page holds at most: a stretch that has more is cut there. */
-  programmes: 500,
-} as const;
+export const GUIDE_RANGE = { channels: 30, hours: 12 } as const;
 
 /**
  * What `guide.schedule` answers of a channel: the programme on now and those that start before
- * `until`, and at least `atLeast` when fewer do, never more than `most`.
+ * `until`, and at least `atLeast` when fewer do, never more than `most`. The guide keeps no
+ * programme shorter than a minute, so `most` holds the longest day, of 25 hours, after the one on
+ * now: up to the end of the day it never cuts one short.
  */
-export const GUIDE_SCHEDULE = { atLeast: 6, most: 500 } as const;
+export const GUIDE_SCHEDULE = { atLeast: 6, most: 25 * 60 + 1 } as const;
 
 /** What a channel shows now and next. Either is null where the guide has a gap or ends. */
 export interface Listing {
@@ -78,7 +78,7 @@ export type GuideSource =
     };
 
 /**
- * What a subscription's guide is doing, as its Settings row shows it: each state holds all the
+ * What a subscription's guide is doing, for a Settings row to show: each state holds all such a
  * row needs. The guide it had keeps answering throughout, until a new one is read whole.
  *   - `downloading`: `bytes` of the document have arrived, of `total` when the server says.
  *   - `reading`: the document is being indexed, `programmes` of it so far, since `since`.

@@ -11,12 +11,15 @@ import { ownedKey } from "@mrstreamer/contracts/subscription";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import { Failed } from "@mrstreamer/core/failure";
+import { openGuideIndex } from "@mrstreamer/core/guide/index-file";
+import { GUIDE_KEPT } from "@mrstreamer/core/guide/limits";
 import type { CatalogueChannels } from "@mrstreamer/core/guide/programmes";
 import {
   Guide,
   GuideAddresses,
   GuideCatalogue,
   GuideIndexer,
+  GuideSearcher,
   GuideSource,
   GuideStore,
   GUIDE_ARCHIVE_MS,
@@ -511,6 +514,28 @@ describe("a guide as it downloads and is indexed", () => {
       Object.keys(await run(guide.range([{ subscriptionId: ID, id: "2" }], NOW, NOW + HOUR))),
     ).toEqual([]);
   });
+
+  it("leaves descriptions out of a grid's stretch, and reads one programme's when it is asked for", async () => {
+    const { run, guide, one, serve } = await standalone();
+    serve(
+      tv(
+        '<programme start="20261002200000 +0200" stop="20261002210000 +0200" channel="one.test"><title>Eight</title><desc>What happens at eight</desc></programme>',
+      ),
+    );
+    await run(guide.refresh(ID));
+
+    expect((await run(guide.range([one], NOW, NOW + HOUR)))[ownedKey(one)]).toEqual([
+      { start: at("20:00"), stop: at("21:00"), title: "Eight" },
+    ]);
+    expect(await run(guide.programme(one, at("20:00")))).toEqual({
+      start: at("20:00"),
+      stop: at("21:00"),
+      title: "Eight",
+      description: "What happens at eight",
+    });
+    expect(await run(guide.programme(one, at("20:30")))).toBeNull();
+    expect(await run(guide.programme({ subscriptionId: ID, id: "2" }, at("20:00")))).toBeNull();
+  });
 });
 
 describe("the files of a guide while it is read", () => {
@@ -576,6 +601,61 @@ describe("the files of a guide while it is read", () => {
     failWrites(false);
     expect(await run(guide.use(ID, id))).toMatchObject({ source: { kind: "external" } });
     expect(await nowOn()).toBe("Elsewhere");
+  });
+
+  it("reads a guide of large descriptions within a small heap, keeping a few thousand characters of each", async () => {
+    const documents = await mkdtemp(join(tmpdir(), "mr-streamer-guide-document-"));
+    const output = await tempDir();
+    // Sixty programmes of half a mebibyte each: what one batch held before it was written.
+    const description = "d".repeat(512 * 1024);
+    const minute = 60_000;
+    const stampOf = (time: number) =>
+      `${new Date(time).toISOString().slice(0, 19).replace(/[-T:]/g, "")} +0000`;
+    await writeFile(
+      join(documents, "guide.xml"),
+      tv(
+        ...Array.from(
+          { length: 60 },
+          (_, n) =>
+            `<programme start="${stampOf(NOW + n * minute)}" stop="${stampOf(NOW + (n + 1) * minute)}" channel="one.test"><title>Item ${n}</title><desc>${description}</desc></programme>`,
+        ),
+      ),
+    );
+    const indexer = await runtimeFor(
+      guideIndexerLayer((options) =>
+        guideIndexWorker({
+          ...options,
+          resourceLimits: { maxOldGenerationSizeMb: 24, maxYoungGenerationSizeMb: 4 },
+        }),
+      ),
+    ).runPromise(GuideIndexer);
+    const target = join(output, "guide-index.sqlite");
+    try {
+      const summary = await indexer.build(
+        {
+          document: join(documents, "guide.xml"),
+          target,
+          previous: null,
+          since: NOW,
+          archive: GUIDE_ARCHIVE_MS,
+          strict: false,
+        },
+        () => {},
+        new AbortController().signal,
+      );
+      expect(summary.programmes).toBe(60);
+      const index = await openGuideIndex(target);
+      const channel = index?.channels.get("one.test");
+      if (!index || !channel) throw new Error("No guide.");
+      const schedule = index.schedule(channel, NOW, NOW + HOUR);
+      index.close();
+      expect(schedule).toHaveLength(60);
+      expect(
+        schedule.every((each) => each.description?.length === GUIDE_KEPT.descriptionChars),
+      ).toBe(true);
+    } finally {
+      await rm(documents, { recursive: true, force: true });
+    }
   });
 
   it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
@@ -815,6 +895,49 @@ describe("work stopped on its way to becoming the guide", () => {
 });
 
 describe("a search that doesn't answer", () => {
+  it.each(["its time running out", "the app quitting"] as const)(
+    "settles once its worker has ended, when it is stopped and %s come together",
+    async (also) => {
+      const ending = held();
+      let terminated = 0;
+      const runtime = runtimeFor(
+        guideSearcherLayer((options) => {
+          const worker = silentSearchWorker(options);
+          const terminate = worker.terminate.bind(worker);
+          worker.terminate = async () => {
+            terminated++;
+            await ending.wait();
+            return terminate();
+          };
+          return worker;
+        }, 100),
+      );
+      const searcher = await runtime.runPromise(GuideSearcher);
+      const stopping = new AbortController();
+      let settled = false;
+      const searched = searcher
+        .first(
+          { path: "none", words: ["news"], at: NOW, channels: [1], limit: 50 },
+          stopping.signal,
+        )
+        .finally(() => (settled = true));
+      void searched.catch(() => {});
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      stopping.abort();
+      await ending.arrived;
+      const quitting = also === "the app quitting" ? runtime.dispose() : null;
+      // Past the search's time, too.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      expect(settled).toBe(false);
+      ending.release();
+      await expect(searched).rejects.toThrow();
+      await quitting;
+      expect(terminated).toBe(1);
+      if (!quitting) await runtime.dispose();
+    },
+  );
+
   it("is given up after its time, its worker ended, and the next search starts another", async () => {
     let started = 0;
     const { run, guide, serve } = await standalone({

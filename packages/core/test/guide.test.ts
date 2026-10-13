@@ -18,7 +18,7 @@ import {
   type GuideIndex,
   type GuideSearching,
 } from "../src/guide/index-file.ts";
-import { GUIDE_LIMITS } from "../src/guide/limits.ts";
+import { GUIDE_KEPT, GUIDE_LIMITS } from "../src/guide/limits.ts";
 import {
   channelsCovered,
   listingsAt,
@@ -402,17 +402,44 @@ describe("indexing a guide", () => {
     expect(titles(guide.range(channel, NOON + 2 * HOUR, NOON + 3 * HOUR))).toEqual([]);
   });
 
-  it("reads a schedule and a stretch of time no further than they are asked, however much the guide holds", async () => {
+  it("keeps each row small however large the guide writes it, and no programme under a minute", async () => {
     const minute = 60_000;
+    // A description cut where the character it ends on is two code units: the whole character goes.
+    const description = `${"d".repeat(GUIDE_KEPT.descriptionChars - 1)}😀${"e".repeat(500)}`;
     const { guide } = await index(
       tv(
-        ...Array.from({ length: 2_000 }, (_, at) =>
-          programme(
-            "one.test",
-            stamp(NOON + at * minute),
-            stamp(NOON + (at + 1) * minute),
-            `Minute ${at}`,
-          ),
+        `<channel id="one.test"><display-name>${"N".repeat(400)}</display-name></channel>`,
+        `<programme start="${stamp(NOON)}" stop="${stamp(NOON + HOUR)}" channel="one.test"><title>${"T".repeat(400)}</title><desc>${description}</desc></programme>`,
+        // Half a minute, and a programme cut to half a minute by the next one.
+        programme("one.test", stamp(NOON + HOUR), stamp(NOON + HOUR + minute / 2), "Short"),
+        programme("one.test", stamp(NOON + 2 * HOUR), stamp(NOON + 3 * HOUR), "Cut short"),
+        programme("one.test", stamp(NOON + 2 * HOUR + minute / 2), stamp(NOON + 3 * HOUR), "Kept"),
+        // An id longer than any a catalogue names: no channel the guide keeps.
+        programme(`${"x".repeat(GUIDE_KEPT.idChars + 1)}`, stamp(NOON), stamp(NOON + HOUR), "Lost"),
+      ),
+    );
+    const channel = guide.channels.get("one.test");
+    if (!channel) throw new Error("No channel.");
+
+    expect(channel.name).toBe("N".repeat(GUIDE_KEPT.nameChars));
+    expect([...guide.channels.keys()]).toEqual(["one.test"]);
+    const [first] = guide.schedule(channel, NOON, NOON + DAY);
+    expect(first?.title).toBe("T".repeat(GUIDE_KEPT.titleChars));
+    expect(first?.description).toBe("d".repeat(GUIDE_KEPT.descriptionChars - 1));
+    expect(of(guide, "one.test")?.map(([title]) => title)).toEqual([
+      "T".repeat(GUIDE_KEPT.titleChars),
+      "Kept",
+    ]);
+  });
+
+  it("answers a whole day of one-minute programmes, the one a search finds among them, and a grid's stretch without descriptions", async () => {
+    const minute = 60_000;
+    const { guide, target } = await index(
+      tv(
+        ...Array.from(
+          { length: 2_000 },
+          (_, at) =>
+            `<programme start="${stamp(NOON + at * minute)}" stop="${stamp(NOON + (at + 1) * minute)}" channel="one.test"><title>${at === 1_400 ? "Needle" : `Minute ${at}`}</title><desc>About minute ${at}</desc></programme>`,
         ),
       ),
     );
@@ -423,9 +450,33 @@ describe("indexing a guide", () => {
     expect(guide.schedule(channel, NOON, NOON + 10 * minute)).toHaveLength(10);
     // At least a few more when fewer do.
     expect(guide.schedule(channel, NOON, NOON + 2 * minute)).toHaveLength(GUIDE_SCHEDULE.atLeast);
-    // Never more than a schedule may hold, nor a page of a grid.
-    expect(guide.schedule(channel, NOON, NOON + DAY)).toHaveLength(GUIDE_SCHEDULE.most);
-    expect(guide.range(channel, NOON, NOON + DAY)).toHaveLength(GUIDE_RANGE.programmes);
+    // A whole day, with what a search of it finds.
+    const day = guide.schedule(channel, NOON + 30_000, NOON + DAY);
+    expect(day).toHaveLength(24 * 60);
+    expect(day.at(-1)?.title).toBe("Minute 1439");
+    const [found] = [
+      ...eachMatch(
+        searchEach({
+          path: target,
+          words: ["needle"],
+          at: NOON + 30_000,
+          until: NOON + DAY,
+          channels: [channel.key],
+        }),
+      ),
+    ];
+    expect(day.find(({ start }) => start === found?.later?.start)?.title).toBe("Needle");
+    // A grid's stretch: every slot, and what one leaves out read on its own.
+    const stretch = guide.range(channel, NOON, NOON + GUIDE_RANGE.hours * HOUR);
+    expect(stretch).toHaveLength(GUIDE_RANGE.hours * 60);
+    expect(stretch[0]).toEqual({ start: NOON, stop: NOON + minute, title: "Minute 0" });
+    expect(guide.programme(channel, NOON + 5 * minute)).toEqual({
+      start: NOON + 5 * minute,
+      stop: NOON + 6 * minute,
+      title: "Minute 5",
+      description: "About minute 5",
+    });
+    expect(guide.programme(channel, NOON + 5 * minute + 1)).toBeNull();
   });
 
   it("keeps ended programmes for the archive window, and drops what ended before it", async () => {
@@ -554,10 +605,34 @@ describe("indexing a guide", () => {
     // Two and a half hours ago, both ended ids still had programmes to come.
     expect(channelsCovered(guide, catalogue, NOON - 2.5 * HOUR)).toBe(2);
     expect(
-      rangeAt(guide, catalogue, ["1", "2"], NOON - 2.5 * HOUR, NOON - 1.5 * HOUR),
+      await rangeAt(guide, catalogue, ["1", "2"], NOON - 2.5 * HOUR, NOON - 1.5 * HOUR),
     ).toMatchObject({
       "1": [{ title: "Old news" }],
       "2": [{ title: "Ended news" }],
+    });
+  });
+
+  it("gives each channel of a grid's page the stretch of the guide channel it shows, also when several show one", async () => {
+    const { guide } = await index(
+      tv(
+        programme("shared.test", stamp(NOON), stamp(NOON + HOUR), "Shared"),
+        programme("own.test", stamp(NOON), stamp(NOON + HOUR), "Own"),
+      ),
+    );
+    const channelsOf = (guideId: string) =>
+      guideId === "shared.test" ? ["1", "2", "3"].map(liveChannel) : [liveChannel("4")];
+    const catalogue = {
+      guideIdsOf: (id: string) => (id === "4" ? ["own.test"] : ["shared.test"]),
+      channelsOf,
+    };
+
+    const page = await rangeAt(guide, catalogue, ["1", "2", "3", "4"], NOON, NOON + HOUR);
+    const shared = [{ start: NOON, stop: NOON + HOUR, title: "Shared" }];
+    expect(page).toEqual({
+      "1": shared,
+      "2": shared,
+      "3": shared,
+      "4": [{ start: NOON, stop: NOON + HOUR, title: "Own" }],
     });
   });
 
@@ -602,6 +677,39 @@ describe("indexing a guide", () => {
       "three.test": { now: true, later: undefined },
     });
     expect(each(["news"], NOON + 3 * DAY)).toMatchObject({ "two.test": { later: "Late news" } });
+  });
+
+  it("finds the first of programmes that start together on the channel the guide keys first, past a page of titles", async () => {
+    // c0 is keyed first. Fifty programmes start together on the others; its own, as early,
+    // has a title read pages of titles later.
+    const { guide, target } = await index(
+      tv(
+        '<channel id="c0"/>',
+        ...Array.from({ length: 50 }, (_, n) =>
+          programme(`c${n + 1}`, stamp(NOON + HOUR), stamp(NOON + 2 * HOUR), "News early"),
+        ),
+        ...Array.from({ length: 10_000 }, (_, n) =>
+          programme(
+            "filler.test",
+            stamp(NOON + n * HOUR),
+            stamp(NOON + (n + 1) * HOUR),
+            `Filler ${n}`,
+          ),
+        ),
+        programme("c0", stamp(NOON + HOUR), stamp(NOON + 2 * HOUR), "News late"),
+      ),
+    );
+    const keys = Array.from({ length: 51 }, (_, n) => guide.channels.get(`c${n}`)?.key ?? 0);
+    const found = searchFirst({
+      path: target,
+      words: ["news"],
+      at: NOON,
+      channels: keys,
+      limit: 50,
+    });
+
+    expect(found[0]).toMatchObject({ channel: keys[0], programme: { title: "News late" } });
+    expect(found).toHaveLength(50);
   });
 
   it("refuses an address's answer that isn't a whole XMLTV guide with something still to come", async () => {

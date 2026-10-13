@@ -8,6 +8,7 @@
 // catalogue's guide ids, both ways, so every lookup here reads one and the same answer.
 import type {
   GuideChannelPage,
+  GuideSlot,
   Listing,
   ListingMatch,
   MapChannel,
@@ -176,21 +177,46 @@ export function scheduleAt(
 /**
  * Each channel's programmes that overlap [from, to), past ones the guide keeps among them, by
  * channel id: of the guide channel that still has programmes at `from`, so a grid scrolled back
- * shows what the guide kept of then. Channels without guide data are left out.
+ * shows what the guide kept of then. Channels without guide data are left out. Channels that
+ * show the same guide channel share one read of it, and other work gets its turn between reads.
  */
-export function rangeAt(
+export async function rangeAt(
   index: GuideIndex,
   channels: GuideChannels,
   channelIds: readonly string[],
   from: number,
   to: number,
-): Record<string, readonly Programme[]> {
-  const result: Record<string, readonly Programme[]> = {};
+): Promise<Record<string, readonly GuideSlot[]>> {
+  const slice = slicer();
+  const read = new Map<number, readonly GuideSlot[]>();
+  const result: Record<string, readonly GuideSlot[]> = {};
   for (const channelId of channelIds) {
     const shown = shownChannel(index, channels, channelId, from);
-    if (shown) result[channelId] = index.range(shown, from, to);
+    if (!shown) continue;
+    let slots = read.get(shown.key);
+    if (!slots) {
+      slots = index.range(shown, from, to);
+      read.set(shown.key, slots);
+      const rest = slice();
+      if (rest) await rest;
+    }
+    result[channelId] = slots;
   }
   return result;
+}
+
+/**
+ * The programme on the channel that starts at `start`, with its description, from the guide
+ * channel it shows then, or null.
+ */
+export function programmeAt(
+  index: GuideIndex,
+  channels: GuideChannels,
+  channelId: string,
+  start: number,
+): Programme | null {
+  const shown = shownChannel(index, channels, channelId, start);
+  return shown ? index.programme(shown, start) : null;
 }
 
 /**

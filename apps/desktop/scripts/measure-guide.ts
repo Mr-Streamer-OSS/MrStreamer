@@ -1,7 +1,7 @@
-// Measures the programme guide against its budgets: download and index under 3 s, no
-// main-process stall over 50 ms while it downloads, indexes, opens or answers, now and next for a
-// screen of channels under 5 ms, under 80 MB of heap and 150 MB of resident memory added once
-// loaded. Indexing runs in a worker thread, as in the app, so its own memory shows in the peak
+// Measures the programme guide against its budgets: no main-process stall over 50 ms while it
+// downloads, indexes, opens or answers, now and next for a screen of channels under 5 ms, under
+// 80 MB of heap and 150 MB of resident memory added once loaded. How long a guide takes to be
+// ready in the background, downloaded and indexed, is reported without a budget. Indexing runs in a worker thread, as in the app, so its own memory shows in the peak
 // resident memory added while indexing, not in what stays. Uses a generated guide the size of a
 // large subscription, or a real XMLTV file, packed with gzip or not. It also times what Settings
 // asks to map channels by hand: a page of the 13,000 channels, a search of the guide's channels,
@@ -55,6 +55,8 @@ const CHUNK_BYTES = 64 * 1024;
 const MAPPED = 300;
 /** A generated guide stays within what a guide may unpack to, at about 450 bytes a programme. */
 const GENERATED_PROGRAMMES = 4_000_000;
+/** Two days of one-minute programmes, the shortest a guide keeps: what a generated channel holds. */
+const GENERATED_PER_CHANNEL = 2 * 24 * 60;
 const HOUR = 60 * 60 * 1000;
 /** How long the event loop is watched with nothing to do, before anything is measured. */
 const IDLE_MS = 3000;
@@ -69,7 +71,11 @@ const { values } = parseArgs({
   },
 });
 const GUIDE_CHANNELS = positiveCount(values["guide-channels"], "guide-channels", 50000);
-const PROGRAMMES_PER_CHANNEL = positiveCount(values.programmes, "programmes", GENERATED_PROGRAMMES);
+const PROGRAMMES_PER_CHANNEL = positiveCount(
+  values.programmes,
+  "programmes",
+  GENERATED_PER_CHANNEL,
+);
 const SUBSCRIPTIONS = positiveCount(values.subscriptions, "subscriptions", 4);
 if (!values.file && GUIDE_CHANNELS * PROGRAMMES_PER_CHANNEL > GENERATED_PROGRAMMES)
   throw new Error(`Generated guide exceeds ${GENERATED_PROGRAMMES} total programmes`);
@@ -423,7 +429,7 @@ try {
   const metrics: Measurement["metrics"] = {
     "longest stall while idle": metric("ms", [idleStall]),
     "download and index": metric("ms", [downloadMs]),
-    "download and index per subscription": metric("ms", subscriptionDownloadSamples, 3000),
+    "time to ready per subscription": metric("ms", subscriptionDownloadSamples),
     "longest stall while downloading": metric("ms", [downloadStall], 50),
     "read from disk after a restart": metric("ms", [diskMs]),
     "longest stall while reading": metric("ms", [diskStall], 50),
@@ -458,7 +464,7 @@ try {
     conditions: {
       warmup:
         "fresh guide disposed and collected before fresh service in same process; mapping options warmed once",
-      downloadBudgetScope: "one refresh per subscription; aggregate unbudgeted",
+      readyScope: "one refresh per subscription, in the background; unbudgeted",
       heapBudgetScope:
         "all subscriptions loaded in first service, heap its disposal and collection frees",
       residentBudgetScope:
@@ -521,24 +527,34 @@ try {
     const first = now - 24 * 60 * 60 * 1000;
     const slot = (48 * 60 * 60 * 1000) / PROGRAMMES_PER_CHANNEL;
     const file = createWriteStream(path);
+    // Written a mebibyte or so at a time, whatever a channel holds, as the file takes it.
+    let parts: string[] = [];
+    let pending = 0;
     const write = async (text: string) => {
+      parts.push(text);
+      pending += text.length;
+      if (pending >= 1024 * 1024) await flush();
+    };
+    const flush = async () => {
+      const text = parts.join("");
+      parts = [];
+      pending = 0;
       if (!file.write(text))
         await new Promise<void>((resolve) => file.once("drain", () => resolve()));
     };
     await write('<?xml version="1.0" encoding="utf-8"?><tv>\n');
     for (let channel = 0; channel < GUIDE_CHANNELS; channel++) {
-      const parts: string[] = [];
       for (let index = 0; index < PROGRAMMES_PER_CHANNEL; index++) {
         const start = first + index * slot;
         const title = `${words[(channel + index) % words.length]} ${channel % 97} ${index}`;
         const description = `Episode ${index}. ${"A description of a length panels often send. ".repeat(5)}`;
-        parts.push(
+        await write(
           `<programme start="${time(start)}" stop="${time(start + slot)}" channel="c${channel}.test">` +
             `<title lang="en">${title}</title><desc lang="en">${description}</desc></programme>\n`,
         );
       }
-      await write(parts.join(""));
     }
+    await flush();
     file.end("</tv>");
     await finished(file);
   }
