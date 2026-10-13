@@ -555,7 +555,7 @@ function reader(
         // process long, however many titles match.
         const rows = db.prepare(`
           select programme.channel, programme.start, programme.stop, title.text
-          from programme join title on title.key = programme.title
+          from programme indexed by programme_title join title on title.key = programme.title
           where programme.title in (select value from json_each(?))
             and programme.start >= ? and programme.start < ? and programme.stop > ?
             and programme.stop - programme.start <= ${LONG_MS} ${within}`);
@@ -572,7 +572,7 @@ function reader(
               if (channels.has(programme.channel)) visit(programme);
               if (slice.due()) await slice.rest();
             }
-            if (slice.due()) await slice.rest();
+            if (slice.overdue()) await slice.rest();
           }
         }
         // Then the long ones, which may have begun long before what is on now, of the few that
@@ -610,12 +610,18 @@ function programmeOf(row: Record<string, unknown>): Programme {
   };
 }
 
-/** Tells a long read on the main process when to let other work in. */
+/**
+ * Tells a long read on the main process when to let other work in: `due` after cheap steps, as
+ * a row, reading the clock every few of them; `overdue` after costly ones, as a statement run,
+ * reading it each time.
+ */
 function slicer() {
   let began = performance.now();
   let count = 0;
+  const overdue = () => performance.now() - began >= SLICE_MS;
   return {
-    due: () => (++count & 127) === 0 && performance.now() - began >= SLICE_MS,
+    due: () => (++count & 15) === 0 && overdue(),
+    overdue,
     rest: async () => {
       await new Promise((resolve) => setImmediate(resolve));
       began = performance.now();
