@@ -2,7 +2,7 @@
 
 > For maintainers. [Releasing](releasing.md) has the release policy, [testing](../contributing/testing.md#ci) what the checks check.
 
-Four workflows in `.github/workflows`, each with one job to do, and two shared actions in `.github/actions`:
+Five workflow files in `.github/workflows`: four named workflows and `package.yml`, which only `release.yml` calls. Two shared actions live in `.github/actions`:
 
 - `checks.yml`: the app's and the website's checks.
 - `release.yml`: plans a run, then builds each release through `package.yml` and publishes it through `publish.yml`.
@@ -90,4 +90,4 @@ A release's jobs check out the commit the plan resolved, so `main` moving during
 
 ## Checking a change to CI
 
-`pnpm actionlint` lints every workflow and action, with shellcheck on each script, and runs in Check on every pull request. `test/publication-guard.test.ts` holds the workflows to one rule: nothing a pull request or dry run starts publishes. `test/release.test.ts`, `test/store-release.test.ts` and `apps/desktop/test/package-receipt.test.ts` cover the scripts the workflows run. A change to `package.yml` or the shared actions needs a dry run of its pull request. A change to `publish.yml` or the stable path can only be proved by the next real nightly or stable release, or by a run by hand of the target it changed.
+`pnpm actionlint` lints the five workflow files, with shellcheck on each workflow `run:` script, and runs in Check on every pull request. It checks how workflows use the shared actions, but not the shell inside the actions themselves. `test/publication-guard.test.ts` evaluates the real `if:` conditions of `release.yml`'s publishing calls and of every `publish.yml` job, for every event, dry-run output and result of the jobs they wait for, and fails if anything a pull request or dry run starts would publish. `test/release.test.ts`, `test/store-release.test.ts` and `apps/desktop/test/package-receipt.test.ts` cover the scripts the workflows run. A change to `package.yml` or the shared actions needs a dry run of its pull request. A change to `publish.yml` or the stable path can only be proved by the next real nightly or stable release, or by a run by hand of the target it changed.

@@ -76,7 +76,7 @@ The plan refuses a stable release when:
 - the nightly entered is a draft, has no release, or isn't a nightly version
 - `main` doesn't contain the nightly's commit
 - the nightly came before the newest stable release and lacks its commit, so it can hold older code
-- the nightly was built from the newest stable release's own commit, so it holds nothing new; the upgrade check would refuse it too, after packaging
+- the nightly was built from the newest stable release's own commit, so it holds nothing new, and the upgrade check could never pass for it
 - the nightly came before the newest stable release and no version is entered
 - the version is already released or would sort before the nightly
 - the nightly to publish first would sort after the stable release, which happens only when `package.json` on `main` records a version no release has

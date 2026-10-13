@@ -388,7 +388,7 @@ Use the platform's normal display and mock keychain arguments on macOS. For chan
 
 The [release workflow](../maintainers/releasing.md) runs Check and Test on the exact commit it releases, next to the packaged-app test on every installed package. There the production build is the release's own bundle job, the workflows are main's, and the website has no say, so those are left out. CI needs no secrets, so pull requests from forks run it too.
 
-`pnpm actionlint` (`scripts/actionlint.ts`) downloads actionlint and shellcheck at pinned versions, checks them against pinned SHA-256s, keeps them in `node_modules/.cache/actionlint` and lints `.github/workflows` the same way on any machine. `test/publication-guard.test.ts` holds the workflows to one rule actionlint can't: nothing a pull request or a dry run starts publishes.
+`pnpm actionlint` (`scripts/actionlint.ts`) downloads actionlint and shellcheck at pinned versions, checks them against pinned SHA-256s, keeps them in `node_modules/.cache/actionlint` and lints `.github/workflows` the same way on any machine, with shellcheck on each workflow `run:` script; the shell inside `.github/actions` isn't linted. `test/publication-guard.test.ts` holds the workflows to one rule actionlint can't, by evaluating their real `if:` conditions: nothing a pull request or a dry run starts publishes.
 
 ### The test report
 
