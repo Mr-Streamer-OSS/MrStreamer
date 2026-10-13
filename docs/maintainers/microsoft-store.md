@@ -26,7 +26,7 @@ From Partner Center's Product identity page. These values are public: every pack
 | Package family name                     | `MrStreamerOSS.Mr.Streamer_5yzg1erdm3xmr` |
 | Store ID                                | `9N45GG76ZP4T`                            |
 
-The publisher display name has no period on purpose: Partner Center doesn't allow one there. The Store ID is also what the submission API calls the application ID. `scripts/store-release.ts` holds the identity the automation insists on.
+The publisher display name has no period on purpose: Partner Center doesn't allow one there. The Store ID is also what the submission API calls the application ID. `STORE_APP` in `scripts/store-release.ts` holds these values, and the release run's package check and the Store job hold every package to them. A test fails when `electron-builder.yml` differs.
 
 ## Store name
 
