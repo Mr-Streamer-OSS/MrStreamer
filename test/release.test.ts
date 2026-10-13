@@ -155,11 +155,11 @@ describe("scheduled nightlies", () => {
     });
   });
 
-  it("waits six hours after the previous nightly, then builds when main has new commits", async () => {
+  it("waits five hours after the previous nightly, then builds when main has new commits", async () => {
     const last = "v0.0.1-nightly.20261002.30";
-    const early = repository({ releases: [published(last, 5.99)] });
+    const early = repository({ releases: [published(last, 4.99)] });
     const due = repository({
-      releases: [published(last, 6)],
+      releases: [published(last, 5)],
       histories: { [`${last}...head`]: "ahead" },
     });
 

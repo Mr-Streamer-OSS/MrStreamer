@@ -48,8 +48,12 @@ import {
 /** The app's manifest, whose version records the newest stable release. */
 const MANIFEST = "apps/desktop/package.json";
 
-/** A scheduled nightly waits at least this long after the previous one. */
-export const NIGHTLY_INTERVAL_MS = 6 * 60 * 60 * 1000;
+/**
+ * A scheduled nightly waits at least this long after the previous one: five hours, so the check
+ * every six hours finds a nightly that took an hour to publish due, and nightlies come about
+ * every six hours.
+ */
+export const NIGHTLY_INTERVAL_MS = 5 * 60 * 60 * 1000;
 
 const HISTORIES = ["ahead", "behind", "identical", "diverged"] as const;
 
@@ -310,7 +314,7 @@ export async function planStable(repo: Repository, request: StableRequest): Prom
 
 /**
  * The nightly a stable run publishes before the stable release, or null when the latest published
- * nightly holds `request.sha` already. Like a nightly started by hand, it skips the six hours.
+ * nightly holds `request.sha` already. Like a nightly started by hand, it skips the five hours.
  */
 async function nightlyBefore(repo: Repository, request: StableRequest): Promise<Plan | null> {
   const last = latestNightly(repo.releases);
@@ -419,7 +423,7 @@ async function nightlySkip(repo: Repository, sha: string, now: number): Promise<
   const last = latestNightly(repo.releases);
   if (!last) return null;
   if (now - Date.parse(last.publishedAt!) < NIGHTLY_INTERVAL_MS) {
-    return { skip: `${last.tag} was published less than six hours ago.`, warning: false };
+    return { skip: `${last.tag} was published less than five hours ago.`, warning: false };
   }
   switch (await repo.compare(last.tag, sha)) {
     case "ahead":

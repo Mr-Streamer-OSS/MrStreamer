@@ -3,7 +3,8 @@
 # package.yml builds and checks each release's files, and publish.yml publishes them.
 #
 # - Nightly: every six hours, a nightly when main has new commits and the last nightly is at least
-#   six hours old. Started by hand, it builds main right away.
+#   five hours old, so a nightly that took an hour to publish doesn't push the next one to twelve
+#   hours. Started by hand, it builds main right away.
 # - Stable: by hand, naming the tested nightly. When main has commits no published nightly holds,
 #   the run first publishes a nightly of main and updates the feed, so Nightly users have every
 #   change before Stable users get any. Then it rebuilds the tested nightly's commit with a stable
