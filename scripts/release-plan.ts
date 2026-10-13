@@ -1,9 +1,10 @@
-// Plans releases for the release workflow: the commit a run builds, its version and tag, and
-// whether a scheduled nightly is due. After publishing, it writes the update feed the app reads.
+// Plans releases for the release workflow: whether a run is a dry run, the commit it builds, its
+// version and tag, and whether a scheduled nightly is due. Right before publishing it checks the
+// release is complete and still new, and after publishing it writes the update feed the app reads.
 // docs/maintainers/releasing.md describes the policy.
 //
-//   node scripts/release-plan.ts nightly --ref <ref> --sha <commit> --run <number> [--scheduled | --dry-run]
-//   node scripts/release-plan.ts stable --ref <ref> --sha <main's commit> --run <number> --nightly <tested nightly> [--version 0.1.0]
+//   node scripts/release-plan.ts plan --event <event> --ref <ref> --sha <commit> --run <number>
+//       [--channel nightly|stable] [--nightly <tested nightly>] [--version 0.1.0] [--dry-run]
 //   node scripts/release-plan.ts check --version <version> --dir <folder> --sources <names>   right before publishing
 //   node scripts/release-plan.ts notes --tag <tag> --sha <commit> [--previous-tag <tag>]
 //   node scripts/release-plan.ts record --version <version>  after a stable release, on main
@@ -138,6 +139,63 @@ export interface StablePlan extends Plan {
    */
   readonly nightlyFirst: Plan | null;
 }
+
+/** What started a release run, as the plan job hands it over. */
+export interface RunRequest extends Omit<NightlyRequest, "scheduled" | "dryRun"> {
+  /** The event that started the run: schedule, workflow_dispatch or pull_request. */
+  readonly event: string;
+  /** Started by hand: nightly or stable. */
+  readonly channel?: string | undefined;
+  /** Started by hand: the stable version, as StableRequest takes it. */
+  readonly version?: string | undefined;
+  /** Started by hand: the tested nightly a stable release promotes. */
+  readonly nightly?: string | undefined;
+  /** Started by hand as a dry run. */
+  readonly dryRun: boolean;
+}
+
+/** A run's plan, and whether it is a dry run, which builds and tests and publishes nothing. */
+export interface RunPlan {
+  readonly dryRun: boolean;
+  readonly plan: Plan | StablePlan | Skip;
+  /** The tag of the tested nightly a stable release promotes, which its upgrade check installs. */
+  readonly promoted: string | null;
+}
+
+/**
+ * Plans a run of the release workflow from what started it. A pull request event is always a dry
+ * run of its head, whatever else it says: only the "release dry run" label starts one, and a fork's
+ * code never gets past that. A run by hand is a dry run when asked, and otherwise a nightly or a
+ * stable release; the schedule asks for a nightly only when one is due.
+ */
+export async function planRun(repo: Repository, request: RunRequest): Promise<RunPlan> {
+  const nightly = { ...request, scheduled: false, dryRun: false };
+  switch (request.event) {
+    case "pull_request":
+      return dryRun(await planNightly(repo, { ...nightly, dryRun: true }));
+    case "schedule":
+      return published(await planNightly(repo, { ...nightly, scheduled: true }));
+    case "workflow_dispatch":
+      if (request.dryRun) {
+        if (request.channel === "stable") {
+          throw new Error(
+            "A dry run builds the branch as a nightly. Leave the channel at nightly.",
+          );
+        }
+        return dryRun(await planNightly(repo, { ...nightly, dryRun: true }));
+      }
+      if (request.channel === "stable") {
+        const plan = await planStable(repo, { ...request, nightly: request.nightly ?? "" });
+        return { dryRun: false, plan, promoted: tagOf(parseVersion(request.nightly ?? "")!) };
+      }
+      return published(await planNightly(repo, nightly));
+    default:
+      throw new Error(`A release run doesn't start on ${request.event}.`);
+  }
+}
+
+const dryRun = (plan: Plan | Skip): RunPlan => ({ dryRun: true, plan, promoted: null });
+const published = (plan: Plan | Skip): RunPlan => ({ dryRun: false, plan, promoted: null });
 
 export async function planNightly(repo: Repository, request: NightlyRequest): Promise<Plan | Skip> {
   if (!request.dryRun) assertDefaultBranch(repo, request.ref, "nightly");
@@ -489,20 +547,25 @@ function summary(markdown: string): void {
   if (file) appendFileSync(file, `${markdown}\n`);
 }
 
-/** Prints the plan as outputs; a stable plan's nightly to publish first goes in the first-* ones. */
-function outputPlan(plan: Plan | StablePlan | Skip): void {
+/**
+ * Prints the run's plan as outputs; a stable plan's nightly to publish first goes in the first-*
+ * ones, and the nightly it promotes in promoted.
+ */
+function outputPlan({ dryRun, plan, promoted }: RunPlan): void {
   if ("skip" in plan) {
     console.log(`${plan.warning ? "::warning::" : ""}${plan.skip}`);
     summary(`No nightly: ${plan.skip}`);
-    output({ skip: "true" });
+    output({ skip: "true", "dry-run": String(dryRun) });
     return;
   }
   const first = "nightlyFirst" in plan ? plan.nightlyFirst : null;
   summary(
-    `${first ? `Nightly ${first.version} from \`${first.sha}\` first, then ` : ""}${plan.channel === "stable" ? "Stable" : "Nightly"} ${plan.version} from \`${plan.sha}\``,
+    `${dryRun ? "Dry run, publishing nothing: " : ""}${first ? `Nightly ${first.version} from \`${first.sha}\` first, then ` : ""}${plan.channel === "stable" ? "Stable" : "Nightly"} ${plan.version} from \`${plan.sha}\``,
   );
   output({
     skip: "false",
+    "dry-run": String(dryRun),
+    promoted: promoted ?? "",
     channel: plan.channel,
     version: plan.version,
     tag: plan.tag,
@@ -521,7 +584,10 @@ function outputPlan(plan: Plan | StablePlan | Skip): void {
  * Logs what a scheduled nightly and a stable release of the latest nightly would do right now, for
  * dry runs.
  */
-async function reportChannels(repo: Repository, request: NightlyRequest): Promise<void> {
+async function reportChannels(
+  repo: Repository,
+  request: Omit<NightlyRequest, "scheduled" | "dryRun">,
+): Promise<void> {
   const ref = `refs/heads/${repo.defaultBranch}`;
   const describe = (plan: Plan | StablePlan | Skip) => {
     if ("skip" in plan) return `skips. ${plan.skip}`;
@@ -612,7 +678,8 @@ async function main(): Promise<void> {
       out: { type: "string" },
       dir: { type: "string" },
       sources: { type: "string" },
-      scheduled: { type: "boolean", default: false },
+      event: { type: "string" },
+      channel: { type: "string" },
       "dry-run": { type: "boolean", default: false },
       "allow-regress": { type: "boolean", default: false },
     },
@@ -629,26 +696,21 @@ async function main(): Promise<void> {
   });
 
   switch (command) {
-    case "nightly": {
+    case "plan": {
       const repo = githubRepository();
-      const request: NightlyRequest = {
+      const request: RunRequest = {
         ...nightlyOf(),
-        scheduled: values.scheduled,
+        event: values.event ?? "",
+        channel: values.channel || undefined,
+        version: values.version || undefined,
+        nightly: values.nightly || undefined,
         dryRun: values["dry-run"],
       };
-      outputPlan(await planNightly(repo, request));
-      if (request.dryRun) await reportChannels(repo, request);
+      const planned = await planRun(repo, request);
+      outputPlan(planned);
+      if (planned.dryRun) await reportChannels(repo, request);
       return;
     }
-    case "stable":
-      outputPlan(
-        await planStable(githubRepository(), {
-          ...nightlyOf(),
-          version: values.version || undefined,
-          nightly: values.nightly ?? "",
-        }),
-      );
-      return;
     case "check": {
       if (!values.dir) throw new Error("Name the folder of the release's files with --dir.");
       const version = values.version ?? "";
@@ -695,9 +757,7 @@ async function main(): Promise<void> {
       return;
     }
     default:
-      throw new Error(
-        `Unknown command "${command}". Use nightly, stable, check, notes, record or feed.`,
-      );
+      throw new Error(`Unknown command "${command}". Use plan, check, notes, record or feed.`);
   }
 }
 

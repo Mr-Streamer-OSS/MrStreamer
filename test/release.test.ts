@@ -6,6 +6,7 @@ import {
   checkUnreleased,
   deployedFeed,
   planNightly,
+  planRun,
   planStable,
   recordedVersion,
   releaseNotes,
@@ -13,6 +14,7 @@ import {
   type NightlyRequest,
   type PullRequest,
   type Repository,
+  type RunRequest,
   type StableRequest,
 } from "../scripts/release-plan.ts";
 import {
@@ -216,6 +218,73 @@ describe("scheduled nightlies", () => {
     await expect(
       planNightly(repo, scheduled({ ref: "refs/heads/feature", scheduled: false })),
     ).rejects.toThrow("from main");
+  });
+});
+
+describe("what a release run is", () => {
+  const tested = "v0.0.1-nightly.20261001.20";
+  const { repo } = repository({
+    releases: [published(tested, 30)],
+    commits: { [tested]: "tested-commit" },
+    histories: { "tested-commit...main": "ahead", [`${tested}...head`]: "identical" },
+  });
+  const run = (event: string, overrides: Partial<RunRequest> = {}) =>
+    planRun(repo, {
+      event,
+      ref: MAIN,
+      sha: "head",
+      run: 40,
+      now: NOW,
+      recorded: "0.0.0",
+      dryRun: false,
+      ...overrides,
+    });
+
+  it("is a dry run of a pull request's head whatever its inputs ask for", async () => {
+    const asked = { ref: "refs/pull/7/merge", sha: "pr-head", channel: "stable", nightly: tested };
+
+    expect(await run("pull_request", asked)).toEqual({
+      dryRun: true,
+      promoted: null,
+      plan: expect.objectContaining({ channel: "nightly", sha: "pr-head" }),
+    });
+  });
+
+  it("is a dry run of any branch when started by hand as one, and never a stable dry run", async () => {
+    const branch = { ref: "refs/heads/feature", sha: "feature-head", dryRun: true };
+
+    expect(await run("workflow_dispatch", branch)).toMatchObject({
+      dryRun: true,
+      plan: { channel: "nightly", sha: "feature-head" },
+    });
+    await expect(
+      run("workflow_dispatch", { ...branch, channel: "stable", nightly: tested }),
+    ).rejects.toThrow("Leave the channel at nightly");
+  });
+
+  it("is a nightly on the schedule only when one is due, and right away by hand", async () => {
+    expect(await run("schedule")).toMatchObject({
+      dryRun: false,
+      plan: { skip: `Nothing new since ${tested}.` },
+    });
+    expect(await run("workflow_dispatch")).toMatchObject({
+      dryRun: false,
+      plan: { channel: "nightly", version: "0.0.1-nightly.20261002.40" },
+    });
+  });
+
+  it("is a stable release by hand, naming the nightly it promotes by tag", async () => {
+    const stable = { channel: "stable", nightly: "0.0.1-nightly.20261001.20" };
+
+    expect(await run("workflow_dispatch", stable)).toMatchObject({
+      dryRun: false,
+      promoted: tested,
+      plan: { channel: "stable", version: "0.0.1", sha: "tested-commit" },
+    });
+  });
+
+  it("starts on nothing else", async () => {
+    await expect(run("push")).rejects.toThrow("doesn't start on push");
   });
 });
 
