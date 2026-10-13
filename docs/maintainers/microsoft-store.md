@@ -50,7 +50,7 @@ Partner Center holds two names for the app, under Product management > Manage ap
 
 0.0.8 is the first release whose package carries the name. Until its submission is published, the listing and every installed copy say "Mr. Streamer". These are 0.0.8's checks, with their results recorded on its release card:
 
-1. Release 0.0.8 from a nightly that has the rename. The package check's line in the run's summary says `named 'Mr. Streamer: IPTV Player'`. A commit from before the rename builds a package named "Mr. Streamer", which passes too and leaves the listing as it is: the rename would then wait for the next release.
+1. Release 0.0.8 from a nightly that has the rename. The package check's line in the run's summary says `named 'Mr. Streamer: IPTV Player'`. Then, a commit from before the rename built a package named "Mr. Streamer", which passed too and left the listing as it was. Since every promotable nightly holds 0.0.12, the package check now refuses any name but the Store name.
 2. The Store job's report has the line `The submission retitles the listing in en-us "Mr. Streamer: IPTV Player", as its package is named.` Without it, the submission left the title alone.
 3. The API has never changed a title for us. If Microsoft refuses it, at the update or at the commit, [submit by hand](#submitting-by-hand), choosing the name under Product name yourself. A submission the automation created is deleted in Partner Center first. A [draft a run named](#using-a-draft-made-in-partner-center) is finished there instead.
 4. Once **status** says `Published`, the public listing shows "Mr. Streamer: IPTV Player".
