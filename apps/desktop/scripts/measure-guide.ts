@@ -2,10 +2,11 @@
 // main-process stall over 50 ms while it downloads, indexes, opens or answers, now and next for a
 // screen of channels under 5 ms, under 80 MB of heap and 150 MB of resident memory added once
 // loaded. Indexing runs in a worker thread, as in the app, so its own memory shows in the peak
-// resident memory while indexing, not in what stays. Uses a generated guide the size of a large
-// subscription, or a real XMLTV file, packed with gzip or not. It also times what Settings asks
-// to map channels by hand: a page of the 13,000 channels, a search of the guide's channels, and
-// now and next with a few hundred of them mapped; and a page of a grid, 30 channels by 6 hours.
+// resident memory added while indexing, not in what stays. Uses a generated guide the size of a
+// large subscription, or a real XMLTV file, packed with gzip or not. It also times what Settings
+// asks to map channels by hand: a page of the 13,000 channels, a search of the guide's channels,
+// and now and next with a few hundred of them mapped; and a page of a grid, 30 channels by 6
+// hours.
 //
 //   node --expose-gc scripts/measure-guide.ts [--file guide.xml[.gz]]
 //       [--guide-channels 1300] [--programmes 70] [--subscriptions 1] [--json results.json]
@@ -220,7 +221,7 @@ try {
     };
   }
 
-  /** Runs `work` noting the largest resident memory the process reaches meanwhile, in MB. */
+  /** Runs `work` noting the largest resident memory the process reaches meanwhile, in bytes. */
   async function peakOf<A>(work: () => Promise<A>): Promise<[A, number]> {
     let peak = process.memoryUsage.rss();
     const sampler = setInterval(() => {
@@ -228,14 +229,26 @@ try {
     }, 50);
     try {
       const result = await work();
-      return [result, Math.max(peak, process.memoryUsage.rss()) / 1e6];
+      return [result, Math.max(peak, process.memoryUsage.rss())];
     } finally {
       clearInterval(sampler);
     }
   }
 
-  gc();
-  const heapBefore = process.memoryUsage().heapUsed;
+  /**
+   * Ends a turn of the event loop, as each request from the window does: the stalls measured
+   * while answering are those of one answer, not of a hundred run back to back.
+   */
+  const turn = () => new Promise((resolve) => setImmediate(resolve));
+
+  /** Collects garbage until the heap settles, as before and after loading alike. */
+  async function settled() {
+    gc!();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    gc!();
+  }
+
+  await settled();
   const rssBefore = process.memoryUsage.rss();
 
   stalls.enable();
@@ -243,7 +256,8 @@ try {
   stalls.reset();
   let started = performance.now();
   let guide: Awaited<ReturnType<typeof create>> | undefined = await create();
-  const [subscriptionDownloadSamples, peakMb] = await peakOf(() => guide!.refresh());
+  const [subscriptionDownloadSamples, peak] = await peakOf(() => guide!.refresh());
+  const peakMb = (peak - rssBefore) / 1e6;
   const downloadMs = performance.now() - started;
   await new Promise((resolve) => setTimeout(resolve, 10));
   stalls.disable();
@@ -251,23 +265,23 @@ try {
 
   // What stays once the guide is loaded and its first answers read, with the workers gone.
   await guide.listings(channels.slice(0, 60));
-  gc();
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  gc();
-  const heapMb = (process.memoryUsage().heapUsed - heapBefore) / 1e6;
+  await settled();
+  const heapLoaded = process.memoryUsage().heapUsed;
   const rssMb = (process.memoryUsage.rss() - rssBefore) / 1e6;
-  if (heapMb < 0) throw new Error("Negative retained guide heap delta");
 
   // Close and release the old service before opening a fresh service on its persisted stores.
-  // This is the same process with warm OS caches, not a fresh-process restart.
+  // This is the same process with warm OS caches, not a fresh-process restart. What releasing it
+  // frees of the heap is what the loaded guides held.
   const retiredGuide = new WeakRef(guide);
   await Promise.all(runtimes.splice(0).map((runtime) => runtime.dispose()));
   guide = undefined;
   await new Promise<void>((resolve) => setImmediate(resolve));
-  gc();
+  await settled();
   const retiredGuideCollected = retiredGuide.deref() === undefined;
   if (!retiredGuideCollected)
     throw new Error("Old guide wrapper is still retained before cached reads");
+  const heapMb = (heapLoaded - process.memoryUsage().heapUsed) / 1e6;
+  if (heapMb < 0) throw new Error("Negative retained guide heap delta");
 
   stalls.reset();
   stalls.enable();
@@ -297,6 +311,7 @@ try {
     const began = performance.now();
     await restarted.listings(screen);
     listingsSamples.push(performance.now() - began);
+    await turn();
   }
   // A screen of channels that all have a guide id: every one of them is read.
   const guided = channels.filter((_, index) => index % 6 === 0);
@@ -306,6 +321,7 @@ try {
     const began = performance.now();
     await restarted.listings(guidedScreen);
     guidedSamples.push(performance.now() - began);
+    await turn();
   }
   const guidedShown = Object.keys(await restarted.listings(guidedScreen)).length;
 
@@ -316,6 +332,7 @@ try {
     const began = performance.now();
     await restarted.range(page, now - HOUR, now + 5 * HOUR);
     rangeSamples.push(performance.now() - began);
+    await turn();
   }
   const rangeChannels = Object.values(
     await restarted.range(page, now - HOUR, now + 5 * HOUR),
@@ -327,6 +344,7 @@ try {
     const began = performance.now();
     matches = await restarted.search("news");
     searchSamples.push(performance.now() - began);
+    await turn();
   }
 
   // Live TV's search of the list it shows: every channel, until the end of the day.
@@ -336,6 +354,7 @@ try {
     const began = performance.now();
     await restarted.searchChannels("news", channels, endOfDay);
     listSearchSamples.push(performance.now() - began);
+    await turn();
   }
   const found = Object.keys(await restarted.searchChannels("news", channels, endOfDay)).length;
 
@@ -346,12 +365,14 @@ try {
     const began = performance.now();
     await restarted.mapChannels("");
     mapPageSamples.push(performance.now() - began);
+    await turn();
   }
   const mapSearchSamples: number[] = [];
   for (let round = 0; round < 20; round++) {
     const began = performance.now();
     await restarted.mapChannels("channel 12");
     mapSearchSamples.push(performance.now() - began);
+    await turn();
   }
   await restarted.mapOptions("");
   const optionsSamples: number[] = [];
@@ -359,6 +380,7 @@ try {
     const began = performance.now();
     await restarted.mapOptions("c1");
     optionsSamples.push(performance.now() - began);
+    await turn();
   }
   const unmatched = await restarted.mapChannels("");
   // Channels without a guide id of their own, each mapped to one of the guide's channels.
@@ -369,12 +391,14 @@ try {
   for (const [at, channel] of byHand.entries()) {
     const guideId = guideIds[at % guideIds.length];
     if (guideId) await restarted.map(channel.id, guideId, unmatched.revision);
+    await turn();
   }
   const mappedListingsSamples: number[] = [];
   for (let round = 0; round < 100; round++) {
     const began = performance.now();
     await restarted.listings(screen);
     mappedListingsSamples.push(performance.now() - began);
+    await turn();
   }
   await new Promise((resolve) => setTimeout(resolve, 10));
   stalls.disable();
@@ -398,7 +422,7 @@ try {
     "now and next channels mapped": metric("ms", mappedListingsSamples, 5),
     "memory held by guide": metric("MB", [heapMb], 80),
     "resident memory added": metric("MB", [rssMb], 150),
-    "peak resident memory while indexing": metric("MB", [peakMb]),
+    "peak resident memory added while indexing": metric("MB", [peakMb]),
   };
   saveMeasurement(output, {
     schemaVersion: 1,
@@ -418,7 +442,8 @@ try {
       warmup:
         "fresh guide disposed and collected before fresh service in same process; mapping options warmed once",
       downloadBudgetScope: "one refresh per subscription; aggregate unbudgeted",
-      heapBudgetScope: "all subscriptions loaded in first service, aggregate retained heap delta",
+      heapBudgetScope:
+        "all subscriptions loaded in first service, heap its disposal and collection frees",
       residentBudgetScope:
         "all subscriptions loaded in first service, resident memory delta once indexing workers ended",
       indexing: "worker thread per document, started from source",
@@ -426,9 +451,11 @@ try {
       cache: "fresh temporary stores then disk reads",
       garbageCollection: true,
       eventLoopResolutionMs: 5,
+      answerScope: "each measured answer in a turn of its own, as requests from the window are",
     },
     observations: [
       { name: "cached-read preparation", retiredGuideCollected },
+      { name: "resident memory before loading", megabytes: rssBefore / 1e6 },
       { name: "answers", guidedScreenShown: guidedShown, rangeChannels },
     ],
     metrics,

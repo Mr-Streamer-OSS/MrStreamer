@@ -539,7 +539,7 @@ const GUIDE_METRICS = {
   "now and next channels mapped": "ms",
   "memory held by guide": "MB",
   "resident memory added": "MB",
-  "peak resident memory while indexing": "MB",
+  "peak resident memory added while indexing": "MB",
 } as const;
 const VIEWING_METRICS = {
   watch: "ms",
@@ -573,7 +573,7 @@ const GUIDE_SAMPLE_COUNTS: Record<string, number> = {
   "now and next channels mapped": 100,
   "memory held by guide": 1,
   "resident memory added": 1,
-  "peak resident memory while indexing": 1,
+  "peak resident memory added while indexing": 1,
 };
 const GUIDE_BUDGETS = {
   "download and index per subscription": 3000,
