@@ -379,8 +379,10 @@ async function leftUntilEnded(d: Driver) {
 }
 
 /**
- * The preview in `area` plays on and names the recording of `title`: its title and when it aired,
- * not the programme on now and its time left. Its picture is the one Watch played.
+ * The preview in `area` names the recording of `title`: its title and when it aired, not the
+ * programme on now and its time left. The fake recording lasts about three seconds, so it may
+ * have played out by now and stand still with the same name; the picture is recorded, not
+ * required.
  */
 async function previewNamesRecording(d: Driver, area: string, title: string, capture: string) {
   const shown = `document.querySelector(${JSON.stringify(area)})?.innerText ?? ''`;
@@ -392,7 +394,7 @@ async function previewNamesRecording(d: Driver, area: string, title: string, cap
   };
   d.observed[capture] = seen;
   expect(
-    seen.text.includes(title) && !seen.text.includes(" left") && seen.width > 0,
+    seen.text.includes(title) && !seen.text.includes(" left"),
     "The preview doesn't name the recording that plays",
     seen,
   );
