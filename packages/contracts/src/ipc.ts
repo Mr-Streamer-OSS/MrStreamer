@@ -143,8 +143,14 @@ export const ipcInputs = {
   /** Fetches one subscription's channels again. */
   "library.refresh": () => type({ subscriptionId: "string > 0" }),
   "guide.listings": () => type({ channels: owned().array() }),
-  /** A channel's programmes from the one on now, as `GUIDE_SCHEDULE` bounds them. */
-  "guide.schedule": () => type({ channel: owned(), until: "number" }),
+  /**
+   * A channel's programmes over [from, until), at most a day of 25 hours, as `GUIDE_SCHEDULE`
+   * bounds them: from the start of the viewer's day, aired ones among them for catch-up.
+   */
+  "guide.schedule": () =>
+    type({ channel: owned(), from: "number", until: "number" }).narrow(
+      ({ from, until }) => until > from && until - from <= 25 * 60 * 60 * 1000,
+    ),
   /**
    * Programmes over a stretch of time, past ones the guide still keeps among them, for a page of
    * a grid's channels: `GUIDE_RANGE.channels` of them and `GUIDE_RANGE.hours` at most, a grid
@@ -508,10 +514,7 @@ export interface IpcOutputs {
   "library.refresh": CatalogueStatus;
   /** Now and next per channel, by its `ownedKey`, for the channels the guide covers. */
   "guide.listings": Readonly<Record<string, Listing>>;
-  /**
-   * The channel's programme on now and those after it that start before `until`, at least
-   * `GUIDE_SCHEDULE.atLeast` and at most `GUIDE_SCHEDULE.most`, in time order.
-   */
+  /** The channel's programmes over the stretch asked for, as `GUIDE_SCHEDULE` says, in time order. */
   "guide.schedule": readonly Programme[];
   /**
    * Per channel asked for, by its `ownedKey`, the programmes that overlap the stretch, in time

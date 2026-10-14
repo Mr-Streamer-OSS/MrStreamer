@@ -175,10 +175,11 @@ export function scheduleAt(
   channels: GuideChannels,
   channelId: string,
   at: number,
+  from: number,
   until: number,
 ): readonly Programme[] {
   const shown = shownChannel(index, channels, channelId, at);
-  return shown ? index.schedule(shown, at, until) : [];
+  return shown ? index.schedule(shown, at, from, until) : [];
 }
 
 /**

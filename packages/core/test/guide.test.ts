@@ -390,7 +390,7 @@ describe("indexing a guide", () => {
       next: { title: "Evening" },
     });
     expect(guide.listing(channel, NOON + 4 * HOUR)).toBeNull();
-    expect(titles(guide.schedule(channel, NOON, NOON + DAY))).toEqual([
+    expect(titles(guide.schedule(channel, NOON, NOON, NOON + DAY))).toEqual([
       "Lunch",
       "Afternoon",
       "Evening",
@@ -424,7 +424,7 @@ describe("indexing a guide", () => {
 
     expect(channel.name).toBe("N".repeat(GUIDE_KEPT.nameChars));
     expect([...guide.channels.keys()]).toEqual(["one.test"]);
-    const [first] = guide.schedule(channel, NOON, NOON + DAY);
+    const [first] = guide.schedule(channel, NOON, NOON, NOON + DAY);
     expect(first?.title).toBe("T".repeat(GUIDE_KEPT.titleChars));
     expect(first?.description).toBe("d".repeat(GUIDE_KEPT.descriptionChars - 1));
     expect(of(guide, "one.test")?.map(([title]) => title)).toEqual([
@@ -448,11 +448,13 @@ describe("indexing a guide", () => {
     if (!channel) throw new Error("No channel.");
 
     // Those that start before the end asked for, from the one on now.
-    expect(guide.schedule(channel, NOON, NOON + 10 * minute)).toHaveLength(10);
+    expect(guide.schedule(channel, NOON, NOON, NOON + 10 * minute)).toHaveLength(10);
     // At least a few more when fewer do.
-    expect(guide.schedule(channel, NOON, NOON + 2 * minute)).toHaveLength(GUIDE_SCHEDULE.atLeast);
+    expect(guide.schedule(channel, NOON, NOON, NOON + 2 * minute)).toHaveLength(
+      GUIDE_SCHEDULE.atLeast,
+    );
     // A whole day, with what a search of it finds.
-    const day = guide.schedule(channel, NOON + 30_000, NOON + DAY);
+    const day = guide.schedule(channel, NOON + 30_000, NOON + 30_000, NOON + DAY);
     expect(day).toHaveLength(24 * 60);
     expect(day.at(-1)?.title).toBe("Minute 1439");
     const [found] = [
@@ -483,6 +485,53 @@ describe("indexing a guide", () => {
       description: "About minute 5",
     });
     expect(guide.programme(channel, NOON + 5 * minute + 1)).toBeNull();
+  });
+
+  it("reads a day from its start, what aired among it, and a few aired and to come either side when it holds fewer", async () => {
+    // Hourly, from ten hours before NOON to thirty after: "Hour -10" to "Hour 29".
+    const { guide } = await index(
+      tv(
+        ...Array.from({ length: 40 }, (_, n) =>
+          programme(
+            "one.test",
+            stamp(NOON + (n - 10) * HOUR),
+            stamp(NOON + (n - 9) * HOUR),
+            `Hour ${n - 10}`,
+          ),
+        ),
+      ),
+    );
+    const channel = guide.channels.get("one.test");
+    if (!channel) throw new Error("No channel.");
+    const read = (from: number, until: number) =>
+      guide.schedule(channel, NOON + HOUR / 2, from, until).map((programme) => programme.title);
+
+    // The stretch asked for, what aired in it first.
+    const day = read(NOON - 8 * HOUR, NOON + 12 * HOUR);
+    expect(day[0]).toBe("Hour -8");
+    expect(day.at(-1)).toBe("Hour 11");
+    expect(day).toHaveLength(20);
+    // Two aired since it began: a few more from before it.
+    expect(read(NOON - 2 * HOUR, NOON + 12 * HOUR).slice(0, 7)).toEqual([
+      "Hour -6",
+      "Hour -5",
+      "Hour -4",
+      "Hour -3",
+      "Hour -2",
+      "Hour -1",
+      "Hour 0",
+    ]);
+    // From now on, none aired.
+    expect(read(NOON + HOUR / 2, NOON + 12 * HOUR)[0]).toBe("Hour 0");
+    // Near its end, a few more to come past it.
+    expect(read(NOON - 8 * HOUR, NOON + 2 * HOUR).slice(-6)).toEqual([
+      "Hour 0",
+      "Hour 1",
+      "Hour 2",
+      "Hour 3",
+      "Hour 4",
+      "Hour 5",
+    ]);
   });
 
   it("keeps ended programmes for the archive window, and drops what ended before it", async () => {

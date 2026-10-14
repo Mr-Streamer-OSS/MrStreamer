@@ -675,7 +675,7 @@ describe("the files of a guide while it is read", () => {
       const index = await openGuideIndex(target);
       const channel = index?.channels.get("one.test");
       if (!index || !channel) throw new Error("No guide.");
-      const schedule = index.schedule(channel, NOW, NOW + HOUR);
+      const schedule = index.schedule(channel, NOW, NOW, NOW + HOUR);
       index.close();
       expect(schedule).toHaveLength(60);
       expect(
@@ -831,6 +831,38 @@ describe("which guide is current, as changes to it meet", () => {
   });
 });
 
+/**
+ * What `work` answers, and the most main-thread CPU, in milliseconds, it ran between two of the
+ * yields it makes with `setImmediate`: a stall, whatever else the machine is doing. What runs
+ * outside those yields, such as taking in a worker's answer, counts toward the slice it ends.
+ */
+async function sliced<A>(work: () => Promise<A>): Promise<{ value: A; longest: number }> {
+  const native = globalThis.setImmediate;
+  let began = process.threadCpuUsage();
+  let longest = 0;
+  const cut = () => {
+    const used = process.threadCpuUsage(began);
+    longest = Math.max(longest, (used.user + used.system) / 1000);
+  };
+  globalThis.setImmediate = Object.assign(
+    (callback: (...args: unknown[]) => void, ...args: unknown[]) => {
+      cut();
+      return native(() => {
+        began = process.threadCpuUsage();
+        callback(...args);
+      });
+    },
+    { __promisify__: native.__promisify__ },
+  ) as typeof setImmediate;
+  try {
+    const value = await work();
+    cut();
+    return { value, longest };
+  } finally {
+    globalThis.setImmediate = native;
+  }
+}
+
 describe("a search of a large guide", () => {
   it("reads its programmes away from the main thread", async () => {
     // Two thousand channels of week-long news a week ahead, every one of them shown: a search
@@ -850,13 +882,11 @@ describe("a search of a large guide", () => {
     serve(tv(...programmes));
     await run(guide.refresh(ID));
 
-    const cpu = process.threadCpuUsage();
-    const found = await run(guide.search("news"));
-    const used = process.threadCpuUsage(cpu);
+    const { value: found, longest } = await sliced(() => run(guide.search("news")));
 
     expect(found).toHaveLength(50);
-    // What the main thread did was ask, and read the answer.
-    expect((used.user + used.system) / 1000).toBeLessThan(50);
+    // What the main thread did was ask, and read the answer, a few milliseconds at a time.
+    expect(longest).toBeLessThan(50);
   });
 });
 

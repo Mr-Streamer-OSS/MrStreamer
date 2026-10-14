@@ -488,7 +488,7 @@ describe("the guides of two subscriptions that use the same ids", () => {
       return [channel(a), channel(b)].map((each) => listings[ownedKey(each)]?.now?.title);
     };
     expect(await shows(guide)).toEqual(["Journaal", "Elsewhere"]);
-    expect(await run(guide.schedule(channel(b), NOW + 24 * HOUR))).toMatchObject([
+    expect(await run(guide.schedule(channel(b), NOW, NOW + 24 * HOUR))).toMatchObject([
       { title: "Elsewhere" },
     ]);
     expect(await run(guide.search("else"))).toMatchObject([{ channel: channel(b) }]);
@@ -585,7 +585,9 @@ describe("channels mapped to a guide's by hand", () => {
 
     expect(mapped).toMatchObject({ id: loose.id, guideId: "spare.test", mappedTo: "spare.test" });
     expect(await nowOn(loose)).toBe("Spare");
-    expect(await run(guide.schedule(loose, NOW + 24 * HOUR))).toMatchObject([{ title: "Spare" }]);
+    expect(await run(guide.schedule(loose, NOW, NOW + 24 * HOUR))).toMatchObject([
+      { title: "Spare" },
+    ]);
     expect(await run(guide.search("spare"))).toMatchObject([{ channel: loose }]);
     expect(await run(guide.searchChannels("spare", [loose, first], at("23:00")))).toEqual({
       [ownedKey(loose)]: { now: true, later: null },

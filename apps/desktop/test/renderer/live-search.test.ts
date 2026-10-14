@@ -392,8 +392,12 @@ describe("searching the list Live TV shows", () => {
     await ready(() => expect(page.row("ITV1")?.textContent).toContain("The day's news."));
 
     expect(ipc.argsOf("guide.schedule")).toEqual([
-      // Until the end of the viewer's day: the main process reads no further.
-      { channel: { subscriptionId: SUBSCRIPTION, id: "2" }, until: expect.any(Number) },
+      // The viewer's day: the main process reads no further.
+      {
+        channel: { subscriptionId: SUBSCRIPTION, id: "2" },
+        from: expect.any(Number),
+        until: expect.any(Number),
+      },
     ]);
     expect(page.row("ITV1")?.textContent).toContain("The day's news.");
     expect(page.row("ITV1")?.textContent).not.toContain("Not what was searched for.");

@@ -376,10 +376,10 @@ export class Guide extends Context.Service<
      */
     listings(channels: readonly OwnedId[]): Effect.Effect<Record<string, Listing>>;
     /**
-     * The channel's programme on now and those after it that start before `until`, at least
-     * `GUIDE_SCHEDULE.atLeast` and at most `GUIDE_SCHEDULE.most`.
+     * The channel's programmes over [from, until), as `GUIDE_SCHEDULE` bounds them: aired ones
+     * for catch-up from `from`, then the one on now and those to come.
      */
-    schedule(channel: OwnedId, until: number): Effect.Effect<readonly Programme[]>;
+    schedule(channel: OwnedId, from: number, until: number): Effect.Effect<readonly Programme[]>;
     /**
      * The programmes of each channel that overlap [from, to), by its `ownedKey`, past ones the
      * guide keeps among them: a page of a grid. Channels without guide data are left out.
@@ -1581,14 +1581,21 @@ function make() {
         perChannel(channels, (found, ids) =>
           Effect.sync(() => listingsAt(found.guide.index, found.channels, ids, found.at)),
         ),
-      schedule: (channel: OwnedId, until: number) =>
+      schedule: (channel: OwnedId, from: number, until: number) =>
         Effect.gen(function* () {
           const subscription = yield* savedAs(channel.subscriptionId);
           const found =
             subscription &&
             (yield* withContext(subscription, (context) =>
               Effect.sync(() =>
-                scheduleAt(context.guide.index, context.channels, channel.id, context.at, until),
+                scheduleAt(
+                  context.guide.index,
+                  context.channels,
+                  channel.id,
+                  context.at,
+                  from,
+                  until,
+                ),
               ),
             ));
           return found ?? [];

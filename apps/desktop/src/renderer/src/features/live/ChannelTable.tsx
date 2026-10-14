@@ -47,8 +47,6 @@ import { rowPlays, searchQualities, type SearchChannelRow } from "./search-rows.
 import type { RowPart } from "./reorder.ts";
 
 const ROW_REM = 3.75;
-/** Earlier programmes from catch-up the schedule shows even when today has had fewer. */
-const MIN_EARLIER = 6;
 const NONE: readonly string[] = [];
 
 /** The list while its channels are being put in another order. */
@@ -653,15 +651,15 @@ function Schedule({
   onWatch: () => void;
   onWatchArchive: (programme: Programme) => void;
 }) {
-  // The rest of today, and at least the next few when the day is nearly over: the main process
-  // reads no more than that.
+  // Today, with what aired for catch-up, and at least a few either side of now when the day has
+  // fewer: the main process reads no more than that.
+  const today = new Date(now).setHours(0, 0, 0, 0);
   const midnight = endOfDay(now);
-  const schedule = useQuery(queries.schedule(channel, midnight));
+  const schedule = useQuery(queries.schedule(channel, today, midnight));
   const remote = useOutput((state) => state.status.output.kind !== "local");
   const found = match?.later?.start ?? null;
   const [open, setOpen] = useState(found);
   const programmes = useMemo(() => {
-    const today = new Date(now).setHours(0, 0, 0, 0);
     const all = schedule.data ?? [];
     const aired = remote
       ? []
@@ -671,13 +669,14 @@ function Schedule({
         );
     return [
       ...aired.filter(
-        (programme, index) => programme.start >= today || index >= aired.length - MIN_EARLIER,
+        (programme, index) =>
+          programme.start >= today || index >= aired.length - GUIDE_SCHEDULE.atLeast,
       ),
       ...all
         .filter((programme) => programme.stop > now)
         .filter((programme, index) => programme.start < midnight || index < GUIDE_SCHEDULE.atLeast),
     ];
-  }, [schedule.data, now, midnight, remote, channel.catchupDays]);
+  }, [schedule.data, now, today, midnight, remote, channel.catchupDays]);
   return (
     <div className="rounded-b-xl bg-white/5 py-2 pr-4 pl-[17.5rem]">
       {programmes.map((programme) => (

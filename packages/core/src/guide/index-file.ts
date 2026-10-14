@@ -408,11 +408,12 @@ export interface GuideIndex {
   /** What `channel` shows at `at` and next, or null when it shows nothing from then on. */
   listing(channel: IndexedChannel, at: number): Listing | null;
   /**
-   * The programme on `channel` at `at`, if any, and those after it that start before `until`:
-   * at least `GUIDE_SCHEDULE.atLeast` when fewer do, and at most `GUIDE_SCHEDULE.most`, which
-   * holds a whole day.
+   * The programmes on `channel` over [from, until), at the time `at`, as `GUIDE_SCHEDULE` bounds
+   * them: at most `most` over the stretch, which holds a whole day; and, where the stretch has
+   * fewer, at least `atLeast` still on or to come, read past `until`, and when `from` is before
+   * `at`, at least `atLeast` that have ended, read before `from`.
    */
-  schedule(channel: IndexedChannel, at: number, until: number): readonly Programme[];
+  schedule(channel: IndexedChannel, at: number, from: number, until: number): readonly Programme[];
   /**
    * The programmes on `channel` that overlap [from, to), in time order, without descriptions,
    * each naming `channel` as its guide: a minute long at least, so a stretch of
@@ -504,9 +505,16 @@ function reader(
   const schedule = db.prepare(
     `${described} and programme.start < :until order by programme.start limit ${GUIDE_SCHEDULE.most + 1}`,
   );
-  const scheduleTail = db.prepare(
-    `${described} order by programme.start limit ${GUIDE_SCHEDULE.atLeast + 1}`,
-  );
+  const selected = `
+    select ${columns}, programme.description
+    from programme join title on title.key = programme.title
+    where programme.channel = :channel`;
+  // What a schedule reads before `from` and past `until`, when its stretch holds too few.
+  const scheduleBefore = db.prepare(`
+    ${selected} and programme.start < :before and programme.stop <= :at
+    order by programme.start desc limit ${GUIDE_SCHEDULE.atLeast}`);
+  const scheduleAfter = db.prepare(`
+    ${selected} and programme.start >= :after order by programme.start limit ${GUIDE_SCHEDULE.atLeast}`);
   // A minute a programme at least: the stretch holds no more than this, the first one also.
   const slots = (GUIDE_RANGE.hours * 60 * 60 * 1000) / GUIDE_KEPT.shortestMs + 2;
   const range = db.prepare(
@@ -529,13 +537,29 @@ function reader(
       if (!first) return null;
       return first.start <= at ? { now: first, next: second } : { now: null, next: first };
     },
-    schedule(channel, at, until) {
-      const today = unended(schedule.all({ channel: channel.key, at, until }), at);
-      if (today.length >= GUIDE_SCHEDULE.atLeast) return today.slice(0, GUIDE_SCHEDULE.most);
-      return unended(scheduleTail.all({ channel: channel.key, at }), at).slice(
-        0,
-        GUIDE_SCHEDULE.atLeast,
-      );
+    schedule(channel, at, from, until) {
+      const { atLeast, most } = GUIDE_SCHEDULE;
+      const key = channel.key;
+      const stretch = unended(schedule.all({ channel: key, at: from, until }), from).slice(0, most);
+      const ended = stretch.filter((programme) => programme.stop <= at).length;
+      const coming = stretch.length - ended;
+      const before =
+        from < at && ended < atLeast
+          ? scheduleBefore
+              .all({ channel: key, before: stretch[0]?.start ?? from, at })
+              .slice(0, atLeast - ended)
+              .map(programmeOf)
+              .reverse()
+          : [];
+      const last = stretch.at(-1);
+      const after =
+        coming < atLeast
+          ? scheduleAfter
+              .all({ channel: key, after: last ? last.start + 1 : until })
+              .slice(0, atLeast - coming)
+              .map(programmeOf)
+          : [];
+      return [...before, ...stretch, ...after];
     },
     range: (channel, at, to) =>
       range

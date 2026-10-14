@@ -28,10 +28,11 @@ export interface GuideSlot extends Omit<Programme, "description"> {
 export const GUIDE_RANGE = { channels: 30, hours: 12 } as const;
 
 /**
- * What `guide.schedule` answers of a channel: the programme on now and those that start before
- * `until`, and at least `atLeast` when fewer do, never more than `most`. The guide keeps no
- * programme shorter than a minute, so `most` holds the longest day, of 25 hours, after the one on
- * now: up to the end of the day it never cuts one short.
+ * What `guide.schedule` answers of a channel: the programmes over [from, until), never more than
+ * `most`; where that holds fewer, at least `atLeast` on now or to come, from past `until`, and,
+ * when `from` has passed, at least `atLeast` that have ended, from before `from`. The guide keeps
+ * no programme shorter than a minute, so `most` holds the longest day, of 25 hours, with the one
+ * on at its start: over a day it never cuts one short.
  */
 export const GUIDE_SCHEDULE = { atLeast: 6, most: 25 * 60 + 1 } as const;
 
