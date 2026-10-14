@@ -83,9 +83,12 @@ const tv = (...elements: string[]) =>
 
 /**
  * Channels "1" to `count`, whose guide ids are "one.test" for the first and "c<n>.test" for each
- * other.
+ * other, after the ones `before` names for a channel.
  */
-function catalogue(count = 1): CatalogueChannels {
+function catalogue(
+  count = 1,
+  before: Readonly<Record<string, readonly string[]>> = {},
+): CatalogueChannels {
   const all = Array.from({ length: count }, (_, at): LiveChannel => {
     const id = String(at + 1);
     return {
@@ -98,6 +101,7 @@ function catalogue(count = 1): CatalogueChannels {
       logoUrl: null,
       categoryIds: [],
       variants: [{ id, name: `Channel ${id}`, tags: [], quality: null }],
+      catchupDays: null,
     };
   });
   const guideIdOf = (id: string) => (id === "1" ? "one.test" : `c${id}.test`);
@@ -108,10 +112,11 @@ function catalogue(count = 1): CatalogueChannels {
     searchNames: all.map((channel) => channel.title.toLowerCase()),
     channel: (id) => byId.get(id),
     listed: (id) => byId.has(id),
-    guideIdsOf: (id) => (byId.has(id) ? [guideIdOf(id)] : []),
+    guideIdsOf: (id) => (byId.has(id) ? [...(before[id] ?? []), guideIdOf(id)] : []),
     channelsOf: (guideId) => {
       const channel = byGuideId.get(guideId);
-      return channel ? [channel] : [];
+      if (channel) return [channel];
+      return all.filter((each) => before[each.id]?.includes(guideId));
     },
   };
 }
@@ -162,10 +167,13 @@ const silentSearchWorker = (options: WorkerOptions) =>
 
 async function standalone({
   channels = 1,
+  aliases = {},
   searchWorker = guideSearchWorker,
   searchTimeout,
 }: {
   readonly channels?: number;
+  /** Guide ids a channel names before its own, by channel id. */
+  readonly aliases?: Readonly<Record<string, readonly string[]>>;
   /** Starts the search worker, as the app does unless a test says otherwise. */
   readonly searchWorker?: (options: WorkerOptions) => Worker;
   readonly searchTimeout?: number;
@@ -248,7 +256,7 @@ async function standalone({
         ),
     })),
   ).pipe(Layer.provide(guideStoreLayer));
-  const listed = catalogue(channels);
+  const listed = catalogue(channels, aliases);
   const ports = Layer.mergeAll(
     store,
     indexer,
@@ -515,26 +523,46 @@ describe("a guide as it downloads and is indexed", () => {
     ).toEqual([]);
   });
 
-  it("leaves descriptions out of a grid's stretch, and reads one programme's when it is asked for", async () => {
-    const { run, guide, one, serve } = await standalone();
+  it("leaves descriptions out of a grid's stretch, and reads a slot's from the guide channel it came from", async () => {
+    // The channel names a spelling of its guide id whose programme has ended, then one whose
+    // programme, begun at the same time, is still on: the slot is the second's.
+    const { run, guide, one, serve } = await standalone({
+      channels: 2,
+      aliases: { "1": ["expired.test"] },
+    });
+    const described = (id: string, from: string, to: string, title: string, about: string) =>
+      `<programme start="20261002${from}00 +0200" stop="20261002${to}00 +0200" channel="${id}"><title>${title}</title><desc>${about}</desc></programme>`;
     serve(
       tv(
-        '<programme start="20261002200000 +0200" stop="20261002210000 +0200" channel="one.test"><title>Eight</title><desc>What happens at eight</desc></programme>',
+        described("expired.test", "1900", "1945", "Expired first spelling", "About expired"),
+        described("one.test", "1900", "2100", "Current second spelling", "About current"),
+        described("c2.test", "1900", "2100", "Elsewhere", "About elsewhere"),
       ),
     );
     await run(guide.refresh(ID));
 
-    expect((await run(guide.range([one], NOW, NOW + HOUR)))[ownedKey(one)]).toEqual([
-      { start: at("20:00"), stop: at("21:00"), title: "Eight" },
-    ]);
-    expect(await run(guide.programme(one, at("20:00")))).toEqual({
-      start: at("20:00"),
+    const [slot] = (await run(guide.range([one], NOW, NOW + HOUR)))[ownedKey(one)] ?? [];
+    expect(slot).toMatchObject({
+      start: at("19:00"),
       stop: at("21:00"),
-      title: "Eight",
-      description: "What happens at eight",
+      title: "Current second spelling",
     });
-    expect(await run(guide.programme(one, at("20:30")))).toBeNull();
-    expect(await run(guide.programme({ subscriptionId: ID, id: "2" }, at("20:00")))).toBeNull();
+    expect(slot && "description" in slot).toBe(false);
+    if (!slot) throw new Error("No slot.");
+    expect(await run(guide.programme(one, slot.guide, slot.start))).toEqual({
+      start: at("19:00"),
+      stop: at("21:00"),
+      title: "Current second spelling",
+      description: "About current",
+    });
+    // Nothing starts then, and another channel's guide channel isn't this one's.
+    expect(await run(guide.programme(one, slot.guide, at("19:30")))).toBeNull();
+    const [elsewhere] =
+      (await run(guide.range([{ subscriptionId: ID, id: "2" }], NOW, NOW + HOUR)))[
+        ownedKey({ subscriptionId: ID, id: "2" })
+      ] ?? [];
+    expect(elsewhere?.title).toBe("Elsewhere");
+    expect(await run(guide.programme(one, elsewhere?.guide ?? "", at("19:00")))).toBeNull();
   });
 });
 

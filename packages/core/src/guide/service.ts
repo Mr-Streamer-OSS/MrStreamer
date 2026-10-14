@@ -390,10 +390,11 @@ export class Guide extends Context.Service<
       to: number,
     ): Effect.Effect<Record<string, readonly GuideSlot[]>>;
     /**
-     * The channel's programme that starts at `start`, with its description: what a slot of
-     * `range` leaves out. Null when the guide has none there.
+     * The programme of guide channel `guide` that starts at `start`, with its description: what
+     * a slot of `range` leaves out, by the slot's `guide` and `start`. Null when the channel
+     * doesn't name that guide channel, or the guide has none starting then.
      */
-    programme(channel: OwnedId, start: number): Effect.Effect<Programme | null>;
+    programme(channel: OwnedId, guide: string, start: number): Effect.Effect<Programme | null>;
     /** Programmes on now or later whose title matches, in any guide, on now first. */
     search(query: string): Effect.Effect<readonly ProgrammeMatch[]>;
     /**
@@ -1338,7 +1339,7 @@ function make() {
                   const at = yield* Clock.currentTimeMillis;
                   const matched = channels
                     ? yield* opening(subscription, { file, fetchedAt }, ({ index }) =>
-                        Effect.sync(() => channelsCovered(index, channels, at)),
+                        Effect.promise(() => channelsCovered(index, channels, at)),
                       )
                     : 0;
                   const candidate = yield* turn(
@@ -1518,9 +1519,8 @@ function make() {
     const processingOf = (
       id: string,
       guide: Loaded | null,
-      channels: MappedChannels | null,
+      covered: number,
       failure: { readonly error: AppError; readonly at: number } | undefined,
-      at: number,
     ): GuideProcessing =>
       progress.get(id) ??
       (failure
@@ -1533,7 +1533,7 @@ function make() {
         : guide
           ? {
               state: "ready",
-              channels: channels ? channelsCovered(guide.index, channels, at) : 0,
+              channels: covered,
               programmes: guide.index.programmes,
               until: guide.index.until,
               fetchedAt: guide.fetchedAt,
@@ -1548,6 +1548,11 @@ function make() {
         const channels = yield* channelsOf(subscription);
         const failure = failures.get(id);
         const at = yield* Clock.currentTimeMillis;
+        // Loaded, but the catalogue it is counted against isn't: none covered yet.
+        const covered =
+          guide && channels
+            ? yield* Effect.promise(() => channelsCovered(guide.index, channels, at))
+            : 0;
         return {
           subscriptionId: id,
           source: config.external
@@ -1558,8 +1563,7 @@ function make() {
                 locked: address === null,
               }
             : { kind: "own" },
-          // Loaded, but the catalogue it is counted against isn't: none covered yet.
-          channels: guide && channels ? channelsCovered(guide.index, channels, at) : 0,
+          channels: covered,
           listed: channels?.all.length ?? 0,
           guideChannels: guide?.index.channels.size ?? 0,
           fetchedAt: guide?.fetchedAt ?? null,
@@ -1568,7 +1572,7 @@ function make() {
           unresolved: channels ? unresolvedMappings(guide?.index ?? null, channels) : 0,
           failure: failure?.error ?? null,
           failedAt: failure?.at ?? null,
-          processing: processingOf(id, guide, channels, failure, at),
+          processing: processingOf(id, guide, covered, failure),
         } satisfies GuideStatus;
       });
 
@@ -1593,14 +1597,14 @@ function make() {
         perChannel(channels, (found, ids) =>
           Effect.promise(() => rangeAt(found.guide.index, found.channels, ids, from, to)),
         ),
-      programme: (channel: OwnedId, start: number) =>
+      programme: (channel: OwnedId, guideId: string, start: number) =>
         Effect.gen(function* () {
           const subscription = yield* savedAs(channel.subscriptionId);
           const found =
             subscription &&
             (yield* withContext(subscription, (context) =>
               Effect.sync(() =>
-                programmeAt(context.guide.index, context.channels, channel.id, start),
+                programmeAt(context.guide.index, context.channels, channel.id, guideId, start),
               ),
             ));
           return found ?? null;

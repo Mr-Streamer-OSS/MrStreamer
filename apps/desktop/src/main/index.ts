@@ -678,7 +678,8 @@ async function start(): Promise<void> {
       "guide.listings": ({ channels }) => guide.listings(channels),
       "guide.schedule": ({ channel, until }) => guide.schedule(channel, until),
       "guide.range": ({ channels, from, to }) => guide.range(channels, from, to),
-      "guide.programme": ({ channel, start }) => guide.programme(channel, start),
+      "guide.programme": ({ channel, guide: guideId, start }) =>
+        guide.programme(channel, guideId, start),
       "guide.search": ({ query }) => guide.search(query),
       "guide.searchList": ({ query, until, ...list }) =>
         Effect.flatMap(library.channels(list), (channels) =>

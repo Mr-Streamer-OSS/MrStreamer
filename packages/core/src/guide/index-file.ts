@@ -398,6 +398,8 @@ export interface IndexedChannel {
 export interface GuideIndex {
   /** Every channel the guide lists, by its id, in name order. */
   readonly channels: ReadonlyMap<string, IndexedChannel>;
+  /** When each channel's programmes end, in time order, those of channels without any left out. */
+  readonly ends: Float64Array;
   /** The channel the file names by `key`. */
   channel(key: number): IndexedChannel | undefined;
   readonly programmes: number;
@@ -412,8 +414,9 @@ export interface GuideIndex {
    */
   schedule(channel: IndexedChannel, at: number, until: number): readonly Programme[];
   /**
-   * The programmes on `channel` that overlap [from, to), in time order, without descriptions:
-   * a minute long at least, so a stretch of `GUIDE_RANGE.hours` holds a few hundred.
+   * The programmes on `channel` that overlap [from, to), in time order, without descriptions,
+   * each naming `channel` as its guide: a minute long at least, so a stretch of
+   * `GUIDE_RANGE.hours` holds a few hundred.
    */
   range(channel: IndexedChannel, from: number, to: number): readonly GuideSlot[];
   /** The programme on `channel` that starts at `start`, with its description, or null. */
@@ -440,6 +443,7 @@ export async function openGuideIndex(path: string): Promise<GuideIndex | null> {
     const meta = db.prepare("select programmes, until from meta").get();
     const channels = new Map<string, IndexedChannel>();
     const byKey: IndexedChannel[] = [];
+    const ends: number[] = [];
     let began = performance.now();
     let count = 0;
     for (const row of db
@@ -454,6 +458,7 @@ export async function openGuideIndex(path: string): Promise<GuideIndex | null> {
       };
       channels.set(channel.id, channel);
       byKey[channel.key] = channel;
+      if (channel.until !== null) ends.push(channel.until);
       // Lets other work in between slices of a few milliseconds.
       if ((++count & 15) === 0 && performance.now() - began >= SLICE_MS) {
         await new Promise((resolve) => setImmediate(resolve));
@@ -462,6 +467,7 @@ export async function openGuideIndex(path: string): Promise<GuideIndex | null> {
     }
     return reader(db, {
       channels,
+      ends: Float64Array.from(ends).sort(),
       byKey,
       programmes: Number(meta?.["programmes"] ?? 0),
       until: typeof meta?.["until"] === "number" ? meta["until"] : null,
@@ -476,6 +482,7 @@ function reader(
   db: DatabaseSync,
   read: {
     channels: Map<string, IndexedChannel>;
+    ends: Float64Array;
     byKey: readonly IndexedChannel[];
     programmes: number;
     until: number | null;
@@ -513,6 +520,7 @@ function reader(
     rows.map(programmeOf).filter((programme) => programme.stop > at);
   return {
     channels: read.channels,
+    ends: read.ends,
     channel: (key) => read.byKey[key],
     programmes: read.programmes,
     until: read.until,
@@ -532,7 +540,7 @@ function reader(
     range: (channel, at, to) =>
       range
         .all({ channel: channel.key, at, to })
-        .map(slotOf)
+        .map((row) => ({ ...slotOf(row), guide: channel.id }))
         .filter((slot) => slot.stop > at),
     programme(channel, start) {
       const row = detail.get(channel.key, start);
@@ -794,7 +802,7 @@ function matching(
   }
 }
 
-function slotOf(row: Record<string, unknown>): GuideSlot {
+function slotOf(row: Record<string, unknown>): Omit<GuideSlot, "guide"> {
   return { start: Number(row["start"]), stop: Number(row["stop"]), title: String(row["title"]) };
 }
 

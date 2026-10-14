@@ -234,6 +234,7 @@ const liveChannel = (id: string): LiveChannel => ({
   logoUrl: null,
   categoryIds: [],
   variants: [{ id, name: `Channel ${id}`, tags: [], quality: null }],
+  catchupDays: null,
 });
 
 /** A search that nothing stops. */
@@ -469,7 +470,12 @@ describe("indexing a guide", () => {
     // A grid's stretch: every slot, and what one leaves out read on its own.
     const stretch = guide.range(channel, NOON, NOON + GUIDE_RANGE.hours * HOUR);
     expect(stretch).toHaveLength(GUIDE_RANGE.hours * 60);
-    expect(stretch[0]).toEqual({ start: NOON, stop: NOON + minute, title: "Minute 0" });
+    expect(stretch[0]).toEqual({
+      start: NOON,
+      stop: NOON + minute,
+      title: "Minute 0",
+      guide: "one.test",
+    });
     expect(guide.programme(channel, NOON + 5 * minute)).toEqual({
       start: NOON + 5 * minute,
       stop: NOON + 6 * minute,
@@ -601,15 +607,40 @@ describe("indexing a guide", () => {
       ),
     ).toEqual(["Current news"]);
     // Only what has programmes to come is covered.
-    expect(channelsCovered(guide, catalogue, NOON)).toBe(1);
+    expect(await channelsCovered(guide, catalogue, NOON)).toBe(1);
     // Two and a half hours ago, both ended ids still had programmes to come.
-    expect(channelsCovered(guide, catalogue, NOON - 2.5 * HOUR)).toBe(2);
+    expect(await channelsCovered(guide, catalogue, NOON - 2.5 * HOUR)).toBe(2);
     expect(
       await rangeAt(guide, catalogue, ["1", "2"], NOON - 2.5 * HOUR, NOON - 1.5 * HOUR),
     ).toMatchObject({
       "1": [{ title: "Old news" }],
       "2": [{ title: "Ended news" }],
     });
+  });
+
+  it("works out what a catalogue covers once for callers that ask while it is being worked out", async () => {
+    const ids = Array.from({ length: 3_000 }, (_, n) => `c${n}.test`);
+    const { guide } = await index(
+      tv(...ids.map((id) => programme(id, stamp(NOON), stamp(NOON + HOUR), "Show"))),
+    );
+    let asked = 0;
+    const catalogue = {
+      guideIdsOf: (id: string) => [`c${id}.test`],
+      channelsOf: (guideId: string) => {
+        asked++;
+        return [liveChannel(guideId.slice(1, -".test".length))];
+      },
+    };
+
+    const answers = await Promise.all([
+      channelsCovered(guide, catalogue, NOON),
+      channelsCovered(guide, catalogue, NOON),
+    ]);
+    expect(answers).toEqual([3_000, 3_000]);
+    expect(asked).toBe(3_000);
+    // Once worked out, it is kept.
+    expect(await channelsCovered(guide, catalogue, NOON + 1)).toBe(3_000);
+    expect(asked).toBe(3_000);
   });
 
   it("gives each channel of a grid's page the stretch of the guide channel it shows, also when several show one", async () => {
@@ -627,12 +658,12 @@ describe("indexing a guide", () => {
     };
 
     const page = await rangeAt(guide, catalogue, ["1", "2", "3", "4"], NOON, NOON + HOUR);
-    const shared = [{ start: NOON, stop: NOON + HOUR, title: "Shared" }];
+    const shared = [{ start: NOON, stop: NOON + HOUR, title: "Shared", guide: "shared.test" }];
     expect(page).toEqual({
       "1": shared,
       "2": shared,
       "3": shared,
-      "4": [{ start: NOON, stop: NOON + HOUR, title: "Own" }],
+      "4": [{ start: NOON, stop: NOON + HOUR, title: "Own", guide: "own.test" }],
     });
   });
 

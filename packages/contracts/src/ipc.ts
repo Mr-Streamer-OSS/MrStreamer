@@ -156,8 +156,8 @@ export const ipcInputs = {
       from: "number",
       to: "number",
     }).narrow(({ from, to }) => to > from && to - from <= GUIDE_RANGE.hours * 60 * 60 * 1000),
-  /** One programme of a channel, by when it starts: what a grid's slot leaves out. */
-  "guide.programme": () => type({ channel: owned(), start: "number" }),
+  /** One programme of a channel, by a slot's `guide` and `start`: what the slot leaves out. */
+  "guide.programme": () => type({ channel: owned(), guide: "string", start: "number" }),
   "guide.search": () => type({ query: "string" }),
   /**
    * Searches the programmes of one list's channels, named as `library.channels` names a list: a
@@ -519,8 +519,9 @@ export interface IpcOutputs {
    */
   "guide.range": Readonly<Record<string, readonly GuideSlot[]>>;
   /**
-   * The programme on the channel that starts at `start`, with its description, from the guide
-   * channel the channel shows then; null when the guide has none there.
+   * The programme of the slot's guide channel that starts at `start`, with its description; null
+   * when the channel no longer names that guide channel, or it has none starting then, as after
+   * the guide was replaced.
    */
   "guide.programme": Programme | null;
   /** Programmes on now or later whose title matches, on now first. */

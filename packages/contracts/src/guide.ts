@@ -9,8 +9,17 @@ export interface Programme {
   readonly description: string | null;
 }
 
-/** A programme as a grid places it: without its description, which `guide.programme` reads. */
-export type GuideSlot = Omit<Programme, "description">;
+/**
+ * A programme as a grid places it: without its description, which `guide.programme` reads with
+ * the slot's `guide`.
+ */
+export interface GuideSlot extends Omit<Programme, "description"> {
+  /**
+   * The guide channel the slot is of, among those its channel's guide ids name: opaque, to hand
+   * back to `guide.programme` as it is.
+   */
+  readonly guide: string;
+}
 
 /**
  * How much a grid reads at once with `guide.range`: a page of channels over a few hours. A grid

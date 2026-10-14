@@ -142,16 +142,23 @@ export function listingsAt(
 
 /**
  * How many of the catalogue's channels the guide has programmes for that haven't ended at `at`.
- * A channel the guide only keeps the past of isn't covered.
+ * A channel the guide only keeps the past of isn't covered. Worked out in slices the first time.
  */
-export function channelsCovered(index: GuideIndex, channels: GuideChannels, at: number): number {
-  return remembered(covered, index, channels, at, () => {
+export function channelsCovered(
+  index: GuideIndex,
+  channels: GuideChannels,
+  at: number,
+): Promise<number> {
+  return remembered(covered, index, channels, at, async (slice) => {
     let count = 0;
     for (const { id, until } of index.channels.values()) {
-      if (until === null || until <= at) continue;
-      for (const channel of channels.channelsOf(id)) {
-        if (shownGuideId(index, channels, channel.id, at) === id) count++;
+      if (until !== null && until > at) {
+        for (const channel of channels.channelsOf(id)) {
+          if (shownGuideId(index, channels, channel.id, at) === id) count++;
+        }
       }
+      const rest = slice();
+      if (rest) await rest;
     }
     return count;
   });
@@ -206,17 +213,20 @@ export async function rangeAt(
 }
 
 /**
- * The programme on the channel that starts at `start`, with its description, from the guide
- * channel it shows then, or null.
+ * The programme of guide channel `guideId` that starts at `start`, with its description: a
+ * slot's of `rangeAt`, by the guide it names. Null when the channel doesn't name that guide
+ * channel, or it has none starting then.
  */
 export function programmeAt(
   index: GuideIndex,
   channels: GuideChannels,
   channelId: string,
+  guideId: string,
   start: number,
 ): Programme | null {
-  const shown = shownChannel(index, channels, channelId, start);
-  return shown ? index.programme(shown, start) : null;
+  if (!channels.guideIdsOf(channelId).includes(guideId)) return null;
+  const channel = index.channels.get(guideId);
+  return channel ? index.programme(channel, start) : null;
 }
 
 /**
@@ -235,7 +245,7 @@ export async function searchAt(
 ): Promise<readonly ProgrammeMatch[]> {
   const words = searchWords(query);
   if (words.length === 0) return [];
-  const shown = searchable(index, channels, at);
+  const shown = await searchable(index, channels, at);
   const found = await search.first(
     {
       path,
@@ -261,15 +271,18 @@ function searchable(
   index: GuideIndex,
   channels: GuideChannels,
   at: number,
-): ReadonlyMap<number, LiveChannel> {
-  return remembered(shownBy, index, channels, at, () => {
+): Promise<ReadonlyMap<number, LiveChannel>> {
+  return remembered(shownBy, index, channels, at, async (slice) => {
     const shown = new Map<number, LiveChannel>();
     for (const { key, id, until } of index.channels.values()) {
-      if (until === null || until <= at) continue;
-      const channel = channels
-        .channelsOf(id)
-        .find((each) => !each.adult && shownGuideId(index, channels, each.id, at) === id);
-      if (channel) shown.set(key, channel);
+      if (until !== null && until > at) {
+        const channel = channels
+          .channelsOf(id)
+          .find((each) => !each.adult && shownGuideId(index, channels, each.id, at) === id);
+        if (channel) shown.set(key, channel);
+      }
+      const rest = slice();
+      if (rest) await rest;
     }
     return shown;
   });
@@ -464,30 +477,21 @@ function shownGuideId(
   return shownChannel(index, channels, channelId, after)?.id;
 }
 
-/** What `remembered` keeps: an answer, and how long it holds. */
+/** What `remembered` keeps: an answer, or the work under way on it, and how long it holds. */
 interface Remembered<A> {
-  readonly value: A;
+  readonly value: Promise<A>;
   /** How many of the guide's channels had no programmes left then: it holds while as many have. */
   readonly ended: number;
 }
 
-/** When each of a guide's channels' programmes end, in order: what decides which still have any. */
-const ends = new WeakMap<GuideIndex, readonly number[]>();
-
 /** How many of a guide's channels have no programmes left at `at`, the guide's last ones among them. */
 function endedBy(index: GuideIndex, at: number): number {
-  let sorted = ends.get(index);
-  if (!sorted) {
-    sorted = [...index.channels.values()]
-      .flatMap(({ until }) => (until === null ? [] : [until]))
-      .sort((a, b) => a - b);
-    ends.set(index, sorted);
-  }
+  const { ends } = index;
   let low = 0;
-  let high = sorted.length;
+  let high = ends.length;
   while (low < high) {
     const middle = (low + high) >> 1;
-    if ((sorted[middle] ?? 0) <= at) low = middle + 1;
+    if ((ends[middle] ?? 0) <= at) low = middle + 1;
     else high = middle;
   }
   return low;
@@ -495,22 +499,28 @@ function endedBy(index: GuideIndex, at: number): number {
 
 /**
  * What `work` makes of a guide and a catalogue's channels at `at`, kept while both are the same
- * and the same channels still have programmes to come.
+ * and the same channels still have programmes to come. Work under way is kept too, so whoever
+ * asks meanwhile waits for the same answer; `work` lets other work in with the `slice` it is
+ * given. Work that fails is forgotten.
  */
 function remembered<A>(
   cache: WeakMap<GuideIndex, WeakMap<GuideChannels, Remembered<A>>>,
   index: GuideIndex,
   channels: GuideChannels,
   at: number,
-  work: () => A,
-): A {
+  work: (slice: () => Promise<void> | undefined) => Promise<A>,
+): Promise<A> {
   let byChannels = cache.get(index);
   if (!byChannels) cache.set(index, (byChannels = new WeakMap()));
   const ended = endedBy(index, at);
   const kept = byChannels.get(channels);
   if (kept?.ended === ended) return kept.value;
-  const value = work();
-  byChannels.set(channels, { value, ended });
+  const value = work(slicer());
+  const remembering = byChannels;
+  remembering.set(channels, { value, ended });
+  value.catch(() => {
+    if (remembering.get(channels)?.value === value) remembering.delete(channels);
+  });
   return value;
 }
 
