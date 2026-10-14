@@ -31,10 +31,14 @@ export const GUIDE_RANGE = { channels: 30, hours: 12 } as const;
  * What `guide.schedule` answers of a channel: the programmes over [from, until), never more than
  * `most`; where that holds fewer, at least `atLeast` on now or to come, from past `until`, and,
  * when `from` has passed, at least `atLeast` that have ended, from before `from`. The guide keeps
- * no programme shorter than a minute, so `most` holds the longest day, of 25 hours, with the one
- * on at its start: over a day it never cuts one short.
+ * no programme shorter than a minute, so `most` holds the longest day with the one on at its
+ * start: over a day it never cuts one short. That is a day of 26 hours, as where the clocks go
+ * back two hours (Antarctica/Troll), `GUIDE_DAY_MS`.
  */
-export const GUIDE_SCHEDULE = { atLeast: 6, most: 25 * 60 + 1 } as const;
+export const GUIDE_SCHEDULE = { atLeast: 6, most: 26 * 60 + 1 } as const;
+
+/** The longest day a clock can have, which `guide.schedule` may be asked for: 26 hours. */
+export const GUIDE_DAY_MS = 26 * 60 * 60 * 1000;
 
 /** What a channel shows now and next. Either is null where the guide has a gap or ends. */
 export interface Listing {

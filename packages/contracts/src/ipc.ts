@@ -18,6 +18,7 @@ import type { Result } from "./errors.ts";
 import type { DiagnosticsPreview } from "./diagnostics.ts";
 import type { CopySession, Download, DownloadList } from "./downloads.ts";
 import {
+  GUIDE_DAY_MS,
   GUIDE_RANGE,
   MAP_FILTERS,
   type GuideCandidate,
@@ -144,12 +145,12 @@ export const ipcInputs = {
   "library.refresh": () => type({ subscriptionId: "string > 0" }),
   "guide.listings": () => type({ channels: owned().array() }),
   /**
-   * A channel's programmes over [from, until), at most a day of 25 hours, as `GUIDE_SCHEDULE`
+   * A channel's programmes over [from, until), at most the longest day (`GUIDE_DAY_MS`), as `GUIDE_SCHEDULE`
    * bounds them: from the start of the viewer's day, aired ones among them for catch-up.
    */
   "guide.schedule": () =>
     type({ channel: owned(), from: "number", until: "number" }).narrow(
-      ({ from, until }) => until > from && until - from <= 25 * 60 * 60 * 1000,
+      ({ from, until }) => until > from && until - from <= GUIDE_DAY_MS,
     ),
   /**
    * Programmes over a stretch of time, past ones the guide still keeps among them, for a page of

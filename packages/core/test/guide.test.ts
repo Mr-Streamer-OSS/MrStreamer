@@ -5,6 +5,7 @@ import { gzipSync } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import { GUIDE_RANGE, GUIDE_SCHEDULE } from "@mrstreamer/contracts/guide";
+import { ipcInputs } from "@mrstreamer/contracts/ipc";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { guideAddress } from "../src/guide/address.ts";
 import { xmltvDocument } from "../src/guide/document.ts";
@@ -485,6 +486,49 @@ describe("indexing a guide", () => {
       description: "About minute 5",
     });
     expect(guide.programme(channel, NOON + 5 * minute + 1)).toBeNull();
+  });
+
+  it("reads a whole day of one-minute programmes where the clocks go back two hours, and is asked for it", async () => {
+    const zone = process.env["TZ"];
+    process.env["TZ"] = "Antarctica/Troll";
+    try {
+      // 25 October 2026 at Troll: +02:00 until 01:00 UTC, +00:00 after, so 26 hours long.
+      const morning = new Date(2026, 9, 25).setHours(0, 0, 0, 0);
+      const midnight = new Date(2026, 9, 25).setHours(24, 0, 0, 0);
+      expect(midnight - morning).toBe(26 * HOUR);
+      const minute = 60_000;
+      // A programme on as the day begins, then one a minute to its end.
+      const { guide } = await index(
+        tv(
+          ...Array.from({ length: 26 * 60 + 2 }, (_, n) =>
+            programme(
+              "one.test",
+              stamp(morning - minute / 2 + n * minute),
+              stamp(morning + minute / 2 + n * minute),
+              `Minute ${n}`,
+            ),
+          ),
+        ),
+        { since: morning, archive: 2 * DAY },
+      );
+      const channel = guide.channels.get("one.test");
+      if (!channel) throw new Error("No channel.");
+
+      const day = guide.schedule(channel, morning, morning, midnight);
+      expect(day).toHaveLength(GUIDE_SCHEDULE.most);
+      expect(day[0]?.title).toBe("Minute 0");
+      expect(day.at(-1)?.title).toBe(`Minute ${26 * 60}`);
+      expect(
+        ipcInputs["guide.schedule"]().allows({
+          channel: { subscriptionId: "s", id: "1" },
+          from: morning,
+          until: midnight,
+        }),
+      ).toBe(true);
+    } finally {
+      if (zone === undefined) delete process.env["TZ"];
+      else process.env["TZ"] = zone;
+    }
   });
 
   it("reads a day from its start, what aired among it, and a few aired and to come either side when it holds fewer", async () => {
