@@ -34,7 +34,7 @@
 //   `.` or `..` path segment, a login before its host, a placeholder in its scheme, host or port,
 //   whitespace or a backslash, which `new URL` would send otherwise, has no catch-up, whatever
 //   its mode made it from; and so has one whose query a provider could read otherwise than it
-//   was meant, with a `;` or a key twice, however spelt or encoded, as a `utc` of the stream's
+//   was meant, with a `;`, a second `?` or a key twice, however spelt or encoded, as a `utc` of the stream's
 //   own beside the one a mode or source adds.
 //
 // Not supported, so no catch-up: a mode without days or days without a mode, whose meaning players
@@ -146,8 +146,9 @@ const PLACEHOLDER = /\$\{[a-z]+\}|\{[a-zA-Z]+(?::\d+)?\}/g;
  * which is never sent; no `.` or `..` path segment, which takes the segment before it out; no
  * login before its host; nothing but a host and port, without placeholders, in its authority; and
  * no whitespace or backslash, which addresses read otherwise than they are written; and a query
- * without a `;`, which some providers separate keys by, and without a key twice, decoded, with
- * `+` as a space and in any case, which a provider could read either of.
+ * without a `;`, which some providers separate keys by, without a second `?`, where a source's
+ * query was joined into a value of the stream's own, and without a key twice, decoded, with `+`
+ * as a space and in any case, which a provider could read either of.
  */
 function plain(template: string): boolean {
   if (/[#\s\\]/.test(template)) return false;
@@ -158,7 +159,7 @@ function plain(template: string): boolean {
   const dot = (segment: string) => /^(\.|%2e){1,2}$/i.test(segment);
   if (path.split("/").some(dot)) return false;
   const query = template.slice(parts[0].length + 1);
-  if (query.includes(";")) return false;
+  if (/[;?]/.test(query)) return false;
   const keys = [...new URLSearchParams(query).keys()].map((key) => key.toLowerCase());
   if (new Set(keys).size !== keys.length) return false;
   return URL.canParse(template.replaceAll(PLACEHOLDER, "1"));

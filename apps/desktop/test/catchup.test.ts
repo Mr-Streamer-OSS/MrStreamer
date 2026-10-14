@@ -443,6 +443,11 @@ describe("a playlist's catch-up", () => {
       "https://iptv.test/live.ts?token=t;%75tc=1",
     ],
     [
+      "append of a query to a stream with one",
+      'catchup="append" catchup-source="?utc={utc}"',
+      "https://iptv.test/live.ts?token=t",
+    ],
+    [
       "append with a utc of its own",
       'catchup="append" catchup-source="&utc={utc}&lutc={lutc}"',
       "https://iptv.test/live.ts?utc=1791914426&token=t",
@@ -478,6 +483,18 @@ describe("a playlist's catch-up", () => {
       expect(channels.map((each) => each.catchupDays)).toEqual([null]);
     },
   );
+
+  it("appends a source that starts with & to a stream without a query as part of its path", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+    const { provider: list, asked } = single(
+      'catchup="append" catchup-source="&utc={utc}"',
+      "https://iptv.test/live.ts",
+    );
+    expect((await list.liveCatalogue()).channels.map((each) => each.catchupDays)).toEqual([2]);
+    await list.request((await list.archiveStream("one", WINDOW)).url);
+    expect(asked).toEqual([`https://iptv.test/live.ts&utc=${S}`]);
+  });
 
   it.each([
     [
