@@ -41,6 +41,8 @@ export const useCatalogue = () => useStore(catalogue);
 const USER_AGENT = `MrStreamer/${Constants.expoConfig?.version ?? "0.0.0"} (iOS)`;
 
 let provider: Provider | null = null;
+/** What signed in, for the stream addresses that carry it. */
+let login: readonly string[] = [];
 let loading: AbortController | null = null;
 
 const providerFor = (account: XtreamAccount) =>
@@ -65,6 +67,7 @@ export function loadCatalogue() {
 
 function signIn(subscription: SavedSubscription, password: string) {
   provider = providerFor({ ...subscription, password });
+  login = [subscription.username, password];
   session.set({ kind: "signed-in", subscription, account: null });
   loadCatalogue();
 }
@@ -128,6 +131,7 @@ export async function disconnect() {
   stop();
   loading?.abort();
   provider = null;
+  login = [];
   if (current.kind === "signed-in") {
     await keychainSecrets.remove(current.subscription.id).catch(() => undefined);
   }
@@ -147,5 +151,5 @@ export function playChannel(channel: ListedChannel, place: string, options: { wa
     provider
       ? provider.liveStream(variant.id, signal)
       : Promise.reject(new AppFailure({ kind: "no-subscription" }));
-  void play({ id: channel.id, title: channel.title, place }, open, options);
+  void play({ id: channel.id, title: channel.title, place }, open, { ...options, login });
 }

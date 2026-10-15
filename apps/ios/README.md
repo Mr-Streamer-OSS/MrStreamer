@@ -31,6 +31,13 @@ template adopts the UIScene life cycle, without which an app built with the iOS 
 launch. `patches/` adds `URL.parse` and `URL.canParse` to React Native's type of the global `URL`:
 at runtime Expo installs a WHATWG `URL` that has both.
 
+Xtream stream addresses carry the username and password in their path, so they stay out of logs
+and failures. `patches/` changes expo-video's warnings, which named the address and printed the
+whole error with it, to name an error by domain and code only, and describes its asset without
+its address, which AVKit's logs print. The player's failures reach the screen through
+`withoutLogin` (`src/errors.ts`). SDK 58 links prebuilt modules, which a patch can't reach, so
+`package.json` has autolinking build ExpoVideo from its patched source.
+
 ## How it is built
 
 Each responsibility has one owner, a plain module with a store the screens read:
@@ -89,6 +96,18 @@ ssh mac-mini xcrun simctl launch <udid> app.mrstreamer.player.dev -RCT_jsLocatio
 The build has no development client, so a deep link doesn't tell it where Metro is: launch it
 with `-RCT_jsLocation`, at the port Metro advertises, which its lazy chunks use too. Metro's
 first bundle request after starting can fail with "Failed to collapse"; reload once.
+
+To check that no login reaches a log, start the panel with canary credentials, distinctive and
+with characters an address encodes, sign in with them and make streams fail (the control port's
+`fail-live` and the offline channel), then scan Metro's output, the app's stdout and stderr and
+the simulator's unified log (`xcrun simctl spawn <udid> log show`). UI automation through XCTest
+logs the accessibility values it reads, the username field's among them, under
+`com.apple.dt.xctest`; leave those entries out of the scan.
+
+```sh
+FIXTURE_USERNAME='cnry Usr7Kq' FIXTURE_PASSWORD='cnry+Pw@9&Zq' node scripts/fixture-server.ts 8791 8792
+node scripts/log-scan.ts 'cnry Usr7Kq' 'cnry+Pw@9&Zq' metro.log unified.log
+```
 
 ## Runtime proof
 

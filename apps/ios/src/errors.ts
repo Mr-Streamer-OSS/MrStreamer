@@ -1,5 +1,6 @@
 import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
 import { formatDate, t } from "@mrstreamer/core/i18n";
+import { withoutAddresses } from "@mrstreamer/core/provider";
 
 /** The typed error behind a failed call, or an `unexpected` error for anything else. */
 export function appError(cause: unknown): AppError {
@@ -42,4 +43,24 @@ export function describeError(error: AppError): string {
     default:
       return error.kind === "unexpected" ? error.detail : error.kind;
   }
+}
+
+/**
+ * `text` as the viewer may see it, for messages the native player writes: every address cut to
+ * its origin (core's rule for provider messages), and each part of `login` gone however an
+ * address spells it, should a message quote a path or query without its scheme.
+ */
+export function withoutLogin(text: string, login: readonly string[]): string {
+  const spellings = login
+    .filter((part) => part !== "")
+    .flatMap((part) => [
+      part,
+      encodeURIComponent(part),
+      new URLSearchParams({ part }).toString().slice("part=".length),
+    ])
+    // The longest first, so a part inside a longer spelling doesn't leave the rest behind.
+    .toSorted((a, b) => b.length - a.length)
+    .map((spelling) => spelling.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const shown = withoutAddresses(text);
+  return spellings.length === 0 ? shown : shown.replace(new RegExp(spellings.join("|"), "gi"), "…");
 }

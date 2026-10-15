@@ -1,6 +1,6 @@
 import type { LiveStream } from "@mrstreamer/core/provider";
 import { createVideoPlayer, type VideoPlayer } from "expo-video";
-import { appError, describeError } from "./errors.ts";
+import { appError, describeError, withoutLogin } from "./errors.ts";
 import { rememberChannel } from "./storage.ts";
 import { store, useStore } from "./store.ts";
 
@@ -55,7 +55,12 @@ export const usePlaybackClock = () => useStore(clock);
 /** Opens a channel's stream; aborted when the viewer moves on first. */
 type Open = (signal: AbortSignal) => Promise<LiveStream>;
 
-let current: { readonly channel: Channel; readonly open: Open } | null = null;
+let current: {
+  readonly channel: Channel;
+  readonly open: Open;
+  /** What the stream's address carries that no failure the viewer sees may show. */
+  readonly login: readonly string[];
+} | null = null;
 let attempt: AbortController | null = null;
 /** Ends Picture in Picture; Watch registers it while its view can. */
 let endPictureInPicture: (() => void) | null = null;
@@ -102,22 +107,29 @@ function release() {
   clock.set(0);
 }
 
+/** Shows why the stream failed: the player's message, which can quote its address, without it. */
 function fail(message: string) {
   if (!current) return;
-  const { channel } = current;
+  const { channel, login } = current;
   release();
-  state.set((s) => ({ ...s, phase: { kind: "failed", channel, error: message } }));
+  const error = withoutLogin(message, login);
+  state.set((s) => ({ ...s, phase: { kind: "failed", channel, error } }));
 }
 
 /**
- * Plays `channel`, in Watch when `watch`, else in Home's preview. Whatever played before stops
- * first; a slower earlier call that finishes later changes nothing.
+ * Plays `channel`, in Watch when `watch`, else in Home's preview. `login` is what the stream's
+ * address carries, kept out of the failures shown. Whatever played before stops first; a slower
+ * earlier call that finishes later changes nothing.
  */
-export async function play(channel: Channel, open: Open, { watch }: { watch: boolean }) {
+export async function play(
+  channel: Channel,
+  open: Open,
+  { watch, login }: { readonly watch: boolean; readonly login: readonly string[] },
+) {
   release();
   const controller = new AbortController();
   attempt = controller;
-  current = { channel, open };
+  current = { channel, open, login };
   state.set((s) => {
     const muted = watch || s.watch ? false : s.muted;
     player().muted = muted;
@@ -141,7 +153,10 @@ export async function play(channel: Channel, open: Open, { watch }: { watch: boo
 
 /** Plays the failed or stopped channel again. */
 export function retry() {
-  if (current) void play(current.channel, current.open, { watch: state.get().watch });
+  if (current) {
+    const { channel, open, login } = current;
+    void play(channel, open, { watch: state.get().watch, login });
+  }
 }
 
 /**

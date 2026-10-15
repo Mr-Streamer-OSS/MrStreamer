@@ -6,11 +6,13 @@
 //
 //   node scripts/fixture-server.ts [port] [control port]
 //
-// The app connects to http://127.0.0.1:<port> as "fixture" / "fixture-pass". Every channel is a
-// live loop: the TEST channels loop their recording from apps/desktop/test/fixtures, codecs as
-// they are, so the ones AVPlayer can't decode fail as they would; every other channel loops a 720p
-// H.264 + AAC test picture made here with ffmpeg, light for even ids and dark for odd ones. Each
-// request is logged without the login, to .local/ios-fixture/requests.jsonl.
+// The app connects to http://127.0.0.1:<port> as "fixture" / "fixture-pass", or as the
+// FIXTURE_USERNAME / FIXTURE_PASSWORD given, such as the canaries scripts/log-scan.ts looks for.
+// Every channel is a live loop: the TEST channels loop their recording from
+// apps/desktop/test/fixtures, codecs as they are, so the ones AVPlayer can't decode fail as they
+// would; every other channel loops a 720p H.264 + AAC test picture made here with ffmpeg, light
+// for even ids and dark for odd ones. Each request is logged without the login, to
+// .local/ios-fixture/requests.jsonl.
 //
 // The control port listens on the workbench only and is never tunnelled to the Mac:
 //   POST /fail-catalogue?status=503    channel and category lists answer that; status=none restores
@@ -23,8 +25,8 @@ import { createServer, request as forward, type ServerResponse } from "node:http
 import { join } from "node:path";
 import { startFakeProvider, type FakeChannel } from "../../desktop/test/fake-provider.ts";
 
-const USERNAME = "fixture";
-const PASSWORD = "fixture-pass";
+const USERNAME = process.env.FIXTURE_USERNAME ?? "fixture";
+const PASSWORD = process.env.FIXTURE_PASSWORD ?? "fixture-pass";
 const CHANNELS = 6000;
 /** Segments a live playlist lists, the newest last. */
 const WINDOW = 5;
@@ -261,5 +263,5 @@ createServer((request, response) => {
 
 writeFileSync(join(out, "server.json"), JSON.stringify({ port, controlPort, started }));
 console.log(
-  `fixture panel http://127.0.0.1:${port} (${USERNAME} / ${PASSWORD}), ${provider.catalogue.channels.length} channels; control http://127.0.0.1:${controlPort}`,
+  `fixture panel http://127.0.0.1:${port} as ${USERNAME}, ${provider.catalogue.channels.length} channels; control http://127.0.0.1:${controlPort}`,
 );

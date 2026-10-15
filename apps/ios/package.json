@@ -10,6 +10,15 @@
     "ios": "expo run:ios",
     "proof": "node scripts/proof-server.ts"
   },
+  "expo": {
+    "autolinking": {
+      "ios": {
+        "buildFromSource": [
+          "ExpoVideo"
+        ]
+      }
+    }
+  },
   "dependencies": {
     "@expo/log-box": "58.0.12",
     "@expo/metro-runtime": "58.0.14",
