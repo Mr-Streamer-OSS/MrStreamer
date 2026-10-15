@@ -144,12 +144,16 @@ export function retry() {
   if (current) void play(current.channel, current.open, { watch: state.get().watch });
 }
 
-/** Stops playing and closes Watch, Picture in Picture and the accessory. */
+/**
+ * Stops playing and closes Watch, Picture in Picture and the accessory. What plays next on Home
+ * starts without sound again.
+ */
 export function stop() {
   current = null;
   release();
   endPictureInPicture?.();
-  state.set((s) => ({ ...s, phase: { kind: "idle" }, watch: false, pip: false }));
+  player().muted = true;
+  state.set((s) => ({ ...s, phase: { kind: "idle" }, watch: false, pip: false, muted: true }));
 }
 
 export function togglePause() {
