@@ -96,8 +96,10 @@ ssh mac-mini xcrun simctl launch <udid> app.mrstreamer.player.dev -RCT_jsLocatio
 ```
 
 The build has no development client, so a deep link doesn't tell it where Metro is: launch it
-with `-RCT_jsLocation`, at the port Metro advertises, which its lazy chunks use too. Metro's
-first bundle request after starting can fail with "Failed to collapse"; reload once.
+with `-RCT_jsLocation`, at the port Metro advertises, which its lazy chunks use too. `app.json`
+turns off Expo's tsconfig `paths` support, which the app doesn't use: it followed `extends` above
+`apps/ios`, outside what Metro watches, and failed the first bundle after every start with
+"Failed to collapse".
 
 To check that no login reaches a log, start the panel with canary credentials, distinctive and
 with characters an address encodes, sign in with them and make streams fail (the control port's
