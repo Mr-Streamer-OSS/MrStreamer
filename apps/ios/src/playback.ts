@@ -45,6 +45,11 @@ const state = store<Playback>({
 const clock = store(0);
 
 export const usePlayback = () => useStore(state);
+
+/** The channel that plays or is about to, for lists to mark; none once it failed or stopped. */
+export function playingChannelId(phase: Phase): string | null {
+  return phase.kind === "idle" || phase.kind === "failed" ? null : phase.channel.id;
+}
 export const usePlaybackClock = () => useStore(clock);
 
 /** Opens a channel's stream; aborted when the viewer moves on first. */

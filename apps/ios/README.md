@@ -54,8 +54,10 @@ Watch (`src/watch.tsx`) is a layer over the navigation rather than a route, beca
 starts Picture in Picture has to stay while it plays. `src/glass.tsx` draws the app's own controls
 as Liquid Glass, and solid before iOS 26 or with Reduce Transparency on.
 
-Live channels are asked for as HLS, which AVPlayer plays and panels serve beside MPEG-TS. That
-covers H.264 or HEVC with AAC; the formats the desktop converts with ffmpeg don't play yet.
+Live channels are asked for as HLS, which AVPlayer plays and panels serve beside MPEG-TS. On the
+simulator the fixture channels showed what that covers: H.264 with AAC or AC-3 plays; MPEG-2 fails
+with "Cannot Decode"; HEVC in MPEG-TS segments plays its sound without a picture. The formats the
+desktop converts with ffmpeg don't play yet.
 
 ## What Hermes lacks
 

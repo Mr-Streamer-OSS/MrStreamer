@@ -4,7 +4,7 @@ import { useCallback, useDeferredValue, useLayoutEffect, useMemo, useState } fro
 import { FlatList, StyleSheet } from "react-native";
 import { playChannel, useCatalogue } from "../../../account.ts";
 import { searchChannels } from "../../../library.ts";
-import { usePlayback } from "../../../playback.ts";
+import { playingChannelId, usePlayback } from "../../../playback.ts";
 import { ChannelRow, Message, useRowHeight } from "../../../ui.tsx";
 
 /** Live channels by name, matched as the desktop's search matches words. Films and series later. */
@@ -34,7 +34,7 @@ export default function Search() {
       library && playChannel(channel, library.placeOf.get(channel.id) ?? "", { watch: true }),
     [library],
   );
-  const playingId = phase.kind === "idle" ? null : phase.channel.id;
+  const playingId = playingChannelId(phase);
   return (
     <FlatList
       style={styles.screen}

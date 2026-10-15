@@ -11,6 +11,7 @@ import {
   player,
   retry,
   setMuted,
+  playingChannelId,
   usePlayback,
   type Playback,
 } from "../../../playback.ts";
@@ -40,7 +41,7 @@ export default function Home() {
       library && playChannel(channel, placeOf(library, channel), { watch: false }),
     [library],
   );
-  const playingId = playback.phase.kind === "idle" ? null : playback.phase.channel.id;
+  const playingId = playingChannelId(playback.phase);
 
   return (
     <ScrollView style={styles.screen} contentInsetAdjustmentBehavior="automatic">

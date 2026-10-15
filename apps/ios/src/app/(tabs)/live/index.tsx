@@ -5,7 +5,7 @@ import { FlatList, StyleSheet, View } from "react-native";
 import { loadCatalogue, playChannel, useCatalogue } from "../../../account.ts";
 import { describeError } from "../../../errors.ts";
 import type { Library, Region } from "../../../library.ts";
-import { usePlayback } from "../../../playback.ts";
+import { playingChannelId, usePlayback } from "../../../playback.ts";
 import { useSavedState, writeState } from "../../../storage.ts";
 import { ChannelRow, Message, useRowHeight } from "../../../ui.tsx";
 
@@ -85,7 +85,7 @@ function Channels({ library }: { library: Library }) {
     });
   }, [navigation, library, region, shelf, choose]);
 
-  const playingId = phase.kind === "idle" ? null : phase.channel.id;
+  const playingId = playingChannelId(phase);
   const watch = useCallback(
     (channel: ListedChannel) =>
       playChannel(channel, library.placeOf.get(channel.id) ?? "", { watch: true }),
