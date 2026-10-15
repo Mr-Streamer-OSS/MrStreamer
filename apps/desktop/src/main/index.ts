@@ -576,6 +576,9 @@ async function start(): Promise<void> {
     };
   });
 
+  /** Whether the window made a call since it was last sent `library.updated`. */
+  let windowCalled = true;
+
   /** Sends each change to the window, while there is one. */
   const forward = <A, E extends IpcEvent>(
     changes: Stream.Stream<A>,
@@ -589,7 +592,18 @@ async function start(): Promise<void> {
         }),
       ),
     );
-  forward(library.changes, "library.updated", (status) => status);
+  // The window reads its library again for each update, the full channel list among it. Until it
+  // makes a call after one, all it reads for that update is still to come, after any catalogue
+  // swapped in since: telling it again would only have it read the same lists twice.
+  runtime.runFork(
+    Stream.runForEach(library.changes, (status) =>
+      Effect.sync(() => {
+        if (!mainWindow || !windowCalled) return;
+        windowCalled = false;
+        emit(mainWindow.webContents, "library.updated", status);
+      }),
+    ),
+  );
   forward(onDemand.changes, "ondemand.updated", (status) => status);
   forward(onDemand.progressChanges, "ondemand.progress", (metadata) => metadata);
   forward(onDemand.detailsChanged, "ondemand.detailsChanged", (title) => title);
@@ -1125,6 +1139,9 @@ async function start(): Promise<void> {
         }),
     },
     (sender) => sender === mainWindow?.webContents,
+    () => {
+      windowCalled = true;
+    },
   );
 
   // What plays here ends with the window, and so does a connect to a receiver still under way:
