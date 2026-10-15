@@ -96,7 +96,19 @@ export async function guideLabelsScenario(d: Driver, host: GuideHost): Promise<v
       deviceScaleFactor: 1,
       mobile: false,
     });
-    await d.wait(() => d.evaluate<boolean>(`innerWidth === ${pixels}`));
+    // The viewport takes the width before the page is laid out at it: wait for the fonts, and for
+    // the rows to measure the same over two frames, before anything is read or captured.
+    await d.wait(() =>
+      d.evaluate<boolean>(`(async () => {
+        if (innerWidth !== ${pixels}) return false;
+        await document.fonts.ready;
+        const measure = () => [...document.querySelectorAll('main li[data-source]')]
+          .map(row => { const box = row.getBoundingClientRect(); return box.width + 'x' + box.height; }).join();
+        const before = measure();
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        return measure() === before;
+      })()`),
+    );
   };
   const openGuides = async () => {
     if (!(await d.exists(byText("nav button", tr("Guides"))))) {
@@ -129,7 +141,10 @@ export async function guideLabelsScenario(d: Driver, host: GuideHost): Promise<v
     const fields = await d.evaluate<string[]>(`[${addressField()}.value, ${nameField()}.value]`);
     expect(fields.join("") === "", "The add form kept what was typed", fields);
   };
-  /** Renames the row called `from` to `to` by typing, ending with `end`, captured as `shot`. */
+  /**
+   * Renames the row called `from` to `to` by typing, ending with `end`, captured as `shot`. It
+   * returns once the field closes, which is before the name is saved: wait for the names it brings.
+   */
   const rename = async (
     from: string,
     to: string,
@@ -182,6 +197,13 @@ export async function guideLabelsScenario(d: Driver, host: GuideHost): Promise<v
   expect((await focused()) === "Rename Netherlands", "Enter didn't hand the keyboard back");
   // A name alike another, case aside, tags both again.
   await rename(hostName, "netherlands", "leave");
+  await d.wait(async () => {
+    const [a, b] = await rows();
+    return (
+      /^Netherlands [0-9a-f]{4,}$/.test(a?.name ?? "") &&
+      /^netherlands [0-9a-f]{4,}$/.test(b?.name ?? "")
+    );
+  });
   const alike = await named(
     (await rows()).map((each) => each.name),
     "Two named alike",
