@@ -12,6 +12,26 @@
       "bundleIdentifier": "app.mrstreamer.player.dev",
       "supportsTablet": true
     },
-    "plugins": [["expo-secure-store", { "faceIDPermission": false }]]
+    "plugins": [
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": false
+        }
+      ],
+      [
+        "expo-router",
+        {
+          "root": "./src/app"
+        }
+      ],
+      [
+        "expo-video",
+        {
+          "supportsPictureInPicture": true,
+          "supportsBackgroundPlayback": true
+        }
+      ]
+    ]
   }
 }
