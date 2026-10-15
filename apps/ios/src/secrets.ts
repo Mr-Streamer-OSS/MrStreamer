@@ -22,9 +22,12 @@ const OPTIONS: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
 };
 
-/** Keychain keys allow letters, digits, ".", "-" and "_"; an id may hold anything else. */
+/**
+ * Keychain keys allow letters, digits, ".", "-" and "_"; an id may hold anything else. Every other
+ * UTF-16 unit, "_" included, becomes "_" and four hex digits, so each id has a key of its own.
+ */
 const keyOf = (id: string) =>
-  `s.${Array.from(id, (c) => (/[\w.-]/.test(c) ? c : `_${c.charCodeAt(0).toString(16)}_`)).join("")}`;
+  `s.${id.replace(/[^A-Za-z0-9.-]/g, (unit) => `_${unit.charCodeAt(0).toString(16).padStart(4, "0")}`)}`;
 
 async function keychain<A>(operation: () => Promise<A>): Promise<A> {
   try {
