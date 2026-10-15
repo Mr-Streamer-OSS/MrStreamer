@@ -32,10 +32,11 @@ export default function RootLayout() {
     <ThemeProvider value={theme}>
       <View style={styles.black}>
         <Stack screenOptions={{ headerShown: false, contentStyle: styles.black }}>
-          <Stack.Protected guard={signedIn}>
+          {/* Explicit, or Expo Router falls back to the first open route: Runtime proof. */}
+          <Stack.Protected guard={signedIn} redirectTo="/connect">
             <Stack.Screen name="(tabs)" />
           </Stack.Protected>
-          <Stack.Protected guard={!signedIn}>
+          <Stack.Protected guard={!signedIn} redirectTo="/">
             <Stack.Screen name="connect" />
           </Stack.Protected>
           <Stack.Screen
