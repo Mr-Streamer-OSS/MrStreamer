@@ -44,7 +44,8 @@ Each responsibility has one owner, a plain module with a store the screens read:
 
 - `src/account.ts`: the subscription and its live catalogue. It signs in with core's Xtream
   adapter (shared with the desktop), loads and reloads the channel list, cancels a load the
-  viewer moved past, and disconnects.
+  viewer moved past, and disconnects. A sign-in overtaken by a newer one or by Disconnect saves
+  nothing and signs nothing in.
 - `src/library.ts`: the catalogue as the screens show it, by core's names, quality grouping and
   country rules.
 - `src/playback.ts`: the one `expo-video` player and what it plays. Home's preview, Watch,

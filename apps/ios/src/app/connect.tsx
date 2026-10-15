@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { connect, useSession } from "../account.ts";
 import { appError, describeError } from "../errors.ts";
@@ -14,11 +14,16 @@ export default function Connect() {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(saved ? "Enter the password again." : null);
+  // The keyboard's Go submits too, and can before `busy` renders: one sign-in at a time.
+  const pending = useRef(false);
 
   const submit = () => {
+    if (pending.current) return;
+    pending.current = true;
     setBusy(true);
     setError(null);
     connect({ server, username, password }).catch((cause: unknown) => {
+      pending.current = false;
       setBusy(false);
       setError(describeError(appError(cause)));
     });

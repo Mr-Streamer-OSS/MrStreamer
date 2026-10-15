@@ -44,6 +44,8 @@ let provider: Provider | null = null;
 /** What signed in, for the stream addresses that carry it. */
 let login: readonly string[] = [];
 let loading: AbortController | null = null;
+/** Counts sign-ins and Disconnects: only the latest Connect may still sign in. */
+let attempts = 0;
 
 const providerFor = (account: XtreamAccount) =>
   xtreamProvider(account, { userAgent: USER_AGENT, live: "hls" });
@@ -104,8 +106,12 @@ function updateAccount(id: string, account: AccountStatus | AppError) {
   );
 }
 
-/** Signs in with what the viewer typed. Rejects with the reason it couldn't. */
+/**
+ * Signs in with what the viewer typed. Rejects with the reason it couldn't. A newer Connect or a
+ * Disconnect before it finishes leaves it without effect: it saves nothing and signs nothing in.
+ */
 export async function connect(input: LoginInput): Promise<void> {
+  const attempt = ++attempts;
   const { account } = parseLogin(input);
   if (account.kind !== "xtream") {
     throw new AppFailure({
@@ -114,12 +120,17 @@ export async function connect(input: LoginInput): Promise<void> {
     });
   }
   const status = await providerFor(account).authenticate(AbortSignal.timeout(20_000));
+  if (attempt !== attempts) return;
   const subscription = {
     id: `xtream-${Date.now().toString(36)}`,
     server: account.server,
     username: account.username,
   };
   await keychainSecrets.write(subscription.id, account.password);
+  if (attempt !== attempts) {
+    await keychainSecrets.remove(subscription.id).catch(() => undefined);
+    return;
+  }
   writeState((state) => ({ ...state, subscription, recent: [], region: null }));
   signIn(subscription, account.password);
   updateAccount(subscription.id, status);
@@ -127,6 +138,7 @@ export async function connect(input: LoginInput): Promise<void> {
 
 /** Forgets the subscription: its password, its saved state and what it plays. */
 export async function disconnect() {
+  attempts++;
   const current = session.get();
   stop();
   loading?.abort();
