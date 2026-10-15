@@ -136,7 +136,11 @@ export async function connect(input: LoginInput): Promise<void> {
   updateAccount(subscription.id, status);
 }
 
-/** Forgets the subscription: its password, its saved state and what it plays. */
+/**
+ * Forgets the subscription: its password, its saved state and what it plays. Everything but the
+ * Keychain is forgotten at once, so a second Disconnect finds nothing to forget, and the removal
+ * that finishes later touches only this subscription's password, never a newer sign-in.
+ */
 export async function disconnect() {
   attempts++;
   const current = session.get();
@@ -144,12 +148,12 @@ export async function disconnect() {
   loading?.abort();
   provider = null;
   login = [];
-  if (current.kind === "signed-in") {
-    await keychainSecrets.remove(current.subscription.id).catch(() => undefined);
-  }
   writeState(() => ({ subscription: null, recent: [], region: null }));
   catalogue.set({ kind: "loading" });
   session.set({ kind: "signed-out", saved: null });
+  if (current.kind === "signed-in") {
+    await keychainSecrets.remove(current.subscription.id).catch(() => undefined);
+  }
 }
 
 /**
