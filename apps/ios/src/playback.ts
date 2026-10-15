@@ -91,7 +91,11 @@ export function player(): VideoPlayer {
   made.addListener("isExternalPlaybackActiveChange", ({ isExternalPlaybackActive }) => {
     // An AirPlay receiver keeps playing while the app is in the background.
     made.staysActiveInBackground = isExternalPlaybackActive;
-    state.set((s) => ({ ...s, external: isExternalPlaybackActive }));
+    // Back on the phone with Watch and Picture in Picture closed, Home's preview is silent again.
+    const { watch, pip } = state.get();
+    const silent = !isExternalPlaybackActive && !watch && !pip;
+    if (silent) made.muted = true;
+    state.set((s) => ({ ...s, external: isExternalPlaybackActive, muted: silent || s.muted }));
   });
   created = made;
   return made;
