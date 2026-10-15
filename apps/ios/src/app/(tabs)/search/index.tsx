@@ -1,7 +1,8 @@
 import type { ListedChannel } from "@mrstreamer/core/catalogue/variants";
 import { useNavigation } from "expo-router";
-import { useCallback, useDeferredValue, useLayoutEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { FlatList, StyleSheet } from "react-native";
+import type { SearchBarCommands } from "react-native-screens";
 import { playChannel, useCatalogue } from "../../../account.ts";
 import { searchChannels } from "../../../library.ts";
 import { playingChannelId, usePlayback } from "../../../playback.ts";
@@ -13,6 +14,7 @@ export default function Search() {
   const catalogue = useCatalogue();
   const { phase } = usePlayback();
   const height = useRowHeight();
+  const searchBar = useRef<SearchBarCommands>(null);
   const [query, setQuery] = useState("");
   const typed = useDeferredValue(query);
   const library = catalogue.kind === "ready" ? catalogue.library : null;
@@ -21,6 +23,7 @@ export default function Search() {
   useLayoutEffect(() => {
     navigation.setOptions({
       headerSearchBarOptions: {
+        ref: searchBar,
         placeholder: "Channels",
         autoCapitalize: "none",
         onChangeText: (event: { nativeEvent: { text: string } }) =>
@@ -30,8 +33,12 @@ export default function Search() {
   }, [navigation]);
 
   const watch = useCallback(
-    (channel: ListedChannel) =>
-      library && playChannel(channel, library.placeOf.get(channel.id) ?? "", { watch: true }),
+    (channel: ListedChannel) => {
+      if (!library) return;
+      // The system search field keeps its keyboard up until it is blurred, over Watch too.
+      searchBar.current?.blur();
+      playChannel(channel, library.placeOf.get(channel.id) ?? "", { watch: true });
+    },
     [library],
   );
   const playingId = playingChannelId(phase);
