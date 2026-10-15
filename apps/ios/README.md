@@ -54,7 +54,8 @@ Each responsibility has one owner, a plain module with a store the screens read:
 - `src/storage.ts`: what the app keeps between launches, apart from secrets, in one JSON file in
   Documents: the subscription's server and username, recent channels and the Live country.
 - `src/secrets.ts`: passwords in the Keychain. Keychain items outlive the app, so the first launch
-  after installing removes what an earlier install left there.
+  after installing removes what an earlier install left there, by an index of the ids it wrote;
+  writes, removals and clearing run one at a time so none loses another's change to the index.
 
 Routes are in `src/app` (Expo Router): `(tabs)` are the system's native tabs, Home's Downloads and
 Settings are pushed from its top bar, and `connect` shows until a subscription is signed in.

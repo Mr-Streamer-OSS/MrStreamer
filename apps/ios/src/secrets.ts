@@ -48,6 +48,21 @@ async function keychain<A>(operation: () => Promise<A>): Promise<A> {
   }
 }
 
+/** The last change to this store's items, settled or not; a failed one counts as done. */
+let changing: Promise<unknown> = Promise.resolve();
+
+/**
+ * Runs `change` once every change begun before it has finished. Writes, removals and clearing
+ * each read the index and write it back, so two at once would lose one's ids: a Disconnect's
+ * removal still running when the next sign-in writes its password would drop the new id, and a
+ * reinstall wouldn't remove that password.
+ */
+function serially<A>(change: () => Promise<A>): Promise<A> {
+  const run = changing.then(change);
+  changing = run.catch(() => undefined);
+  return run;
+}
+
 async function ids(): Promise<string[]> {
   const listed = await SecureStore.getItemAsync(INDEX, OPTIONS);
   const parsed: unknown = listed ? JSON.parse(listed) : [];
@@ -60,18 +75,24 @@ const index = (change: (listed: string[]) => string[]) =>
 export const keychainSecrets: SecretStore = {
   read: (id) => keychain(() => SecureStore.getItemAsync(keyOf(id), OPTIONS)),
   write: (id, secret) =>
-    keychain(async () => {
-      await index((listed) => [...listed.filter((each) => each !== id), id]);
-      await SecureStore.setItemAsync(keyOf(id), secret, OPTIONS);
-    }),
+    keychain(() =>
+      serially(async () => {
+        await index((listed) => [...listed.filter((each) => each !== id), id]);
+        await SecureStore.setItemAsync(keyOf(id), secret, OPTIONS);
+      }),
+    ),
   remove: (id) =>
-    keychain(async () => {
-      await SecureStore.deleteItemAsync(keyOf(id), OPTIONS);
-      await index((listed) => listed.filter((each) => each !== id));
-    }),
+    keychain(() =>
+      serially(async () => {
+        await SecureStore.deleteItemAsync(keyOf(id), OPTIONS);
+        await index((listed) => listed.filter((each) => each !== id));
+      }),
+    ),
   clear: () =>
-    keychain(async () => {
-      for (const id of await ids()) await SecureStore.deleteItemAsync(keyOf(id), OPTIONS);
-      await SecureStore.deleteItemAsync(INDEX, OPTIONS);
-    }),
+    keychain(() =>
+      serially(async () => {
+        for (const id of await ids()) await SecureStore.deleteItemAsync(keyOf(id), OPTIONS);
+        await SecureStore.deleteItemAsync(INDEX, OPTIONS);
+      }),
+    ),
 };
