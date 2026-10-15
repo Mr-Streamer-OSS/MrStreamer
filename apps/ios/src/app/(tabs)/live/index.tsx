@@ -51,7 +51,6 @@ function Channels({ library }: { library: Library }) {
         {
           type: "menu",
           label: shelf && region ? `${region.name} · ${shelf.title}` : (region?.name ?? "Live"),
-          icon: { type: "sfSymbol", name: "chevron.down" },
           menu: {
             items: library.regions.map((each) =>
               each.shelves.length > 1

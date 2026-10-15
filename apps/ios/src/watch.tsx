@@ -1,6 +1,14 @@
 import { isPictureInPictureSupported, VideoAirPlayButton, VideoView } from "expo-video";
 import { useEffect, useRef, useState } from "react";
-import { Pressable, StatusBar, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import {
+  Keyboard,
+  Pressable,
+  StatusBar,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Glass, IconButton } from "./glass.tsx";
 import {
@@ -33,7 +41,10 @@ export function WatchLayer() {
     return () => onEndPictureInPicture(null);
   }, []);
   useEffect(() => {
-    if (watch) setControls(true);
+    if (!watch) return;
+    setControls(true);
+    // A search field left focused under Watch would keep its keyboard over the picture.
+    Keyboard.dismiss();
   }, [watch]);
 
   if (!watch && !pip) return null;
@@ -42,6 +53,8 @@ export function WatchLayer() {
     <View
       style={[StyleSheet.absoluteFill, watch ? styles.layer : styles.hidden]}
       pointerEvents={watch ? "auto" : "none"}
+      // Watch lies over the tabs rather than replacing them, so VoiceOver is kept to it.
+      accessibilityViewIsModal={watch}
       accessibilityElementsHidden={!watch}
       importantForAccessibility={watch ? "auto" : "no-hide-descendants"}
       testID="watch"

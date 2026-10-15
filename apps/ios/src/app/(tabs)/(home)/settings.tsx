@@ -1,6 +1,7 @@
 import type { AppError } from "@mrstreamer/contracts/errors";
 import type { AccountStatus } from "@mrstreamer/contracts/subscription";
 import { router } from "expo-router";
+import { isPictureInPictureSupported } from "expo-video";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { disconnect, loadCatalogue, useCatalogue, useSession } from "../../../account.ts";
 import { describeError } from "../../../errors.ts";
@@ -42,6 +43,10 @@ export default function Settings() {
           <Text style={styles.section} accessibilityRole="header">
             Development
           </Text>
+          <Line
+            label="Picture in Picture"
+            value={isPictureInPictureSupported() ? "Supported" : "Not supported here"}
+          />
           <View style={styles.actions}>
             <TextButton label="Runtime proof" onPress={() => router.push("/proof")} />
           </View>
