@@ -127,7 +127,7 @@ const provider = await startFakeProvider({
   password: PASSWORD,
 });
 const tmdb = await startFakeTmdb();
-// One service streams the first films and series it is told about.
+// One service streams the first movies and series it is told about.
 tmdb.stream(
   "movie",
   provider.titles.movies.slice(12, 40).map((movie) => String(movie.id + 10_000)),

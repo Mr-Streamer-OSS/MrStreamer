@@ -20,9 +20,9 @@ type Row =
   | { readonly kind: "channel"; readonly channel: ListedChannel };
 
 /**
- * Films, series and live channels by name, matched as the desktop's search matches words: titles
+ * Movies, series and live channels by name, matched as the desktop's search matches words: titles
  * by any of their names, TMDB's translations included, the best first. A title opens its details
- * in Films or Series; a channel plays in Watch.
+ * in Movies or Series; a channel plays in Watch.
  */
 export default function Search() {
   const navigation = useNavigation();
@@ -40,7 +40,7 @@ export default function Search() {
     const found: { title: string; total: number; data: Row[] }[] = [];
     if (lists.kind === "ready" && typed.trim()) {
       for (const [kind, name] of [
-        ["movie", "Films"],
+        ["movie", "Movies"],
         ["series", "Series"],
       ] as const) {
         const page = searchTitles(lists.index, kind, typed);
@@ -69,7 +69,7 @@ export default function Search() {
     navigation.setOptions({
       headerSearchBarOptions: {
         ref: searchBar,
-        placeholder: "Films, series and channels",
+        placeholder: "Movies, series and channels",
         autoCapitalize: "none",
         onChangeText: (event: { nativeEvent: { text: string } }) =>
           setQuery(event.nativeEvent.text),
@@ -138,7 +138,9 @@ function TitleRow({
   height: number;
   onPress: (title: Title) => void;
 }) {
-  const line = [title.kind === "movie" ? "Film" : "Series", title.year].filter(Boolean).join(" · ");
+  const line = [title.kind === "movie" ? "Movie" : "Series", title.year]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <Pressable
       accessibilityRole="button"

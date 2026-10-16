@@ -92,6 +92,18 @@ export function buildLibrary(catalogue: LiveCatalogue): Library {
     }
     return { name, shelves, channels };
   });
+
+  // Channels in no category the provider lists, as a panel that lists no categories leaves every
+  // channel, come last on their own, as the desktop's Live shows every channel without a category.
+  const others = listed.length > 0 ? "Other channels" : "All channels";
+  const unplaced: ListedChannel[] = [];
+  for (const stream of streams) {
+    const channel = byId.get(stream.id);
+    if (!channel || placeOf.has(channel.id)) continue;
+    placeOf.set(channel.id, others);
+    unplaced.push(channel);
+  }
+  if (unplaced.length > 0) listed.push({ name: others, shelves: [], channels: unplaced });
   return { regions: listed, byId, placeOf };
 }
 

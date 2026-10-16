@@ -33,7 +33,7 @@ import { store, useStore } from "./store.ts";
 
 // The movie and series catalogue of the connected subscription, as the desktop builds it: the
 // provider's lists through core's Xtream adapter, indexed by core (names, versions gathered by
-// TMDB id, the version that suits the viewer's language first), the collections Films and Series
+// TMDB id, the version that suits the viewer's language first), the collections Movies and Series
 // show, search, and details with seasons and episodes. TMDB's metadata comes from core's store,
 // with the key built into the app (EXPO_PUBLIC_TMDB_KEY); without one, collections that need it
 // are empty and details show the provider's facts. The lists are read once per sign-in and on

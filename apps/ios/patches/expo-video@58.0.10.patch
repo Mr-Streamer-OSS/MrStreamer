@@ -1,3 +1,36 @@
+diff --git a/build/VideoView.types.d.ts b/build/VideoView.types.d.ts
+index f2970f5943aac4b2c80cb29765e7140752f75e36..26f73804680cd3a0695ce012ff1845deebf0e608 100644
+--- a/build/VideoView.types.d.ts
++++ b/build/VideoView.types.d.ts
+@@ -86,6 +86,11 @@ export interface VideoViewProps extends ViewProps {
+      * @platform web
+      */
+     onPictureInPictureStop?: () => void;
++    /**
++     * A callback to call when the viewer returns from Picture in Picture to the app, before it stops.
++     * @platform ios
++     */
++    onPictureInPictureRestore?: () => void;
+     /**
+      * Determines whether the player allows Picture in Picture (PiP) mode.
+      * > **Note:** The `supportsPictureInPicture` property of the [config plugin](#configuration-in-app-config)
+diff --git a/ios/OrientationAVPlayerViewController.swift b/ios/OrientationAVPlayerViewController.swift
+index c66e0fae98a838732c9a2deab6c5e2a0b7e5abc1..4316053e1257923913a199e80abe825930701a28 100644
+--- a/ios/OrientationAVPlayerViewController.swift
++++ b/ios/OrientationAVPlayerViewController.swift
+@@ -220,7 +220,11 @@ internal class OrientationAVPlayerViewController: AVPlayerViewController, AVPlay
+         self?.pendingPiPCompletionHandler?(false)
+         self?.pendingPiPCompletionHandler = nil
+       })
+-    } else {
++    } else if forwardDelegate?.playerViewController?(
++      playerViewController,
++      restoreUserInterfaceForPictureInPictureStopWithCompletionHandler: completionHandler
++    ) == nil {
++      // The view's owner restores its own interface when it listens for the restore.
+       completionHandler(false)
+     }
+   }
 diff --git a/ios/VideoAsset.swift b/ios/VideoAsset.swift
 index ea1043e4f62718244ddfab88394c85ff617c6224..ac7b85190a85b20ac5d1ab2c237fcdaea1296d80 100644
 --- a/ios/VideoAsset.swift
@@ -39,6 +72,18 @@ index 71766387e6e661c112a05cf32c19723508e8ffa8..0fba324eb3a74c2f642616a239eafb77
 +    return "\(failure.domain) \(failure.code)\(cause)"
 +  }
 +}
+diff --git a/ios/VideoModule.swift b/ios/VideoModule.swift
+index a34afc4a755cb3a0fbe43878c89b9f1174c511a2..5c801e29e40819a48cdc56558ec59e1fcd95b0b8 100644
+--- a/ios/VideoModule.swift
++++ b/ios/VideoModule.swift
+@@ -31,6 +31,7 @@ public final class VideoModule: Module {
+       Events(
+         "onPictureInPictureStart",
+         "onPictureInPictureStop",
++        "onPictureInPictureRestore",
+         "onFullscreenEnter",
+         "onFullscreenExit",
+         "onFirstFrameRender"
 diff --git a/ios/VideoPlayer.swift b/ios/VideoPlayer.swift
 index 3c2fde463a10c78546947dacd8c0fda67f0494c7..3b6d520985d5af1038414fda3aafbd27ea2aa212 100644
 --- a/ios/VideoPlayer.swift
@@ -93,3 +138,48 @@ index ab8464c918cf43c08b72dba12c366eaf658ba83e..6bf10ff2c4bc41b1988de4850e3dfaa4
        availableSubtitleTracks = []
      }
  
+diff --git a/ios/VideoView.swift b/ios/VideoView.swift
+index 152c74e72c65a447e01e468b137ea8d193771faf..33e18f4710c42dee8131fa004c0e1822fa98f779 100644
+--- a/ios/VideoView.swift
++++ b/ios/VideoView.swift
+@@ -40,6 +40,7 @@ public final class VideoView: ExpoView, AVPlayerViewControllerDelegate {
+ 
+   let onPictureInPictureStart = EventDispatcher()
+   let onPictureInPictureStop = EventDispatcher()
++  let onPictureInPictureRestore = EventDispatcher()
+   let onFullscreenEnter = EventDispatcher()
+   let onFullscreenExit = EventDispatcher()
+   let onFirstFrameRender = EventDispatcher()
+@@ -165,6 +166,16 @@ public final class VideoView: ExpoView, AVPlayerViewControllerDelegate {
+     onPictureInPictureStop()
+   }
+ 
++  // The viewer asked Picture in Picture to return to the app, rather than closing it. JavaScript
++  // shows this view again before Picture in Picture stops, so its window returns into it.
++  public func playerViewController(
++    _ playerViewController: AVPlayerViewController,
++    restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void
++  ) {
++    onPictureInPictureRestore()
++    completionHandler(true)
++  }
++
+   public override func didMoveToWindow() {
+     // TV is doing a normal view controller present, so we should not execute
+     // this code
+diff --git a/src/VideoView.types.ts b/src/VideoView.types.ts
+index 0602ad659298136cdf6bbf2e9d603bedf98a980a..56986ebb2fb8e48b7a81d68e001ff6571f40da78 100644
+--- a/src/VideoView.types.ts
++++ b/src/VideoView.types.ts
+@@ -97,6 +97,11 @@ export interface VideoViewProps extends ViewProps {
+    * @platform web
+    */
+   onPictureInPictureStop?: () => void;
++  /**
++   * A callback to call when the viewer returns from Picture in Picture to the app, before it stops.
++   * @platform ios
++   */
++  onPictureInPictureRestore?: () => void;
+ 
+   /**
+    * Determines whether the player allows Picture in Picture (PiP) mode.

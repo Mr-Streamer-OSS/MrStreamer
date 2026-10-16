@@ -86,7 +86,7 @@ export default function Home() {
         />
       ) : null}
       {library && recentChannels.length === 0 && playback.phase.kind === "idle" && !titlesShown ? (
-        <Message text="Pick a channel in Live, or a film or series." />
+        <Message text="Pick a channel in Live, or a movie or series." />
       ) : null}
     </ScrollView>
   );

@@ -46,7 +46,7 @@ import { colors, Message } from "./ui.tsx";
 import { markEpisode, progressOf, relist, seriesViewing, undoMark, useViewing } from "./viewing.ts";
 import { removeTitle, saveTitle, savedEntry, useWatchlist } from "./watchlist.ts";
 
-// A movie's or series' details, pushed on the Films or Series tab: the backdrop with one glass
+// A movie's or series' details, pushed on the Movies or Series tab: the backdrop with one glass
 // capsule over it (Play or Resume, Save, and Download, which isn't on iPhone yet), the facts, the
 // version menu, and for a series its seasons as text tabs over episode rows with stills and how
 // far each got. Long-press marks an episode watched or unwatched, with the desktop's Undo line.

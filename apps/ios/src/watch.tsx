@@ -1,3 +1,4 @@
+import * as ScreenOrientation from "expo-screen-orientation";
 import { isPictureInPictureSupported, VideoAirPlayButton, VideoView } from "expo-video";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -21,6 +22,7 @@ import {
   pictureInPicture,
   player,
   playNext,
+  restoreFromPictureInPicture,
   retry,
   seekBy,
   seekTo,
@@ -40,7 +42,8 @@ import { colors } from "./ui.tsx";
  * episode adds a scrubber, its sound and subtitle tracks and the next episode. It is the app's
  * own layer rather than a route, because the view that starts Picture in Picture has to stay
  * while it plays: Watch then hides, and the tabs and accessory take over. Closing it shows the
- * screen under it, a title's details among them.
+ * screen under it, a title's details among them. A movie or an episode turns Watch to landscape
+ * while it shows; the screens under it turn as the phone does again once it closes.
  */
 export function WatchLayer() {
   const { phase, watch, pip } = usePlayback();
@@ -51,6 +54,12 @@ export function WatchLayer() {
     onEndPictureInPicture(() => void view.current?.stopPictureInPicture());
     return () => onEndPictureInPicture(null);
   }, []);
+  const landscape = watch && phase.kind !== "idle" && !phase.item.live;
+  useEffect(() => {
+    if (!landscape) return;
+    void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+    return () => void ScreenOrientation.unlockAsync();
+  }, [landscape]);
   useEffect(() => {
     if (!watch) return;
     setControls(true);
@@ -81,6 +90,7 @@ export function WatchLayer() {
           startsPictureInPictureAutomatically
           onPictureInPictureStart={() => pictureInPicture(true)}
           onPictureInPictureStop={() => pictureInPicture(false)}
+          onPictureInPictureRestore={restoreFromPictureInPicture}
           style={StyleSheet.absoluteFill}
         />
       ) : null}

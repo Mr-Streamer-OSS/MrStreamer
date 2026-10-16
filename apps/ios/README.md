@@ -5,11 +5,11 @@ React Native on Hermes (Expo SDK 58), building toward the desktop app's features
 own native adapters: the Keychain, app storage and one native player so far. Nothing of it is in
 the desktop's install, build or packages.
 
-So far it connects one Xtream subscription. Live plays channels; Films and Series browse the
+So far it connects one Xtream subscription. Live plays channels; Movies and Series browse the
 desktop's collections (For you, New, Genres, Services, 4K and All) and open details pushed on
 their tab, with seasons and episodes, the version menu, the watchlist and episodes marked by hand.
 A movie or an episode plays in Watch from where it stopped, and Home shows Continue watching and
-the watchlist; Search finds films, series and channels. Downloads are a route that says they
+the watchlist; Search finds movies, series and channels. Downloads are a route that says they
 aren't on iPhone yet, and the details' Download button is shown disabled. What the desktop does
 and iOS doesn't yet is tracked in the parity report on the iOS card.
 
@@ -48,9 +48,12 @@ Each responsibility has one owner, a plain module with a store the screens read:
 - `src/account.ts`: the subscription and its live catalogue. It signs in with core's Xtream
   adapter (shared with the desktop), loads and reloads the channel list, cancels a load the
   viewer moved past, and disconnects. A sign-in overtaken by a newer one or by Disconnect saves
-  nothing and signs nothing in.
+  nothing and signs nothing in. Its requests to the provider ask iOS's URL cache to keep
+  nothing: the cache would store each answer on disk under an address carrying the login, and
+  answer a later Connect or reload with a failure a panel allowed it to keep.
 - `src/library.ts`: the catalogue as the screens show it, by core's names, quality grouping and
-  country rules.
+  country rules. Channels in no category the provider lists come last, as Other channels, or as
+  All channels when it lists no categories, so Live shows every channel the desktop does.
 - `src/titles.ts`: the movie and series lists through the same adapter, indexed by core's
   `indexCatalogue` (each kind in a task of its own, so input is handled between them), core's
   collections and search, details with TMDB's facts, and the file each title streams from.
@@ -74,7 +77,9 @@ Each responsibility has one owner, a plain module with a store the screens read:
 Routes are in `src/app` (Expo Router): `(tabs)` are the system's native tabs, Home's Downloads and
 Settings are pushed from its top bar, and `connect` shows until a subscription is signed in.
 Watch (`src/watch.tsx`) is a layer over the navigation rather than a route, because the view that
-starts Picture in Picture has to stay while it plays. `src/glass.tsx` draws the app's own controls
+starts Picture in Picture has to stay while it plays. A movie or an episode turns it to landscape
+(`expo-screen-orientation`). `patches/` makes expo-video report Picture in Picture brought back to
+the app, which its own view never forwarded, so Watch opens again rather than leaving Home. `src/glass.tsx` draws the app's own controls
 as Liquid Glass, and solid before iOS 26 or with Reduce Transparency on.
 
 Live channels are asked for as HLS, which AVPlayer plays and panels serve beside MPEG-TS. On the

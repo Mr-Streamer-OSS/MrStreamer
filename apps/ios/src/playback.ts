@@ -400,6 +400,15 @@ export function pictureInPicture(active: boolean) {
   state.set((s) => ({ ...s, pip: false, muted: s.watch ? s.muted : true }));
 }
 
+/**
+ * The viewer brought Picture in Picture back to the app rather than closing it: Watch shows the
+ * player again, with its sound, before Picture in Picture reports that it ended.
+ */
+export function restoreFromPictureInPicture() {
+  player().muted = false;
+  state.set((s) => ({ ...s, watch: true, muted: false }));
+}
+
 export function onEndPictureInPicture(end: (() => void) | null) {
   endPictureInPicture = end;
 }

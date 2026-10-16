@@ -47,7 +47,7 @@ export default function Settings() {
               : "Loading"
         }
       />
-      <Line label="Films" value={countOf(lists, "movie")} />
+      <Line label="Movies" value={countOf(lists, "movie")} />
       <Line label="Series" value={countOf(lists, "series")} />
       <Line
         label="TMDB"
@@ -65,7 +65,7 @@ export default function Settings() {
       />
       <View style={styles.actions}>
         <TextButton label="Reload channels" onPress={loadCatalogue} />
-        <TextButton label="Reload films and series" onPress={loadTitles} />
+        <TextButton label="Reload movies and series" onPress={loadTitles} />
         <TextButton label="Disconnect" onPress={() => void disconnect()} destructive />
       </View>
       {hasTmdb ? (
@@ -93,7 +93,7 @@ export default function Settings() {
             Development
           </Text>
           <Line
-            label="Films and series lists"
+            label="Movie and series lists"
             value={
               timings ? `read ${timings.fetched} ms, indexed ${timings.indexed} ms` : "Not read"
             }

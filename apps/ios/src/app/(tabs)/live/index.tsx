@@ -27,6 +27,16 @@ export default function Live() {
       </View>
     );
   }
+  if (catalogue.library.regions.length === 0) {
+    return (
+      <View style={styles.screen}>
+        <Message
+          text="This subscription lists no channels."
+          action={{ label: "Reload", onPress: loadCatalogue }}
+        />
+      </View>
+    );
+  }
   return <Channels library={catalogue.library} />;
 }
 
@@ -84,6 +94,11 @@ function Channels({ library }: { library: Library }) {
       ],
     });
   }, [navigation, library, region, shelf, choose]);
+  // While channels reload, fail or are missing, there is no list for the menu to choose in.
+  useLayoutEffect(
+    () => () => navigation.setOptions({ unstable_headerRightItems: () => [] }),
+    [navigation],
+  );
 
   const playing = playingId(phase);
   const watch = useCallback(

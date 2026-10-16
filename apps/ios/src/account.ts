@@ -59,8 +59,19 @@ let loading: AbortController | null = null;
 /** Counts sign-ins and Disconnects: only the latest Connect may still sign in. */
 let attempts = 0;
 
+/**
+ * Every request to the provider goes to the provider. iOS's URL cache would otherwise keep each
+ * answer on disk under its address, which carries the login, and could answer a later sign-in or
+ * reload with an earlier failure, as a panel that lets its answers be cached would have it.
+ */
+const uncached: typeof fetch = (input, init) => {
+  const headers = new Headers(init?.headers);
+  headers.set("Cache-Control", "no-store");
+  return fetch(input, { ...init, headers });
+};
+
 const providerFor = (account: XtreamAccount) =>
-  xtreamProvider(account, { userAgent: USER_AGENT, live: "hls" });
+  xtreamProvider(account, { userAgent: USER_AGENT, live: "hls", fetch: uncached });
 
 /** Reads the provider's channel list again, dropping a load still under way. */
 export function loadCatalogue() {
