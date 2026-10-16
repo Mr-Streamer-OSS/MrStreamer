@@ -221,14 +221,21 @@ function install() {
   memory.played.length = 0;
 }
 
+/**
+ * Adds the first provider, and the second when `both`, then waits until the combined index lists
+ * the titles the tests ask each for: lists can be ready while the index still is an older one.
+ */
 async function withProviders(app: App, both = false) {
   const a = await app.add({ server: one.url, ...ONE });
   const b = both ? await app.add({ server: two.url, ...TWO }) : null;
   const listed = () => {
     const lists = app.titleLists();
-    return (
-      lists.kind === "ready" && app.members().every((member) => member.titles.kind === "ready")
-    );
+    if (lists.kind !== "ready") return false;
+    const has = (kind: "movie" | "series", subscriptionId: string, id: number) =>
+      app.titleOf(lists.index, kind, { subscriptionId, id: String(id) }) !== undefined;
+    const films = (subscriptionId: string) =>
+      has("movie", subscriptionId, movie().id) && has("movie", subscriptionId, otherMovie().id);
+    return films(a!) && has("series", a!, episode().series.id) && (b === null || films(b));
   };
   await until(listed, "the title lists");
   return { a: a!, b };
