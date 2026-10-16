@@ -18,7 +18,7 @@ import { store, useStore } from "./store.ts";
 
 // The watchlist: movies and whole series saved to watch later, apart from how far anything got.
 // Each saved subscription keeps its own record of what it saved, by its provider's ids, in
-// watchlists.json; the watchlist shows them as one by core's rules (`entriesOf`): a film two
+// watchlists.json; the watchlist shows them as one by core's rules (`entriesOf`): a movie two
 // subscriptions list under one TMDB id is one entry, saved for both. Which title an entry is now
 // goes by `titleOf`, and each time the lists are read, saved titles take their name and versions
 // as the lists have them now (`settled`). A removed subscription's record stays for when its

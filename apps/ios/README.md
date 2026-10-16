@@ -7,15 +7,16 @@ the desktop's install, build or packages.
 
 It connects Xtream subscriptions, one or several, and shows everything from all of them
 together, as the desktop does: there is no subscription to switch to. Live lists a country's channels with their
-providers' logos, its categories as text tabs, and plays them; Films and Series browse the
+providers' logos, its categories as text tabs, and plays them; Movies and Series browse the
 desktop's collections (For you, New, Genres, Services, 4K and All) and open details pushed on
 their tab, with seasons and episodes, the version menu, the watchlist and episodes marked by hand.
 A movie or an episode plays in Watch from where it stopped. Home leads with the preview, then
 channels to preview (On now: recent ones, else Live's country), Continue watching, the watchlist
 and Movies for you, which falls back to the provider's own list without TMDB. Rows show a
-channel's category where the desktop shows its programme: iOS reads no guide yet; Search finds films, series and channels. Downloads are a route that says they
-aren't on iPhone yet, and the details' Download button is shown disabled. What the desktop does
-and iOS doesn't yet is tracked in the parity report on the iOS card.
+channel's category where the desktop shows its programme: iOS reads no guide yet. Search finds
+movies, series and channels. Downloads are a route that says they aren't on iPhone yet, and the
+details' Download button is shown disabled. What the desktop does and iOS doesn't yet is tracked
+in the parity report on the iOS card.
 
 ## Its own install
 
@@ -55,6 +56,11 @@ Each responsibility has one owner, a plain module with a store the screens read:
   desktop) and loads each one's channels, and its movie and series lists once its login is
   checked. Each has its own login, loads and failures: one that fails, reloads or is removed
   leaves the others as they were. Changes to the registry and the Keychain run one at a time.
+  Its requests to the provider ask iOS's URL cache to keep nothing: the cache would store each
+  answer on disk under an address carrying the login, and answer a later Connect or reload with a
+  failure a panel allowed it to keep. The first private betas didn't ask, so
+  `modules/forget-cached-logins` empties that cache once, at the first launch of a build that has
+  it, before the app's JavaScript runs.
 - `src/subscriptions.ts`: the registry, `subscriptions.json`, and how private beta 2's one
   subscription in `state.json` becomes its first entry under the same id. Accounts removed with
   their history kept are remembered, so adding one again takes its id, and its history, back. Ids
@@ -68,9 +74,11 @@ Each responsibility has one owner, a plain module with a store the screens read:
 - `src/library.ts`: every subscription's channels together, by core's names, quality grouping and
   country rules, and the desktop's way of combining them: categories of one name in one country
   are one, and a channel is never joined across subscriptions. Two channels of one name say which
-  subscription each is from.
+  subscription each is from. Channels in no category their provider lists come last, as Other
+  channels, or as All channels when none lists categories, so Live shows every channel the
+  desktop does.
 - `src/titles.ts`: every subscription's movie and series lists, indexed together by core's
-  `indexCatalogue` (each kind in a task of its own, so input is handled between them): a film two
+  `indexCatalogue` (each kind in a task of its own, so input is handled between them): a movie two
   list under one TMDB id is one title with both versions, never by name. Core's collections and
   search, details with TMDB's facts, and the file each version streams from, asked of its own
   subscription. TMDB's metadata comes from core's store (`metadata/store.ts`, shared with the
@@ -103,8 +111,13 @@ provider's Edit) above Settings, and `connect` shows until a subscription is sav
 stands; pressing one offers Retry, its reloads, Edit and Remove as a system sheet, and Remove asks
 whether to delete its history too.
 Watch (`src/watch.tsx`) is a layer over the navigation rather than a route, because the view that
-starts Picture in Picture has to stay while it plays. `src/glass.tsx` draws the app's own controls
-as Liquid Glass, and solid before iOS 26 or with Reduce Transparency on.
+starts Picture in Picture has to stay while it plays. A movie or an episode turns it to landscape
+(`expo-screen-orientation`). Closing it holds the screens under it upright until the next title,
+because unlocking turned them back to landscape on the iOS 27 simulator; so after a title, the tabs
+and live channels no longer turn with the phone until the app starts again. `patches/` makes
+expo-video report Picture in Picture brought back to the app, which its own view never forwarded,
+so Watch opens again rather than leaving Home. `src/glass.tsx` draws the app's own controls as
+Liquid Glass, and solid before iOS 26 or with Reduce Transparency on.
 
 Live channels are asked for as HLS, which AVPlayer plays and panels serve beside MPEG-TS. On the
 simulator the fixture channels showed what that covers: H.264 with AAC or AC-3 plays; MPEG-2 fails

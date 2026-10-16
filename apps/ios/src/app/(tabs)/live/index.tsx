@@ -145,6 +145,11 @@ function Channels({
       ],
     });
   }, [navigation, library, region, choose]);
+  // While channels reload, fail or are missing, there is no list for the menu to choose in.
+  useLayoutEffect(
+    () => () => navigation.setOptions({ unstable_headerRightItems: () => [] }),
+    [navigation],
+  );
 
   const playing = playingChannel(phase);
   const watch = useCallback(

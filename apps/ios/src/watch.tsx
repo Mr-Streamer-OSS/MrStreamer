@@ -1,7 +1,9 @@
+import { lockAsync, OrientationLock, unlockAsync } from "expo-screen-orientation";
 import { isPictureInPictureSupported, VideoAirPlayButton, VideoView } from "expo-video";
 import { useEffect, useRef, useState } from "react";
 import {
   ActionSheetIOS,
+  Dimensions,
   Keyboard,
   PanResponder,
   Pressable,
@@ -20,7 +22,10 @@ import {
   onEndPictureInPicture,
   pictureInPicture,
   player,
+  playingItem,
   playNext,
+  type Playing,
+  restoreFromPictureInPicture,
   retry,
   seekBy,
   seekTo,
@@ -40,7 +45,8 @@ import { colors } from "./ui.tsx";
  * episode adds a scrubber, its sound and subtitle tracks and the next episode. It is the app's
  * own layer rather than a route, because the view that starts Picture in Picture has to stay
  * while it plays: Watch then hides, and the tabs and accessory take over. Closing it shows the
- * screen under it, a title's details among them.
+ * screen under it, a title's details among them. A movie or an episode turns Watch to landscape
+ * while it shows; the screens under it turn as the phone does again once it closes.
  */
 export function WatchLayer() {
   const { phase, watch, pip } = usePlayback();
@@ -51,6 +57,32 @@ export function WatchLayer() {
     onEndPictureInPicture(() => void view.current?.stopPictureInPicture());
     return () => onEndPictureInPicture(null);
   }, []);
+  // A return from Picture in Picture, answered once Watch has committed what it returns to: AVKit
+  // then brings the picture back into a view on screen. Anything else playing by then, or Watch
+  // closed, answers no. If the view goes first, the native view answers no as it goes.
+  const [restoring, setRestoring] = useState<{ readonly item: Playing } | null>(null);
+  useEffect(() => {
+    if (!restoring) return;
+    setRestoring(null);
+    void view.current?.finishPictureInPictureRestore(
+      watch && playingItem(phase) === restoring.item,
+    );
+  }, [restoring, watch, phase]);
+  const restore = () => {
+    const item = restoreFromPictureInPicture();
+    if (item === null) void view.current?.finishPictureInPictureRestore(false);
+    else setRestoring({ item });
+  };
+  const landscape = watch && phase.kind !== "idle" && !phase.item.live;
+  useEffect(() => {
+    if (!landscape) return;
+    const { width, height } = Dimensions.get("window");
+    const sideways = width > height;
+    turn(() => lockAsync(OrientationLock.LANDSCAPE));
+    // Unlocking turned the screens under Watch back to landscape on iOS 27 (on the simulator), so
+    // unless they were sideways before, they stay upright until a title asks for landscape again.
+    return () => turn(() => (sideways ? unlockAsync() : lockAsync(OrientationLock.PORTRAIT_UP)));
+  }, [landscape]);
   useEffect(() => {
     if (!watch) return;
     setControls(true);
@@ -81,6 +113,7 @@ export function WatchLayer() {
           startsPictureInPictureAutomatically
           onPictureInPictureStart={() => pictureInPicture(true)}
           onPictureInPictureStop={() => pictureInPicture(false)}
+          onPictureInPictureRestore={restore}
           style={StyleSheet.absoluteFill}
         />
       ) : null}
@@ -96,6 +129,12 @@ export function WatchLayer() {
       ) : null}
     </View>
   );
+}
+
+/** Orientation changes, made in the order asked so a quick close and reopen can't swap them. */
+let turning = Promise.resolve();
+function turn(change: () => Promise<void>) {
+  turning = turning.then(change).catch(() => undefined);
 }
 
 function Controls({ onPictureInPicture }: { onPictureInPicture: () => void }) {

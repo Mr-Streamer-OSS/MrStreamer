@@ -107,6 +107,14 @@ export function playingChannel(phase: Phase): string | null {
 }
 
 /**
+ * What streams or is about to, a channel or a title; none once it failed or stopped. A new play
+ * is a new item, even of the same key, so a return from Picture in Picture can tell it apart.
+ */
+export function playingItem(phase: Phase): Playing | null {
+  return phase.kind === "idle" || phase.kind === "failed" ? null : phase.item;
+}
+
+/**
  * A request of the viewer's that waits before it plays or opens anything, as a series' resume
  * waits for its details, or Next episode for how the episodes stand. It stands until the viewer
  * asks for something newer: any other request, any channel or title played, Stop, removing a
@@ -416,6 +424,21 @@ export function pictureInPicture(active: boolean) {
   const { watch } = state.get();
   if (!watch) player().muted = true;
   state.set((s) => ({ ...s, pip: false, muted: s.watch ? s.muted : true }));
+}
+
+/**
+ * The viewer brought Picture in Picture back to the app rather than closing it: Watch shows the
+ * player again, with its sound, before Picture in Picture reports that it ended. Returns what
+ * Watch shows, or null when nothing streams in Picture in Picture any more (it stopped or failed
+ * first), so there is nothing to return to.
+ */
+export function restoreFromPictureInPicture(): Playing | null {
+  const { phase, pip } = state.get();
+  const item = playingItem(phase);
+  if (!pip || item === null) return null;
+  player().muted = false;
+  state.set((s) => ({ ...s, watch: true, muted: false }));
+  return item;
 }
 
 export function onPlaybackFailure(listener: ((failure: AnalyticsFailure) => void) | null) {

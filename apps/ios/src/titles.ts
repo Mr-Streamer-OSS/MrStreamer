@@ -37,7 +37,7 @@ import { alignWatchlist } from "./watchlist.ts";
 // The movie and series catalogue of every saved subscription together, as the desktop builds it:
 // each provider's lists, which account.ts loads, indexed by core as one (names, versions gathered
 // by TMDB id across subscriptions and never by name, the version that suits the viewer's language
-// first), the collections Films and Series show, search, and details with seasons and episodes,
+// first), the collections Movies and Series show, search, and details with seasons and episodes,
 // each read from the subscription that lists the version. TMDB's metadata comes from core's
 // store, with the key built into the app (EXPO_PUBLIC_TMDB_KEY); without one, collections that
 // need it are empty and details show the provider's facts. Nothing of the lists is kept on disk

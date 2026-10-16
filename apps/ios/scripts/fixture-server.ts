@@ -9,7 +9,7 @@
 // The app connects to http://127.0.0.1:<port> as "fixture" / "fixture-pass", or as the
 // FIXTURE_USERNAME / FIXTURE_PASSWORD given, such as the canaries scripts/log-scan.ts looks for.
 // FIXTURE_SECOND=1 makes it another provider beside the first, on other ports: the fake panel's
-// `second`, numbering channels, films and series as the first does, some of the first's films
+// `second`, numbering channels, movies and series as the first does, some of the first's movies
 // under ids of its own. Its requests are logged to requests-<port>.jsonl, and it says where it runs in server-<port>.json.
 // Every channel is a live loop: the TEST channels loop their recording from
 // apps/desktop/test/fixtures, codecs as they are, so the ones AVPlayer can't decode fail as they
@@ -132,7 +132,7 @@ const provider = await startFakeProvider({
   second,
 });
 const tmdb = await startFakeTmdb();
-// One service streams the first films and series it is told about.
+// One service streams the first movies and series it is told about.
 tmdb.stream(
   "movie",
   provider.titles.movies.slice(12, 40).map((movie) => String(movie.id + 10_000)),
