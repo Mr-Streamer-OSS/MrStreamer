@@ -21,8 +21,9 @@ import { basename, dirname, join } from "node:path";
 // is moved to the destination only once it is whole and the status was 2xx; a status outside 2xx
 // rejects with Expo's words; a pause gives resume data only when the server named the file (ETag
 // or Last-Modified) and takes byte ranges, and resuming sends `Range` with `If-Range`, so a
-// changed file comes whole from the start. It is a model of that behaviour, not URLSession: the
-// real task, its suspension in the background and its resume data are only proved on iOS.
+// changed file comes whole from the start. A released task's native calls throw, as a released
+// shared object's do. It is a model of that behaviour, not URLSession: the real task, how long it
+// takes to end, its suspension in the background and its resume data are only proved on iOS.
 
 interface Native {
   readonly root: string;
@@ -34,6 +35,11 @@ interface Native {
   open: number;
   /** How long URLSession takes to end a request it is asked to pause, in milliseconds. */
   pauseMs: number;
+  /**
+   * While a list, a request asked to pause or cancel goes on, its ending kept here until the test
+   * runs it: a URLSession that hasn't ended the request yet. Null: requests end as asked.
+   */
+  held: (() => void)[] | null;
   /** Ends every task's request, as the end of the app's process ends a foreground session's. */
   kill(): void;
   readonly live: Set<AbortController>;
@@ -51,6 +57,7 @@ export const native: Native = ((
   requests: [],
   open: 0,
   pauseMs: 0,
+  held: null,
   live: new Set(),
   kill() {
     for (const controller of this.live) controller.abort();
@@ -183,6 +190,7 @@ export class DownloadTask {
   private _resumeData: string | undefined;
   private _controller: AbortController | null = null;
   private _pausing = false;
+  private _released = false;
 
   private readonly _url: string;
   private readonly _destination: File;
@@ -228,15 +236,19 @@ export class DownloadTask {
 
   pause() {
     if (this._state !== "active") throw new Error(`Cannot call pause() in state "${this._state}"`);
+    this._native();
     this._pausing = true;
     const controller = this._controller;
-    setTimeout(() => controller?.abort(), native.pauseMs);
+    end(() => setTimeout(() => controller?.abort(), native.pauseMs));
   }
 
+  /** As Expo's: a paused task's cancel still calls native code. */
   cancel() {
     if (["completed", "cancelled", "error"].includes(this._state)) return;
+    this._native();
     this._state = "cancelled";
-    this._controller?.abort();
+    const controller = this._controller;
+    end(() => controller?.abort());
   }
 
   savable() {
@@ -251,9 +263,21 @@ export class DownloadTask {
     };
   }
 
-  release() {}
+  release() {
+    this._released = true;
+  }
+
+  /** A call into the native task, which a released handle no longer has. */
+  private _native() {
+    if (this._released) {
+      throw new Error(
+        "Unable to find the native shared object associated with given JavaScript object",
+      );
+    }
+  }
 
   private async _run(resumeData: string | null): Promise<File | null> {
+    this._native();
     this._state = "active";
     this._pausing = false;
     const controller = new AbortController();
@@ -344,6 +368,12 @@ export class DownloadTask {
       if (requested) native.open--;
     }
   }
+}
+
+/** Ends a request now, or once the test lets held endings go. */
+function end(ending: () => void) {
+  if (native.held) native.held.push(ending);
+  else ending();
 }
 
 function abortError() {

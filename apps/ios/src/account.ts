@@ -501,8 +501,9 @@ export async function update(
 
 /**
  * Removes a subscription: what plays from it stops, and its login and lists go. What plays from
- * another plays on. Its favourites, watchlist, history and progress stay for when the account is
- * added again, unless `keepHistory` is false. Removing the last returns to Connect.
+ * another, or a downloaded copy, plays on. Its favourites, watchlist, history and progress stay
+ * for when the account is added again, unless `keepHistory` is false. Removing the last returns to
+ * Connect.
  *
  * The registry is written first, with the history to delete when it goes too; a refused write
  * rejects with nothing changed, and the subscription stays in the roster. From then on the
@@ -517,10 +518,11 @@ export function remove(id: string, { keepHistory }: { keepHistory: boolean }): P
     commit(withoutSubscription(registry, entry, keepHistory));
     for (const kind of ["live", "titles"] as const) loads.get(`${kind}|${id}`)?.abort();
     dropSource(id);
-    // A request waiting to play, such as a series' resume, lapses; with none left, so does Watch.
+    // A request waiting to play, such as a series' resume, lapses; with none left, so does Watch,
+    // unless it shows a downloaded copy, which needs no subscription.
     const { phase } = playbackState.get();
-    const playing = phase.kind !== "idle" && phase.item.subscriptionId === id;
-    if (playing || registry.subscriptions.length === 0) stop();
+    const from = phase.kind === "idle" ? undefined : phase.item.subscriptionId;
+    if (from === id || (registry.subscriptions.length === 0 && from !== null)) stop();
     else request();
     // The roster without it ends its unfinished downloads (downloads.ts); finished copies stay.
     syncRoster();

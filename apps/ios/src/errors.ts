@@ -1,4 +1,5 @@
 import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
+import type { StreamFailure } from "@mrstreamer/contracts/playback";
 import { formatDate, t } from "@mrstreamer/core/i18n";
 import { withoutAddresses } from "@mrstreamer/core/provider";
 
@@ -40,8 +41,28 @@ export function describeError(error: AppError): string {
       return t("Your system's keychain would not store your password.");
     case "channel-not-found":
       return t("This channel is no longer in the provider's list.");
+    case "stream":
+      return describeStreamFailure(error.failure);
     default:
       return error.kind === "unexpected" ? error.detail : error.kind;
+  }
+}
+
+/** Why a stream or a provider file didn't come, in the desktop's words. */
+function describeStreamFailure(failure: StreamFailure): string {
+  switch (failure.kind) {
+    case "refused":
+      return t("The provider refused this title. Another device may be using your connection.");
+    case "unavailable":
+      return t("The provider has no file for this title right now.");
+    case "provider-error":
+      return t("The provider answered with an error (HTTP {status}).", {
+        status: String(failure.status),
+      });
+    case "network":
+      return `${t("The connection to the provider failed.")} ${failure.detail}`;
+    case "unsupported":
+      return `${t("Mr. Streamer can't play this file.")} ${failure.detail}`;
   }
 }
 

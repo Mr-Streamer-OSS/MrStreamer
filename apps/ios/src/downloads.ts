@@ -4,6 +4,7 @@ import { AppFailure } from "@mrstreamer/contracts/errors";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
 import { RawTitleRef, type TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { StreamFailure } from "@mrstreamer/contracts/playback";
+import { t } from "@mrstreamer/core/i18n";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import { isFinished } from "@mrstreamer/core/viewing/titles";
 import { Directory, File, Paths } from "expo-file-system";
@@ -31,13 +32,16 @@ import { recordProgress } from "./viewing.ts";
 //
 // One download transfers at a time, by `download-task.ts` (expo-file-system's native task, in a
 // foreground URLSession). A stream of the same subscription takes the connection back first: the
-// transfer pauses, and its request has ended before the stream's goes out (`onReclaim`). It waits
-// until nothing of that subscription streams; another subscription's stream, or a copy, lets it
-// go on. Sending the app to the background pauses it too: iOS suspends the app soon after, and a
-// foreground session doesn't run while it is suspended. A pause keeps URLSession's resume data in
-// the Keychain, since it names the address with the login; a transfer goes on from it only when
-// it was made for the very address the subscription gives now, and when it can't, it starts again
-// and says so (`restarted`). Should the app be killed before the pause is written, the next launch
+// transfer pauses, and its request has ended before the stream's goes out (`onReclaim`). When it
+// doesn't end in time, the stream fails rather than ask the provider for a second connection. It
+// waits until nothing of that subscription streams; another subscription's stream, or a copy, lets
+// it go on. A provider can take a moment to free the connection of a request that ended, so the
+// next request of that subscription, a stream's or the queue's next download, waits until
+// `RELEASE_MS` after this app's last one ended. Sending the app to the background pauses a
+// transfer too: iOS suspends the app soon after, and a foreground session doesn't run while it is
+// suspended. A pause keeps URLSession's resume data in the Keychain, since it names the address
+// with the login; a transfer goes on from it only when it was made for the very address the
+// subscription gives now, and when it can't, it starts again and says so (`restarted`). Should the app be killed before the pause is written, the next launch
 // starts that download again: nothing promises the pause comes first.
 //
 // A copy is complete only once the native task said it moved every byte into place and the size
@@ -52,8 +56,16 @@ const ROOT = "downloads";
 const PROGRESS_MS = 250;
 /** How often a transfer's progress is written down. */
 const SAVE_MS = 5000;
-/** How long a stream waits for a download to pause before it is cancelled instead. */
+/**
+ * How long a stream waits for a download to pause before it is cancelled instead, and then for
+ * the cancel, before the stream fails.
+ */
 const RECLAIM_MS = 5000;
+/**
+ * How long after this app's request of a subscription ended its next one waits, while the
+ * provider frees the connection. The desktop's fake panel takes 300 ms; real ones aren't measured.
+ */
+const RELEASE_MS = 1000;
 const ARTWORK_MS = 20_000;
 /** A download's id: also its folder's name. */
 const ID = /^d-[a-z0-9-]+$/;
@@ -151,6 +163,8 @@ interface Active {
   expected: number | null;
   rate: number | null;
   restarted: boolean;
+  /** Settles once its request to the provider ended, or once it stopped before asking. */
+  closed: Promise<void>;
   /** Settles once how it ended is written down. */
   over: Promise<void>;
 }
@@ -184,6 +198,12 @@ const missing = new Set<string>();
 /** Unfinished downloads that ended with their subscription since launch. */
 let ended = 0;
 let made = 0;
+/** When this app's last request of each subscription ended, a download's or a stream's. */
+const released = new Map<string, number>();
+/** The subscription whose stream had the connection when playback last changed. */
+let streaming: string | null = null;
+/** Wakes the queue once a subscription's connection had time to be freed. */
+let later: ReturnType<typeof setTimeout> | null = null;
 
 const folderOf = (id: string) => new Directory(Paths.document, ROOT, id);
 /** A file type safe to name a file with; anything else is kept as "bin", as on the desktop. */
@@ -359,17 +379,34 @@ function halt(transferring: Active, why: "pause" | "cancel") {
   else transferring.transfer?.pause();
 }
 
+/** Milliseconds until a request of `subscriptionId` may go out, after the last of ours ended. */
+function freeing(subscriptionId: string): number {
+  const at = released.get(subscriptionId);
+  return at === undefined ? 0 : Math.max(0, at + RELEASE_MS - Date.now());
+}
+
+const after = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 /** Starts the first download the queue can have now, unless one transfers. */
 function wake() {
   if (!started || active || away) return;
   const busy = borrowed();
-  const next = doc.items.find(
+  const ready = doc.items.filter(
     (record) =>
       record.state === "queued" &&
       record.subscriptionId !== busy &&
       currentSource(record.subscriptionId) !== undefined,
   );
-  if (next) begin(next);
+  const next = ready.find((record) => freeing(record.subscriptionId) === 0);
+  if (next) return begin(next);
+  // Only subscriptions whose connection is still being freed: the queue looks again then.
+  const wait = Math.min(...ready.map((record) => freeing(record.subscriptionId)));
+  if (!Number.isFinite(wait)) return;
+  if (later) clearTimeout(later);
+  later = setTimeout(() => {
+    later = null;
+    wake();
+  }, wait);
 }
 
 function begin(record: Stored) {
@@ -384,11 +421,12 @@ function begin(record: Stored) {
     expected: null,
     rate: null,
     restarted: record.restarted,
+    closed: Promise.resolve(),
     over: Promise.resolve(),
   };
   active = transferring;
   tell();
-  transferring.over = run(record, transferring)
+  const ran = run(record, transferring)
     .catch((cause: unknown): Ending => {
       const error = appError(cause);
       return {
@@ -399,6 +437,13 @@ function begin(record: Stored) {
         },
       };
     })
+    .then((ending) => {
+      // The provider may still be freeing the connection of the request that just ended.
+      if (transferring.transfer) released.set(record.subscriptionId, Date.now());
+      return ending;
+    });
+  transferring.closed = ran.then(() => undefined);
+  transferring.over = ran
     .then((ending) => settle(record.id, transferring, ending))
     .catch((cause: unknown) => {
       // Its end couldn't be written down. Failed as far as this run knows, so the queue doesn't
@@ -678,16 +723,33 @@ function reconcile() {
   }
 }
 
-/** Gives a subscription's connection back to its stream: the transfer pauses, or is cancelled. */
+/**
+ * Gives a subscription's connection back to its stream: the transfer pauses, or is cancelled, and
+ * the provider gets `RELEASE_MS` to free it. Rejects, so the stream fails without asking the
+ * provider, when the transfer's request still hasn't ended; the stream's Try again asks again.
+ */
 async function reclaim(subscriptionId: string): Promise<void> {
   const transferring = active;
-  if (!transferring || transferring.subscriptionId !== subscriptionId) return;
-  halt(transferring, "pause");
-  const late = (ms: number) =>
-    new Promise<"late">((resolve) => setTimeout(() => resolve("late"), ms));
-  if ((await Promise.race([transferring.over, late(RECLAIM_MS)])) !== "late") return;
-  halt(transferring, "cancel");
-  await Promise.race([transferring.over, late(RECLAIM_MS)]);
+  if (transferring?.subscriptionId === subscriptionId) {
+    halt(transferring, "pause");
+    const closed = (ms: number) =>
+      Promise.race([transferring.closed.then(() => true), after(ms).then(() => false)]);
+    // Without a native task yet, a halted transfer asks the provider nothing.
+    if (transferring.transfer && !(await closed(RECLAIM_MS))) {
+      halt(transferring, "cancel");
+      if (!(await closed(RECLAIM_MS))) {
+        throw new AppFailure({
+          kind: "stream",
+          failure: {
+            kind: "network",
+            detail: t("A download still holds the provider's connection."),
+          },
+        });
+      }
+    }
+  }
+  const wait = freeing(subscriptionId);
+  if (wait > 0) await after(wait);
 }
 
 /** Reads downloads.json; deletes what an earlier run left: secrets, files and folders. */
@@ -752,6 +814,8 @@ export function startDownloads(): void {
   });
   playbackState.subscribe(() => {
     const busy = borrowed();
+    if (streaming !== null && streaming !== busy) released.set(streaming, Date.now());
+    streaming = busy;
     if (active && active.subscriptionId === busy) halt(active, "pause");
     tell();
     wake();

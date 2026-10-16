@@ -43,7 +43,10 @@ export interface Transfer {
   readonly ended: Promise<TransferEnd>;
   /** Asks the task to pause; `ended` answers `paused`, or how it ended first. */
   pause(): void;
-  /** Stops the task; `ended` answers `cancelled`, or how it ended first. */
+  /**
+   * Stops the task; `ended` answers `cancelled`, or how it ended first. Does nothing once the task
+   * ended, so a caller still writing down a pause can cancel safely.
+   */
   cancel(): void;
 }
 
@@ -71,6 +74,11 @@ export function transfer(request: TransferRequest): Transfer {
       )
     : new DownloadTask(request.url, request.destination, options);
   let asked: "pause" | "cancel" | null = null;
+  /**
+   * Set once the native operation settled, before the handle is released. Expo still calls into
+   * native code for a paused task's cancel, and a released handle rejects that call.
+   */
+  let over = false;
   const run = request.resumeData ? task.resumeAsync() : task.downloadAsync();
   const ended = run
     .then((file): TransferEnd => {
@@ -87,11 +95,14 @@ export function transfer(request: TransferRequest): Transfer {
       if (MOVE.test(message)) return { kind: "folder", detail: message };
       return { kind: "network", detail: message };
     })
-    .finally(() => task.release());
+    .finally(() => {
+      over = true;
+      task.release();
+    });
   return {
     ended,
     pause() {
-      if (asked) return;
+      if (asked || over) return;
       asked = "pause";
       try {
         task.pause();
@@ -100,6 +111,7 @@ export function transfer(request: TransferRequest): Transfer {
       }
     },
     cancel() {
+      if (asked === "cancel" || over) return;
       asked = "cancel";
       task.cancel();
     },

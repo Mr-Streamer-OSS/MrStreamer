@@ -3,18 +3,23 @@ import type { TitleRef } from "@mrstreamer/contracts/ondemand";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 // Downloads through the app's own owners: the account, its two fake Xtream panels over HTTP (the
-// desktop tests' fake provider, one connection each, closed slots freed at once), the title
-// lists, the one player and the downloads owner. expo-file-system is `native-files.ts`, a model of
-// Expo's DownloadTask over real files and real requests; the Keychain is kept in memory, and a
-// relaunch imports the app's modules again over the same Documents and Keychain. What only iOS
-// can show (URLSession's own resume data, suspension in the background, playing the file) is not
-// proved here.
+// desktop tests' fake provider, one connection each, a closed one freed 300 ms later as its
+// default has it), the title lists, the one player and the downloads owner. expo-file-system is
+// `native-files.ts`, a model of Expo's DownloadTask over real files and real requests; the player
+// asks for an online stream over HTTP, as AVPlayer does, and holds it until it is replaced. The
+// Keychain is kept in memory, and a relaunch imports the app's modules again over the same
+// Documents and Keychain. What only iOS can show (URLSession's own resume data and timing,
+// suspension in the background, playing the file) is not proved here.
 
 const memory = vi.hoisted(() => ({
   keychain: new Map<string, string>(),
-  /** The address the player was given last, and how many file streams each panel had open then. */
-  /** What the player was given, and how many download requests were still open then. */
-  played: [] as { readonly uri: string; readonly downloading: number }[],
+  /** How long the Keychain takes to write a download's resume data. */
+  keychainMs: 0,
+  /**
+   * What the player was given, how many download requests were still open then, and the HTTP
+   * status the provider answered an online stream with, once it did.
+   */
+  played: [] as { readonly uri: string; readonly downloading: number; status: number | null }[],
   downloading: (): number => 0,
   player: null as null | {
     currentTime: number;
@@ -42,12 +47,18 @@ vi.mock("react-native", () => ({
 vi.mock("expo-secure-store", () => ({
   AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 0,
   getItemAsync: async (key: string) => memory.keychain.get(key) ?? null,
-  setItemAsync: async (key: string, value: string) => void memory.keychain.set(key, value),
+  setItemAsync: async (key: string, value: string) => {
+    if (key.includes("download") && memory.keychainMs > 0) {
+      await new Promise((done) => setTimeout(done, memory.keychainMs));
+    }
+    memory.keychain.set(key, value);
+  },
   deleteItemAsync: async (key: string) => void memory.keychain.delete(key),
 }));
 vi.mock("expo-video", () => ({
   createVideoPlayer: () => {
     const listeners = new Map<string, Array<(payload: unknown) => void>>();
+    let stream: AbortController | null = null;
     const player = {
       currentTime: 0,
       duration: 0,
@@ -59,7 +70,27 @@ vi.mock("expo-video", () => ({
         for (const listener of listeners.get(event) ?? []) listener(payload);
       },
       replaceAsync: async (source: { uri: string } | null) => {
-        if (source) memory.played.push({ uri: source.uri, downloading: memory.downloading() });
+        stream?.abort();
+        stream = null;
+        if (!source) return;
+        const played = {
+          uri: source.uri,
+          downloading: memory.downloading(),
+          status: null as number | null,
+        };
+        memory.played.push(played);
+        if (!source.uri.startsWith("http")) return;
+        const controller = new AbortController();
+        stream = controller;
+        void fetch(source.uri, { signal: controller.signal }).then(
+          (response) => {
+            played.status = response.status;
+            if (response.ok) return;
+            void response.body?.cancel();
+            player.emit("statusChange", { status: "error", error: { message: "HTTP error" } });
+          },
+          () => undefined,
+        );
       },
       play: () => undefined,
       pause: () => undefined,
@@ -88,6 +119,7 @@ interface FakeProvider {
   };
   activeStreams(): number;
   fileRequests(): number;
+  streamRequests(): number;
   mostFilesAtOnce(): number;
   stallMovieFile(movieId: number, at: number, ms: number): void;
   replaceMovieFile(movieId: number, file: string | Buffer): void;
@@ -106,8 +138,8 @@ let one: FakeProvider;
 let two: FakeProvider;
 beforeAll(async () => {
   [one, two] = await Promise.all([
-    startFakeProvider({ ...ONE, channels: 20, titles: 10, slotReleaseMs: 0 }),
-    startFakeProvider({ ...TWO, channels: 20, titles: 10, slotReleaseMs: 0, second: true }),
+    startFakeProvider({ ...ONE, channels: 20, titles: 10 }),
+    startFakeProvider({ ...TWO, channels: 20, titles: 10, second: true }),
   ]);
   memory.downloading = () => native.open;
 });
@@ -134,22 +166,32 @@ afterEach(async () => {
   one.stallMovieFile(otherMovie().id, 0, 0);
   memory.appState = "active";
   // What an earlier launch left streaming ends before the next test asks the panels for files.
-  await until(() => one.activeStreams() === 0 && two.activeStreams() === 0, "the panels to idle");
+  await until(panelsIdle, "the panels to idle");
 });
 
-async function until(ready: () => boolean, what: string) {
+const panelsIdle = () => one.activeStreams() === 0 && two.activeStreams() === 0;
+
+async function until(ready: () => boolean, what: string, ms = 8_000) {
   for (let waited = 0; !ready(); waited += 10) {
-    if (waited > 8_000) throw new Error(`Timed out waiting for ${what}`);
+    if (waited > ms) throw new Error(`Timed out waiting for ${what}`);
     await new Promise((done) => setTimeout(done, 10));
   }
 }
 
 /**
  * The app as a launch starts it: what the last process transferred ends with it, as a foreground
- * session's tasks do, and fresh modules start over the same files and Keychain.
+ * session's tasks do, and fresh modules start over the same files and Keychain. A launch takes
+ * longer than the panels take to free a closed connection; the last process writes nothing more.
  */
 async function launch() {
   native.kill();
+  const list = new DiskFile(native.root, "documents", "downloads.json");
+  const left = { list: list.exists ? list.textSync() : null, keychain: new Map(memory.keychain) };
+  await until(panelsIdle, "the last process's requests to be freed");
+  if (left.list === null) {
+    if (list.exists) list.delete();
+  } else list.writeSync(left.list);
+  memory.keychain = left.keychain;
   vi.resetModules();
   memory.appListeners.length = 0;
   const account = await import("../src/account.ts");
@@ -157,9 +199,11 @@ async function launch() {
   const playback = await import("../src/playback.ts");
   const viewing = await import("../src/viewing.ts");
   const downloads = await import("../src/downloads.ts");
+  const playTitle = await import("../src/play-title.ts");
   await account.restore();
   downloads.startDownloads();
-  return { ...titles, ...playback, ...viewing, ...downloads, ...account };
+  // `playback` too, whose `retry` another owner's shadows.
+  return { ...titles, ...playback, ...viewing, ...downloads, ...account, ...playTitle, playback };
 }
 type App = Awaited<ReturnType<typeof launch>>;
 
@@ -171,7 +215,9 @@ function install() {
   native.free = 64 * 1024 * 1024 * 1024;
   native.requests.length = 0;
   native.pauseMs = 0;
+  native.held = null;
   memory.keychain.clear();
+  memory.keychainMs = 0;
   memory.played.length = 0;
 }
 
@@ -218,6 +264,14 @@ function everythingStored(): string {
             : [entry.textSync()],
       );
   return read(new Folder(native.root, "documents")).join("\n");
+}
+
+/** Plays a film of `subscriptionId` in Watch, online, as its details' Play does. */
+function playFilm(app: App, subscriptionId: string, id: number) {
+  const lists = app.titleLists();
+  if (lists.kind !== "ready") throw new Error("No titles");
+  const version = { subscriptionId, id: String(id) };
+  app.playMovie(app.titleOf(lists.index, "movie", version)!, version, 0, () => undefined);
 }
 
 /** Sends the app to the background and back, as iOS reports it. */
@@ -385,7 +439,10 @@ describe("downloads", { timeout: 30_000 }, () => {
     const { a } = await withProviders(app);
     one.stallMovieFile(movie().id, 20_000, 60_000);
     const film = await app.addDownload(movieRef(a));
-    await until(() => folder(film.id).exists, "its folder");
+    await until(
+      () => (statusOf(app, film.id) as { received?: number } | undefined)?.received === 20_000,
+      "the transfer to stall",
+    );
     // A whole file of the right size, but no completion was ever written down for it.
     const left = new DiskFile(folder(film.id), "media.mp4");
     left.writeSync("x".repeat(fixture(movie().fixture!).length));
@@ -399,34 +456,84 @@ describe("downloads", { timeout: 30_000 }, () => {
     install();
     const app = await launch();
     const { a, b } = await withProviders(app, true);
-    await until(() => app.currentCatalogue().kind === "ready", "the channels");
     one.stallMovieFile(movie().id, 20_000, 60_000);
     const film = await app.addDownload(movieRef(a));
     await until(() => one.activeStreams() === 1, "the transfer");
-    const channelOf = (subscriptionId: string) => {
-      const now = app.currentCatalogue();
-      if (now.kind !== "ready") throw new Error("No channels");
-      return [...now.library.byKey.values()].find(
-        (each) => each.subscriptionId === subscriptionId,
-      )!;
-    };
-    // Another provider's channel: the transfer goes on.
-    app.playChannel(channelOf(b!), "", { watch: true });
-    await until(() => memory.played.length === 1, "the other channel");
+    // Another provider's film: the transfer goes on.
+    playFilm(app, b!, otherMovie().id);
+    await until(() => memory.played[0]?.status === 200, "the other provider's film");
     expect(statusOf(app, film.id)?.kind).toBe("transferring");
     expect(one.activeStreams()).toBe(1);
-    // Its own provider's channel: the transfer's request ended before the stream was opened, though
-    // URLSession took a while to end it.
+    // Its own provider's film: the transfer's request ended before the stream asked, though
+    // URLSession took a while to end it, and the panel, still freeing that connection, takes it.
+    one.stallMovieFile(otherMovie().id, 1, 60_000);
     native.pauseMs = 200;
-    app.playChannel(channelOf(a), "", { watch: true });
-    await until(() => memory.played.length === 2, "the channel");
-    expect(memory.played[1]?.downloading).toBe(0);
+    playFilm(app, a, otherMovie().id);
+    await until(() => memory.played[1]?.status != null, "the film");
+    expect(memory.played[1]).toMatchObject({ downloading: 0, status: 200 });
+    expect(app.playbackState.get().phase.kind).not.toBe("failed");
     expect(statusOf(app, film.id)?.kind).toBe("waiting");
+    // Stopped, the stream's connection is freed in turn before the transfer goes on.
     one.stallMovieFile(movie().id, 0, 0);
     native.requests.length = 0;
     app.stop();
     await until(() => isComplete(app, film.id), "the copy");
     expect(native.requests[0]?.range).toBe("bytes=20000-");
+  });
+
+  it("fails a stream whose download doesn't let go of the connection, asking the provider nothing, and plays once tried again", async () => {
+    install();
+    const app = await launch();
+    const { a } = await withProviders(app);
+    one.stallMovieFile(movie().id, 20_000, 60_000);
+    one.stallMovieFile(otherMovie().id, 1, 60_000);
+    const film = await app.addDownload(movieRef(a));
+    await until(() => one.activeStreams() === 1, "the transfer");
+    // URLSession ends neither the request it is asked to pause nor, after, to cancel.
+    native.held = [];
+    const asked = one.fileRequests();
+    playFilm(app, a, otherMovie().id);
+    await until(
+      () => app.playbackState.get().phase.kind === "failed",
+      "the stream to fail",
+      15_000,
+    );
+    expect(app.playbackState.get().phase).toMatchObject({
+      error: expect.stringContaining("A download still holds the provider's connection."),
+    });
+    expect(memory.played).toEqual([]);
+    expect(one.fileRequests()).toBe(asked);
+    // The request ends at last; Try again takes the connection, though the queue had it again.
+    const held = native.held;
+    native.held = null;
+    for (const ending of held) ending();
+    await until(() => statusOf(app, film.id)?.kind !== "transferring", "the transfer to end");
+    app.playback.retry();
+    await until(() => memory.played[0]?.status != null, "the film");
+    expect(memory.played[0]).toMatchObject({ downloading: 0, status: 200 });
+    await app.removeDownload(film.id);
+    app.stop();
+  });
+
+  it("removes a download paused while the Keychain still writes its resume data", async () => {
+    install();
+    const app = await launch();
+    const { a } = await withProviders(app);
+    one.stallMovieFile(movie().id, 20_000, 60_000);
+    const film = await app.addDownload(movieRef(a));
+    await until(
+      () => (statusOf(app, film.id) as { received?: number } | undefined)?.received === 20_000,
+      "the transfer to stall",
+    );
+    memory.keychainMs = 200;
+    appGoes("background");
+    await until(() => native.open === 0, "the transfer to pause");
+    await expect(app.removeDownload(film.id)).resolves.toBeUndefined();
+    expect(app.downloadList().items).toEqual([]);
+    expect(folder(film.id).exists).toBe(false);
+    expect(downloadSecrets()).toEqual([]);
+    expect(doc()).toMatchObject({ items: [], forgetting: [] });
+    appGoes("active");
   });
 
   it("ends a removed provider's unfinished downloads; its copy stays, plays offline and keeps its progress", async () => {
@@ -464,14 +571,22 @@ describe("downloads", { timeout: 30_000 }, () => {
     expect(folder(unfinished.id).exists).toBe(false);
     expect(downloadSecrets()).toEqual([]);
 
-    // After a relaunch, with no provider for it, it plays from where it was left.
+    // After a relaunch, with no provider for it, it plays from where it was left, and plays on
+    // when the last provider goes, while a request waiting to play lapses.
     app = await launch();
     const requests = one.fileRequests();
     app.playDownload(kept.id);
     await until(() => memory.played.length === 2, "the copy to open again");
     expect(memory.played[1]?.uri).toBe(memory.played[0]?.uri);
-    expect(app.playbackState.get().phase).toMatchObject({ item: { subscriptionId: null } });
     memory.player!.emit("playingChange", { isPlaying: true });
+    const waiting = app.request();
+    await app.remove(b!, { keepHistory: true });
+    expect(waiting.stands()).toBe(false);
+    expect(app.members()).toEqual([]);
+    expect(app.playbackState.get()).toMatchObject({
+      phase: { kind: "playing", item: { subscriptionId: null } },
+      watch: true,
+    });
     Object.assign(memory.player!, { currentTime: 70, duration: 100 });
     app.stop();
     await until(
@@ -479,7 +594,6 @@ describe("downloads", { timeout: 30_000 }, () => {
       "the copy's progress",
     );
     expect(one.fileRequests()).toBe(requests);
-    expect(app.members().map((member) => member.entry.id)).toEqual([b]);
     const copy: Download | undefined = app.downloadList().items[0];
     expect(copy?.subscription).toBeNull();
   });

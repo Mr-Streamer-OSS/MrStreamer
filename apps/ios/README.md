@@ -96,14 +96,17 @@ Each responsibility has one owner, a plain module with a store the screens read:
   app's process. Records hold no address, header, login or resume data; a file's address is made
   from its subscription's login as its transfer starts. A stream of the same subscription takes the
   connection back first (`onReclaim` in `playback.ts`): the transfer pauses before the stream's
-  request goes out, and goes on once nothing of that subscription streams. Going to the background
-  pauses it too. A pause keeps URLSession's resume data, which names the address, in the Keychain
+  request goes out, and goes on once nothing of that subscription streams. A transfer that doesn't
+  end within ten seconds fails the stream instead of opening a second connection. A provider takes
+  a moment to free a closed connection, so a subscription's next request, a stream's or the next
+  download's, waits a second after the app's last one ended. Going to the background pauses it too. A pause keeps URLSession's resume data, which names the address, in the Keychain
   under `download:<id>`, used only for that same address; otherwise the transfer starts again and
   says so. A kill before the pause is written starts it again at the next launch. A copy is complete
   only once the native task moved it into place at the announced size; a file beside an unfinished
   download at launch is deleted. A removed subscription's unfinished downloads end, with their files
   and resume data; its copies stay, play from the phone with no login or network, and keep their own
-  progress, also given to the subscription's viewing record while it is saved.
+  progress, also given to the subscription's viewing record while it is saved. A copy playing goes
+  on when the last subscription is removed.
   `modules/downloads-folder` makes `Documents/downloads` at launch and keeps it out of backups
   (native: it takes a new build).
 - `src/playback.ts`: the one `expo-video` player and what it plays, a channel or a title. Home's

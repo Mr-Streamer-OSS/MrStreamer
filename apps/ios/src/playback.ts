@@ -172,7 +172,8 @@ let failed: ((failure: AnalyticsFailure) => void) | null = null;
 let endPictureInPicture: (() => void) | null = null;
 /**
  * Takes a subscription's connection back from a download before a stream of it opens, so the
- * provider never sees both; downloads.ts registers it. Resolves once the download's request ended.
+ * provider never sees both; downloads.ts registers it. Resolves once the download's request ended
+ * and the provider had a moment to free it; rejects when it didn't end, and the stream fails.
  */
 let reclaim: ((subscriptionId: string) => Promise<void>) | null = null;
 
