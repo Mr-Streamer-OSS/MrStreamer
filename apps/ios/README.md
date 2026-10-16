@@ -112,12 +112,13 @@ stands; pressing one offers Retry, its reloads, Edit and Remove as a system shee
 whether to delete its history too.
 Watch (`src/watch.tsx`) is a layer over the navigation rather than a route, because the view that
 starts Picture in Picture has to stay while it plays. A movie or an episode turns it to landscape
-(`expo-screen-orientation`). Closing it holds the screens under it upright until the next title,
-because unlocking turned them back to landscape on the iOS 27 simulator; so after a title, the tabs
-and live channels no longer turn with the phone until the app starts again. `patches/` makes
-expo-video report Picture in Picture brought back to the app, which its own view never forwarded,
-so Watch opens again rather than leaving Home. `src/glass.tsx` draws the app's own controls as
-Liquid Glass, and solid before iOS 26 or with Reduce Transparency on.
+(`expo-screen-orientation`); closing it unlocks again, and iOS turns the screens under it as the
+phone is held. On the simulator the screens follow its device orientation (agent-device's
+`orientation`), not where Watch left them. `patches/` makes expo-video report Picture in Picture
+brought back to the app, which its own view never forwarded, and hold AVKit's answer until Watch
+has shown the player again, so the picture returns into Watch rather than Home.
+`src/glass.tsx` draws the app's own controls as Liquid Glass, and solid before iOS 26 or with
+Reduce Transparency on.
 
 Live channels are asked for as HLS, which AVPlayer plays and panels serve beside MPEG-TS. On the
 simulator the fixture channels showed what that covers: H.264 with AAC or AC-3 plays; MPEG-2 fails

@@ -126,7 +126,6 @@ vi.mock("react-native", async () => {
       createElement("button", { "data-testid": testID, onClick: onPress }, children),
     StatusBar: () => null,
     StyleSheet: { create: <T>(styles: T) => styles, absoluteFill: {} },
-    Dimensions: { get: () => ({ width: 390, height: 844 }) },
     Keyboard: { dismiss: () => undefined },
     PanResponder: { create: () => ({ panHandlers: {} }) },
     ActionSheetIOS: { showActionSheetWithOptions: () => undefined },
@@ -137,7 +136,7 @@ vi.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 vi.mock("expo-screen-orientation", () => ({
-  OrientationLock: { LANDSCAPE: 1, PORTRAIT_UP: 2 },
+  OrientationLock: { LANDSCAPE: 1 },
   lockAsync: async () => undefined,
   unlockAsync: async () => undefined,
 }));
