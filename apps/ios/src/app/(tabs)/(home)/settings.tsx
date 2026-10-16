@@ -1,73 +1,120 @@
+import type { AnalyticsSettings } from "@mrstreamer/contracts/analytics";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import type { AccountStatus } from "@mrstreamer/contracts/subscription";
-import { kindOf } from "@mrstreamer/core/ondemand/catalogue";
+import { formatDate } from "@mrstreamer/core/i18n";
+import Constants from "expo-constants";
 import { router } from "expo-router";
 import { isPictureInPictureSupported } from "expo-video";
-import { Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+  Image,
+  Linking,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+} from "react-native";
 import { disconnect, loadCatalogue, useCatalogue, useSession } from "../../../account.ts";
-import { describeError } from "../../../errors.ts";
+import { failureOf, hostOf } from "../../../errors.ts";
+import { setStatistics, useStatistics } from "../../../telemetry/index.ts";
 import {
   hasTmdb,
   loadTitles,
   useMetadataStatus,
   useTitleLists,
   useTitleTimings,
-  type TitleLists,
 } from "../../../titles.ts";
 import { colors, TextButton } from "../../../ui.tsx";
 
 /**
- * The subscription, its movies and series and TMDB, so far. Several subscriptions, guides,
- * languages, preferences and privacy come here as they come to iOS. TMDB's terms ask for its
- * logo and notice, as the desktop's Settings show them.
+ * Settings as one list: the provider first, then Downloads, Playback, Privacy and About. iOS has
+ * one subscription so far; several, M3U playlists, downloads and guide sources come here as they
+ * come to iOS, and until then nothing here offers them. TMDB's terms ask for its logo and notice,
+ * as the desktop's Settings show them.
  */
 export default function Settings() {
   const session = useSession();
   const catalogue = useCatalogue();
   const lists = useTitleLists();
-  const tmdb = useMetadataStatus();
-  const timings = useTitleTimings();
+  const statistics = useStatistics();
   if (session.kind !== "signed-in") return null;
   const { subscription, account } = session;
+  const host = hostOf(subscription.server);
+  // Only what needs the viewer: a load under way or one that failed.
+  const loads = [
+    catalogue.kind === "loading"
+      ? "Loading channels"
+      : catalogue.kind === "failed"
+        ? `Channels: ${failureOf(catalogue.error, subscription.server).headline}`
+        : null,
+    lists.kind === "loading"
+      ? "Loading movies and series"
+      : lists.kind === "failed"
+        ? `Movies and series: ${failureOf(lists.error, subscription.server).headline}`
+        : null,
+  ].filter((line) => line !== null);
   return (
     <ScrollView style={styles.screen} contentInsetAdjustmentBehavior="automatic">
-      <Text style={styles.section} accessibilityRole="header">
-        Subscription
-      </Text>
-      <Line label="Server" value={subscription.server.replace(/^https?:\/\//, "")} />
-      <Line label="Username" value={subscription.username} />
-      <Line label="Account" value={accountLine(account)} />
-      <Line
-        label="Channels"
-        value={
-          catalogue.kind === "ready"
-            ? String(catalogue.library.byId.size)
-            : catalogue.kind === "failed"
-              ? describeError(catalogue.error)
-              : "Loading"
-        }
-      />
-      <Line label="Films" value={countOf(lists, "movie")} />
-      <Line label="Series" value={countOf(lists, "series")} />
-      <Line
-        label="TMDB"
-        value={
-          !hasTmdb
-            ? "No key in this build"
-            : !tmdb
-              ? "Waiting for the lists"
-              : tmdb.refused
-                ? "Refused the key"
-                : tmdb.known < tmdb.wanted
-                  ? `${tmdb.known} of ${tmdb.wanted} titles`
-                  : `${tmdb.known} titles`
-        }
-      />
+      <Section name="Provider" />
+      <View style={styles.block} accessible testID="settings-provider">
+        <Text style={styles.name} numberOfLines={1}>
+          {host}
+        </Text>
+        <Text style={styles.plain} numberOfLines={2}>
+          {[subscription.username, accountLine(account, subscription.server)].join(" · ")}
+        </Text>
+        {loads.map((line) => (
+          <Text key={line} style={styles.plain} numberOfLines={2}>
+            {line}
+          </Text>
+        ))}
+      </View>
       <View style={styles.actions}>
         <TextButton label="Reload channels" onPress={loadCatalogue} />
-        <TextButton label="Reload films and series" onPress={loadTitles} />
+        <TextButton label="Reload movies and series" onPress={loadTitles} />
         <TextButton label="Disconnect" onPress={() => void disconnect()} destructive />
       </View>
+
+      <Section name="Downloads" />
+      <Text style={styles.paragraph}>
+        Downloads aren't on iPhone yet. Movies and episodes play while online.
+      </Text>
+
+      <Section name="Playback" />
+      <Line
+        label="Picture in Picture"
+        value={isPictureInPictureSupported() ? "Supported" : "Not on this iPhone"}
+      />
+
+      <Section name="Privacy" />
+      <View style={styles.toggle}>
+        <Text style={styles.label} importantForAccessibility="no" accessibilityElementsHidden>
+          Share basic usage statistics
+        </Text>
+        <Switch
+          accessibilityLabel="Share basic usage statistics"
+          value={statistics.enabled}
+          onValueChange={(enabled) => void setStatistics(enabled)}
+          testID="settings-statistics"
+        />
+      </View>
+      <Text style={styles.paragraph}>
+        {[
+          "Counts app use, the screens you open, and whether playback works and for how long.",
+          "No viewing history, searches or provider details. Off unless you turn it on.",
+          transportNote(statistics),
+        ]
+          .filter(Boolean)
+          .join(" ")}
+      </Text>
+
+      <Section name="About" />
+      <Line
+        label="Version"
+        value={`${Constants.expoConfig?.version ?? "?"} (${Constants.platform?.ios?.buildNumber ?? "?"})`}
+      />
+      <TmdbLine />
       {hasTmdb ? (
         <View style={styles.notice}>
           <Pressable
@@ -87,44 +134,82 @@ export default function Settings() {
           </Text>
         </View>
       ) : null}
-      {__DEV__ ? (
-        <>
-          <Text style={styles.section} accessibilityRole="header">
-            Development
-          </Text>
-          <Line
-            label="Films and series lists"
-            value={
-              timings ? `read ${timings.fetched} ms, indexed ${timings.indexed} ms` : "Not read"
-            }
-          />
-          <Line
-            label="Picture in Picture"
-            value={isPictureInPictureSupported() ? "Supported" : "Not supported here"}
-          />
-          <View style={styles.actions}>
-            <TextButton label="Runtime proof" onPress={() => router.push("/proof")} />
-          </View>
-        </>
-      ) : null}
+      {__DEV__ ? <Development /> : null}
+      <View style={styles.end} />
     </ScrollView>
   );
 }
 
-function countOf(lists: TitleLists, kind: "movie" | "series"): string {
-  if (lists.kind === "ready") return String(kindOf(lists.index, kind).titles.length);
-  return lists.kind === "failed" ? describeError(lists.error) : "Loading";
+/** Where statistics go in this build, when that isn't PostHog. */
+function transportNote({ enabled, transport }: AnalyticsSettings): string | null {
+  if (transport === "unavailable") return "They can't be saved on this iPhone right now.";
+  if (!enabled || transport === "production") return null;
+  return transport === "local"
+    ? "This development build sends them to a test endpoint on this computer only."
+    : "This build sends nothing.";
 }
 
-function accountLine(account: AccountStatus | AppError | null): string {
+/** TMDB's part: movie and series facts and pictures, when the build has a key. */
+function TmdbLine() {
+  const tmdb = useMetadataStatus();
+  return (
+    <Line
+      label="TMDB"
+      value={
+        !hasTmdb
+          ? "Not in this build"
+          : !tmdb
+            ? "Waiting for the lists"
+            : tmdb.refused
+              ? "Refused the key"
+              : tmdb.known < tmdb.wanted
+                ? `${tmdb.known} of ${tmdb.wanted} titles`
+                : `${tmdb.known} titles`
+      }
+    />
+  );
+}
+
+/** What development builds also show. Release builds leave it out. */
+function Development() {
+  const timings = useTitleTimings();
+  return (
+    <>
+      <Section name="Development" />
+      <Line
+        label="Movies and series lists"
+        value={timings ? `read ${timings.fetched} ms, indexed ${timings.indexed} ms` : "Not read"}
+      />
+      <View style={styles.actions}>
+        <TextButton label="Runtime proof" onPress={() => router.push("/proof")} />
+      </View>
+    </>
+  );
+}
+
+/** The account as one plain line: "Active until 12 Mar 2027, 1 of 2 streams". */
+function accountLine(account: AccountStatus | AppError | null, server: string): string {
   if (!account) return "Checking";
-  if ("kind" in account) return describeError(account);
-  const parts = [account.state === "active" ? "Active" : account.state];
-  if (account.expiresAt) parts.push(`until ${new Date(account.expiresAt).toLocaleDateString()}`);
-  if (account.maxConnections !== null) {
-    parts.push(`${account.activeConnections ?? 0} of ${account.maxConnections} connections`);
-  }
-  return parts.join(" · ");
+  if ("kind" in account) return failureOf(account, server).headline;
+  const state = account.state === "active" ? "Active" : capitalised(account.state);
+  const until = account.expiresAt
+    ? ` until ${formatDate(Date.parse(account.expiresAt), "date")}`
+    : "";
+  const streams =
+    account.maxConnections !== null
+      ? `, ${account.activeConnections ?? 0} of ${account.maxConnections} streams`
+      : "";
+  return `${state}${until}${streams}`;
+}
+
+const capitalised = (word: string) => word.charAt(0).toUpperCase() + word.slice(1);
+
+function Section({ name }: { name: string }) {
+  return (
+    <Text style={styles.section} accessibilityRole="header">
+      {name}
+    </Text>
+  );
 }
 
 function Line({ label, value }: { label: string; value: string }) {
@@ -144,9 +229,13 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 20,
     fontWeight: "700",
-    marginTop: 16,
+    marginTop: 24,
+    marginBottom: 4,
     marginHorizontal: 16,
   },
+  block: { marginHorizontal: 16, marginTop: 4, gap: 2 },
+  name: { color: colors.text, fontSize: 17, fontWeight: "600" },
+  plain: { color: colors.text, fontSize: 15 },
   line: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -157,10 +246,26 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.line,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  label: { color: colors.text, fontSize: 17 },
+  toggle: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 16,
+    minHeight: 44,
+    marginHorizontal: 16,
+  },
+  label: { color: colors.text, fontSize: 17, flexShrink: 1 },
   value: { color: colors.dim, fontSize: 17, flexShrink: 1, textAlign: "right" },
-  actions: { marginHorizontal: 16, marginTop: 8 },
-  notice: { marginHorizontal: 16, marginTop: 32, marginBottom: 24, gap: 10 },
+  paragraph: {
+    color: colors.dim,
+    fontSize: 13,
+    lineHeight: 18,
+    marginHorizontal: 16,
+    marginTop: 4,
+  },
+  actions: { marginHorizontal: 16, marginTop: 4 },
+  notice: { marginHorizontal: 16, marginTop: 24, gap: 10 },
   logo: { width: 108, height: 14 },
   noticeText: { color: colors.dim, fontSize: 13, lineHeight: 18 },
+  end: { height: 32 },
 });
