@@ -50,6 +50,26 @@ describe("the channels Live shows", () => {
     expect(library.placeOf.get(library.byId.get("2")!.id)).toBe("Other channels");
   });
 
+  it("adds them to a provider category of the same name, which Live finds by that name", () => {
+    const library = buildLibrary({
+      categories: [
+        { id: "10", name: "News" },
+        { id: "20", name: "Other channels" },
+      ],
+      channels: [
+        channel("1", "Alpha", ["10"]),
+        channel("2", "Bravo", ["20"]),
+        channel("3", "Charlie", []),
+      ],
+    });
+    expect(shown(library.regions)).toEqual([
+      ["News", ["Alpha"]],
+      ["Other channels", ["Bravo", "Charlie"]],
+    ]);
+    const chosen = library.regions.find((region) => region.name === "Other channels");
+    expect(chosen?.shelves.map((shelf) => shelf.title)).toEqual(["Other channels"]);
+  });
+
   it("leaves channels for adults out, and nothing to show when that is all there is", () => {
     const library = buildLibrary({
       categories: [],

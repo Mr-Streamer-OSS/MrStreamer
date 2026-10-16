@@ -44,10 +44,18 @@ beforeEach(() => stop());
 describe("leaving Picture in Picture", () => {
   it("opens Watch again with sound when the viewer brings it back", async () => {
     await intoPictureInPicture();
-    restoreFromPictureInPicture();
+    expect(restoreFromPictureInPicture()).toBe("movie:1");
     pictureInPicture(false);
     expect(usePlayback()).toMatchObject({ watch: true, pip: false, muted: false });
     expect(player().muted).toBe(false);
+  });
+
+  it("opens nothing when the viewer stopped it before it came back", async () => {
+    await intoPictureInPicture();
+    stop();
+    expect(restoreFromPictureInPicture()).toBeNull();
+    pictureInPicture(false);
+    expect(usePlayback()).toMatchObject({ phase: { kind: "idle" }, watch: false, pip: false });
   });
 
   it("stays on the tabs, silent, when the viewer closes it", async () => {

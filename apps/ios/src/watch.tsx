@@ -22,6 +22,7 @@ import {
   onEndPictureInPicture,
   pictureInPicture,
   player,
+  playingId,
   playNext,
   restoreFromPictureInPicture,
   retry,
@@ -55,6 +56,20 @@ export function WatchLayer() {
     onEndPictureInPicture(() => void view.current?.stopPictureInPicture());
     return () => onEndPictureInPicture(null);
   }, []);
+  // A return from Picture in Picture, answered once Watch has committed what it returns to: AVKit
+  // then brings the picture back into a view on screen. Anything else playing by then, or Watch
+  // closed, answers no. If the view goes first, the native view answers no as it goes.
+  const [restoring, setRestoring] = useState<{ readonly id: string } | null>(null);
+  useEffect(() => {
+    if (!restoring) return;
+    setRestoring(null);
+    void view.current?.finishPictureInPictureRestore(watch && playingId(phase) === restoring.id);
+  }, [restoring, watch, phase]);
+  const restore = () => {
+    const id = restoreFromPictureInPicture();
+    if (id === null) void view.current?.finishPictureInPictureRestore(false);
+    else setRestoring({ id });
+  };
   const landscape = watch && phase.kind !== "idle" && !phase.item.live;
   useEffect(() => {
     if (!landscape) return;
@@ -95,7 +110,7 @@ export function WatchLayer() {
           startsPictureInPictureAutomatically
           onPictureInPictureStart={() => pictureInPicture(true)}
           onPictureInPictureStop={() => pictureInPicture(false)}
-          onPictureInPictureRestore={restoreFromPictureInPicture}
+          onPictureInPictureRestore={restore}
           style={StyleSheet.absoluteFill}
         />
       ) : null}

@@ -94,7 +94,7 @@ export function buildLibrary(catalogue: LiveCatalogue): Library {
   });
 
   // Channels in no category the provider lists, as a panel that lists no categories leaves every
-  // channel, come last on their own, as the desktop's Live shows every channel without a category.
+  // channel, come last under one name, as the desktop's Live shows channels without a category.
   const others = listed.length > 0 ? "Other channels" : "All channels";
   const unplaced: ListedChannel[] = [];
   for (const stream of streams) {
@@ -103,7 +103,12 @@ export function buildLibrary(catalogue: LiveCatalogue): Library {
     placeOf.set(channel.id, others);
     unplaced.push(channel);
   }
-  if (unplaced.length > 0) listed.push({ name: others, shelves: [], channels: unplaced });
+  if (unplaced.length > 0) {
+    // Live chooses a region by its name, so a provider category of that name takes them in.
+    const same = listed.findIndex((region) => region.name === others);
+    if (same === -1) listed.push({ name: others, shelves: [], channels: unplaced });
+    else listed[same] = { ...listed[same]!, channels: [...listed[same]!.channels, ...unplaced] };
+  }
   return { regions: listed, byId, placeOf };
 }
 

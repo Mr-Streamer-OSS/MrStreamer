@@ -412,11 +412,16 @@ export function pictureInPicture(active: boolean) {
 
 /**
  * The viewer brought Picture in Picture back to the app rather than closing it: Watch shows the
- * player again, with its sound, before Picture in Picture reports that it ended.
+ * player again, with its sound, before Picture in Picture reports that it ended. Returns the id of
+ * what Watch shows, or null when nothing streams in Picture in Picture any more (it stopped or
+ * failed first), so there is nothing to return to.
  */
-export function restoreFromPictureInPicture() {
+export function restoreFromPictureInPicture(): string | null {
+  const { phase, pip } = state.get();
+  if (!pip || playingId(phase) === null) return null;
   player().muted = false;
   state.set((s) => ({ ...s, watch: true, muted: false }));
+  return playingId(phase);
 }
 
 export function onPlaybackFailure(listener: ((failure: AnalyticsFailure) => void) | null) {
