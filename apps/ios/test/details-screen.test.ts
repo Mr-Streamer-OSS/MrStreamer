@@ -118,6 +118,12 @@ vi.mock("../src/viewing.ts", () => ({
 }));
 vi.mock("../src/downloads.ts", () => ({
   useDownloadOf: () => scenario.download,
+  downloadList: () => ({
+    items: scenario.download ? [scenario.download] : [],
+    bytes: 0,
+    free: null,
+    ended: 0,
+  }),
   addDownload: async (ref: TitleRef) => {
     scenario.asked.push(`add ${ref.subscriptionId}:${ref.id}`);
   },

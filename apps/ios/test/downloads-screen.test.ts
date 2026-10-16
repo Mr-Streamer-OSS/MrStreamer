@@ -112,6 +112,7 @@ vi.mock("../src/ui.tsx", async () => {
 });
 vi.mock("../src/downloads.ts", () => ({
   useDownloads: () => scenario.list,
+  downloadList: () => scenario.list,
   useDownloadOf: () => undefined,
   addDownload: async () => undefined,
   playDownload: (id: string) => scenario.asked.push(`play ${id}`),
@@ -174,6 +175,7 @@ const kept = movie("k", "Small Hours", { status: { kind: "complete" }, subscript
 const missing = movie("m", "Red Meridian", { status: { kind: "missing" } });
 
 let unmount = () => {};
+let redraw = () => {};
 afterEach(() => {
   unmount();
   scenario.pressables.clear();
@@ -187,7 +189,14 @@ function show(items: readonly Download[], bytes = 0, free: number | null = null)
   const root = createRoot(container);
   React.act(() => root.render(React.createElement(DownloadsScreen)));
   unmount = () => React.act(() => root.unmount());
+  redraw = () => React.act(() => root.render(React.createElement(DownloadsScreen)));
   return container;
+}
+
+/** The owner's list moves on, as it can while a sheet stays open, and the screen redraws. */
+function publish(...items: Download[]) {
+  scenario.list = { ...scenario.list, items };
+  redraw();
 }
 
 const row = (id: string) => scenario.pressables.get(`download-${id}`)!;
@@ -302,5 +311,53 @@ describe("Downloads", () => {
     row("c").onAccessibilityAction!({ nativeEvent: { actionName: "Delete download" } });
     await pick("Delete download");
     expect(scenario.asked).toEqual(["play c", "remove c"]);
+  });
+});
+
+describe("a sheet left open while the download moves on", () => {
+  const nowQueued = (status: Download["status"]): Download => ({ ...queued, status });
+
+  it("asks before ending a transfer that started under it", async () => {
+    show([queued]);
+    row("q").onLongPress!();
+    publish(nowQueued(transferring.status));
+    await pick("Cancel download");
+    expect(scenario.asked).toEqual([]);
+    expect(scenario.sheet?.title).toBe("Cancel downloading Glass Orchard?");
+    await pick("Cancel download");
+    expect(scenario.asked).toEqual(["remove q"]);
+  });
+
+  it("keeps a copy that finished under its Cancel, or under the confirmation", async () => {
+    show([queued]);
+    row("q").onLongPress!();
+    publish(nowQueued({ kind: "complete" }));
+    await pick("Cancel download");
+    expect(scenario.sheet).toBeNull();
+
+    publish(nowQueued(transferring.status));
+    row("q").onLongPress!();
+    await pick("Cancel download");
+    publish(nowQueued({ kind: "complete" }));
+    await pick("Cancel download");
+    expect(scenario.asked).toEqual([]);
+  });
+
+  it("cancels one still waiting at once, and does nothing for one that went", async () => {
+    show([queued, failed, complete]);
+    row("q").onLongPress!();
+    publish(nowQueued({ kind: "waiting" }), failed, complete);
+    await pick("Cancel download");
+    expect(scenario.asked).toEqual(["remove q"]);
+
+    row("f").onLongPress!();
+    publish(complete);
+    await pick("Remove");
+    row("c").onLongPress!();
+    await pick("Delete download");
+    publish();
+    await pick("Delete download");
+    expect(scenario.asked).toEqual(["remove q"]);
+    expect(scenario.sheet).toBeNull();
   });
 });

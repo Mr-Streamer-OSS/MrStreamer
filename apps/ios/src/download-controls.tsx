@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import {
   addDownload,
+  downloadList,
   playDownload,
   removeDownload,
   retryDownload,
@@ -27,6 +28,8 @@ import { appError, describeError } from "./errors.ts";
 // queued, waiting and transferring Cancel; failed Retry and Remove, with why it stopped; a copy
 // Play offline and Delete; a copy whose file went Delete. Ending a running transfer or deleting a
 // copy asks first, as both lose what took a while to download; the rest happens at once.
+// A sheet or a confirmation can stay open while the download moves on, so each action looks the
+// download up again when it runs, and again on confirming: it does what still applies, or nothing.
 
 const RED = "#FF453A";
 
@@ -173,30 +176,52 @@ function ask(title: string, confirm: string, keep: string, run: () => void) {
   );
 }
 
-/** Cancels a download in the queue: at once, unless it is transferring and would lose its bytes. */
-function cancel(download: Download) {
+/** The download `id` as it stands now, or undefined once it is gone. */
+const current = (id: string) => downloadList().items.find((item) => item.id === id);
+
+/** Still in the queue, or stopped there: what Cancel and Remove end. */
+const unfinished = (download: Download | undefined): download is Download =>
+  download !== undefined &&
+  download.status.kind !== "complete" &&
+  download.status.kind !== "missing";
+
+/**
+ * Cancels or removes download `id` while it is unfinished: at once, unless it is transferring and
+ * would lose its bytes. One that finished meanwhile stays, as Cancel no longer applies to it.
+ */
+function cancel(id: string) {
+  const download = current(id);
+  if (!unfinished(download)) return;
   if (download.status.kind !== "transferring") return remove(download);
-  ask(`Cancel downloading ${nameOf(download)}?`, "Cancel download", "Keep downloading", () =>
-    remove(download),
-  );
+  ask(`Cancel downloading ${nameOf(download)}?`, "Cancel download", "Keep downloading", () => {
+    const now = current(id);
+    if (unfinished(now)) remove(now);
+  });
 }
 
-/** Deletes a copy after asking, as it took a while to download. */
-function deleteCopy(download: Download) {
+/** Deletes copy `id`: after asking while its file is there, at once when the file went. */
+function deleteCopy(id: string) {
+  const download = current(id);
+  if (download?.status.kind === "missing") return remove(download);
+  if (download?.status.kind !== "complete") return;
   const size = download.size ? `${formatBytes(download.size)} ` : "";
-  ask(`Delete the ${size}copy of ${nameOf(download)}?`, "Delete download", "Cancel", () =>
-    remove(download),
-  );
+  ask(`Delete the ${size}copy of ${nameOf(download)}?`, "Delete download", "Cancel", () => {
+    const now = current(id);
+    if (now && !unfinished(now)) remove(now);
+  });
 }
 
-/** Everything that can be done with `download` as it stands, the first being what fits most. */
+/**
+ * Everything that can be done with `download` as it stands, the first being what fits most. Each
+ * run acts on the download as it is by then.
+ */
 export function actionsOf(download: Download): readonly DownloadAction[] {
   const { status } = download;
   switch (status.kind) {
     case "queued":
     case "waiting":
     case "transferring":
-      return [{ label: "Cancel download", destructive: true, run: () => cancel(download) }];
+      return [{ label: "Cancel download", destructive: true, run: () => cancel(download.id) }];
     case "failed":
       return [
         {
@@ -204,15 +229,15 @@ export function actionsOf(download: Download): readonly DownloadAction[] {
           destructive: false,
           run: () => attempt(`Couldn't retry ${nameOf(download)}`, retryDownload(download.id)),
         },
-        { label: "Remove", destructive: true, run: () => remove(download) },
+        { label: "Remove", destructive: true, run: () => cancel(download.id) },
       ];
     case "complete":
       return [
         { label: "Play offline", destructive: false, run: () => playDownload(download.id) },
-        { label: "Delete download", destructive: true, run: () => deleteCopy(download) },
+        { label: "Delete download", destructive: true, run: () => deleteCopy(download.id) },
       ];
     case "missing":
-      return [{ label: "Delete download", destructive: true, run: () => remove(download) }];
+      return [{ label: "Delete download", destructive: true, run: () => deleteCopy(download.id) }];
   }
 }
 
