@@ -291,6 +291,53 @@ describe("playback", () => {
     ]);
   });
 
+  it("keeps a failure after playing one incident until playing again", async () => {
+    const app = await launch();
+    app.setStatistics(true);
+    await until(() => captured.length === 2);
+
+    let opening: "fails" | "plays" = "plays";
+    await app.play(
+      channel(),
+      async () => {
+        if (opening === "fails") {
+          throw new app.AppFailure({
+            kind: "unreachable",
+            server: "http://panel.example",
+            detail: "",
+          });
+        }
+        return opens();
+      },
+      { watch: true, login },
+    );
+    playing(true);
+    plays(3);
+    emit("statusChange", { status: "error", error: { message: "Cannot Decode" } });
+    opening = "fails";
+    app.retry(); // fails again while opening: the same incident
+    await quiet();
+    opening = "plays";
+    app.retry();
+    await quiet();
+    playing(true);
+    plays(2);
+    emit("statusChange", { status: "error", error: { message: "Cannot Decode" } }); // a new one
+    app.stop();
+
+    await until(() => names().includes("stream_stopped"));
+    expect(
+      captured
+        .filter((body) => String(body["event"]).startsWith("stream_"))
+        .map((body) => [body["event"], body["properties"]]),
+    ).toEqual([
+      ["stream_started", expect.objectContaining({ stream_type: "live" })],
+      ["stream_error", expect.objectContaining({ stream_type: "live", error_type: "unsupported" })],
+      ["stream_error", expect.objectContaining({ stream_type: "live", error_type: "unsupported" })],
+      ["stream_stopped", expect.objectContaining({ watch_duration_seconds: 5 })],
+    ]);
+  });
+
   it("sends the stop of a run iOS ended in the background at the next launch", async () => {
     const first = await launch();
     first.setStatistics(true);
@@ -545,6 +592,43 @@ describe("the outbox", () => {
     analytics.configure(false);
     await realWait(50);
     expect(sent).toHaveLength(1);
+    analytics.setForeground(false);
+  });
+
+  it("sends nothing when it can't save an attempt", async () => {
+    // A launch whose first event waits in the outbox, one attempt made.
+    const before = owner(() => new Promise(() => undefined));
+    before.analytics.configure(true);
+    before.analytics.setForeground(false);
+    const saved = structuredClone(before.record());
+    expect(saved?.pending[0]?.attempts).toBe(1);
+
+    // The next launch can read the record but not write it.
+    const sent: CaptureEvent[] = [];
+    const analytics = new Analytics({
+      store: {
+        load: () => structuredClone(saved),
+        save: () => {
+          throw new Error("Disk full");
+        },
+      },
+      transport: {
+        kind: "local",
+        send: async (event) => {
+          sent.push(event);
+          return "accepted";
+        },
+      },
+      build: { app_version: "0.1.0", app_build: "2", os: "ios" },
+      monotonic: () => 0,
+      uuid: () => "00000000-0000-4000-8000-000000000099",
+      retryMs: 1,
+    });
+    analytics.setForeground(true);
+    await realWait(50);
+    expect(sent).toEqual([]);
+    expect(analytics.settings.get()).toEqual({ enabled: false, transport: "unavailable" });
+    expect(before.record()).toEqual(saved);
     analytics.setForeground(false);
   });
 

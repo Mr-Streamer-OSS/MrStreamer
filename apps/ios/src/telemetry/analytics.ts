@@ -63,7 +63,7 @@ interface Run {
   started: boolean;
   /** Its stream_started was queued, so its end owes a stream_stopped. */
   reported: boolean;
-  /** A failure was reported and no playing since. */
+  /** A failure was reported and the player hasn't confirmed playing since. */
   incident: boolean;
   watchMs: number;
   /** The stop's own UUID, so a stop saved for the next launch and the stop itself are one. */
@@ -193,6 +193,9 @@ export class Analytics {
     }
     this.view = view;
     this.count();
+    // Only the player playing again ends an incident. The clock can't: it resets while a failed
+    // stream is let go, before the player shows the failure.
+    if (this.run && this.counting()) this.run.incident = false;
   }
 
   /** The playing position moved on, which renews a confirmed playing state. */
@@ -243,7 +246,6 @@ export class Analytics {
       run.started = true;
       run.reported = this.capture("stream_started", { stream_type: run.kind });
     }
-    run.incident = false;
     const mono = this.ports.monotonic();
     this.interval = { mono, until: mono + PLAYING_LEASE_MS };
   }
@@ -376,10 +378,12 @@ export class Analytics {
       return;
     const revision = this.revision;
     const attempts = next.attempts + 1;
-    this.save({
+    // An attempt that can't be saved isn't made: a later launch couldn't tell it was.
+    const saved = this.save({
       ...record,
       pending: record.pending.map((item) => (item === next ? { ...item, attempts } : item)),
     });
+    if (!saved) return;
     const request = new AbortController();
     this.request = request;
     void transport
