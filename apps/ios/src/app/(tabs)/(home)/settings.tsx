@@ -15,16 +15,10 @@ import {
   Text,
   View,
 } from "react-native";
-import { disconnect, loadCatalogue, useCatalogue, useSession } from "../../../account.ts";
-import { failureOf, hostOf } from "../../../errors.ts";
+import { reloadChannels, reloadTitles, remove, useRoster, type Member } from "../../../account.ts";
+import { failureOf } from "../../../errors.ts";
 import { setStatistics, useStatistics } from "../../../telemetry/index.ts";
-import {
-  hasTmdb,
-  loadTitles,
-  useMetadataStatus,
-  useTitleLists,
-  useTitleTimings,
-} from "../../../titles.ts";
+import { hasTmdb, useMetadataStatus, useTitleTimings } from "../../../titles.ts";
 import { colors, TextButton } from "../../../ui.tsx";
 
 /**
@@ -34,47 +28,15 @@ import { colors, TextButton } from "../../../ui.tsx";
  * as the desktop's Settings show them.
  */
 export default function Settings() {
-  const session = useSession();
-  const catalogue = useCatalogue();
-  const lists = useTitleLists();
+  const roster = useRoster();
   const statistics = useStatistics();
-  if (session.kind !== "signed-in") return null;
-  const { subscription, account } = session;
-  const host = hostOf(subscription.server);
-  // Only what needs the viewer: a load under way or one that failed.
-  const loads = [
-    catalogue.kind === "loading"
-      ? "Loading channels"
-      : catalogue.kind === "failed"
-        ? `Channels: ${failureOf(catalogue.error, subscription.server).headline}`
-        : null,
-    lists.kind === "loading"
-      ? "Loading movies and series"
-      : lists.kind === "failed"
-        ? `Movies and series: ${failureOf(lists.error, subscription.server).headline}`
-        : null,
-  ].filter((line) => line !== null);
+  if (roster.kind !== "ready") return null;
   return (
     <ScrollView style={styles.screen} contentInsetAdjustmentBehavior="automatic">
-      <Section name="Provider" />
-      <View style={styles.block} accessible testID="settings-provider">
-        <Text style={styles.name} numberOfLines={1}>
-          {host}
-        </Text>
-        <Text style={styles.plain} numberOfLines={2}>
-          {[subscription.username, accountLine(account, subscription.server)].join(" · ")}
-        </Text>
-        {loads.map((line) => (
-          <Text key={line} style={styles.plain} numberOfLines={2}>
-            {line}
-          </Text>
-        ))}
-      </View>
-      <View style={styles.actions}>
-        <TextButton label="Reload channels" onPress={loadCatalogue} />
-        <TextButton label="Reload movies and series" onPress={loadTitles} />
-        <TextButton label="Disconnect" onPress={() => void disconnect()} destructive />
-      </View>
+      <Section name={roster.members.length > 1 ? "Providers" : "Provider"} />
+      {roster.members.map((member) => (
+        <Provider key={member.entry.id} member={member} />
+      ))}
 
       <Section name="Downloads" />
       <Text style={styles.paragraph}>
@@ -137,6 +99,50 @@ export default function Settings() {
       {__DEV__ ? <Development /> : null}
       <View style={styles.end} />
     </ScrollView>
+  );
+}
+
+/** A provider: its name, account and lists, with its own reloads. */
+function Provider({ member }: { member: Member }) {
+  const { entry, label, account, live, titles } = member;
+  // Only what needs the viewer: a load under way or one that failed.
+  const loads = [
+    live.kind === "loading"
+      ? "Loading channels"
+      : live.kind === "failed"
+        ? `Channels: ${failureOf(live.error, entry.server).headline}`
+        : null,
+    titles.kind === "loading"
+      ? "Loading movies and series"
+      : titles.kind === "failed"
+        ? `Movies and series: ${failureOf(titles.error, entry.server).headline}`
+        : null,
+  ].filter((line) => line !== null);
+  return (
+    <>
+      <View style={styles.block} accessible testID={`settings-provider-${entry.id}`}>
+        <Text style={styles.name} numberOfLines={1}>
+          {label}
+        </Text>
+        <Text style={styles.plain} numberOfLines={2}>
+          {[entry.username, accountLine(account, entry.server)].join(" · ")}
+        </Text>
+        {loads.map((line) => (
+          <Text key={line} style={styles.plain} numberOfLines={2}>
+            {line}
+          </Text>
+        ))}
+      </View>
+      <View style={styles.actions}>
+        <TextButton label="Reload channels" onPress={() => reloadChannels(entry.id)} />
+        <TextButton label="Reload movies and series" onPress={() => reloadTitles(entry.id)} />
+        <TextButton
+          label="Disconnect"
+          onPress={() => void remove(entry.id, { keepHistory: false }).catch(() => undefined)}
+          destructive
+        />
+      </View>
+    </>
   );
 }
 

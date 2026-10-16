@@ -91,6 +91,11 @@ export function failureOf(error: AppError, server: string): Failure {
         headline: `${host} isn't answering`,
         advice: "This usually passes. Try again in a minute.",
       };
+    case "needs-secret":
+      return {
+        headline: `Enter the password for ${host} again`,
+        advice: "Your iPhone no longer gives it back. Enter it in Settings.",
+      };
     case "keychain-refused":
       return {
         headline: "Your iPhone wouldn't save the password",

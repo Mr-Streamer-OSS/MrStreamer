@@ -160,6 +160,7 @@ const playing = (isPlaying: boolean) => emit("playingChange", { isPlaying });
 
 const channel = (id = "c1") => ({
   id,
+  subscriptionId: "xtream-test",
   title: CHANNEL,
   place: "cnry place",
   live: true,

@@ -5,18 +5,12 @@ import type { IndexedCatalogue } from "@mrstreamer/core/ondemand/catalogue";
 import { router } from "expo-router";
 import { useCallback, useMemo } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { retryTitles } from "./account.ts";
 import { describeError } from "./errors.ts";
 import { detailsHref, openDetails, resume, useContinueWatching } from "./resume.ts";
 import { store, useStore } from "./store.ts";
 import { useFixedTabBar } from "./tab-bar.ts";
-import {
-  collectionOf,
-  loadTitles,
-  rowsOf,
-  tilesOf,
-  useMetadataVersion,
-  useTitleLists,
-} from "./titles.ts";
+import { collectionOf, rowsOf, tilesOf, useMetadataVersion, useTitleLists } from "./titles.ts";
 import { Artwork, CollectionTileView, PosterGrid, Shelf, TextTabs } from "./titles-ui.tsx";
 import { colors, Message } from "./ui.tsx";
 import { useViewing } from "./viewing.ts";
@@ -47,7 +41,7 @@ export function TitlesHome({ kind }: { kind: TitleKind }) {
       <View style={styles.screen}>
         <Message
           text={describeError(lists.error)}
-          action={{ label: "Try again", onPress: loadTitles }}
+          action={{ label: "Try again", onPress: retryTitles }}
         />
       </View>
     );
@@ -204,7 +198,7 @@ function Featured({ title }: { title: Title }) {
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={[title.title, line].filter(Boolean).join(", ")}
-      onPress={() => router.push(detailsHref(title.kind, title.id))}
+      onPress={() => router.push(detailsHref(title.kind, title))}
       style={({ pressed }) => [styles.featured, pressed && styles.pressed]}
       testID="featured"
     >

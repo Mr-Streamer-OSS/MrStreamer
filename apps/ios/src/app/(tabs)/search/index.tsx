@@ -1,11 +1,10 @@
-import type { ListedChannel } from "@mrstreamer/core/catalogue/variants";
 import type { Title } from "@mrstreamer/contracts/ondemand";
 import { useNavigation } from "expo-router";
 import { useCallback, useDeferredValue, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Pressable, SectionList, StyleSheet, Text, View } from "react-native";
 import type { SearchBarCommands } from "react-native-screens";
 import { playChannel, useCatalogue } from "../../../account.ts";
-import { searchChannels } from "../../../library.ts";
+import { searchChannels, type Channel } from "../../../library.ts";
 import { playingId, usePlayback } from "../../../playback.ts";
 import { openDetails } from "../../../resume.ts";
 import { onSearchText } from "../../../telemetry/index.ts";
@@ -18,7 +17,7 @@ const SHOWN = 20;
 
 type Row =
   | { readonly kind: "title"; readonly title: Title }
-  | { readonly kind: "channel"; readonly channel: ListedChannel };
+  | { readonly kind: "channel"; readonly channel: Channel };
 
 /**
  * Films, series and live channels by name, matched as the desktop's search matches words: titles
@@ -81,11 +80,11 @@ export default function Search() {
   }, [navigation]);
 
   const watch = useCallback(
-    (channel: ListedChannel) => {
+    (channel: Channel) => {
       if (!library) return;
       // The system search field keeps its keyboard up until it is blurred, over Watch too.
       searchBar.current?.blur();
-      playChannel(channel, library.placeOf.get(channel.id) ?? "", { watch: true });
+      playChannel(channel, library.placeOf.get(channel.key) ?? "", { watch: true });
     },
     [library],
   );
@@ -98,7 +97,7 @@ export default function Search() {
     <SectionList
       style={styles.screen}
       sections={sections}
-      keyExtractor={(row) => (row.kind === "title" ? row.title.key : row.channel.id)}
+      keyExtractor={(row) => (row.kind === "title" ? row.title.key : row.channel.key)}
       extraData={playing}
       renderSectionHeader={({ section }) => (
         <Text style={styles.section} accessibilityRole="header">
@@ -113,8 +112,8 @@ export default function Search() {
         ) : (
           <ChannelRow
             channel={item.channel}
-            detail={library?.placeOf.get(item.channel.id) ?? ""}
-            playing={item.channel.id === playing}
+            detail={library?.placeOf.get(item.channel.key) ?? ""}
+            playing={item.channel.key === playing}
             height={height}
             onPress={watch}
           />

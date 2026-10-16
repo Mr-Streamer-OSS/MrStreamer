@@ -1,12 +1,11 @@
-import type { ListedChannel } from "@mrstreamer/core/catalogue/variants";
 import { router } from "expo-router";
 import { VideoView } from "expo-video";
 import { useCallback, useMemo } from "react";
 import { ActionSheetIOS, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { loadCatalogue, playChannel, useCatalogue, useSession } from "../../../account.ts";
+import { playChannel, retryChannels, useCatalogue } from "../../../account.ts";
 import { failureOf } from "../../../errors.ts";
 import { Glass, IconButton } from "../../../glass.tsx";
-import type { Library } from "../../../library.ts";
+import type { Channel, Library } from "../../../library.ts";
 import {
   openWatch,
   player,
@@ -37,16 +36,15 @@ const MOVIES = 20;
  */
 export default function Home() {
   const catalogue = useCatalogue();
-  const session = useSession();
-  const { recent, region } = useSavedState();
+  const { recentChannels: recent = [], region } = useSavedState();
   const playback = usePlayback();
   const continuing = useContinueWatching();
   const saved = useWatchlist();
   const titlesShown = continuing.length > 0 || saved.length > 0;
   const library = catalogue.kind === "ready" ? catalogue.library : null;
   const recentChannels = library
-    ? recent.flatMap((id) => {
-        const channel = library.byId.get(id);
+    ? recent.flatMap((key) => {
+        const channel = library.byKey.get(key);
         return channel ? [channel] : [];
       })
     : [];
@@ -57,7 +55,7 @@ export default function Home() {
         []);
   const onNow = listed.slice(0, ON_NOW);
   const preview = useCallback(
-    (channel: ListedChannel) =>
+    (channel: Channel) =>
       library && playChannel(channel, placeOf(library, channel), { watch: false }),
     [library],
   );
@@ -66,7 +64,7 @@ export default function Home() {
   const shown =
     playback.phase.kind === "idle"
       ? suggested
-      : (library?.byId.get(playback.phase.item.id) ?? null);
+      : (library?.byKey.get(playback.phase.item.id) ?? null);
 
   return (
     <ScrollView style={styles.screen} contentInsetAdjustmentBehavior="automatic">
@@ -89,11 +87,8 @@ export default function Home() {
       ) : null}
       {catalogue.kind === "failed" ? (
         <Notice
-          failure={failureOf(
-            catalogue.error,
-            session.kind === "signed-in" ? session.subscription.server : "",
-          )}
-          actions={[{ label: "Try again", onPress: loadCatalogue }]}
+          failure={failureOf(catalogue.error, catalogue.member.entry.server)}
+          actions={[{ label: "Try again", onPress: retryChannels }]}
         />
       ) : null}
       <TitleRows />
@@ -106,7 +101,7 @@ export default function Home() {
   );
 }
 
-const placeOf = (library: Library, channel: ListedChannel) => library.placeOf.get(channel.id) ?? "";
+const placeOf = (library: Library, channel: Channel) => library.placeOf.get(channel.key) ?? "";
 
 /** Channels as a row of logos to preview on the Stage, with All channels opening Live. */
 function OnNow({
@@ -115,10 +110,10 @@ function OnNow({
   playing,
   onPress,
 }: {
-  channels: readonly ListedChannel[];
+  channels: readonly Channel[];
   library: Library;
   playing: string | null;
-  onPress: (channel: ListedChannel) => void;
+  onPress: (channel: Channel) => void;
 }) {
   return (
     <View style={styles.block}>
@@ -141,15 +136,15 @@ function OnNow({
         contentContainerStyle={styles.tiles}
       >
         {channels.map((channel) => {
-          const line = channel.id === playing ? "Playing" : shelfOf(placeOf(library, channel));
+          const line = channel.key === playing ? "Playing" : shelfOf(placeOf(library, channel));
           return (
             <Pressable
-              key={channel.id}
+              key={channel.key}
               accessibilityRole="button"
               accessibilityLabel={[channel.title, line].filter(Boolean).join(", ")}
               onPress={() => onPress(channel)}
               style={({ pressed }) => [styles.tile, pressed && styles.pressed]}
-              testID={`home-channel-${channel.id}`}
+              testID={`home-channel-${channel.key}`}
             >
               <ChannelLogo channel={channel} style={styles.tileLogo} large />
               <Text style={styles.tileName} numberOfLines={1}>
@@ -254,7 +249,7 @@ function Stage({
 }: {
   playback: Playback;
   /** The channel playing, or the one Play starts. */
-  channel: ListedChannel | null;
+  channel: Channel | null;
   /** Under the name while idle: why this channel. */
   line: string;
   onPlay: () => void;

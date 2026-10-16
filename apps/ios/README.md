@@ -5,7 +5,8 @@ React Native on Hermes (Expo SDK 58), building toward the desktop app's features
 own native adapters: the Keychain, app storage and one native player so far. Nothing of it is in
 the desktop's install, build or packages.
 
-So far it connects one Xtream subscription. Live lists a country's channels with their
+It connects Xtream subscriptions, one or several, and shows everything from all of them
+together, as the desktop does: there is no subscription to switch to. Live lists a country's channels with their
 providers' logos, its categories as text tabs, and plays them; Films and Series browse the
 desktop's collections (For you, New, Genres, Services, 4K and All) and open details pushed on
 their tab, with seasons and episodes, the version menu, the watchlist and episodes marked by hand.
@@ -48,28 +49,43 @@ its address, which AVKit's logs print. The player's failures reach the screen th
 
 Each responsibility has one owner, a plain module with a store the screens read:
 
-- `src/account.ts`: the subscription and its live catalogue. It signs in with core's Xtream
-  adapter (shared with the desktop), loads and reloads the channel list, cancels a load the
-  viewer moved past, and disconnects. A sign-in overtaken by a newer one or by Disconnect saves
-  nothing and signs nothing in.
-- `src/library.ts`: the catalogue as the screens show it, by core's names, quality grouping and
-  country rules.
-- `src/titles.ts`: the movie and series lists through the same adapter, indexed by core's
-  `indexCatalogue` (each kind in a task of its own, so input is handled between them), core's
-  collections and search, details with TMDB's facts, and the file each title streams from.
-  TMDB's metadata comes from core's store (`metadata/store.ts`, shared with the desktop) and is
-  kept in Caches.
+- `src/account.ts`: the saved subscriptions and their lists. It adds them (the provider checks
+  the login before anything is saved; the same account added again updates the one saved),
+  edits, retries and removes them, signs each in with core's Xtream adapter (shared with the
+  desktop) and loads each one's channels, and its movie and series lists once its login is
+  checked. Each has its own login, loads and failures: one that fails, reloads or is removed
+  leaves the others as they were. Changes to the registry and the Keychain run one at a time.
+- `src/subscriptions.ts`: the registry, `subscriptions.json`, and how private beta 2's one
+  subscription in `state.json` becomes its first entry under the same id. Accounts removed with
+  their history kept are remembered, so adding one again takes its id, and its history, back. Ids
+  whose Keychain item an add or a removal was writing when the app stopped are listed, and the
+  next launch removes those items; nothing else in the Keychain is touched.
+- `src/sources.ts`: each subscription's provider adapter and login, apart from every store, so no
+  screen, snapshot or failure holds a password. Requests go to the subscription that lists what
+  they name (`OwnedId`), and a failure hides only that subscription's login.
+- `src/library.ts`: every subscription's channels together, by core's names, quality grouping and
+  country rules, and the desktop's way of combining them: categories of one name in one country
+  are one, and a channel is never joined across subscriptions. Two channels of one name say which
+  subscription each is from.
+- `src/titles.ts`: every subscription's movie and series lists, indexed together by core's
+  `indexCatalogue` (each kind in a task of its own, so input is handled between them): a film two
+  list under one TMDB id is one title with both versions, never by name. Core's collections and
+  search, details with TMDB's facts, and the file each version streams from, asked of its own
+  subscription. TMDB's metadata comes from core's store (`metadata/store.ts`, shared with the
+  desktop) and is kept in Caches.
 - `src/viewing.ts`: how far titles got, episode marks and Continue watching: core's
-  `ViewingRecord` service over core's in-memory store, its snapshot in `viewing.json`.
-- `src/watchlist.ts`: saved movies and series in `watchlist.json`, by core's watchlist rules.
+  `ViewingRecord` service over core's in-memory store, its snapshot in `viewing.json`, one record
+  per subscription under its id.
+- `src/watchlist.ts`: saved movies and series, each subscription's record in `watchlists.json`,
+  shown as one by core's watchlist rules. Beta 2's `watchlist.json` is read until the first change.
 - `src/playback.ts`: the one `expo-video` player and what it plays, a channel or a title. Home's
   preview, Watch, Picture in Picture and the accessory all show or control this player; none
-  opens a stream of its own. Another channel or title, Stop, Disconnect and a failure each let go
+  opens a stream of its own. Another channel or title, Stop, removing its subscription and a failure each let go
   of the stream. `src/play-title.ts` plays movies and episodes in it, saving how far they got.
-- `src/storage.ts`: what the app keeps between launches, apart from secrets, in one JSON file in
-  Documents: the subscription's server and username, recent channels and the Live country.
-  `src/files.ts` writes the viewing record and watchlist files whole, through a file beside them.
-  Disconnect erases both.
+- `src/storage.ts`: what the app keeps between launches, apart from secrets and the registry, in
+  `state.json` in Documents: recent channels by subscription and the Live country, and beta 2's
+  subscription for an older build to show. `src/files.ts` writes every file whole, through a file
+  beside it. Removing a subscription keeps its history unless the viewer deletes it too.
 - `src/telemetry/`: product statistics, off until the viewer turns them on in Settings. One owner
   keeps the viewer's choice, a random installation id and a bounded outbox in `analytics.json`,
   and builds every event from fixed observations: the app's activity, the player's state and

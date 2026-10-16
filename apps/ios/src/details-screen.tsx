@@ -31,12 +31,12 @@ import {
 import { Glass } from "./glass.tsx";
 import { failureOf, playEpisode, playMovie, useFailure, type Failure } from "./play-title.ts";
 import { useRead } from "./read.ts";
-import { openDetails } from "./resume.ts";
+import { members, useRoster } from "./account.ts";
+import { openDetails, versionOf } from "./resume.ts";
 import {
   collectionOf,
   detailsOf,
   episodesOf,
-  subscriptionOf,
   titleOf,
   useMetadataVersion,
   useTitleLists,
@@ -63,16 +63,17 @@ function failureNote(failure: Failure | undefined): string | null {
       : null;
 }
 
-export function DetailsScreen({ kind, id }: { kind: TitleKind; id: string }) {
+/** The details of the title whose version `version` (an `ownedKey`) names. */
+export function DetailsScreen({ kind, version }: { kind: TitleKind; version: string }) {
   const lists = useTitleLists();
   const metadata = useMetadataVersion();
-  const opened = useMemo(() => ({ subscriptionId: subscriptionOf(), id }), [id]);
+  const opened = useMemo(() => versionOf(version), [version]);
   const title = useMemo(
-    () => (lists.kind === "ready" ? titleOf(lists.index, kind, opened) : undefined),
+    () => (lists.kind === "ready" && opened ? titleOf(lists.index, kind, opened) : undefined),
     [lists, kind, opened, metadata],
   );
   if (lists.kind !== "ready") return <Message text="Loading" />;
-  if (!title) return <Message text="The provider no longer lists this title." />;
+  if (!title || !opened) return <Message text="The provider no longer lists this title." />;
   return <Details title={title} opened={opened} />;
 }
 
@@ -106,14 +107,26 @@ function Details({ title, opened }: { title: Title; opened: OwnedId }) {
     useCallback(() => detailsOf(shownTitle), [shownTitle]),
   );
   const failedHere = useFailure(title.kind, version);
+  const roster = useRoster();
+  // Versions from several subscriptions say which each is from, in the order they were added.
+  const providers = useMemo(() => {
+    const listed = roster.kind === "ready" ? roster.members : members();
+    const labels = new Map(listed.map((member) => [member.entry.id, member.label]));
+    const several = new Set(title.versions.map((each) => each.subscriptionId)).size > 1;
+    return {
+      order: listed.map((member) => member.entry.id),
+      label: (subscriptionId: string) => (several ? labels.get(subscriptionId) : undefined),
+    };
+  }, [roster, title]);
   const saved = savedEntry(watchlist, title) !== undefined;
 
   const chooseVersion = () => {
-    const groups = versionOptions(title.versions, title.originalLanguage, [subscriptionOf()]);
+    const groups = versionOptions(title.versions, title.originalLanguage, providers.order);
     const choices = groups.flatMap((group) =>
       group.versions.map((each, at) => ({
         version: ownedId(each),
         label: [
+          providers.label(group.subscriptionId),
           group.quality,
           group.label + (group.versions.length > 1 ? ` (${at + 1})` : ""),
           failureNote(failureOf(title.kind, each)),
@@ -135,10 +148,14 @@ function Details({ title, opened }: { title: Title; opened: OwnedId }) {
     );
   };
   const versionLabel = useMemo(() => {
-    const groups = versionOptions(title.versions, title.originalLanguage, [subscriptionOf()]);
+    const groups = versionOptions(title.versions, title.originalLanguage, providers.order);
     const group = groups.find((each) => each.versions.some((v) => sameOwned(v, version)));
-    return group ? [group.quality, group.label].filter(Boolean).join(" · ") : "";
-  }, [title, version]);
+    return group
+      ? [providers.label(group.subscriptionId), group.quality, group.label]
+          .filter(Boolean)
+          .join(" · ")
+      : "";
+  }, [title, version, providers]);
 
   const facts = details.kind === "ready" ? details.value : null;
   const movieProgress =

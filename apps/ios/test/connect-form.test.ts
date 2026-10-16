@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // The Connect form after a failed sign-in: its button says Try again only for the details that
 // just failed, and the failure shows only while those details stand. A sign-in that fails after
 // a field changed says nothing about the new details. The real screen runs with React DOM on a
-// happy-dom window; React Native's views stand in as plain elements and `connect` is held until
+// happy-dom window; React Native's views stand in as plain elements and `add` is held until
 // a test answers it. The file stays in Node's environment, where the mocked native modules need
 // no install.
 
@@ -26,8 +26,7 @@ vi.stubGlobal("__DEV__", false);
 const signIns: Array<{ server: string; fail: () => void; succeed: () => void }> = [];
 
 vi.mock("../src/account.ts", () => ({
-  useSession: () => ({ kind: "signed-out", saved: null }),
-  connect: (input: { server: string }) =>
+  add: (input: { server: string }) =>
     new Promise<void>((resolve, reject) => {
       signIns.push({
         server: input.server,

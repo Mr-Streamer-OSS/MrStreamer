@@ -1,4 +1,5 @@
 import type { ListedChannel } from "@mrstreamer/core/catalogue/variants";
+import type { Channel } from "./library.ts";
 import { memo, useState } from "react";
 import {
   Image,
@@ -76,11 +77,11 @@ export const ChannelRow = memo(function ChannelRow({
   height,
   onPress,
 }: {
-  channel: ListedChannel;
+  channel: Channel;
   detail: string;
   playing: boolean;
   height: number;
-  onPress: (channel: ListedChannel) => void;
+  onPress: (channel: Channel) => void;
 }) {
   const tags = channel.tags.join(" ");
   return (
@@ -90,7 +91,7 @@ export const ChannelRow = memo(function ChannelRow({
       accessibilityHint={detail}
       onPress={() => onPress(channel)}
       style={({ pressed }) => [styles.row, { height }, pressed && styles.pressed]}
-      testID={`channel-${channel.id}`}
+      testID={`channel-${channel.key}`}
     >
       <ChannelLogo channel={channel} style={styles.rowMark} />
       <View style={styles.names}>

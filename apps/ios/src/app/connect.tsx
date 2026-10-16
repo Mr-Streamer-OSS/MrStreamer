@@ -1,29 +1,23 @@
 import { router } from "expo-router";
 import { useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { connect, useSession } from "../account.ts";
+import { add } from "../account.ts";
 import { appError, failureOf, type Failure } from "../errors.ts";
 import { colors, TextButton } from "../ui.tsx";
 
 /**
- * Signs in to an Xtream subscription, on one form. A failure keeps every field and says what
+ * Adds the first Xtream subscription, on one form. A failure keeps every field and says what
  * happened and what to do; Connect becomes Try again with the same details until a field changes,
  * which clears the failure. The root layout shows the tabs once it is signed in.
  */
 export default function Connect() {
-  const session = useSession();
-  const saved = session.kind === "signed-out" ? session.saved : null;
-  const [server, setServer] = useState(saved?.server ?? "");
-  const [username, setUsername] = useState(saved?.username ?? "");
+  const [server, setServer] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  // The line under the fields. `tried` when it is the failure of the details as they stand: the
-  // button says Try again, and an edit clears it. The saved login's prompt stays until Connect.
-  const [notice, setNotice] = useState<{ failure: Failure; tried: boolean } | null>(
-    saved
-      ? { failure: { headline: "Enter the password again.", advice: null }, tried: false }
-      : null,
-  );
+  // The line under the fields, when it is the failure of the details as they stand: the button
+  // says Try again, and an edit clears it.
+  const [notice, setNotice] = useState<{ failure: Failure; tried: boolean } | null>(null);
   // Counts edits, so a sign-in that fails after the fields changed says nothing about them.
   const edits = useRef(0);
   // The keyboard's Go submits too, and can before `busy` renders: one sign-in at a time.
@@ -41,7 +35,7 @@ export default function Connect() {
     const submitted = edits.current;
     setBusy(true);
     setNotice(null);
-    connect({ server, username, password }).catch((cause: unknown) => {
+    add({ server, username, password }).catch((cause: unknown) => {
       pending.current = false;
       setBusy(false);
       if (edits.current !== submitted) return;

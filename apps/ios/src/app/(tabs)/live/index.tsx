@@ -1,10 +1,15 @@
-import type { ListedChannel } from "@mrstreamer/core/catalogue/variants";
 import { router, useNavigation } from "expo-router";
 import { useCallback, useLayoutEffect, useState } from "react";
 import { FlatList, StyleSheet, Text, View } from "react-native";
-import { loadCatalogue, playChannel, useCatalogue, useSession } from "../../../account.ts";
-import { failureOf, hostOf } from "../../../errors.ts";
-import type { Library, Region } from "../../../library.ts";
+import {
+  playChannel,
+  reloadAllChannels,
+  retryChannels,
+  useCatalogue,
+  useRoster,
+} from "../../../account.ts";
+import { failureOf } from "../../../errors.ts";
+import type { Channel, Library, Region } from "../../../library.ts";
 import { playingId, usePlayback } from "../../../playback.ts";
 import { useSavedState, writeState } from "../../../storage.ts";
 import { TextTabs } from "../../../titles-ui.tsx";
@@ -20,9 +25,11 @@ const ALL = "*";
  */
 export default function Live() {
   const catalogue = useCatalogue();
-  const session = useSession();
+  const roster = useRoster();
   const height = useRowHeight();
-  const host = session.kind === "signed-in" ? hostOf(session.subscription.server) : "";
+  const providers = roster.kind === "ready" ? roster.members : [];
+  // One provider is named; several are "your providers".
+  const host = providers.length === 1 && providers[0] ? providers[0].label : "";
   if (catalogue.kind === "loading") {
     return (
       <View style={styles.screen}>
@@ -34,7 +41,7 @@ export default function Live() {
     );
   }
   if (catalogue.kind === "failed") {
-    const failure = failureOf(catalogue.error, host);
+    const failure = failureOf(catalogue.error, catalogue.member.entry.server);
     return (
       <View style={styles.screen}>
         <Notice
@@ -43,7 +50,7 @@ export default function Live() {
             advice: [failure.headline, failure.advice].filter(Boolean).join(". "),
           }}
           actions={[
-            { label: "Try again", onPress: loadCatalogue },
+            { label: "Try again", onPress: retryChannels },
             { label: "Provider settings", onPress: () => router.navigate("/settings") },
           ]}
         />
@@ -54,8 +61,11 @@ export default function Live() {
     return (
       <View style={styles.screen}>
         <Notice
-          failure={{ headline: "No live channels", advice: `${host} lists no live channels.` }}
-          actions={[{ label: "Reload", onPress: loadCatalogue }]}
+          failure={{
+            headline: "No live channels",
+            advice: `${host || "Your providers"} ${host ? "lists" : "list"} no live channels.`,
+          }}
+          actions={[{ label: "Reload", onPress: reloadAllChannels }]}
         />
       </View>
     );
@@ -99,8 +109,8 @@ function Channels({ library, height }: { library: Library; height: number }) {
 
   const playing = playingId(phase);
   const watch = useCallback(
-    (channel: ListedChannel) =>
-      playChannel(channel, library.placeOf.get(channel.id) ?? "", { watch: true }),
+    (channel: Channel) =>
+      playChannel(channel, library.placeOf.get(channel.key) ?? "", { watch: true }),
     [library],
   );
   const tabs =
@@ -125,13 +135,13 @@ function Channels({ library, height }: { library: Library; height: number }) {
         key={`${region.name}\n${shelf?.id ?? ALL}`}
         style={styles.screen}
         data={channels}
-        keyExtractor={(channel) => channel.id}
+        keyExtractor={(channel) => channel.key}
         extraData={playing}
         renderItem={({ item }) => (
           <ChannelRow
             channel={item}
-            detail={library.placeOf.get(item.id) ?? ""}
-            playing={item.id === playing}
+            detail={library.placeOf.get(item.key) ?? ""}
+            playing={item.key === playing}
             height={height}
             onPress={watch}
           />

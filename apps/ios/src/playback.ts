@@ -6,8 +6,8 @@ import { store, useStore, type Store } from "./store.ts";
 // The app's one player and what it plays: a live channel, or a movie or an episode. Every surface
 // shows this player and no other: Home's preview, Watch, Picture in Picture and AirPlay, and the
 // accessory above the tabs controls it. Nothing opens a second stream for a preview. Playing
-// something else, stopping, disconnecting and a failure each let go of the stream, so the
-// provider's connection closes.
+// something else, stopping, removing its subscription and a failure each let go of the stream,
+// so the provider's connection closes.
 //
 // A title starts where it is asked to, has a length to seek in, and tells whoever played it how
 // far it got: every minute while it plays, when it pauses, and when it stops, fails or gives way
@@ -15,8 +15,10 @@ import { store, useStore, type Store } from "./store.ts";
 
 /** What plays, as the screens name it. */
 export interface Playing {
-  /** A channel's id, or a movie's or episode's version as `ownedKey` writes it. */
+  /** A channel's, movie's or episode's `ownedKey`. */
   readonly id: string;
+  /** The subscription it plays from. */
+  readonly subscriptionId: string;
   readonly title: string;
   /** Where the catalogue lists a channel, "Netherlands · News"; a title's line, "S1 E2 · Name". */
   readonly place: string;
@@ -101,8 +103,8 @@ export function playingId(phase: Phase): string | null {
 /**
  * A request of the viewer's that waits before it plays or opens anything, as a series' resume
  * waits for its details, or Next episode for how the episodes stand. It stands until the viewer
- * asks for something newer: any other request, any channel or title played, Stop (which
- * Disconnect calls) or another screen. Whatever waited checks `stands()` before acting, so a late
+ * asks for something newer: any other request, any channel or title played, Stop, removing a
+ * subscription or another screen. Whatever waited checks `stands()` before acting, so a late
  * answer never replaces what the viewer chose since, nor opens Watch over Connect.
  */
 export interface Request {
