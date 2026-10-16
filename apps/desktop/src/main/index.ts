@@ -594,7 +594,9 @@ async function start(): Promise<void> {
     );
   // The window reads its library again for each update, the full channel list among it. Until it
   // makes a call after one, all it reads for that update is still to come, after any catalogue
-  // swapped in since: telling it again would only have it read the same lists twice.
+  // swapped in since: telling it again would only have it read the same lists twice. A read it
+  // started before the update can answer from an older catalogue; the window marks its query
+  // stale again once it settles (`syncLibraryUpdates`), so no later update is needed for it.
   runtime.runFork(
     Stream.runForEach(library.changes, (status) =>
       Effect.sync(() => {

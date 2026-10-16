@@ -784,7 +784,8 @@ export interface IpcEvents {
   "analytics.reset": null;
   /**
    * A subscription's catalogue refresh finished, or failed and kept the previous channels. Not sent
-   * again until the window makes a call: what it reads for this one shows the later refreshes.
+   * again until the window makes a call: what it reads for this one shows the later refreshes, as
+   * long as it reads again what a read started before this one answered.
    */
   "library.updated": CatalogueStatus;
   /**
