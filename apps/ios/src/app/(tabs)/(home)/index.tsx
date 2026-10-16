@@ -11,7 +11,7 @@ import {
   player,
   retry,
   setMuted,
-  playingId,
+  playingChannel,
   usePlayback,
   type Playback,
 } from "../../../playback.ts";
@@ -59,12 +59,14 @@ export default function Home() {
       library && playChannel(channel, placeOf(library, channel), { watch: false }),
     [library],
   );
-  const playing = playingId(playback.phase);
+  const playing = playingChannel(playback.phase);
   const suggested = onNow[0] ?? null;
   const shown =
     playback.phase.kind === "idle"
       ? suggested
-      : (library?.byKey.get(playback.phase.item.id) ?? null);
+      : playback.phase.item.live
+        ? (library?.byKey.get(playback.phase.item.id) ?? null)
+        : null;
 
   return (
     <ScrollView style={styles.screen} contentInsetAdjustmentBehavior="automatic">

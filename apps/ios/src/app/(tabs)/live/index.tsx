@@ -12,7 +12,7 @@ import {
 } from "../../../account.ts";
 import { failureOf } from "../../../errors.ts";
 import type { Channel, Library, Region } from "../../../library.ts";
-import { playingId, usePlayback } from "../../../playback.ts";
+import { playingChannel, usePlayback } from "../../../playback.ts";
 import { useSavedState, writeState } from "../../../storage.ts";
 import { TextTabs } from "../../../titles-ui.tsx";
 import {
@@ -146,7 +146,7 @@ function Channels({
     });
   }, [navigation, library, region, choose]);
 
-  const playing = playingId(phase);
+  const playing = playingChannel(phase);
   const watch = useCallback(
     (channel: Channel) =>
       playChannel(channel, library.placeOf.get(channel.key) ?? "", { watch: true }),

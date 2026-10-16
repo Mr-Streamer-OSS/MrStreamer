@@ -195,7 +195,15 @@ export function buildLibrary(sources: readonly LiveSource[]): Library {
       unplaced.push(channel);
     }
   }
-  if (unplaced.length > 0) listed.push({ name: others, shelves: [], channels: unplaced });
+  // A region is named once: a provider's own "Other channels" takes them in, so Live's country
+  // menu, which goes by name, never holds two of one name.
+  const named = listed.findIndex((region) => region.name === others);
+  const region = listed[named];
+  if (unplaced.length > 0 && region) {
+    listed[named] = { ...region, channels: [...region.channels, ...unplaced] };
+  } else if (unplaced.length > 0) {
+    listed.push({ name: others, shelves: [], channels: unplaced });
+  }
   return { regions: listed, byKey, placeOf };
 }
 

@@ -95,9 +95,15 @@ export const playbackClock: Pick<Store<number>, "get" | "subscribe"> = clock;
 export const usePlaybackClock = () => useStore(clock);
 export const usePlaybackLength = () => useStore(length);
 
-/** What plays or is about to, for lists to mark; none once it failed or stopped. */
-export function playingId(phase: Phase): string | null {
-  return phase.kind === "idle" || phase.kind === "failed" ? null : phase.item.id;
+/**
+ * The channel that plays or is about to, for channel lists to mark; none once it failed or
+ * stopped, or while a title plays. A movie's key can read like a channel's of the same
+ * subscription, so a title never counts.
+ */
+export function playingChannel(phase: Phase): string | null {
+  return phase.kind === "idle" || phase.kind === "failed" || !phase.item.live
+    ? null
+    : phase.item.id;
 }
 
 /**

@@ -5,7 +5,7 @@ import { Pressable, SectionList, StyleSheet, Text, View } from "react-native";
 import type { SearchBarCommands } from "react-native-screens";
 import { playChannel, useCatalogue } from "../../../account.ts";
 import { searchChannels, type Channel } from "../../../library.ts";
-import { playingId, usePlayback } from "../../../playback.ts";
+import { playingChannel, usePlayback } from "../../../playback.ts";
 import { openDetails } from "../../../resume.ts";
 import { onSearchText } from "../../../telemetry/index.ts";
 import { searchTitles, useMetadataVersion, useTitleLists } from "../../../titles.ts";
@@ -92,7 +92,7 @@ export default function Search() {
     searchBar.current?.blur();
     openDetails(title);
   }, []);
-  const playing = playingId(phase);
+  const playing = playingChannel(phase);
   return (
     <SectionList
       style={styles.screen}

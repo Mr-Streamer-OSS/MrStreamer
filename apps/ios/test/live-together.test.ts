@@ -86,3 +86,30 @@ describe("channels of several subscriptions", () => {
     expect(library.placeOf.get("a:12")).toBe("Other channels");
   });
 });
+
+describe("channels in no category", () => {
+  it("join a provider's own region of that name rather than make a second one", () => {
+    const own: LiveCatalogue = {
+      categories: [
+        { id: "1", name: "News" },
+        { id: "2", name: "Other channels" },
+      ],
+      channels: [
+        channel("1", "Alpha", ["1"]),
+        channel("2", "Bravo", ["2"]),
+        channel("3", "Charlie", []),
+      ],
+    };
+    const joined = buildLibrary([
+      { subscriptionId: "a", label: "Home", catalogue: own },
+      {
+        subscriptionId: "b",
+        label: "Cabin",
+        catalogue: { categories: [], channels: [channel("9", "Delta", [])] },
+      },
+    ]);
+    const names = joined.regions.map((region) => region.name);
+    expect(names).toEqual(["News", "Other channels"]);
+    expect(joined.regions[1]?.channels.map((each) => each.key)).toEqual(["a:2", "a:3", "b:9"]);
+  });
+});
