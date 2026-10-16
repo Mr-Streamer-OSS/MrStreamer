@@ -3,7 +3,6 @@ import { isPictureInPictureSupported, VideoAirPlayButton, VideoView } from "expo
 import { useEffect, useRef, useState } from "react";
 import {
   ActionSheetIOS,
-  Dimensions,
   Keyboard,
   PanResponder,
   Pressable,
@@ -73,12 +72,9 @@ export function WatchLayer() {
   const landscape = watch && phase.kind !== "idle" && !phase.item.live;
   useEffect(() => {
     if (!landscape) return;
-    const { width, height } = Dimensions.get("window");
-    const sideways = width > height;
     turn(() => lockAsync(OrientationLock.LANDSCAPE));
-    // Unlocking turned the screens under Watch back to landscape on iOS 27 (on the simulator), so
-    // unless they were sideways before, they stay upright until a title asks for landscape again.
-    return () => turn(() => (sideways ? unlockAsync() : lockAsync(OrientationLock.PORTRAIT_UP)));
+    // Closing gives the screens back the app's own rotation: iOS turns them as the phone is held.
+    return () => turn(unlockAsync);
   }, [landscape]);
   useEffect(() => {
     if (!watch) return;
