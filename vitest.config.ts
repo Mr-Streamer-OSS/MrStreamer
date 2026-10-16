@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { defineConfig } from "vitest/config";
 import { exclude, include } from "./test/suites.ts";
 
@@ -10,7 +10,25 @@ process.env["NODE_COMPILE_CACHE"] ??= join(
   "node_modules/.cache/node-compile-cache",
 );
 
+// The iOS app keeps its own install, which CI doesn't make (pnpm-workspace.yaml leaves it out).
+// Its tests run the app's own TypeScript with the native modules mocked, so the shared packages
+// and React it imports resolve from the desktop app's install instead: one copy of each, as the
+// app's Metro resolves the shared packages' imports from the app (apps/ios/metro.config.cjs).
+const ios = join(import.meta.dirname, "apps/ios") + sep;
+const desktop = join(import.meta.dirname, "apps/desktop/package.json");
+const fromDesktop = /^(?:@mrstreamer\/(?:contracts|core)\/|react(?:-dom)?(?:\/|$))/;
+
 export default defineConfig({
+  plugins: [
+    {
+      name: "ios-tests-from-desktop-install",
+      enforce: "pre",
+      resolveId(source, importer, options) {
+        if (!importer?.startsWith(ios) || !fromDesktop.test(source)) return null;
+        return this.resolve(source, desktop, { ...options, skipSelf: true });
+      },
+    },
+  ],
   test: {
     include,
     exclude,

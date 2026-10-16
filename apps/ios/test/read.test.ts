@@ -1,20 +1,20 @@
 // @vitest-environment happy-dom
-import { describe, expect, it, vi } from "vitest";
+import * as React from "react";
+import { describe, expect, it } from "vitest";
 
 // A screen's read answers only the request it was made for: once the viewer picks another
 // version or season, nothing of the earlier answer shows, from the very next render, until the
-// new request answers. Run with a React DOM renderer; the hook's React is the same copy.
+// new request answers. Run with React DOM; the tests resolve React and React DOM from the
+// desktop's install (vitest.config.ts), so the hook and the renderer share one React.
 
-const REACT = "../../desktop/node_modules/react/index.js";
-const REACT_DOM = "../../desktop/node_modules/react-dom/client.js";
-vi.mock("react", async () => await import(REACT));
+/** The app's own types have no React DOM; the tests resolve it from the desktop's install. */
+const REACT_DOM = "react-dom/client";
 
 type Root = { render(node: unknown): void; unmount(): void };
 /** happy-dom's document; the app's own types have no DOM. */
 const { document } = globalThis as unknown as {
   document: { createElement(tag: string): object };
 };
-const React = (await import(REACT)) as typeof import("react");
 const { createRoot } = (await import(REACT_DOM)) as {
   createRoot(container: object): Root;
 };
