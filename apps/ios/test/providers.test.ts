@@ -792,6 +792,18 @@ describe("removing a subscription", () => {
     expect(ids(app)).toEqual([a]);
   });
 
+  it("keeps the subscription saved when the registry refuses its removal", async () => {
+    const { app, a, b } = await twoProviders();
+    const before = memory.files.get(doc("subscriptions.json"));
+    memory.full.add("subscriptions.json");
+    await expect(app.remove(b, { keepHistory: false })).rejects.toThrow();
+    expect(ids(app)).toEqual([a, b]);
+    memory.full.clear();
+    expect(memory.files.get(doc("subscriptions.json"))).toBe(before);
+    expect(memory.keychain.has(`s.${b}`)).toBe(true);
+    expect(ids(await launch())).toEqual([a, b]);
+  });
+
   it("drops a remove's password at the next launch when the Keychain kept it", async () => {
     const { app, b } = await twoProviders();
     const removing = app.remove(b, { keepHistory: true });

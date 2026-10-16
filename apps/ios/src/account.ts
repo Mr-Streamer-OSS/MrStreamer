@@ -501,7 +501,8 @@ export async function update(
  * another plays on. Its favourites, watchlist, history and progress stay for when the account is
  * added again, unless `keepHistory` is false. Removing the last returns to Connect.
  *
- * The registry is written first, with the history to delete when it goes too; from then on the
+ * The registry is written first, with the history to delete when it goes too; a refused write
+ * rejects with nothing changed, and the subscription stays in the roster. From then on the
  * removal stands, whatever fails after. A history not all deleted rejects the promise, and each
  * launch deletes the rest until it is gone. A password the Keychain didn't remove is removed at
  * the next launch.

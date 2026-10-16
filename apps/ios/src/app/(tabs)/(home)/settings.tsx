@@ -19,6 +19,7 @@ import {
   View,
 } from "react-native";
 import {
+  members,
   reloadChannels,
   reloadTitles,
   remove,
@@ -198,16 +199,24 @@ function standing({ entry, account, needsSecret, live, titles }: Member): string
 
 /**
  * Asks before removing, saying what goes. Its history stays unless the viewer deletes it too;
- * the last one removed returns to Connect.
+ * the last one removed returns to Connect. A failed removal says how it stands: still saved
+ * when the registry refused it, else removed with history the next launch deletes.
  */
 function confirmRemove({ entry, label }: Member) {
   const removing = (keepHistory: boolean) => () =>
-    void remove(entry.id, { keepHistory }).catch(() =>
-      Alert.alert(
-        `${label} is removed`,
-        "Its history couldn't all be deleted yet. The app tries again when it next opens.",
-      ),
-    );
+    void remove(entry.id, { keepHistory }).catch(() => {
+      if (members().some((member) => member.entry.id === entry.id)) {
+        Alert.alert(
+          `Couldn't remove ${label}`,
+          "It's still saved and nothing was deleted. Try again.",
+        );
+      } else if (!keepHistory) {
+        Alert.alert(
+          `${label} is removed`,
+          "Its history couldn't all be deleted yet. The app tries again when it next opens.",
+        );
+      }
+    });
   Alert.alert(
     `Remove ${label}?`,
     "What plays from it stops. Its favourites, watchlist, history and progress stay for when you add it again, unless you delete them too.",
