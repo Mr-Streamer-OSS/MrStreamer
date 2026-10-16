@@ -7,7 +7,8 @@ import { store, useStore, type Store } from "./store.ts";
 // shows this player and no other: Home's preview, Watch, Picture in Picture and AirPlay, and the
 // accessory above the tabs controls it. Nothing opens a second stream for a preview. Playing
 // something else, stopping, removing its subscription and a failure each let go of the stream,
-// so the provider's connection closes.
+// so the provider's connection closes. A download of the same subscription gives the connection
+// back before a stream opens (`onReclaim`); a downloaded copy plays from the phone and takes none.
 //
 // A title starts where it is asked to, has a length to seek in, and tells whoever played it how
 // far it got: every minute while it plays, when it pauses, and when it stops, fails or gives way
@@ -17,8 +18,11 @@ import { store, useStore, type Store } from "./store.ts";
 export interface Playing {
   /** A channel's, movie's or episode's `ownedKey`. */
   readonly id: string;
-  /** The subscription it plays from. */
-  readonly subscriptionId: string;
+  /**
+   * The subscription whose provider streams it; null for a downloaded copy, which plays from the
+   * phone and holds no provider's connection.
+   */
+  readonly subscriptionId: string | null;
   readonly title: string;
   /** Where the catalogue lists a channel, "Netherlands · News"; a title's line, "S1 E2 · Name". */
   readonly place: string;
@@ -166,6 +170,11 @@ let checkpoint: ReturnType<typeof setInterval> | null = null;
 let failed: ((failure: AnalyticsFailure) => void) | null = null;
 /** Ends Picture in Picture; Watch registers it while its view can. */
 let endPictureInPicture: (() => void) | null = null;
+/**
+ * Takes a subscription's connection back from a download before a stream of it opens, so the
+ * provider never sees both; downloads.ts registers it. Resolves once the download's request ended.
+ */
+let reclaim: ((subscriptionId: string) => Promise<void>) | null = null;
 
 /** Tells a title's owner how far it got, if it got anywhere. */
 function report() {
@@ -283,6 +292,8 @@ export async function play(item: Playing, open: Open, options: PlayOptions) {
     };
   });
   try {
+    if (item.subscriptionId !== null) await reclaim?.(item.subscriptionId);
+    if (controller.signal.aborted) return;
     const source = await open(controller.signal);
     if (controller.signal.aborted) return;
     await player().replaceAsync({
@@ -447,4 +458,8 @@ export function onPlaybackFailure(listener: ((failure: AnalyticsFailure) => void
 
 export function onEndPictureInPicture(end: (() => void) | null) {
   endPictureInPicture = end;
+}
+
+export function onReclaim(take: ((subscriptionId: string) => Promise<void>) | null) {
+  reclaim = take;
 }

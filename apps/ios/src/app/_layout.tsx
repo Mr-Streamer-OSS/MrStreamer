@@ -2,6 +2,7 @@ import { DarkTheme, Stack, ThemeProvider, usePathname } from "expo-router";
 import { useEffect } from "react";
 import { StyleSheet, View } from "react-native";
 import { restore, useRoster } from "../account.ts";
+import { startDownloads } from "../downloads.ts";
 import { onScreen } from "../playback.ts";
 import { onTelemetryScreen, startTelemetry } from "../telemetry/index.ts";
 import { WatchLayer } from "../watch.tsx";
@@ -29,6 +30,7 @@ export default function RootLayout() {
   useEffect(() => {
     startTelemetry();
     restored ??= restore();
+    startDownloads();
   }, []);
   // A request still waiting when the viewer moves to another screen lapses (playback.ts).
   useEffect(() => {

@@ -15,7 +15,8 @@ channels to preview (On now: recent ones, else Live's country), Continue watchin
 and Movies for you, which falls back to the provider's own list without TMDB. Rows show a
 channel's category where the desktop shows its programme: iOS reads no guide yet. Search finds
 movies, series and channels. Downloads are a route that says they aren't on iPhone yet, and the
-details' Download button is shown disabled. What the desktop does and iOS doesn't yet is tracked
+details' Download button is shown disabled: the downloads owner (`src/downloads.ts`) runs, but no
+screen uses it yet. What the desktop does and iOS doesn't yet is tracked
 in the parity report on the iOS card.
 
 ## Its own install
@@ -88,6 +89,23 @@ Each responsibility has one owner, a plain module with a store the screens read:
   per subscription under its id.
 - `src/watchlist.ts`: saved movies and series, each subscription's record in `watchlists.json`,
   shown as one by core's watchlist rules. Beta 2's `watchlist.json` is read until the first change.
+- `src/downloads.ts`: movies and episodes downloaded to the phone, as the desktop's downloads:
+  `downloads.json`, a folder per download in `Documents/downloads`, and nothing else. One
+  transfers at a time through `src/download-task.ts`, expo-file-system's native `DownloadTask` in a
+  foreground URLSession, so the bytes never pass through JavaScript and no transfer outlives the
+  app's process. Records hold no address, header, login or resume data; a file's address is made
+  from its subscription's login as its transfer starts. A stream of the same subscription takes the
+  connection back first (`onReclaim` in `playback.ts`): the transfer pauses before the stream's
+  request goes out, and goes on once nothing of that subscription streams. Going to the background
+  pauses it too. A pause keeps URLSession's resume data, which names the address, in the Keychain
+  under `download:<id>`, used only for that same address; otherwise the transfer starts again and
+  says so. A kill before the pause is written starts it again at the next launch. A copy is complete
+  only once the native task moved it into place at the announced size; a file beside an unfinished
+  download at launch is deleted. A removed subscription's unfinished downloads end, with their files
+  and resume data; its copies stay, play from the phone with no login or network, and keep their own
+  progress, also given to the subscription's viewing record while it is saved.
+  `modules/downloads-folder` makes `Documents/downloads` at launch and keeps it out of backups
+  (native: it takes a new build).
 - `src/playback.ts`: the one `expo-video` player and what it plays, a channel or a title. Home's
   preview, Watch, Picture in Picture and the accessory all show or control this player; none
   opens a stream of its own. Another channel or title, Stop, removing its subscription and a failure each let go

@@ -106,6 +106,8 @@ export const members = (): readonly Member[] => {
   const now = roster.get();
   return now.kind === "ready" ? now.members : [];
 };
+/** The roster as it stands: whether launch has read the registry yet, for owners outside React. */
+export const currentRoster = () => roster.get();
 /** Calls `listener` whenever a subscription or its lists change. */
 export const onRoster = (listener: () => void) => roster.subscribe(listener);
 
@@ -520,7 +522,7 @@ export function remove(id: string, { keepHistory }: { keepHistory: boolean }): P
     const playing = phase.kind !== "idle" && phase.item.subscriptionId === id;
     if (playing || registry.subscriptions.length === 0) stop();
     else request();
-    // Its unfinished downloads stop here once iOS has downloads; finished copies stay.
+    // The roster without it ends its unfinished downloads (downloads.ts); finished copies stay.
     syncRoster();
     noteAction("playlist_removed");
     await keychainSecrets
