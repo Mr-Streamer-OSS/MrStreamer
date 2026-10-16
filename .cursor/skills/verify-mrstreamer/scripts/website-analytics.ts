@@ -1,8 +1,10 @@
 #!/usr/bin/env -S node
 // Website analytics in a production-configured build, against an isolated loopback capture.
-// The browser reaches eu.i.posthog.com only through a loopback proxy that hands it to a local TLS
-// fixture with a certificate this run made; every other external request is blocked. Nothing
-// reaches PostHog. Build first with the EU host and a verification key, as --help says.
+// The browser reaches the site's own route, mrstreamer.app/ingest, only through a loopback proxy
+// that hands it to a local TLS fixture with a certificate this run made; every other external
+// request is blocked. The fixture resolves each request through the routes the package gives
+// Vercel and records where Vercel would send it, without sending it on. Nothing reaches
+// mrstreamer.app or PostHog. Build first with the EU host and a verification key, as --help says.
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createServer as createHttpServer, type Server } from "node:http";
@@ -17,7 +19,11 @@ import { electronExecutable, freePort, record, stop } from "./session.ts";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
 const marketing = join(root, "apps/marketing");
-const ENDPOINT = "https://eu.i.posthog.com/i/v0/e/";
+/** Where a production build's pages send, on the site's own route. */
+const ENDPOINT = "https://mrstreamer.app/ingest/i/v0/e/";
+/** What the packaged route must forward that to: PostHog's EU capture. */
+const UPSTREAM = "https://eu.i.posthog.com/i/v0/e/";
+const INGEST_HOST = "mrstreamer.app";
 const CHOICE = "mrstreamer.site-analytics";
 /** Words from the private queries, fragments and referrers the run opens with. None may be sent. */
 const PRIVATE = [
@@ -73,6 +79,22 @@ async function run() {
   );
   const bundle = scripts.find((text) => text.includes(ENDPOINT));
   if (!bundle) throw new Error("dist has no production-configured website analytics. See --help.");
+  if (scripts.some((text) => text.includes("i.posthog.com")))
+    throw new Error("The site's script names PostHog's host, past its own route.");
+  // The routes `vercel deploy --prebuilt` would deploy, before its filesystem phase.
+  const { routes } = JSON.parse(
+    await readFile(join(marketing, ".vercel/output/config.json"), "utf8"),
+  ) as { routes: { src?: string; dest?: string; methods?: string[]; handle?: string }[] };
+  const before = routes.slice(
+    0,
+    routes.findIndex((route) => route.handle === "filesystem"),
+  );
+  /** Where the package's first matching route sends `method` `path`, or "site" for none. */
+  const routed = (method: string, path: string) =>
+    before.find(
+      ({ src, methods }) =>
+        src !== undefined && new RegExp(src).test(path) && (!methods || methods.includes(method)),
+    )?.dest ?? "site";
   const key = /"(phc_[A-Za-z0-9_-]+)"/.exec(bundle)?.[1] ?? "";
   await mkdir(join(root, ".local/verification"), { recursive: true });
   const evidence = await mkdtemp(join(root, ".local/verification/website-analytics-"));
@@ -83,9 +105,28 @@ async function run() {
   const observed: Record<string, unknown> = {
     bundleSha256: createHash("sha256").update(bundle).digest("hex"),
     endpointInBundle: ENDPOINT,
+    // Other methods and paths under /ingest must not leave the site.
+    packagedRoutes: Object.fromEntries(
+      [
+        ["POST", "/ingest/i/v0/e/"],
+        ["GET", "/ingest/i/v0/e/"],
+        ["OPTIONS", "/ingest/i/v0/e/"],
+        ["POST", "/ingest/flags"],
+        ["POST", "/ingest/i/v0/e/extra"],
+        ["GET", "/ingest/static/array.js"],
+      ].map(([method = "", path = ""]) => [`${method} ${path}`, routed(method, path)]),
+    ),
     // The key itself is never written to evidence.
     verificationKey: key === "phc_mrstreamer_verification",
   };
+  if (
+    Object.entries(observed["packagedRoutes"] as Record<string, string>).some(
+      ([request, dest]) => dest !== (request === "POST /ingest/i/v0/e/" ? UPSTREAM : "site"),
+    )
+  )
+    throw new Error(
+      `The package routes /ingest wrongly: ${JSON.stringify(observed["packagedRoutes"])}`,
+    );
   const captures: Capture[] = [];
   const refusedTunnels: string[] = [];
   let hold = false;
@@ -129,7 +170,7 @@ async function run() {
     throw new Error(`Timed out: ${what}`);
   };
   try {
-    // A certificate for eu.i.posthog.com that only this run's browser trusts.
+    // A certificate for mrstreamer.app that only this run's browser trusts.
     execFileSync(
       "openssl",
       [
@@ -145,9 +186,9 @@ async function run() {
         "-out",
         join(scratch, "cert.pem"),
         "-subj",
-        "/CN=eu.i.posthog.com",
+        `/CN=${INGEST_HOST}`,
         "-addext",
-        "subjectAltName=DNS:eu.i.posthog.com",
+        `subjectAltName=DNS:${INGEST_HOST}`,
       ],
       { stdio: "ignore" },
     );
@@ -191,7 +232,7 @@ async function run() {
     );
     const proxy = createHttpServer((_req, res) => res.writeHead(403).end());
     proxy.on("connect", (req, socket, head) => {
-      if (req.url !== "eu.i.posthog.com:443") {
+      if (req.url !== `${INGEST_HOST}:443`) {
         refusedTunnels.push(req.url ?? "");
         socket.end("HTTP/1.1 403 Forbidden\r\n\r\n");
         return;
@@ -231,10 +272,10 @@ const cert = ${JSON.stringify(cert.replace(/\s/g, ""))};
 const origin = ${JSON.stringify(origin)};
 app.whenReady().then(async () => {
   const own = session.defaultSession;
-  // https goes only through the loopback proxy, which answers eu.i.posthog.com and refuses the rest.
+  // https goes only through the loopback proxy, which answers ${INGEST_HOST} and refuses the rest.
   await own.setProxy({ proxyRules: 'https=127.0.0.1:${proxyPort}' });
   own.setCertificateVerifyProc((request, callback) => {
-    callback(request.hostname === 'eu.i.posthog.com' && request.certificate.data.replace(/\\s/g, '') === cert ? 0 : -2);
+    callback(request.hostname === '${INGEST_HOST}' && request.certificate.data.replace(/\\s/g, '') === cert ? 0 : -2);
   });
   own.webRequest.onBeforeRequest((details, callback) => {
     const allowed = details.url.startsWith(origin + '/') || details.url === ${JSON.stringify(ENDPOINT)} || /^(data|blob|devtools):/.test(details.url);
@@ -804,7 +845,12 @@ app.on('window-all-closed', () => app.quit());
       changelog_viewed: ["version"],
     };
     const events = captures.map((entry) => {
-      if (entry.method !== "POST" || entry.path !== "/i/v0/e/" || entry.host !== "eu.i.posthog.com")
+      if (
+        entry.method !== "POST" ||
+        entry.path !== "/ingest/i/v0/e/" ||
+        entry.host !== INGEST_HOST ||
+        routed(entry.method, entry.path) !== UPSTREAM
+      )
         throw new Error(`Unexpected request ${entry.method} ${entry.host}${entry.path}`);
       if (entry.referer || entry.cookie) throw new Error("A request carried a Referer or cookie.");
       if (PRIVATE.some((word) => entry.raw.includes(word)))
@@ -828,9 +874,11 @@ app.on('window-all-closed', () => app.quit());
         $current_url,
         $pathname,
         $host,
+        $lib_custom_api_host,
         ...fields
       } = properties;
       if (
+        $lib_custom_api_host !== `https://${INGEST_HOST}/ingest` ||
         source !== "website" ||
         $process_person_profile !== false ||
         $geoip_disable !== true ||
@@ -993,7 +1041,8 @@ app.on('window-all-closed', () => app.quit());
             errors,
           },
           limits: [
-            "Production-configured local build; eu.i.posthog.com answered by a loopback fixture, never PostHog",
+            "Production-configured local build; mrstreamer.app/ingest answered by a loopback fixture, never Vercel or PostHog",
+            "The fixture resolves each request through the packaged Vercel routes; Vercel's own forwarding, including the visitor's IP address as x-forwarded-for, and PostHog's hash and proxy health check are not observed",
             "PostHog ingestion, dashboards and the project's IP setting not observed",
             "GPC, Do Not Track and blocked storage emulated by page scripts in Electron's Chromium",
             "390px viewport is not a physical phone or Safari",

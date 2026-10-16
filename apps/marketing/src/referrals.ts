@@ -175,9 +175,16 @@ export function enterPage(search: string, referrer: string, origin: string): Ent
   try {
     sessionStorage.setItem(ENTRY, JSON.stringify(entry));
   } catch {
-    // Session storage is blocked or full: this page still knows its entry.
+    // Session storage is blocked or full: this page still knows its entry, and an older one
+    // mustn't outlive it.
+    forgetEntry();
   }
   return entry;
+}
+
+/** The tab's entry as stored now, for a page restored from the back-forward cache. */
+export function tabEntry(): Entry {
+  return stored() ?? UNKNOWN;
 }
 
 /** Removes the tab's entry, so turning analytics on again starts from unknown. */

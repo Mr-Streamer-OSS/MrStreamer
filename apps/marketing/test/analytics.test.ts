@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderPage } from "../scripts/pages.ts";
-import { siteAnalyticsConfiguration } from "../scripts/site-analytics.ts";
+import { INGEST_ROUTE, siteAnalyticsConfiguration } from "../scripts/site-analytics.ts";
 import { CHOICE, DEADLINE_MS, MAX_EVENTS, startSiteAnalytics } from "../src/analytics.ts";
 import { ENTRY } from "../src/referrals.ts";
 
@@ -40,7 +40,12 @@ const report = (name: "LCP" | "CLS" | "INP", value: number) =>
 const root = join(import.meta.dirname, "..");
 const home = readFileSync(join(root, "index.html"), "utf8");
 const missing = readFileSync(join(root, "404.html"), "utf8");
-const CAPTURE = { endpoint: "https://eu.i.posthog.com/i/v0/e/", token: "phc_test" };
+/** A production build's capture: the site's own route to PostHog. */
+const CAPTURE = {
+  endpoint: "https://mrstreamer.app/ingest/i/v0/e/",
+  token: "phc_test",
+  apiHost: "https://mrstreamer.app/ingest",
+};
 
 /** A request that stays open until it is aborted, as a browser's would. */
 const pending = (_url: string, init: RequestInit) =>
@@ -114,6 +119,7 @@ const fixed = (route: string) => ({
   source: "website",
   $process_person_profile: false,
   $geoip_disable: true,
+  $lib_custom_api_host: "https://mrstreamer.app/ingest",
 });
 
 beforeEach(() => {
@@ -664,6 +670,61 @@ describe("where a visit entered the site", () => {
     expect(sessionStorage.getItem(ENTRY)).toBeNull();
   });
 
+  it("stop and remove the entry when another tab's off arrives after it turned on again", () => {
+    start(home, "/", "https://github.com/");
+    const signal = sent()[0]?.init.signal;
+    // The page was frozen while another tab turned off and on, and hears both late.
+    localStorage.setItem(CHOICE, "on");
+    dispatchEvent(new StorageEvent("storage", { key: CHOICE, oldValue: null, newValue: "off" }));
+    dispatchEvent(new StorageEvent("storage", { key: CHOICE, oldValue: "off", newValue: "on" }));
+    expect(signal?.aborted).toBe(true);
+    expect(sessionStorage.getItem(ENTRY)).toBeNull();
+    expect(footer()).toBe("Site analytics: on. Turn off What's counted");
+    click('.hero a[data-installer="dmg"]');
+    dispatchEvent(new Event("pagehide"));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    start(download, "/download", "https://mrstreamer.app/");
+    expect(entries().at(-1)).toEqual(["$pageview", "unknown", "unknown", "none"]);
+  });
+
+  it("give a page restored from the back-forward cache the tab's entry as it is now", () => {
+    start(home, "/", "https://github.com/");
+    // A later page in the tab came from Google, then the visitor went back.
+    sessionStorage.setItem(
+      ENTRY,
+      JSON.stringify({ entry_source: "google", entry_medium: "search", entry_campaign: "none" }),
+    );
+    dispatchEvent(Object.assign(new Event("pageshow"), { persisted: true }));
+    click('.hero a[data-installer="dmg"]');
+    sessionStorage.clear();
+    dispatchEvent(Object.assign(new Event("pageshow"), { persisted: true }));
+    click('.hero a[data-installer="dmg"]');
+    expect(entries()).toEqual([
+      ["$pageview", "github", "referral", "none"],
+      ["download_clicked", "google", "search", "none"],
+      ["download_clicked", "unknown", "unknown", "none"],
+    ]);
+  });
+
+  it("not keep an older entry when a new one can't be written", () => {
+    start(home, "/", "https://github.com/");
+    const storage = sessionStorage;
+    vi.stubGlobal("sessionStorage", {
+      getItem: (key: string) => storage.getItem(key),
+      setItem: () => {
+        throw new Error("Full");
+      },
+      removeItem: (key: string) => storage.removeItem(key),
+    });
+    start(home, "/", "https://www.google.com/");
+    start(download, "/download", "https://mrstreamer.app/");
+    expect(entries()).toEqual([
+      ["$pageview", "github", "referral", "none"],
+      ["$pageview", "google", "search", "none"],
+      ["$pageview", "unknown", "unknown", "none"],
+    ]);
+  });
+
   it("still count the first page's entry when session storage fails", () => {
     const fail = () => {
       throw new Error("Storage unavailable");
@@ -689,8 +750,9 @@ describe("website analytics build configuration", () => {
 
   it("names EU production only for a release build with a public project key", () => {
     expect(siteAnalyticsConfiguration(release, true)).toEqual({
-      endpoint: "https://eu.i.posthog.com/i/v0/e/",
+      endpoint: "https://mrstreamer.app/ingest/i/v0/e/",
       token: "phc_abc_123",
+      apiHost: "https://mrstreamer.app/ingest",
     });
     expect(siteAnalyticsConfiguration(release, false)).toBeNull();
     expect(
@@ -714,6 +776,36 @@ describe("website analytics build configuration", () => {
     expect(siteAnalyticsConfiguration({}, true)).toBeNull();
   });
 
+  it("sends production only to the site's route, which the package forwards to EU capture alone", () => {
+    const endpoint = new URL(siteAnalyticsConfiguration(release, true)?.endpoint ?? "");
+    const route = new RegExp(INGEST_ROUTE.src);
+    expect(endpoint.origin).toBe("https://mrstreamer.app");
+    expect(route.test(endpoint.pathname)).toBe(true);
+    expect(INGEST_ROUTE.methods).toEqual(["POST"]);
+    expect(INGEST_ROUTE.dest).toBe("https://eu.i.posthog.com/i/v0/e/");
+    for (const path of [
+      "/ingest/i/v0/e",
+      "/ingest/i/v0/e/x",
+      "/ingest/flags",
+      "/ingest/decide",
+      "/ingest/static/array.js",
+      "/ingest/s/",
+      "/i/v0/e/",
+    ])
+      expect(route.test(path)).toBe(false);
+  });
+
+  it("names no proxy on a loopback check's events", () => {
+    const local = siteAnalyticsConfiguration(
+      { MR_STREAMER_SITE_ANALYTICS_LOCAL_ENDPOINT: "http://127.0.0.1:4555/i/v0/e/" },
+      false,
+    );
+    open(home);
+    stop = startSiteAnalytics(local);
+    expect(sent()[0]?.url).toBe("http://127.0.0.1:4555/i/v0/e/");
+    expect(sent()[0]?.body.properties).not.toHaveProperty("$lib_custom_api_host");
+  });
+
   it("lets an explicit loopback endpoint replace production, without its key", () => {
     const local = {
       ...release,
@@ -722,6 +814,7 @@ describe("website analytics build configuration", () => {
     expect(siteAnalyticsConfiguration(local, true)).toEqual({
       endpoint: "http://127.0.0.1:4555/i/v0/e/",
       token: "mrstreamer-local-verification",
+      apiHost: null,
     });
     for (const endpoint of [
       "http://example.com:4555/i/v0/e/",

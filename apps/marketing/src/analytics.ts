@@ -1,6 +1,6 @@
 // Website analytics: a few fixed events per page, sent to the app statistics' PostHog project
-// without an SDK, in PostHog's cookieless mode. docs/privacy.md#website-analytics is the promise
-// this keeps:
+// without an SDK, in PostHog's cookieless mode, through the site's own /ingest route
+// (scripts/site-analytics.ts). docs/privacy.md#website-analytics is the promise this keeps:
 // - On unless the browser sends Global Privacy Control or Do Not Track, the visitor turned them
 //   off, or local storage fails. Local storage holds only an explicit "on" or "off".
 // - The page holds no identifier. Each event carries posthog-js's cookieless flag and placeholder
@@ -21,13 +21,15 @@
 //   tab's entry. A page that opens off removes it too. Turning on sends nothing until the next page
 //   opens, whose entry is then unknown unless it came from a tagged link or another site.
 
-import { enterPage, forgetEntry, type Entry } from "./referrals.ts";
+import { enterPage, forgetEntry, tabEntry, type Entry } from "./referrals.ts";
 import { onCLS, onINP, onLCP, type CLSMetric, type INPMetric, type LCPMetric } from "web-vitals";
 
-/** Where the build points capture: PostHog's EU ingestion, or a loopback endpoint for checks. */
+/** Where the build points capture: the site's route to PostHog's EU ingestion, or a loopback. */
 export interface SiteCapture {
   readonly endpoint: string;
   readonly token: string;
+  /** The site's own PostHog address the endpoint sits under, or null for a loopback check. */
+  readonly apiHost: string | null;
 }
 
 /** Requests one page may make, however long it stays open or however often it is clicked. */
@@ -281,6 +283,8 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
         source: "website",
         $process_person_profile: false,
         $geoip_disable: true,
+        // What posthog-js sends behind a proxy, so PostHog's Web analytics sees the site's route.
+        ...(capture.apiHost && { $lib_custom_api_host: capture.apiHost }),
       },
     });
     // A string body is text/plain, so the browser sends it without a preflight. Events that come
@@ -370,11 +374,15 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
     if (status !== "on") turnedOff();
     render();
   };
-  // A choice made in another tab applies here at once.
+  // A choice made in another tab applies here at once. An off applies even when it arrives late,
+  // after the choice is on again: this page stops and the tab forgets its entry. An on never
+  // restarts this page.
   addEventListener(
     "storage",
-    ({ key }) => {
-      if (status !== "refused" && (key === null || key === CHOICE)) reread();
+    ({ key, newValue }) => {
+      if (status === "refused" || (key !== null && key !== CHOICE)) return;
+      if (key === CHOICE && newValue === "off") turnedOff();
+      reread();
     },
     on,
   );
@@ -396,8 +404,17 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
     return () => listeners.abort();
   }
 
-  const entry = enterPage(location.search, document.referrer, location.origin);
+  let entry = enterPage(location.search, document.referrer, location.origin);
   send({ event: "$pageview", properties: { route, ...entry } });
+  // A page restored from the back-forward cache takes the tab's entry as it is now: a later page
+  // may have replaced or removed it.
+  addEventListener(
+    "pageshow",
+    ({ persisted }) => {
+      if (persisted && sending) entry = tabEntry();
+    },
+    on,
+  );
 
   // Core Web Vitals as web-vitals reports them: LCP once it is final, CLS and INP as the page is
   // hidden, and again at a later hide if they grew. A page without an interaction has no INP, and
