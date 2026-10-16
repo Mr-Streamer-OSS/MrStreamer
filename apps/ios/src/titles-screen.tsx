@@ -21,7 +21,7 @@ import { Artwork, CollectionTileView, PosterGrid, Shelf, TextTabs } from "./titl
 import { colors, Message } from "./ui.tsx";
 import { useViewing } from "./viewing.ts";
 
-// Films or Series: the desktop's tabs as text under the title. For you leads with a featured
+// Movies or Series: the desktop's tabs as text under the title. For you leads with a featured
 // title, what is being watched, titles like the last one and the collections that suit the
 // viewer's language; New gathers what was added; Genres and Services are tiles; 4K and All are
 // virtualised grids. A row's All, a genre or a service opens its collection on the tab's stack.
@@ -36,11 +36,11 @@ const places = store<Record<TitleKind, Tab>>({ movie: "for-you", series: "for-yo
 export const collectionHref = (kind: TitleKind, id: CollectionId) =>
   `/${kind === "movie" ? "films" : "series"}/collection/${encodeURIComponent(id)}` as const;
 
-/** The Films or Series tab. */
+/** The Movies or Series tab. */
 export function TitlesHome({ kind }: { kind: TitleKind }) {
   const lists = useTitleLists();
   if (lists.kind === "idle" || lists.kind === "loading") {
-    return <Message text={kind === "movie" ? "Loading films" : "Loading series"} />;
+    return <Message text={kind === "movie" ? "Loading movies" : "Loading series"} />;
   }
   if (lists.kind === "failed") {
     return (
@@ -105,7 +105,7 @@ function Browse({ index, kind }: { index: IndexedCatalogue; kind: TitleKind }) {
         titles={tab === "4k" ? built.fourK : built.all}
         onPress={open}
         header={<View style={styles.gridHead}>{header}</View>}
-        empty={<Message text={kind === "movie" ? "No films." : "No series."} />}
+        empty={<Message text={kind === "movie" ? "No movies." : "No series."} />}
         testID={`${kind}-grid`}
       />
     );
@@ -188,7 +188,7 @@ function ForYou({
         <Message
           text={
             kind === "movie"
-              ? "Nothing new or popular yet. All lists every film."
+              ? "Nothing new or popular yet. All lists every movie."
               : "Nothing new or popular yet. All lists every series."
           }
         />

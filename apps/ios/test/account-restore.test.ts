@@ -11,6 +11,8 @@ const SERVER = "http://panel.test";
 interface Asked {
   readonly action: string;
   readonly username: string;
+  /** The request's Cache-Control header. */
+  readonly cache: string | null;
 }
 const asked: Asked[] = [];
 /** Login checks waiting for an answer, oldest first. */
@@ -21,12 +23,12 @@ const json = (body: unknown) =>
 
 vi.stubGlobal(
   "fetch",
-  (input: string) =>
+  (input: string, init?: RequestInit) =>
     new Promise<Response>((resolve, reject) => {
       const url = new URL(input);
       const username = url.searchParams.get("username") ?? "";
       const action = url.searchParams.get("action") ?? "login";
-      asked.push({ action, username });
+      asked.push({ action, username, cache: new Headers(init?.headers).get("Cache-Control") });
       if (action !== "login") return resolve(json([]));
       checks.push({
         username,
@@ -157,5 +159,24 @@ describe("connecting", () => {
     await settle();
     expect(asked.filter(({ action }) => action === "login")).toHaveLength(1);
     expect(titleLists()).toEqual(Array(4).fill("new user"));
+  });
+});
+
+describe("asking the provider", () => {
+  // iOS's URL cache would keep each answer on disk under an address carrying the login, and answer
+  // a later Connect with a failure the panel let it keep, so retrying could never reach the panel.
+  it("keeps every request out of the URL cache, a retry after a failed Connect included", async () => {
+    const failed = connect({ server: SERVER, username: "new user", password: "new pass" });
+    await settle();
+    checks.shift()?.answer(false);
+    await expect(failed).rejects.toThrow();
+    const retried = connect({ server: SERVER, username: "new user", password: "new pass" });
+    await settle();
+    checks.shift()?.answer(true);
+    await retried;
+    await settle();
+    expect(asked.filter(({ action }) => action === "login")).toHaveLength(2);
+    expect(titleLists()).toEqual(Array(4).fill("new user"));
+    expect(asked.every(({ cache }) => cache === "no-store")).toBe(true);
   });
 });

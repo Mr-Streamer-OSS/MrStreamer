@@ -16,14 +16,14 @@ import { seriesViewing, useViewing } from "./viewing.ts";
 // Continue watching as Home and For you show it, by core's `continueEntries`, and resuming an
 // entry as the desktop does: a movie where it stopped, a series where its episodes say it goes on.
 
-/** The details page of a title's version, in the Films or Series tab. */
+/** The details page of a title's version, in the Movies or Series tab. */
 export function detailsHref(kind: TitleKind, id: string) {
   return kind === "movie"
     ? (`/films/title/${encodeURIComponent(id)}` as const)
     : (`/series/title/${encodeURIComponent(id)}` as const);
 }
 
-/** Opens a title's details in its tab, Films or Series. */
+/** Opens a title's details in its tab, Movies or Series. */
 export function openDetails(title: Pick<Title, "kind" | "id">) {
   router.push(detailsHref(title.kind, title.id));
 }
