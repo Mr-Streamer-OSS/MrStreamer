@@ -6,7 +6,7 @@ import { resumePoint } from "@mrstreamer/core/viewing/continue";
 import { finishes, nextUnwatched } from "@mrstreamer/core/viewing/episodes";
 import { isFinished } from "@mrstreamer/core/viewing/titles";
 import { streamLogin } from "./account.ts";
-import { play, type Playing } from "./playback.ts";
+import { play, request, type Playing } from "./playback.ts";
 import { store, useStore } from "./store.ts";
 import { titleFile } from "./titles.ts";
 import { finishSeries, recordProgress, seriesViewing } from "./viewing.ts";
@@ -14,26 +14,35 @@ import { finishSeries, recordProgress, seriesViewing } from "./viewing.ts";
 // Playing a movie or an episode in the one player, as the desktop's title player decides it:
 // from where it stopped, saving how far it got in the viewing record against when this play
 // began, the next episode not yet watched, and a series finished once its last episode ends with
-// none left. Any file is tried, whatever its name or type says: a version that fails is noted as
-// one that didn't play here, for the details' version menu, until it plays.
+// none left. Any file is tried, whatever its name or type says.
+//
+// What didn't play is noted by the version the viewer chooses between, a movie's or a series',
+// for its details and version menu, until that version plays. For a series it says an episode of
+// the version didn't play, not that the version can't play: its other episodes may well.
 
-const failed = store<ReadonlySet<string>>(new Set());
-/** Versions, by `ownedKey`, that failed to play since launch. */
+/** What failed in a version: its file, or an episode's file of a series version. */
+export type Failure = "file" | "episode";
+
+const failed = store<ReadonlyMap<string, Failure>>(new Map());
+/** Versions, by `ownedKey`, that failed to play since launch, and what of them failed. */
 export const useFailedVersions = () => useStore(failed);
 /** The same, as it stands now, for a menu opened later than the screen last drew. */
 export const failedVersions = () => failed.get();
 
-function noted(key: string, played: boolean) {
-  failed.set((current) => {
-    if (current.has(key) === !played) return current;
-    const next = new Set(current);
-    if (played) next.delete(key);
-    else next.add(key);
-    return next;
-  });
+/** Notes whether `version` played: a failure until it plays, cleared once it does. */
+function outcomeOf(version: OwnedId, failure: Failure) {
+  const key = ownedKey(version);
+  return (played: boolean) =>
+    failed.set((current) => {
+      if (played ? !current.has(key) : current.get(key) === failure) return current;
+      const next = new Map(current);
+      if (played) next.delete(key);
+      else next.set(key, failure);
+      return next;
+    });
 }
 
-/** Where the details of a title are, to show its versions after one failed. */
+/** Shows the title's version choice, after one failed. */
 export type ShowVersions = () => void;
 
 const sourceOf = (ref: TitleRef) => async (signal: AbortSignal) => {
@@ -64,7 +73,7 @@ export function playMovie(title: Title, version: OwnedId, from: number, versions
     from,
     progress: (position, duration) =>
       void recordProgress(ref, position, duration, since).catch(() => undefined),
-    outcome: (played) => noted(key, played),
+    outcome: outcomeOf(version, "file"),
     versions,
   });
 }
@@ -98,7 +107,7 @@ export function playEpisode(
     place: `${episodeLabel(episode.season, episode.number)} · ${episode.title}`,
     live: false,
     next: after !== null,
-    versions: false,
+    versions: details.title.versions.length > 1,
   };
   void play(item, sourceOf(ref), {
     watch: true,
@@ -119,11 +128,14 @@ export function playEpisode(
         )
         .catch(() => (finishing = false));
     },
-    outcome: (played) => noted(key, played),
-    // The next one not yet watched, as the record stands now, else the next in order.
-    next: () =>
+    outcome: outcomeOf(series, "episode"),
+    // The next one not yet watched, as the record stands now, else the next in order, unless the
+    // viewer did something else while the record answered.
+    next: () => {
+      const asked = request();
       void standing().then(
         ({ progress, marks }) => {
+          if (!asked.stands()) return;
           const upcoming = nextUnwatched(details, at, progress, marks) ?? after;
           if (!upcoming) return;
           const kept = progress.find(
@@ -131,8 +143,9 @@ export function playEpisode(
           );
           playEpisode(details, upcoming, resumePoint(kept), versions);
         },
-        () => after && playEpisode(details, after, 0, versions),
-      ),
+        () => asked.stands() && after && playEpisode(details, after, 0, versions),
+      );
+    },
     versions,
   });
 }

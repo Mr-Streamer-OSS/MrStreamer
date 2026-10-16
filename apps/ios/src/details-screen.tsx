@@ -28,9 +28,15 @@ import {
   View,
   type AccessibilityActionEvent,
 } from "react-native";
-import { appError, describeError } from "./errors.ts";
 import { Glass } from "./glass.tsx";
-import { failedVersions, playEpisode, playMovie, useFailedVersions } from "./play-title.ts";
+import {
+  failedVersions,
+  playEpisode,
+  playMovie,
+  useFailedVersions,
+  type Failure,
+} from "./play-title.ts";
+import { useRead } from "./read.ts";
 import { openDetails } from "./resume.ts";
 import {
   collectionOf,
@@ -54,27 +60,13 @@ import { removeTitle, saveTitle, savedEntry, useWatchlist } from "./watchlist.ts
 
 const NONE: readonly TitleProgress[] = [];
 
-type Loaded<A> =
-  | { readonly kind: "loading" }
-  | { readonly kind: "ready"; readonly value: A }
-  | { readonly kind: "failed"; readonly error: string };
-
-/** Something read once its inputs are known, and again when `again` changes. */
-function useRead<A>(read: (() => Promise<A>) | null, again: unknown): Loaded<A> {
-  const [state, setState] = useState<Loaded<A>>({ kind: "loading" });
-  useEffect(() => {
-    if (!read) return;
-    let current = true;
-    read().then(
-      (value) => current && setState({ kind: "ready", value }),
-      (cause: unknown) =>
-        current && setState({ kind: "failed", error: describeError(appError(cause)) }),
-    );
-    return () => {
-      current = false;
-    };
-  }, [read, again]);
-  return state;
+/** What the version menu says of a version that failed. */
+function failureNote(failure: Failure | undefined): string | null {
+  return failure === "file"
+    ? "Didn't play here"
+    : failure === "episode"
+      ? "An episode didn't play here"
+      : null;
 }
 
 export function DetailsScreen({ kind, id }: { kind: TitleKind; id: string }) {
@@ -100,6 +92,7 @@ function Details({ title, opened }: { title: Title; opened: OwnedId }) {
 
   // How far every version got: a movie's own, a series' episodes in the version shown.
   const progress = useRead(
+    `${title.kind}|${versions.map(ownedKey).join(",")}`,
     useCallback(
       () => progressOf(title.kind === "movie" ? { movies: versions } : { series: versions }),
       [title.kind, versions],
@@ -114,11 +107,12 @@ function Details({ title, opened }: { title: Title; opened: OwnedId }) {
     [chosen.subscriptionId, chosen.id],
   );
   const shownTitle = useMemo(() => ({ ...title, ...version }), [title, version]);
+  // Details answer only the version they were read for: another version shows loading at once.
   const details = useRead(
+    `${title.kind}|${ownedKey(version)}`,
     useCallback(() => detailsOf(shownTitle), [shownTitle]),
-    null,
   );
-  const failedHere = failed.has(ownedKey(version));
+  const failedHere = failed.get(ownedKey(version));
   const saved = savedEntry(watchlist, title) !== undefined;
 
   const chooseVersion = () => {
@@ -129,7 +123,7 @@ function Details({ title, opened }: { title: Title; opened: OwnedId }) {
         label: [
           group.quality,
           group.label + (group.versions.length > 1 ? ` (${at + 1})` : ""),
-          failedVersions().has(ownedKey(each)) ? "Didn't play here" : null,
+          failureNote(failedVersions().get(ownedKey(each))),
         ]
           .filter(Boolean)
           .join(" · "),
@@ -183,7 +177,11 @@ function Details({ title, opened }: { title: Title; opened: OwnedId }) {
               testID="details-play"
             />
           ) : (
-            <SeriesPlay details={facts?.kind === "series" ? facts : null} version={version} />
+            <SeriesPlay
+              details={facts?.kind === "series" ? facts : null}
+              version={version}
+              onVersions={chooseVersion}
+            />
           )}
           <CapsuleButton
             symbol={saved ? "bookmark.fill" : "bookmark"}
@@ -237,7 +235,7 @@ function Details({ title, opened }: { title: Title; opened: OwnedId }) {
         ) : null}
         {failedHere ? (
           <Text style={styles.failure} testID="details-failed">
-            {`${versionLabel || "This version"} didn't play on this iPhone.${title.versions.length > 1 ? " Try another version." : ""}`}
+            {`${failedHere === "episode" ? `An episode of ${versionLabel || "this version"}` : versionLabel || "This version"} didn't play on this iPhone.${title.versions.length > 1 ? " Try another version." : ""}`}
           </Text>
         ) : null}
         {movieProgress ? <Text style={styles.left}>{timeLeftOf(movieProgress) ?? ""}</Text> : null}
@@ -250,7 +248,13 @@ function Details({ title, opened }: { title: Title; opened: OwnedId }) {
         )}
       </View>
       {facts?.kind === "series" ? (
-        <Seasons details={facts} title={shownTitle} version={version} sequence={sequence} />
+        <Seasons
+          details={facts}
+          title={shownTitle}
+          version={version}
+          sequence={sequence}
+          onVersions={chooseVersion}
+        />
       ) : null}
       <Related title={title} />
     </ScrollView>
@@ -280,9 +284,18 @@ function About({ facts, provider }: { facts: TitleDetails; provider: boolean }) 
 }
 
 /** Play for a series: where its episodes say it goes on. */
-function SeriesPlay({ details, version }: { details: SeriesDetails | null; version: OwnedId }) {
+function SeriesPlay({
+  details,
+  version,
+  onVersions,
+}: {
+  details: SeriesDetails | null;
+  version: OwnedId;
+  onVersions: () => void;
+}) {
   const viewing = useViewing();
   const standing = useRead(
+    ownedKey(version),
     useCallback(() => seriesViewing(version), [version]),
     viewing?.sequence ?? 0,
   );
@@ -303,9 +316,7 @@ function SeriesPlay({ details, version }: { details: SeriesDetails | null; versi
       onPress={() =>
         details &&
         goesOn &&
-        playEpisode(details, goesOn.episode, resumePoint(goesOn.resume), () =>
-          openDetails({ kind: "series", id: version.id }),
-        )
+        playEpisode(details, goesOn.episode, resumePoint(goesOn.resume), onVersions)
       }
       testID="details-play"
     />
@@ -318,13 +329,16 @@ function Seasons({
   title,
   version,
   sequence,
+  onVersions,
 }: {
   details: SeriesDetails;
   title: Title;
   version: OwnedId;
   sequence: number;
+  onVersions: () => void;
 }) {
   const standing = useRead(
+    ownedKey(version),
     useCallback(() => seriesViewing(version), [version]),
     sequence,
   );
@@ -341,9 +355,10 @@ function Seasons({
     details.seasons.find((each) => each.number === season) ??
     details.seasons.find((each) => each.number === watching?.episode.season) ??
     details.seasons[0];
+  // Until the season shown answers, its own provider rows show, never another season's.
   const episodes = useRead(
+    shown ? `${ownedKey(title)}|${shown.number}` : null,
     useCallback(() => (shown ? episodesOf(title, shown) : Promise.resolve([])), [title, shown]),
-    null,
   );
   if (!shown) return <Message text="No episodes listed." />;
   const rows: readonly (Episode | EpisodeDetails)[] =
@@ -408,11 +423,7 @@ function Seasons({
             episode={episode}
             watched={state.kind === "watched"}
             progress={progress}
-            onPlay={() =>
-              playEpisode(details, episode, resumePoint(progress), () =>
-                openDetails({ kind: "series", id: version.id }),
-              )
-            }
+            onPlay={() => playEpisode(details, episode, resumePoint(progress), onVersions)}
             onMark={(watched) => mark(episode, watched)}
           />
         );

@@ -94,6 +94,34 @@ export function playingId(phase: Phase): string | null {
   return phase.kind === "idle" || phase.kind === "failed" ? null : phase.item.id;
 }
 
+/**
+ * A request of the viewer's that waits before it plays or opens anything, as a series' resume
+ * waits for its details, or Next episode for how the episodes stand. It stands until the viewer
+ * asks for something newer: any other request, any channel or title played, Stop (which
+ * Disconnect calls) or another screen. Whatever waited checks `stands()` before acting, so a late
+ * answer never replaces what the viewer chose since, nor opens Watch over Connect.
+ */
+export interface Request {
+  stands(): boolean;
+}
+
+/** Rises with every request, play and Stop: only the latest request stands. */
+let requests = 0;
+/** The screen the viewer is on, as navigation reports it. */
+let screen = "";
+
+/** Starts a request that has to wait, replacing any waiting before it. */
+export function request(): Request {
+  const mine = ++requests;
+  const at = screen;
+  return { stands: () => mine === requests && screen === at };
+}
+
+/** Navigation reports each screen the viewer goes to; a request made on another one lapses. */
+export function onScreen(path: string) {
+  screen = path;
+}
+
 /** How often a playing title says how far it got. */
 const CHECKPOINT_MS = 60_000;
 
@@ -211,6 +239,7 @@ function fail(message: string) {
  * stops first, saying how far it got; a slower earlier call that finishes later changes nothing.
  */
 export async function play(item: Playing, open: Open, options: PlayOptions) {
+  requests++;
   release();
   const controller = new AbortController();
   attempt = controller;
@@ -257,6 +286,7 @@ export function retry() {
  * starts without sound again.
  */
 export function stop() {
+  requests++;
   release();
   current = null;
   endPictureInPicture?.();

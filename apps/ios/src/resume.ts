@@ -9,6 +9,7 @@ import { continuation } from "@mrstreamer/core/viewing/episodes";
 import { router } from "expo-router";
 import { useMemo } from "react";
 import { playEpisode, playMovie } from "./play-title.ts";
+import { request } from "./playback.ts";
 import { detailsOf, titleOf, useMetadataVersion, useTitleLists } from "./titles.ts";
 import { seriesViewing, useViewing } from "./viewing.ts";
 
@@ -44,13 +45,11 @@ export function useContinueWatching(kind?: TitleKind): readonly ContinueEntry[] 
   }, [viewing, lists, version, kind]);
 }
 
-/** Rises with every resume, so only the latest acts once a series' details arrive. */
-let resuming = 0;
-
 /**
  * Plays an entry: a movie at once, where it stopped; a series once its details and how its
  * episodes stand say where it goes on. A series with nothing to go on with, or whose details
- * can't be read, opens its details instead.
+ * can't be read, opens its details instead. Anything the viewer does meanwhile, playing,
+ * stopping, disconnecting or going to another screen, cancels the series' resume.
  */
 export function resume({ title, version, progress }: ContinueEntry) {
   const opened = { ...title, ...version };
@@ -59,15 +58,15 @@ export function resume({ title, version, progress }: ContinueEntry) {
     playMovie(opened, version, resumePoint(progress), versions);
     return;
   }
-  const mine = ++resuming;
+  const asked = request();
   void Promise.all([detailsOf(opened), seriesViewing(version)]).then(
     ([found, standing]) => {
-      if (mine !== resuming) return;
+      if (!asked.stands()) return;
       const goesOn =
         found.kind === "series" ? continuation(found, standing.progress, standing.marks) : null;
       if (found.kind !== "series" || !goesOn || goesOn.replay) return versions();
       playEpisode(found, goesOn.episode, resumePoint(goesOn.resume), versions);
     },
-    () => mine === resuming && versions(),
+    () => asked.stands() && versions(),
   );
 }
