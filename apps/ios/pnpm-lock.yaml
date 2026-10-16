@@ -5,6 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
+  '@ark/schema@0.56.4': 5c9f5381d2dc496083992c52990cdcf0805df495584dabf8bb151e5adc5b875d
   expo-video@58.0.10: 45d16ebc5ddc52a6948f600fa23752d50e055b8a9f6b7f968a8cb7437cc0c43a
   react-native@0.88.0-rc.4: a93e046771a3ab9188f8f497a4d9922be224914051678391d5de0581db7fb25c
 
@@ -2500,7 +2501,7 @@ snapshots:
 
   2g@0.4.4: {}
 
-  '@ark/schema@0.56.4':
+  '@ark/schema@0.56.4(patch_hash=5c9f5381d2dc496083992c52990cdcf0805df495584dabf8bb151e5adc5b875d)':
     dependencies:
       '@ark/util': 0.56.4
 
@@ -3730,7 +3731,7 @@ snapshots:
 
   arktype@2.2.5:
     dependencies:
-      '@ark/schema': 0.56.4
+      '@ark/schema': 0.56.4(patch_hash=5c9f5381d2dc496083992c52990cdcf0805df495584dabf8bb151e5adc5b875d)
       '@ark/util': 0.56.4
       arkregex: 0.0.10
 

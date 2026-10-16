@@ -144,6 +144,12 @@ missing and not polyfilled: `Buffer`, so `core/guide/xmltv` can't load, and `cry
 and `crypto.subtle`, which `core/guide/address`, `service`, `ondemand/files` and
 `playlist/import` take from `node:crypto`.
 
+Hermes's array methods ignore `Symbol.species`, so an Array subclass's `map` returns a plain
+Array. ArkType's intersection results are such a subclass, and it corrects this in one method but
+not in `withPrefixKey`; `patches/` makes that one keep its class too. Without it, a union of object
+schemas, as the statistics events are, fails to build on the iPhone with "undefined is not a
+function". The root tests run on Node, which honours species, so only the app shows it.
+
 ## On the simulator
 
 On the workbench, with the Mac mini's simulator (see the `mac-mini` skill). The fixture panel is
