@@ -14,7 +14,6 @@
     "autolinking": {
       "ios": {
         "buildFromSource": [
-          "ExpoScreenOrientation",
           "ExpoVideo"
         ]
       }

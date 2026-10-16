@@ -61,13 +61,9 @@ export function WatchLayer() {
     const { width, height } = Dimensions.get("window");
     const sideways = width > height;
     turn(() => lockAsync(OrientationLock.LANDSCAPE));
-    return () =>
-      turn(async () => {
-        // Unlocked alone, the screens under Watch would stay sideways until the phone turns, so
-        // they turn upright first unless they were sideways before.
-        if (!sideways) await lockAsync(OrientationLock.PORTRAIT_UP);
-        await unlockAsync();
-      });
+    // Unlocking turned the screens under Watch back to landscape on iOS 27 (on the simulator), so
+    // unless they were sideways before, they stay upright until a title asks for landscape again.
+    return () => turn(() => (sideways ? unlockAsync() : lockAsync(OrientationLock.PORTRAIT_UP)));
   }, [landscape]);
   useEffect(() => {
     if (!watch) return;
