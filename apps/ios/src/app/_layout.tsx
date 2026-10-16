@@ -55,6 +55,7 @@ export default function RootLayout() {
               options={{
                 headerShown: true,
                 title: "Downloads",
+                headerBackButtonDisplayMode: "minimal",
                 headerTintColor: "#FFFFFF",
                 headerTitleStyle: { color: "#FFFFFF" },
               }}
