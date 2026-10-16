@@ -657,6 +657,9 @@ async function settle(id: string, transferring: Active, ending: Ending) {
       else fail({ kind: "stream", failure: { kind: "network", detail: ending.detail } });
       break;
   }
+  // Shown before the Keychain answers: until then a screen would still offer the transfer's
+  // Cancel, and act on it, for what is now a copy or a failure.
+  tell();
   await forget(id);
 }
 

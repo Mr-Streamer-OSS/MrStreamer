@@ -8,13 +8,18 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 // `native-files.ts`, a model of Expo's DownloadTask over real files and real requests; the player
 // asks for an online stream over HTTP, as AVPlayer does, and holds it until it is replaced. The
 // Keychain is kept in memory, and a relaunch imports the app's modules again over the same
-// Documents and Keychain. What only iOS can show (URLSession's own resume data and timing,
+// Documents and Keychain. The shared download actions answer through a recorded system sheet.
+// What only iOS can show (URLSession's own resume data and timing,
 // suspension in the background, playing the file) is not proved here.
 
 const memory = vi.hoisted(() => ({
   keychain: new Map<string, string>(),
   /** How long the Keychain takes to write a download's resume data. */
   keychainMs: 0,
+  /** Holds the Keychain's removal of a download's resume data until `done`, saying when it starts. */
+  removal: null as null | { started: () => void; done: Promise<void> },
+  /** The last system sheet shown, and how to answer it. */
+  sheet: null as null | { options: readonly string[]; pick: (at: number) => void },
   /**
    * What the player was given, how many download requests were still open then, and the HTTP
    * status the provider answered an online stream with, once it did.
@@ -33,7 +38,18 @@ const memory = vi.hoisted(() => ({
 vi.mock("expo-file-system", () => import("./native-files.ts"));
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.1.0" } } }));
 vi.mock("../src/telemetry/index.ts", () => ({ noteAction: () => undefined }));
+vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 vi.mock("react-native", () => ({
+  StyleSheet: { create: <T>(styles: T) => styles },
+  Alert: { alert: () => undefined },
+  ActionSheetIOS: {
+    showActionSheetWithOptions: (
+      { options }: { options: readonly string[] },
+      pick: (at: number) => void,
+    ) => {
+      memory.sheet = { options, pick };
+    },
+  },
   AppState: {
     get currentState() {
       return memory.appState;
@@ -53,7 +69,14 @@ vi.mock("expo-secure-store", () => ({
     }
     memory.keychain.set(key, value);
   },
-  deleteItemAsync: async (key: string) => void memory.keychain.delete(key),
+  deleteItemAsync: async (key: string) => {
+    const held = key.includes("download") ? memory.removal : null;
+    if (held) {
+      held.started();
+      await held.done;
+    }
+    memory.keychain.delete(key);
+  },
 }));
 vi.mock("expo-video", () => ({
   createVideoPlayer: () => {
@@ -218,6 +241,8 @@ function install() {
   native.held = null;
   memory.keychain.clear();
   memory.keychainMs = 0;
+  memory.removal = null;
+  memory.sheet = null;
   memory.played.length = 0;
 }
 
@@ -613,6 +638,33 @@ describe("downloads", { timeout: 30_000 }, () => {
     expect(downloadSecrets()).toEqual([]);
     expect(doc()).toMatchObject({ items: [], forgetting: [] });
     appGoes("active");
+  });
+
+  it("shows a finished copy before the Keychain lets go of its resume data, so an open Cancel keeps it", async () => {
+    install();
+    const app = await launch();
+    const { actionsOf } = await import("../src/download-controls.tsx");
+    const { a } = await withProviders(app);
+    one.stallMovieFile(movie().id, 20_000, 500);
+    let release = () => {};
+    const removing = new Promise<void>((started) => {
+      memory.removal = { started, done: new Promise((done) => (release = done)) };
+    });
+    const film = await app.addDownload(movieRef(a));
+    await until(() => statusOf(app, film.id)?.kind === "transferring", "the transfer");
+    const shown = app.downloadList().items.find((item) => item.id === film.id)!;
+    actionsOf(shown)
+      .find((action) => action.label === "Cancel download")!
+      .run();
+    expect(memory.sheet?.options).toEqual(["Cancel download", "Keep downloading"]);
+    await removing;
+    expect.soft(statusOf(app, film.id)?.kind).toBe("complete");
+    memory.sheet!.pick(0);
+    release();
+    await until(() => doc().forgetting.length === 0, "the resume data to go");
+    expect(statusOf(app, film.id)?.kind).toBe("complete");
+    expect(doc().items.map((item: { id: string }) => item.id)).toEqual([film.id]);
+    expect(mediaFile(film.id)?.size).toBe(fixture(movie().fixture!).length);
   });
 
   it("ends a removed provider's unfinished downloads; its copy stays, plays offline and keeps its progress", async () => {
