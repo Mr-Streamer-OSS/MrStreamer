@@ -24,7 +24,8 @@ import { alignWatchlist, connectWatchlist, disconnectWatchlist } from "./watchli
 // The connected subscription and its live catalogue. One Xtream subscription for now; the
 // desktop app's several, and M3U playlists, come later. The server and username are saved in
 // app storage and the password in the Keychain, under the subscription's id. Signing in starts
-// what belongs to the subscription, its movies and series (titles.ts), its viewing record
+// what belongs to the subscription, its movies and series (titles.ts, once the login is known to
+// be good or has been checked again), its viewing record
 // (viewing.ts) and watchlist (watchlist.ts); Disconnect forgets them with it.
 
 export type Session =
@@ -78,15 +79,19 @@ export function loadCatalogue() {
   );
 }
 
-function signIn(subscription: SavedSubscription, password: string) {
+/**
+ * Makes `subscription` the signed-in one and loads its channels. Its movies and series are the
+ * caller's to start (`connectTitles`), once it knows the login is good or has checked it.
+ */
+function signIn(subscription: SavedSubscription, password: string): Provider {
   const signedIn = providerFor({ ...subscription, password });
   provider = signedIn;
   login = [subscription.username, password];
   connectWatchlist(subscription.id);
   connectViewing(subscription.id, titleLists);
-  connectTitles(signedIn, subscription.id);
   session.set({ kind: "signed-in", subscription, account: null });
   loadCatalogue();
+  return signedIn;
 }
 
 // Saved titles take their names and versions as each read of the lists has them.
@@ -117,11 +122,21 @@ export async function restore() {
     session.set({ kind: "signed-out", saved: subscription });
     return;
   }
-  signIn(subscription, password);
-  provider?.authenticate().then(
-    (account) => updateAccount(subscription.id, account),
-    (cause: unknown) => updateAccount(subscription.id, appError(cause)),
-  );
+  const signedIn = signIn(subscription, password);
+  const attempt = attempts;
+  // The login is checked again before the movie and series lists, the largest downloads, start:
+  // they wait until the check answers, fails or runs out of time, so on a slow link they don't
+  // hold its answer back. Channels load at once. A Disconnect or another Connect meanwhile
+  // leaves the lists to whatever signed in since.
+  void signedIn
+    .authenticate()
+    .then(
+      (account) => updateAccount(subscription.id, account),
+      (cause: unknown) => updateAccount(subscription.id, appError(cause)),
+    )
+    .then(() => {
+      if (attempt === attempts && provider === signedIn) connectTitles(signedIn, subscription.id);
+    });
 }
 
 function updateAccount(id: string, account: AccountStatus | AppError) {
@@ -158,7 +173,8 @@ export async function connect(input: LoginInput): Promise<void> {
     return;
   }
   writeState((state) => ({ ...state, subscription, recent: [], region: null }));
-  signIn(subscription, account.password);
+  // The login was just checked, so the movie and series lists start with the channels.
+  connectTitles(signIn(subscription, account.password), subscription.id);
   updateAccount(subscription.id, status);
 }
 
