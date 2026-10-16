@@ -19,7 +19,19 @@ const root = fileURLToPath(new URL("../../../../", import.meta.url));
 const marketing = join(root, "apps/marketing");
 const ENDPOINT = "https://eu.i.posthog.com/i/v0/e/";
 const CHOICE = "mrstreamer.site-analytics";
-const PRIVATE = ["private-query", "private-fragment", "campaign"];
+/** Words from the private queries, fragments and referrers the run opens with. None may be sent. */
+const PRIVATE = [
+  "private-query",
+  "private-fragment",
+  "campaign=",
+  "utm_",
+  "gclid",
+  "github.com/Mr-Streamer-OSS/MrStreamer?",
+  "google.de",
+  "example.net",
+];
+/** The session storage key holding the tab's entry codes, and nothing else. */
+const ENTRY = "mrstreamer.site-entry";
 const SITE = "https://mrstreamer.app";
 /** posthog-js's cookieless placeholder distinct id. */
 const COOKIELESS = "$posthog_cookieless";
@@ -359,6 +371,31 @@ app.on('window-all-closed', () => app.quit());
     };
     const storage = () =>
       evaluate<Record<string, string>>("Object.fromEntries(Object.entries(localStorage))");
+    const session = () =>
+      evaluate<Record<string, string>>("Object.fromEntries(Object.entries(sessionStorage))");
+    /** The entry codes on the newest `event` from `pathname` since `from`. */
+    const entryOf = (from: number, pathname: string, event = "$pageview") => {
+      const found = captures
+        .slice(from)
+        .filter((c) => pageOf(c) === pathname && c.raw.includes(`"event":"${event}"`))
+        .at(-1);
+      if (!found) return undefined;
+      const { properties } = JSON.parse(found.raw) as { properties: Record<string, unknown> };
+      return [properties["entry_source"], properties["entry_medium"], properties["entry_campaign"]];
+    };
+    /** Waits for `event` from `pathname` since `from` and requires its entry codes. */
+    const expectEntry = async (
+      from: number,
+      pathname: string,
+      codes: readonly string[],
+      event = "$pageview",
+    ) => {
+      await wait(() => entryOf(from, pathname, event) !== undefined, `${event} on ${pathname}`);
+      const sent = entryOf(from, pathname, event);
+      if (JSON.stringify(sent) !== JSON.stringify(codes))
+        throw new Error(`${event} on ${pathname} entered as ${JSON.stringify(sent)}.`);
+      return sent;
+    };
     /** Nothing new arrives, except the leave and vitals of a page that was already counting. */
     const quiet = async (from: number, what: string) => {
       await delay(1500);
@@ -473,6 +510,72 @@ app.on('window-all-closed', () => app.quit());
     );
     await delay(1000);
 
+    // 1c. Where a visit entered. The browser reports each referrer, here as a whole private
+    // address; the page may send and keep only fixed codes. Pages opened from the site or the
+    // address bar keep the tab's entry; a tagged link or another site starts a new one.
+    const entries: Record<string, unknown> = {};
+    const fromTag = captures.length;
+    act("Open Home from a tagged GitHub link whose referrer is a full private address");
+    await send("Page.navigate", {
+      url: `${origin}/?utm_source=GitHub&utm_medium=readme&utm_campaign=release&utm_content=private-query&utm_term=private-query&gclid=private-query`,
+      referrer: "https://github.com/Mr-Streamer-OSS/MrStreamer?private-query=1",
+      referrerPolicy: "unsafeUrl",
+    });
+    entries["taggedView"] = await expectEntry(fromTag, "/", ["github", "readme", "release"]);
+    entries["pageSawReferrer"] = await evaluate<boolean>(
+      "document.referrer.startsWith('https://github.com/')",
+    );
+    entries["taggedSessionStorage"] = await session();
+    if (
+      JSON.stringify(entries["taggedSessionStorage"]) !==
+      JSON.stringify({
+        [ENTRY]: JSON.stringify({
+          entry_source: "github",
+          entry_medium: "readme",
+          entry_campaign: "release",
+        }),
+      })
+    )
+      throw new Error("Session storage holds more than the entry codes.");
+    act("Click the header Downloads link, then an installer link");
+    await click('header a[href="/download"]');
+    entries["siteLinkView"] = await expectEntry(fromTag, "/download", [
+      "github",
+      "readme",
+      "release",
+    ]);
+    entries["internalReferrer"] = await evaluate<boolean>(
+      "new URL(document.referrer).origin === location.origin",
+    );
+    await click("main a[data-installer]");
+    entries["downloadClick"] = await expectEntry(
+      fromTag,
+      "/download",
+      ["github", "readme", "release"],
+      "download_clicked",
+    );
+    act("Open /faq from the address bar");
+    const fromTyped = captures.length;
+    await send("Page.navigate", { url: `${origin}/faq` });
+    entries["typedView"] = await expectEntry(fromTyped, "/faq", ["github", "readme", "release"]);
+    act("Open Home from a Google search with a private query");
+    const fromSearch = captures.length;
+    await send("Page.navigate", {
+      url: `${origin}/`,
+      referrer: "https://www.google.de/search?q=private-query",
+      referrerPolicy: "unsafeUrl",
+    });
+    entries["searchView"] = await expectEntry(fromSearch, "/", ["google", "search", "none"]);
+    act("Open /download from an unlisted site with an unlisted tag");
+    const fromOther = captures.length;
+    await send("Page.navigate", {
+      url: `${origin}/download?utm_source=private-query&utm_campaign=release`,
+      referrer: "https://private-query.example.net/post?private-query=1",
+      referrerPolicy: "unsafeUrl",
+    });
+    entries["otherView"] = await expectEntry(fromOther, "/download", ["other", "referral", "none"]);
+    observed["entries"] = entries;
+
     // 2. Turning off while a guide's events are held in flight aborts them, and nothing follows.
     hold = true;
     const beforeHeld = captures.length;
@@ -503,6 +606,9 @@ app.on('window-all-closed', () => app.quit());
     observed["offStorage"] = await storage();
     if ((observed["offStorage"] as Record<string, string>)[CHOICE] !== "off")
       throw new Error("Off was not stored.");
+    observed["offSessionStorage"] = await session();
+    if (Object.keys(observed["offSessionStorage"] as object).length)
+      throw new Error("Turning off left the tab's entry.");
     await narrow();
     await scrollToEnd();
     await shot("guide-footer-off-390");
@@ -538,6 +644,8 @@ app.on('window-all-closed', () => app.quit());
     act("Open /faq#free from the address bar");
     await send("Page.navigate", { url: `${origin}/faq#free` });
     await wait(() => captures.some((c) => c.raw.includes('"faq_question":"free"')), "FAQ anchor");
+    // The first page counted after turning on doesn't bring back the earlier entry.
+    observed["onAgainEntry"] = await expectEntry(afterOff, "/faq", ["unknown", "unknown", "none"]);
     // Home opened off: turning on there sent nothing, at its leave either.
     silent(afterOff, "/", "Home opened off");
     await click('footer a[href="/privacy"]');
@@ -622,6 +730,14 @@ app.on('window-all-closed', () => app.quit());
     };
     const refusing = captures.length;
     for (const [name, script] of Object.entries(refusals)) {
+      act(`Open /about from a Bing search, keeping an entry before the ${name} refusal`);
+      const kept = captures.length;
+      await send("Page.navigate", {
+        url: `${origin}/about`,
+        referrer: "https://www.bing.com/",
+        referrerPolicy: "unsafeUrl",
+      });
+      await expectEntry(kept, "/about", ["bing", "search", "none"]);
       const added = await send("Page.addScriptToEvaluateOnNewDocument", { source: script });
       const before = captures.length;
       act(`Open Home with ${name} refusal`);
@@ -635,6 +751,9 @@ app.on('window-all-closed', () => app.quit());
       );
       await quiet(before, name);
       observed[`${name}Footer`] = await switchText("footer");
+      observed[`${name}SessionStorage`] = await session();
+      if (Object.keys(observed[`${name}SessionStorage`] as object).length)
+        throw new Error(`${name} refusal left the tab's entry.`);
       observed[`${name}Emulated`] = await evaluate(
         "({ gpc: navigator.globalPrivacyControl ?? null, dnt: navigator.doNotTrack ?? null, storage: (() => { try { localStorage.length; return 'readable'; } catch { return 'blocked'; } })() })",
       );
@@ -658,7 +777,7 @@ app.on('window-all-closed', () => app.quit());
     // 8. Every request against the allowlist.
     const browserUserAgent = await evaluate<string>("navigator.userAgent");
     const allowed: Record<string, readonly string[]> = {
-      $pageview: ["route"],
+      $pageview: ["route", "entry_source", "entry_medium", "entry_campaign"],
       $pageleave: [
         "route",
         "visible",
@@ -667,7 +786,16 @@ app.on('window-all-closed', () => app.quit());
         "$prev_pageview_max_content_percentage",
       ],
       $web_vitals: ["$web_vitals_LCP_value", "$web_vitals_INP_value", "$web_vitals_CLS_value"],
-      download_clicked: ["download_type", "os_hint", "kind", "route", "location"],
+      download_clicked: [
+        "download_type",
+        "os_hint",
+        "kind",
+        "route",
+        "location",
+        "entry_source",
+        "entry_medium",
+        "entry_campaign",
+      ],
       github_link_clicked: ["route", "link_location"],
       docs_link_clicked: ["doc_section", "route", "location"],
       feature_section_viewed: ["feature_name"],
@@ -725,6 +853,15 @@ app.on('window-all-closed', () => app.quit());
         throw new Error(
           `Property outside the allowlist on ${event}: ${Object.keys(fields).join(",")}`,
         );
+      // Page views and download clicks carry all three entry codes, each a short fixed code.
+      if (
+        names.includes("entry_source") &&
+        ["entry_source", "entry_medium", "entry_campaign"].some(
+          (name) =>
+            typeof fields[name] !== "string" || !/^[a-z_]{1,20}$/.test(String(fields[name])),
+        )
+      )
+        throw new Error(`Entry codes malformed on ${event}: ${JSON.stringify(fields)}`);
       // Measurements are bounded numbers in their units, and each leave carries all three.
       const share = (value: unknown) =>
         typeof value === "number" &&
@@ -860,6 +997,7 @@ app.on('window-all-closed', () => app.quit());
             "PostHog ingestion, dashboards and the project's IP setting not observed",
             "GPC, Do Not Track and blocked storage emulated by page scripts in Electron's Chromium",
             "390px viewport is not a physical phone or Safari",
+            "Referrers are set through CDP Page.navigate with an unsafe-url policy, so the page sees whole private addresses; real sites usually send only their origin, and some send none",
             "The guide's layout shift and slow interaction are caused by helper scripts; Electron's Chromium and web-vitals measure them. Other browsers' vital support is not observed",
           ],
         },

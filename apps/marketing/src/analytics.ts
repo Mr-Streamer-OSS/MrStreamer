@@ -8,16 +8,20 @@
 //   IP address, user agent and host, and its own session id. It then deletes the IP address and
 //   user agent from the event.
 // - The address sent is the page's canonical one on mrstreamer.app, never location, so no query,
-//   fragment or referrer. The user agent is sent only as the hash input ingestion requires. No
-//   typed text or other device or browser detail is sent, and every other value is fixed here or
-//   written into the page by the build.
+//   fragment or referrer. Where the visit entered the site goes only as three fixed codes from
+//   referrals.ts, on page views and download clicks, kept in session storage for the tab. The user
+//   agent is sent only as the hash input ingestion requires. No typed text or other device or
+//   browser detail is sent, and every other value is fixed here or written into the page by the
+//   build.
 // - Measurements are numbers only: how far down the page was scrolled, as shares of it, and the
 //   Core Web Vitals LCP, INP and CLS as web-vitals reports them. Never an element, address or
 //   pixel position.
 // - At most MAX_EVENTS requests per page, each aborted after DEADLINE_MS. No retry or queue.
-// - Turning off sends nothing more, aborts requests still open and stops measuring. Turning on
-//   sends nothing until the next page opens.
+// - Turning off sends nothing more, aborts requests still open, stops measuring and removes the
+//   tab's entry. A page that opens off removes it too. Turning on sends nothing until the next page
+//   opens, whose entry is then unknown unless it came from a tagged link or another site.
 
+import { enterPage, forgetEntry, type Entry } from "./referrals.ts";
 import { onCLS, onINP, onLCP, type CLSMetric, type INPMetric, type LCPMetric } from "web-vitals";
 
 /** Where the build points capture: PostHog's EU ingestion, or a loopback endpoint for checks. */
@@ -69,7 +73,7 @@ const STORE: Download = { os_hint: "windows", kind: "store" };
 type Vital = (CLSMetric | INPMetric | LCPMetric)["name"];
 
 type SiteEvent =
-  | { readonly event: "$pageview"; readonly properties: { readonly route: string } }
+  | { readonly event: "$pageview"; readonly properties: Entry & { readonly route: string } }
   | {
       readonly event: "$pageleave";
       readonly properties: {
@@ -90,12 +94,13 @@ type SiteEvent =
     }
   | {
       readonly event: "download_clicked";
-      readonly properties: Download & {
-        /** Every installer link and the Store carry stable releases. Nightlies are on GitHub. */
-        readonly download_type: "stable";
-        readonly route: string;
-        readonly location: "hero" | "page";
-      };
+      readonly properties: Download &
+        Entry & {
+          /** Every installer link and the Store carry stable releases. Nightlies are on GitHub. */
+          readonly download_type: "stable";
+          readonly route: string;
+          readonly location: "hero" | "page";
+        };
     }
   | {
       readonly event: "github_link_clicked";
@@ -320,6 +325,11 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
     observer?.disconnect();
     measuring.abort();
   };
+  /** Analytics went off: nothing more is sent and the tab forgets where the visit entered. */
+  const turnedOff = (): void => {
+    stopSending();
+    forgetEntry();
+  };
 
   const controls = [...document.querySelectorAll<HTMLElement>("[data-site-analytics]")].map(
     (control) => {
@@ -351,13 +361,13 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
     } catch {
       status = "unavailable";
     }
-    if (status !== "on") stopSending();
+    if (status !== "on") turnedOff();
     render();
   };
 
   const reread = (): void => {
     status = storedStatus();
-    if (status !== "on") stopSending();
+    if (status !== "on") turnedOff();
     render();
   };
   // A choice made in another tab applies here at once.
@@ -381,9 +391,13 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
   for (const { control, place } of controls)
     if (place === "footer")
       control.querySelector("[data-site-analytics-status]")?.setAttribute("role", "status");
-  if (!sending) return () => listeners.abort();
+  if (!sending) {
+    forgetEntry();
+    return () => listeners.abort();
+  }
 
-  send({ event: "$pageview", properties: { route } });
+  const entry = enterPage(location.search, document.referrer, location.origin);
+  send({ event: "$pageview", properties: { route, ...entry } });
 
   // Core Web Vitals as web-vitals reports them: LCP once it is final, CLS and INP as the page is
   // hidden, and again at a later hide if they grew. A page without an interaction has no INP, and
@@ -456,7 +470,7 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
         const location = link.closest(".hero") ? "hero" : "page";
         send({
           event: "download_clicked",
-          properties: { ...download, download_type: "stable", route, location },
+          properties: { ...download, ...entry, download_type: "stable", route, location },
         });
       } else if (href.startsWith(REPOSITORY)) {
         const link_location = !link.closest("footer")
