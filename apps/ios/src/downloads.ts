@@ -36,13 +36,14 @@ import { recordProgress } from "./viewing.ts";
 // doesn't end in time, the stream fails rather than ask the provider for a second connection. It
 // waits until nothing of that subscription streams; another subscription's stream, or a copy, lets
 // it go on. A provider can take a moment to free the connection of a request that ended, so the
-// next request of that subscription, a stream's or the queue's next download, waits until
-// `RELEASE_MS` after this app's last one ended. Sending the app to the background pauses a
-// transfer too: iOS suspends the app soon after, and a foreground session doesn't run while it is
-// suspended. A pause keeps URLSession's resume data in the Keychain, since it names the address
-// with the login; a transfer goes on from it only when it was made for the very address the
-// subscription gives now, and when it can't, it starts again and says so (`restarted`). Should the app be killed before the pause is written, the next launch
-// starts that download again: nothing promises the pause comes first.
+// next request of that subscription, a stream's, the queue's next download or a transfer's fresh
+// start after its resumed request broke, waits until `RELEASE_MS` after this app's last one
+// ended. Sending the app to the background pauses a transfer too: iOS suspends the app soon
+// after, and a foreground session doesn't run while it is suspended. A pause keeps URLSession's
+// resume data in the Keychain, since it names the address with the login; a transfer goes on
+// from it only when it was made for the very address the subscription gives now, and when it
+// can't, it starts again and says so (`restarted`). Should the app be killed before the pause is
+// written, the next launch starts that download again: nothing promises the pause comes first.
 //
 // A copy is complete only once the native task said it moved every byte into place and the size
 // matches what the server announced. A launch trusts nothing else: a file left beside an unfinished
@@ -163,7 +164,7 @@ interface Active {
   expected: number | null;
   rate: number | null;
   restarted: boolean;
-  /** Settles once its request to the provider ended, or once it stopped before asking. */
+  /** Settles once it asks the provider nothing more: its last request ended, or it stopped. */
   closed: Promise<void>;
   /** Settles once how it ended is written down. */
   over: Promise<void>;
@@ -426,22 +427,16 @@ function begin(record: Stored) {
   };
   active = transferring;
   tell();
-  const ran = run(record, transferring)
-    .catch((cause: unknown): Ending => {
-      const error = appError(cause);
-      return {
-        kind: "failed",
-        failure: {
-          kind: "app",
-          error: { kind: "unexpected", detail: describeError(error) },
-        },
-      };
-    })
-    .then((ending) => {
-      // The provider may still be freeing the connection of the request that just ended.
-      if (transferring.transfer) released.set(record.subscriptionId, Date.now());
-      return ending;
-    });
+  const ran = run(record, transferring).catch((cause: unknown): Ending => {
+    const error = appError(cause);
+    return {
+      kind: "failed",
+      failure: {
+        kind: "app",
+        error: { kind: "unexpected", detail: describeError(error) },
+      },
+    };
+  });
   transferring.closed = ran.then(() => undefined);
   transferring.over = ran
     .then((ending) => settle(record.id, transferring, ending))
@@ -501,6 +496,7 @@ async function run(record: Stored, transferring: Active): Promise<Ending> {
     const from = resumeData ? record.received : 0;
     if (!resumeData && record.received > 0) transferring.restarted = true;
     transferring.received = from;
+    tell();
     let first = true;
     let savedAt = Date.now();
     let measured = { at: Date.now(), received: from };
@@ -548,7 +544,8 @@ async function run(record: Stored, transferring: Active): Promise<Ending> {
       },
     });
     transferring.transfer = native;
-    return native.ended;
+    // The provider may still be freeing the connection of the request that just ended.
+    return native.ended.finally(() => released.set(record.subscriptionId, Date.now()));
   };
   const ending = await attempt(saved?.resumeData ?? null);
   // Resume data URLSession wouldn't go on from, or a server that no longer takes it: once more
@@ -559,7 +556,10 @@ async function run(record: Stored, transferring: Active): Promise<Ending> {
     (ending.kind === "refused" || ending.kind === "network" || ending.kind === "folder");
   if (!untrusted) return withUrl(ending, file.url, login);
   await forget(record.id);
-  if (transferring.stopping) return { kind: "stopped" };
+  await after(freeing(record.subscriptionId));
+  if (transferring.stopping || currentSource(record.subscriptionId) !== source) {
+    return { kind: "stopped" };
+  }
   return withUrl(await attempt(null), file.url, login);
 }
 

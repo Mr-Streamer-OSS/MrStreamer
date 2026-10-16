@@ -98,10 +98,12 @@ Each responsibility has one owner, a plain module with a store the screens read:
   connection back first (`onReclaim` in `playback.ts`): the transfer pauses before the stream's
   request goes out, and goes on once nothing of that subscription streams. A transfer that doesn't
   end within ten seconds fails the stream instead of opening a second connection. A provider takes
-  a moment to free a closed connection, so a subscription's next request, a stream's or the next
-  download's, waits a second after the app's last one ended. Going to the background pauses it too. A pause keeps URLSession's resume data, which names the address, in the Keychain
-  under `download:<id>`, used only for that same address; otherwise the transfer starts again and
-  says so. A kill before the pause is written starts it again at the next launch. A copy is complete
+  a moment to free a closed connection, so a subscription's next request, a stream's, the next
+  download's or a transfer's fresh start after its resumed request broke, waits a second after the
+  app's last one ended. Going to the background pauses it too. A pause keeps URLSession's resume
+  data, which names the address, in the Keychain under `download:<id>`, used only for that same
+  address; otherwise the transfer starts again and says so. A kill before the pause is written
+  starts it again at the next launch. A copy is complete
   only once the native task moved it into place at the announced size; a file beside an unfinished
   download at launch is deleted. A removed subscription's unfinished downloads end, with their files
   and resume data; its copies stay, play from the phone with no login or network, and keep their own

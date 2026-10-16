@@ -274,6 +274,27 @@ function playFilm(app: App, subscriptionId: string, id: number) {
   app.playMovie(app.titleOf(lists.index, "movie", version)!, version, 0, () => undefined);
 }
 
+/**
+ * A film paused at byte 20,000 with its resume data, whose resumed request then breaks off at
+ * byte 40,000, the connection lost, while the panel still frees it. The file no longer stalls.
+ */
+async function breakResumed(app: App) {
+  const { a } = await withProviders(app);
+  one.stallMovieFile(movie().id, 20_000, 60_000);
+  const film = await app.addDownload(movieRef(a));
+  const received = () => (statusOf(app, film.id) as { received?: number } | undefined)?.received;
+  await until(() => received() === 20_000, "the transfer to stall");
+  appGoes("background");
+  await until(() => downloadSecrets().length === 1 && panelsIdle(), "the pause");
+  one.stallMovieFile(movie().id, 40_000, 60_000);
+  native.requests.length = 0;
+  appGoes("active");
+  await until(() => received() === 40_000, "the resumed transfer to stall");
+  native.kill();
+  one.stallMovieFile(movie().id, 0, 0);
+  return film;
+}
+
 /** Sends the app to the background and back, as iOS reports it. */
 function appGoes(state: "background" | "active") {
   memory.appState = state;
@@ -402,6 +423,57 @@ describe("downloads", { timeout: 30_000 }, () => {
     expect(native.requests.map((each) => each.range)).toEqual(["bytes=30000-"]);
     expect(mediaFile(film.id)?.size).toBe(fixture(movie().fixture!).length);
     expect(downloadSecrets()).toEqual([]);
+  });
+
+  it("starts once more from the start when a resumed request breaks, after the provider freed it", async () => {
+    install();
+    const app = await launch();
+    const film = await breakResumed(app);
+    const ended = () => isComplete(app, film.id) || statusOf(app, film.id)?.kind === "failed";
+    await until(ended, "the download to end");
+    expect(statusOf(app, film.id)).toEqual({ kind: "complete" });
+    expect(native.requests.map((each) => each.range)).toEqual(["bytes=20000-", null]);
+    expect(mediaFile(film.id)?.size).toBe(fixture(movie().fixture!).length);
+    expect(downloadSecrets()).toEqual([]);
+  });
+
+  it("asks nothing more of a broken resumed download sent to the background, streamed over or removed", async () => {
+    install();
+    let app = await launch();
+    let film = await breakResumed(app);
+    // While the panel still frees the broken request's connection.
+    await new Promise((done) => setTimeout(done, 200));
+    appGoes("background");
+    await new Promise((done) => setTimeout(done, 1_500));
+    expect(native.requests.map((each) => each.range)).toEqual(["bytes=20000-"]);
+    expect(statusOf(app, film.id)?.kind).toBe("queued");
+    appGoes("active");
+    await until(() => isComplete(app, film.id), "the copy");
+    expect(native.requests.at(-1)?.range).toBeNull();
+
+    // Its own provider's film takes the connection once the panel freed it.
+    install();
+    app = await launch();
+    film = await breakResumed(app);
+    await new Promise((done) => setTimeout(done, 200));
+    playFilm(app, film.subscription!.id, otherMovie().id);
+    await until(() => memory.played[0]?.status != null, "the film");
+    expect(memory.played[0]).toMatchObject({ downloading: 0, status: 200 });
+    expect(native.requests.map((each) => each.range)).toEqual(["bytes=20000-"]);
+    expect(statusOf(app, film.id)?.kind).toBe("waiting");
+    app.stop();
+    await until(() => isComplete(app, film.id), "the copy");
+    expect(native.requests.at(-1)?.range).toBeNull();
+
+    install();
+    app = await launch();
+    film = await breakResumed(app);
+    await new Promise((done) => setTimeout(done, 200));
+    await app.removeDownload(film.id);
+    await new Promise((done) => setTimeout(done, 1_500));
+    expect(native.requests.map((each) => each.range)).toEqual(["bytes=20000-"]);
+    expect(app.downloadList().items).toEqual([]);
+    expect(folder(film.id).exists).toBe(false);
   });
 
   it("starts again, and says so, when the provider's file changed while it was paused", async () => {
