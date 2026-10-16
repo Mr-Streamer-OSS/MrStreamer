@@ -180,6 +180,22 @@ export function buildLibrary(sources: readonly LiveSource[]): Library {
     }
     return { name, shelves, channels };
   });
+
+  // Channels in no category their provider lists, as a panel that lists no categories leaves
+  // every channel, come last on their own, as the desktop's Live shows every channel without a
+  // category.
+  const others = listed.length > 0 ? "Other channels" : "All channels";
+  const unplaced: Channel[] = [];
+  for (const { channels } of members) {
+    for (const each of channels) {
+      const channel = shown.get(each) ?? each;
+      if (placeOf.has(channel.key)) continue;
+      const label = channel.ambiguous ? labels.get(channel.subscriptionId) : undefined;
+      placeOf.set(channel.key, label ? `${others} · ${label}` : others);
+      unplaced.push(channel);
+    }
+  }
+  if (unplaced.length > 0) listed.push({ name: others, shelves: [], channels: unplaced });
   return { regions: listed, byKey, placeOf };
 }
 

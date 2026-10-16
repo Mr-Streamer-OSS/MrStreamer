@@ -4,16 +4,25 @@ import { FlatList, StyleSheet, Text, View } from "react-native";
 import {
   playChannel,
   reloadAllChannels,
+  retry,
   retryChannels,
   useCatalogue,
   useRoster,
+  type Member,
 } from "../../../account.ts";
 import { failureOf } from "../../../errors.ts";
 import type { Channel, Library, Region } from "../../../library.ts";
 import { playingId, usePlayback } from "../../../playback.ts";
 import { useSavedState, writeState } from "../../../storage.ts";
 import { TextTabs } from "../../../titles-ui.tsx";
-import { ChannelRow, colors, Notice, PlaceholderRows, useRowHeight } from "../../../ui.tsx";
+import {
+  ChannelRow,
+  colors,
+  Notice,
+  PlaceholderRows,
+  TextButton,
+  useRowHeight,
+} from "../../../ui.tsx";
 
 /** The text tab for all of a country's categories. Provider category ids are never "*". */
 const ALL = "*";
@@ -70,10 +79,40 @@ export default function Live() {
       </View>
     );
   }
-  return <Channels library={catalogue.library} height={height} />;
+  return <Channels library={catalogue.library} failing={catalogue.failing} height={height} />;
 }
 
-function Channels({ library, height }: { library: Library; height: number }) {
+/**
+ * One line for a provider whose channels didn't load, or whose password the iPhone no longer
+ * gives back: its channels as they were stay in the list, and the others carry on.
+ */
+function Failing({ member }: { member: Member }) {
+  const { entry, label, needsSecret } = member;
+  return (
+    <View style={styles.failing} testID={`live-failing-${entry.id}`}>
+      <Text style={styles.failingText} numberOfLines={2}>
+        {needsSecret
+          ? `Enter the password for ${label} in Settings.`
+          : `Couldn't load channels from ${label}.`}
+      </Text>
+      {needsSecret ? (
+        <TextButton label="Settings" onPress={() => router.navigate("/settings")} />
+      ) : (
+        <TextButton label="Retry" onPress={() => retry(entry.id)} />
+      )}
+    </View>
+  );
+}
+
+function Channels({
+  library,
+  failing,
+  height,
+}: {
+  library: Library;
+  failing: readonly Member[];
+  height: number;
+}) {
   const navigation = useNavigation();
   const saved = useSavedState();
   const { phase } = usePlayback();
@@ -122,6 +161,9 @@ function Channels({ library, height }: { library: Library; height: number }) {
       : [];
   return (
     <View style={styles.screen}>
+      {failing.map((member) => (
+        <Failing key={member.entry.id} member={member} />
+      ))}
       {saved.region && !found ? (
         <Text style={styles.note}>{`${saved.region} isn't listed any more.`}</Text>
       ) : null}
@@ -161,5 +203,12 @@ function Channels({ library, height }: { library: Library; height: number }) {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#000000" },
   note: { color: colors.text, fontSize: 15, marginHorizontal: 16, marginVertical: 12 },
+  failing: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginHorizontal: 16,
+  },
+  failingText: { color: colors.text, fontSize: 15, flex: 1 },
   tabs: { borderBottomColor: colors.line, borderBottomWidth: StyleSheet.hairlineWidth },
 });

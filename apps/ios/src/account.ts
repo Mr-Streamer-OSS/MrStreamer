@@ -110,8 +110,19 @@ export const onRoster = (listener: () => void) => roster.subscribe(listener);
 
 const USER_AGENT = `MrStreamer/${Constants.expoConfig?.version ?? "0.0.0"} (iOS)`;
 
+/**
+ * Every request to the provider goes to the provider. iOS's URL cache would otherwise keep each
+ * answer on disk under its address, which carries the login, and could answer a later sign-in or
+ * reload with an earlier failure, as a panel that lets its answers be cached would have it.
+ */
+const uncached: typeof fetch = (input, init) => {
+  const headers = new Headers(init?.headers);
+  headers.set("Cache-Control", "no-store");
+  return fetch(input, { ...init, headers });
+};
+
 const providerFor = (account: XtreamAccount): Provider =>
-  xtreamProvider(account, { userAgent: USER_AGENT, live: "hls" });
+  xtreamProvider(account, { userAgent: USER_AGENT, live: "hls", fetch: uncached });
 
 /** The registry as last written. */
 let registry: Registry = EMPTY_REGISTRY;

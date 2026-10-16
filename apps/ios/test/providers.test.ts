@@ -22,6 +22,8 @@ const memory = vi.hoisted(() => ({
   /** Login checks held until a test lets them through. */
   held: [] as Array<() => void>,
   holdLogins: false,
+  /** The Cache-Control header of each request to a panel. */
+  caching: [] as Array<string | null>,
 }));
 
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.1.0" } } }));
@@ -92,6 +94,7 @@ vi.mock("../src/telemetry/index.ts", () => ({
 const passThrough = globalThis.fetch;
 vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
   const url = new URL(input);
+  memory.caching.push(new Headers(init?.headers).get("Cache-Control"));
   const login = url.pathname.endsWith("/player_api.php") && !url.searchParams.has("action");
   if (login && memory.holdLogins) await new Promise<void>((go) => memory.held.push(go));
   return passThrough(input, init);
@@ -246,6 +249,7 @@ beforeEach(() => {
   memory.played.length = 0;
   memory.holdLogins = false;
   memory.held.length = 0;
+  memory.caching.length = 0;
   one.failCatalogue(null);
   two.failCatalogue(null);
 });
@@ -408,6 +412,12 @@ describe("adding a subscription", () => {
 });
 
 describe("everything together", () => {
+  it("keeps every request out of the URL cache, whose entries would hold the login", async () => {
+    await twoProviders();
+    expect(memory.caching.length).toBeGreaterThan(0);
+    expect(memory.caching.every((each) => each === "no-store")).toBe(true);
+  });
+
   it("lists both providers' channels, each playing from its own provider though their ids match", async () => {
     const { app, a, b } = await twoProviders();
     const fromOne = channels(app).filter((each) => each.subscriptionId === a);
