@@ -8,6 +8,7 @@ import { playChannel, useCatalogue } from "../../../account.ts";
 import { searchChannels } from "../../../library.ts";
 import { playingId, usePlayback } from "../../../playback.ts";
 import { openDetails } from "../../../resume.ts";
+import { onSearchText } from "../../../telemetry/index.ts";
 import { searchTitles, useMetadataVersion, useTitleLists } from "../../../titles.ts";
 import { Artwork } from "../../../titles-ui.tsx";
 import { ChannelRow, colors, Message, useRowHeight } from "../../../ui.tsx";
@@ -71,8 +72,10 @@ export default function Search() {
         ref: searchBar,
         placeholder: "Films, series and channels",
         autoCapitalize: "none",
-        onChangeText: (event: { nativeEvent: { text: string } }) =>
-          setQuery(event.nativeEvent.text),
+        onChangeText: (event: { nativeEvent: { text: string } }) => {
+          setQuery(event.nativeEvent.text);
+          onSearchText(event.nativeEvent.text);
+        },
       },
     });
   }, [navigation]);

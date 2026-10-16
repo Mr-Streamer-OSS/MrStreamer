@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { StyleSheet, View } from "react-native";
 import { restore, useSession } from "../account.ts";
 import { onScreen } from "../playback.ts";
+import { onTelemetryScreen, startTelemetry } from "../telemetry/index.ts";
 import { WatchLayer } from "../watch.tsx";
 
 // The app: Connect until a subscription is signed in, then the five tabs. Watch lies over both,
@@ -26,10 +27,14 @@ export default function RootLayout() {
   const session = useSession();
   const pathname = usePathname();
   useEffect(() => {
+    startTelemetry();
     restored ??= restore();
   }, []);
   // A request still waiting when the viewer moves to another screen lapses (playback.ts).
-  useEffect(() => onScreen(pathname), [pathname]);
+  useEffect(() => {
+    onScreen(pathname);
+    onTelemetryScreen(pathname);
+  }, [pathname]);
   if (session.kind === "restoring") return <View style={styles.black} />;
   const signedIn = session.kind === "signed-in";
   return (

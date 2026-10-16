@@ -1,6 +1,7 @@
+import { appFailure, type AnalyticsFailure } from "@mrstreamer/contracts/analytics";
 import { createVideoPlayer, type VideoPlayer } from "expo-video";
 import { appError, describeError, withoutLogin } from "./errors.ts";
-import { store, useStore } from "./store.ts";
+import { store, useStore, type Store } from "./store.ts";
 
 // The app's one player and what it plays: a live channel, or a movie or an episode. Every surface
 // shows this player and no other: Home's preview, Watch, Picture in Picture and AirPlay, and the
@@ -86,6 +87,9 @@ const clock = store(0);
 const length = store(0);
 
 export const usePlayback = () => useStore(state);
+/** Read-only, for telemetry, which follows the player without a screen. */
+export const playbackState: Pick<Store<Playback>, "get" | "subscribe"> = state;
+export const playbackClock: Pick<Store<number>, "get" | "subscribe"> = clock;
 export const usePlaybackClock = () => useStore(clock);
 export const usePlaybackLength = () => useStore(length);
 
@@ -142,6 +146,8 @@ let current: {
 } | null = null;
 let attempt: AbortController | null = null;
 let checkpoint: ReturnType<typeof setInterval> | null = null;
+/** Told each failure's category, never its message; telemetry registers it. */
+let failed: ((failure: AnalyticsFailure) => void) | null = null;
 /** Ends Picture in Picture; Watch registers it while its view can. */
 let endPictureInPicture: (() => void) | null = null;
 
@@ -164,7 +170,8 @@ export function player(): VideoPlayer {
   made.muted = state.get().muted;
   made.addListener("statusChange", ({ status, error }) => {
     if (!current) return;
-    if (status === "error") return fail(error?.message ?? "The player stopped.");
+    // AVPlayer's failures come without a type; on the fixtures they were formats it can't play.
+    if (status === "error") return fail(error?.message ?? "The player stopped.", "unsupported");
     if (status === "readyToPlay" && current.seek !== null) {
       const from = current.seek;
       current.seek = null;
@@ -228,8 +235,9 @@ function release() {
 }
 
 /** Shows why the stream failed: the player's message, which can quote its address, without it. */
-function fail(message: string) {
+function fail(message: string, failure: AnalyticsFailure) {
   if (!current) return;
+  failed?.(failure);
   const { item, options } = current;
   release();
   if (!current.loaded) options.outcome?.(false);
@@ -269,7 +277,9 @@ export async function play(item: Playing, open: Open, options: PlayOptions) {
     if (controller.signal.aborted) return;
     player().play();
   } catch (cause) {
-    if (!controller.signal.aborted) fail(describeError(appError(cause)));
+    if (controller.signal.aborted) return;
+    const error = appError(cause);
+    fail(describeError(error), appFailure(error));
   }
 }
 
@@ -398,6 +408,10 @@ export function pictureInPicture(active: boolean) {
   const { watch } = state.get();
   if (!watch) player().muted = true;
   state.set((s) => ({ ...s, pip: false, muted: s.watch ? s.muted : true }));
+}
+
+export function onPlaybackFailure(listener: ((failure: AnalyticsFailure) => void) | null) {
+  failed = listener;
 }
 
 export function onEndPictureInPicture(end: (() => void) | null) {

@@ -67,6 +67,10 @@ Each responsibility has one owner, a plain module with a store the screens read:
   Documents: the subscription's server and username, recent channels and the Live country.
   `src/files.ts` writes the viewing record and watchlist files whole, through a file beside them.
   Disconnect erases both.
+- `src/telemetry/`: product statistics, off until Settings has a control for them. One owner
+  keeps the viewer's choice, a random installation id and a bounded outbox in `analytics.json`,
+  and builds every event from fixed observations: the app's activity, the player's state and
+  the screen on show. Events and properties are in `docs/telemetry.md`.
 - `src/secrets.ts`: passwords in the Keychain. Keychain items outlive the app, so the first launch
   after installing removes what an earlier install left there, by an index of the ids it wrote;
   writes, removals and clearing run one at a time so none loses another's change to the index.
