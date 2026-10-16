@@ -1,4 +1,6 @@
 import * as React from "react";
+import type { Download } from "@mrstreamer/contracts/downloads";
+import type { TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { OwnedId } from "@mrstreamer/contracts/subscription";
 import { byIds, indexCatalogue, type IndexedCatalogue } from "@mrstreamer/core/ondemand/catalogue";
 import type { OnDemandCatalogue } from "@mrstreamer/core/provider";
@@ -6,9 +8,11 @@ import { Window } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // A film's details while the providers listing it change: a version picked from a provider that
-// is removed meanwhile gives way to one still listed. The real screen runs with React DOM on a
-// happy-dom window, as provider-form.test.ts does; React Native's views stand in as plain
-// elements, the version menu answers as the test picks, and Play records the version it plays.
+// is removed meanwhile gives way to one still listed. And its download: the button queues the
+// version shown, a copy offers Play offline from its menu, and Play keeps streaming. The real
+// screen runs with React DOM on a happy-dom window, as provider-form.test.ts does; React Native's
+// views stand in as plain elements, menus answer as the test picks, Play records the version it
+// plays and the downloads owner records what it was asked.
 
 const REACT_DOM = "react-dom/client";
 const window = new Window();
@@ -24,6 +28,9 @@ const scenario = vi.hoisted(() => ({
   /** The version menu last shown: its options, and what picking one does. */
   menu: null as { options: readonly string[]; pick: (index: number) => void } | null,
   played: [] as OwnedId[],
+  /** The film's download as the owner has it, and what it was asked to do. */
+  download: undefined as Download | undefined,
+  asked: [] as string[],
 }));
 
 vi.mock("react-native", async () => {
@@ -43,6 +50,7 @@ vi.mock("react-native", async () => {
     }: Props & { disabled?: boolean; onPress: () => void }) =>
       createElement("button", { "data-testid": testID, disabled, onClick: onPress }, children),
     StyleSheet: { create: <T>(styles: T) => styles, absoluteFill: {} },
+    Alert: { alert: () => undefined },
     ActionSheetIOS: {
       showActionSheetWithOptions: (
         { options }: { options: readonly string[] },
@@ -108,6 +116,19 @@ vi.mock("../src/viewing.ts", () => ({
   seriesViewing: async () => ({ progress: [], marks: [] }),
   undoMark: async () => undefined,
 }));
+vi.mock("../src/downloads.ts", () => ({
+  useDownloadOf: () => scenario.download,
+  addDownload: async (ref: TitleRef) => {
+    scenario.asked.push(`add ${ref.subscriptionId}:${ref.id}`);
+  },
+  playDownload: (id: string) => scenario.asked.push(`play ${id}`),
+  removeDownload: async (id: string) => {
+    scenario.asked.push(`remove ${id}`);
+  },
+  retryDownload: async (id: string) => {
+    scenario.asked.push(`retry ${id}`);
+  },
+}));
 vi.mock("../src/watchlist.ts", () => ({
   useWatchlist: () => [],
   savedEntry: () => undefined,
@@ -157,6 +178,8 @@ afterEach(() => {
   unmount();
   scenario.menu = null;
   scenario.played.length = 0;
+  scenario.download = undefined;
+  scenario.asked.length = 0;
 });
 
 function mount() {
@@ -177,6 +200,8 @@ function mount() {
   return {
     /** The screen again, as a change of the lists draws it. */
     render,
+    press,
+    text: () => container.textContent ?? "",
     /** Plays, and answers whose version played. */
     play() {
       press("details-play");
@@ -217,5 +242,62 @@ describe("a film's version", () => {
     page.render();
     pick("Cabin");
     expect(page.play()).toBe("a");
+  });
+});
+
+/** The film of provider "a", downloaded. */
+const copy: Download = {
+  id: "d-1",
+  title: { kind: "movie", id: "1" },
+  subscription: { id: "a", name: "Home" },
+  name: "Same movie (EN)",
+  episodeName: null,
+  year: null,
+  duration: 6000,
+  originalLanguage: null,
+  posterUrl: null,
+  wideUrl: null,
+  size: 2_100_000_000,
+  status: { kind: "complete" },
+  progress: null,
+};
+
+describe("a film's download", () => {
+  it("queues the version shown at once", async () => {
+    providers("a", "b");
+    const page = mount();
+    page.openVersions()("Cabin");
+    scenario.menu = null;
+    page.press("details-download");
+    await React.act(async () => undefined);
+    expect(scenario.asked).toEqual(["add b:1"]);
+    expect(scenario.menu).toBeNull();
+  });
+
+  it("offers a copy offline from its menu while Play keeps streaming", () => {
+    providers("a");
+    scenario.download = copy;
+    const page = mount();
+    expect(page.text()).toContain("Downloaded, 2.1 GB");
+    expect(page.play()).toBe("a");
+    expect(scenario.asked).toEqual([]);
+
+    page.press("details-download");
+    expect(scenario.menu?.options).toEqual(["Play offline", "Delete download", "Cancel"]);
+    React.act(() => scenario.menu!.pick(0));
+    expect(scenario.asked).toEqual(["play d-1"]);
+  });
+
+  it("asks before deleting a copy", async () => {
+    providers("a");
+    scenario.download = copy;
+    const page = mount();
+    page.press("details-download");
+    React.act(() => scenario.menu!.pick(1));
+    expect(scenario.asked).toEqual([]);
+    expect(scenario.menu?.options).toEqual(["Delete download", "Cancel"]);
+    React.act(() => scenario.menu!.pick(0));
+    await React.act(async () => undefined);
+    expect(scenario.asked).toEqual(["remove d-1"]);
   });
 });

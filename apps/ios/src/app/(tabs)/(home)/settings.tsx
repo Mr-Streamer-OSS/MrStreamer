@@ -27,6 +27,7 @@ import {
   useRoster,
   type Member,
 } from "../../../account.ts";
+import { DownloadsLink } from "../../../downloads-screen.tsx";
 import { failureOf } from "../../../errors.ts";
 import { setStatistics, useStatistics } from "../../../telemetry/index.ts";
 import { hasTmdb, useMetadataStatus, useTitleTimings } from "../../../titles.ts";
@@ -34,8 +35,8 @@ import { ChannelLogo, colors, TextButton } from "../../../ui.tsx";
 
 /**
  * Settings as one list: the providers first, each a row with Add provider under them, then
- * Downloads, Playback, Privacy and About. M3U playlists, downloads and guide sources come here as
- * they come to iOS, and until then nothing here offers them. TMDB's terms ask for its logo and
+ * Downloads, a row with what they take that opens them, Playback, Privacy and About. M3U playlists
+ * and guide sources come here as they come to iOS, and until then nothing here offers them. TMDB's terms ask for its logo and
  * notice, as the desktop's Settings show them.
  */
 export default function Settings() {
@@ -59,9 +60,7 @@ export default function Settings() {
       </Pressable>
 
       <Section name="Downloads" />
-      <Text style={styles.paragraph}>
-        Downloads aren't on iPhone yet. Movies and episodes play while online.
-      </Text>
+      <DownloadsLink onPress={() => router.push("/downloads")} />
 
       <Section name="Playback" />
       <Line

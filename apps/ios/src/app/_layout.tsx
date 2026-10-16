@@ -7,7 +7,8 @@ import { onScreen } from "../playback.ts";
 import { onTelemetryScreen, startTelemetry } from "../telemetry/index.ts";
 import { WatchLayer } from "../watch.tsx";
 
-// The app: Connect until a subscription is saved, then the five tabs. Watch lies over both,
+// The app: Connect until a subscription is saved, then the five tabs. Without one, Connect also
+// opens Downloads (`offline`), as copies play with no provider. Watch lies over all of them,
 // outside navigation, so the one player view it shows lives on under Picture in Picture while
 // the tabs are used.
 
@@ -49,6 +50,15 @@ export default function RootLayout() {
           </Stack.Protected>
           <Stack.Protected guard={!signedIn} redirectTo="/">
             <Stack.Screen name="connect" />
+            <Stack.Screen
+              name="offline"
+              options={{
+                headerShown: true,
+                title: "Downloads",
+                headerTintColor: "#FFFFFF",
+                headerTitleStyle: { color: "#FFFFFF" },
+              }}
+            />
           </Stack.Protected>
           <Stack.Screen
             name="proof"

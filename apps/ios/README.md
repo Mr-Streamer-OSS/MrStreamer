@@ -14,10 +14,12 @@ A movie or an episode plays in Watch from where it stopped. Home leads with the 
 channels to preview (On now: recent ones, else Live's country), Continue watching, the watchlist
 and Movies for you, which falls back to the provider's own list without TMDB. Rows show a
 channel's category where the desktop shows its programme: iOS reads no guide yet. Search finds
-movies, series and channels. Downloads are a route that says they aren't on iPhone yet, and the
-details' Download button is shown disabled: the downloads owner (`src/downloads.ts`) runs, but no
-screen uses it yet. What the desktop does and iOS doesn't yet is tracked
-in the parity report on the iOS card.
+movies, series and channels. A movie's details and each episode row have a download button whose
+symbol is the download's state; Downloads lists the queue, then the copies on the phone, with
+Cancel, Retry, Remove, Play offline and Delete as each state allows (`src/downloads-screen.tsx`,
+`src/download-controls.tsx`). Play and Resume always stream; a copy plays offline from Downloads,
+its menu and an episode's check. Downloads transfer only while the app is open. What the desktop
+does and iOS doesn't yet is tracked in the parity report on the iOS card.
 
 ## Its own install
 
@@ -129,8 +131,9 @@ Each responsibility has one owner, a plain module with a store the screens read:
 
 Routes are in `src/app` (Expo Router): `(tabs)` are the system's native tabs, Home's Downloads and
 Settings are pushed from its top bar, Settings' provider form (`provider`, Add provider or a
-provider's Edit) above Settings, and `connect` shows until a subscription is saved. Connect and
-`provider` share `src/provider-form.tsx`. Settings lists each provider as a row with how it
+provider's Edit) above Settings, and `connect` shows until a subscription is saved. With copies on
+the phone, Connect also opens `offline`, the same Downloads outside the tabs, so copies play with
+no provider saved, after a relaunch too. Connect and `provider` share `src/provider-form.tsx`. Settings lists each provider as a row with how it
 stands; pressing one offers Retry, its reloads, Edit and Remove as a system sheet, and Remove asks
 whether to delete its history too.
 Watch (`src/watch.tsx`) is a layer over the navigation rather than a route, because the view that

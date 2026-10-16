@@ -41,6 +41,12 @@ export function describeError(error: AppError): string {
       return t("Your system's keychain would not store your password.");
     case "channel-not-found":
       return t("This channel is no longer in the provider's list.");
+    case "title-not-found":
+      return t("The provider no longer lists this title.");
+    case "no-subscription":
+      return t("No subscription is connected.");
+    case "needs-secret":
+      return t("This subscription needs its password or link again, in Settings.");
     case "stream":
       return describeStreamFailure(error.failure);
     default:

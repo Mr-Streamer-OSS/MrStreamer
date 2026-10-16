@@ -70,6 +70,8 @@ vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.0.0" } }
 vi.mock("expo-router", () => ({ router: { push: () => undefined } }));
 vi.mock("expo-video", () => ({ isPictureInPictureSupported: () => true }));
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+// Downloads open from a row of their own, which this test leaves out.
+vi.mock("../src/downloads-screen.tsx", () => ({ DownloadsLink: () => null }));
 vi.mock("../src/ui.tsx", () => ({
   colors: { text: "#FFFFFF", dim: "#8E8E93", line: "#38383A" },
   ChannelLogo: () => null,

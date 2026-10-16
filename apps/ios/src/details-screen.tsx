@@ -5,7 +5,9 @@ import type {
   Title,
   TitleDetails,
   TitleKind,
+  TitleRef,
 } from "@mrstreamer/contracts/ondemand";
+import { formatBytes } from "@mrstreamer/core/i18n";
 import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type { EpisodeMark, SeriesViewing, TitleProgress } from "@mrstreamer/contracts/viewing";
 import { versionOptions } from "@mrstreamer/core/ondemand/version-options";
@@ -28,6 +30,15 @@ import {
   View,
   type AccessibilityActionEvent,
 } from "react-native";
+import {
+  actionsOf,
+  DownloadButton,
+  downloadAction,
+  showActions,
+  stateWord,
+  type DownloadAction,
+} from "./download-controls.tsx";
+import { useDownloadOf } from "./downloads.ts";
 import { Glass } from "./glass.tsx";
 import { failureOf, playEpisode, playMovie, useFailure, type Failure } from "./play-title.ts";
 import { useRead } from "./read.ts";
@@ -47,10 +58,12 @@ import { markEpisode, progressOf, relist, seriesViewing, undoMark, useViewing } 
 import { removeTitle, saveTitle, savedEntry, useWatchlist } from "./watchlist.ts";
 
 // A movie's or series' details, pushed on the Movies or Series tab: the backdrop with one glass
-// capsule over it (Play or Resume, Save, and Download, which isn't on iPhone yet), the facts, the
-// version menu, and for a series its seasons as text tabs over episode rows with stills and how
-// far each got. Long-press marks an episode watched or unwatched, with the desktop's Undo line.
-// Closing Watch comes back here, as it lies over the navigation.
+// capsule over it (Play or Resume, Save, and for a movie Download), the facts, the version menu,
+// and for a series its seasons as text tabs over episode rows with stills, how far each got and
+// each one's download button. Long-press marks an episode watched or unwatched, with the
+// desktop's Undo line, and offers its download's actions. Play and Resume always stream; a
+// download plays offline from its own menu, from an episode's check, and from Downloads. Closing
+// Watch comes back here, as it lies over the navigation.
 
 const NONE: readonly TitleProgress[] = [];
 
@@ -204,14 +217,14 @@ function Details({ title, opened }: { title: Title; opened: OwnedId }) {
             onPress={() => (saved ? removeTitle(title) : saveTitle(title))}
             testID="details-save"
           />
-          <CapsuleButton
-            symbol="arrow.down"
-            label="Download"
-            hint="Downloads aren't on iPhone yet"
-            compact
-            disabled
-            onPress={() => undefined}
-          />
+          {title.kind === "movie" ? (
+            <DownloadButton
+              of={{ kind: "movie", ...version }}
+              name={title.title}
+              style={styles.capsuleButton}
+              testID="details-download"
+            />
+          ) : null}
         </Glass>
       </View>
       <View style={styles.facts}>
@@ -230,6 +243,7 @@ function Details({ title, opened }: { title: Title; opened: OwnedId }) {
           ]
             .filter(Boolean)
             .join(" · ")}
+          {title.kind === "movie" ? <DownloadFact of={{ kind: "movie", ...version }} /> : null}
         </Text>
         {versionLabel || title.versions.length > 1 ? (
           <Pressable
@@ -273,6 +287,15 @@ function Details({ title, opened }: { title: Title; opened: OwnedId }) {
       <Related title={title} />
     </ScrollView>
   );
+}
+
+/** " · Downloaded, 2.1 GB" or " · Downloading 42%": the facts line's word for a download. */
+function DownloadFact({ of: ref }: { of: TitleRef }) {
+  const download = useDownloadOf(ref);
+  if (!download) return null;
+  const size =
+    download.status.kind === "complete" && download.size ? `, ${formatBytes(download.size)}` : "";
+  return ` · ${stateWord(download)}${size}`;
 }
 
 /** The plot and credits; a note where only the provider's facts are known. */
@@ -435,6 +458,7 @@ function Seasons({
           <EpisodeRow
             key={episode.id}
             episode={episode}
+            name={title.title}
             watched={state.kind === "watched"}
             progress={progress}
             onPlay={() => playEpisode(details, episode, resumePoint(progress), onVersions)}
@@ -448,26 +472,40 @@ function Seasons({
 
 function EpisodeRow({
   episode,
+  name,
   watched,
   progress,
   onPlay,
   onMark,
 }: {
   episode: Episode | EpisodeDetails;
+  /** The series' name, as alerts about its download name the episode. */
+  name: string;
   watched: boolean;
   progress: TitleProgress | undefined;
   onPlay: () => void;
   onMark: (watched: boolean) => void;
 }) {
+  const ref: TitleRef = {
+    kind: "episode",
+    subscriptionId: episode.subscriptionId,
+    id: episode.id,
+    seriesId: episode.seriesId,
+    season: episode.season,
+    episode: episode.number,
+  };
+  const download = useDownloadOf(ref);
+  const named = `${name} · ${episodeLabel(episode.season, episode.number)}`;
   const markLabel = watched ? "Mark unwatched" : "Mark watched";
-  const ask = () =>
-    ActionSheetIOS.showActionSheetWithOptions(
-      { options: [markLabel, "Cancel"], cancelButtonIndex: 1 },
-      (index) => index === 0 && onMark(!watched),
-    );
+  // Marking first, then what its download allows, as the sheet and VoiceOver offer them.
+  const actions: readonly DownloadAction[] = [
+    { label: markLabel, destructive: false, run: () => onMark(!watched) },
+    ...(download ? actionsOf(download) : [downloadAction(ref, named)]),
+  ];
   const line = [
     episode.duration ? runtime(episode.duration) : null,
     watched ? "Watched" : timeLeftOf(progress),
+    download ? stateWord(download) : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -475,12 +513,17 @@ function EpisodeRow({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`${episode.number}, ${episode.title}${line ? `, ${line}` : ""}`}
-      accessibilityActions={[{ name: "activate" }, { name: "mark", label: markLabel }]}
-      onAccessibilityAction={(event: AccessibilityActionEvent) =>
-        event.nativeEvent.actionName === "mark" ? onMark(!watched) : onPlay()
-      }
+      accessibilityActions={[
+        { name: "activate" },
+        ...actions.map((action) => ({ name: action.label, label: action.label })),
+      ]}
+      onAccessibilityAction={(event: AccessibilityActionEvent) => {
+        const { actionName } = event.nativeEvent;
+        if (actionName === "activate") onPlay();
+        else actions.find((action) => action.label === actionName)?.run();
+      }}
       onPress={onPlay}
-      onLongPress={ask}
+      onLongPress={() => showActions(download, actions)}
       style={({ pressed }) => [styles.episode, pressed && styles.pressed]}
       testID={`episode-${episode.id}`}
     >
@@ -502,6 +545,13 @@ function EpisodeRow({
       {watched ? (
         <SymbolView name="checkmark.circle.fill" size={20} tintColor={colors.dim} />
       ) : null}
+      <DownloadButton
+        of={ref}
+        name={named}
+        playsCopy
+        hidden
+        testID={`episode-${episode.id}-download`}
+      />
     </Pressable>
   );
 }
@@ -525,7 +575,6 @@ function Related({ title }: { title: Title }) {
 function CapsuleButton({
   symbol,
   label,
-  hint,
   compact = false,
   disabled = false,
   onPress,
@@ -533,7 +582,6 @@ function CapsuleButton({
 }: {
   symbol: SFSymbol;
   label: string;
-  hint?: string;
   compact?: boolean;
   disabled?: boolean;
   onPress: () => void;
@@ -543,7 +591,6 @@ function CapsuleButton({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      {...(hint ? { accessibilityHint: hint } : {})}
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}
