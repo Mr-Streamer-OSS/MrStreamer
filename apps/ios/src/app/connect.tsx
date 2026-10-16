@@ -7,8 +7,8 @@ import { colors, TextButton } from "../ui.tsx";
 
 /**
  * Signs in to an Xtream subscription, on one form. A failure keeps every field and says what
- * happened and what to do; Connect becomes Try again with the same details until a field changes.
- * The root layout shows the tabs once it is signed in.
+ * happened and what to do; Connect becomes Try again with the same details until a field changes,
+ * which clears the failure. The root layout shows the tabs once it is signed in.
  */
 export default function Connect() {
   const session = useSession();
@@ -17,29 +17,35 @@ export default function Connect() {
   const [username, setUsername] = useState(saved?.username ?? "");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<Failure | null>(
-    saved ? { headline: "Enter the password again.", advice: null } : null,
+  // The line under the fields. `tried` when it is the failure of the details as they stand: the
+  // button says Try again, and an edit clears it. The saved login's prompt stays until Connect.
+  const [notice, setNotice] = useState<{ failure: Failure; tried: boolean } | null>(
+    saved
+      ? { failure: { headline: "Enter the password again.", advice: null }, tried: false }
+      : null,
   );
-  // Whether the details are those that just failed: then the button says Try again.
-  const [failed, setFailed] = useState(false);
+  // Counts edits, so a sign-in that fails after the fields changed says nothing about them.
+  const edits = useRef(0);
   // The keyboard's Go submits too, and can before `busy` renders: one sign-in at a time.
   const pending = useRef(false);
 
   const edit = (set: (value: string) => void) => (value: string) => {
     set(value);
-    setFailed(false);
+    edits.current += 1;
+    setNotice((shown) => (shown?.tried ? null : shown));
   };
 
   const submit = () => {
     if (pending.current) return;
     pending.current = true;
+    const submitted = edits.current;
     setBusy(true);
-    setFailure(null);
+    setNotice(null);
     connect({ server, username, password }).catch((cause: unknown) => {
       pending.current = false;
       setBusy(false);
-      setFailed(true);
-      setFailure(failureOf(appError(cause), server));
+      if (edits.current !== submitted) return;
+      setNotice({ failure: failureOf(appError(cause), server), tried: true });
     });
   };
 
@@ -71,14 +77,16 @@ export default function Connect() {
         secret
         onSubmit={submit}
       />
-      {failure ? (
+      {notice ? (
         <View accessible accessibilityLiveRegion="polite" testID="connect-error">
-          <Text style={styles.error}>{failure.headline}</Text>
-          {failure.advice ? <Text style={styles.advice}>{failure.advice}</Text> : null}
+          <Text style={styles.error}>{notice.failure.headline}</Text>
+          {notice.failure.advice ? (
+            <Text style={styles.advice}>{notice.failure.advice}</Text>
+          ) : null}
         </View>
       ) : null}
       <TextButton
-        label={busy ? "Connecting" : failed ? "Try again" : "Connect"}
+        label={busy ? "Connecting" : notice?.tried ? "Try again" : "Connect"}
         onPress={submit}
         disabled={busy}
       />
