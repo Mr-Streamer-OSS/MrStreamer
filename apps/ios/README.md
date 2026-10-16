@@ -95,7 +95,11 @@ Each responsibility has one owner, a plain module with a store the screens read:
   writes, removals and clearing run one at a time so none loses another's change to the index.
 
 Routes are in `src/app` (Expo Router): `(tabs)` are the system's native tabs, Home's Downloads and
-Settings are pushed from its top bar, and `connect` shows until a subscription is signed in.
+Settings are pushed from its top bar, Settings' provider form (`provider`, Add provider or a
+provider's Edit) above Settings, and `connect` shows until a subscription is saved. Connect and
+`provider` share `src/provider-form.tsx`. Settings lists each provider as a row with how it
+stands; pressing one offers Retry, its reloads, Edit and Remove as a system sheet, and Remove asks
+whether to delete its history too.
 Watch (`src/watch.tsx`) is a layer over the navigation rather than a route, because the view that
 starts Picture in Picture has to stay while it plays. `src/glass.tsx` draws the app's own controls
 as Liquid Glass, and solid before iOS 26 or with Reduce Transparency on.
@@ -131,7 +135,10 @@ the desktop tests' fake Xtream provider with live HLS in front, its movie and se
 fake TMDB under `/tmdb/3`; log in to `http://127.0.0.1:8791` as `fixture` / `fixture-pass`.
 `FIXTURE_TITLES` sizes the movie and series lists. Its control port (8792) stays on the workbench
 and makes the catalogue, a channel or title files fail, or holds movie and series details back to
-try what a slow panel does; see `scripts/fixture-server.ts`.
+try what a slow panel does; see `scripts/fixture-server.ts`. A second panel, for several
+providers, runs beside it on other ports with `FIXTURE_SECOND=1` and its own login, such as
+`FIXTURE_SECOND=1 FIXTURE_USERNAME=second FIXTURE_PASSWORD=second-pass node scripts/fixture-server.ts 8793 8794`;
+add it in Settings > Add provider at `http://127.0.0.1:8793`. Its channels have the first's ids.
 
 ```sh
 node scripts/fixture-server.ts 8791 8792

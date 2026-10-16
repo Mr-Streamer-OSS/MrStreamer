@@ -5,7 +5,10 @@ import { formatDate } from "@mrstreamer/core/i18n";
 import Constants from "expo-constants";
 import { router } from "expo-router";
 import { isPictureInPictureSupported } from "expo-video";
+import { SymbolView } from "expo-symbols";
 import {
+  ActionSheetIOS,
+  Alert,
   Image,
   Linking,
   Pressable,
@@ -15,17 +18,24 @@ import {
   Text,
   View,
 } from "react-native";
-import { reloadChannels, reloadTitles, remove, useRoster, type Member } from "../../../account.ts";
+import {
+  reloadChannels,
+  reloadTitles,
+  remove,
+  retry,
+  useRoster,
+  type Member,
+} from "../../../account.ts";
 import { failureOf } from "../../../errors.ts";
 import { setStatistics, useStatistics } from "../../../telemetry/index.ts";
 import { hasTmdb, useMetadataStatus, useTitleTimings } from "../../../titles.ts";
-import { colors, TextButton } from "../../../ui.tsx";
+import { ChannelLogo, colors, TextButton } from "../../../ui.tsx";
 
 /**
- * Settings as one list: the provider first, then Downloads, Playback, Privacy and About. iOS has
- * one subscription so far; several, M3U playlists, downloads and guide sources come here as they
- * come to iOS, and until then nothing here offers them. TMDB's terms ask for its logo and notice,
- * as the desktop's Settings show them.
+ * Settings as one list: the providers first, each a row with Add provider under them, then
+ * Downloads, Playback, Privacy and About. M3U playlists, downloads and guide sources come here as
+ * they come to iOS, and until then nothing here offers them. TMDB's terms ask for its logo and
+ * notice, as the desktop's Settings show them.
  */
 export default function Settings() {
   const roster = useRoster();
@@ -33,10 +43,19 @@ export default function Settings() {
   if (roster.kind !== "ready") return null;
   return (
     <ScrollView style={styles.screen} contentInsetAdjustmentBehavior="automatic">
-      <Section name={roster.members.length > 1 ? "Providers" : "Provider"} />
+      <Section name="Providers" />
       {roster.members.map((member) => (
         <Provider key={member.entry.id} member={member} />
       ))}
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => router.push("/provider")}
+        style={({ pressed }) => [styles.provider, pressed && styles.pressed]}
+        testID="settings-add-provider"
+      >
+        <SymbolView name="plus" size={20} tintColor={colors.text} style={styles.mark} />
+        <Text style={styles.name}>Add provider</Text>
+      </Pressable>
 
       <Section name="Downloads" />
       <Text style={styles.paragraph}>
@@ -102,47 +121,98 @@ export default function Settings() {
   );
 }
 
-/** A provider: its name, account and lists, with its own reloads. */
+/**
+ * A provider as one row: its name and how it stands, in a line. Pressing it offers what can be
+ * done with it, as a system sheet: Retry when it didn't answer, the reloads, Edit and Remove.
+ */
 function Provider({ member }: { member: Member }) {
-  const { entry, label, account, live, titles } = member;
-  // Only what needs the viewer: a load under way or one that failed.
-  const loads = [
-    live.kind === "loading"
-      ? "Loading channels"
-      : live.kind === "failed"
-        ? `Channels: ${failureOf(live.error, entry.server).headline}`
-        : null,
-    titles.kind === "loading"
-      ? "Loading movies and series"
-      : titles.kind === "failed"
-        ? `Movies and series: ${failureOf(titles.error, entry.server).headline}`
-        : null,
-  ].filter((line) => line !== null);
+  const { entry, label } = member;
+  const line = standing(member);
+  const open = () => {
+    const actions = [
+      ...(member.needsSecret
+        ? [{ label: "Enter password", run: () => edit(entry.id) }]
+        : failed(member)
+          ? [{ label: "Retry", run: () => retry(entry.id) }]
+          : []),
+      ...(member.needsSecret
+        ? []
+        : [
+            { label: "Reload channels", run: () => reloadChannels(entry.id) },
+            { label: "Reload movies and series", run: () => reloadTitles(entry.id) },
+          ]),
+      { label: "Edit", run: () => edit(entry.id) },
+      { label: "Remove", run: () => confirmRemove(member) },
+    ];
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        title: label,
+        options: [...actions.map((action) => action.label), "Cancel"],
+        destructiveButtonIndex: actions.length - 1,
+        cancelButtonIndex: actions.length,
+      },
+      (index) => actions[index]?.run(),
+    );
+  };
   return (
-    <>
-      <View style={styles.block} accessible testID={`settings-provider-${entry.id}`}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${label}, ${line}`}
+      onPress={open}
+      style={({ pressed }) => [styles.provider, pressed && styles.pressed]}
+      testID={`settings-provider-${entry.id}`}
+    >
+      <ChannelLogo channel={{ title: label, logoUrl: null }} style={styles.mark} />
+      <View style={styles.names}>
         <Text style={styles.name} numberOfLines={1}>
           {label}
         </Text>
-        <Text style={styles.plain} numberOfLines={2}>
-          {[entry.username, accountLine(account, entry.server)].join(" · ")}
+        <Text style={[styles.plain, failed(member) && styles.failed]} numberOfLines={2}>
+          {line}
         </Text>
-        {loads.map((line) => (
-          <Text key={line} style={styles.plain} numberOfLines={2}>
-            {line}
-          </Text>
-        ))}
       </View>
-      <View style={styles.actions}>
-        <TextButton label="Reload channels" onPress={() => reloadChannels(entry.id)} />
-        <TextButton label="Reload movies and series" onPress={() => reloadTitles(entry.id)} />
-        <TextButton
-          label="Disconnect"
-          onPress={() => void remove(entry.id, { keepHistory: false }).catch(() => undefined)}
-          destructive
-        />
-      </View>
-    </>
+    </Pressable>
+  );
+}
+
+const edit = (id: string) => router.push({ pathname: "/provider", params: { id } });
+
+/** Whether it needs the viewer: it didn't answer, or asks for its password again. */
+const failed = (member: Member) =>
+  member.needsSecret ||
+  member.live.kind === "failed" ||
+  member.titles.kind === "failed" ||
+  (member.account !== null && "kind" in member.account);
+
+/** How a provider stands, in a line: its account, or what needs the viewer, or what loads. */
+function standing({ entry, account, needsSecret, live, titles }: Member): string {
+  if (needsSecret) return "Enter the password again";
+  if (live.kind === "failed") return failureOf(live.error, entry.server).headline;
+  if (titles.kind === "failed") {
+    return `Movies and series: ${failureOf(titles.error, entry.server).headline}`;
+  }
+  const loading =
+    live.kind === "loading" ? "Loading channels" : titles.kind === "loading" ? "Loading" : null;
+  return [accountLine(account, entry.server), loading].filter(Boolean).join(" · ");
+}
+
+/**
+ * Asks before removing, saying what goes. Its history stays unless the viewer deletes it too;
+ * the last one removed returns to Connect.
+ */
+function confirmRemove({ entry, label }: Member) {
+  const removing = (keepHistory: boolean) => () =>
+    void remove(entry.id, { keepHistory }).catch(() =>
+      Alert.alert(`${label} is removed`, "Its history couldn't be deleted from this iPhone."),
+    );
+  Alert.alert(
+    `Remove ${label}?`,
+    "What plays from it stops. Its favourites, watchlist, history and progress stay for when you add it again, unless you delete them too.",
+    [
+      { text: "Remove", style: "destructive", onPress: removing(true) },
+      { text: "Remove and delete history", style: "destructive", onPress: removing(false) },
+      { text: "Cancel", style: "cancel" },
+    ],
   );
 }
 
@@ -239,7 +309,20 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     marginHorizontal: 16,
   },
-  block: { marginHorizontal: 16, marginTop: 4, gap: 2 },
+  provider: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    minHeight: 56,
+    paddingVertical: 8,
+    marginHorizontal: 16,
+    borderBottomColor: colors.line,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  pressed: { opacity: 0.5 },
+  mark: { width: 36, height: 36 },
+  names: { flex: 1, minWidth: 0 },
+  failed: { color: "#FF453A" },
   name: { color: colors.text, fontSize: 17, fontWeight: "600" },
   plain: { color: colors.text, fontSize: 15 },
   line: {

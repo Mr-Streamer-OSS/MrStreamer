@@ -8,6 +8,9 @@
 //
 // The app connects to http://127.0.0.1:<port> as "fixture" / "fixture-pass", or as the
 // FIXTURE_USERNAME / FIXTURE_PASSWORD given, such as the canaries scripts/log-scan.ts looks for.
+// FIXTURE_SECOND=1 makes it another provider beside the first, on other ports: the fake panel's
+// `second`, numbering channels, films and series as the first does, some of the first's films
+// under ids of its own. Its requests are logged to requests-<port>.jsonl, and it says where it runs in server-<port>.json.
 // Every channel is a live loop: the TEST channels loop their recording from
 // apps/desktop/test/fixtures, codecs as they are, so the ones AVPlayer can't decode fail as they
 // would; every other channel loops a 720p H.264 + AAC test picture made here with ffmpeg, light
@@ -55,7 +58,8 @@ const root = join(import.meta.dirname, "../../..");
 const out = join(root, ".local/ios-fixture");
 const fixtures = join(root, "apps/desktop/test/fixtures");
 mkdirSync(out, { recursive: true });
-const log = join(out, "requests.jsonl");
+const second = process.env.FIXTURE_SECOND === "1";
+const log = join(out, second ? `requests-${port}.jsonl` : "requests.jsonl");
 
 /** A looped recording, cut into segments of the durations its playlist gives. */
 interface Media {
@@ -125,6 +129,7 @@ const provider = await startFakeProvider({
   titles: Number(process.env.FIXTURE_TITLES ?? 120),
   username: USERNAME,
   password: PASSWORD,
+  second,
 });
 const tmdb = await startFakeTmdb();
 // One service streams the first films and series it is told about.
@@ -399,7 +404,10 @@ createServer((request, response) => {
   answer(response, 404, "text/plain", "");
 }).listen(controlPort, "127.0.0.1");
 
-writeFileSync(join(out, "server.json"), JSON.stringify({ port, controlPort, started }));
+writeFileSync(
+  join(out, second ? `server-${port}.json` : "server.json"),
+  JSON.stringify({ port, controlPort, started }),
+);
 console.log(`fake TMDB at http://127.0.0.1:${port}/tmdb/3`);
 console.log(
   `fixture panel http://127.0.0.1:${port} as ${USERNAME}, ${provider.catalogue.channels.length} channels; control http://127.0.0.1:${controlPort}`,
