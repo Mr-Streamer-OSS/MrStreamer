@@ -5,11 +5,14 @@ React Native on Hermes (Expo SDK 58), building toward the desktop app's features
 own native adapters: the Keychain, app storage and one native player so far. Nothing of it is in
 the desktop's install, build or packages.
 
-So far it connects one Xtream subscription. Live plays channels; Films and Series browse the
+So far it connects one Xtream subscription. Live lists a country's channels with their
+providers' logos, its categories as text tabs, and plays them; Films and Series browse the
 desktop's collections (For you, New, Genres, Services, 4K and All) and open details pushed on
 their tab, with seasons and episodes, the version menu, the watchlist and episodes marked by hand.
-A movie or an episode plays in Watch from where it stopped, and Home shows Continue watching and
-the watchlist; Search finds films, series and channels. Downloads are a route that says they
+A movie or an episode plays in Watch from where it stopped. Home leads with the preview, then
+channels to preview (On now: recent ones, else Live's country), Continue watching, the watchlist
+and Movies for you, which falls back to the provider's own list without TMDB. Rows show a
+channel's category where the desktop shows its programme: iOS reads no guide yet; Search finds films, series and channels. Downloads are a route that says they
 aren't on iPhone yet, and the details' Download button is shown disabled. What the desktop does
 and iOS doesn't yet is tracked in the parity report on the iOS card.
 

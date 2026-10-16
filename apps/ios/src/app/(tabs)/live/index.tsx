@@ -1,48 +1,81 @@
 import type { ListedChannel } from "@mrstreamer/core/catalogue/variants";
-import { useNavigation } from "expo-router";
+import { router, useNavigation } from "expo-router";
 import { useCallback, useLayoutEffect, useState } from "react";
-import { FlatList, StyleSheet, View } from "react-native";
-import { loadCatalogue, playChannel, useCatalogue } from "../../../account.ts";
-import { describeError } from "../../../errors.ts";
+import { FlatList, StyleSheet, Text, View } from "react-native";
+import { loadCatalogue, playChannel, useCatalogue, useSession } from "../../../account.ts";
+import { failureOf, hostOf } from "../../../errors.ts";
 import type { Library, Region } from "../../../library.ts";
 import { playingId, usePlayback } from "../../../playback.ts";
 import { useSavedState, writeState } from "../../../storage.ts";
-import { ChannelRow, Message, useRowHeight } from "../../../ui.tsx";
+import { TextTabs } from "../../../titles-ui.tsx";
+import { ChannelRow, colors, Notice, PlaceholderRows, useRowHeight } from "../../../ui.tsx";
+
+/** The text tab for all of a country's categories. Provider category ids are never "*". */
+const ALL = "*";
 
 /**
- * Live: one country's channels, or one of its categories', in a virtualised list. The country
- * and category menu is a system button in the top bar, so the list has no filters of its own.
- * The guide comes here once core reads XMLTV on iOS.
+ * Live: one country's channels, or one of its categories', in a virtualised list of rows of one
+ * fixed height. The country is a system menu in the top bar; its categories are text tabs above
+ * the list. Rows show the channel's category until iOS reads a guide, which brings now and next.
  */
 export default function Live() {
   const catalogue = useCatalogue();
-  if (catalogue.kind === "loading") return <Message text="Loading channels" />;
-  if (catalogue.kind === "failed") {
+  const session = useSession();
+  const height = useRowHeight();
+  const host = session.kind === "signed-in" ? hostOf(session.subscription.server) : "";
+  if (catalogue.kind === "loading") {
     return (
       <View style={styles.screen}>
-        <Message
-          text={describeError(catalogue.error)}
-          action={{ label: "Try again", onPress: loadCatalogue }}
+        <Text style={styles.note} accessibilityLiveRegion="polite">
+          {host ? `Loading channels from ${host}` : "Loading channels"}
+        </Text>
+        <PlaceholderRows height={height} />
+      </View>
+    );
+  }
+  if (catalogue.kind === "failed") {
+    const failure = failureOf(catalogue.error, host);
+    return (
+      <View style={styles.screen}>
+        <Notice
+          failure={{
+            headline: "Couldn't load channels",
+            advice: [failure.headline, failure.advice].filter(Boolean).join(". "),
+          }}
+          actions={[
+            { label: "Try again", onPress: loadCatalogue },
+            { label: "Provider settings", onPress: () => router.navigate("/settings") },
+          ]}
         />
       </View>
     );
   }
-  return <Channels library={catalogue.library} />;
+  if (catalogue.library.regions.length === 0) {
+    return (
+      <View style={styles.screen}>
+        <Notice
+          failure={{ headline: "No live channels", advice: `${host} lists no live channels.` }}
+          actions={[{ label: "Reload", onPress: loadCatalogue }]}
+        />
+      </View>
+    );
+  }
+  return <Channels library={catalogue.library} height={height} />;
 }
 
-function Channels({ library }: { library: Library }) {
+function Channels({ library, height }: { library: Library; height: number }) {
   const navigation = useNavigation();
   const saved = useSavedState();
   const { phase } = usePlayback();
-  const height = useRowHeight();
-  const [shelfId, setShelfId] = useState<string | null>(null);
-  const region = library.regions.find((each) => each.name === saved.region) ?? library.regions[0];
-  const shelf = region?.shelves.find((each) => each.id === shelfId) ?? null;
-  const channels = shelf?.channels ?? region?.channels ?? [];
+  const [shelfId, setShelfId] = useState<string>(ALL);
+  const found = library.regions.find((each) => each.name === saved.region);
+  const region = found ?? library.regions[0]!;
+  const shelf = region.shelves.find((each) => each.id === shelfId) ?? null;
+  const channels = shelf?.channels ?? region.channels;
 
-  const choose = useCallback((next: Region, nextShelf: string | null) => {
+  const choose = useCallback((next: Region) => {
     writeState((state) => ({ ...state, region: next.name }));
-    setShelfId(nextShelf);
+    setShelfId(ALL);
   }, []);
 
   useLayoutEffect(() => {
@@ -50,40 +83,19 @@ function Channels({ library }: { library: Library }) {
       unstable_headerRightItems: () => [
         {
           type: "menu",
-          label: shelf && region ? `${region.name} · ${shelf.title}` : (region?.name ?? "Live"),
+          label: region.name,
           menu: {
-            items: library.regions.map((each) =>
-              each.shelves.length > 1
-                ? {
-                    type: "submenu" as const,
-                    label: each.name,
-                    items: [
-                      {
-                        type: "action" as const,
-                        label: `All of ${each.name}`,
-                        state: each === region && !shelf ? ("on" as const) : ("off" as const),
-                        onPress: () => choose(each, null),
-                      },
-                      ...each.shelves.map((option) => ({
-                        type: "action" as const,
-                        label: option.title,
-                        state: option === shelf ? ("on" as const) : ("off" as const),
-                        onPress: () => choose(each, option.id),
-                      })),
-                    ],
-                  }
-                : {
-                    type: "action" as const,
-                    label: each.name,
-                    state: each === region ? ("on" as const) : ("off" as const),
-                    onPress: () => choose(each, null),
-                  },
-            ),
+            items: library.regions.map((each) => ({
+              type: "action" as const,
+              label: each.name,
+              state: each === region ? ("on" as const) : ("off" as const),
+              onPress: () => choose(each),
+            })),
           },
         },
       ],
     });
-  }, [navigation, library, region, shelf, choose]);
+  }, [navigation, library, region, choose]);
 
   const playing = playingId(phase);
   const watch = useCallback(
@@ -91,30 +103,53 @@ function Channels({ library }: { library: Library }) {
       playChannel(channel, library.placeOf.get(channel.id) ?? "", { watch: true }),
     [library],
   );
+  const tabs =
+    region.shelves.length > 1
+      ? [
+          { value: ALL, label: "All" },
+          ...region.shelves.map((each) => ({ value: each.id, label: each.title })),
+        ]
+      : [];
   return (
-    <FlatList
-      style={styles.screen}
-      data={channels}
-      keyExtractor={(channel) => channel.id}
-      extraData={playing}
-      renderItem={({ item }) => (
-        <ChannelRow
-          channel={item}
-          detail={library.placeOf.get(item.id) ?? ""}
-          playing={item.id === playing}
-          height={height}
-          onPress={watch}
-        />
-      )}
-      getItemLayout={(_, index) => ({ length: height, offset: height * index, index })}
-      contentInsetAdjustmentBehavior="automatic"
-      initialNumToRender={16}
-      maxToRenderPerBatch={16}
-      windowSize={9}
-      removeClippedSubviews
-      testID="live-list"
-    />
+    <View style={styles.screen}>
+      {saved.region && !found ? (
+        <Text style={styles.note}>{`${saved.region} isn't listed any more.`}</Text>
+      ) : null}
+      {tabs.length > 0 ? (
+        <View style={styles.tabs}>
+          <TextTabs tabs={tabs} value={shelf?.id ?? ALL} onChange={setShelfId} />
+        </View>
+      ) : null}
+      {/* The tabs sit above the list, not in it, so every row's offset stays height × index. */}
+      <FlatList
+        key={`${region.name}\n${shelf?.id ?? ALL}`}
+        style={styles.screen}
+        data={channels}
+        keyExtractor={(channel) => channel.id}
+        extraData={playing}
+        renderItem={({ item }) => (
+          <ChannelRow
+            channel={item}
+            detail={library.placeOf.get(item.id) ?? ""}
+            playing={item.id === playing}
+            height={height}
+            onPress={watch}
+          />
+        )}
+        getItemLayout={(_, index) => ({ length: height, offset: height * index, index })}
+        contentInsetAdjustmentBehavior="automatic"
+        initialNumToRender={16}
+        maxToRenderPerBatch={16}
+        windowSize={9}
+        removeClippedSubviews
+        testID="live-list"
+      />
+    </View>
   );
 }
 
-const styles = StyleSheet.create({ screen: { flex: 1, backgroundColor: "#000000" } });
+const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: "#000000" },
+  note: { color: colors.text, fontSize: 15, marginHorizontal: 16, marginVertical: 12 },
+  tabs: { borderBottomColor: colors.line, borderBottomWidth: StyleSheet.hairlineWidth },
+});
