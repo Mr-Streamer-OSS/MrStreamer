@@ -58,20 +58,27 @@ export function WatchLayer() {
     return () => onEndPictureInPicture(null);
   }, []);
   // A return from Picture in Picture, answered once Watch has committed what it returns to: AVKit
-  // then brings the picture back into a view on screen. Anything else playing by then, or Watch
-  // closed, answers no. If the view goes first, the native view answers no as it goes.
-  const [restoring, setRestoring] = useState<{ readonly item: Playing } | null>(null);
+  // then brings the picture back into a view on screen. The answer goes to the view that asked,
+  // with the number its request carried, so a late answer can't complete a newer request.
+  // Anything else playing by then, or Watch closed, answers no. If the view goes first, the
+  // native view answers no as it goes.
+  const [restoring, setRestoring] = useState<{
+    readonly from: VideoView;
+    readonly request: number;
+    readonly item: Playing;
+  } | null>(null);
   useEffect(() => {
     if (!restoring) return;
     setRestoring(null);
-    void view.current?.finishPictureInPictureRestore(
-      watch && playingItem(phase) === restoring.item,
-    );
+    const { from, request, item } = restoring;
+    void from.finishPictureInPictureRestore(request, watch && playingItem(phase) === item);
   }, [restoring, watch, phase]);
-  const restore = () => {
+  const restore = (request: number) => {
+    const from = view.current;
+    if (!from) return;
     const item = restoreFromPictureInPicture();
-    if (item === null) void view.current?.finishPictureInPictureRestore(false);
-    else setRestoring({ item });
+    if (item === null) void from.finishPictureInPictureRestore(request, false);
+    else setRestoring({ from, request, item });
   };
   const landscape = watch && phase.kind !== "idle" && !phase.item.live;
   useEffect(() => {
@@ -113,7 +120,7 @@ export function WatchLayer() {
           startsPictureInPictureAutomatically
           onPictureInPictureStart={() => pictureInPicture(true)}
           onPictureInPictureStop={() => pictureInPicture(false)}
-          onPictureInPictureRestore={restore}
+          onPictureInPictureRestore={({ nativeEvent }) => restore(nativeEvent.request)}
           style={StyleSheet.absoluteFill}
         />
       ) : null}
