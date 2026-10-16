@@ -1,5 +1,4 @@
 import type { Episode, SeriesDetails, Title, TitleRef } from "@mrstreamer/contracts/ondemand";
-import { ownedKey } from "@mrstreamer/contracts/subscription";
 import type { SeriesViewing } from "@mrstreamer/contracts/viewing";
 import type { ContinueEntry } from "@mrstreamer/core/viewing/continue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -85,7 +84,7 @@ vi.mock("../src/storage.ts", () => ({
 }));
 
 const { disconnect } = await import("../src/account.ts");
-const { failedVersions, playEpisode, playMovie } = await import("../src/play-title.ts");
+const { failureOf, playEpisode, playMovie } = await import("../src/play-title.ts");
 const { onScreen, play, playNext, showVersions, stop } = await import("../src/playback.ts");
 const { resume } = await import("../src/resume.ts");
 
@@ -244,6 +243,27 @@ describe("a series' resume", () => {
     expect(sources).toEqual([]);
   });
 
+  it("stays lapsed when the viewer goes away and comes back before it answers", async () => {
+    resume(seriesEntry("s1"));
+    onScreen("/films");
+    onScreen("/");
+    await answer(seriesDetails("s1"));
+    resume(seriesEntry("s2"));
+    onScreen("/films");
+    onScreen("/");
+    held.details.shift()?.reject(new Error("unreachable"));
+    await settle();
+    expect(sources).toEqual([]);
+    expect(pushed).toEqual([]);
+  });
+
+  it("goes on when the same screen is reported again", async () => {
+    resume(seriesEntry("s1"));
+    onScreen("/");
+    await answer(seriesDetails("s1"));
+    expect(sources).toEqual(["file:episode:s1e1"]);
+  });
+
   it("opens the series' details when they fail and nothing was asked since", async () => {
     resume(seriesEntry("s1"));
     held.details.shift()?.reject(new Error("unreachable"));
@@ -261,6 +281,17 @@ describe("Next episode", () => {
     held.standing.shift()?.(nothingPlayed);
     await settle();
     expect(sources).toEqual(["file:episode:s1e1", "file:episode:s1e2"]);
+  });
+
+  it("stays cancelled when the viewer goes away and comes back while the record answers", async () => {
+    playEpisode(seriesDetails("s1"), episode("s1", 1), 0, () => undefined);
+    await settle();
+    playNext();
+    onScreen("/films");
+    onScreen("/");
+    held.standing.shift()?.(nothingPlayed);
+    await settle();
+    expect(sources).toEqual(["file:episode:s1e1"]);
   });
 
   it("gives way to a movie played while the record answers", async () => {
@@ -281,11 +312,11 @@ describe("a version that fails", () => {
     playMovie(title("movie", "m1", ["m1", "m2"]), version, 0, () => undefined);
     await settle();
     emit("statusChange", { status: "error", error: { message: "Cannot Open" } });
-    expect(failedVersions().get(ownedKey(version))).toBe("file");
+    expect(failureOf("movie", version)).toBe("file");
     playMovie(title("movie", "m1", ["m1", "m2"]), version, 0, () => undefined);
     await settle();
     emit("playingChange", { isPlaying: true });
-    expect(failedVersions().has(ownedKey(version))).toBe(false);
+    expect(failureOf("movie", version)).toBeUndefined();
   });
 
   it("marks a series' version by an episode, and offers its other versions", async () => {
@@ -294,9 +325,22 @@ describe("a version that fails", () => {
     playEpisode(details, episode("s1", 1), 0, shown);
     await settle();
     emit("statusChange", { status: "error", error: { message: "Cannot Open" } });
-    expect(failedVersions().get(ownedKey({ subscriptionId: SUB, id: "s1" }))).toBe("episode");
-    expect(failedVersions().has(ownedKey(episode("s1", 1)))).toBe(false);
+    expect(failureOf("series", { subscriptionId: SUB, id: "s1" })).toBe("episode");
+    expect(failureOf("series", { subscriptionId: SUB, id: "s1e1" })).toBeUndefined();
     showVersions();
     expect(shown).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a movie's and a series' failures apart when they share an id", async () => {
+    const shared = { subscriptionId: SUB, id: "x1" };
+    playMovie(title("movie", "x1", ["x1", "x2"]), shared, 0, () => undefined);
+    await settle();
+    emit("statusChange", { status: "error", error: { message: "Cannot Open" } });
+    // A series listed under the same id plays an episode: the movie's failure stands.
+    playEpisode(seriesDetails("x1"), episode("x1", 1), 0, () => undefined);
+    await settle();
+    emit("playingChange", { isPlaying: true });
+    expect(failureOf("movie", shared)).toBe("file");
+    expect(failureOf("series", shared)).toBeUndefined();
   });
 });

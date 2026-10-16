@@ -29,13 +29,7 @@ import {
   type AccessibilityActionEvent,
 } from "react-native";
 import { Glass } from "./glass.tsx";
-import {
-  failedVersions,
-  playEpisode,
-  playMovie,
-  useFailedVersions,
-  type Failure,
-} from "./play-title.ts";
+import { failureOf, playEpisode, playMovie, useFailure, type Failure } from "./play-title.ts";
 import { useRead } from "./read.ts";
 import { openDetails } from "./resume.ts";
 import {
@@ -84,7 +78,6 @@ export function DetailsScreen({ kind, id }: { kind: TitleKind; id: string }) {
 
 function Details({ title, opened }: { title: Title; opened: OwnedId }) {
   const viewing = useViewing();
-  const failed = useFailedVersions();
   const watchlist = useWatchlist();
   const [picked, setPicked] = useState<OwnedId | null>(null);
   const sequence = viewing?.sequence ?? 0;
@@ -112,7 +105,7 @@ function Details({ title, opened }: { title: Title; opened: OwnedId }) {
     `${title.kind}|${ownedKey(version)}`,
     useCallback(() => detailsOf(shownTitle), [shownTitle]),
   );
-  const failedHere = failed.get(ownedKey(version));
+  const failedHere = useFailure(title.kind, version);
   const saved = savedEntry(watchlist, title) !== undefined;
 
   const chooseVersion = () => {
@@ -123,7 +116,7 @@ function Details({ title, opened }: { title: Title; opened: OwnedId }) {
         label: [
           group.quality,
           group.label + (group.versions.length > 1 ? ` (${at + 1})` : ""),
-          failureNote(failedVersions().get(ownedKey(each))),
+          failureNote(failureOf(title.kind, each)),
         ]
           .filter(Boolean)
           .join(" · "),

@@ -105,7 +105,7 @@ export interface Request {
   stands(): boolean;
 }
 
-/** Rises with every request, play and Stop: only the latest request stands. */
+/** Rises with every request, play, Stop and move to another screen: only the latest stands. */
 let requests = 0;
 /** The screen the viewer is on, as navigation reports it. */
 let screen = "";
@@ -113,13 +113,17 @@ let screen = "";
 /** Starts a request that has to wait, replacing any waiting before it. */
 export function request(): Request {
   const mine = ++requests;
-  const at = screen;
-  return { stands: () => mine === requests && screen === at };
+  return { stands: () => mine === requests };
 }
 
-/** Navigation reports each screen the viewer goes to; a request made on another one lapses. */
+/**
+ * Navigation reports the screen the viewer is on. Leaving it ends any waiting request for good,
+ * coming back too; the same screen reported again changes nothing.
+ */
 export function onScreen(path: string) {
+  if (path === screen) return;
   screen = path;
+  requests++;
 }
 
 /** How often a playing title says how far it got. */

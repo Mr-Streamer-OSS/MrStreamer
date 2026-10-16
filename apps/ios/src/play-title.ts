@@ -1,4 +1,10 @@
-import type { Episode, SeriesDetails, Title, TitleRef } from "@mrstreamer/contracts/ondemand";
+import type {
+  Episode,
+  SeriesDetails,
+  Title,
+  TitleKind,
+  TitleRef,
+} from "@mrstreamer/contracts/ondemand";
 import { ownedId, ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import { nextEpisode } from "@mrstreamer/core/ondemand/details";
@@ -23,15 +29,25 @@ import { finishSeries, recordProgress, seriesViewing } from "./viewing.ts";
 /** What failed in a version: its file, or an episode's file of a series version. */
 export type Failure = "file" | "episode";
 
+/**
+ * Versions that failed to play since launch, and what of them failed, by kind and version: a
+ * movie and a series can have the same id in one subscription.
+ */
 const failed = store<ReadonlyMap<string, Failure>>(new Map());
-/** Versions, by `ownedKey`, that failed to play since launch, and what of them failed. */
-export const useFailedVersions = () => useStore(failed);
+const failureKey = (kind: TitleKind, version: OwnedId) => `${kind}|${ownedKey(version)}`;
+
+/** What failed of a movie's or series' version since launch, if anything. */
+export function useFailure(kind: TitleKind, version: OwnedId): Failure | undefined {
+  return useStore(failed).get(failureKey(kind, version));
+}
 /** The same, as it stands now, for a menu opened later than the screen last drew. */
-export const failedVersions = () => failed.get();
+export function failureOf(kind: TitleKind, version: OwnedId): Failure | undefined {
+  return failed.get().get(failureKey(kind, version));
+}
 
 /** Notes whether `version` played: a failure until it plays, cleared once it does. */
-function outcomeOf(version: OwnedId, failure: Failure) {
-  const key = ownedKey(version);
+function outcomeOf(kind: TitleKind, version: OwnedId, failure: Failure) {
+  const key = failureKey(kind, version);
   return (played: boolean) =>
     failed.set((current) => {
       if (played ? !current.has(key) : current.get(key) === failure) return current;
@@ -73,7 +89,7 @@ export function playMovie(title: Title, version: OwnedId, from: number, versions
     from,
     progress: (position, duration) =>
       void recordProgress(ref, position, duration, since).catch(() => undefined),
-    outcome: outcomeOf(version, "file"),
+    outcome: outcomeOf("movie", version, "file"),
     versions,
   });
 }
@@ -128,7 +144,7 @@ export function playEpisode(
         )
         .catch(() => (finishing = false));
     },
-    outcome: outcomeOf(series, "episode"),
+    outcome: outcomeOf("series", series, "episode"),
     // The next one not yet watched, as the record stands now, else the next in order, unless the
     // viewer did something else while the record answered.
     next: () => {
