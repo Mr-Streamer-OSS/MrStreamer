@@ -28,6 +28,7 @@
 //   GET  /live                         channels asked for in the last six seconds
 //   GET  /titles                       movie and episode files asked for in the last six seconds
 //   POST /fail-titles?status=503       the next title file requests answer that; status=none restores
+//   POST /delay-details?ms=8000        movie and series details answer that much later; ms=0 restores
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import {
@@ -163,6 +164,8 @@ for (const series of provider.titles.series) {
 }
 /** Title file requests left to answer with a failure, and its status. */
 let titleFailure: number | null = null;
+/** How long movie and series details wait before the panel is asked. */
+let detailsDelay = 0;
 const channels = new Map(provider.catalogue.channels.map((each) => [String(each.streamId), each]));
 const mediaOf = (channel: FakeChannel): Media | null =>
   channel.offline
@@ -327,28 +330,32 @@ createServer((request, response) => {
     request.pipe(upstream);
     return;
   }
-  // Everything else is the panel's own: its API, logos and guide.
-  const upstream = forward(
-    {
-      host: panel.hostname,
-      port: panel.port,
-      method: request.method,
-      path,
-      headers: { ...request.headers, host: panel.host },
-    },
-    (reply) => {
-      record({
-        at: Date.now(),
-        kind: url.pathname === "/player_api.php" ? "api" : "other",
-        status: reply.statusCode ?? 0,
-        path: `${url.pathname}${url.searchParams.get("action") ? `?action=${url.searchParams.get("action")}` : ""}`,
-      });
-      response.writeHead(reply.statusCode ?? 502, reply.headers);
-      reply.pipe(response);
-    },
-  );
-  upstream.on("error", () => answer(response, 502, "text/plain", ""));
-  request.pipe(upstream);
+  // Everything else is the panel's own: its API, logos and guide. Details can be held back.
+  const action = url.searchParams.get("action");
+  const wait = action === "get_vod_info" || action === "get_series_info" ? detailsDelay : 0;
+  setTimeout(() => {
+    const upstream = forward(
+      {
+        host: panel.hostname,
+        port: panel.port,
+        method: request.method,
+        path,
+        headers: { ...request.headers, host: panel.host },
+      },
+      (reply) => {
+        record({
+          at: Date.now(),
+          kind: url.pathname === "/player_api.php" ? "api" : "other",
+          status: reply.statusCode ?? 0,
+          path: `${url.pathname}${url.searchParams.get("action") ? `?action=${url.searchParams.get("action")}` : ""}`,
+        });
+        response.writeHead(reply.statusCode ?? 502, reply.headers);
+        reply.pipe(response);
+      },
+    );
+    upstream.on("error", () => answer(response, 502, "text/plain", ""));
+    request.pipe(upstream);
+  }, wait);
 }).listen(port, "127.0.0.1");
 
 createServer((request, response) => {
@@ -371,6 +378,10 @@ createServer((request, response) => {
     const status = url.searchParams.get("status");
     titleFailure = status && status !== "none" ? Number(status) : null;
     return json({ titles: titleFailure });
+  }
+  if (request.method === "POST" && url.pathname === "/delay-details") {
+    detailsDelay = Number(url.searchParams.get("ms") ?? 0);
+    return json({ detailsDelay });
   }
   if (url.pathname === "/titles") {
     const recent = requests.filter(

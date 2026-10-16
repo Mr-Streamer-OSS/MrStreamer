@@ -107,7 +107,8 @@ On the workbench, with the Mac mini's simulator (see the `mac-mini` skill). The 
 the desktop tests' fake Xtream provider with live HLS in front, its movie and series files and a
 fake TMDB under `/tmdb/3`; log in to `http://127.0.0.1:8791` as `fixture` / `fixture-pass`.
 `FIXTURE_TITLES` sizes the movie and series lists. Its control port (8792) stays on the workbench
-and makes the catalogue, a channel or title files fail; see `scripts/fixture-server.ts`.
+and makes the catalogue, a channel or title files fail, or holds movie and series details back to
+try what a slow panel does; see `scripts/fixture-server.ts`.
 
 ```sh
 node scripts/fixture-server.ts 8791 8792
