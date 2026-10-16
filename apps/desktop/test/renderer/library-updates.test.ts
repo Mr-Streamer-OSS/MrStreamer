@@ -1,11 +1,6 @@
 // @vitest-environment happy-dom
 import { ipc, SUBSCRIPTION } from "./support.ts";
-import {
-  QueryClient,
-  QueryObserver,
-  type QueryKey,
-  type QueryObserverOptions,
-} from "@tanstack/react-query";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { IpcOutput } from "@mrstreamer/contracts/ipc";
 import type { CatalogueStatus, LiveChannel } from "@mrstreamer/contracts/library";
@@ -63,13 +58,12 @@ afterEach(() => {
  * No other update follows; back on the list, it shows the new catalogue's.
  */
 async function readsAgainWhenShown<M extends "library.channels" | "viewing.get">(
-  options: QueryObserverOptions<IpcOutput<M>, Error, IpcOutput<M>, IpcOutput<M>, QueryKey>,
+  page: Pick<QueryObserver<IpcOutput<M>>, "subscribe" | "getCurrentResult">,
   method: M,
   before: IpcOutput<M>,
   after: IpcOutput<M>,
 ) {
   const old = ipc.hold(method);
-  const page = new QueryObserver(client, options);
   const leave = page.subscribe(() => {});
   await settled();
   leave();
@@ -87,14 +81,19 @@ async function readsAgainWhenShown<M extends "library.channels" | "viewing.get">
 describe("a catalogue update during a read", () => {
   it("reads All channels again when shown after a read under way answered from the catalogue before", () =>
     readsAgainWhenShown(
-      queries.channels(null),
+      new QueryObserver(client, queries.channels(null)),
       "library.channels",
       [channel("1")],
       [channel("2")],
     ));
 
   it("reads favourites and history again when shown after a read under way answered from the catalogue before", () =>
-    readsAgainWhenShown(queries.viewing(), "viewing.get", viewing("1"), viewing("2")));
+    readsAgainWhenShown(
+      new QueryObserver(client, queries.viewing()),
+      "viewing.get",
+      viewing("1"),
+      viewing("2"),
+    ));
 
   it("reads a shown list again once its first read answered from the catalogue before", async () => {
     const old = ipc.hold("library.channels");

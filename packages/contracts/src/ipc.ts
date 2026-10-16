@@ -782,11 +782,7 @@ export type IpcArgs<M extends IpcMethod> =
 /** Events the main process pushes to the UI. */
 export interface IpcEvents {
   "analytics.reset": null;
-  /**
-   * A subscription's catalogue refresh finished, or failed and kept the previous channels. Not sent
-   * again until the window makes a call: what it reads for this one shows the later refreshes, as
-   * long as it reads again what a read started before this one answered.
-   */
+  /** A subscription's catalogue refresh finished, or failed and kept the previous channels. */
   "library.updated": CatalogueStatus;
   /**
    * A new programme guide is loaded or the one loaded was dropped, a subscription's guide or

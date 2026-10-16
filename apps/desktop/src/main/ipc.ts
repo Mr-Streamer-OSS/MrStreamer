@@ -29,13 +29,12 @@ export type IpcHandlers = {
 /**
  * Registers every IPC method. Input is validated against its schema before the handler runs on
  * `run`, the main runtime, and any failure resolves to a typed error instead of a rejected promise.
- * Failed calls go to the diagnostics. `called` hears of each trusted call as it arrives.
+ * Failed calls go to the diagnostics.
  */
 export function registerIpc(
   run: <A>(effect: Effect.Effect<A, Failed>) => Promise<Exit.Exit<A, Failed>>,
   handlers: IpcHandlers,
   isTrusted: (sender: WebContents) => boolean,
-  called: () => void,
 ): void {
   for (const method of Object.keys(ipcInputs) as IpcMethod[]) {
     // TypeScript cannot pair `ipcInputs[method]` with `handlers[method]` inside a loop over all
@@ -58,7 +57,6 @@ export function registerIpc(
           error: { kind: "unexpected", detail: "IPC call from an unknown window." },
         };
       }
-      called();
       validate ??= schema();
       const input = validate(raw);
       if (input instanceof type.errors) {
