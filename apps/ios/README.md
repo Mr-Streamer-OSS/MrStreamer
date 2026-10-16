@@ -54,7 +54,9 @@ Each responsibility has one owner, a plain module with a store the screens read:
   viewer moved past, and disconnects. A sign-in overtaken by a newer one or by Disconnect saves
   nothing and signs nothing in. Its requests to the provider ask iOS's URL cache to keep
   nothing: the cache would store each answer on disk under an address carrying the login, and
-  answer a later Connect or reload with a failure a panel allowed it to keep.
+  answer a later Connect or reload with a failure a panel allowed it to keep. The first private
+  betas didn't ask, so `modules/forget-cached-logins` empties that cache once, at the first
+  launch of a build that has it, before the app's JavaScript runs.
 - `src/library.ts`: the catalogue as the screens show it, by core's names, quality grouping and
   country rules. Channels in no category the provider lists come last, as Other channels, or as
   All channels when it lists no categories, so Live shows every channel the desktop does.
