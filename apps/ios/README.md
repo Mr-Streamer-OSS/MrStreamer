@@ -78,7 +78,9 @@ Routes are in `src/app` (Expo Router): `(tabs)` are the system's native tabs, Ho
 Settings are pushed from its top bar, and `connect` shows until a subscription is signed in.
 Watch (`src/watch.tsx`) is a layer over the navigation rather than a route, because the view that
 starts Picture in Picture has to stay while it plays. A movie or an episode turns it to landscape
-(`expo-screen-orientation`). `patches/` makes expo-video report Picture in Picture brought back to
+(`expo-screen-orientation`), and closing it turns the screens under it upright again. The
+module's patch records each orientation it asks for: it only learns of a turn through its own
+view controller, which isn't this app's root, and unlocking turned back to a stale landscape. `patches/` makes expo-video report Picture in Picture brought back to
 the app, which its own view never forwarded, so Watch opens again rather than leaving Home. `src/glass.tsx` draws the app's own controls
 as Liquid Glass, and solid before iOS 26 or with Reduce Transparency on.
 

@@ -1,0 +1,28 @@
+diff --git a/ios/ScreenOrientationRegistry.swift b/ios/ScreenOrientationRegistry.swift
+index f7fc584b28bccb6285accdeb7673420a8fa41f45..89489efd726f53487510e842d21c2378649e2ccf 100644
+--- a/ios/ScreenOrientationRegistry.swift
++++ b/ios/ScreenOrientationRegistry.swift
+@@ -82,6 +82,10 @@ public class ScreenOrientationRegistry: NSObject, UIApplicationDelegate {
+     guard newOrientation != .unknown else {
+       return
+     }
++    // Recorded as soon as it is asked for. Only this module's own view controller reports a
++    // transition, and an app whose root is another's never corrects a stale orientation, so a
++    // later unlock would turn the screen back to it.
++    screenOrientationDidChange(newOrientation)
+ 
+     RCTExecuteOnMainQueue { [weak self] in
+       guard let self = self else {
+@@ -104,12 +108,6 @@ public class ScreenOrientationRegistry: NSObject, UIApplicationDelegate {
+       self.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+       UIDevice.current.setValue(newOrientation.rawValue, forKey: "orientation")
+       UIViewController.attemptRotationToDeviceOrientation()
+-
+-      if self.currentScreenOrientation == .unknown {
+-        // CurrentScreenOrientation might be unknown (especially just after launch), but at this point we already know it.
+-        // Later the currentScreenOrientation will be updated by the iOS orientation change notifications.
+-        self.screenOrientationDidChange(newOrientation)
+-      }
+     }
+   }
+ 

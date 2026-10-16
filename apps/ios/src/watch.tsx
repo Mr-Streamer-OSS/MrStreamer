@@ -1,8 +1,9 @@
-import * as ScreenOrientation from "expo-screen-orientation";
+import { lockAsync, OrientationLock, unlockAsync } from "expo-screen-orientation";
 import { isPictureInPictureSupported, VideoAirPlayButton, VideoView } from "expo-video";
 import { useEffect, useRef, useState } from "react";
 import {
   ActionSheetIOS,
+  Dimensions,
   Keyboard,
   PanResponder,
   Pressable,
@@ -57,8 +58,16 @@ export function WatchLayer() {
   const landscape = watch && phase.kind !== "idle" && !phase.item.live;
   useEffect(() => {
     if (!landscape) return;
-    void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
-    return () => void ScreenOrientation.unlockAsync();
+    const { width, height } = Dimensions.get("window");
+    const sideways = width > height;
+    turn(() => lockAsync(OrientationLock.LANDSCAPE));
+    return () =>
+      turn(async () => {
+        // Unlocked alone, the screens under Watch would stay sideways until the phone turns, so
+        // they turn upright first unless they were sideways before.
+        if (!sideways) await lockAsync(OrientationLock.PORTRAIT_UP);
+        await unlockAsync();
+      });
   }, [landscape]);
   useEffect(() => {
     if (!watch) return;
@@ -106,6 +115,12 @@ export function WatchLayer() {
       ) : null}
     </View>
   );
+}
+
+/** Orientation changes, made in the order asked so a quick close and reopen can't swap them. */
+let turning = Promise.resolve();
+function turn(change: () => Promise<void>) {
+  turning = turning.then(change).catch(() => undefined);
 }
 
 function Controls({ onPictureInPicture }: { onPictureInPicture: () => void }) {
