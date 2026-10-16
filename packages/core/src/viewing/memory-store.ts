@@ -184,7 +184,11 @@ export function memoryViewingStore(deps: {
 
   const readOne = (account: string) => {
     const held = accounts.get(account) ?? fresh();
-    const rows = [...held.rows.values()].sort((a, b) => b.at - a.at).slice(0, CONTINUE_WINDOW);
+    // The latest first; of two saved at the same moment, the one written last.
+    const rows = [...held.rows.values()]
+      .toReversed()
+      .sort((a, b) => b.at - a.at)
+      .slice(0, CONTINUE_WINDOW);
     const marked = [...held.series]
       .flatMap(([key, state]) => {
         const mark = leading(state);

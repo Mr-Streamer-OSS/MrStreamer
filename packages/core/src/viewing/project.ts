@@ -157,7 +157,12 @@ export function remembered(
         ({ title }) => title.kind === "episode" && title.seriesId === seriesId,
       ),
     removedAt: (title) => removals.get(removalScope(title)) ?? null,
-    saveRow: (row) => void rows.set(titleKey(row.title), row),
+    // Moved to the end, so the rows read in the order they were last written.
+    saveRow: (row) => {
+      const key = titleKey(row.title);
+      rows.delete(key);
+      rows.set(key, row);
+    },
     remove: (title, keys, at) => {
       for (const key of keys) {
         const row = rows.get(key);

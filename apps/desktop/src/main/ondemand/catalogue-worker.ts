@@ -23,11 +23,7 @@ import {
   searchPage,
   type IndexedCatalogue,
 } from "@mrstreamer/core/ondemand/catalogue";
-import type {
-  HomeRecommendation,
-  Title,
-  TitleKind,
-} from "@mrstreamer/contracts/ondemand";
+import type { HomeRecommendation, Title, TitleKind } from "@mrstreamer/contracts/ondemand";
 import { listedFileKey } from "@mrstreamer/core/ondemand/files";
 import {
   filterOptions,

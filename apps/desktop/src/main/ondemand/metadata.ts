@@ -6,7 +6,7 @@ import {
 } from "@mrstreamer/core/metadata/store";
 import { readJsonFile, writeJsonFile } from "../platform/json-file.ts";
 
-export type { MetadataStatus, ServiceTitles, Wanted } from "@mrstreamer/core/metadata/store";
+export type { MetadataStatus, Wanted } from "@mrstreamer/core/metadata/store";
 
 export interface MetadataDeps extends Omit<SharedDeps, "read" | "write"> {
   readonly path: string;

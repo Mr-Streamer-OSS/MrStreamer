@@ -9,12 +9,23 @@ import { appError } from "./errors.ts";
 import { buildLibrary, type Library } from "./library.ts";
 import { play, stop } from "./playback.ts";
 import { keychainSecrets } from "./secrets.ts";
-import { firstLaunch, readState, writeState, type SavedSubscription } from "./storage.ts";
+import {
+  firstLaunch,
+  readState,
+  rememberChannel,
+  writeState,
+  type SavedSubscription,
+} from "./storage.ts";
 import { store, useStore } from "./store.ts";
+import { connectTitles, disconnectTitles, onTitleLists, titleLists } from "./titles.ts";
+import { connectViewing, disconnectViewing } from "./viewing.ts";
+import { alignWatchlist, connectWatchlist, disconnectWatchlist } from "./watchlist.ts";
 
 // The connected subscription and its live catalogue. One Xtream subscription for now; the
 // desktop app's several, and M3U playlists, come later. The server and username are saved in
-// app storage and the password in the Keychain, under the subscription's id.
+// app storage and the password in the Keychain, under the subscription's id. Signing in starts
+// what belongs to the subscription, its movies and series (titles.ts), its viewing record
+// (viewing.ts) and watchlist (watchlist.ts); Disconnect forgets them with it.
 
 export type Session =
   | { readonly kind: "restoring" }
@@ -68,10 +79,25 @@ export function loadCatalogue() {
 }
 
 function signIn(subscription: SavedSubscription, password: string) {
-  provider = providerFor({ ...subscription, password });
+  const signedIn = providerFor({ ...subscription, password });
+  provider = signedIn;
   login = [subscription.username, password];
+  connectWatchlist(subscription.id);
+  connectViewing(subscription.id, titleLists);
+  connectTitles(signedIn, subscription.id);
   session.set({ kind: "signed-in", subscription, account: null });
   loadCatalogue();
+}
+
+// Saved titles take their names and versions as each read of the lists has them.
+onTitleLists(() => {
+  const lists = titleLists();
+  if (lists.kind === "ready") alignWatchlist(lists.index);
+});
+
+/** What signed in, for the stream addresses that carry it: kept out of every failure shown. */
+export function streamLogin(): readonly string[] {
+  return login;
 }
 
 /**
@@ -146,6 +172,9 @@ export async function disconnect() {
   const current = session.get();
   stop();
   loading?.abort();
+  disconnectTitles();
+  disconnectWatchlist();
+  await disconnectViewing();
   provider = null;
   login = [];
   writeState(() => ({ subscription: null, recent: [], region: null }));
@@ -163,9 +192,19 @@ export async function disconnect() {
 export function playChannel(channel: ListedChannel, place: string, options: { watch: boolean }) {
   const [variant] = streamsToPlay(channel, {});
   if (!variant) return;
-  const open = (signal: AbortSignal) =>
-    provider
-      ? provider.liveStream(variant.id, signal)
-      : Promise.reject(new AppFailure({ kind: "no-subscription" }));
-  void play({ id: channel.id, title: channel.title, place }, open, { ...options, login });
+  const open = async (signal: AbortSignal) => {
+    if (!provider) throw new AppFailure({ kind: "no-subscription" });
+    const stream = await provider.liveStream(variant.id, signal);
+    return {
+      url: stream.url,
+      hls: stream.format === "hls",
+      ...(stream.headers ? { headers: stream.headers } : {}),
+    };
+  };
+  rememberChannel(channel.id);
+  void play(
+    { id: channel.id, title: channel.title, place, live: true, next: false, versions: false },
+    open,
+    { ...options, login },
+  );
 }

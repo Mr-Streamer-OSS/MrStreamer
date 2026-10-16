@@ -111,10 +111,10 @@ describe("the viewing record over the in-memory store", () => {
   });
 
   it("erases an account with everything it recorded", async () => {
-    let saved: ViewingSnapshot | null = null;
-    const running = app(null, (next) => (saved = next));
+    const kept: { snapshot: ViewingSnapshot | null } = { snapshot: null };
+    const running = app(null, (next) => (kept.snapshot = next));
     await running.run((record) => record.markEpisode("m1", episode(1), true));
     await running.run((record) => record.erase(SUB));
-    expect(saved?.accounts).toEqual({});
+    expect(kept.snapshot?.accounts).toEqual({});
   });
 });

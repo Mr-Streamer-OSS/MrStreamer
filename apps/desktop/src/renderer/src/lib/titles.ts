@@ -12,10 +12,7 @@ import {
 import { seriesOf, type Title } from "@mrstreamer/contracts/ondemand";
 import type { SubscriptionPreferences } from "@mrstreamer/contracts/preferences";
 import { ownedId, ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
-import {
-  CONTINUE_LIMIT,
-  type TitleProgress,
-} from "@mrstreamer/contracts/viewing";
+import { CONTINUE_LIMIT, type TitleProgress } from "@mrstreamer/contracts/viewing";
 import { continuation } from "@mrstreamer/core/viewing/episodes";
 import {
   continueEntries,
