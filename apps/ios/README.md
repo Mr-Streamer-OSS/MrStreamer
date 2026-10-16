@@ -59,7 +59,9 @@ Each responsibility has one owner, a plain module with a store the screens read:
   subscription in `state.json` becomes its first entry under the same id. Accounts removed with
   their history kept are remembered, so adding one again takes its id, and its history, back. Ids
   whose Keychain item an add or a removal was writing when the app stopped are listed, and the
-  next launch removes those items; nothing else in the Keychain is touched.
+  next launch removes those items; nothing else in the Keychain is touched. Ids removed with
+  their history are listed until all of it is deleted: each launch deletes what is left, and no new
+  subscription takes one of those ids.
 - `src/sources.ts`: each subscription's provider adapter and login, apart from every store, so no
   screen, snapshot or failure holds a password. Requests go to the subscription that lists what
   they name (`OwnedId`), and a failure hides only that subscription's login.

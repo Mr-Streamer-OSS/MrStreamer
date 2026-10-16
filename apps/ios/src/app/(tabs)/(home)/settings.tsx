@@ -203,7 +203,10 @@ function standing({ entry, account, needsSecret, live, titles }: Member): string
 function confirmRemove({ entry, label }: Member) {
   const removing = (keepHistory: boolean) => () =>
     void remove(entry.id, { keepHistory }).catch(() =>
-      Alert.alert(`${label} is removed`, "Its history couldn't be deleted from this iPhone."),
+      Alert.alert(
+        `${label} is removed`,
+        "Its history couldn't all be deleted yet. The app tries again when it next opens.",
+      ),
     );
   Alert.alert(
     `Remove ${label}?`,

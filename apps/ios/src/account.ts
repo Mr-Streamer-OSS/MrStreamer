@@ -16,6 +16,7 @@ import {
   readState,
   rememberChannel,
   writeState,
+  type SavedState,
 } from "./storage.ts";
 import { store, useStore } from "./store.ts";
 import {
@@ -347,6 +348,7 @@ export function restore(): Promise<void> {
       // Shown from memory for now.
     }
     for (const id of registry.pendingSecrets) await settleSecret(id).catch(() => undefined);
+    for (const id of registry.erasing) await eraseHistory(id).catch(() => undefined);
     const passwords = await Promise.all(
       registry.subscriptions.map((entry) => keychainSecrets.read(entry.id).catch(() => null)),
     );
@@ -372,8 +374,11 @@ const authenticate = (account: XtreamAccount, signal?: AbortSignal) =>
  * Adds a subscription with what the viewer typed, once its provider accepted the login; nothing
  * is saved when it doesn't, and the promise rejects with why. The same account added again updates
  * the one saved: its password and, when given, its name. An account removed with its history kept
- * takes its id back, and its history with it. Aborting `signal` before it is saved leaves
- * everything as it was. Answers the subscription's id, or null when aborted.
+ * takes its id back, and its history with it. Answers the subscription's id, or null when aborted.
+ *
+ * A new subscription is saved when the registry lists it: aborting `signal` before then, its
+ * password's write included, leaves everything as it was. For an account already saved, the
+ * change is made once its password starts to be written, as `update` makes one.
  */
 export async function add(input: LoginInput, signal?: AbortSignal): Promise<string | null> {
   const { account } = parseLogin(input);
@@ -396,8 +401,9 @@ export async function add(input: LoginInput, signal?: AbortSignal): Promise<stri
           ...registry,
           subscriptions: registry.subscriptions.map((each) => (each === known ? entry : each)),
         });
-        syncRoster();
       }
+      // The roster follows the registry, whatever an earlier change left of it.
+      syncRoster();
       signIn(entry, account.password, status);
       return entry.id;
     }
@@ -405,12 +411,6 @@ export async function add(input: LoginInput, signal?: AbortSignal): Promise<stri
     const id = retired?.id ?? newSubscriptionId(registry, Date.now());
     // Should the app stop before the registry lists it, the next launch removes its password.
     commit({ ...registry, pendingSecrets: withPending(registry.pendingSecrets, id) });
-    try {
-      await keychainSecrets.write(id, account.password);
-    } catch (cause) {
-      await settleSecret(id).catch(() => undefined);
-      throw cause;
-    }
     const entry: SubscriptionEntry = {
       id,
       kind: "xtream",
@@ -419,30 +419,53 @@ export async function add(input: LoginInput, signal?: AbortSignal): Promise<stri
       name: name ?? null,
     };
     const first = registry.subscriptions.length === 0;
-    commit({
-      ...registry,
-      subscriptions: [...registry.subscriptions, entry],
-      retired: registry.retired.filter((each) => each.id !== id),
-      pendingSecrets: withoutPending(registry.pendingSecrets, id),
-    });
-    // An older build shows the subscription it knew; with none left, it shows this one.
-    if (first) {
-      writeState((state) => ({
-        ...state,
-        subscription: state.subscription ?? { id, server: entry.server, username: entry.username },
-      }));
+    try {
+      await keychainSecrets.write(id, account.password);
+      // Left while the password was written: it goes again, and nothing is saved.
+      if (signal?.aborted) {
+        await settleSecret(id).catch(() => undefined);
+        return null;
+      }
+      commit({
+        ...registry,
+        subscriptions: [...registry.subscriptions, entry],
+        retired: registry.retired.filter((each) => each.id !== id),
+        pendingSecrets: withoutPending(registry.pendingSecrets, id),
+      });
+    } catch (cause) {
+      await settleSecret(id).catch(() => undefined);
+      throw cause;
     }
+    // Saved: from here on it shows and signs in, whatever fails after.
     syncRoster();
     signIn(entry, account.password, status);
     noteAction("playlist_added");
+    // An older build shows the subscription it knew; with none left, it shows this one. Only an
+    // older build reads it: when it can't be written, that build shows Connect instead.
+    if (first) {
+      try {
+        writeState((state) => ({
+          ...state,
+          subscription: state.subscription ?? {
+            id,
+            server: entry.server,
+            username: entry.username,
+          },
+        }));
+      } catch {
+        // This build has the subscription saved.
+      }
+    }
     return id;
   });
 }
 
 /**
  * Changes a saved subscription's name, and its password when `password` is given: the provider
- * checks the new one first, and nothing changes when it refuses. Aborting `signal` before the
- * change is saved leaves it as it was.
+ * checks the new one first, and nothing changes when it refuses. Aborting `signal` while the
+ * provider checks it, or while another change runs, leaves it as it was. The change is made from
+ * the moment it starts being saved, as the Keychain may hold the new password from then: aborting
+ * after that changes nothing, and the change completes.
  */
 export async function update(
   id: string,
@@ -478,9 +501,10 @@ export async function update(
  * another plays on. Its favourites, watchlist, history and progress stay for when the account is
  * added again, unless `keepHistory` is false. Removing the last returns to Connect.
  *
- * The registry is written first; from then on the removal stands, whatever fails after: a
- * history that couldn't be erased rejects the promise, and a password the Keychain didn't remove
- * is removed at the next launch.
+ * The registry is written first, with the history to delete when it goes too; from then on the
+ * removal stands, whatever fails after. A history not all deleted rejects the promise, and each
+ * launch deletes the rest until it is gone. A password the Keychain didn't remove is removed at
+ * the next launch.
  */
 export function remove(id: string, { keepHistory }: { keepHistory: boolean }): Promise<void> {
   return serially(async () => {
@@ -503,29 +527,44 @@ export function remove(id: string, { keepHistory }: { keepHistory: boolean }): P
         commit({ ...registry, pendingSecrets: withoutPending(registry.pendingSecrets, id) }),
       )
       .catch(() => undefined);
-    writeState((state) => {
-      const original = state.subscription?.id === id;
-      return {
-        ...state,
-        subscription: original ? null : state.subscription,
-        ...(keepHistory
-          ? {}
-          : {
-              recent: original ? [] : state.recent,
-              recentChannels: (state.recentChannels ?? []).filter(
-                (key) => !key.startsWith(`${id}:`),
-              ),
-            }),
-      };
-    });
-    if (keepHistory) return;
-    const erased = await Promise.allSettled([
-      Promise.resolve().then(() => eraseWatchlist(id)),
-      eraseViewing(id),
-    ]);
-    const failed = erased.find((each) => each.status === "rejected");
-    if (failed) throw failed.reason;
+    if (!keepHistory) return eraseHistory(id);
+    try {
+      writeState((state) => forgotten(state, id, false));
+    } catch {
+      // Only an older build reads which subscription it was.
+    }
   });
+}
+
+/** state.json without `id`: no longer an older build's subscription, its channels gone with it. */
+function forgotten(state: SavedState, id: string, erase: boolean): SavedState {
+  const original = state.subscription?.id === id;
+  return {
+    ...state,
+    subscription: original ? null : state.subscription,
+    ...(erase
+      ? {
+          recent: original ? [] : state.recent,
+          recentChannels: (state.recentChannels ?? []).filter((key) => !key.startsWith(`${id}:`)),
+        }
+      : {}),
+  };
+}
+
+/**
+ * Deletes the history of a subscription removed with it: its recent channels, watchlist and
+ * viewing record, each whatever another fails, then drops it from the registry's `erasing`.
+ * Rejects when one isn't deleted, leaving it there for the next launch to try again.
+ */
+async function eraseHistory(id: string): Promise<void> {
+  const erased = await Promise.allSettled([
+    Promise.resolve().then(() => writeState((state) => forgotten(state, id, true))),
+    Promise.resolve().then(() => eraseWatchlist(id)),
+    eraseViewing(id),
+  ]);
+  const failed = erased.find((each) => each.status === "rejected");
+  if (failed) throw failed.reason;
+  commit({ ...registry, erasing: withoutPending(registry.erasing, id) });
 }
 
 /** The last channel chosen to watch while a channel played: another one changes the channel. */

@@ -10,7 +10,7 @@ import type {
   TitleKind,
   TitleRef,
 } from "@mrstreamer/contracts/ondemand";
-import { ownedId, ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
+import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { metadataStore, type MetadataStatus } from "@mrstreamer/core/metadata/store";
 import { tmdb, type Tmdb, type TmdbKind } from "@mrstreamer/core/metadata/tmdb";
 import {
@@ -28,7 +28,7 @@ import {
 import { movieDetails, seasonEpisodes, seriesDetails } from "@mrstreamer/core/ondemand/details";
 import type { OnDemandCatalogue, ProviderDetails, ProviderFile } from "@mrstreamer/core/provider";
 import { File, Paths } from "expo-file-system";
-import { members, onRoster, shownOf } from "./account.ts";
+import { members, onRoster, shownOf, type Member } from "./account.ts";
 import { currentSource, sourceOf } from "./sources.ts";
 import { store, useStore } from "./store.ts";
 import { serveViewing } from "./viewing.ts";
@@ -116,9 +116,30 @@ const sameLists = (a: readonly Listed[], b: readonly Listed[]) =>
   );
 
 /**
+ * What the lists are while no subscription has any: loading while one may still bring some, else
+ * why the first that can't failed, a password the Keychain lost included.
+ */
+function standing(all: readonly Member[]): TitleLists {
+  if (all.length === 0) return { kind: "idle" };
+  const waiting = all.some(
+    (member) =>
+      member.titles.kind === "loading" || (member.titles.kind === "idle" && !member.needsSecret),
+  );
+  const stuck = all.find((member) => member.titles.kind === "failed" || member.needsSecret);
+  if (waiting || !stuck) return { kind: "loading" };
+  return {
+    kind: "failed",
+    error:
+      stuck.titles.kind === "failed"
+        ? stuck.titles.error
+        : { kind: "needs-secret", subscriptionId: stuck.entry.id },
+  };
+}
+
+/**
  * Indexes the lists of every subscription that has them, whenever one's change: those that
  * failed or load again keep what they had. Until one has lists, the state says whether any is
- * still loading or why they failed.
+ * still loading or why they failed, after every change of the subscriptions.
  */
 function relist() {
   const all = members();
@@ -126,27 +147,25 @@ function relist() {
     const catalogue = shownOf(member.titles);
     return catalogue ? [{ subscriptionId: member.entry.id, catalogue }] : [];
   });
+  if (listed.length === 0) {
+    if (indexed.length > 0) {
+      indexed = [];
+      indexing?.abort();
+      indexing = null;
+      made.clear();
+      metadata.want([]);
+    }
+    const next = standing(all);
+    const now = lists.get();
+    const same =
+      now.kind === next.kind &&
+      (now.kind !== "failed" || (next.kind === "failed" && now.error === next.error));
+    if (!same) lists.set(next);
+    return;
+  }
   if (sameLists(listed, indexed)) return;
   indexed = listed;
   indexing?.abort();
-  indexing = null;
-  if (listed.length === 0) {
-    made.clear();
-    metadata.want([]);
-    const failed = all.find((member) => member.titles.kind === "failed");
-    const waiting = all.some(
-      (member) =>
-        member.titles.kind === "loading" || (member.titles.kind === "idle" && !member.needsSecret),
-    );
-    lists.set(
-      all.length === 0
-        ? { kind: "idle" }
-        : !waiting && failed?.titles.kind === "failed"
-          ? { kind: "failed", error: failed.titles.error }
-          : { kind: "loading" },
-    );
-    return;
-  }
   const controller = new AbortController();
   indexing = controller;
   void index(listed, controller.signal);
@@ -325,28 +344,26 @@ async function readDetails(title: Title): Promise<Read> {
   return { raw, shown: seriesDetails(title, raw, known, language) };
 }
 
-/** A season's episodes with TMDB's names, stills and stories, by series version and season. */
-const seasons = new Map<string, Promise<readonly EpisodeDetails[]>>();
+type SeasonAnswers = Parameters<typeof seasonEpisodes>[1];
+
+/**
+ * What TMDB says of a season's episodes, by TMDB id and season. It is the same whichever provider
+ * lists the series, so it is asked once; the provider's episodes are those of the details read.
+ */
+const seasons = new Map<string, Promise<SeasonAnswers>>();
 
 /** A season's episodes as its details list them, with TMDB's worked in where it answers. */
-export function episodesOf(title: Title, season: Season): Promise<readonly EpisodeDetails[]> {
-  const key = `${ownedKey(title)}|${season.number}`;
-  let found = seasons.get(key);
-  if (!found) {
-    found = readSeason(title, season);
-    seasons.set(key, found);
+export async function episodesOf(title: Title, season: Season): Promise<readonly EpisodeDetails[]> {
+  const { tmdbId } = title;
+  if (!client || !tmdbId || title.adult) return seasonEpisodes(season, []);
+  const key = `${tmdbId}|${season.number}`;
+  let answers = seasons.get(key);
+  if (!answers) {
+    const ask = (asked: string) => client.season(tmdbId, season.number, asked).catch(() => []);
+    answers = Promise.all(language === "en" ? [ask(language)] : [ask(language), ask("en")]);
+    seasons.set(key, answers);
   }
-  return found;
-}
-
-async function readSeason(title: Title, season: Season): Promise<readonly EpisodeDetails[]> {
-  if (!client || !title.tmdbId || title.adult) return seasonEpisodes(season, []);
-  const ask = (asked: string) =>
-    client.season(title.tmdbId ?? "", season.number, asked).catch(() => []);
-  const answers = await Promise.all(
-    language === "en" ? [ask(language)] : [ask(language), ask("en")],
-  );
-  return seasonEpisodes(season, answers);
+  return seasonEpisodes(season, await answers);
 }
 
 /**
@@ -362,7 +379,7 @@ export async function titleFile(ref: TitleRef, signal: AbortSignal): Promise<Pro
   if (ref.kind === "movie") {
     const title = titleOf(ready.index, "movie", ref);
     if (!title) throw missing;
-    const listed = title.versions.find((version) => version.id === ref.id)?.container;
+    const listed = title.versions.find((version) => sameOwned(version, ref))?.container;
     const container = listed ?? (await readOnce({ ...title, ...ownedId(ref) })).raw.container;
     return reading.titleFile("movie", ref.id, container ?? "mp4", signal);
   }

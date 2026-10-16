@@ -32,6 +32,11 @@ const Registry = lazy(() =>
      * touched.
      */
     pendingSecrets: "string[]",
+    /**
+     * Ids removed with their history whose history isn't all deleted yet: launch deletes it again
+     * until it is. No subscription is given one of these ids meanwhile.
+     */
+    erasing: ["string[]", "=", () => []],
   }),
 );
 
@@ -48,6 +53,7 @@ export const EMPTY_REGISTRY: Registry = {
   subscriptions: [],
   retired: [],
   pendingSecrets: [],
+  erasing: [],
 };
 
 /** The saved registry; null when there is none yet, or it doesn't read as one. */
@@ -102,6 +108,7 @@ export function withoutSubscription(
     subscriptions: registry.subscriptions.filter((each) => each.id !== entry.id),
     retired: keepHistory ? [account, ...others].slice(0, RETIRED_LIMIT) : others,
     pendingSecrets: withPending(registry.pendingSecrets, entry.id),
+    erasing: keepHistory ? registry.erasing : withPending(registry.erasing, entry.id),
   };
 }
 
@@ -113,9 +120,15 @@ export const withPending = (pending: readonly string[], id: string): string[] =>
 export const withoutPending = (pending: readonly string[], id: string): string[] =>
   pending.filter((each) => each !== id);
 
-/** A new subscription id: no colon (`ownedKey`), and none saved or retired has it. */
+/**
+ * A new subscription id: no colon (`ownedKey`), and none saved, retired or with a history still
+ * being deleted has it.
+ */
 export function newSubscriptionId(registry: Registry, now: number): string {
-  const taken = new Set([...registry.subscriptions, ...registry.retired].map((each) => each.id));
+  const taken = new Set([
+    ...[...registry.subscriptions, ...registry.retired].map((each) => each.id),
+    ...registry.erasing,
+  ]);
   const base = `xtream-${now.toString(36)}`;
   let id = base;
   for (let next = 2; taken.has(id); next++) id = `${base}-${next}`;

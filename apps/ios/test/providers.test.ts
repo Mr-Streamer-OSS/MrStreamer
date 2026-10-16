@@ -1,4 +1,4 @@
-import type { TitleRef } from "@mrstreamer/contracts/ondemand";
+import type { Season, TitleRef } from "@mrstreamer/contracts/ondemand";
 import { kindOf } from "@mrstreamer/core/ondemand/catalogue";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -22,6 +22,9 @@ const memory = vi.hoisted(() => ({
   /** Login checks held until a test lets them through. */
   held: [] as Array<() => void>,
   holdLogins: false,
+  /** Passwords the Keychain has stored but whose write it hasn't answered yet. */
+  heldSecrets: [] as Array<() => void>,
+  holdSecrets: false,
   /** The Cache-Control header of each request to a panel. */
   caching: [] as Array<string | null>,
 }));
@@ -82,6 +85,9 @@ vi.mock("expo-secure-store", () => ({
   setItemAsync: async (key: string, value: string) => {
     if (memory.refused.has(key)) throw new Error("errSecInteractionNotAllowed");
     memory.keychain.set(key, value);
+    if (memory.holdSecrets && key.startsWith("s.")) {
+      await new Promise<void>((go) => memory.heldSecrets.push(go));
+    }
   },
   deleteItemAsync: async (key: string) => {
     memory.keychain.delete(key);
@@ -101,10 +107,15 @@ vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
 });
 
 /** What these tests use of the desktop tests' fake panel. */
+interface FakeTitles {
+  readonly movies: readonly { readonly id: number; readonly container: string }[];
+}
 interface FakeProvider {
   readonly url: string;
-  readonly titles: { readonly movies: readonly { readonly id: number }[] };
+  readonly titles: FakeTitles;
   failCatalogue(status: number | null): void;
+  failTitles(status: number | null): void;
+  serveTitles(select: <A extends FakeTitles>(all: A) => A): void;
   titleListRequests(): number;
   close(): Promise<void>;
 }
@@ -249,12 +260,19 @@ beforeEach(() => {
   memory.played.length = 0;
   memory.holdLogins = false;
   memory.held.length = 0;
+  memory.holdSecrets = false;
   memory.caching.length = 0;
-  one.failCatalogue(null);
-  two.failCatalogue(null);
+  for (const panel of [one, two]) {
+    panel.failCatalogue(null);
+    panel.failTitles(null);
+    panel.serveTitles((all) => all);
+  }
 });
 afterEach(() => {
   for (const go of memory.held.splice(0)) go();
+  // A write still held belongs to an app that stopped: it never answers.
+  memory.heldSecrets.length = 0;
+  vi.useRealTimers();
 });
 
 describe("the first launch since private beta 2", () => {
@@ -270,6 +288,7 @@ describe("the first launch since private beta 2", () => {
       subscriptions: [{ id: LEGACY, kind: "xtream", server: one.url, username: "one", name: null }],
       retired: [],
       pendingSecrets: [],
+      erasing: [],
     });
     expect(keychainIds()).toEqual([LEGACY]);
     expect(memory.keychain.get(`s.${LEGACY}`)).toBe("one+Pw@1");
@@ -311,6 +330,8 @@ describe("the first launch since private beta 2", () => {
     const app = await launch();
     expect(ids(app)).toEqual([LEGACY]);
     expect(member(app, LEGACY)?.needsSecret).toBe(true);
+    // Movies and Series say so too, rather than loading for ever.
+    expect(app.titleLists()).toMatchObject({ kind: "failed", error: { kind: "needs-secret" } });
   });
 });
 
@@ -399,15 +420,89 @@ describe("adding a subscription", () => {
   it("removes at the next launch a password an add wrote before the app stopped", async () => {
     const app = await launch();
     memory.keychain.set("s.download-key", "not a provider's");
-    memory.full.add("subscriptions.json");
-    // The registry write that lists it fails after the password is in the Keychain.
-    const failing = app.add({ server: one.url, ...ONE });
-    await expect(failing).rejects.toThrow();
-    memory.full.clear();
+    memory.holdSecrets = true;
+    void app.add({ server: one.url, ...ONE });
+    // The password is in the Keychain and the registry doesn't list it yet: the app stops here.
+    await until(() => memory.heldSecrets.length === 1, "the password's write");
+    expect([...memory.keychain.keys()].filter((key) => key.startsWith("s.xtream"))).toHaveLength(1);
+    memory.holdSecrets = false;
     const again = await launch();
     expect(ids(again)).toEqual([]);
     expect([...memory.keychain.keys()].filter((key) => key.startsWith("s.xtream"))).toEqual([]);
+    expect(keychainIds()).toEqual([]);
     expect(memory.keychain.get("s.download-key")).toBe("not a provider's");
+  });
+
+  it("saves nothing for an add left while its password is written, keeping the others", async () => {
+    const { app, a, b } = await twoProviders();
+    const movie = titlesOf(app)
+      .flatMap((title) => title.versions)
+      .find((v) => v.subscriptionId === b);
+    if (!movie) throw new Error("No film of the second");
+    await app.recordProgress({ kind: "movie", ...movie }, 200, 600, Date.now());
+    await app.remove(b, { keepHistory: true });
+    memory.holdSecrets = true;
+    const leaving = new AbortController();
+    const adding = app.add({ server: two.url, ...TWO }, leaving.signal);
+    await until(() => memory.heldSecrets.length === 1, "the password's write");
+    leaving.abort();
+    for (const go of memory.heldSecrets.splice(0)) go();
+    expect(await adding).toBeNull();
+    expect(ids(app)).toEqual([a]);
+    expect(keychainIds()).toEqual([a]);
+    expect(memory.keychain.has(`s.${b}`)).toBe(false);
+    expect(registry().subscriptions.map((each: { id: string }) => each.id)).toEqual([a]);
+    expect(registry().retired.map((each: { id: string }) => each.id)).toEqual([b]);
+    expect(registry().pendingSecrets).toEqual([]);
+    expect(member(app, a)?.live.kind).toBe("ready");
+    // Added later, it still takes its id and history back.
+    memory.holdSecrets = false;
+    expect(await app.add({ server: two.url, ...TWO })).toBe(b);
+    const progress = await app.progressOf({ movies: [{ subscriptionId: b, id: movie.id }] });
+    expect(progress.map((each) => each.position)).toEqual([200]);
+  });
+
+  it("shows a first subscription saved, though older builds' copy of it couldn't be written", async () => {
+    const app = await launch();
+    memory.full.add("state.json");
+    const a = await app.add({ server: one.url, ...ONE });
+    expect(a).not.toBeNull();
+    expect(ids(app)).toEqual([a]);
+    await until(() => channelsReady(app, 1), "its channels");
+    memory.full.clear();
+    expect(await app.add({ server: one.url, ...ONE })).toBe(a);
+    expect(ids(app)).toEqual([a]);
+  });
+});
+
+describe("editing a subscription", () => {
+  it("changes nothing when the viewer leaves while the new password is checked", async () => {
+    const { app, b } = await twoProviders();
+    memory.holdLogins = true;
+    const leaving = new AbortController();
+    const editing = app.update(b, { name: "Cabin", password: TWO.password }, leaving.signal);
+    await until(() => memory.held.length === 1, "the login check");
+    leaving.abort();
+    for (const go of memory.held.splice(0)) go();
+    await editing.catch(() => undefined);
+    expect(member(app, b)?.label).toBe("Holiday house");
+  });
+
+  it("finishes the change once the new password is being written", async () => {
+    const { app, b } = await twoProviders();
+    memory.holdSecrets = true;
+    const leaving = new AbortController();
+    const editing = app.update(b, { name: "Cabin", password: TWO.password }, leaving.signal);
+    await until(() => memory.heldSecrets.length === 1, "the password's write");
+    leaving.abort();
+    for (const go of memory.heldSecrets.splice(0)) go();
+    await editing;
+    expect(member(app, b)?.label).toBe("Cabin");
+    expect(registry().subscriptions.map((each: { name: string | null }) => each.name)).toEqual([
+      null,
+      "Cabin",
+    ]);
+    await until(() => member(app, b)?.live.kind === "ready", "its channels again");
   });
 });
 
@@ -486,6 +581,82 @@ describe("everything together", () => {
     expect(playingNow(app)?.subscriptionId).toBe(a);
   });
 
+  it("plays a film from the file its own provider lists, when both list it under one id", async () => {
+    one.serveTitles((all) => ({
+      ...all,
+      movies: all.movies.map((movie) => ({ ...movie, container: "mkv" })),
+    }));
+    two.serveTitles((all) => ({
+      ...all,
+      movies: all.movies.map((movie) => ({ ...movie, container: "mp4" })),
+    }));
+    const { app, a, b } = await twoProviders();
+    const shared = titlesOf(app).find((title) =>
+      title.versions.some(
+        (v) =>
+          v.subscriptionId === a &&
+          title.versions.some((w) => w.subscriptionId === b && w.id === v.id),
+      ),
+    );
+    if (!shared) throw new Error("No film both list under one id");
+    const id = shared.versions[0]!.id;
+    const fileOf = (subscriptionId: string) =>
+      app.titleFile({ kind: "movie", subscriptionId, id }, new AbortController().signal);
+    expect((await fileOf(a)).url).toMatch(new RegExp(`/movie/one/.+/${id}\\.mkv$`));
+    expect((await fileOf(b)).url).toMatch(new RegExp(`/movie/two/.+/${id}\\.mp4$`));
+  });
+
+  it("tells Movies and Series why no list loaded, and loads them on Try again", async () => {
+    one.failTitles(503);
+    const app = await launch();
+    const a = await app.add({ server: one.url, ...ONE });
+    if (!a) throw new Error("The add was cancelled");
+    await until(() => member(app, a)?.titles.kind === "failed", "the failure");
+    expect(app.titleLists().kind).toBe("failed");
+    one.failTitles(null);
+    app.retryTitles();
+    await until(() => app.titleLists().kind === "ready", "the lists");
+  });
+
+  it("reads a season as a provider added again lists it, not as it was before", async () => {
+    const { app, b } = await twoProviders();
+    const lists = app.titleLists();
+    if (lists.kind !== "ready") throw new Error("No lists");
+    const series = kindOf(lists.index, "series").titles.find((title) =>
+      title.versions.some((v) => v.subscriptionId === b),
+    );
+    const version = series?.versions.find((v) => v.subscriptionId === b);
+    if (!series || !version) throw new Error("No series of the second");
+    const title = { ...series, ...version };
+    const seasonOf = (id: string): Season => ({
+      number: 1,
+      name: "Season 1",
+      posterUrl: null,
+      episodes: [
+        {
+          subscriptionId: b,
+          seriesId: version.id,
+          id,
+          season: 1,
+          number: 1,
+          title: "Pilot",
+          plot: null,
+          duration: null,
+          stillUrl: null,
+          airDate: null,
+        },
+      ],
+    });
+    expect((await app.episodesOf(title, seasonOf("old-file"))).map((each) => each.id)).toEqual([
+      "old-file",
+    ]);
+    await app.remove(b, { keepHistory: true });
+    expect(await app.add({ server: two.url, ...TWO })).toBe(b);
+    expect((await app.episodesOf(title, seasonOf("new-file"))).map((each) => each.id)).toEqual([
+      "new-file",
+    ]);
+  });
+
   it("counts a change of channel, not the first one or the same one again", async () => {
     const { app, a, b } = await twoProviders();
     const [first, second] = channels(app).filter((each) => each.subscriptionId === a);
@@ -556,6 +727,69 @@ describe("removing a subscription", () => {
     ).toEqual([[a]]);
     // Added again, it starts afresh.
     expect(await app.add({ server: two.url, ...TWO })).not.toBe(b);
+  });
+
+  it("deletes a history it couldn't delete at the next launch", async () => {
+    const { app, a, b } = await twoProviders();
+    const watchlist = await import("../src/watchlist.ts");
+    const own = titlesOf(app).find((title) => title.versions.every((v) => v.subscriptionId === b));
+    if (!own) throw new Error("No film of the second's own");
+    watchlist.saveTitle(own);
+    const version = own.versions[0]!;
+    await app.recordProgress({ kind: "movie", ...version }, 200, 600, Date.now());
+    const [channel] = channels(app).filter((each) => each.subscriptionId === b);
+    if (!channel) throw new Error("No channel");
+    watchChannel(app, b, channel.id);
+    const recentOf = () =>
+      (JSON.parse(memory.files.get(doc("state.json")) ?? "{}").recentChannels ?? []) as string[];
+    expect(recentOf()).toContain(channel.key);
+
+    memory.full.add("state.json");
+    memory.full.add("viewing.json");
+    await expect(app.remove(b, { keepHistory: false })).rejects.toThrow();
+    expect(ids(app)).toEqual([a]);
+    memory.full.clear();
+
+    const again = await launch();
+    expect(ids(again)).toEqual([a]);
+    expect(memory.files.get(doc("viewing.json"))).not.toContain(b);
+    expect(memory.files.get(doc("watchlists.json"))).not.toContain(b);
+    expect(recentOf().filter((key) => key.startsWith(`${b}:`))).toEqual([]);
+    // Done: a later launch has nothing left to delete, and changes nothing.
+    const after = new Map(memory.files);
+    await launch();
+    expect(new Map(memory.files)).toEqual(after);
+  });
+
+  it("never deletes, for a history still to go, an account added since under the same id", async () => {
+    const { app, b } = await twoProviders();
+    memory.full.add("viewing.json");
+    await expect(app.remove(b, { keepHistory: false })).rejects.toThrow();
+    memory.full.clear();
+    // The clock as when the removed one was added, which its id was made from.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Number.parseInt(b.slice("xtream-".length), 36));
+    const readded = await app.add({ server: two.url, ...TWO });
+    vi.useRealTimers();
+    if (!readded) throw new Error("The add was cancelled");
+    expect(readded).not.toBe(b);
+    await until(() =>
+      titlesOf(app).some((t) => t.versions.some((v) => v.subscriptionId === readded)),
+    );
+    const version = titlesOf(app)
+      .flatMap((title) => title.versions)
+      .find((v) => v.subscriptionId === readded)!;
+    await app.recordProgress({ kind: "movie", ...version }, 90, 600, Date.now());
+    const again = await launch();
+    const progress = await again.progressOf({ movies: [version] });
+    expect(progress.map((each) => each.position)).toEqual([90]);
+  });
+
+  it("stands when it keeps the history, though older builds' copy couldn't be written", async () => {
+    const { app, a, b } = await twoProviders();
+    memory.full.add("state.json");
+    await app.remove(b, { keepHistory: true });
+    expect(ids(app)).toEqual([a]);
   });
 
   it("drops a remove's password at the next launch when the Keychain kept it", async () => {

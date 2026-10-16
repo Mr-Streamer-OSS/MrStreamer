@@ -94,8 +94,12 @@ function Details({ title, opened }: { title: Title; opened: OwnedId }) {
     sequence,
   );
   const played = progress.kind === "ready" ? progress.value : NONE;
+  // A version picked from a subscription removed since, or from a menu shown before then, is
+  // forgotten: the title's own choice shows, and stays when that subscription is added again.
+  const listed = picked && title.versions.some((each) => sameOwned(each, picked)) ? picked : null;
+  if (picked !== listed) setPicked(null);
   // Kept by its ids, so a render that works out the same version reads nothing again.
-  const chosen = picked ?? automaticVersion(title, played, opened);
+  const chosen = listed ?? automaticVersion(title, played, opened);
   const version = useMemo(
     () => ({ subscriptionId: chosen.subscriptionId, id: chosen.id }),
     [chosen.subscriptionId, chosen.id],
