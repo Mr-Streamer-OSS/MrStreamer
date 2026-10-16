@@ -1440,6 +1440,105 @@ describe("observed playback runs", () => {
     await expectStreams(owner, events, []);
   });
 
+  it("ends a receiver run once at its terminal observation, with no renderer left", async () => {
+    playbackClock();
+    const { owner, events } = await measuring();
+    const token = owner.beginPlayback("vod")!;
+    const remote = owner.remotePlayback("vod", token);
+    for (let second = 0; second < 20; second++) {
+      remote.state("playing");
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    remote.state("stopped");
+    remote.end();
+    remote.end();
+    remote.state("playing");
+    remote.failure("network");
+    await expectStreams(owner, events, ["started vod", "stopped vod 20"]);
+  });
+
+  it("ends the renderer's run at a receiver's terminal observation, so its control is spent and a fresh one starts anew", async () => {
+    playbackClock();
+    const { owner, events } = await measuring();
+    const hint = { control: randomUUID(), order: 1, ongoing: false };
+    owner.admitPlayback("vod", hint, "frame");
+    const remote = owner.remotePlayback("vod", hint.control);
+    for (let second = 0; second < 10; second++) {
+      remote.state("playing");
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    remote.end();
+    expect(owner.controlledPlayback(hint.control, "frame")).toBeNull();
+    expect(owner.admitPlayback("vod", hint, "frame")).toBeNull();
+    owner.endControlledPlayback(hint.control, "frame");
+    const again = { control: randomUUID(), order: 2, ongoing: false };
+    const token = owner.admitPlayback("vod", again, "frame")!;
+    const next = owner.remotePlayback("vod", again.control);
+    next.state("playing");
+    await vi.advanceTimersByTimeAsync(1000);
+    next.end();
+    expect(token).not.toBeNull();
+    await expectStreams(owner, events, [
+      "started vod",
+      "stopped vod 10",
+      "started vod",
+      "stopped vod 1",
+    ]);
+  });
+
+  it("ignores a terminal observation from a replaced load, a moved output or an older run", async () => {
+    playbackClock();
+    const { owner, events } = await measuring();
+    const first = owner.beginPlayback("vod")!;
+    const old = owner.remotePlayback("vod", first);
+    old.state("playing");
+    await vi.advanceTimersByTimeAsync(1000);
+    // Another track: a new load takes the binding of the same run before the old one stops.
+    const reload = owner.remotePlayback("vod", first);
+    old.end();
+    reload.state("playing");
+    await vi.advanceTimersByTimeAsync(1000);
+    // Moved back here: the receiver's load stops reporting and local playback goes on.
+    reload.stop();
+    reload.end();
+    const local = owner.bindPlayback(first, "local")!;
+    owner.notePlaybackState(first, local, 1, "playing");
+    await vi.advanceTimersByTimeAsync(1000);
+    const replay = owner.beginPlayback("vod")!;
+    const fresh = owner.remotePlayback("vod", replay);
+    fresh.state("playing");
+    await vi.advanceTimersByTimeAsync(1000);
+    reload.end();
+    old.end();
+    fresh.state("playing");
+    await vi.advanceTimersByTimeAsync(1000);
+    fresh.end();
+    await expectStreams(owner, events, [
+      "started vod",
+      "stopped vod 3",
+      "started vod",
+      "stopped vod 2",
+    ]);
+  });
+
+  it("reports nothing for a terminal observation after opt-out, and no stop after opting back in", async () => {
+    playbackClock();
+    const { owner, events } = await measuring();
+    const token = owner.beginPlayback("live")!;
+    const remote = owner.remotePlayback("live", token);
+    remote.state("playing");
+    await expectStreams(owner, events, ["started live"]);
+    await owner.configure(false);
+    remote.end();
+    await owner.configure(true);
+    await vi.advanceTimersByTimeAsync(0);
+    const continued = owner.remotePlayback("live", token);
+    continued.state("playing");
+    await vi.advanceTimersByTimeAsync(1000);
+    continued.end();
+    await expectStreams(owner, events, ["started live"]);
+  });
+
   it("rejects stale logical request tokens and stopped receiver observations across consent changes", async () => {
     playbackClock();
     const { owner, events } = await measuring();

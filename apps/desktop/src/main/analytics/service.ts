@@ -466,6 +466,13 @@ export class Analytics {
         active = false;
         if (binding) this.stopPlaybackBinding(binding);
       },
+      // Only while this load still owns the run's binding: a newer load, run or reset keeps its own.
+      end: () => {
+        if (!active) return;
+        active = false;
+        if (token && binding && this.binding?.token === binding) this.endPlayback(token);
+        else if (binding) this.stopPlaybackBinding(binding);
+      },
     };
   }
 
