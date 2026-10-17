@@ -18,7 +18,8 @@ movies, series and channels. A movie's details and each episode row have a downl
 symbol is the download's state; Downloads lists the queue, then the copies on the phone, with
 Cancel, Retry, Remove, Play offline and Delete as each state allows (`src/downloads-screen.tsx`,
 `src/download-controls.tsx`). Play and Resume always stream; a copy plays offline from Downloads,
-its menu and an episode's check. Downloads transfer only while the app is open. What the desktop
+its menu and an episode's check. A download under way goes on in the background, but the next in
+the queue starts only once the app is open again: not yet the desktop's queue. What the desktop
 does and iOS doesn't yet is tracked in the parity report on the iOS card.
 
 ## Its own install
@@ -46,8 +47,11 @@ Xtream stream addresses carry the username and password in their path, so they s
 and failures. `patches/` changes expo-video's warnings, which named the address and printed the
 whole error with it, to name an error by domain and code only, and describes its asset without
 its address, which AVKit's logs print. The player's failures reach the screen through
-`withoutLogin` (`src/errors.ts`). SDK 58 links prebuilt modules, which a patch can't reach, so
-`package.json` has autolinking build ExpoVideo from its patched source.
+`withoutLogin` (`src/errors.ts`). `patches/` also makes expo-file-system's two handlers of
+background session wakes answer at once for a session not theirs: Expo calls the system's handler
+only once every handler answered, and theirs would wait forever on the app's download session.
+SDK 58 links prebuilt modules, which a patch can't reach, so `package.json` has autolinking build
+ExpoFileSystem and ExpoVideo from their patched source.
 
 ## How it is built
 
@@ -93,26 +97,37 @@ Each responsibility has one owner, a plain module with a store the screens read:
   shown as one by core's watchlist rules. Beta 2's `watchlist.json` is read until the first change.
 - `src/downloads.ts`: movies and episodes downloaded to the phone, as the desktop's downloads:
   `downloads.json`, a folder per download in `Documents/downloads`, and nothing else. One
-  transfers at a time through `src/download-task.ts`, expo-file-system's native `DownloadTask` in a
-  foreground URLSession, so the bytes never pass through JavaScript and no transfer outlives the
-  app's process. Records hold no address, header, login or resume data; a file's address is made
-  from its subscription's login as its transfer starts. A stream of the same subscription takes the
+  transfers at a time through `src/download-task.ts`, the app's own native owner of a background
+  URLSession (`modules/background-downloads`), so the bytes never pass through JavaScript and a
+  transfer goes on while the app is suspended and after iOS ends its process. The next download
+  starts only while the app is open (AppState `active`). Each request is an attempt, written on
+  its record before it starts; the native side moves only an authorized attempt's file into place
+  and writes how each ended as a receipt, which `downloads.ts` takes in, then acknowledges. At
+  launch nothing asks a provider for a file or a stream, and nothing is removed, until the
+  subscriptions are read and every native request is accounted for: a queued download's request
+  goes on as its transfer, any other is cancelled and has ended, and every receipt is taken in.
+  Records hold no address, header, login or resume data; a file's address is made from its
+  subscription's login as its transfer starts. A stream of the same subscription takes the
   connection back first (`onReclaim` in `playback.ts`): the transfer pauses before the stream's
   request goes out, and goes on once nothing of that subscription streams. A transfer that doesn't
   end within ten seconds fails the stream instead of opening a second connection. A provider takes
   a moment to free a closed connection, so a subscription's next request, a stream's, the next
-  download's or a transfer's fresh start after its resumed request broke, waits a second after the
-  app's last one ended. Going to the background pauses it too. A pause keeps URLSession's resume
-  data, which names the address, in the Keychain under `download:<id>`, used only for that same
-  address; otherwise the transfer starts again and says so. A kill before the pause is written
-  starts it again at the next launch. A copy is complete
-  only once the native task moved it into place at the announced size; a file beside an unfinished
-  download at launch is deleted. A removed subscription's unfinished downloads end, with their files
-  and resume data; its copies stay, play from the phone with no login or network, and keep their own
-  progress, also given to the subscription's viewing record while it is saved. A copy playing goes
-  on when the last subscription is removed.
-  `modules/downloads-folder` makes `Documents/downloads` at launch and keeps it out of backups
-  (native: it takes a new build).
+  download's or a transfer's fresh start after its resumed request was refused, waits a second
+  after the app's last one ended, and every subscription waits a second after launch when requests
+  ended unheard. Resume data, which names the address, stays with the native side in the Keychain,
+  from a pause or a broken request, and is used only for that same address; otherwise the transfer
+  starts again and says so. A request that breaks while the app is open fails, and Retry goes on;
+  one that breaks in the background goes on once the app is open. A user's force quit ends a
+  transfer, as iOS does. Resume data beta 3 kept under `download:<id>` moves to the native side at
+  launch. A copy is complete only once the native side moved it into place at the whole size the
+  server announced; a file beside an unfinished download is deleted before it starts again. A
+  removed subscription's unfinished downloads end, with their files and resume data; its copies
+  stay, play from the phone with no login or network, and keep their own progress, also given to
+  the subscription's viewing record while it is saved. A copy playing goes on when the last
+  subscription is removed.
+  `modules/downloads-folder` makes `Documents/downloads` at launch and keeps it out of backups;
+  `modules/background-downloads` keeps its ledger in Application Support and its resume data in
+  the Keychain, both readable after the first unlock (native: both take a new build).
 - `src/playback.ts`: the one `expo-video` player and what it plays, a channel or a title. Home's
   preview, Watch, Picture in Picture and the accessory all show or control this player; none
   opens a stream of its own. Another channel or title, Stop, removing its subscription and a failure each let go
