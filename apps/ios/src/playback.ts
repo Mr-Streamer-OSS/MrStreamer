@@ -57,7 +57,7 @@ export interface Playback {
   readonly muted: boolean;
   /**
    * The subscription whose provider connection a format session that let go of its stream still
-   * holds, until its request ended.
+   * holds, until its request ended. The session streaming now isn't counted: the phase says so.
    */
   readonly closing: string | null;
 }
@@ -181,22 +181,29 @@ let current: {
   stoppedAt: number | null;
 } | null = null;
 let attempt: AbortController | null = null;
-/** The format session the player streams from now, and how to stop it. */
-let format: { readonly session: FormatSession; readonly close: () => void } | null = null;
+/** The format session the player streams from now, how to stop it, and when it has. */
+let format: {
+  readonly session: FormatSession;
+  readonly close: () => void;
+  readonly closed: Promise<void>;
+} | null = null;
 /** Every format session whose provider request hasn't ended, with its subscription. */
 const held = new Map<Promise<void>, string | null>();
+
+/** Says which subscription a session that let go of its stream still holds, if any. */
+function noteClosing() {
+  const holding =
+    [...held].find(([closed, id]) => id !== null && closed !== format?.closed)?.[1] ?? null;
+  if (state.get().closing !== holding) state.set((s) => ({ ...s, closing: holding }));
+}
 
 /** Keeps `closed` among the sessions holding a connection until it resolves. */
 function hold(closed: Promise<void>, subscriptionId: string | null) {
   held.set(closed, subscriptionId);
-  const closing = () => {
-    const holding = [...held.values()].find((id) => id !== null) ?? null;
-    if (state.get().closing !== holding) state.set((s) => ({ ...s, closing: holding }));
-  };
-  closing();
+  noteClosing();
   void closed.finally(() => {
     held.delete(closed);
-    closing();
+    noteClosing();
   });
 }
 let checkpoint: ReturnType<typeof setInterval> | null = null;
@@ -299,6 +306,7 @@ function release() {
   // Its request ends on its own time; `held` keeps the next play from the provider until then.
   format?.close();
   format = null;
+  noteClosing();
   clock.set(0);
   length.set(0);
 }
@@ -348,13 +356,17 @@ export async function play(item: Playing, open: Open, options: PlayOptions) {
       contentType: source.container === "m3u8" ? ("hls" as const) : ("auto" as const),
     };
     if (!item.live && !DIRECT.has(source.container.toLowerCase())) {
-      const opening = openFormat(source.url, source.headers, controller.signal);
+      const start = options.from ?? 0;
+      const opening = openFormat(source.url, source.headers, start, controller.signal);
       hold(opening.closed, item.subscriptionId);
       const opened = await opening.opened;
       if (controller.signal.aborted) return opening.close();
       if (opened.kind === "session") {
-        format = { session: opened.session, close: opening.close };
+        format = { session: opened.session, close: opening.close, closed: opening.closed };
+        noteClosing();
         playable = { uri: opened.session.playlist, contentType: "hls" };
+        // The stream starts there itself, so AVPlayer reads nothing before it.
+        if (current) current.seek = null;
       } else {
         // AVPlayer opens it itself, once the session's request ended.
         await opening.closed;

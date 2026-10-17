@@ -17,6 +17,11 @@ Pod::Spec.new do |s|
   # FFmpeg's libraries, built by scripts/build-ffmpeg.sh ios.
   s.vendored_frameworks = 'vendor/ffmpeg/libavutil.xcframework', 'vendor/ffmpeg/libavcodec.xcframework',
                           'vendor/ffmpeg/libavformat.xcframework'
+  # What the app carries for FFmpeg's licence: the notice, the licence and how it was built.
+  s.resource_bundles = {
+    'TitleFormatsNotices' => ['vendor/ffmpeg/NOTICE.txt', 'vendor/ffmpeg/BUILD.txt',
+                              'vendor/ffmpeg/COPYING.LGPLv2.1'],
+  }
   s.pod_target_xcconfig = {
     'HEADER_SEARCH_PATHS' => '"$(PODS_TARGET_SRCROOT)/vendor/ffmpeg/include"',
     'GCC_C_LANGUAGE_STANDARD' => 'c11',

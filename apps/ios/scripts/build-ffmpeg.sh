@@ -12,8 +12,9 @@
 #
 # Needs a C compiler, make, pkg-config and curl. The source is FFmpeg 9.0.2, pinned by the
 # SHA-256 the desktop's scripts/build-ffmpeg.sh pins, from the copy attached to Mr. Streamer's
-# v0.0.14 release. BUILD.txt beside the result records the archive, its checksum, the
-# configure line and the toolchain.
+# v0.0.14 release. Beside the result, BUILD.txt records the archive, its checksum, the
+# configure lines and the toolchain, and NOTICE.txt and COPYING.LGPLv2.1 are the notice the app
+# carries for them (modules/title-formats bundles all three).
 set -euo pipefail
 
 target=${1:?usage: scripts/build-ffmpeg.sh ios|reference}
@@ -81,6 +82,19 @@ record() {
     for each in "${@:2}"; do echo "$(basename "$(dirname "$each")") $(cat "$each")"; done
   } >"$out/BUILD.txt"
   cp "$work/src-${slices[0]}/COPYING.LGPLv2.1" "$out/COPYING.LGPLv2.1"
+  cat >"$out/NOTICE.txt" <<NOTICE
+FFmpeg $FFMPEG_VERSION: libavutil, libavcodec and libavformat.
+Copyright the FFmpeg developers, https://ffmpeg.org.
+Licensed under the GNU Lesser General Public License, version 2.1 or later; its text is in
+COPYING.LGPLv2.1 beside this file.
+
+Source: the unchanged FFmpeg release archive at
+$FFMPEG_URL
+SHA-256 $FFMPEG_SHA256
+built by apps/ios/scripts/build-ffmpeg.sh at the app's commit, configured as BUILD.txt says.
+In the app the libraries are separate dynamic frameworks: Frameworks/libavutil.framework,
+libavcodec.framework and libavformat.framework.
+NOTICE
 }
 
 case "$target" in

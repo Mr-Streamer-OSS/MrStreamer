@@ -74,9 +74,35 @@ final class CopyBytes: ByteSource {
   func whenEnded(_ ended: @escaping () -> Void) { ended() }
 }
 
-/// A provider's file, over one connection: at most one request is open at a time, a new one
-/// starts only once URLSession said the last one ended, and a read near where the last stopped
+/// What happened to one request to the provider, for the native proof: where it asked from
+/// and when, in milliseconds since the session began. No address.
+struct RequestTrace {
+  let offset: Int64
+  let sent: Int
+  var answered: Int?
+  var status: Int?
+  var cancelled: Int?
+  var ended: Int?
+  var bytes: Int64 = 0
+  var outcome = ""
+
+  var record: [String: Any] {
+    var out: [String: Any] = ["offset": offset, "sent": sent, "bytes": bytes, "outcome": outcome]
+    if let answered { out["answered"] = answered }
+    if let status { out["status"] = status }
+    if let cancelled { out["cancelled"] = cancelled }
+    if let ended { out["ended"] = ended }
+    return out
+  }
+}
+
+/// A provider's file, over one connection: at most one request is open at a time, and a new one
+/// is sent only once URLSession said the last one ended. A read near where the last stopped
 /// carries on with the request that is open. Its body is taken as it is read, up to a bound.
+///
+/// Each request has a URLSession of its own. With one session limited to one connection per
+/// host, a request sent right after another was cancelled waited seconds on the simulator before
+/// it went out; the order of requests is kept here instead, so no session holds a slot.
 final class ProviderBytes: NSObject, ByteSource, URLSessionDataDelegate {
   /// What the open request may hold unread before it is paused, and resumed below `low`. A move
   /// elsewhere in the file throws away at most this much.
@@ -84,16 +110,27 @@ final class ProviderBytes: NSObject, ByteSource, URLSessionDataDelegate {
   private static let low = 1 << 20
   /// A read this far past the bytes received waits for them rather than asking again.
   private static let reach: Int64 = 512 << 10
+  /// Requests that dropped one after another, with nothing received between, before giving up.
+  private static let drops = 2
 
   private let url: URL
   private let headers: [String: String]
   private let condition = NSCondition()
-  private var session: URLSession!
+  private let began = Date()
+  private let queue: OperationQueue = {
+    let queue = OperationQueue()
+    queue.maxConcurrentOperationCount = 1
+    return queue
+  }()
+  private var session: URLSession?
   private var task: URLSessionDataTask?
   /// A request whose end URLSession hasn't told yet.
   private var open = false
   private var answered = false
   private var finished = false
+  /// The request that finished ended early: by an error, or before the end of the file.
+  private var dropped = false
+  private var dropsInRow = 0
   private var paused = false
   /// The open request is being cancelled: what it still delivers is dropped.
   private var stopping = false
@@ -105,21 +142,21 @@ final class ProviderBytes: NSObject, ByteSource, URLSessionDataDelegate {
   private var ended: [() -> Void] = []
   private(set) var size: Int64 = -1
   private(set) var failure: SessionFailure?
-  /// Requests sent, for the proof's record.
-  private(set) var requests = 0
+  private var trace: [RequestTrace] = []
+  /// The requests so far, read under the lock.
+  var traced: [RequestTrace] {
+    condition.lock()
+    defer { condition.unlock() }
+    return trace
+  }
 
   init(url: URL, headers: [String: String]) {
     self.url = url
     self.headers = headers
     super.init()
-    let configuration = URLSessionConfiguration.ephemeral
-    configuration.httpMaximumConnectionsPerHost = 1
-    configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-    configuration.urlCache = nil
-    let queue = OperationQueue()
-    queue.maxConcurrentOperationCount = 1
-    session = URLSession(configuration: configuration, delegate: self, delegateQueue: queue)
   }
+
+  private var now: Int { Int(Date().timeIntervalSince(began) * 1000) }
 
   func prepare() -> Bool {
     condition.lock()
@@ -139,13 +176,19 @@ final class ProviderBytes: NSObject, ByteSource, URLSessionDataDelegate {
     head = 0
     answered = false
     finished = false
+    dropped = false
     paused = false
     stopping = false
     open = true
-    requests += 1
-    let made = session.dataTask(with: request)
-    task = made
-    made.resume()
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+    configuration.urlCache = nil
+    let made = URLSession(configuration: configuration, delegate: self, delegateQueue: queue)
+    session = made
+    let next = made.dataTask(with: request)
+    task = next
+    trace.append(RequestTrace(offset: offset, sent: now))
+    next.resume()
   }
 
   private var available: Int { bytes.count - head }
@@ -178,7 +221,17 @@ final class ProviderBytes: NSObject, ByteSource, URLSessionDataDelegate {
             }
             return taken
           }
-          if finished { return 0 }
+          if finished {
+            // The body is over here: the end of the file, else a drop to go on from.
+            if !dropped && (size < 0 || offset >= size) { return 0 }
+            if dropsInRow >= Self.drops {
+              failure = .network(Self.describe(lastError))
+              return -1
+            }
+            dropsInRow += 1
+            begin(at: offset)
+            continue
+          }
         }
         condition.wait()
         continue
@@ -197,6 +250,7 @@ final class ProviderBytes: NSObject, ByteSource, URLSessionDataDelegate {
   /// seconds on the simulator, so it is resumed first; the lock is held.
   private func stopTask() {
     stopping = true
+    if trace.indices.last.map({ trace[$0].cancelled == nil }) == true { trace[trace.count - 1].cancelled = now }
     if paused {
       paused = false
       task?.resume()
@@ -207,7 +261,7 @@ final class ProviderBytes: NSObject, ByteSource, URLSessionDataDelegate {
   func close() {
     condition.lock()
     closed = true
-    stopTask()
+    if open { stopTask() }
     let done = !open ? takeEnded() : []
     condition.broadcast()
     condition.unlock()
@@ -229,7 +283,6 @@ final class ProviderBytes: NSObject, ByteSource, URLSessionDataDelegate {
   private func takeEnded() -> [() -> Void] {
     let waiting = ended
     ended = []
-    session.finishTasksAndInvalidate()
     return waiting
   }
 
@@ -242,10 +295,12 @@ final class ProviderBytes: NSObject, ByteSource, URLSessionDataDelegate {
       condition.broadcast()
       condition.unlock()
     }
-    guard dataTask === task, !closed, let http = response as? HTTPURLResponse else {
+    guard dataTask === task, !closed, !stopping, let http = response as? HTTPURLResponse else {
       completionHandler(.cancel)
       return
     }
+    trace[trace.count - 1].answered = now
+    trace[trace.count - 1].status = http.statusCode
     switch http.statusCode {
     case 206:
       // "bytes <first>-<last>/<size>": it must start where it was asked.
@@ -261,6 +316,7 @@ final class ProviderBytes: NSObject, ByteSource, URLSessionDataDelegate {
     case 200 where start == 0:
       size = response.expectedContentLength
     case 200, 416:
+      // Without parts of the file, nothing can seek in it; nothing is read in full instead.
       failure = .unsupported("The provider doesn't send part of a file, which seeking needs.")
       completionHandler(.cancel)
       return
@@ -281,6 +337,8 @@ final class ProviderBytes: NSObject, ByteSource, URLSessionDataDelegate {
     }
     guard dataTask === task, !stopping else { return }
     bytes.append(contentsOf: data)
+    trace[trace.count - 1].bytes += Int64(data.count)
+    dropsInRow = 0
     if available > Self.high && !paused {
       paused = true
       dataTask.suspend()
@@ -293,14 +351,48 @@ final class ProviderBytes: NSObject, ByteSource, URLSessionDataDelegate {
     if ended === task {
       open = false
       finished = true
-      if let error = error as NSError?, error.code != NSURLErrorCancelled, failure == nil, !closed {
-        // The code says enough; the system's words can quote the address.
-        failure = .network("(\(error.domain) \(error.code))")
+      trace[trace.count - 1].ended = now
+      let error = error as NSError?
+      if stopping || closed {
+        trace[trace.count - 1].outcome = "cancelled"
+      } else if let error, !answered {
+        failure = .network(Self.describe(error.code))
+        trace[trace.count - 1].outcome = "failed \(error.code)"
+      } else if let error {
+        // A drop: the next read goes on from where it stopped.
+        dropped = true
+        trace[trace.count - 1].outcome = "dropped \(error.code)"
+        lastError = error.code
+      } else {
+        trace[trace.count - 1].outcome = "finished"
+        dropped = size >= 0 && start + Int64(available) < size
+        if dropped { lastError = 0 }
       }
+      session.finishTasksAndInvalidate()
       if closed { done = takeEnded() }
     }
     condition.broadcast()
     condition.unlock()
     done.forEach { $0() }
+  }
+
+  /// The system's code for the last drop, 0 for a body that ended early without one.
+  private var lastError = 0
+
+  /// A network failure in fixed words: the system's own can quote the address.
+  static func describe(_ code: Int) -> String {
+    switch code {
+    case NSURLErrorTimedOut: return "The provider didn't answer in time."
+    case NSURLErrorNetworkConnectionLost: return "The connection dropped."
+    case NSURLErrorNotConnectedToInternet, NSURLErrorDataNotAllowed: return "This device is offline."
+    case NSURLErrorCannotFindHost, NSURLErrorDNSLookupFailed: return "The provider's server can't be found."
+    case NSURLErrorCannotConnectToHost: return "The provider's server refused the connection."
+    case NSURLErrorSecureConnectionFailed, NSURLErrorServerCertificateUntrusted,
+      NSURLErrorServerCertificateHasBadDate, NSURLErrorServerCertificateNotYetValid,
+      NSURLErrorServerCertificateHasUnknownRoot:
+      return "The secure connection to the provider failed."
+    case 0: return "The connection kept ending early."
+    default: return "Network error \(code)."
+    }
   }
 }

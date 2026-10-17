@@ -21,11 +21,18 @@ type NativeOpened =
   | { readonly kind: "failed"; readonly failure: NativeFailure };
 
 interface TitleFormatsModule {
-  create(id: string, url: string, headers: Readonly<Record<string, string>> | null): void;
+  create(
+    id: string,
+    url: string,
+    headers: Readonly<Record<string, string>> | null,
+    start: number,
+  ): void;
   open(id: string): Promise<NativeOpened>;
   close(id: string): void;
   closed(id: string): Promise<void>;
   failure(id: string): NativeFailure | null;
+  /** The session's requests to the provider so far, without their address, for native proofs. */
+  trace(id: string): readonly Readonly<Record<string, number | string>>[];
 }
 
 /**
@@ -59,17 +66,19 @@ export type Opened =
 let made = 0;
 
 /**
- * Opens `url`. `closed` resolves once the provider's request ended, which is before the session
+ * Opens `url`, to play from `start` seconds: the stream says so, and the file is read there
+ * first rather than at its start. `closed` resolves once the provider's request ended, which is before the session
  * answers for a file AVPlayer opens itself or that failed; `close` stops it at once. Rejects with
  * the stream's failure, or as aborted when `signal` aborted first.
  */
 export function openFormat(
   url: string,
   headers: Readonly<Record<string, string>> | undefined,
+  start: number,
   signal: AbortSignal,
 ): { readonly opened: Promise<Opened>; readonly close: () => void; readonly closed: Promise<void> } {
   const id = String(++made);
-  native().create(id, url, headers ?? null);
+  native().create(id, url, headers ?? null, start);
   const closed = native().closed(id);
   const close = () => native().close(id);
   if (signal.aborted) close();

@@ -15,11 +15,11 @@ public class TitleFormatsModule: Module {
   public func definition() -> ModuleDefinition {
     Name("TitleFormats")
 
-    /// Makes session `id` for `url`, a provider's file or a copy's `file:` address, without
-    /// reading anything yet. Synchronous, so `close` and `closed` find it from here on.
-    Function("create") { (id: String, url: String, headers: [String: String]?) in
+    /// Makes session `id` for `url`, a provider's file or a copy's `file:` address, to start at
+    /// `start` seconds, without reading anything yet. Synchronous, so `close` and `closed` find it from here on.
+    Function("create") { (id: String, url: String, headers: [String: String]?, start: Double) in
       let address = URL(string: url) ?? URL(fileURLWithPath: "/nonexistent")
-      let made = FormatSession(url: address, headers: headers ?? [:])
+      let made = FormatSession(url: address, headers: headers ?? [:], start: start)
       self.lock.lock()
       self.sessions[id] = made
       self.lock.unlock()
@@ -62,6 +62,12 @@ public class TitleFormatsModule: Module {
     AsyncFunction("closed") { (id: String, promise: Promise) in
       guard let made = self.session(id) else { return promise.resolve(nil) }
       made.whenClosed { promise.resolve(nil) }
+    }
+
+    /// The session's requests to the provider so far, without their address, for the native
+    /// proof's record of timing; empty once it closed.
+    Function("trace") { (id: String) -> [[String: Any]] in
+      self.session(id)?.trace ?? []
     }
 
     /// Why the session stopped serving, if it did.

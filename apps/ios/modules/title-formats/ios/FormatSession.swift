@@ -1,13 +1,11 @@
 import Foundation
 
-/// One file played through the C core: its source, its title, the segments made last, and its
-/// route on the loopback server. Everything of the title runs on `work`, one request at a time;
-/// the source's reads block there while URLSession answers on its own queue.
+/// One file played through the C core: its source, its title and its route on the loopback
+/// server. Everything of the title runs on `work`, one request at a time, including AVPlayer's
+/// requests for the picture and each sound track, which the core makes in one pass and keeps,
+/// bounded, until they are asked for; the source's reads block there while URLSession answers on
+/// a queue of its own.
 final class FormatSession {
-  /// The segments kept after they were made, for AVPlayer asking again. Each is bounded by the
-  /// core (SEGMENT_BYTES_MOST), so this bounds what a session holds.
-  private static let kept = 2
-
   enum Opened {
     case session(playlist: String)
     case direct
@@ -19,19 +17,18 @@ final class FormatSession {
   private let lock = NSLock()
   private let source: ByteSource
   private let token: String
+  /// Where playback starts, in seconds of the title.
+  private let start: Double
   private var title: OpaquePointer?
-  private var store: [Int: Data] = [:]
-  private var recent: [Int] = []
-  private var init_: Data?
-  private var playlist: Data?
   private var closed = false
   private var failure_: SessionFailure?
   private var sourceEnded = false
   private var titleFreed = false
   private var finished: [() -> Void] = []
 
-  init(url: URL, headers: [String: String]) {
+  init(url: URL, headers: [String: String], start: Double) {
     source = url.isFileURL ? CopyBytes(path: url.path) : ProviderBytes(url: url, headers: headers)
+    self.start = start
     var random = [UInt8](repeating: 0, count: 16)
     _ = SecRandomCopyBytes(kSecRandomDefault, random.count, &random)
     token = random.map { String(format: "%02x", $0) }.joined()
@@ -44,6 +41,11 @@ final class FormatSession {
     return failure_ ?? source.failure
   }
 
+  /// The provider requests so far, without their address; none for a copy.
+  var trace: [[String: Any]] {
+    (source as? ProviderBytes).map { provider in provider.traced.map(\.record) } ?? []
+  }
+
   private func fail(_ failure: SessionFailure) {
     lock.lock()
     if failure_ == nil { failure_ = failure }
@@ -54,7 +56,7 @@ final class FormatSession {
   func open(_ done: @escaping (Opened) -> Void) {
     work.async { [self] in
       guard !isClosed, source.prepare() else {
-        return done(isClosed ? .closed : .failed(failure ?? .network("")))
+        return done(isClosed ? .closed : .failed(failure ?? .network(ProviderBytes.describe(0))))
       }
       var callbacks = TitleHlsSource()
       callbacks.opaque = Unmanaged.passUnretained(self).toOpaque()
@@ -65,7 +67,7 @@ final class FormatSession {
       }
       var made: OpaquePointer?
       var detail = [CChar](repeating: 0, count: 256)
-      let result = title_hls_open(&callbacks, &made, &detail, detail.count)
+      let result = title_hls_open(&callbacks, start, &made, &detail, detail.count)
       lock.lock()
       let stopped = closed
       if !stopped { title = made }
@@ -74,11 +76,7 @@ final class FormatSession {
         if let made { title_hls_close(made) }
         return done(.closed)
       }
-      if result == TITLE_HLS_OK, let made {
-        var size = 0
-        let start = title_hls_init(made, &size)!
-        init_ = Data(bytes: start, count: size)
-        playlist = Data(String(cString: title_hls_playlist(made)).utf8)
+      if result == TITLE_HLS_OK {
         do {
           let port = try LoopbackServer.shared.start()
           LoopbackServer.shared.add(token) { [weak self] name, respond in
@@ -93,7 +91,7 @@ final class FormatSession {
       switch result {
       case TITLE_HLS_DIRECT: done(.direct)
       case TITLE_HLS_INTERRUPTED: done(.closed)
-      case TITLE_HLS_READ_FAILED: done(.failed(failure ?? .network("")))
+      case TITLE_HLS_READ_FAILED: done(.failed(failure ?? .network(ProviderBytes.describe(0))))
       default: done(.failed(.unsupported(String(cString: detail))))
       }
     }
@@ -108,36 +106,27 @@ final class FormatSession {
   /// One of AVPlayer's requests, on the work queue.
   private func answer(_ name: String) -> LoopbackResponse {
     guard !isClosed, let title else { return .missing }
-    switch name {
-    case "main.m3u8":
-      return LoopbackResponse(status: 200, type: "application/vnd.apple.mpegurl", body: playlist!)
-    case "init.mp4":
-      return LoopbackResponse(status: 200, type: "video/mp4", body: init_!)
+    var data: UnsafePointer<UInt8>?
+    var size = 0
+    var type: UnsafePointer<CChar>?
+    var detail = [CChar](repeating: 0, count: 256)
+    let result = title_hls_get(title, name, &data, &size, &type, &detail, detail.count)
+    switch result {
+    case TITLE_HLS_OK:
+      let body = data.map { Data(bytes: $0, count: size) } ?? Data()
+      return LoopbackResponse(status: 200, type: type.map { String(cString: $0) } ?? "video/mp4", body: body)
+    case TITLE_HLS_MISSING:
+      return .missing
+    case TITLE_HLS_READ_FAILED:
+      fail(source.failure ?? .network(ProviderBytes.describe(0)))
+    case TITLE_HLS_UNSUPPORTED:
+      fail(.unsupported(String(cString: detail)))
+    case TITLE_HLS_NO_MEMORY:
+      fail(.unsupported("This part of the file is too large to play from memory."))
     default:
-      guard name.hasPrefix("s"), name.hasSuffix(".m4s"),
-        let index = Int(name.dropFirst().dropLast(4))
-      else { return .missing }
-      if let kept = store[index] { return LoopbackResponse(status: 200, type: "video/mp4", body: kept) }
-      var data: UnsafeMutablePointer<UInt8>?
-      var size = 0
-      var detail = [CChar](repeating: 0, count: 256)
-      let result = title_hls_segment(title, Int32(index), &data, &size, &detail, detail.count)
-      guard result == TITLE_HLS_OK, let data else {
-        switch result {
-        case TITLE_HLS_READ_FAILED: fail(source.failure ?? .network(""))
-        case TITLE_HLS_UNSUPPORTED: fail(.unsupported(String(cString: detail)))
-        default: break
-        }
-        return .failed
-      }
-      let made = Data(bytes: data, count: size)
-      title_hls_free(data)
-      store[index] = made
-      recent.removeAll { $0 == index }
-      recent.append(index)
-      while recent.count > Self.kept { store[recent.removeFirst()] = nil }
-      return LoopbackResponse(status: 200, type: "video/mp4", body: made)
+      break
     }
+    return .failed
   }
 
   /// Stops serving and reading at once; the title is freed once its work queue is free.
@@ -159,7 +148,6 @@ final class FormatSession {
       self.title = nil
       lock.unlock()
       if let title { title_hls_close(title) }
-      store = [:]
       ended(source: false)
     }
   }
