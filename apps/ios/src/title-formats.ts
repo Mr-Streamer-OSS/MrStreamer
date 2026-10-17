@@ -76,7 +76,11 @@ export function openFormat(
   headers: Readonly<Record<string, string>> | undefined,
   start: number,
   signal: AbortSignal,
-): { readonly opened: Promise<Opened>; readonly close: () => void; readonly closed: Promise<void> } {
+): {
+  readonly opened: Promise<Opened>;
+  readonly close: () => void;
+  readonly closed: Promise<void>;
+} {
   const id = String(++made);
   native().create(id, url, headers ?? null, start);
   const closed = native().closed(id);

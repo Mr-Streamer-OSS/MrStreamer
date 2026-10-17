@@ -150,7 +150,10 @@ describe("a file AVPlayer can't open", () => {
     sessions[0]!.opened.resolve({ kind: "session", playlist: "http://127.0.0.1:1/a/main.m3u8" });
     await settle();
     sessions[0]!.failure = { kind: "status", status: 509 };
-    emit("statusChange", { status: "error", error: { message: "The network connection was lost." } });
+    emit("statusChange", {
+      status: "error",
+      error: { message: "The network connection was lost." },
+    });
     expect(playbackState.get().phase).toMatchObject({
       kind: "failed",
       error: "The provider refused this title. Another device may be using your connection.",
@@ -183,8 +186,16 @@ describe("a file AVPlayer can't open", () => {
 it("plays MP4, AVI and other files, and live channels, directly as before", async () => {
   await play(movie("a"), async () => ({ url: "http://panel/a.mp4", container: "mp4" }), options);
   await play(movie("e"), async () => ({ url: "http://panel/e.avi", container: "avi" }), options);
-  await play({ ...movie("c"), live: true }, async () => ({ url: "http://panel/c.ts", container: "ts" }), options);
-  await play({ ...movie("d"), live: true }, async () => ({ url: "http://panel/d.m3u8", container: "m3u8" }), options);
+  await play(
+    { ...movie("c"), live: true },
+    async () => ({ url: "http://panel/c.ts", container: "ts" }),
+    options,
+  );
+  await play(
+    { ...movie("d"), live: true },
+    async () => ({ url: "http://panel/d.m3u8", container: "m3u8" }),
+    options,
+  );
   expect(sessions).toEqual([]);
   expect(given.filter(Boolean)).toEqual([
     { uri: "http://panel/a.mp4", contentType: "auto" },
