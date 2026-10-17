@@ -8,7 +8,7 @@
 // TMDB id is one title with the versions of both, so lists count and show it once, and what plays
 // is still one version of one subscription. Nothing joins by name: a row without a TMDB id stays
 // on its own, whichever subscription lists another of its name, and so does a row for adults.
-import type { Title, TitleKind } from "@mrstreamer/contracts/ondemand";
+import type { Title, TitleKind, TitleVersion } from "@mrstreamer/contracts/ondemand";
 import { ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { adultIn } from "../adult.ts";
 import type { OnDemandCatalogue, ProviderTitle } from "../provider.ts";
@@ -155,15 +155,20 @@ function* indexKind(
   /** Every version's name, title by title, for search. */
   const names: string[] = [];
   const byId = new Map<string, Title>();
+  // A title can gather thousands of versions, so the work pauses between slices of versions.
   for (const group of groups) {
-    if (due()) yield;
-    const versions = group.map((listed): Version => ({
-      ...listed,
-      // With one version there is nothing to choose between.
-      fit: group.length === 1 ? 1 : suitability(listed.name.tags, language),
-    }));
+    const versions: Version[] = [];
+    for (const listed of group) {
+      if (due()) yield;
+      versions.push({
+        ...listed,
+        // With one version there is nothing to choose between.
+        fit: group.length === 1 ? 1 : suitability(listed.name.tags, language),
+      });
+    }
     // The version suiting the language best first, then the newest; equals keep the order of
-    // the subscriptions.
+    // the subscriptions. One sort, without a pause: it is short next to the rest, 25,000 versions
+    // of one film in about 10 ms in Node.
     if (versions.length > 1) {
       versions.sort((a, b) => b.fit - a.fit || (b.item.addedAt ?? 0) - (a.item.addedAt ?? 0));
     }
@@ -177,6 +182,7 @@ function* indexKind(
     let addedAt = 0;
     let anyAddedAt = 0;
     for (const { item, name, fit } of versions) {
+      if (due()) yield;
       year ??= name.year;
       posterUrl ??= item.posterUrl;
       backdropUrl ??= item.backdropUrl;
@@ -186,6 +192,20 @@ function* indexKind(
     }
     const shown = { subscriptionId: first.subscriptionId, id: first.item.id };
     const tmdbId = first.item.tmdbId ?? null;
+    const listedVersions: TitleVersion[] = [];
+    for (const { subscriptionId, item, name, listedOrder } of versions) {
+      if (due()) yield;
+      listedVersions.push({
+        subscriptionId,
+        id: item.id,
+        tags: name.tags,
+        name: item.name,
+        container: item.container,
+        addedAt: item.addedAt,
+        listedOrder,
+        ...(item.episodeFiles ? { episodeFiles: item.episodeFiles } : {}),
+      });
+    }
     const title: Title = {
       kind,
       // The TMDB id names it wherever versions gather under one, whichever shows first.
@@ -204,26 +224,26 @@ function* indexKind(
       adult: versions.length === 1 && first.adult,
       tmdbId,
       genres: [],
-      versions: versions.map(({ subscriptionId, item, name, listedOrder }) => ({
-        subscriptionId,
-        id: item.id,
-        tags: name.tags,
-        name: item.name,
-        container: item.container,
-        addedAt: item.addedAt,
-        listedOrder,
-        ...(item.episodeFiles ? { episodeFiles: item.episodeFiles } : {}),
-      })),
+      versions: listedVersions,
     };
     titles.push(title);
-    names.push(
-      versions.length === 1 ? first.item.name : group.map(({ item }) => item.name).join(" "),
-    );
+    if (versions.length === 1) {
+      names.push(first.item.name);
+    } else {
+      const spelled: string[] = [];
+      for (const { item } of group) {
+        if (due()) yield;
+        spelled.push(item.name);
+      }
+      names.push(spelled.join(" "));
+    }
   }
   const shown = sources.length > 1 ? yield* marked(titles) : titles;
   for (const title of shown) {
-    if (due()) yield;
-    for (const version of title.versions) byId.set(ownedKey(version), title);
+    for (const version of title.versions) {
+      if (due()) yield;
+      byId.set(ownedKey(version), title);
+    }
   }
   return {
     titles: shown,
@@ -255,9 +275,9 @@ function* marked(titles: readonly Title[]): Steps<readonly Title[]> {
   const reads = (title: Title) =>
     `${title.adult}\n${title.year ?? ""}\n${title.title.toLowerCase()}`;
   for (const title of titles) {
-    if (due()) yield;
     const key = reads(title);
     for (const { subscriptionId } of title.versions) {
+      if (due()) yield;
       const owner = listedBy.get(key);
       if (owner === undefined) listedBy.set(key, subscriptionId);
       else if (owner !== subscriptionId) listedBy.set(key, null);
@@ -265,9 +285,15 @@ function* marked(titles: readonly Title[]): Steps<readonly Title[]> {
   }
   const shown: Title[] = [];
   for (const title of titles) {
-    if (due()) yield;
     const { subscriptionId } = title;
-    const own = title.versions.every((version) => version.subscriptionId === subscriptionId);
+    let own = true;
+    for (const version of title.versions) {
+      if (due()) yield;
+      if (version.subscriptionId !== subscriptionId) {
+        own = false;
+        break;
+      }
+    }
     shown.push(own && listedBy.get(reads(title)) === null ? { ...title, ambiguous: true } : title);
   }
   return shown;

@@ -119,15 +119,41 @@ describe("movie and series lists read and indexed in tasks", () => {
     }
   });
 
-  it("stops reading rows once the load is aborted, and fails as the abort", async () => {
-    const controller = new AbortController();
-    const reason = new Error("Left");
-    const reading = panel(panelRows(3000, 0), true).onDemandCatalogue(controller.signal);
-    // The bodies have arrived and their rows are being read when the load is left.
-    await new Promise((done) => setTimeout(done, 0));
-    controller.abort(reason);
-    await expect(reading).rejects.toBe(reason);
+  it("gathers thousands of versions of one film between other tasks, as indexing at once does", async () => {
+    // Every row of both panels under one TMDB id: one title, its versions in the viewer's order.
+    const sameFilm = (count: number, offset: number) => {
+      const rows = panelRows(count, offset);
+      const film = (row: unknown) => ({
+        ...(row as object),
+        tmdb: "42",
+        is_adult: 0,
+        category_id: "films",
+      });
+      return { movies: rows.movies.slice(0, count).map(film), series: rows.series.map(film) };
+    };
+    const sources: CatalogueSource[] = [
+      { subscriptionId: "a", catalogue: await panel(sameFilm(4000, 0), false).onDemandCatalogue() },
+      { subscriptionId: "b", catalogue: await panel(sameFilm(3000, 9), false).onDemandCatalogue() },
+    ];
+    const { result, tasks } = await alongside(() => inTasks(indexSteps(sources, "nl"), () => true));
+    expect(tasks).toBeGreaterThan(2);
+    if (!result) throw new Error("Stopped");
+    const most = Math.max(...kindOf(result, "movie").titles.map((title) => title.versions.length));
+    expect(most).toBeGreaterThan(3000);
+    expect(shown(result)).toEqual(shown(indexCatalogue(sources, "nl")));
   });
+
+  it.each([new Error("Left"), null, false, 0, "left"])(
+    "stops reading rows once the load is aborted, and fails with its reason, %j",
+    async (reason) => {
+      const controller = new AbortController();
+      const reading = panel(panelRows(3000, 0), true).onDemandCatalogue(controller.signal);
+      // The bodies have arrived and their rows are being read when the load is left.
+      await new Promise((done) => setTimeout(done, 0));
+      controller.abort(reason);
+      await expect(reading).rejects.toBe(reason);
+    },
+  );
 
   it("fails as the panel's answer says, reading in tasks too", async () => {
     for (const [status, kind] of [
@@ -165,17 +191,12 @@ describe("movie and series lists read and indexed in tasks", () => {
   });
 
   it("stops indexing once it is no longer wanted, leaving nothing half made", async () => {
-    const catalogue = await panel(panelRows(3000, 0), false).onDemandCatalogue();
-    let wanted = true;
-    let tasks = 0;
-    const count = () => {
-      if (++tasks < 3) setTimeout(count, 0);
-      else wanted = false;
-    };
-    setTimeout(count, 0);
+    const catalogue = await panel(panelRows(20_000, 0), false).onDemandCatalogue();
+    // Wanted for the first task only: the load is left after one task of work.
+    let asked = 0;
     const left = await inTasks(
       indexSteps([{ subscriptionId: "a", catalogue }], "en"),
-      () => wanted,
+      () => ++asked < 2,
     );
     expect(left).toBeNull();
     // Indexing the same lists again gives what lists never indexed before give.

@@ -210,9 +210,11 @@ export function xtreamProvider(account: XtreamAccount, options: XtreamOptions): 
       const mapping = mapSteps(rows(body), map);
       if (!options.inTasks) return finish(mapping);
       const mapped = await options.inTasks(mapping, () => !signal?.aborted);
-      // Left unfinished only once the caller aborted, which `request` passes on as it is.
-      if (mapped === null) throw signal?.reason ?? new Error("Aborted");
-      return mapped;
+      if (mapped !== null) return mapped;
+      // Left unfinished once the caller aborted: its reason, whatever it is, which `request`
+      // passes on as it is.
+      if (signal?.aborted) throw signal.reason;
+      throw new Error("The list was left unread");
     });
 
   return {
