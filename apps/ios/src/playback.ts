@@ -1,5 +1,10 @@
 import { appFailure, type AnalyticsFailure } from "@mrstreamer/contracts/analytics";
-import { createVideoPlayer, type VideoPlayer } from "expo-video";
+import {
+  createVideoPlayer,
+  type AudioTrack,
+  type SubtitleTrack,
+  type VideoPlayer,
+} from "expo-video";
 import { appError, describeError, withoutLogin } from "./errors.ts";
 import { store, useStore, type Store } from "./store.ts";
 import { openFormat, type FormatSession } from "./title-formats.ts";
@@ -447,17 +452,50 @@ export interface TrackChoice {
   readonly choose: () => void;
 }
 
+/** What names a sound or subtitle track. */
+type Track = Pick<AudioTrack | SubtitleTrack, "id" | "language" | "label" | "name">;
+
+/**
+ * A file can hold tracks of one language, such as English stereo and English surround. On iOS the
+ * player's `id` (the track's place in what plays now, from the expo-video patch) tells them apart,
+ * and the track's own name, where the file gives one, does too.
+ */
+function sameTrack(a: Track | null, b: Track) {
+  return (
+    a !== null &&
+    a.id === b.id &&
+    a.language === b.language &&
+    a.label === b.label &&
+    a.name === b.name
+  );
+}
+
+/**
+ * Each track with its label, or its language: tracks that share one add their own name, or else
+ * their number among those that share it.
+ */
+function labelled<T extends Track>(tracks: readonly T[], fallback: string) {
+  const labels = tracks.map((track) => track.label || track.language || fallback);
+  return tracks.map((track, i) => {
+    const label = labels[i] ?? fallback;
+    if (labels.indexOf(label) === labels.lastIndexOf(label)) return { track, label };
+    const number = labels.slice(0, i + 1).filter((other) => other === label).length;
+    return { track, label: `${label} · ${track.name || number}` };
+  });
+}
+
 /**
  * The sound tracks, or the subtitle tracks with Off first, AVPlayer exposes for what plays now.
- * Subtitles it doesn't draw itself, such as pictures, aren't among them.
+ * Subtitles it doesn't draw itself, such as pictures, aren't among them. Choosing one hands the
+ * player back the very track it listed.
  */
 export function trackChoices(of: "audio" | "subtitles"): readonly TrackChoice[] {
   const made = player();
   if (of === "audio") {
     const current = made.audioTrack;
-    return made.availableAudioTracks.map((track) => ({
-      label: track.label || track.language || "Sound",
-      selected: current?.id === track.id && current?.language === track.language,
+    return labelled(made.availableAudioTracks, "Sound").map(({ track, label }) => ({
+      label,
+      selected: sameTrack(current, track),
       choose: () => {
         made.audioTrack = track;
       },
@@ -472,9 +510,9 @@ export function trackChoices(of: "audio" | "subtitles"): readonly TrackChoice[] 
         made.subtitleTrack = null;
       },
     },
-    ...made.availableSubtitleTracks.map((track) => ({
-      label: track.label || track.language || "Subtitles",
-      selected: current?.id === track.id && current?.language === track.language,
+    ...labelled(made.availableSubtitleTracks, "Subtitles").map(({ track, label }) => ({
+      label,
+      selected: sameTrack(current, track),
       choose: () => {
         made.subtitleTrack = track;
       },

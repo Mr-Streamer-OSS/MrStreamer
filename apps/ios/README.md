@@ -163,6 +163,9 @@ phone is held. On the simulator the screens follow its device orientation (agent
 `orientation`), not where Watch left them. `patches/` makes expo-video report Picture in Picture
 brought back to the app, which its own view never forwarded, and hold AVKit's answer until Watch
 has shown the player again, so the picture returns into Watch rather than Home.
+Watch's Audio and Subtitles list the tracks the player reports. Expo-video named a track by its
+label and language alone, so English stereo and English surround were one track to it; `patches/`
+gives each its place among what plays now as its `id`, and selects by it.
 `src/glass.tsx` draws the app's own controls as Liquid Glass, and solid before iOS 26 or with
 Reduce Transparency on.
 
