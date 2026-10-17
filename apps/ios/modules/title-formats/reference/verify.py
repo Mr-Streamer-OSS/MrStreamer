@@ -10,7 +10,8 @@
 #     frame, and decoding to zero after the first in a row;
 #   - a rendition runs without gaps from within one frame of title time 0 to within one frame
 #     past the picture's end. One without added silence may instead start or end up to 0.1 s
-#     inside, and lack a segment the core refused, but only one where the source track has a gap;
+#     inside, and lack a segment the core refused, but only one where the source track, all of
+#     its packets each sounding a frame, has a hole more than 0.1 s inside the title;
 #   - each rendition decodes cleanly, AC-3 and E-AC-3 with their CRCs checked.
 # A packed MP3 rendition's segments are read as an ID3 transport stream time and raw frames.
 #   python3 -I verify.py <source.mkv> <out-folder>
@@ -110,6 +111,9 @@ def decode(rendition, samples, raw):
     os.unlink(path)
     return run.stderr.decode().strip(), run.stdout
 
+# How far inside the title a track that can't be filled may start or end: the core's EDGE_S.
+EDGE_S = 0.1
+
 def near(times, t, within):
     """Whether a sorted list of times has one within `within` of `t`."""
     i = bisect.bisect_left(times, t)
@@ -154,12 +158,29 @@ for rendition in re.findall(r'URI="(a\d+)\.m3u8"', master):
     if not track:
         print(f"{rendition}: no source track known for it -> FAIL"); ok = False; continue
     codec, rate = track["codec_name"], int(track["sample_rate"])
-    half = round(mine[0][1] * rate) / rate / 2 + 0.0011  # half a frame, and Matroska's tick
-    # Expected: every packet from title time 0 on, but in segments refused for a gap; one within
-    # half a frame of where those start or end may go either way.
+    if not mine:
+        print(f"{rendition}: serves no sound -> FAIL"); ok = False; continue
+    # The source track's frame length, from its own packets' spacing.
+    source = sorted(t - origin for t, _ in packets[track["index"]])
+    steps = sorted(b - a for a, b in zip(source, source[1:]) if b > a)
+    frame = steps[len(steps) // 2]
+    half = frame / 2 + 0.0011  # half a frame, and Matroska's tick
+    # Where the source track has no sound, from all its packets, each sounding one frame. A
+    # segment may be refused only where such a hole lies more than EDGE_S inside the title: a
+    # track may start or end that much inside without its segment being refused.
+    holes, sounded = [], 0.0
+    for t in source:
+        if t - sounded > half: holes.append((sounded, t))
+        sounded = max(sounded, t + frame)
+    if picture_end - sounded > half: holes.append((sounded, picture_end))
+    gappy = lambda k: any(max(a, cuts[k], EDGE_S) < min(b, cuts[k + 1], picture_end - EDGE_S) for a, b in holes)
     served = {int(re.findall(r"(\d+)\.\w+$", n)[0]) for n in names}
-    edges = [0.0] + [c for k in range(listed) if k not in served for c in (cuts[k], cuts[k + 1])]
-    inside = lambda t: t >= -half and not any(cuts[k] + half <= t < cuts[k + 1] - half for k in range(listed) if k not in served)
+    refused = [k for k in range(listed) if k not in served]
+    allowed = [k for k in refused if gappy(k)]
+    # Expected: every packet from title time 0 on, but in segments legitimately refused; one
+    # within half a frame of where those start or end may go either way.
+    edges = [0.0] + [c for k in allowed for c in (cuts[k], cuts[k + 1])]
+    inside = lambda t: t >= -half and not any(cuts[k] + half <= t < cuts[k + 1] - half for k in allowed)
     expected = [(t - origin, h) for t, h in packets[track["index"]] if inside(t - origin)]
     optional = {h for t, h in expected if any(abs(t - e) < half for e in edges)}
     problems, at, kept, added, drift = [], 0, 0, [], 0.0
@@ -179,24 +200,20 @@ for rendition in re.findall(r'URI="(a\d+)\.m3u8"', master):
     covering = [t for t, _, _ in added if near(times, t, half)]
     if covering: problems.append(f"{len(covering)} added frames where the source has a packet, the first at {covering[0]:.3f} s")
     if drift > half: problems.append(f"time off by {drift * 1000:.2f} ms")
-    # Either silence fills every gap, or a segment with a gap in the source is refused; a track
-    # without silence may start or end EDGE_S inside the picture.
-    refused = [k for k in range(listed) if k not in served]
-    frame = mine[0][1]
-    edge = (0.1 + 2 * half) if not added else 2 * half
+    # Either silence fills every gap, or only a segment with a hole in the source is refused; a
+    # track without silence may start or end EDGE_S inside the picture.
+    edge = (EDGE_S + 2 * half) if not added else 2 * half
     if added and refused: problems.append("segments refused in a track it fills with silence")
     for k in refused:
-        marks = [cuts[k]] + sorted(t for t, _ in expected if cuts[k] <= t < cuts[k + 1]) + [cuts[k + 1]]
-        if not any(b - a > 1.5 * frame for a, b in zip(marks, marks[1:])):
-            problems.append(f"segment {k} refused where the source has no gap")
+        if k not in allowed: problems.append(f"segment {k} missing where the source has sound throughout")
     jumps = [(a[0] + a[1], b[0]) for a, b in zip(mine, mine[1:]) if abs(a[0] + a[1] - b[0]) >= 1e-5]
     unexplained = [a for a, b in jumps
-                   if not any(a <= cuts[k] + half and b >= cuts[k + 1] - half for k in refused)]
+                   if not any(a <= cuts[k] + half and b >= cuts[k + 1] - half for k in allowed)]
     runs = not jumps
     end = mine[-1][0] + mine[-1][1]
     if unexplained: problems.append(f"{len(unexplained)} gaps, the first at {unexplained[0]:.3f} s")
-    if 0 not in refused and mine[0][0] > edge: problems.append(f"starts at {mine[0][0]:.3f} s")
-    if listed - 1 not in refused and not picture_end - edge + 2 * half - 1e-5 <= end <= picture_end + 2 * half:
+    if 0 not in allowed and mine[0][0] > edge: problems.append(f"starts at {mine[0][0]:.3f} s")
+    if listed - 1 not in allowed and not picture_end - edge + 2 * half - 1e-5 <= end <= picture_end + 2 * half:
         problems.append(f"ends at {end:.3f} s, the picture at {picture_end:.3f} s")
     errors, pcm = decode(rendition, mine, raw)
     if errors: problems.append("decode " + errors[:200])
