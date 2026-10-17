@@ -97,7 +97,11 @@ export function* partSteps({
     const channel = { ...listed, subscriptionId, key: ownedKey({ subscriptionId, id: listed.id }) };
     channels.push(channel);
     byId.set(channel.id, channel);
-    for (const variant of channel.variants) byId.set(variant.id, channel);
+    // A channel can have thousands of streams.
+    for (const variant of channel.variants) {
+      if (due()) yield;
+      byId.set(variant.id, channel);
+    }
   }
   // A channel shows in each of its streams' categories once, where its first stream there is.
   const inCategory = new Map<string, Channel[]>();

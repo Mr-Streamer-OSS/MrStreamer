@@ -14,7 +14,7 @@
 // catalogue it is: the library says which subscription's the channels and categories are.
 import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
 import { normalize as fold } from "../text.ts";
-import type { LiveCatalogue, ProviderChannel } from "../provider.ts";
+import type { LiveCatalogue, ProviderCategory, ProviderChannel } from "../provider.ts";
 import { finish, pacer, type Steps } from "../steps.ts";
 import { leadingFlag, regionForCode, regionForName } from "./regions.ts";
 
@@ -101,12 +101,16 @@ export function normalizeCatalogue(catalogue: LiveCatalogue): NormalizedCatalogu
 /** `normalizeCatalogue`, pausing between slices of its channels (../steps.ts). */
 export function* normalizeSteps(catalogue: LiveCatalogue): Steps<NormalizedCatalogue> {
   const due = pacer();
-  const named = catalogue.categories.map((category) => ({ category, name: parse(category.name) }));
+  const named: { category: ProviderCategory; name: ParsedName }[] = [];
+  for (const category of catalogue.categories) {
+    if (due()) yield;
+    named.push({ category, name: parse(category.name) });
+  }
   const prefixed = named.filter(({ name }) => name.region !== null).length;
   const prefixStyle = prefixed >= Math.max(2, named.length * PREFIX_STYLE_SHARE);
   const regionUse = countBy(named.map(({ name }) => name.region));
 
-  const shown = named.map(({ category, name }): ShownCategory => {
+  const show = ({ category, name }: (typeof named)[number]): ShownCategory => {
     const subject = fold((name.region === null ? name.text : name.rest).replace(QUALITY, " "));
     const base = {
       id: category.id,
@@ -123,7 +127,12 @@ export function* normalizeSteps(catalogue: LiveCatalogue): Steps<NormalizedCatal
     // the region, and keeps its whole name when the prefix is not a region anyone knows.
     if (namesRegion(name.rest, name.region)) return { ...base, group: null, title };
     return name.known ? { ...base, group: name.region, title } : whole;
-  });
+  };
+  const shown: ShownCategory[] = [];
+  for (const each of named) {
+    if (due()) yield;
+    shown.push(show(each));
+  }
   const categoryById = new Map(shown.map((category) => [category.id, category]));
   const categoryRegions = new Set(shown.map((category) => category.region));
 

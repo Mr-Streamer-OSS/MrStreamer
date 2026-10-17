@@ -56,17 +56,35 @@ async function alongside<A>(work: () => Promise<A>): Promise<{ result: A; tasks:
   return { result, tasks };
 }
 
+/** Every part worked out in tasks, then joined in tasks, as the account owner does. */
+async function libraryInTasks(of: readonly LiveSource[]) {
+  const parts = [];
+  for (const source of of) {
+    const part = await inTasks(partSteps(source), () => true);
+    if (!part) throw new Error("Stopped");
+    parts.push({ label: source.label, part });
+  }
+  return inTasks(combineSteps(parts), () => true);
+}
+
+/** One name listed `count` times in one category, each stream under `guideId`. */
+const listedOften = (name: string, guideId: string | null, count: number): LiveCatalogue => ({
+  categories: [{ id: "1", name: "NL | Events" }],
+  channels: Array.from({ length: count }, (_, at) => ({
+    id: String(at + 1),
+    name,
+    number: null,
+    logoUrl: null,
+    categoryIds: ["1"],
+    guideId,
+    adult: false,
+    catchupDays: null,
+  })),
+});
+
 describe("a library worked out in tasks", () => {
   it("lets other tasks run between its slices, and shows what buildLibrary shows", async () => {
-    const { result, tasks } = await alongside(async () => {
-      const parts = [];
-      for (const source of sources) {
-        const part = await inTasks(partSteps(source), () => true);
-        if (!part) throw new Error("Stopped");
-        parts.push({ label: source.label, part });
-      }
-      return inTasks(combineSteps(parts), () => true);
-    });
+    const { result, tasks } = await alongside(() => libraryInTasks(sources));
     expect(tasks).toBeGreaterThan(2);
     const library = buildLibrary(sources);
     expect(result).toEqual(library);
@@ -76,6 +94,24 @@ describe("a library worked out in tasks", () => {
     expect(channels.some((each) => each.variants.length > 1)).toBe(true);
     expect(library.regions.at(-1)?.name).toBe("Other channels");
     expect([...library.placeOf.values()].some((place) => place.endsWith(" · Cabin"))).toBe(true);
+  });
+
+  it("shows a channel listed hundreds of times, and names under one placeholder guide id, as buildLibrary does", async () => {
+    const often: LiveSource[] = [
+      {
+        subscriptionId: "a",
+        label: "Home",
+        catalogue: listedOften("Event Offline HD", null, 600),
+      },
+      {
+        subscriptionId: "b",
+        label: "Cabin",
+        catalogue: listedOften("NL | Event Offline HD", "placeholder.tv", 600),
+      },
+    ];
+    const { result, tasks } = await alongside(() => libraryInTasks(often));
+    expect(tasks).toBeGreaterThan(2);
+    expect(result).toEqual(buildLibrary(often));
   });
 
   it("stops, unfinished, once it is no longer wanted", async () => {
