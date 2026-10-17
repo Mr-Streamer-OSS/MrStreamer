@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Builds the FFmpeg libraries the iOS app links to play files AVPlayer can't open, such as
 # Matroska: libavformat reads the file and writes its packets, unchanged, as fragmented MP4 for
-# a loopback HLS stream (modules/title-formats). Nothing is decoded or encoded, so the build has
-# no codecs, no programs, no network code and nothing under the GPL.
+# a loopback HLS stream (modules/title-formats). Nothing is decoded; the only codecs are FFmpeg's
+# own AC-3 and E-AC-3 encoders, which make one frame of silence per such sound track to fill
+# where it has none. No decoders, programs, resampler or network code, and nothing under the GPL.
 #
 #   scripts/build-ffmpeg.sh ios          on a Mac with Xcode: dynamic xcframeworks for the iPhone
 #                                        and the arm64 simulator, in the module that links them,
@@ -28,7 +29,7 @@ IOS_MIN=16.4
 
 # The one list of what the libraries can do. Matroska is what AVPlayer refuses; MP4 and MOV read
 # too, for a file whose name says otherwise. The parsers fill in what a copied packet's track
-# needs to be written as MP4.
+# needs to be written as MP4. The encoders only ever encode silence.
 features=(
   --disable-everything --disable-autodetect --disable-doc --disable-programs
   --disable-avdevice --disable-avfilter --disable-swscale --disable-swresample --disable-network
@@ -37,6 +38,7 @@ features=(
   --enable-demuxer=matroska,mov
   --enable-muxer=mp4
   --enable-parser=h264,hevc,aac,ac3,mpegaudio
+  --enable-encoder=ac3,eac3
   --enable-shared --disable-static
 )
 

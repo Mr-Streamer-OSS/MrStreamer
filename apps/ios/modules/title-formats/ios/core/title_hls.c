@@ -17,21 +17,33 @@
 //   follow each other without the gaps or overlaps the rounding would leave.
 // - A segment has the picture's packets from its cut's keyframe up to the next cut's, and each
 //   sound track's packets whose time is between the two cuts, made in one pass of the file and
-//   written as one MP4 per rendition. Made in order, the packets read past a cut are kept for
-//   the next segment; made after a seek, the read starts at the cut's cluster, or one cut
-//   earlier when sound of this segment may lie before it.
+//   written per rendition. Made in order, the packets read past a cut are kept for the next
+//   segment; made after a seek, and at open, the read starts at the cut's cluster, or one cut
+//   earlier when sound of this segment may lie before it. A muxer may store sound ahead of the
+//   picture, so sound for the first cut can lie in clusters before the first cut's: opening
+//   reads the file's first clusters up to the picture's first keyframe and keeps that sound
+//   (within LEAD_PACKETS_MOST and LEAD_BYTES_MOST) for whenever the read starts at the first cut.
 // - A sound track may end before the picture, pause, or start late. Sound is waited for until the
 //   picture is LATE_SOUND_S past the cut, and a track with nothing near where playing starts
-//   isn't offered. AVPlayer's clock stops where the chosen sound stops, so each frame of an AAC
-//   track's grid that has no packet gets a frame of silence: its renditions run the whole
-//   title. A track of another codec with nothing in a segment gets a fragment with no samples
-//   there, which keeps the picture and the other tracks playable but stalls when it's chosen.
+//   isn't offered. AVPlayer's clock stops where the chosen sound stops, so each frame of a
+//   track's grid that has no packet gets a frame of silence: its rendition runs the whole
+//   title. The silence is built for AAC-LC and MP3, and encoded once with FFmpeg's encoder for
+//   AC-3 and E-AC-3 when that writes frames like the track's. A track without one may start or
+//   end EDGE_S inside the picture; a segment where it has a gap elsewhere is refused, with a
+//   reason, when that track is chosen, rather than left to stall.
 // - Each rendition's MP4 is written by a muxer of its own, fed the packets and flushed twice:
 //   with delay_moov the first flush writes the header, which for AC-3 and E-AC-3 the muxer can
 //   only write once it has parsed a packet, and the second the fragment. A segment keeps the
 //   fragment, the initialization segment the header.
+// - AVPlayer doesn't take MP3 in fragmented MP4; HLS carries it as packed audio. An MP3
+//   rendition has no initialization segment, and each of its segments is an ID3 tag with the
+//   MPEG-2 transport stream time of its first frame (33 bits of a 90 kHz clock) followed by the
+//   frames as they are. A frame may take part of its data from up to the last 511 bytes of the
+//   frames before it (the bit reservoir), so playing from a segment reached by a seek, its first
+//   few frames may not decode fully.
 #include "title_hls.h"
 
+#include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/avstring.h>
 #include <libavutil/bprint.h>
@@ -68,6 +80,18 @@
  * has nothing there.
  */
 #define LATE_SOUND_S 5.0
+/**
+ * Packets read from the file's start for sound before the first cut's cluster at most, and the
+ * bytes of sound kept from them.
+ */
+#define LEAD_PACKETS_MOST 1024
+#define LEAD_BYTES_MOST (4 * 1024 * 1024)
+/**
+ * How far inside the picture a track that can't be filled with silence may start or end without
+ * its segment being refused: AVPlayer starts its clock where such sound starts, and stops it
+ * where it ends, so this little is lost at either end of the title.
+ */
+#define EDGE_S 0.1
 /** Sound tracks offered at most. */
 #define SOUNDS_MOST 8
 /** Segments kept after they were made, every rendition of each. */
@@ -95,12 +119,13 @@ typedef struct Sound {
   int64_t first;
   /** That packet, which the initialization segment is written from. */
   AVPacket *sample;
+  /** Empty for packed audio, which has none. */
   Bytes init;
-  /** A frame of silence, filling where the track has none; empty when one can't be made. */
-  Bytes silence;
+  /** A frame of silence, filling where the track has none; NULL when one can't be made. */
+  AVPacket *silence;
 } Sound;
 
-/** Every rendition of one segment. */
+/** Every rendition of one segment; a sound rendition without data was refused for a gap. */
 typedef struct Made {
   int index; /* -1 when empty */
   Bytes renditions[1 + SOUNDS_MOST];
@@ -128,6 +153,8 @@ struct TitleHls {
   /** The segment the input continues into without a seek, or -1. */
   int next;
   Packets ahead;
+  /** Sound stored before the first cut's cluster, which a seek there doesn't read. */
+  Packets lead;
   Made kept[KEPT];
   int kept_next;
   /** The last playlist asked for. */
@@ -136,6 +163,7 @@ struct TitleHls {
 
 static const char *const MPEGURL = "application/vnd.apple.mpegurl";
 static const char *const MP4 = "video/mp4";
+static const char *const MPEG_AUDIO = "audio/mpeg";
 
 static void say(char *detail, size_t size, const char *text) {
   if (detail && size) av_strlcpy(detail, text, size);
@@ -281,6 +309,11 @@ static Sound *sound_of(TitleHls *title, const AVPacket *packet) {
   return NULL;
 }
 
+/** Whether a track is served as packed audio, not fragmented MP4: MP3, as AVPlayer takes it. */
+static int packed(const TitleHls *title, const Sound *sound) {
+  return title->input->streams[sound->stream]->codecpar->codec_id == AV_CODEC_ID_MP3;
+}
+
 /** Where the first top-level box of `type` starts in an MP4, or with `after`, where it ends. */
 static size_t box_offset(const uint8_t *data, size_t size, const char *type, int after) {
   size_t at = 0;
@@ -305,30 +338,8 @@ static void put32(uint8_t *at, uint32_t value) {
   at[3] = value;
 }
 
-/**
- * A fragment with no samples: the muxer writes none for a track with nothing to say, and a
- * rendition needs one per segment. Its decode time `at` is where the segment starts.
- */
-static int empty_fragment(int index, int64_t at, Bytes *made) {
-  static const size_t SIZE = 92;
-  uint8_t *x = av_mallocz(SIZE);
-  if (!x) return AVERROR(ENOMEM);
-  put32(x, 84), memcpy(x + 4, "moof", 4);
-  put32(x + 8, 16), memcpy(x + 12, "mfhd", 4), put32(x + 20, (uint32_t)index + 1);
-  put32(x + 24, 60), memcpy(x + 28, "traf", 4);
-  // tfhd: default-base-is-moof, track 1, which every rendition's single track is.
-  put32(x + 32, 16), memcpy(x + 36, "tfhd", 4), put32(x + 40, 0x020000), put32(x + 44, 1);
-  put32(x + 48, 20), memcpy(x + 52, "tfdt", 4), put32(x + 56, 0x01000000);
-  put32(x + 60, (uint32_t)((uint64_t)at >> 32)), put32(x + 64, (uint32_t)at);
-  put32(x + 68, 16), memcpy(x + 72, "trun", 4), put32(x + 76, 0), put32(x + 80, 0);
-  put32(x + 84, 8), memcpy(x + 88, "mdat", 4);
-  made->data = x;
-  made->size = SIZE;
-  return 0;
-}
-
 typedef struct Bits {
-  uint8_t *data;
+  const uint8_t *data;
   int size, at;
 } Bits;
 
@@ -342,18 +353,31 @@ static unsigned bits_read(Bits *bits, int count) {
   return value;
 }
 
-static void bits_put(Bits *bits, int count, unsigned value) {
-  for (int i = count - 1; i >= 0; i--, bits->at++) {
-    if (value >> i & 1) bits->data[bits->at >> 3] |= 0x80 >> (bits->at & 7);
+static void bits_put(uint8_t *data, int *at, int count, unsigned value) {
+  for (int i = count - 1; i >= 0; i--, (*at)++) {
+    if (value >> i & 1) data[*at >> 3] |= 0x80 >> (*at & 7);
   }
+}
+
+/** A key packet holding a copy of `size` bytes of `data`. */
+static int frame_packet(const uint8_t *data, int size, AVPacket **made) {
+  AVPacket *packet = av_packet_alloc();
+  if (!packet || av_new_packet(packet, size) < 0) {
+    av_packet_free(&packet);
+    return AVERROR(ENOMEM);
+  }
+  memcpy(packet->data, data, (size_t)size);
+  packet->flags = AV_PKT_FLAG_KEY;
+  *made = packet;
+  return 0;
 }
 
 /**
  * An AAC-LC frame of silence for the channels `par`'s AudioSpecificConfig names: every channel
- * element has no scale factor bands, so all its coefficients are zero. Empty for other AAC
- * (SBR, 960-sample frames, a channel configuration of its own), which this can't silence.
+ * element has no scale factor bands, so all its coefficients are zero. None for other AAC (SBR,
+ * 960-sample frames, a channel configuration of its own), which this can't silence.
  */
-static int aac_silence(const AVCodecParameters *par, Bytes *made) {
+static int aac_silence(const AVCodecParameters *par, AVPacket **made) {
   // The channel elements of channel configurations 1 to 7: S single, C pair, L low frequency.
   static const char *const ELEMENTS[] = {"", "S", "C", "SC", "SCS", "SCC", "SCCL", "SCCCL"};
   if (par->extradata_size < 2) return 0;
@@ -371,44 +395,214 @@ static int aac_silence(const AVCodecParameters *par, Bytes *made) {
       bits_read(&config, 5) == 5 && bits_read(&config, 1))
     return 0;
   uint8_t frame[32] = {0};
-  Bits out = {frame, sizeof(frame), 0};
-  int tags[4] = {0};
+  int at = 0, tags[4] = {0};
   for (const char *element = ELEMENTS[channels]; *element; element++) {
     int id = *element == 'S' ? 0 : *element == 'C' ? 1 : 3;
-    bits_put(&out, 3, (unsigned)id);
-    bits_put(&out, 4, (unsigned)tags[id]++);
-    if (id == 1) bits_put(&out, 1, 0); /* common_window */
+    bits_put(frame, &at, 3, (unsigned)id);
+    bits_put(frame, &at, 4, (unsigned)tags[id]++);
+    if (id == 1) bits_put(frame, &at, 1, 0); /* common_window */
     for (int channel = 0; channel < (id == 1 ? 2 : 1); channel++) {
-      bits_put(&out, 8, 100); /* global_gain */
+      bits_put(frame, &at, 8, 100); /* global_gain */
       // ics_info: reserved, one long window, its shape, max_sfb 0, no prediction.
-      bits_put(&out, 11, 0);
+      bits_put(frame, &at, 11, 0);
       // No pulse, TNS or gain control data; with no bands, no sections, scale factors or
       // spectral data.
-      bits_put(&out, 3, 0);
+      bits_put(frame, &at, 3, 0);
     }
   }
-  bits_put(&out, 3, 7); /* END */
-  made->size = (size_t)(out.at + 7) / 8;
-  if (!(made->data = av_memdup(frame, made->size))) return AVERROR(ENOMEM);
-  return 0;
+  bits_put(frame, &at, 3, 7); /* END */
+  return frame_packet(frame, (at + 7) / 8, made);
+}
+
+/**
+ * An MP3 frame of silence like `sample`'s: its header without CRC or padding, then side
+ * information of zeros, so no granule has any data, and nothing else. None for a free-format
+ * bitrate, whose frame length the header doesn't give.
+ */
+static int mp3_silence(const AVPacket *sample, AVPacket **made) {
+  static const int KBPS[2][15] = {
+      {0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320},
+      {0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160}};
+  static const int RATES[4][3] = {{11025, 12000, 8000}, {0}, {22050, 24000, 16000},
+                                  {44100, 48000, 32000}};
+  const uint8_t *x = sample ? sample->data : NULL;
+  if (!x || sample->size < 4 || x[0] != 0xFF || (x[1] & 0xE0) != 0xE0 || (x[1] >> 1 & 3) != 1)
+    return 0;
+  int version = x[1] >> 3 & 3, bitrate = x[2] >> 4, rate = x[2] >> 2 & 3;
+  if (version == 1 || bitrate == 0 || bitrate == 15 || rate == 3) return 0;
+  // Layer III: 144 bytes a frame per bit per second over the rate in MPEG-1, 72 in MPEG-2 and 2.5.
+  uint8_t frame[1440] = {0};
+  int size = (version == 3 ? 144 : 72) * KBPS[version != 3][bitrate] * 1000 / RATES[version][rate];
+  frame[0] = 0xFF;
+  frame[1] = x[1] | 1;
+  frame[2] = x[2] & ~2;
+  frame[3] = x[3];
+  return frame_packet(frame, size, made);
+}
+
+/** How the first syncframe of an AC-3 or E-AC-3 packet is coded. */
+typedef struct Dolby {
+  int eac3, rate, acmod, lfe, blocks, size;
+  /** AC-3's bitrate, in its table. */
+  int bitrate;
+} Dolby;
+
+static const int DOLBY_RATES[3] = {48000, 44100, 32000};
+static const int AC3_KBPS[19] = {32,  40,  48,  56,  64,  80,  96,  112, 128, 160,
+                                 192, 224, 256, 320, 384, 448, 512, 576, 640};
+
+/** Reads an AC-3 (bsid up to 8) or independent E-AC-3 (bsid 11 to 16) syncframe's header. */
+static int dolby_header(const uint8_t *data, int size, Dolby *out) {
+  if (size < 8 || data[0] != 0x0B || data[1] != 0x77) return 0;
+  int bsid = data[5] >> 3; /* at the same place in both */
+  Bits bits = {data, size, 16};
+  Dolby d = {0};
+  if (bsid <= 8) {
+    bits_read(&bits, 16); /* crc1 */
+    int fscod = (int)bits_read(&bits, 2), code = (int)bits_read(&bits, 6);
+    if (fscod == 3 || code >= 38) return 0;
+    bits_read(&bits, 8); /* bsid, bsmod */
+    d.acmod = (int)bits_read(&bits, 3);
+    if ((d.acmod & 1) && d.acmod != 1) bits_read(&bits, 2);
+    if (d.acmod & 4) bits_read(&bits, 2);
+    if (d.acmod == 2) bits_read(&bits, 2);
+    d.lfe = (int)bits_read(&bits, 1);
+    d.rate = DOLBY_RATES[fscod];
+    d.bitrate = code >> 1;
+    d.blocks = 6;
+    // 16-bit words: 96 per kbit/s per kHz of the rate; at 44.1 kHz odd codes add a word.
+    d.size = 2 * (AC3_KBPS[d.bitrate] * 96000 / d.rate) + (d.rate == 44100 ? 2 * (code & 1) : 0);
+  } else if (bsid >= 11 && bsid <= 16) {
+    d.eac3 = 1;
+    if (bits_read(&bits, 2) != 0) return 0; /* not an independent substream */
+    bits_read(&bits, 3);
+    d.size = 2 * ((int)bits_read(&bits, 11) + 1);
+    int fscod = (int)bits_read(&bits, 2);
+    if (fscod == 3) return 0; /* half rates, which FFmpeg's encoder doesn't write */
+    d.blocks = (int[]){1, 2, 3, 6}[bits_read(&bits, 2)];
+    d.acmod = (int)bits_read(&bits, 3);
+    d.lfe = (int)bits_read(&bits, 1);
+    d.rate = DOLBY_RATES[fscod];
+  } else {
+    return 0;
+  }
+  *out = d;
+  return 1;
+}
+
+/**
+ * An AC-3 or E-AC-3 frame of silence coded like `sample`'s: FFmpeg's encoder given one frame
+ * of zeros at the track's rate, channels and bitrate. None when the track's frames aren't ones
+ * that encoder writes: two independent mono channels, E-AC-3 with fewer than six blocks a frame
+ * or dependent substreams (over 5.1), or anything it writes differently.
+ */
+static int dolby_silence(const AVCodecParameters *par, const AVPacket *sample, AVPacket **made) {
+  // The channels of acmod 1 to 7: 1/0, 2/0, 3/0, 2/1, 3/1, 2/2, 3/2.
+  static const uint64_t LAYOUTS[8] = {0,
+                                      AV_CH_LAYOUT_MONO,
+                                      AV_CH_LAYOUT_STEREO,
+                                      AV_CH_LAYOUT_SURROUND,
+                                      AV_CH_LAYOUT_2_1,
+                                      AV_CH_LAYOUT_4POINT0,
+                                      AV_CH_LAYOUT_2_2,
+                                      AV_CH_LAYOUT_5POINT0};
+  Dolby want, got;
+  if (!sample || !dolby_header(sample->data, sample->size, &want) || !LAYOUTS[want.acmod] ||
+      want.blocks != 6 || want.size != sample->size)
+    return 0;
+  const AVCodec *codec = avcodec_find_encoder(par->codec_id);
+  if (!codec) return 0;
+  AVCodecContext *context = avcodec_alloc_context3(codec);
+  AVFrame *frame = av_frame_alloc();
+  AVPacket *packet = av_packet_alloc();
+  int error = AVERROR(ENOMEM);
+  if (!context || !frame || !packet) goto end;
+  context->sample_rate = want.rate;
+  context->sample_fmt = AV_SAMPLE_FMT_FLTP;
+  av_channel_layout_from_mask(&context->ch_layout,
+                              LAYOUTS[want.acmod] | (want.lfe ? AV_CH_LOW_FREQUENCY : 0));
+  context->bit_rate = want.eac3 ? (int64_t)want.size * 8 * want.rate / 1536
+                                : (int64_t)AC3_KBPS[want.bitrate] * 1000;
+  // A rate, layout or bitrate the encoder refuses: no silence.
+  if ((error = avcodec_open2(context, codec, NULL)) < 0) goto end;
+  frame->nb_samples = context->frame_size;
+  frame->format = context->sample_fmt;
+  frame->sample_rate = context->sample_rate;
+  if ((error = av_channel_layout_copy(&frame->ch_layout, &context->ch_layout)) < 0 ||
+      (error = av_frame_get_buffer(frame, 0)) < 0)
+    goto end;
+  av_samples_set_silence(frame->extended_data, 0, frame->nb_samples,
+                         frame->ch_layout.nb_channels, context->sample_fmt);
+  if ((error = avcodec_send_frame(context, frame)) < 0) goto end;
+  error = avcodec_receive_packet(context, packet);
+  if (error == AVERROR(EAGAIN) && (error = avcodec_send_frame(context, NULL)) >= 0)
+    error = avcodec_receive_packet(context, packet);
+  if (error < 0) goto end;
+  if (dolby_header(packet->data, packet->size, &got) && got.eac3 == want.eac3 &&
+      got.rate == want.rate && got.acmod == want.acmod && got.lfe == want.lfe &&
+      got.blocks == 6 && got.size == packet->size &&
+      (want.eac3 ? got.size == want.size : got.bitrate == want.bitrate)) {
+    packet->pts = packet->dts = AV_NOPTS_VALUE;
+    packet->flags = AV_PKT_FLAG_KEY;
+    *made = packet;
+    packet = NULL;
+  }
+end:
+  av_packet_free(&packet);
+  av_frame_free(&frame);
+  avcodec_free_context(&context);
+  return error == AVERROR(ENOMEM) ? error : 0;
+}
+
+/** The track's frame of silence, or none: `silence` stays NULL. */
+static int silence_of(const AVCodecParameters *par, const AVPacket *sample, AVPacket **silence) {
+  switch (par->codec_id) {
+    case AV_CODEC_ID_AAC:
+      return aac_silence(par, silence);
+    case AV_CODEC_ID_MP3:
+      return mp3_silence(sample, silence);
+    case AV_CODEC_ID_AC3:
+    case AV_CODEC_ID_EAC3:
+      return dolby_silence(par, sample, silence);
+    default:
+      return 0;
+  }
+}
+
+/** The first frame of the grid at or after the cut `cut`, as sound_before tells it. */
+static int64_t slot_at(const TitleHls *title, const Sound *sound, int64_t first, int64_t cut) {
+  int64_t at = av_rescale_q_rnd(cut - title->cuts[0], title->video_base, sound_base(sound),
+                                AV_ROUND_UP) - first;
+  return at >= 0 ? (at + sound->frame - 1) / sound->frame : -(-at / sound->frame);
 }
 
 /**
  * Fills each frame of the grid between the cuts `from` and `to` that has no packet of
- * `packets`, a segment's, stamped and in order, with silence: AVPlayer's clock stops where the
- * chosen sound stops, so a rendition has sound for the whole of every segment.
+ * `packets`, a segment's, stamped and in order, with the track's silence, adding its bytes to
+ * `*bytes`: AVPlayer's clock stops where the chosen sound stops, so a rendition has sound for
+ * the whole of every segment. A track without silence is left as it is; 1 when it has a gap
+ * more than EDGE_S inside the title, which this segment can't be played through. The frames are
+ * those of one segment, so the work is bounded by its length.
  */
 static int fill(const TitleHls *title, const Sound *sound, Packets *packets, int64_t from,
-                int64_t to) {
+                int64_t to, size_t *bytes) {
   AVRational base = sound_base(sound);
   int64_t first = av_rescale_q(sound->first, sound->base, base) -
                   av_rescale_q(title->cuts[0], title->video_base, base);
-  // The first frame of the grid at or after each cut, as sound_before tells it.
-  int64_t slots[2];
-  for (int i = 0; i < 2; i++) {
-    int64_t at = av_rescale_q_rnd((i ? to : from) - title->cuts[0], title->video_base, base,
-                                  AV_ROUND_UP) - first;
-    slots[i] = at >= 0 ? (at + sound->frame - 1) / sound->frame : -(-at / sound->frame);
+  int64_t slots[2] = {slot_at(title, sound, first, from), slot_at(title, sound, first, to)};
+  if (!sound->silence) {
+    int64_t edge = (int64_t)(EDGE_S * sound->rate / sound->frame);
+    int64_t inside[2] = {slot_at(title, sound, first, title->cuts[0]) + edge,
+                         slot_at(title, sound, first, title->cuts[title->count]) - edge};
+    int i = 0;
+    for (int64_t slot = slots[0]; slot < slots[1]; slot++) {
+      int64_t at = first + slot * sound->frame;
+      int heard = 0;
+      for (; i < packets->count && packets->items[i]->pts <= at; i++)
+        heard |= packets->items[i]->pts == at;
+      if (!heard && slot >= inside[0] && slot < inside[1]) return 1;
+    }
+    return 0;
   }
   Packets out = {0};
   int i = 0, error = 0;
@@ -421,17 +615,15 @@ static int fill(const TitleHls *title, const Sound *sound, Packets *packets, int
       packets->items[i] = NULL;
     }
     if (heard) continue;
-    AVPacket *silent = av_packet_alloc();
-    if (!silent || (error = av_new_packet(silent, (int)sound->silence.size)) < 0 ||
-        (error = push(&out, silent)) < 0) {
+    AVPacket *silent = av_packet_clone(sound->silence);
+    if (!silent || (error = push(&out, silent)) < 0) {
       av_packet_free(&silent);
       error = error < 0 ? error : AVERROR(ENOMEM);
       goto end;
     }
-    memcpy(silent->data, sound->silence.data, sound->silence.size);
     silent->pts = silent->dts = at;
     silent->duration = sound->frame;
-    silent->flags = AV_PKT_FLAG_KEY;
+    *bytes += (size_t)silent->size;
   }
   for (; i < packets->count; i++) {
     if ((error = push(&out, packets->items[i])) < 0) goto end;
@@ -443,6 +635,39 @@ static int fill(const TitleHls *title, const Sound *sound, Packets *packets, int
 end:
   release(&out);
   return error;
+}
+
+/**
+ * Writes a packed audio segment of `packets`, frames on the grid of `sound`: an ID3 tag whose
+ * PRIV frame gives the first frame's MPEG-2 transport stream time, then the frames as they are.
+ */
+static int pack(const Sound *sound, const Packets *packets, Bytes *made) {
+  static const char OWNER[] = "com.apple.streaming.transportStreamTimestamp";
+  // The tag's header, its frame's header, the owner with its NUL and the eight-byte time.
+  enum { PRIV = sizeof(OWNER) + 8, TAG = 10 + 10 + PRIV };
+  size_t size = TAG;
+  for (int i = 0; i < packets->count; i++) size += (size_t)packets->items[i]->size;
+  uint8_t *x = av_malloc(size);
+  if (!x) return AVERROR(ENOMEM);
+  // Sizes in ID3v2.4 are syncsafe, seven bits a byte; both fit in one.
+  memcpy(x, "ID3\x04\x00\x00\x00\x00\x00", 9);
+  x[9] = TAG - 10;
+  memcpy(x + 10, "PRIV\x00\x00\x00", 7);
+  x[17] = PRIV;
+  x[18] = x[19] = 0;
+  memcpy(x + 20, OWNER, sizeof(OWNER));
+  int64_t at = packets->count ? av_rescale(packets->items[0]->pts, 90000, sound->rate) : 0;
+  uint64_t clock = (uint64_t)at & ((UINT64_C(1) << 33) - 1);
+  put32(x + 20 + sizeof(OWNER), (uint32_t)(clock >> 32));
+  put32(x + 24 + sizeof(OWNER), (uint32_t)clock);
+  size_t offset = TAG;
+  for (int i = 0; i < packets->count; i++) {
+    memcpy(x + offset, packets->items[i]->data, (size_t)packets->items[i]->size);
+    offset += (size_t)packets->items[i]->size;
+  }
+  made->data = x;
+  made->size = size;
+  return 0;
 }
 
 /**
@@ -606,33 +831,43 @@ static int next_packet(TitleHls *title, Packets *ahead, int *at, AVPacket **out)
 /**
  * Moves the read to segment `index`'s cut, or one earlier when some offered sound track's first
  * packet there is already past the cut, so its sound may start before the cluster the seek
- * found. What was read on the way stays in `ahead`.
+ * found. Read from the first cut, the lead comes first. What was read on the way stays in
+ * `ahead`.
  */
 static int reach(TitleHls *title, int index, Packets *ahead) {
   for (int from = index; from >= 0 && from >= index - 1; from--) {
     clear(ahead);
     int error = av_seek_frame(title->input, title->video, title->cuts[from], AVSEEK_FLAG_BACKWARD);
     if (error < 0) return error;
+    for (int i = 0; from == 0 && i < title->lead.count; i++) {
+      AVPacket *copy = av_packet_clone(title->lead.items[i]);
+      if (!copy || push(ahead, copy) < 0) {
+        av_packet_free(&copy);
+        return AVERROR(ENOMEM);
+      }
+    }
     int seen[SOUNDS_MOST] = {0}, missing = title->sound_count, late = 0;
     int64_t until = title->cuts[index] + llrint(LATE_SOUND_S / av_q2d(title->video_base));
-    while (missing > 0 && ahead->count < AHEAD_PACKETS_MOST) {
-      AVPacket *packet = av_packet_alloc();
+    for (int i = 0; missing > 0 && i < AHEAD_PACKETS_MOST; i++) {
+      AVPacket *packet = i < ahead->count ? ahead->items[i] : av_packet_alloc();
       if (!packet) return AVERROR(ENOMEM);
-      error = av_read_frame(title->input, packet);
-      if (error < 0) {
-        av_packet_free(&packet);
-        if (error == AVERROR_EOF) break;
-        return error;
-      }
-      if ((error = push(ahead, packet)) < 0) {
-        av_packet_free(&packet);
-        return error;
+      if (i == ahead->count) {
+        if ((error = av_read_frame(title->input, packet)) < 0) {
+          av_packet_free(&packet);
+          if (error == AVERROR_EOF) break;
+          return error;
+        }
+        if ((error = push(ahead, packet)) < 0) {
+          av_packet_free(&packet);
+          return error;
+        }
       }
       Sound *sound = sound_of(title, packet);
       if (sound && packet->pts != AV_NOPTS_VALUE && !seen[sound - title->sounds]) {
         seen[sound - title->sounds] = 1;
         missing--;
-        if (!sound_before(title, sound, packet, title->cuts[index])) late = 1;
+        if (av_compare_ts(packet->pts, sound->base, title->cuts[index], title->video_base) >= 0)
+          late = 1;
       }
       // A track with nothing near here has nothing to start before the cut either.
       if (packet->stream_index == title->video && packet->pts != AV_NOPTS_VALUE &&
@@ -642,6 +877,52 @@ static int reach(TitleHls *title, int index, Packets *ahead) {
     if (!late || from == 0 || from == index - 1) return 0;
   }
   return 0;
+}
+
+/**
+ * Reads the file's first clusters, where opening left the read, up to the picture's first
+ * keyframe, keeping the offered sound found there in the lead. A muxer may store sound ahead of
+ * the picture, before the first cut's cluster, where a seek to the first cut doesn't read;
+ * `prune` keeps only that. It reads LEAD_PACKETS_MOST packets and keeps LEAD_BYTES_MOST bytes at
+ * most.
+ */
+static int read_lead(TitleHls *title) {
+  for (int read = 0; read < LEAD_PACKETS_MOST && title->lead.bytes < LEAD_BYTES_MOST; read++) {
+    AVPacket *packet = av_packet_alloc();
+    if (!packet) return AVERROR(ENOMEM);
+    int error = av_read_frame(title->input, packet);
+    if (error < 0) {
+      av_packet_free(&packet);
+      return error == AVERROR_EOF ? 0 : error;
+    }
+    if (packet->stream_index == title->video && (packet->flags & AV_PKT_FLAG_KEY)) {
+      av_packet_free(&packet);
+      return 0;
+    }
+    if (!sound_of(title, packet) || packet->pts == AV_NOPTS_VALUE || packet->pos < 0 ||
+        (error = push(&title->lead, packet)) < 0)
+      av_packet_free(&packet);
+    if (error < 0) return error;
+  }
+  return 0;
+}
+
+/** Keeps of the lead what lies before the cluster a seek to the first cut starts at. */
+static void prune(TitleHls *title) {
+  AVStream *video = title->input->streams[title->video];
+  int index = av_index_search_timestamp(video, title->cuts[0], AVSEEK_FLAG_BACKWARD);
+  const AVIndexEntry *entry = index >= 0 ? avformat_index_get_entry(video, index) : NULL;
+  int kept = 0;
+  for (int i = 0; i < title->lead.count; i++) {
+    AVPacket *packet = title->lead.items[i];
+    if (entry && packet->pos < entry->pos) {
+      title->lead.items[kept++] = packet;
+    } else {
+      title->lead.bytes -= (size_t)packet->size;
+      av_packet_free(&packet);
+    }
+  }
+  title->lead.count = kept;
 }
 
 static int by_pts(const void *a, const void *b) {
@@ -819,19 +1100,20 @@ static TitleHlsResult make(TitleHls *title, int index, Made **out, char *detail,
   for (int t = 0; t < title->sound_count; t++) {
     Sound *track = &title->sounds[t];
     stamp_sound(title, track, &sound[t]);
-    if (track->silence.size && (error = fill(title, track, &sound[t], start, end)) < 0) {
+    int gap = fill(title, track, &sound[t], start, end, &bytes);
+    if (bytes > SEGMENT_BYTES_MOST) {
       forget(slot);
-      result = failure(title, error);
-      say(detail, detail_size, "This part of the file can't be written as MP4.");
+      result = TITLE_HLS_UNSUPPORTED;
+      say(detail, detail_size, "A stretch of the file is too large to play from memory.");
       goto end;
     }
-    if (sound[t].count == 0) {
-      int64_t at = av_rescale_q(start - title->cuts[0], title->video_base, sound_base(track));
-      error = empty_fragment(index, at, &slot->renditions[1 + t]);
-    } else {
+    // A rendition left empty is refused when asked for: a gap it can't be played through.
+    if (gap == 1 || sound[t].count == 0) error = 0;
+    else if (gap < 0) error = gap;
+    else if (packed(title, track)) error = pack(track, &sound[t], &slot->renditions[1 + t]);
+    else
       error = mux(title->input->streams[track->stream], sound_base(track), track->frame, &sound[t],
                   NULL, index, &slot->renditions[1 + t]);
-    }
     if (error < 0) {
       forget(slot);
       result = failure(title, error);
@@ -855,42 +1137,39 @@ end:
 }
 
 /**
- * Reads from segment `index`'s cut until the picture and every offered sound track have a
- * packet: these write the initialization segments, and the first sound packets anchor the
- * grids. What was read is the start of the first segment played, kept for it. A track with no
- * packet there isn't offered.
+ * Reaches segment `index` as a seek would, then takes the first keyframe and each offered sound
+ * track's first packet read: these write the initialization segments, and the first sound
+ * packets anchor the grids. What was read is the start of the first segment played, kept for
+ * it. A track with no packet there isn't offered.
  */
 static int sample(TitleHls *title, int index) {
-  int error = av_seek_frame(title->input, title->video, title->cuts[index], AVSEEK_FLAG_BACKWARD);
+  int error = reach(title, index, &title->ahead);
   if (error < 0) return error;
-  int missing = 1 + title->sound_count;
-  int64_t until = title->cuts[index] + llrint(LATE_SOUND_S / av_q2d(title->video_base));
-  while (missing > 0 && title->ahead.count < AHEAD_PACKETS_MOST) {
-    AVPacket *packet = av_packet_alloc();
-    if (!packet) return AVERROR(ENOMEM);
-    error = av_read_frame(title->input, packet);
-    if (error < 0) {
-      av_packet_free(&packet);
-      if (error == AVERROR_EOF) break;
-      return error;
-    }
-    if ((error = push(&title->ahead, packet)) < 0) {
-      av_packet_free(&packet);
-      return error;
+  for (int i = 0;; i++) {
+    AVPacket *packet = NULL;
+    if (i < title->ahead.count) {
+      packet = title->ahead.items[i];
+    } else {
+      // Read on only for the picture, which the sound may have come well before.
+      if (title->video_sample || title->ahead.count >= AHEAD_PACKETS_MOST) break;
+      if (!(packet = av_packet_alloc())) return AVERROR(ENOMEM);
+      if ((error = av_read_frame(title->input, packet)) < 0 ||
+          (error = push(&title->ahead, packet)) < 0) {
+        av_packet_free(&packet);
+        if (error == AVERROR_EOF) break;
+        return error;
+      }
     }
     if (packet->pts == AV_NOPTS_VALUE) continue;
     Sound *sound = sound_of(title, packet);
     if (packet->stream_index == title->video && !title->video_sample &&
         (packet->flags & AV_PKT_FLAG_KEY)) {
       if (!(title->video_sample = av_packet_clone(packet))) return AVERROR(ENOMEM);
-      missing--;
     } else if (sound && !sound->sample) {
       if (!(sound->sample = av_packet_clone(packet))) return AVERROR(ENOMEM);
       sound->first = packet->pts;
       sound->frame = sample_frame(title->input->streams[sound->stream]->codecpar, packet);
-      missing--;
     }
-    if (packet->stream_index == title->video && title->video_sample && packet->pts >= until) break;
   }
   int kept = 0;
   for (int i = 0; i < title->sound_count; i++) {
@@ -979,6 +1258,11 @@ TitleHlsResult title_hls_open(const TitleHlsSource *source, double start, TitleH
     goto fail;
   }
   if ((result = choose(title, detail, detail_size)) != TITLE_HLS_OK) goto fail;
+  if ((error = read_lead(title)) < 0) {
+    result = failure(title, error);
+    say(detail, detail_size, "The file couldn't be read at its start.");
+    goto fail;
+  }
   // Matroska reads its index on the first seek.
   title->budget = INDEX_BYTES_MOST;
   error = av_seek_frame(title->input, title->video, 0, AVSEEK_FLAG_BACKWARD);
@@ -991,6 +1275,7 @@ TitleHlsResult title_hls_open(const TitleHlsSource *source, double start, TitleH
   }
   if (error < 0 && (result = failure(title, error)) != TITLE_HLS_UNSUPPORTED) goto fail;
   if ((result = plan(title, detail, detail_size)) != TITLE_HLS_OK) goto fail;
+  prune(title);
   double length = seconds(title->cuts[title->count] - title->cuts[0], title->video_base);
   title->start = start > 0 && start < length ? start : 0;
   if ((error = sample(title, segment_at(title, title->start))) < 0) {
@@ -1004,10 +1289,11 @@ TitleHlsResult title_hls_open(const TitleHlsSource *source, double start, TitleH
     goto unwritable;
   for (int t = 0; t < title->sound_count; t++) {
     Sound *sound = &title->sounds[t];
-    const AVCodecParameters *par = title->input->streams[sound->stream]->codecpar;
-    if ((error = mux(title->input->streams[sound->stream], sound_base(sound), sound->frame, NULL,
-                     sound->sample, 0, &sound->init)) < 0 ||
-        (par->codec_id == AV_CODEC_ID_AAC && (error = aac_silence(par, &sound->silence)) < 0))
+    AVStream *st = title->input->streams[sound->stream];
+    if ((!packed(title, sound) &&
+         (error = mux(st, sound_base(sound), sound->frame, NULL, sound->sample, 0, &sound->init)) <
+             0) ||
+        (error = silence_of(st->codecpar, sound->sample, &sound->silence)) < 0)
       goto unwritable;
   }
   *out = title;
@@ -1112,8 +1398,13 @@ static void master(TitleHls *title, AVBPrint *text) {
   av_bprintf(text, "\nv.m3u8\n");
 }
 
-/** A rendition's media playlist: "v" for the picture, "a<n>" for a sound track. */
+/**
+ * A rendition's media playlist: "v" for the picture, "a<n>" for a sound track. Packed audio has
+ * no initialization segment, and its segments are .mp3.
+ */
 static void media(TitleHls *title, const char *rendition, AVBPrint *text) {
+  int track = rendition[0] == 'a' ? atoi(rendition + 1) : -1;
+  int raw = track >= 0 && packed(title, &title->sounds[track]);
   double target = 0;
   for (int i = 0; i < title->count; i++) {
     double length = seconds(title->cuts[i + 1] - title->cuts[i], title->video_base);
@@ -1125,11 +1416,11 @@ static void media(TitleHls *title, const char *rendition, AVBPrint *text) {
              (int)ceil(target));
   if (title->start > 0)
     av_bprintf(text, "#EXT-X-START:TIME-OFFSET=%.3f,PRECISE=YES\n", title->start);
-  av_bprintf(text, "#EXT-X-MAP:URI=\"%s.mp4\"\n", rendition);
+  if (!raw) av_bprintf(text, "#EXT-X-MAP:URI=\"%s.mp4\"\n", rendition);
   for (int i = 0; i < title->count; i++) {
-    av_bprintf(text, "#EXTINF:%.6f,\n%s%s%d.m4s\n",
+    av_bprintf(text, "#EXTINF:%.6f,\n%s%s%d.%s\n",
                seconds(title->cuts[i + 1] - title->cuts[i], title->video_base), rendition,
-               rendition[0] == 'a' ? "-" : "", i);
+               track >= 0 ? "-" : "", i, raw ? "mp3" : "m4s");
   }
   av_bprintf(text, "#EXT-X-ENDLIST\n");
 }
@@ -1181,7 +1472,7 @@ TitleHlsResult title_hls_get(TitleHls *title, const char *name, const uint8_t **
     return TITLE_HLS_OK;
   }
   track = numbered(name, "a", ".mp4", NULL);
-  if (track >= 0 && track < title->sound_count) {
+  if (track >= 0 && track < title->sound_count && !packed(title, &title->sounds[track])) {
     *data = title->sounds[track].init.data;
     *size = title->sounds[track].init.size;
     return TITLE_HLS_OK;
@@ -1191,8 +1482,10 @@ TitleHlsResult title_hls_get(TitleHls *title, const char *name, const uint8_t **
   const char *rest = NULL;
   track = numbered(name, "a", NULL, &rest);
   if (track >= 0 && track < title->sound_count && *rest == '-') {
-    index = numbered(rest, "-", ".m4s", NULL);
+    int raw = packed(title, &title->sounds[track]);
+    index = numbered(rest, "-", raw ? ".mp3" : ".m4s", NULL);
     if (index >= 0) rendition = 1 + track;
+    if (raw) *type = MPEG_AUDIO;
   }
   if (rendition < 0 || index < 0 || index >= title->count) return TITLE_HLS_MISSING;
   Made *made = NULL;
@@ -1202,6 +1495,11 @@ TitleHlsResult title_hls_get(TitleHls *title, const char *name, const uint8_t **
   if (!made) {
     TitleHlsResult result = make(title, index, &made, detail, detail_size);
     if (result != TITLE_HLS_OK) return result;
+  }
+  if (!made->renditions[rendition].data) {
+    say(detail, detail_size,
+        "This sound track has a gap here that can't be filled; choose another.");
+    return TITLE_HLS_UNSUPPORTED;
   }
   *data = made->renditions[rendition].data;
   *size = made->renditions[rendition].size;
@@ -1213,11 +1511,12 @@ void title_hls_interrupt(TitleHls *title) { atomic_store(&title->interrupted, 1)
 void title_hls_close(TitleHls *title) {
   if (!title) return;
   release(&title->ahead);
+  release(&title->lead);
   for (int i = 0; i < KEPT; i++) forget(&title->kept[i]);
   for (int t = 0; t < SOUNDS_MOST; t++) {
     av_packet_free(&title->sounds[t].sample);
     av_free(title->sounds[t].init.data);
-    av_free(title->sounds[t].silence.data);
+    av_packet_free(&title->sounds[t].silence);
   }
   av_packet_free(&title->video_sample);
   av_free(title->video_init.data);

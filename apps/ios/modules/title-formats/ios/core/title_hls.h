@@ -1,6 +1,7 @@
 // A movie or episode file AVPlayer can't open, such as Matroska, served as a VOD HLS stream it
-// can: a complete playlist cut at the keyframes the file's own index lists, and fragmented MP4
-// segments made on request from the file's packets, copied unchanged. Nothing is decoded.
+// can: a complete playlist cut at the keyframes the file's own index lists, and segments made on
+// request from the file's packets, copied unchanged: fragmented MP4, or packed audio for MP3.
+// Nothing is decoded; where a sound track has no packets, frames of silence fill in.
 //
 // The picture is one rendition and each sound track AVPlayer plays (AAC, AC-3, E-AC-3, MP3)
 // another, listed as the stream's audio choices. Subtitles aren't served.
