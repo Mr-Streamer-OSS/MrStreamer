@@ -1,5 +1,5 @@
+import Darwin
 import Foundation
-import Network
 
 /// An answer to one request of AVPlayer's.
 struct LoopbackResponse {
@@ -11,117 +11,148 @@ struct LoopbackResponse {
   static let failed = LoopbackResponse(status: 500, type: "text/plain", body: Data())
 }
 
-/// The HTTP server AVPlayer streams sessions from: on 127.0.0.1 only, GET and HEAD, each
-/// session under an unguessable path of its own, removed when it closes. Nothing it serves
-/// carries a login.
+/// The HTTP server AVPlayer streams sessions from: a socket bound to 127.0.0.1 only, GET and
+/// HEAD, each session under an unguessable path of its own, removed when it closes. Nothing it
+/// serves carries a login.
+///
+/// A BSD socket rather than Network's NWListener, which in the iOS 27 simulator reported ready
+/// and never delivered a connection. Each connection reads and answers on a queue of its own;
+/// AVPlayer opens a few at most.
 final class LoopbackServer {
   static let shared = LoopbackServer()
 
   typealias Handler = (_ name: String, _ respond: @escaping (LoopbackResponse) -> Void) -> Void
 
-  private let queue = DispatchQueue(label: "app.mrstreamer.title-formats.server")
-  private var listener: NWListener?
+  private let lock = NSLock()
+  private var listening: Int32 = -1
   private var port: UInt16 = 0
+  private var source: DispatchSourceRead?
   private var routes: [String: Handler] = [:]
 
   /// The listening port, starting the server if it isn't running.
   func start() throws -> UInt16 {
-    try queue.sync {
-      if let listener, listener.state == .ready { return port }
-      listener?.cancel()
-      let parameters = NWParameters.tcp
-      parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: .any)
-      parameters.acceptLocalOnly = true
-      let made = try NWListener(using: parameters)
-      let ready = DispatchSemaphore(value: 0)
-      var failed = false
-      made.stateUpdateHandler = { [weak self] state in
-        switch state {
-        case .ready:
-          ready.signal()
-        case .failed, .cancelled:
-          failed = true
-          ready.signal()
-          self?.queue.async { if self?.listener === made { self?.listener = nil } }
-        default:
-          break
-        }
+    lock.lock()
+    defer { lock.unlock() }
+    if listening >= 0 { return port }
+    let fd = socket(AF_INET, SOCK_STREAM, 0)
+    guard fd >= 0 else { throw NSError(domain: "TitleFormats", code: Int(errno)) }
+    var on: Int32 = 1
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, socklen_t(MemoryLayout<Int32>.size))
+    var address = sockaddr_in()
+    address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    address.sin_family = sa_family_t(AF_INET)
+    address.sin_port = 0
+    address.sin_addr.s_addr = inet_addr("127.0.0.1")
+    let bound = withUnsafePointer(to: &address) {
+      $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+        bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
       }
-      made.newConnectionHandler = { [weak self] connection in self?.serve(connection) }
-      made.start(queue: DispatchQueue(label: "app.mrstreamer.title-formats.listener"))
-      ready.wait()
-      guard !failed, let bound = made.port?.rawValue else {
-        made.cancel()
-        throw NSError(domain: "TitleFormats", code: 1)
-      }
-      listener = made
-      port = bound
-      return bound
     }
+    var named = sockaddr_in()
+    var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+    let found = withUnsafeMutablePointer(to: &named) {
+      $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &length) }
+    }
+    guard bound == 0, listen(fd, 16) == 0, found == 0 else {
+      let code = errno
+      close(fd)
+      throw NSError(domain: "TitleFormats", code: Int(code))
+    }
+    _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
+    let accepting = DispatchSource.makeReadSource(
+      fileDescriptor: fd, queue: DispatchQueue(label: "app.mrstreamer.title-formats.accept"))
+    accepting.setEventHandler { [weak self] in self?.accept(fd) }
+    accepting.setCancelHandler { close(fd) }
+    accepting.resume()
+    listening = fd
+    port = UInt16(bigEndian: named.sin_port)
+    source = accepting
+    return port
   }
 
-  func add(_ token: String, _ handler: @escaping Handler) { queue.sync { routes[token] = handler } }
-  func remove(_ token: String) { queue.sync { routes[token] = nil } }
-
-  private func handler(for token: String) -> Handler? { queue.sync { routes[token] } }
-
-  private func serve(_ connection: NWConnection) {
-    connection.start(queue: DispatchQueue(label: "app.mrstreamer.title-formats.connection"))
-    receive(connection, Data())
+  func add(_ token: String, _ handler: @escaping Handler) {
+    lock.lock()
+    routes[token] = handler
+    lock.unlock()
   }
 
-  /// Reads one request's head, answers it, then the next on the same connection.
-  private func receive(_ connection: NWConnection, _ pending: Data) {
-    connection.receive(minimumIncompleteLength: 1, maximumLength: 16 * 1024) {
-      [weak self] data, _, complete, error in
-      guard let self else { return connection.cancel() }
-      var buffer = pending
-      if let data { buffer.append(data) }
-      guard let end = buffer.range(of: Data("\r\n\r\n".utf8)) else {
-        if complete || error != nil || buffer.count > 64 * 1024 { connection.cancel() }
-        else { self.receive(connection, buffer) }
+  func remove(_ token: String) {
+    lock.lock()
+    routes[token] = nil
+    lock.unlock()
+  }
+
+  private func handler(for token: String) -> Handler? {
+    lock.lock()
+    defer { lock.unlock() }
+    return routes[token]
+  }
+
+  /// Takes every connection waiting; a listening socket that failed is let go, so the next
+  /// session starts another.
+  private func accept(_ fd: Int32) {
+    while true {
+      let client = Darwin.accept(fd, nil, nil)
+      if client < 0 {
+        if errno != EWOULDBLOCK && errno != EAGAIN && errno != EINTR { stopListening(fd) }
         return
       }
-      let head = String(decoding: buffer[buffer.startIndex..<end.lowerBound], as: UTF8.self)
-      let rest = Data(buffer[end.upperBound...])
-      self.answer(head) { response, method, range in
-        var body = response.body
-        var status = response.status
-        var lines = ["Content-Type: \(response.type)", "Accept-Ranges: bytes"]
-        if let range, status == 200 {
-          let last = min(range.upperBound, body.count - 1)
-          if range.lowerBound < body.count, last >= range.lowerBound {
-            lines.append("Content-Range: bytes \(range.lowerBound)-\(last)/\(body.count)")
-            body = body.subdata(in: range.lowerBound..<(last + 1))
-            status = 206
-          } else {
-            lines.append("Content-Range: bytes */\(body.count)")
-            body = Data()
-            status = 416
-          }
-        }
-        lines.append("Content-Length: \(body.count)")
-        let reason = [200: "OK", 206: "Partial Content", 404: "Not Found", 416: "Range Not Satisfiable"][status] ?? "Error"
-        var out = Data("HTTP/1.1 \(status) \(reason)\r\n\(lines.joined(separator: "\r\n"))\r\n\r\n".utf8)
-        if method != "HEAD" { out.append(body) }
-        connection.send(content: out, completion: .contentProcessed { error in
-          if error != nil { connection.cancel() } else { self.receive(connection, rest) }
-        })
+      var on: Int32 = 1
+      setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+      // An accepted socket inherits the listening socket's O_NONBLOCK; its reads here block.
+      _ = fcntl(client, F_SETFL, fcntl(client, F_GETFL) & ~O_NONBLOCK)
+      DispatchQueue(label: "app.mrstreamer.title-formats.connection").async { [weak self] in
+        self?.serve(client)
+        close(client)
       }
     }
   }
 
-  /// Parses the request line and Range, and asks the session it names.
-  private func answer(
-    _ head: String, _ respond: @escaping (LoopbackResponse, String, ClosedRange<Int>?) -> Void
-  ) {
+  private func stopListening(_ fd: Int32) {
+    lock.lock()
+    if listening == fd {
+      source?.cancel()
+      source = nil
+      listening = -1
+    }
+    lock.unlock()
+  }
+
+  /// Answers requests on one connection until AVPlayer closes it.
+  private func serve(_ client: Int32) {
+    var pending = Data()
+    var chunk = [UInt8](repeating: 0, count: 16 * 1024)
+    while true {
+      while pending.range(of: Data("\r\n\r\n".utf8)) == nil {
+        let read = chunk.withUnsafeMutableBytes { recv(client, $0.baseAddress, $0.count, 0) }
+        if read <= 0 || pending.count > 64 * 1024 { return }
+        pending.append(contentsOf: chunk[0..<read])
+      }
+      let end = pending.range(of: Data("\r\n\r\n".utf8))!
+      let head = String(decoding: pending[pending.startIndex..<end.lowerBound], as: UTF8.self)
+      pending = Data(pending[end.upperBound...])
+      guard send(answer(head), to: client) else { return }
+    }
+  }
+
+  private func send(_ data: Data, to client: Int32) -> Bool {
+    data.withUnsafeBytes { all in
+      var sent = 0
+      while sent < all.count {
+        let wrote = Darwin.send(client, all.baseAddress! + sent, all.count - sent, 0)
+        if wrote <= 0 { return false }
+        sent += wrote
+      }
+      return true
+    }
+  }
+
+  /// The whole response to one request: the session it names answers, on its own queue.
+  private func answer(_ head: String) -> Data {
     let lines = head.components(separatedBy: "\r\n")
     let parts = lines.first?.split(separator: " ") ?? []
-    guard parts.count >= 2, parts[0] == "GET" || parts[0] == "HEAD" else {
-      return respond(.missing, "GET", nil)
-    }
-    let method = String(parts[0])
-    let path = parts[1].split(separator: "?").first.map(String.init) ?? ""
+    let method = parts.first.map(String.init) ?? ""
+    let path = parts.count > 1 ? (parts[1].split(separator: "?").first.map(String.init) ?? "") : ""
     let segments = path.split(separator: "/").map(String.init)
     var range: ClosedRange<Int>?
     for line in lines.dropFirst() where line.lowercased().hasPrefix("range:") {
@@ -133,9 +164,38 @@ final class LoopbackServer {
         }
       }
     }
-    guard segments.count == 2, let handler = handler(for: segments[0]) else {
-      return respond(.missing, method, nil)
+    var response = LoopbackResponse.missing
+    if method == "GET" || method == "HEAD", segments.count == 2,
+      let handler = handler(for: segments[0])
+    {
+      let answered = DispatchSemaphore(value: 0)
+      handler(segments[1]) {
+        response = $0
+        answered.signal()
+      }
+      answered.wait()
     }
-    handler(segments[1]) { respond($0, method, range) }
+    var body = response.body
+    var status = response.status
+    var headers = ["Content-Type: \(response.type)", "Accept-Ranges: bytes"]
+    if let range, status == 200 {
+      let last = min(range.upperBound, body.count - 1)
+      if range.lowerBound < body.count, last >= range.lowerBound {
+        headers.append("Content-Range: bytes \(range.lowerBound)-\(last)/\(body.count)")
+        body = body.subdata(in: range.lowerBound..<(last + 1))
+        status = 206
+      } else {
+        headers.append("Content-Range: bytes */\(body.count)")
+        body = Data()
+        status = 416
+      }
+    }
+    headers.append("Content-Length: \(body.count)")
+    let reason =
+      [200: "OK", 206: "Partial Content", 404: "Not Found", 416: "Range Not Satisfiable"][status]
+      ?? "Error"
+    var out = Data("HTTP/1.1 \(status) \(reason)\r\n\(headers.joined(separator: "\r\n"))\r\n\r\n".utf8)
+    if method != "HEAD" { out.append(body) }
+    return out
   }
 }

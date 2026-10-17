@@ -78,9 +78,10 @@ final class CopyBytes: ByteSource {
 /// starts only once URLSession said the last one ended, and a read near where the last stopped
 /// carries on with the request that is open. Its body is taken as it is read, up to a bound.
 final class ProviderBytes: NSObject, ByteSource, URLSessionDataDelegate {
-  /// What the open request may hold unread before it is paused, and resumed below `low`.
-  private static let high = 8 << 20
-  private static let low = 2 << 20
+  /// What the open request may hold unread before it is paused, and resumed below `low`. A move
+  /// elsewhere in the file throws away at most this much.
+  private static let high = 4 << 20
+  private static let low = 1 << 20
   /// A read this far past the bytes received waits for them rather than asking again.
   private static let reach: Int64 = 512 << 10
 
@@ -94,6 +95,8 @@ final class ProviderBytes: NSObject, ByteSource, URLSessionDataDelegate {
   private var answered = false
   private var finished = false
   private var paused = false
+  /// The open request is being cancelled: what it still delivers is dropped.
+  private var stopping = false
   private var closed = false
   /// The file offset of `bytes[head]`.
   private var start: Int64 = 0
@@ -137,6 +140,7 @@ final class ProviderBytes: NSObject, ByteSource, URLSessionDataDelegate {
     answered = false
     finished = false
     paused = false
+    stopping = false
     open = true
     requests += 1
     let made = session.dataTask(with: request)
@@ -181,7 +185,7 @@ final class ProviderBytes: NSObject, ByteSource, URLSessionDataDelegate {
       }
       // Elsewhere in the file: the open request ends first, then one goes out from here.
       if open {
-        task?.cancel()
+        stopTask()
         while open { condition.wait() }
         if closed { return -1 }
       }
@@ -189,10 +193,21 @@ final class ProviderBytes: NSObject, ByteSource, URLSessionDataDelegate {
     }
   }
 
+  /// Cancels the open request. A suspended task reports its end only once resumed, which took
+  /// seconds on the simulator, so it is resumed first; the lock is held.
+  private func stopTask() {
+    stopping = true
+    if paused {
+      paused = false
+      task?.resume()
+    }
+    task?.cancel()
+  }
+
   func close() {
     condition.lock()
     closed = true
-    task?.cancel()
+    stopTask()
     let done = !open ? takeEnded() : []
     condition.broadcast()
     condition.unlock()
@@ -264,7 +279,7 @@ final class ProviderBytes: NSObject, ByteSource, URLSessionDataDelegate {
       condition.broadcast()
       condition.unlock()
     }
-    guard dataTask === task else { return }
+    guard dataTask === task, !stopping else { return }
     bytes.append(contentsOf: data)
     if available > Self.high && !paused {
       paused = true
