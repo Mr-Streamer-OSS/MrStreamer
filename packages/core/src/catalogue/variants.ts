@@ -24,6 +24,7 @@ import {
   type Preferences,
   type SubscriptionPreferences,
 } from "@mrstreamer/contracts/preferences";
+import { finish, pacer, type Steps } from "../steps.ts";
 import { trustedGuideIds } from "./guide-ids.ts";
 import type { NormalizedStream } from "./normalize.ts";
 import { countryForCode, isBroadRegion } from "./regions.ts";
@@ -52,7 +53,13 @@ export interface LiveChannels {
 
 /** The catalogue's channels, each with its streams. */
 export function liveChannels(streams: readonly NormalizedStream[]): LiveChannels {
-  const trusted = trustedGuideIds(
+  return finish(liveChannelSteps(streams));
+}
+
+/** `liveChannels`, pausing between slices of its streams (../steps.ts). */
+export function* liveChannelSteps(streams: readonly NormalizedStream[]): Steps<LiveChannels> {
+  const due = pacer();
+  const trusted = yield* trustedGuideIds(
     streams.flatMap((stream) =>
       stream.guideId ? [{ channel: stream, guideId: stream.guideId }] : [],
     ),
@@ -60,6 +67,7 @@ export function liveChannels(streams: readonly NormalizedStream[]): LiveChannels
   const alike = new Map<string, NormalizedStream[]>();
   const uncertain = new Set<NormalizedStream>();
   for (const stream of streams) {
+    if (due()) yield;
     // Contradictory category/prefix metadata must not join or bridge otherwise distinct feeds.
     const country = /\.([a-z]{2})(?:@[^.@]*)?$/i.exec(trusted.get(stream.id) ?? "")?.[1];
     const guideRegion = country ? countryForCode(country) : null;
@@ -88,6 +96,7 @@ export function liveChannels(streams: readonly NormalizedStream[]): LiveChannels
   for (const candidates of alike.values()) {
     // Most streams are a channel of their own.
     if (candidates.length === 1) continue;
+    if (due()) yield;
     for (const regional of partition(candidates, regionOf)) {
       for (const group of partition(regional, (stream) => stream.topics)) {
         const guideIds = new Set(group.flatMap((stream) => guideChannel(trusted.get(stream.id))));
@@ -101,6 +110,7 @@ export function liveChannels(streams: readonly NormalizedStream[]): LiveChannels
   const channels: ListedChannel[] = [];
   const guideIds = new Map<string, readonly string[]>();
   for (const stream of streams) {
+    if (due()) yield;
     const group = together.get(stream) ?? [stream];
     if (group[0] !== stream) continue;
     const searchIdentity = uncertain.has(stream) ? undefined : searchIdentityOf(group, trusted);

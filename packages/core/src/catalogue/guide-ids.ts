@@ -6,23 +6,27 @@
 //     1" and DAZN1.de.
 //   - Otherwise only when every channel sharing the id is the same channel under another name or
 //     quality: "NPO 1" and "NPO1", "National Geographic" under NatGeo.nl.
+import { pacer, type Steps } from "../steps.ts";
 import { normalize } from "../text.ts";
 
-/** The guide id of each channel that can keep one, by channel id. */
-export function trustedGuideIds(
+/** The guide id of each channel that can keep one, by channel id, pausing as ../steps.ts says. */
+export function* trustedGuideIds(
   claims: readonly {
     readonly channel: { readonly id: string; readonly title: string };
     readonly guideId: string;
   }[],
-): Map<string, string> {
+): Steps<Map<string, string>> {
+  const due = pacer();
   const namesByGuideId = new Map<string, string[][]>();
   for (const { channel, guideId } of claims) {
+    if (due()) yield;
     const names = namesByGuideId.get(guideId);
     if (names) names.push(words(channel.title));
     else namesByGuideId.set(guideId, [words(channel.title)]);
   }
   const trusted = new Map<string, string>();
   for (const { channel, guideId } of claims) {
+    if (due()) yield;
     const name = words(channel.title);
     const sharing = namesByGuideId.get(guideId) ?? [];
     if (alike(name, idWords(guideId)) || sharing.every((other) => alike(other, name))) {
