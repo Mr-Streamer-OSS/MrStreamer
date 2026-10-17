@@ -161,6 +161,8 @@ final class ProviderBytes: NSObject, ByteSource, URLSessionDataDelegate {
   func prepare() -> Bool {
     condition.lock()
     defer { condition.unlock() }
+    // Closed already, its end told: nothing more is asked of the provider.
+    if closed { return false }
     begin(at: 0)
     while !answered && failure == nil && !closed { condition.wait() }
     return answered && failure == nil && !closed
@@ -231,6 +233,17 @@ final class ProviderBytes: NSObject, ByteSource, URLSessionDataDelegate {
             dropsInRow += 1
             begin(at: offset)
             continue
+          }
+        }
+        if offset > end {
+          // A little further on: what was received before it isn't needed, and a request paused
+          // because nothing read it goes on, else the wait would never end.
+          bytes.removeAll(keepingCapacity: true)
+          head = 0
+          start = end
+          if paused {
+            paused = false
+            task?.resume()
           }
         }
         condition.wait()
@@ -355,6 +368,9 @@ final class ProviderBytes: NSObject, ByteSource, URLSessionDataDelegate {
       let error = error as NSError?
       if stopping || closed {
         trace[trace.count - 1].outcome = "cancelled"
+      } else if failure != nil {
+        // The answer was refused already, and cancelling it ended the task: its failure stands.
+        trace[trace.count - 1].outcome = "refused"
       } else if let error, !answered {
         failure = .network(Self.describe(error.code))
         trace[trace.count - 1].outcome = "failed \(error.code)"

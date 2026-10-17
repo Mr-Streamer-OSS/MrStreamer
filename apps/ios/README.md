@@ -157,15 +157,17 @@ with "Cannot Decode"; HEVC in MPEG-TS segments plays its sound without a picture
 desktop converts with ffmpeg don't play yet.
 
 Titles are tried whatever their file type: a version that fails says so in Watch and in its
-details, and the version menu marks it and offers the others. MP4 and MOV go to AVPlayer as they
-are. Anything else goes through a format session, which plays Matroska with an H.264 or HEVC
-picture and AAC, AC-3, E-AC-3 or MP3 sound, with its sound tracks to choose from, starting where
-the title stopped. It needs the file's keyframe index (Matroska's Cues) and doesn't serve
-subtitles; other files fail as files Mr. Streamer can't play. `scripts/build-ffmpeg.sh ios`
-builds the FFmpeg libraries it links, before `expo prebuild`; `modules/title-formats/reference`
-checks its segments on Linux. On the simulator a Matroska file with H.264 and AAC played, over the
+details, and the version menu marks it and offers the others. Matroska (`.mkv`) goes through a
+format session; everything else goes to AVPlayer as it is, as does a `.mkv` that turns out to be
+another container. A session plays an H.264 or HEVC picture with AAC, AC-3, E-AC-3 or MP3 sound,
+with its sound tracks to choose from (a track that ends early or pauses goes quiet there; one
+that starts more than five seconds after where playing starts isn't offered), starting where the
+title stopped. It needs the file's keyframe index (Matroska's Cues) and doesn't serve subtitles;
+other Matroska files fail as files Mr. Streamer can't play. `scripts/build-ffmpeg.sh ios` builds
+the FFmpeg libraries it links, before `expo prebuild`; `modules/title-formats/reference` checks
+its segments on Linux. On the simulator a Matroska file with H.264 and AAC played, over the
 network and as a copy, from where it stopped and after seeks; the test AVI (MPEG-4 Part 2, MP3)
-ran to its end without a picture before this, and now fails as unsupported.
+ran to its end without a picture.
 
 TMDB's key is built in from `EXPO_PUBLIC_TMDB_KEY` (`EXPO_PUBLIC_TMDB_API` points at a test
 server). Without one, collections that need TMDB are left out, details show the provider's

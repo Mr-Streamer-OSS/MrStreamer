@@ -20,6 +20,10 @@
 //   written as one MP4 per rendition. Made in order, the packets read past a cut are kept for
 //   the next segment; made after a seek, the read starts at the cut's cluster, or one cut
 //   earlier when sound of this segment may lie before it.
+// - A sound track may end before the picture, pause, or start late. Sound is waited for until the
+//   picture is LATE_SOUND_S past the cut; a track with nothing in a segment gets a fragment with
+//   no samples there rather than failing the picture and the other tracks, and one with nothing
+//   near where playing starts isn't offered.
 // - Each rendition's MP4 is written by a muxer of its own, fed the packets and flushed twice:
 //   with delay_moov the first flush writes the header, which for AC-3 and E-AC-3 the muxer can
 //   only write once it has parsed a packet, and the second the fragment. A segment keeps the
@@ -56,6 +60,12 @@
  * FFmpeg's seek would read the whole file to find keyframes, so the reading stops here instead.
  */
 #define INDEX_BYTES_MOST (16 * 1024 * 1024)
+/**
+ * How far past a cut the picture may be read while sound of the segment before it is still
+ * awaited. Muxers keep sound within about a second of the picture; a track with nothing by then
+ * has nothing there.
+ */
+#define LATE_SOUND_S 5.0
 /** Sound tracks offered at most. */
 #define SOUNDS_MOST 8
 /** Segments kept after they were made, every rendition of each. */
@@ -216,6 +226,21 @@ static int frame_samples(enum AVCodecID codec) {
   }
 }
 
+/**
+ * Samples per frame of the sound `sample` begins: for MP3, Layer III frames hold 1152 samples in
+ * MPEG-1 and 576 in MPEG-2 and 2.5, as its header says, or its sample rate when the header can't
+ * be read; for the others, `frame_samples`.
+ */
+static int sample_frame(const AVCodecParameters *par, const AVPacket *sample) {
+  if (par->codec_id != AV_CODEC_ID_MP3) return frame_samples(par->codec_id);
+  const uint8_t *x = sample ? sample->data : NULL;
+  if (x && sample->size >= 4 && x[0] == 0xFF && (x[1] & 0xE0) == 0xE0 && ((x[1] >> 1) & 3) == 1) {
+    int version = (x[1] >> 3) & 3; /* 3: MPEG-1, 2: MPEG-2, 0: MPEG-2.5 */
+    if (version != 1) return version == 3 ? 1152 : 576;
+  }
+  return par->sample_rate >= 32000 ? 1152 : 576;
+}
+
 /** The sound codecs AVPlayer plays from fragmented MP4, copied as they are. */
 static int sound_copyable(enum AVCodecID codec) { return frame_samples(codec) > 0; }
 
@@ -267,6 +292,35 @@ static size_t box_offset(const uint8_t *data, size_t size, const char *type, int
     at += (size_t)length;
   }
   return SIZE_MAX;
+}
+
+static void put32(uint8_t *at, uint32_t value) {
+  at[0] = value >> 24;
+  at[1] = value >> 16;
+  at[2] = value >> 8;
+  at[3] = value;
+}
+
+/**
+ * A fragment with no samples: the muxer writes none for a track with nothing to say, and a
+ * rendition needs one per segment. Its decode time `at` is where the segment starts.
+ */
+static int empty_fragment(int index, int64_t at, Bytes *made) {
+  static const size_t SIZE = 92;
+  uint8_t *x = av_mallocz(SIZE);
+  if (!x) return AVERROR(ENOMEM);
+  put32(x, 84), memcpy(x + 4, "moof", 4);
+  put32(x + 8, 16), memcpy(x + 12, "mfhd", 4), put32(x + 20, (uint32_t)index + 1);
+  put32(x + 24, 60), memcpy(x + 28, "traf", 4);
+  // tfhd: default-base-is-moof, track 1, which every rendition's single track is.
+  put32(x + 32, 16), memcpy(x + 36, "tfhd", 4), put32(x + 40, 0x020000), put32(x + 44, 1);
+  put32(x + 48, 20), memcpy(x + 52, "tfdt", 4), put32(x + 56, 0x01000000);
+  put32(x + 60, (uint32_t)((uint64_t)at >> 32)), put32(x + 64, (uint32_t)at);
+  put32(x + 68, 16), memcpy(x + 72, "trun", 4), put32(x + 76, 0), put32(x + 80, 0);
+  put32(x + 84, 8), memcpy(x + 88, "mdat", 4);
+  made->data = x;
+  made->size = SIZE;
+  return 0;
 }
 
 /**
@@ -438,6 +492,7 @@ static int reach(TitleHls *title, int index, Packets *ahead) {
     int error = av_seek_frame(title->input, title->video, title->cuts[from], AVSEEK_FLAG_BACKWARD);
     if (error < 0) return error;
     int seen[SOUNDS_MOST] = {0}, missing = title->sound_count, late = 0;
+    int64_t until = title->cuts[index] + llrint(LATE_SOUND_S / av_q2d(title->video_base));
     while (missing > 0 && ahead->count < AHEAD_PACKETS_MOST) {
       AVPacket *packet = av_packet_alloc();
       if (!packet) return AVERROR(ENOMEM);
@@ -457,6 +512,10 @@ static int reach(TitleHls *title, int index, Packets *ahead) {
         missing--;
         if (!sound_before(title, sound, packet, title->cuts[index])) late = 1;
       }
+      // A track with nothing near here has nothing to start before the cut either.
+      if (packet->stream_index == title->video && packet->pts != AV_NOPTS_VALUE &&
+          packet->pts >= until)
+        break;
     }
     if (!late || from == 0 || from == index - 1) return 0;
   }
@@ -525,6 +584,7 @@ static TitleHlsResult make(TitleHls *title, int index, Made **out, char *detail,
   }
   title->next = -1;
   int64_t start = title->cuts[index], end = title->cuts[index + 1];
+  int64_t late = llrint(LATE_SOUND_S / av_q2d(title->video_base));
   int last = index == title->count - 1;
   Packets pictures = {0}, later = {0}, sound[SOUNDS_MOST] = {{0}};
   Packets ahead = title->ahead;
@@ -566,6 +626,15 @@ static TitleHlsResult make(TitleHls *title, int index, Made **out, char *detail,
           goto end;
         }
         picture_done = 1;
+      }
+      // Sound not heard of by now has nothing in this segment.
+      if (picture_done && packet->pts - end >= late) {
+        for (int t = 0; t < title->sound_count; t++) {
+          if (!sound_done[t]) {
+            sound_done[t] = 1;
+            sounds_left--;
+          }
+        }
       }
       into = !picture_started ? NULL : picture_done ? &later : &pictures;
     } else if (track) {
@@ -628,8 +697,13 @@ static TitleHlsResult make(TitleHls *title, int index, Made **out, char *detail,
   for (int t = 0; t < title->sound_count; t++) {
     Sound *track = &title->sounds[t];
     stamp_sound(title, track, &sound[t]);
-    error = mux(title->input->streams[track->stream], sound_base(track), track->frame, &sound[t],
-                NULL, index, &slot->renditions[1 + t]);
+    if (sound[t].count == 0) {
+      int64_t at = av_rescale_q(start - title->cuts[0], title->video_base, sound_base(track));
+      error = empty_fragment(index, at, &slot->renditions[1 + t]);
+    } else {
+      error = mux(title->input->streams[track->stream], sound_base(track), track->frame, &sound[t],
+                  NULL, index, &slot->renditions[1 + t]);
+    }
     if (error < 0) {
       forget(slot);
       result = failure(title, error);
@@ -662,6 +736,7 @@ static int sample(TitleHls *title, int index) {
   int error = av_seek_frame(title->input, title->video, title->cuts[index], AVSEEK_FLAG_BACKWARD);
   if (error < 0) return error;
   int missing = 1 + title->sound_count;
+  int64_t until = title->cuts[index] + llrint(LATE_SOUND_S / av_q2d(title->video_base));
   while (missing > 0 && title->ahead.count < AHEAD_PACKETS_MOST) {
     AVPacket *packet = av_packet_alloc();
     if (!packet) return AVERROR(ENOMEM);
@@ -684,8 +759,10 @@ static int sample(TitleHls *title, int index) {
     } else if (sound && !sound->sample) {
       if (!(sound->sample = av_packet_clone(packet))) return AVERROR(ENOMEM);
       sound->first = packet->pts;
+      sound->frame = sample_frame(title->input->streams[sound->stream]->codecpar, packet);
       missing--;
     }
+    if (packet->stream_index == title->video && title->video_sample && packet->pts >= until) break;
   }
   int kept = 0;
   for (int i = 0; i < title->sound_count; i++) {
@@ -724,7 +801,7 @@ static TitleHlsResult choose(TitleHls *title, char *detail, size_t detail_size) 
         sound->stream = (int)i;
         sound->base = st->time_base;
         sound->rate = st->codecpar->sample_rate;
-        sound->frame = frame_samples(st->codecpar->codec_id);
+        sound->frame = sample_frame(st->codecpar, NULL);
         offered = 1;
       }
     }
@@ -759,6 +836,11 @@ TitleHlsResult title_hls_open(const TitleHlsSource *source, double start, TitleH
   title->input->interrupt_callback = (AVIOInterruptCB){interrupted, title};
   title->input->flags |= AVFMT_FLAG_CUSTOM_IO;
   error = avformat_open_input(&title->input, NULL, NULL, NULL);
+  if (error == AVERROR_INVALIDDATA && !atomic_load(&title->interrupted)) {
+    // Not Matroska or MP4 after all: AVPlayer gets to try it, as it always did.
+    result = TITLE_HLS_DIRECT;
+    goto fail;
+  }
   if (error < 0) {
     result = failure(title, error);
     say(detail, detail_size, "The file isn't in a format this reads.");

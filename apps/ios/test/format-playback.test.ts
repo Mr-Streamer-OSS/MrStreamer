@@ -118,7 +118,7 @@ describe("a file AVPlayer can't open", () => {
     await settle();
     stop();
     expect(sessions[0]!.closeAsked).toBe(true);
-    expect(playbackState.get().closing).toBe("sub");
+    expect(playbackState.get().closing).toEqual(["sub"]);
     const opened = vi.fn(async () => ({ url: "http://panel/b.mp4", container: "mp4" }));
     void play(movie("b"), opened, options);
     await settle();
@@ -126,7 +126,7 @@ describe("a file AVPlayer can't open", () => {
     sessions[0]!.closed.resolve();
     await settle();
     expect(opened).toHaveBeenCalledOnce();
-    expect(playbackState.get().closing).toBeNull();
+    expect(playbackState.get().closing).toEqual([]);
   });
 
   it("closes a session that opens after the viewer moved on, and never plays it", async () => {
@@ -180,13 +180,15 @@ describe("a file AVPlayer can't open", () => {
   });
 });
 
-it("plays MP4 titles and live channels directly, as before", async () => {
+it("plays MP4, AVI and other files, and live channels, directly as before", async () => {
   await play(movie("a"), async () => ({ url: "http://panel/a.mp4", container: "mp4" }), options);
+  await play(movie("e"), async () => ({ url: "http://panel/e.avi", container: "avi" }), options);
   await play({ ...movie("c"), live: true }, async () => ({ url: "http://panel/c.ts", container: "ts" }), options);
   await play({ ...movie("d"), live: true }, async () => ({ url: "http://panel/d.m3u8", container: "m3u8" }), options);
   expect(sessions).toEqual([]);
   expect(given.filter(Boolean)).toEqual([
     { uri: "http://panel/a.mp4", contentType: "auto" },
+    { uri: "http://panel/e.avi", contentType: "auto" },
     { uri: "http://panel/c.ts", contentType: "auto" },
     { uri: "http://panel/d.m3u8", contentType: "hls" },
   ]);

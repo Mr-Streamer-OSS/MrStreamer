@@ -201,7 +201,7 @@ let made = 0;
 /** When this app's last request of each subscription ended, a download's or a stream's. */
 const released = new Map<string, number>();
 /** The subscription whose stream had the connection when playback last changed. */
-let streaming: string | null = null;
+let streaming: ReadonlySet<string> = new Set();
 /** Wakes the queue once a subscription's connection had time to be freed. */
 let later: ReturnType<typeof setTimeout> | null = null;
 
@@ -276,17 +276,24 @@ function freeBytes(): number | null {
 }
 
 /**
- * The subscription whose stream has the provider's connection, if one does, or whose format
- * session still holds it while its request ends.
+ * The subscriptions whose provider connection playback holds: the one whose stream plays or is
+ * opening, and any whose format session let go of its stream but hasn't closed its request yet,
+ * which another subscription's play doesn't hide.
  */
-function borrowed(): string | null {
+function borrowed(): ReadonlySet<string> {
   const { phase, closing } = playbackState.get();
-  return phase.kind === "loading" || phase.kind === "playing" || phase.kind === "paused"
-    ? phase.item.subscriptionId
-    : closing;
+  const busy = new Set(closing);
+  if (phase.kind === "loading" || phase.kind === "playing" || phase.kind === "paused") {
+    if (phase.item.subscriptionId !== null) busy.add(phase.item.subscriptionId);
+  }
+  return busy;
 }
 
-function viewOf(record: Stored, names: ReadonlyMap<string, string>, busy: string | null): Download {
+function viewOf(
+  record: Stored,
+  names: ReadonlyMap<string, string>,
+  busy: ReadonlySet<string>,
+): Download {
   const name = names.get(record.subscriptionId);
   const transferring = active?.id === record.id ? active : null;
   return {
@@ -320,7 +327,7 @@ function viewOf(record: Stored, names: ReadonlyMap<string, string>, busy: string
                 rate: transferring.rate,
                 restarted: transferring.restarted,
               }
-            : busy === record.subscriptionId
+            : busy.has(record.subscriptionId)
               ? { kind: "waiting" }
               : { kind: "queued" },
     progress: record.progress && {
@@ -397,7 +404,7 @@ function wake() {
   const ready = doc.items.filter(
     (record) =>
       record.state === "queued" &&
-      record.subscriptionId !== busy &&
+      !busy.has(record.subscriptionId) &&
       currentSource(record.subscriptionId) !== undefined,
   );
   const next = ready.find((record) => freeing(record.subscriptionId) === 0);
@@ -813,9 +820,10 @@ export function startDownloads(): void {
   });
   playbackState.subscribe(() => {
     const busy = borrowed();
-    if (streaming !== null && streaming !== busy) released.set(streaming, Date.now());
+    // The provider gets its moment to free the connection from when playback let go of it.
+    for (const id of streaming) if (!busy.has(id)) released.set(id, Date.now());
     streaming = busy;
-    if (active && active.subscriptionId === busy) halt(active, "pause");
+    if (active && busy.has(active.subscriptionId)) halt(active, "pause");
     tell();
     wake();
   });

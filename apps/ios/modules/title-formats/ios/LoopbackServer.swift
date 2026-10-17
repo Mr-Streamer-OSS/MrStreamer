@@ -147,6 +147,19 @@ final class LoopbackServer {
     }
   }
 
+  /// One range of "bytes=<first>-[<last>]", or nil for anything else: a suffix, several ranges,
+  /// a reversed or unrepresentable one. A request with such a Range gets the whole body, as HTTP
+  /// lets a server ignore a Range it doesn't take.
+  static func range(_ value: String) -> (first: Int, last: Int?)? {
+    guard value.hasPrefix("bytes=") else { return nil }
+    let bounds = value.dropFirst(6).split(separator: "-", omittingEmptySubsequences: false)
+    let digits = { (text: Substring) in !text.isEmpty && text.allSatisfy { $0.isASCII && $0.isNumber } }
+    guard bounds.count == 2, digits(bounds[0]), let first = Int(bounds[0]) else { return nil }
+    if bounds[1].isEmpty { return (first, nil) }
+    guard digits(bounds[1]), let last = Int(bounds[1]), last >= first else { return nil }
+    return (first, last)
+  }
+
   /// The whole response to one request: the session it names answers, on its own queue.
   private func answer(_ head: String) -> Data {
     let lines = head.components(separatedBy: "\r\n")
@@ -154,15 +167,9 @@ final class LoopbackServer {
     let method = parts.first.map(String.init) ?? ""
     let path = parts.count > 1 ? (parts[1].split(separator: "?").first.map(String.init) ?? "") : ""
     let segments = path.split(separator: "/").map(String.init)
-    var range: ClosedRange<Int>?
+    var range: (first: Int, last: Int?)?
     for line in lines.dropFirst() where line.lowercased().hasPrefix("range:") {
-      let value = line.dropFirst(6).trimmingCharacters(in: .whitespaces)
-      if value.hasPrefix("bytes=") {
-        let bounds = value.dropFirst(6).split(separator: "-", omittingEmptySubsequences: false)
-        if bounds.count == 2, let first = Int(bounds[0]) {
-          range = first...(Int(bounds[1]) ?? Int.max - 1)
-        }
-      }
+      range = Self.range(line.dropFirst(6).trimmingCharacters(in: .whitespaces))
     }
     var response = LoopbackResponse.missing
     if method == "GET" || method == "HEAD", segments.count == 2,
@@ -179,10 +186,10 @@ final class LoopbackServer {
     var status = response.status
     var headers = ["Content-Type: \(response.type)", "Accept-Ranges: bytes"]
     if let range, status == 200 {
-      let last = min(range.upperBound, body.count - 1)
-      if range.lowerBound < body.count, last >= range.lowerBound {
-        headers.append("Content-Range: bytes \(range.lowerBound)-\(last)/\(body.count)")
-        body = body.subdata(in: range.lowerBound..<(last + 1))
+      if range.first < body.count {
+        let last = min(range.last ?? body.count - 1, body.count - 1)
+        headers.append("Content-Range: bytes \(range.first)-\(last)/\(body.count)")
+        body = body.subdata(in: range.first..<(last + 1))
         status = 206
       } else {
         headers.append("Content-Range: bytes */\(body.count)")

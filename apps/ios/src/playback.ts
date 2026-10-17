@@ -56,10 +56,10 @@ export interface Playback {
   /** Home's preview plays without sound until Watch opens or the viewer unmutes it. */
   readonly muted: boolean;
   /**
-   * The subscription whose provider connection a format session that let go of its stream still
+   * The subscriptions whose provider connection a format session that let go of its stream still
    * holds, until its request ended. The session streaming now isn't counted: the phase says so.
    */
-  readonly closing: string | null;
+  readonly closing: readonly string[];
 }
 
 /** Where a stream is, and its file type as whoever opened it knows it. */
@@ -70,8 +70,11 @@ export interface Source {
   readonly container: string;
 }
 
-/** The file types AVPlayer opens itself. Live streams always play directly. */
-const DIRECT: ReadonlySet<string> = new Set(["m3u8", "mp4", "m4v", "mov"]);
+/**
+ * The file types a format session plays: Matroska, which AVPlayer can't open. Everything else,
+ * live streams always, goes to AVPlayer as it is, as it always did.
+ */
+const THROUGH_SESSION: ReadonlySet<string> = new Set(["mkv"]);
 
 /** Opens what plays; aborted when the viewer moves on first. */
 type Open = (signal: AbortSignal) => Promise<Source>;
@@ -101,7 +104,7 @@ const state = store<Playback>({
   pip: false,
   external: false,
   muted: true,
-  closing: null,
+  closing: [],
 });
 /** Seconds played of the current stream, apart from the rest so only the clock redraws. */
 const clock = store(0);
@@ -190,11 +193,19 @@ let format: {
 /** Every format session whose provider request hasn't ended, with its subscription. */
 const held = new Map<Promise<void>, string | null>();
 
-/** Says which subscription a session that let go of its stream still holds, if any. */
+/** Says which subscriptions sessions that let go of their stream still hold. */
 function noteClosing() {
-  const holding =
-    [...held].find(([closed, id]) => id !== null && closed !== format?.closed)?.[1] ?? null;
-  if (state.get().closing !== holding) state.set((s) => ({ ...s, closing: holding }));
+  const holding = [
+    ...new Set(
+      [...held]
+        .filter(([closed, id]) => id !== null && closed !== format?.closed)
+        .map(([, id]) => id!),
+    ),
+  ];
+  const now = state.get().closing;
+  if (holding.length !== now.length || holding.some((id, at) => id !== now[at])) {
+    state.set((s) => ({ ...s, closing: holding }));
+  }
 }
 
 /** Keeps `closed` among the sessions holding a connection until it resolves. */
@@ -355,7 +366,7 @@ export async function play(item: Playing, open: Open, options: PlayOptions) {
       ...(source.headers ? { headers: { ...source.headers } } : {}),
       contentType: source.container === "m3u8" ? ("hls" as const) : ("auto" as const),
     };
-    if (!item.live && !DIRECT.has(source.container.toLowerCase())) {
+    if (!item.live && THROUGH_SESSION.has(source.container.toLowerCase())) {
       const start = options.from ?? 0;
       const opening = openFormat(source.url, source.headers, start, controller.signal);
       hold(opening.closed, item.subscriptionId);

@@ -28,9 +28,12 @@ typedef struct TitleHlsSource {
 
 typedef enum TitleHlsResult {
   TITLE_HLS_OK = 0,
-  /** An MP4 or MOV, whatever its name said: AVPlayer opens it itself. */
+  /**
+   * Not a file this reads, whatever its name said: an MP4 or MOV, which AVPlayer opens itself,
+   * or another container AVPlayer may try.
+   */
   TITLE_HLS_DIRECT,
-  /** Not a file this reads, or a track this can't copy: the detail says which. */
+  /** A Matroska file with a track or layout this can't copy: the detail says which. */
   TITLE_HLS_UNSUPPORTED,
   /** The source failed to read; the app knows why. */
   TITLE_HLS_READ_FAILED,
