@@ -2,6 +2,9 @@
 // can: a complete playlist cut at the keyframes the file's own index lists, and fragmented MP4
 // segments made on request from the file's packets, copied unchanged. Nothing is decoded.
 //
+// The picture is one rendition and each sound track AVPlayer plays (AAC, AC-3, E-AC-3, MP3)
+// another, listed as the stream's audio choices. Subtitles aren't served.
+//
 // The file is read through `TitleHlsSource`, which the app answers from the provider or from a
 // downloaded copy. One title is used from one thread at a time; `title_hls_interrupt` may be
 // called from any thread, and makes a read in progress, and every later one, fail.
@@ -34,30 +37,29 @@ typedef enum TitleHlsResult {
   /** Interrupted on request. */
   TITLE_HLS_INTERRUPTED,
   TITLE_HLS_NO_MEMORY,
+  /** No such resource. */
+  TITLE_HLS_MISSING,
 } TitleHlsResult;
 
 typedef struct TitleHls TitleHls;
 
 /**
- * Reads the file's header and index and plans its segments. On failure `*out` is NULL and
- * `detail`, when given, says why in a short sentence without any address.
+ * Reads the file's header and index and plans its segments. Playback starts at `start` seconds
+ * of the title: the playlist says so, and opening reads the file there rather than at its
+ * start. On failure `*out` is NULL and `detail`, when given, says why in a short sentence
+ * without any address.
  */
-TitleHlsResult title_hls_open(const TitleHlsSource *source, TitleHls **out, char *detail,
-                              size_t detail_size);
-
-/** The media playlist, naming "init.mp4" and "s<index>.m4s". Owned by the title. */
-const char *title_hls_playlist(const TitleHls *title);
-/** The initialization segment. Owned by the title. */
-const uint8_t *title_hls_init(const TitleHls *title, size_t *size);
-int title_hls_segment_count(const TitleHls *title);
+TitleHlsResult title_hls_open(const TitleHlsSource *source, double start, TitleHls **out,
+                              char *detail, size_t detail_size);
 
 /**
- * Makes segment `index`, continuing the read when it follows the last one made, else seeking.
- * `*data` is freed with `title_hls_free`.
+ * One resource of the stream, by the name AVPlayer asks for: "main.m3u8", the playlists and
+ * initialization segments it names, and the segments those name. `*data` and `*type` stay the
+ * title's, valid until the next call. A segment is made on request, continuing the read when it
+ * follows the last one made, else seeking.
  */
-TitleHlsResult title_hls_segment(TitleHls *title, int index, uint8_t **data, size_t *size,
-                                 char *detail, size_t detail_size);
-void title_hls_free(uint8_t *data);
+TitleHlsResult title_hls_get(TitleHls *title, const char *name, const uint8_t **data,
+                             size_t *size, const char **type, char *detail, size_t detail_size);
 
 void title_hls_interrupt(TitleHls *title);
 void title_hls_close(TitleHls *title);
