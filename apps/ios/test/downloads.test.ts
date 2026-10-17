@@ -695,6 +695,67 @@ describe("downloads", { timeout: 30_000 }, () => {
     expect(native.requests[0]?.range).toBe("bytes=20000-");
   });
 
+  it("waits while its provider's closing format session holds the connection, whatever plays next", async () => {
+    await install();
+    const app = await launch();
+    const { a, b } = await withProviders(app, true);
+    const item = (subscriptionId: string | null) => ({
+      id: "format",
+      subscriptionId,
+      title: "format",
+      place: "",
+      live: false,
+      next: false,
+      versions: false,
+    });
+    // Another provider's film, then a copy on the phone, plays after A's Matroska title.
+    for (const next of [b!, null]) {
+      let end!: () => void;
+      const ended = new Promise<void>((done) => (end = done));
+      Object.assign(globalThis, {
+        expo: {
+          modules: {
+            TitleFormats: {
+              create: () => undefined,
+              open: async () => ({ kind: "session", playlist: "file:session.m3u8" }),
+              close: () => undefined,
+              closed: () => ended,
+              failure: () => null,
+              trace: () => [],
+            },
+          },
+        },
+      });
+      const options = { watch: true, login: [] };
+      await app.playback.play(
+        item(a),
+        async () => ({ url: "file:a.mkv", container: "mkv" }),
+        options,
+      );
+      const film = await app.addDownload(movieRef(a));
+      expect(statusOf(app, film.id)?.kind).toBe("waiting");
+      native.requests.length = 0;
+      const playing = app.playback.play(
+        item(next),
+        async () => ({ url: "file:next.mp4", container: "mp4" }),
+        options,
+      );
+      // Longer than the provider's moment to free a connection: A's session still holds it.
+      await new Promise((done) => setTimeout(done, 1_500));
+      expect(native.requests).toEqual([]);
+      expect(statusOf(app, film.id)?.kind).toBe("waiting");
+      expect(app.playbackState.get().closing).toEqual([a]);
+      const closedAt = Date.now();
+      end();
+      await playing;
+      await until(() => native.requests.length > 0, "A's download, once its session closed");
+      // The provider's moment to free it runs from the session's actual end.
+      expect(Date.now() - closedAt).toBeGreaterThanOrEqual(900);
+      app.stop();
+      await app.removeDownload(film.id);
+    }
+  });
+
   it("fails a stream whose download doesn't let go of the connection, asking the provider nothing, and plays once tried again", async () => {
     await install();
     const app = await launch();

@@ -2,6 +2,7 @@ import { appFailure, type AnalyticsFailure } from "@mrstreamer/contracts/analyti
 import { createVideoPlayer, type VideoPlayer } from "expo-video";
 import { appError, describeError, withoutLogin } from "./errors.ts";
 import { store, useStore, type Store } from "./store.ts";
+import { openFormat, type FormatSession } from "./title-formats.ts";
 
 // The app's one player and what it plays: a live channel, or a movie or an episode. Every surface
 // shows this player and no other: Home's preview, Watch, Picture in Picture and AirPlay, and the
@@ -9,6 +10,11 @@ import { store, useStore, type Store } from "./store.ts";
 // something else, stopping, removing its subscription and a failure each let go of the stream,
 // so the provider's connection closes. A download of the same subscription gives the connection
 // back before a stream opens (`onReclaim`); a downloaded copy plays from the phone and takes none.
+//
+// A movie or episode in a file AVPlayer can't open, such as Matroska, plays through a format
+// session (`title-formats.ts`): the file is read natively, over one request to the provider at a
+// time, and this player gets it as HLS from 127.0.0.1. Nothing of a new play reaches the
+// provider until every earlier session's request has ended.
 //
 // A title starts where it is asked to, has a length to seek in, and tells whoever played it how
 // far it got: every minute while it plays, when it pauses, and when it stops, fails or gives way
@@ -49,14 +55,26 @@ export interface Playback {
   readonly external: boolean;
   /** Home's preview plays without sound until Watch opens or the viewer unmutes it. */
   readonly muted: boolean;
+  /**
+   * The subscriptions whose provider connection a format session that let go of its stream still
+   * holds, until its request ended. The session streaming now isn't counted: the phase says so.
+   */
+  readonly closing: readonly string[];
 }
 
-/** Where a stream is, and whether it is HLS. */
+/** Where a stream is, and its file type as whoever opened it knows it. */
 export interface Source {
   readonly url: string;
   readonly headers?: Readonly<Record<string, string>>;
-  readonly hls: boolean;
+  /** "m3u8" for HLS; a title's listed container, or a copy's. */
+  readonly container: string;
 }
+
+/**
+ * The file types a format session plays: Matroska, which AVPlayer can't open. Everything else,
+ * live streams always, goes to AVPlayer as it is, as it always did.
+ */
+const THROUGH_SESSION: ReadonlySet<string> = new Set(["mkv"]);
 
 /** Opens what plays; aborted when the viewer moves on first. */
 type Open = (signal: AbortSignal) => Promise<Source>;
@@ -86,6 +104,7 @@ const state = store<Playback>({
   pip: false,
   external: false,
   muted: true,
+  closing: [],
 });
 /** Seconds played of the current stream, apart from the rest so only the clock redraws. */
 const clock = store(0);
@@ -165,6 +184,39 @@ let current: {
   stoppedAt: number | null;
 } | null = null;
 let attempt: AbortController | null = null;
+/** The format session the player streams from now, how to stop it, and when it has. */
+let format: {
+  readonly session: FormatSession;
+  readonly close: () => void;
+  readonly closed: Promise<void>;
+} | null = null;
+/** Every format session whose provider request hasn't ended, with its subscription. */
+const held = new Map<Promise<void>, string | null>();
+
+/** Says which subscriptions sessions that let go of their stream still hold. */
+function noteClosing() {
+  const holding = [
+    ...new Set(
+      [...held]
+        .filter(([closed, id]) => id !== null && closed !== format?.closed)
+        .map(([, id]) => id!),
+    ),
+  ];
+  const now = state.get().closing;
+  if (holding.length !== now.length || holding.some((id, at) => id !== now[at])) {
+    state.set((s) => ({ ...s, closing: holding }));
+  }
+}
+
+/** Keeps `closed` among the sessions holding a connection until it resolves. */
+function hold(closed: Promise<void>, subscriptionId: string | null) {
+  held.set(closed, subscriptionId);
+  noteClosing();
+  void closed.finally(() => {
+    held.delete(closed);
+    noteClosing();
+  });
+}
 let checkpoint: ReturnType<typeof setInterval> | null = null;
 /** Told each failure's category, never its message; telemetry registers it. */
 let failed: ((failure: AnalyticsFailure) => void) | null = null;
@@ -196,8 +248,14 @@ export function player(): VideoPlayer {
   made.muted = state.get().muted;
   made.addListener("statusChange", ({ status, error }) => {
     if (!current) return;
-    // AVPlayer's failures come without a type; on the fixtures they were formats it can't play.
-    if (status === "error") return fail(error?.message ?? "The player stopped.", "unsupported");
+    if (status === "error") {
+      // A format session says why it stopped serving; AVPlayer's failures come without a type,
+      // and on the fixtures they were formats it can't play.
+      const stopped = format?.session.failure();
+      if (!stopped) return fail(error?.message ?? "The player stopped.", "unsupported");
+      const failure = { kind: "stream", failure: stopped } as const;
+      return fail(describeError(failure), appFailure(failure));
+    }
     if (status === "readyToPlay" && current.seek !== null) {
       const from = current.seek;
       current.seek = null;
@@ -256,6 +314,10 @@ function release() {
   const made = player();
   made.pause();
   void made.replaceAsync(null);
+  // Its request ends on its own time; `held` keeps the next play from the provider until then.
+  format?.close();
+  format = null;
+  noteClosing();
   clock.set(0);
   length.set(0);
 }
@@ -293,15 +355,36 @@ export async function play(item: Playing, open: Open, options: PlayOptions) {
     };
   });
   try {
+    await Promise.all(held.keys());
+    if (controller.signal.aborted) return;
     if (item.subscriptionId !== null) await reclaim?.(item.subscriptionId);
     if (controller.signal.aborted) return;
     const source = await open(controller.signal);
     if (controller.signal.aborted) return;
-    await player().replaceAsync({
+    let playable = {
       uri: source.url,
       ...(source.headers ? { headers: { ...source.headers } } : {}),
-      contentType: source.hls ? "hls" : "auto",
-    });
+      contentType: source.container === "m3u8" ? ("hls" as const) : ("auto" as const),
+    };
+    if (!item.live && THROUGH_SESSION.has(source.container.toLowerCase())) {
+      const start = options.from ?? 0;
+      const opening = openFormat(source.url, source.headers, start, controller.signal);
+      hold(opening.closed, item.subscriptionId);
+      const opened = await opening.opened;
+      if (controller.signal.aborted) return opening.close();
+      if (opened.kind === "session") {
+        format = { session: opened.session, close: opening.close, closed: opening.closed };
+        noteClosing();
+        playable = { uri: opened.session.playlist, contentType: "hls" };
+        // The stream starts there itself, so AVPlayer reads nothing before it.
+        if (current) current.seek = null;
+      } else {
+        // AVPlayer opens it itself, once the session's request ended.
+        await opening.closed;
+        if (controller.signal.aborted) return;
+      }
+    }
+    await player().replaceAsync(playable);
     if (controller.signal.aborted) return;
     player().play();
   } catch (cause) {

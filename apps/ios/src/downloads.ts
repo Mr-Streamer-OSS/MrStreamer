@@ -3,7 +3,6 @@ import type { Download, DownloadList } from "@mrstreamer/contracts/downloads";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
 import { RawTitleRef, type TitleRef } from "@mrstreamer/contracts/ondemand";
-import type { StreamFailure } from "@mrstreamer/contracts/playback";
 import { t } from "@mrstreamer/core/i18n";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import { isFinished } from "@mrstreamer/core/viewing/titles";
@@ -18,7 +17,7 @@ import {
   type Running,
   type StartRequest,
 } from "./download-task.ts";
-import { appError, describeError } from "./errors.ts";
+import { appError, describeError, statusFailure } from "./errors.ts";
 import { readJson, writeJson } from "./files.ts";
 import { onReclaim, play, playbackState, playingItem, stop, type Playing } from "./playback.ts";
 import { keychainSecrets } from "./secrets.ts";
@@ -239,8 +238,8 @@ let attempts = 0;
 const released = new Map<string, number>();
 /** When requests that ended while nobody watched were found: every subscription waits after it. */
 let releasedAll = -Infinity;
-/** The subscription whose stream had the connection when playback last changed. */
-let streaming: string | null = null;
+/** The subscriptions whose connections playback held when it last changed. */
+let streaming: ReadonlySet<string> = new Set();
 /** Wakes the queue once a subscription's connection had time to be freed. */
 let later: ReturnType<typeof setTimeout> | null = null;
 /** Who waits for each attempt's receipt. */
@@ -330,14 +329,25 @@ function freeBytes(): number | null {
   }
 }
 
-/** The subscription whose stream has the provider's connection, if one does. */
-function borrowed(): string | null {
-  const { phase } = playbackState.get();
-  return phase.kind === "loading" || phase.kind === "playing" || phase.kind === "paused"
-    ? phase.item.subscriptionId
-    : null;
+/**
+ * The subscriptions whose provider connection playback holds: the one whose stream plays or is
+ * opening, and any whose format session let go of its stream but hasn't closed its request yet,
+ * which another subscription's play doesn't hide.
+ */
+function borrowed(): ReadonlySet<string> {
+  const { phase, closing } = playbackState.get();
+  const busy = new Set(closing);
+  if (phase.kind === "loading" || phase.kind === "playing" || phase.kind === "paused") {
+    if (phase.item.subscriptionId !== null) busy.add(phase.item.subscriptionId);
+  }
+  return busy;
 }
-function viewOf(record: Stored, names: ReadonlyMap<string, string>, busy: string | null): Download {
+
+function viewOf(
+  record: Stored,
+  names: ReadonlyMap<string, string>,
+  busy: ReadonlySet<string>,
+): Download {
   const name = names.get(record.subscriptionId);
   const transferring = active?.id === record.id ? active : null;
   return {
@@ -371,7 +381,7 @@ function viewOf(record: Stored, names: ReadonlyMap<string, string>, busy: string
                 rate: transferring.rate,
                 restarted: transferring.restarted,
               }
-            : busy === record.subscriptionId
+            : busy.has(record.subscriptionId)
               ? { kind: "waiting" }
               : { kind: "queued" },
     progress: record.progress && {
@@ -451,7 +461,7 @@ function wake() {
   const ready = doc.items.filter(
     (record) =>
       record.state === "queued" &&
-      record.subscriptionId !== busy &&
+      !busy.has(record.subscriptionId) &&
       !held.has(record.id) &&
       currentSource(record.subscriptionId) !== undefined,
   );
@@ -789,7 +799,7 @@ async function apply(record: Stored, outcome: Outcome, transferring: Active | nu
       else requeue();
       break;
     case "refused":
-      fail({ kind: "stream", failure: refusal(outcome.status) });
+      fail({ kind: "stream", failure: statusFailure(outcome.status) });
       break;
     case "folder":
       fail({ kind: "folder", detail: "The file couldn't be moved into its folder." });
@@ -816,13 +826,6 @@ async function apply(record: Stored, outcome: Outcome, transferring: Active | nu
 function withoutFailure(record: Stored): Stored {
   const { failure: _failure, ...rest } = record;
   return rest;
-}
-
-/** The desktop's reading of an HTTP status for a stream. */
-function refusal(status: number): StreamFailure {
-  if ([401, 403, 429, 458, 509].includes(status)) return { kind: "refused", status };
-  if (status === 404 || status === 410) return { kind: "unavailable", status };
-  return { kind: "provider-error", status };
 }
 
 const messageOf = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
@@ -1082,9 +1085,10 @@ export function startDownloads(): void {
   });
   playbackState.subscribe(() => {
     const busy = borrowed();
-    if (streaming !== null && streaming !== busy) released.set(streaming, Date.now());
+    // The provider gets its moment to free the connection from when playback let go of it.
+    for (const id of streaming) if (!busy.has(id)) released.set(id, Date.now());
     streaming = busy;
-    if (active && active.subscriptionId === busy) halt(active, "pause");
+    if (active && busy.has(active.subscriptionId)) halt(active, "pause");
     tell();
     wake();
   });
@@ -1238,7 +1242,7 @@ export function playDownload(id: string): void {
         tell();
         throw new AppFailure({ kind: "stream", failure: { kind: "unavailable", status: 404 } });
       }
-      return { url: media.uri, hls: false };
+      return { url: media.uri, container: record.container };
     },
     {
       watch: true,
