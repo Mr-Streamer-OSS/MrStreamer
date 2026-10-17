@@ -174,18 +174,8 @@ const opens = async () => ({
 const login = [USERNAME, PASSWORD];
 
 describe("before the viewer chooses", () => {
-  it("records and sends nothing until statistics are turned on", async () => {
-    const app = await launch();
-    app.onTelemetryScreen("/");
-    await app.play(channel(), opens, { watch: true, login });
-    playing(true);
-    plays(5);
-    app.stop();
-    await quiet();
-    expect(captured).toEqual([]);
-    expect(stored()?.pending ?? []).toEqual([]);
-
-    app.setStatistics(true);
+  it("are on from the first launch of a build with a capture", async () => {
+    await launch();
     await until(() => captured.length === 2);
     expect(names()).toEqual(["installation_observed", "app_active_day"]);
     const [first, second] = captured;
@@ -200,6 +190,20 @@ describe("before the viewer chooses", () => {
       $geoip_disable: true,
       activity_date: "2026-10-16",
     });
+  });
+
+  it("record and send nothing in a build without a capture", async () => {
+    delete process.env["EXPO_PUBLIC_MR_STREAMER_ANALYTICS_LOCAL_ENDPOINT"];
+    const app = await launch();
+    app.onTelemetryScreen("/");
+    await app.play(channel(), opens, { watch: true, login });
+    playing(true);
+    plays(5);
+    app.stop();
+    expect(app.setStatistics(true)).toEqual({ enabled: true, transport: "unconfigured" });
+    await quiet();
+    expect(captured).toEqual([]);
+    expect(stored()?.pending ?? []).toEqual([]);
   });
 });
 

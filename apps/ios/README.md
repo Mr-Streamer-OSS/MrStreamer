@@ -121,7 +121,7 @@ Each responsibility has one owner, a plain module with a store the screens read:
   `state.json` in Documents: recent channels by subscription and the Live country, and beta 2's
   subscription for an older build to show. `src/files.ts` writes every file whole, through a file
   beside it. Removing a subscription keeps its history unless the viewer deletes it too.
-- `src/telemetry/`: product statistics, off until the viewer turns them on in Settings. One owner
+- `src/telemetry/`: product statistics, on until the viewer turns them off in Settings. One owner
   keeps the viewer's choice, a random installation id and a bounded outbox in `analytics.json`,
   and builds every event from fixed observations: the app's activity, the player's state and
   the screen on show. Events and properties are in `docs/telemetry.md`.
