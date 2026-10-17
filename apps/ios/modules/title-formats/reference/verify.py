@@ -1,6 +1,9 @@
 # Checks a reference run's renditions against the source with system ffprobe and ffmpeg:
 # every packet's payload equals the source track's, in order, with its time within half a frame
 # of the source's time from the first cut; the picture's times are exact; each rendition decodes.
+# An AAC-LC rendition may add one frame of silence wherever the track has none; it must run
+# without gaps from its first frame to within one frame past the picture's end, and decode to
+# zero over each added frame after the first in a row.
 #   python3 -I verify.py <source.mkv> <out-folder>
 import glob, json, os, re, subprocess, sys
 
@@ -12,9 +15,10 @@ def packets(path, stream):
         capture_output=True, text=True, check=True).stdout
     return [(float(p["pts_time"]), p["data_hash"]) for p in json.loads(out)["packets"]]
 
-def presented(init, segments):
+def presented(init, segments, timed=False):
     """Presentation times read from the MP4 boxes themselves: tfdt, then each sample's duration
-    (trun, else tfhd's default) and composition offset, over the timescale in mdhd."""
+    (trun, else tfhd's default) and composition offset, over the timescale in mdhd. With `timed`,
+    each sample's decode time and duration instead, in the timescale, and the timescale."""
     import struct
     def boxes(b, o, e):
         while o + 8 <= e:
@@ -50,8 +54,8 @@ def presented(init, segments):
                             if fl & 0x200: p += 4
                             if fl & 0x400: p += 4
                             if fl & 0x800: c = struct.unpack(">i" if ver else ">I", b[p:p+4])[0]; p += 4
-                            times.append((dt + c) / scale); dt += d
-    return times
+                            times.append((dt, d) if timed else (dt + c) / scale); dt += d
+    return (times, scale) if timed else times
 
 def joined(rendition):
     names = sorted(glob.glob(f"{folder}/{rendition}*.m4s"), key=lambda n: int(re.findall(r"(\d+)\.m4s$", n)[0]))
@@ -61,18 +65,43 @@ def joined(rendition):
         for name in names: out.write(open(name, "rb").read())
     return path
 
-streams = json.loads(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=index,codec_type,codec_name,sample_rate",
+streams = json.loads(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=index,codec_type,codec_name,profile,sample_rate",
     "-of", "json", source], capture_output=True, text=True, check=True).stdout)["streams"]
 master = open(f"{folder}/main.m3u8").read()
 audio = [s for s in streams if s["codec_type"] == "audio" and s["codec_name"] in ("aac", "ac3", "eac3", "mp3")]
 video = next(s for s in streams if s["codec_type"] == "video")
 origin = min(t for t, _ in packets(source, video["index"]))  # the first keyframe: title time 0
 ok = True
+picture_end = None
 for rendition, track in [("v", video)] + [(f"a{i}", s) for i, s in enumerate(audio)]:
     if f'URI="{rendition}.m3u8"' not in master and rendition != "v": continue
     path = joined(rendition)
     mine = packets(path, 0)
     theirs = [(t - origin, h) for t, h in packets(source, track["index"])]
+    filled = ""
+    if rendition != "v":
+        # Frames the source doesn't have are silence: one payload, on the grid, nothing missing.
+        ours = {h for _, h in theirs}
+        silent = {h for _, h in mine if h not in ours}
+        names = sorted(glob.glob(f"{folder}/{rendition}-*.m4s"), key=lambda n: int(re.findall(r"(\d+)\.m4s$", n)[0]))
+        timed, rate = presented(f"{folder}/{rendition}.mp4", names, timed=True)
+        timed = [(t, d, h) for (t, d), (_, h) in zip(timed, mine)]
+        runs = all(a[0] + a[1] == b[0] for a, b in zip(timed, timed[1:]))
+        end = (timed[-1][0] + timed[-1][1]) / rate
+        if len(silent) == 1:
+            pcm = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-f", "s16le", "-ac", "1", "-"], capture_output=True).stdout
+            first = timed[0][0]
+            loud = sum(1 for a, b in zip(timed, timed[1:]) if a[2] in silent and b[2] in silent
+                       and any(pcm[2 * (b[0] - first):2 * (b[0] - first + b[1])]))
+            whole = track["codec_name"] == "aac" and track.get("profile") == "LC"
+            good_fill = whole and runs and picture_end <= end <= picture_end + timed[-1][1] / rate and not loud
+            filled = (f", {sum(1 for p in mine if p[1] in silent)} silent frames, "
+                      f"{'continuous' if runs else 'GAPS'} to {end:.3f} s, {loud} silent frames not silent")
+            mine = [p for p in mine if p[1] not in silent]
+            ok &= good_fill
+        elif track["codec_name"] == "aac" and track.get("profile") == "LC" and not runs:
+            filled = ", GAPS in AAC"
+            ok = False
     # The source's packets from where the rendition's first one is.
     start = next(i for i, (_, h) in enumerate(theirs) if h == mine[0][1])
     theirs = theirs[start:start + len(mine)]
@@ -82,6 +111,8 @@ for rendition, track in [("v", video)] + [(f"a{i}", s) for i, s in enumerate(aud
     if rendition == "v":
         names = sorted(glob.glob(f"{folder}/v*.m4s"), key=lambda n: int(re.findall(r"(\d+)\.m4s$", n)[0]))
         shown = presented(f"{folder}/v.mp4", names)
+        timed, scale = presented(f"{folder}/v.mp4", names, timed=True)
+        picture_end = (timed[-1][0] + timed[-1][1]) / scale
         drift = max(abs(a - b) for a, b in zip(shown, [t for t, _ in theirs]))
     else:
         drift = max(abs(a[0] - b[0]) for a, b in zip(mine, theirs))
@@ -90,5 +121,5 @@ for rendition, track in [("v", video)] + [(f"a{i}", s) for i, s in enumerate(aud
     ok &= good
     print(f"{rendition} {track['codec_name']}: {len(mine)} packets, payloads {'equal' if all(same) else 'DIFFER'}, "
           f"from source packet {start}, largest time difference {drift*1000:.2f} ms (limit {limit*1000:.2f}), "
-          f"decode {'clean' if not decoded else 'ERRORS ' + decoded[:200]} -> {'ok' if good else 'FAIL'}")
+          f"decode {'clean' if not decoded else 'ERRORS ' + decoded[:200]}{filled} -> {'ok' if good else 'FAIL'}")
 sys.exit(0 if ok else 1)

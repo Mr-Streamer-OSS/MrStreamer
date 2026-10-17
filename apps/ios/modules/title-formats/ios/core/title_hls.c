@@ -21,9 +21,11 @@
 //   the next segment; made after a seek, the read starts at the cut's cluster, or one cut
 //   earlier when sound of this segment may lie before it.
 // - A sound track may end before the picture, pause, or start late. Sound is waited for until the
-//   picture is LATE_SOUND_S past the cut; a track with nothing in a segment gets a fragment with
-//   no samples there rather than failing the picture and the other tracks, and one with nothing
-//   near where playing starts isn't offered.
+//   picture is LATE_SOUND_S past the cut, and a track with nothing near where playing starts
+//   isn't offered. AVPlayer's clock stops where the chosen sound stops, so each frame of an AAC
+//   track's grid that has no packet gets a frame of silence: its renditions run the whole
+//   title. A track of another codec with nothing in a segment gets a fragment with no samples
+//   there, which keeps the picture and the other tracks playable but stalls when it's chosen.
 // - Each rendition's MP4 is written by a muxer of its own, fed the packets and flushed twice:
 //   with delay_moov the first flush writes the header, which for AC-3 and E-AC-3 the muxer can
 //   only write once it has parsed a packet, and the second the fragment. A segment keeps the
@@ -94,6 +96,8 @@ typedef struct Sound {
   /** That packet, which the initialization segment is written from. */
   AVPacket *sample;
   Bytes init;
+  /** A frame of silence, filling where the track has none; empty when one can't be made. */
+  Bytes silence;
 } Sound;
 
 /** Every rendition of one segment. */
@@ -321,6 +325,124 @@ static int empty_fragment(int index, int64_t at, Bytes *made) {
   made->data = x;
   made->size = SIZE;
   return 0;
+}
+
+typedef struct Bits {
+  uint8_t *data;
+  int size, at;
+} Bits;
+
+/** Reads `count` bits, zeros past the end. */
+static unsigned bits_read(Bits *bits, int count) {
+  unsigned value = 0;
+  for (int i = 0; i < count; i++, bits->at++) {
+    int bit = bits->at < bits->size * 8 ? bits->data[bits->at >> 3] >> (7 - (bits->at & 7)) & 1 : 0;
+    value = value << 1 | (unsigned)bit;
+  }
+  return value;
+}
+
+static void bits_put(Bits *bits, int count, unsigned value) {
+  for (int i = count - 1; i >= 0; i--, bits->at++) {
+    if (value >> i & 1) bits->data[bits->at >> 3] |= 0x80 >> (bits->at & 7);
+  }
+}
+
+/**
+ * An AAC-LC frame of silence for the channels `par`'s AudioSpecificConfig names: every channel
+ * element has no scale factor bands, so all its coefficients are zero. Empty for other AAC
+ * (SBR, 960-sample frames, a channel configuration of its own), which this can't silence.
+ */
+static int aac_silence(const AVCodecParameters *par, Bytes *made) {
+  // The channel elements of channel configurations 1 to 7: S single, C pair, L low frequency.
+  static const char *const ELEMENTS[] = {"", "S", "C", "SC", "SCS", "SCC", "SCCL", "SCCCL"};
+  if (par->extradata_size < 2) return 0;
+  Bits config = {par->extradata, par->extradata_size, 0};
+  unsigned type = bits_read(&config, 5);
+  if (type == 31) type = 32 + bits_read(&config, 6);
+  if (bits_read(&config, 4) == 15) bits_read(&config, 24);
+  unsigned channels = bits_read(&config, 4);
+  if (type != 2 || channels < 1 || channels > 7) return 0;
+  if (bits_read(&config, 1)) return 0; /* 960-sample frames */
+  if (bits_read(&config, 1)) bits_read(&config, 14);
+  bits_read(&config, 1);
+  // A sync extension may say SBR follows the plain AAC.
+  if (config.size * 8 - config.at >= 16 && bits_read(&config, 11) == 0x2b7 &&
+      bits_read(&config, 5) == 5 && bits_read(&config, 1))
+    return 0;
+  uint8_t frame[32] = {0};
+  Bits out = {frame, sizeof(frame), 0};
+  int tags[4] = {0};
+  for (const char *element = ELEMENTS[channels]; *element; element++) {
+    int id = *element == 'S' ? 0 : *element == 'C' ? 1 : 3;
+    bits_put(&out, 3, (unsigned)id);
+    bits_put(&out, 4, (unsigned)tags[id]++);
+    if (id == 1) bits_put(&out, 1, 0); /* common_window */
+    for (int channel = 0; channel < (id == 1 ? 2 : 1); channel++) {
+      bits_put(&out, 8, 100); /* global_gain */
+      // ics_info: reserved, one long window, its shape, max_sfb 0, no prediction.
+      bits_put(&out, 11, 0);
+      // No pulse, TNS or gain control data; with no bands, no sections, scale factors or
+      // spectral data.
+      bits_put(&out, 3, 0);
+    }
+  }
+  bits_put(&out, 3, 7); /* END */
+  made->size = (size_t)(out.at + 7) / 8;
+  if (!(made->data = av_memdup(frame, made->size))) return AVERROR(ENOMEM);
+  return 0;
+}
+
+/**
+ * Fills each frame of the grid between the cuts `from` and `to` that has no packet of
+ * `packets`, a segment's, stamped and in order, with silence: AVPlayer's clock stops where the
+ * chosen sound stops, so a rendition has sound for the whole of every segment.
+ */
+static int fill(const TitleHls *title, const Sound *sound, Packets *packets, int64_t from,
+                int64_t to) {
+  AVRational base = sound_base(sound);
+  int64_t first = av_rescale_q(sound->first, sound->base, base) -
+                  av_rescale_q(title->cuts[0], title->video_base, base);
+  // The first frame of the grid at or after each cut, as sound_before tells it.
+  int64_t slots[2];
+  for (int i = 0; i < 2; i++) {
+    int64_t at = av_rescale_q_rnd((i ? to : from) - title->cuts[0], title->video_base, base,
+                                  AV_ROUND_UP) - first;
+    slots[i] = at >= 0 ? (at + sound->frame - 1) / sound->frame : -(-at / sound->frame);
+  }
+  Packets out = {0};
+  int i = 0, error = 0;
+  for (int64_t slot = slots[0]; slot < slots[1]; slot++) {
+    int64_t at = first + slot * sound->frame;
+    int heard = 0;
+    for (; i < packets->count && packets->items[i]->pts <= at; i++) {
+      heard |= packets->items[i]->pts == at;
+      if ((error = push(&out, packets->items[i])) < 0) goto end;
+      packets->items[i] = NULL;
+    }
+    if (heard) continue;
+    AVPacket *silent = av_packet_alloc();
+    if (!silent || (error = av_new_packet(silent, (int)sound->silence.size)) < 0 ||
+        (error = push(&out, silent)) < 0) {
+      av_packet_free(&silent);
+      error = error < 0 ? error : AVERROR(ENOMEM);
+      goto end;
+    }
+    memcpy(silent->data, sound->silence.data, sound->silence.size);
+    silent->pts = silent->dts = at;
+    silent->duration = sound->frame;
+    silent->flags = AV_PKT_FLAG_KEY;
+  }
+  for (; i < packets->count; i++) {
+    if ((error = push(&out, packets->items[i])) < 0) goto end;
+    packets->items[i] = NULL;
+  }
+  release(packets);
+  *packets = out;
+  return 0;
+end:
+  release(&out);
+  return error;
 }
 
 /**
@@ -697,6 +819,12 @@ static TitleHlsResult make(TitleHls *title, int index, Made **out, char *detail,
   for (int t = 0; t < title->sound_count; t++) {
     Sound *track = &title->sounds[t];
     stamp_sound(title, track, &sound[t]);
+    if (track->silence.size && (error = fill(title, track, &sound[t], start, end)) < 0) {
+      forget(slot);
+      result = failure(title, error);
+      say(detail, detail_size, "This part of the file can't be written as MP4.");
+      goto end;
+    }
     if (sound[t].count == 0) {
       int64_t at = av_rescale_q(start - title->cuts[0], title->video_base, sound_base(track));
       error = empty_fragment(index, at, &slot->renditions[1 + t]);
@@ -876,8 +1004,10 @@ TitleHlsResult title_hls_open(const TitleHlsSource *source, double start, TitleH
     goto unwritable;
   for (int t = 0; t < title->sound_count; t++) {
     Sound *sound = &title->sounds[t];
+    const AVCodecParameters *par = title->input->streams[sound->stream]->codecpar;
     if ((error = mux(title->input->streams[sound->stream], sound_base(sound), sound->frame, NULL,
-                     sound->sample, 0, &sound->init)) < 0)
+                     sound->sample, 0, &sound->init)) < 0 ||
+        (par->codec_id == AV_CODEC_ID_AAC && (error = aac_silence(par, &sound->silence)) < 0))
       goto unwritable;
   }
   *out = title;
@@ -1087,6 +1217,7 @@ void title_hls_close(TitleHls *title) {
   for (int t = 0; t < SOUNDS_MOST; t++) {
     av_packet_free(&title->sounds[t].sample);
     av_free(title->sounds[t].init.data);
+    av_free(title->sounds[t].silence.data);
   }
   av_packet_free(&title->video_sample);
   av_free(title->video_init.data);
