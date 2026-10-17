@@ -160,10 +160,17 @@ for rendition in re.findall(r'URI="(a\d+)\.m3u8"', master):
     codec, rate = track["codec_name"], int(track["sample_rate"])
     if not mine:
         print(f"{rendition}: serves no sound -> FAIL"); ok = False; continue
-    # The source track's frame length, from its own packets' spacing.
+    # The source track's frame length, from its own packets' spacing; for a track of one packet,
+    # its codec's frame at the stream's rate (MP3 has MPEG-1's 1152 samples from 32 kHz up).
     source = sorted(t - origin for t, _ in packets[track["index"]])
     steps = sorted(b - a for a, b in zip(source, source[1:]) if b > a)
-    frame = steps[len(steps) // 2]
+    if steps:
+        frame = steps[len(steps) // 2]
+    else:
+        he = "HE" in track.get("profile", "")
+        samples = {"aac": 2048 if he else 1024, "ac3": 1536, "eac3": 1536,
+                   "mp3": 1152 if rate >= 32000 else 576}[codec]
+        frame = samples / rate
     half = frame / 2 + 0.0011  # half a frame, and Matroska's tick
     # Where the source track has no sound, from all its packets, each sounding one frame. A
     # segment may be refused only where such a hole lies more than EDGE_S inside the title: a
