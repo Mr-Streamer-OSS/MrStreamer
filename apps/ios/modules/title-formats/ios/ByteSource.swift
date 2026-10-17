@@ -235,16 +235,15 @@ final class ProviderBytes: NSObject, ByteSource, URLSessionDataDelegate {
             continue
           }
         }
-        if offset > end {
-          // A little further on: what was received before it isn't needed, and a request paused
-          // because nothing read it goes on, else the wait would never end.
-          bytes.removeAll(keepingCapacity: true)
-          head = 0
-          start = end
-          if paused {
-            paused = false
-            task?.resume()
-          }
+        // Nothing here to read yet: the offset is at the end of what was received, of a request
+        // still sending, or a little further on. What was received before it isn't needed, and a
+        // request paused because nothing read it goes on, else the wait would never end.
+        bytes.removeAll(keepingCapacity: true)
+        head = 0
+        start = end
+        if paused {
+          paused = false
+          task?.resume()
         }
         condition.wait()
         continue
