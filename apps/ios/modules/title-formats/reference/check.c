@@ -3,7 +3,8 @@
 // playlist, initialization segment and segment, each rendition, made in order, into a folder,
 // then makes every segment again in a shuffled order, each after a seek, and fails unless both
 // are the same bytes. A sound segment refused for a gap is printed, not saved, and must be
-// refused again after the seek. It counts the separate runs of reading the file asks for, which is how
+// refused again after the seek. streams.txt says which stream of the file each sound rendition
+// carries. It counts the separate runs of reading the file asks for, which is how
 // many requests a provider would see, and the bytes read before the first segment is ready.
 //
 //   check <file> <folder> [start-seconds [interrupt-after-reads]]
@@ -105,6 +106,13 @@ int main(int argc, char **argv) {
     if (uri && count < 16) sscanf(uri + 5, "%15[^.]", renditions[count++]);
   }
   free(data);
+  // Which of the file's streams each sound rendition carries, for verify.py.
+  char path[4096];
+  snprintf(path, sizeof(path), "%s/streams.txt", argv[2]);
+  FILE *streams = fopen(path, "w");
+  for (int r = 1; streams && r < count; r++)
+    fprintf(streams, "%s %d\n", renditions[r], title_hls_sound_stream(title, atoi(renditions[r] + 1)));
+  if (streams) fclose(streams);
   for (int r = 0; r < count; r++) {
     char name[64];
     snprintf(name, sizeof(name), "%s.m3u8", renditions[r]);

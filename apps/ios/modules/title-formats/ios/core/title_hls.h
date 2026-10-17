@@ -3,8 +3,8 @@
 // request from the file's packets, copied unchanged: fragmented MP4, or packed audio for MP3.
 // Nothing is decoded; where a sound track has no packets, frames of silence fill in.
 //
-// The picture is one rendition and each sound track AVPlayer plays (AAC, AC-3, E-AC-3, MP3)
-// another, listed as the stream's audio choices. Subtitles aren't served.
+// The picture is one rendition and each sound track AVPlayer plays (AAC-LC, HE-AAC, AC-3,
+// E-AC-3, MP3) another, listed as the stream's audio choices. Subtitles aren't served.
 //
 // The file is read through `TitleHlsSource`, which the app answers from the provider or from a
 // downloaded copy. One title is used from one thread at a time; `title_hls_interrupt` may be
@@ -64,6 +64,9 @@ TitleHlsResult title_hls_open(const TitleHlsSource *source, double start, TitleH
  */
 TitleHlsResult title_hls_get(TitleHls *title, const char *name, const uint8_t **data,
                              size_t *size, const char **type, char *detail, size_t detail_size);
+
+/** The file's stream index of sound rendition `track` ("a<track>"), or -1: for checks. */
+int title_hls_sound_stream(const TitleHls *title, int track);
 
 void title_hls_interrupt(TitleHls *title);
 void title_hls_close(TitleHls *title);

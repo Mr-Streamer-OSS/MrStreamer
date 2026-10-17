@@ -30,7 +30,8 @@
 //   title. The silence is built for AAC-LC and MP3, and encoded once with FFmpeg's encoder for
 //   AC-3 and E-AC-3 when that writes frames like the track's. A track without one may start or
 //   end EDGE_S inside the picture; a segment where it has a gap elsewhere is refused, with a
-//   reason, when that track is chosen, rather than left to stall.
+//   reason, when that track is chosen, rather than left to stall. The session fails with it,
+//   and opening the title again, from where it stopped, plays the default sound.
 // - Each rendition's MP4 is written by a muxer of its own, fed the packets and flushed twice:
 //   with delay_moov the first flush writes the header, which for AC-3 and E-AC-3 the muxer can
 //   only write once it has parsed a packet, and the second the fragment. A segment keeps the
@@ -372,6 +373,26 @@ static int frame_packet(const uint8_t *data, int size, AVPacket **made) {
   return 0;
 }
 
+/** The AAC audio object type `par`'s AudioSpecificConfig names, or 0 when it has none. */
+static unsigned aac_type(const AVCodecParameters *par) {
+  if (par->extradata_size < 1) return 0;
+  Bits config = {par->extradata, par->extradata_size, 0};
+  unsigned type = bits_read(&config, 5);
+  return type == 31 ? 32 + bits_read(&config, 6) : type;
+}
+
+/**
+ * Whether AVPlayer plays a sound track's codec in HLS: AAC only as AAC-LC or HE-AAC (v1, v2), as
+ * Apple's HLS authoring specification lists it. A variant naming another AAC, such as AAC Main,
+ * in its CODECS fails to open whole, the default sound with it; such a track isn't offered.
+ */
+static int sound_playable(const AVCodecParameters *par) {
+  if (!sound_copyable(par->codec_id)) return 0;
+  if (par->codec_id != AV_CODEC_ID_AAC) return 1;
+  unsigned type = aac_type(par);
+  return type == 0 || type == 2 || type == 5 || type == 29;
+}
+
 /**
  * An AAC-LC frame of silence for the channels `par`'s AudioSpecificConfig names: every channel
  * element has no scale factor bands, so all its coefficients are zero. None for other AAC (SBR,
@@ -380,13 +401,11 @@ static int frame_packet(const uint8_t *data, int size, AVPacket **made) {
 static int aac_silence(const AVCodecParameters *par, AVPacket **made) {
   // The channel elements of channel configurations 1 to 7: S single, C pair, L low frequency.
   static const char *const ELEMENTS[] = {"", "S", "C", "SC", "SCS", "SCC", "SCCL", "SCCCL"};
-  if (par->extradata_size < 2) return 0;
-  Bits config = {par->extradata, par->extradata_size, 0};
-  unsigned type = bits_read(&config, 5);
-  if (type == 31) type = 32 + bits_read(&config, 6);
+  if (par->extradata_size < 2 || aac_type(par) != 2) return 0;
+  Bits config = {par->extradata, par->extradata_size, 5};
   if (bits_read(&config, 4) == 15) bits_read(&config, 24);
   unsigned channels = bits_read(&config, 4);
-  if (type != 2 || channels < 1 || channels > 7) return 0;
+  if (channels < 1 || channels > 7) return 0;
   if (bits_read(&config, 1)) return 0; /* 960-sample frames */
   if (bits_read(&config, 1)) bits_read(&config, 14);
   bits_read(&config, 1);
@@ -1202,7 +1221,7 @@ static TitleHlsResult choose(TitleHls *title, char *detail, size_t detail_size) 
     int offered = 0;
     if (st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
       any = 1;
-      if (sound_copyable(st->codecpar->codec_id) && st->codecpar->sample_rate > 0 &&
+      if (sound_playable(st->codecpar) && st->codecpar->sample_rate > 0 &&
           title->sound_count < SOUNDS_MOST) {
         Sound *sound = &title->sounds[title->sound_count++];
         sound->stream = (int)i;
@@ -1215,7 +1234,7 @@ static TitleHlsResult choose(TitleHls *title, char *detail, size_t detail_size) 
     if ((int)i != title->video && !offered) st->discard = AVDISCARD_ALL;
   }
   if (any && title->sound_count == 0) {
-    say(detail, detail_size, "Its sound isn't AAC, AC-3, E-AC-3 or MP3.");
+    say(detail, detail_size, "Its sound isn't AAC-LC, HE-AAC, AC-3, E-AC-3 or MP3.");
     return TITLE_HLS_UNSUPPORTED;
   }
   return TITLE_HLS_OK;
@@ -1342,17 +1361,23 @@ static void quoted(AVBPrint *text, const char *value) {
   }
 }
 
+/**
+ * The sound track the master playlist makes the default, which AVPlayer plays when a stream is
+ * opened: the file's default, else its first.
+ */
+static int default_sound(const TitleHls *title) {
+  for (int t = 0; t < title->sound_count; t++) {
+    if (title->input->streams[title->sounds[t].stream]->disposition & AV_DISPOSITION_DEFAULT)
+      return t;
+  }
+  return 0;
+}
+
 static void master(TitleHls *title, AVBPrint *text) {
   av_bprintf(text, "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-INDEPENDENT-SEGMENTS\n");
   if (title->start > 0)
     av_bprintf(text, "#EXT-X-START:TIME-OFFSET=%.3f,PRECISE=YES\n", title->start);
-  int chosen = 0;
-  for (int t = 0; t < title->sound_count; t++) {
-    if (title->input->streams[title->sounds[t].stream]->disposition & AV_DISPOSITION_DEFAULT) {
-      chosen = t;
-      break;
-    }
-  }
+  int chosen = default_sound(title);
   for (int t = 0; t < title->sound_count; t++) {
     const AVStream *st = title->input->streams[title->sounds[t].stream];
     const AVDictionaryEntry *language = av_dict_get(st->metadata, "language", NULL, 0);
@@ -1496,14 +1521,23 @@ TitleHlsResult title_hls_get(TitleHls *title, const char *name, const uint8_t **
     TitleHlsResult result = make(title, index, &made, detail, detail_size);
     if (result != TITLE_HLS_OK) return result;
   }
+  // The session fails with this; Try again opens the title anew, from where it stopped, with the
+  // default sound.
   if (!made->renditions[rendition].data) {
     say(detail, detail_size,
-        "This sound track has a gap here that can't be filled; choose another.");
+        rendition - 1 == default_sound(title)
+            ? "Its sound has a gap here that can't be played."
+            : "The chosen sound has a gap here that can't be played. Try again goes on from here "
+              "with the title's main sound.");
     return TITLE_HLS_UNSUPPORTED;
   }
   *data = made->renditions[rendition].data;
   *size = made->renditions[rendition].size;
   return TITLE_HLS_OK;
+}
+
+int title_hls_sound_stream(const TitleHls *title, int track) {
+  return track >= 0 && track < title->sound_count ? title->sounds[track].stream : -1;
 }
 
 void title_hls_interrupt(TitleHls *title) { atomic_store(&title->interrupted, 1); }

@@ -1,14 +1,16 @@
 # Checks a reference run's renditions against the source with system ffprobe and ffmpeg. What
-# each rendition must hold is worked out from the source alone, not from what was served:
+# each rendition must hold is worked out from the source and the stream the core says it carries,
+# never from what was served:
 #   - the picture: every source picture packet, in order, at exactly its time from the first cut;
-#   - a sound rendition is matched to the source track whose packets it carries. It must hold
+#   - a sound rendition is checked against the source stream check.c recorded for it in
+#     streams.txt, as the core reported it; a rendition with none fails. It must hold
 #     every packet of that track from title time 0 on (one within half a frame of 0 may go either
 #     way), in order, each within half a frame of its source time. Anything else it holds must be
 #     one frame of silence, repeated, only where the source track has no packet within half a
 #     frame, and decoding to zero after the first in a row;
-#   - AAC-LC, AC-3, E-AC-3 and MP3 renditions run without gaps from within one frame of title
-#     time 0 to within one frame past the picture's end. Another codec's rendition may lack segments the core
-#     refused for a gap;
+#   - a rendition runs without gaps from within one frame of title time 0 to within one frame
+#     past the picture's end. One without added silence may instead start or end up to 0.1 s
+#     inside, and lack a segment the core refused, but only one where the source track has a gap;
 #   - each rendition decodes cleanly, AC-3 and E-AC-3 with their CRCs checked.
 # A packed MP3 rendition's segments are read as an ID3 transport stream time and raw frames.
 #   python3 -I verify.py <source.mkv> <out-folder>
@@ -137,20 +139,20 @@ ok &= good
 print(f"v {video['codec_name']}: {len(mine)} of {len(theirs)} packets, times within {drift * 1000:.2f} ms, "
       f"decode {'clean' if not errors else 'ERRORS ' + errors[:200]} -> {'ok' if good else 'FAIL'}")
 
-taken = set()
+# Which stream of the file each sound rendition carries, as the core reported it to check.c.
+carries = {}
+if os.path.exists(f"{folder}/streams.txt"):
+    carries = {name: int(index) for name, index in (line.split() for line in open(f"{folder}/streams.txt") if line.strip())}
 for rendition in re.findall(r'URI="(a\d+)\.m3u8"', master):
     playlist = open(f"{folder}/{rendition}.m3u8").read()
     raw = "#EXT-X-MAP" not in playlist
     listed = len(re.findall(r"#EXTINF", playlist))
     names = segments(rendition, "mp3" if raw else "m4s")
     mine = packed(names) if raw else fragments(f"{folder}/{rendition}.mp4", names)
-    hashes = {md5(p) for _, _, p in mine}
-    # The source track whose packets this carries, each track matched once.
-    track = next((s for s in streams if s["codec_type"] == "audio" and s["index"] not in taken
-                  and hashes & {h for _, h in packets.get(s["index"], [])}), None)
+    # The source track the core says this carries; without that, nothing is checked.
+    track = next((s for s in streams if s["index"] == carries.get(rendition) and s["codec_type"] == "audio"), None)
     if not track:
-        print(f"{rendition}: carries no source track's packets -> FAIL"); ok = False; continue
-    taken.add(track["index"])
+        print(f"{rendition}: no source track known for it -> FAIL"); ok = False; continue
     codec, rate = track["codec_name"], int(track["sample_rate"])
     half = round(mine[0][1] * rate) / rate / 2 + 0.0011  # half a frame, and Matroska's tick
     # Expected: every packet from title time 0 on, but in segments refused for a gap; one within
@@ -177,15 +179,25 @@ for rendition in re.findall(r'URI="(a\d+)\.m3u8"', master):
     covering = [t for t, _, _ in added if near(times, t, half)]
     if covering: problems.append(f"{len(covering)} added frames where the source has a packet, the first at {covering[0]:.3f} s")
     if drift > half: problems.append(f"time off by {drift * 1000:.2f} ms")
-    fillable = codec in ("ac3", "eac3", "mp3") or (codec == "aac" and track.get("profile") == "LC")
-    runs = all(abs(a[0] + a[1] - b[0]) < 1e-5 for a, b in zip(mine, mine[1:]))
+    # Either silence fills every gap, or a segment with a gap in the source is refused; a track
+    # without silence may start or end EDGE_S inside the picture.
+    refused = [k for k in range(listed) if k not in served]
+    frame = mine[0][1]
+    edge = (0.1 + 2 * half) if not added else 2 * half
+    if added and refused: problems.append("segments refused in a track it fills with silence")
+    for k in refused:
+        marks = [cuts[k]] + sorted(t for t, _ in expected if cuts[k] <= t < cuts[k + 1]) + [cuts[k + 1]]
+        if not any(b - a > 1.5 * frame for a, b in zip(marks, marks[1:])):
+            problems.append(f"segment {k} refused where the source has no gap")
+    jumps = [(a[0] + a[1], b[0]) for a, b in zip(mine, mine[1:]) if abs(a[0] + a[1] - b[0]) >= 1e-5]
+    unexplained = [a for a, b in jumps
+                   if not any(a <= cuts[k] + half and b >= cuts[k + 1] - half for k in refused)]
+    runs = not jumps
     end = mine[-1][0] + mine[-1][1]
-    if fillable:
-        if len(names) != listed: problems.append(f"{listed - len(names)} segments missing")
-        if not runs: problems.append("gaps")
-        if mine[0][0] > 2 * half: problems.append(f"starts at {mine[0][0]:.3f} s")
-        if not picture_end - 1e-5 <= end <= picture_end + 2 * half:
-            problems.append(f"ends at {end:.3f} s, the picture at {picture_end:.3f} s")
+    if unexplained: problems.append(f"{len(unexplained)} gaps, the first at {unexplained[0]:.3f} s")
+    if 0 not in refused and mine[0][0] > edge: problems.append(f"starts at {mine[0][0]:.3f} s")
+    if listed - 1 not in refused and not picture_end - edge + 2 * half - 1e-5 <= end <= picture_end + 2 * half:
+        problems.append(f"ends at {end:.3f} s, the picture at {picture_end:.3f} s")
     errors, pcm = decode(rendition, mine, raw)
     if errors: problems.append("decode " + errors[:200])
     # Zero PCM over each added frame after the first in a row.
