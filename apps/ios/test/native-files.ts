@@ -21,8 +21,8 @@ interface Native {
   readonly root: string;
   /** What `Paths.availableDiskSpace` answers. */
   free: number;
-  /** Each request a media transfer made: its address, and the range it asked for. */
-  readonly requests: { readonly url: string; readonly range: string | null }[];
+  /** Each request a media transfer made: its address, the range it asked for, and when. */
+  readonly requests: { readonly url: string; readonly range: string | null; readonly at: number }[];
   /** Media transfer requests not yet ended. */
   open: number;
   /** How long URLSession takes to end a request it is asked to pause, in milliseconds. */

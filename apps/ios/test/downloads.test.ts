@@ -223,8 +223,9 @@ async function launch() {
   background.die();
   const list = new DiskFile(native.root, "documents", "downloads.json");
   const left = { list: list.exists ? list.textSync() : null, keychain: new Map(memory.keychain) };
-  if (background.attempts.size === 0)
+  if (background.attempts.size === 0 && background.strays.size === 0) {
     await until(panelsIdle, "the last process's requests to be freed");
+  }
   if (left.list === null) {
     if (list.exists) list.delete();
   } else list.writeSync(left.list);
@@ -488,8 +489,9 @@ describe("downloads", { timeout: 30_000 }, () => {
     await install();
     let app = await launch();
     const { a } = await withProviders(app);
-    memory.appState = "background";
+    appGoes("background");
     const film = await app.addDownload(movieRef(a));
+    expect(native.requests).toEqual([]);
     // An attempt this download never authorized says it completed.
     background.receipts.push({
       receipt: "r-stale",
@@ -508,21 +510,27 @@ describe("downloads", { timeout: 30_000 }, () => {
     await install();
     let app = await launch();
     const { a } = await withProviders(app);
-    memory.appState = "background";
+    appGoes("background");
     const film = await app.addDownload(movieRef(a));
-    // A request the session has that no attempt names, holding the provider's one connection.
+    expect(native.requests).toEqual([]);
+    // A request the session has that no attempt names, holding the provider's one connection
+    // until the next launch's reconcile ends it.
     one.stallMovieFile(otherMovie().id, 1, 60_000);
     const login = `${ONE.username}/${encodeURIComponent(ONE.password)}`;
     background.stray(`${one.url}/movie/${login}/${otherMovie().id}.mp4`);
     await until(() => one.activeStreams() === 1, "the stray request");
+    // Launched in the foreground, its last process gone without hearing a change.
     memory.appState = "active";
     app = await launch();
     await until(
       () => isComplete(app, film.id) || statusOf(app, film.id)?.kind === "failed",
       "the download to end",
     );
+    // The provider, still freeing the stray's connection, took the download's request.
     expect(statusOf(app, film.id)).toEqual({ kind: "complete" });
     expect(background.strays.size).toBe(0);
+    expect(native.requests).toHaveLength(1);
+    expect(native.requests[0]!.at - background.strayEndedAt).toBeGreaterThanOrEqual(1_000);
   });
 
   it("fails a stream, asking the provider nothing, while the native side's requests can't be read, and plays once they can", async () => {

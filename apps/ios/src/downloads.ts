@@ -1010,9 +1010,10 @@ async function drain() {
  */
 async function prepare() {
   await rosterRead();
-  const { running, receipts } = await transfers.reconcile();
+  const { running, receipts, closed } = await transfers.reconcile();
   for (const receipt of receipts) early.set(receipt.receipt, receipt);
-  let unwatched = receipts.length > 0;
+  // Requests that ended unheard, or that no attempt accounted for and were just ended.
+  let unwatched = receipts.length > 0 || closed > 0;
   for (const each of running) {
     if (active?.attempt === each.attempt) continue;
     const record = find(each.id);

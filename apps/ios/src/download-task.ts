@@ -76,9 +76,10 @@ interface Subscription {
 interface BackgroundDownloads {
   /**
    * What is under way and every receipt not acknowledged, at one moment, once any request no
-   * attempt accounts for has ended. Rejects while its record can't be read.
+   * attempt accounts for has ended; `closed` counts those, which leave no receipt. Rejects while
+   * its record can't be read.
    */
-  reconcile(): Promise<{ running: Running[]; receipts: Receipt[] }>;
+  reconcile(): Promise<{ running: Running[]; receipts: Receipt[]; closed: number }>;
   /**
    * Authorizes `attempt` and starts its request; answers whether it goes on from resume data.
    * The same attempt again answers as the first did. Rejects while an earlier attempt may still

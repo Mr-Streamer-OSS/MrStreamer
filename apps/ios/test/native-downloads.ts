@@ -58,6 +58,8 @@ interface State {
   readonly secrets: Map<string, { readonly url: string; readonly data: string }>;
   /** Requests no attempt accounts for, as a task with no readable description is. */
   readonly strays: Set<AbortController>;
+  /** When the last of those requests ended. */
+  strayEndedAt: number;
   readonly listeners: Map<string, Set<(body: never) => void>>;
   /** While true, `reconcile` and `start` are refused, as before the first unlock. */
   unavailable: boolean;
@@ -83,6 +85,7 @@ export const background: State & {
   receipts: [],
   secrets: new Map(),
   strays: new Set(),
+  strayEndedAt: 0,
   listeners: new Map(),
   unavailable: false,
   receiptsMade: 0,
@@ -128,6 +131,7 @@ export const background: State & {
       .finally(() => {
         native.open--;
         this.strays.delete(controller);
+        this.strayEndedAt = Date.now();
       });
   },
   reset() {
@@ -197,7 +201,7 @@ function transfer(key: string, request: StartRequest, resume: ResumeData | null)
       headers["Range"] = `bytes=${resume.written}-`;
       headers["If-Range"] = resume.validator;
     }
-    native.requests.push({ url, range: headers["Range"] ?? null });
+    native.requests.push({ url, range: headers["Range"] ?? null, at: Date.now() });
     native.open++;
     let outcome: Outcome;
     try {
@@ -266,7 +270,7 @@ function transfer(key: string, request: StartRequest, resume: ResumeData | null)
 }
 
 const module = {
-  async reconcile(): Promise<{ running: Running[]; receipts: Receipt[] }> {
+  async reconcile(): Promise<{ running: Running[]; receipts: Receipt[]; closed: number }> {
     if (background.unavailable) {
       throw refused("ERR_DOWNLOADS_UNAVAILABLE", "The downloads can't be read.");
     }
@@ -284,6 +288,7 @@ const module = {
         expected: null,
       })),
       receipts: [...background.receipts],
+      closed: strays.length,
     };
   },
 

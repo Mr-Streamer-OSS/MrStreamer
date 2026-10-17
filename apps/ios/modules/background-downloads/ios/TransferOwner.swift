@@ -244,9 +244,10 @@ final class TransferOwner: NSObject, URLSessionDownloadDelegate {
   /**
    The attempts whose request may still be open and the receipts not yet acknowledged, as one
    moment of the ledger. Before answering, any task of the session that isn't an authorized
-   attempt's, unreadable ones included, is cancelled and its request has ended; an attempt left
-   by a process that ended mid-way is settled from what is on disk. Refused while the ledger
-   can't be read, so nothing new asks the provider meanwhile.
+   attempt's, unreadable ones included, is cancelled and its request has ended; `closed` counts
+   them, since they leave no receipt, so JavaScript gives their provider its time to free the
+   connection. An attempt left by a process that ended mid-way is settled from what is on disk.
+   Refused while the ledger can't be read, so nothing new asks the provider meanwhile.
    */
   func reconcile(done: @escaping (Result<[String: Any], Refusal>) -> Void) {
     queue.async {
@@ -520,7 +521,7 @@ final class TransferOwner: NSObject, URLSessionDownloadDelegate {
         ]
       }
       let receipts = (self.ledger?.receipts ?? []).map(\.dictionary)
-      done(.success(["running": running, "receipts": receipts]))
+      done(.success(["running": running, "receipts": receipts, "closed": strays.count]))
     }
   }
 
