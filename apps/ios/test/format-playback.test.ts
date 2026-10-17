@@ -47,6 +47,12 @@ const sessions: Array<{
   failure: { kind: "status"; status: number } | null;
 }> = [];
 const session = (id: string) => sessions.find((each) => each.id === id)!;
+type NativeFailure = { kind: "unsupported"; detail: string } | { kind: "status"; status: number };
+const stoppedServing = new Set<(event: { id: string; failure: NativeFailure }) => void>();
+/** The native module saying session `id` stopped serving, as only it knows. */
+const sessionFails = (id: string, failure: NativeFailure) => {
+  for (const listener of stoppedServing) listener({ id, failure });
+};
 Object.assign(globalThis, {
   expo: {
     modules: {
@@ -68,12 +74,19 @@ Object.assign(globalThis, {
         closed: (id: string) => session(id).closed.promise,
         failure: (id: string) => session(id).failure,
         trace: () => [],
+        addListener: (
+          _event: "onFailure",
+          listener: (event: { id: string; failure: NativeFailure }) => void,
+        ) => {
+          stoppedServing.add(listener);
+          return { remove: () => stoppedServing.delete(listener) };
+        },
       },
     },
   },
 });
 
-const { play, playbackState, stop } = await import("../src/playback.ts");
+const { onPlaybackFailure, play, playbackState, retry, stop } = await import("../src/playback.ts");
 
 const movie = (id: string, subscriptionId: string | null = "sub") => ({
   id,
@@ -168,6 +181,60 @@ describe("a file AVPlayer can't open", () => {
     expect(playbackState.get().phase).toMatchObject({
       kind: "failed",
       error: "The provider has no file for this title right now.",
+    });
+  });
+
+  describe("when the session stops serving while the player only waits", () => {
+    const gap = "The chosen sound has a gap here that can't be played.";
+    const opening = async () => {
+      void play(movie("a"), async () => ({ url: "http://panel/a.mkv", container: "mkv" }), options);
+      await settle();
+      sessions[0]!.opened.resolve({ kind: "session", playlist: "http://127.0.0.1:1/a/main.m3u8" });
+      await settle();
+      emit("playingChange", { isPlaying: true });
+      fakePlayer.currentTime = 3.878;
+    };
+
+    it("fails at once with the session's reason, once, and Try again goes on from there", async () => {
+      const reported = vi.fn();
+      onPlaybackFailure(reported);
+      await opening();
+      sessionFails(sessions[0]!.id, { kind: "unsupported", detail: gap });
+      await settle();
+      expect(playbackState.get().phase).toMatchObject({
+        kind: "failed",
+        error: `Mr. Streamer can't play this file. ${gap}`,
+      });
+      expect(sessions[0]!.closeAsked).toBe(true);
+      expect(given.at(-1)).toBeNull();
+      // The player's own error, as it lets go, changes nothing.
+      emit("statusChange", { status: "error", error: { message: "Cannot Open" } });
+      expect(playbackState.get().phase).toMatchObject({
+        error: `Mr. Streamer can't play this file. ${gap}`,
+      });
+      expect(reported).toHaveBeenCalledOnce();
+      onPlaybackFailure(null);
+
+      sessions[0]!.closed.resolve();
+      retry();
+      await settle();
+      expect(sessions[1]).toMatchObject({ url: "http://panel/a.mkv", start: 3.878 });
+    });
+
+    it("says nothing of a session it let go of, to the next title or after stopping", async () => {
+      await opening();
+      void play(movie("b"), async () => ({ url: "http://panel/b.mkv", container: "mkv" }), options);
+      sessionFails(sessions[0]!.id, { kind: "unsupported", detail: gap });
+      sessions[0]!.closed.resolve();
+      await settle();
+      sessions[1]!.opened.resolve({ kind: "session", playlist: "http://127.0.0.1:1/b/main.m3u8" });
+      await settle();
+      expect(playbackState.get().phase).toMatchObject({ kind: "loading" });
+
+      stop();
+      sessionFails(sessions[1]!.id, { kind: "status", status: 509 });
+      await settle();
+      expect(playbackState.get().phase).toEqual({ kind: "idle" });
     });
   });
 

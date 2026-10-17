@@ -15,11 +15,18 @@ public class TitleFormatsModule: Module {
   public func definition() -> ModuleDefinition {
     Name("TitleFormats")
 
+    /// `{ id, failure }` when session `id`, once open, stops serving: the same failure
+    /// `failure` answers from then on.
+    Events("onFailure")
+
     /// Makes session `id` for `url`, a provider's file or a copy's `file:` address, to start at
     /// `start` seconds, without reading anything yet. Synchronous, so `close` and `closed` find it from here on.
     Function("create") { (id: String, url: String, headers: [String: String]?, start: Double) in
       let address = URL(string: url) ?? URL(fileURLWithPath: "/nonexistent")
-      let made = FormatSession(url: address, headers: headers ?? [:], start: start)
+      let made = FormatSession(url: address, headers: headers ?? [:], start: start) {
+        [weak self] failure in
+        self?.sendEvent("onFailure", ["id": id, "failure": failure.record])
+      }
       self.lock.lock()
       self.sessions[id] = made
       self.lock.unlock()

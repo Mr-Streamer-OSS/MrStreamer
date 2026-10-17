@@ -722,6 +722,7 @@ describe("downloads", { timeout: 30_000 }, () => {
               closed: () => ended,
               failure: () => null,
               trace: () => [],
+              addListener: () => ({ remove: () => undefined }),
             },
           },
         },

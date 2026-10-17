@@ -327,9 +327,12 @@ function release() {
   length.set(0);
 }
 
-/** Shows why the stream failed: the player's message, which can quote its address, without it. */
+/**
+ * Shows why the stream failed: the player's message, which can quote its address, without it.
+ * The first failure stands; the player may report another as the stream is let go of.
+ */
 function fail(message: string, failure: AnalyticsFailure) {
-  if (!current) return;
+  if (!current || state.get().phase.kind === "failed") return;
   failed?.(failure);
   const { item, options } = current;
   release();
@@ -378,8 +381,16 @@ export async function play(item: Playing, open: Open, options: PlayOptions) {
       const opened = await opening.opened;
       if (controller.signal.aborted) return opening.close();
       if (opened.kind === "session") {
-        format = { session: opened.session, close: opening.close, closed: opening.closed };
+        const { session } = opened;
+        format = { session, close: opening.close, closed: opening.closed };
         noteClosing();
+        // AVPlayer may only wait on the request the session refused, so its own word ends the
+        // stream; a session already let go of says nothing to what plays now.
+        void session.failed.then((failure) => {
+          if (format?.session !== session) return;
+          const error = { kind: "stream", failure } as const;
+          fail(describeError(error), appFailure(error));
+        });
         playable = { uri: opened.session.playlist, contentType: "hls" };
         // The stream starts there itself, so AVPlayer reads nothing before it.
         if (current) current.seek = null;

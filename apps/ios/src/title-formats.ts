@@ -7,7 +7,8 @@ import { statusFailure } from "./errors.ts";
 // HLS on 127.0.0.1. For playback.ts, which owns the one session that may be open.
 //
 // A session reads the provider's file over one request at a time and holds the provider's
-// connection until `closed` resolves, after `close` or a failure, whether or not it opened.
+// connection until `closed` resolves, after `close` or a failure, whether or not it opened. One
+// that opened says when it stops serving, which AVPlayer may not.
 
 type NativeFailure =
   | { readonly kind: "status"; readonly status: number }
@@ -33,6 +34,11 @@ interface TitleFormatsModule {
   failure(id: string): NativeFailure | null;
   /** The session's requests to the provider so far, without their address, for native proofs. */
   trace(id: string): readonly Readonly<Record<string, number | string>>[];
+  /** Once per session that opened and then stopped serving, with what `failure` answers. */
+  addListener(
+    event: "onFailure",
+    listener: (event: { readonly id: string; readonly failure: NativeFailure }) => void,
+  ): { remove(): void };
 }
 
 /**
@@ -56,6 +62,11 @@ export interface FormatSession {
   readonly playlist: string;
   /** Why it stopped serving, if it did. */
   failure(): StreamFailure | null;
+  /**
+   * Resolves when it stops serving, as soon as it does: AVPlayer may only wait on a request that
+   * failed, without an error. Never resolves for a session that closed first.
+   */
+  readonly failed: Promise<StreamFailure>;
 }
 
 export type Opened =
@@ -82,8 +93,15 @@ export function openFormat(
   readonly closed: Promise<void>;
 } {
   const id = String(++made);
+  // Listening from before the session exists, until it closed, for its own failure only.
+  let stopped!: (failure: StreamFailure) => void;
+  const failed = new Promise<StreamFailure>((resolve) => (stopped = resolve));
+  const listening = native().addListener("onFailure", (event) => {
+    if (event.id === id) stopped(streamFailure(event.failure));
+  });
   native().create(id, url, headers ?? null, start);
   const closed = native().closed(id);
+  void closed.then(() => listening.remove());
   const close = () => native().close(id);
   if (signal.aborted) close();
   else signal.addEventListener("abort", close, { once: true });
@@ -98,7 +116,7 @@ export function openFormat(
       const found = native().failure(id);
       return found ? streamFailure(found) : null;
     };
-    return { kind: "session", session: { playlist: result.playlist, failure } };
+    return { kind: "session", session: { playlist: result.playlist, failure, failed } };
   });
   return { opened, close, closed };
 }

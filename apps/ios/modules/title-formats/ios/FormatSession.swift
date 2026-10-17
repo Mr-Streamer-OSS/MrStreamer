@@ -25,10 +25,17 @@ final class FormatSession {
   private var sourceEnded = false
   private var titleFreed = false
   private var finished: [() -> Void] = []
+  /// Told, once and on the work queue, when a session that opened stops serving: AVPlayer
+  /// needn't report an error for a request that failed, and may wait instead.
+  private let failed: (SessionFailure) -> Void
 
-  init(url: URL, headers: [String: String], start: Double) {
+  init(
+    url: URL, headers: [String: String], start: Double,
+    failed: @escaping (SessionFailure) -> Void
+  ) {
     source = url.isFileURL ? CopyBytes(path: url.path) : ProviderBytes(url: url, headers: headers)
     self.start = start
+    self.failed = failed
     var random = [UInt8](repeating: 0, count: 16)
     _ = SecRandomCopyBytes(kSecRandomDefault, random.count, &random)
     token = random.map { String(format: "%02x", $0) }.joined()
@@ -46,10 +53,14 @@ final class FormatSession {
     (source as? ProviderBytes).map { provider in provider.traced.map(\.record) } ?? []
   }
 
+  /// Stops serving for `failure`, the first one only, and says so unless the session closed.
   private func fail(_ failure: SessionFailure) {
     lock.lock()
-    if failure_ == nil { failure_ = failure }
+    let first = failure_ == nil
+    if first { failure_ = failure }
+    let tell = first && !closed
     lock.unlock()
+    if tell { failed(failure) }
   }
 
   /// Reads the file's header and index, then serves it. Calls `done` on the work queue.
