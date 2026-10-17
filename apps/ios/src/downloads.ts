@@ -3,7 +3,6 @@ import type { Download, DownloadList } from "@mrstreamer/contracts/downloads";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
 import { RawTitleRef, type TitleRef } from "@mrstreamer/contracts/ondemand";
-import type { StreamFailure } from "@mrstreamer/contracts/playback";
 import { t } from "@mrstreamer/core/i18n";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import { isFinished } from "@mrstreamer/core/viewing/titles";
@@ -11,7 +10,7 @@ import { Directory, File, Paths } from "expo-file-system";
 import { AppState } from "react-native";
 import { currentRoster, members, onRoster } from "./account.ts";
 import { transfer, type Transfer, type TransferEnd } from "./download-task.ts";
-import { appError, describeError, withoutLogin } from "./errors.ts";
+import { appError, describeError, statusFailure, withoutLogin } from "./errors.ts";
 import { readJson, writeJson } from "./files.ts";
 import { onReclaim, play, playbackState, playingItem, stop, type Playing } from "./playback.ts";
 import { keychainSecrets } from "./secrets.ts";
@@ -276,12 +275,15 @@ function freeBytes(): number | null {
   }
 }
 
-/** The subscription whose stream has the provider's connection, if one does. */
+/**
+ * The subscription whose stream has the provider's connection, if one does, or whose format
+ * session still holds it while its request ends.
+ */
 function borrowed(): string | null {
-  const { phase } = playbackState.get();
+  const { phase, closing } = playbackState.get();
   return phase.kind === "loading" || phase.kind === "playing" || phase.kind === "paused"
     ? phase.item.subscriptionId
-    : null;
+    : closing;
 }
 
 function viewOf(record: Stored, names: ReadonlyMap<string, string>, busy: string | null): Download {
@@ -645,7 +647,7 @@ async function settle(id: string, transferring: Active, ending: Ending) {
       fail(ending.failure);
       break;
     case "refused":
-      fail({ kind: "stream", failure: refusal(ending.status) });
+      fail({ kind: "stream", failure: statusFailure(ending.status) });
       break;
     case "folder":
       fail({ kind: "folder", detail: ending.detail });
@@ -668,12 +670,6 @@ function withoutFailure(record: Stored): Stored {
   return rest;
 }
 
-/** The desktop's reading of an HTTP status for a stream. */
-function refusal(status: number): StreamFailure {
-  if ([401, 403, 429, 458, 509].includes(status)) return { kind: "refused", status };
-  if (status === 404 || status === 410) return { kind: "unavailable", status };
-  return { kind: "provider-error", status };
-}
 
 const messageOf = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
@@ -970,7 +966,7 @@ export function playDownload(id: string): void {
         tell();
         throw new AppFailure({ kind: "stream", failure: { kind: "unavailable", status: 404 } });
       }
-      return { url: media.uri, hls: false };
+      return { url: media.uri, container: record.container };
     },
     {
       watch: true,

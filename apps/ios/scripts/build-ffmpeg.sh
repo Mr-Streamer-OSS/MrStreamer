@@ -5,13 +5,14 @@
 # no codecs, no programs, no network code and nothing under the GPL.
 #
 #   scripts/build-ffmpeg.sh ios          on a Mac with Xcode: dynamic xcframeworks for the iPhone
-#                                        and the arm64 simulator, in vendor/ffmpeg/ios
+#                                        and the arm64 simulator, in the module that links them,
+#                                        modules/title-formats/ios/vendor/ffmpeg
 #   scripts/build-ffmpeg.sh reference    on Linux or a Mac: the same configuration for this
 #                                        machine, in vendor/ffmpeg/reference, for the core's tests
 #
 # Needs a C compiler, make, pkg-config and curl. The source is FFmpeg 9.0.2, pinned by the
 # SHA-256 the desktop's scripts/build-ffmpeg.sh pins, from the copy attached to Mr. Streamer's
-# v0.0.14 release. vendor/ffmpeg/<target>/BUILD.txt records the archive, its checksum, the
+# v0.0.14 release. BUILD.txt beside the result records the archive, its checksum, the
 # configure line and the toolchain.
 set -euo pipefail
 
@@ -44,6 +45,7 @@ sha256() {
 jobs=$(getconf _NPROCESSORS_ONLN)
 work=$root/build/ffmpeg
 out=$root/vendor/ffmpeg/$target
+[[ $target == ios ]] && out=$root/modules/title-formats/ios/vendor/ffmpeg
 mkdir -p "$work"
 archive=$work/ffmpeg-$FFMPEG_VERSION.tar.xz
 if [[ ! -f $archive || $(sha256 "$archive") != "$FFMPEG_SHA256" ]]; then

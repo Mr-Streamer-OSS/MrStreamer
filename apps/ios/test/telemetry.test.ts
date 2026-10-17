@@ -169,7 +169,7 @@ const channel = (id = "c1") => ({
 });
 const opens = async () => ({
   url: `http://panel.example/live/${encodeURIComponent(USERNAME)}/${PASSWORD}/1.m3u8`,
-  hls: true,
+  container: "m3u8",
 });
 const login = [USERNAME, PASSWORD];
 
@@ -265,7 +265,7 @@ describe("playback", () => {
       title,
       async () => {
         if (refuse) throw new app.AppFailure({ kind: "invalid-login" });
-        return { url: `http://panel.example/movie/${PASSWORD}/1.mp4`, hls: false };
+        return { url: `http://panel.example/movie/${PASSWORD}/1.mp4`, container: "mp4" };
       },
       { watch: true, login },
     );
