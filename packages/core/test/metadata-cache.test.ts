@@ -118,3 +118,56 @@ describe("complete streaming-service snapshots", () => {
     expect(terminal.saved()?.services?.at).toBe(1000 * DAY);
   });
 });
+
+describe("warmed metadata aliases", () => {
+  it("checks the raw expiry even without a key, including a backward clock correction", async () => {
+    let now = 182 * DAY - 1;
+    const store = metadataStore({
+      read: async () => ({
+        version: 1,
+        entries: { "movie:1": { at: 0, names: { en: "Translated" }, original: "Original" } },
+      }),
+      write: async () => {},
+      client: null,
+      region: "NL",
+      now: () => now,
+      onChange: () => {},
+    });
+    await Promise.resolve();
+    expect(store.searchName("movie", "1")).toContain("translated");
+    now++;
+    expect(store.get("movie", "1")).toBeNull();
+    expect(store.name("movie", "1", "en")).toBeNull();
+    expect(store.searchName("movie", "1")).toBe("");
+    now -= DAY;
+    expect(store.searchName("movie", "1")).toContain("translated");
+  });
+
+  it("removes cached aliases when a refreshed title becomes missing", async () => {
+    vi.useFakeTimers();
+    const store = metadataStore({
+      read: async () => ({
+        version: 1,
+        entries: { "movie:1": { at: 0, names: { en: "Obsolete" } } },
+      }),
+      write: async () => {},
+      client: {
+        ...tmdb({ key: "test" }),
+        details: async () => {
+          throw new TmdbError({ kind: "missing" });
+        },
+        services: async () => [],
+      },
+      region: "NL",
+      now: () => 151 * DAY,
+      onChange: () => {},
+    });
+    await Promise.resolve();
+    expect(store.searchName("movie", "1")).toBe("obsolete");
+    store.want([{ kind: "movie", tmdbId: "1", addedAt: 0 }]);
+    await finish(store);
+    expect(store.status().known).toBe(1);
+    expect(store.get("movie", "1")).toBeNull();
+    expect(store.searchName("movie", "1")).toBe("");
+  });
+});

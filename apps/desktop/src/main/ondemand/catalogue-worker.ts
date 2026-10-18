@@ -466,8 +466,9 @@ function filterFiles(found: Shown, kind: TitleKind, known: readonly KnownFile[])
 /** The collections of a kind as a viewer of `language` sees them, with the metadata so far. */
 function collectionsOf(found: Shown, kind: TitleKind): Collections {
   const key = `${kind}|${metadataVersion}`;
+  const now = Date.now();
   let made = found.collections.get(key);
-  if (!made) {
+  if (!made || !made.validAt(now)) {
     const { language } = found.index;
     const tmdbKind = kind === "movie" ? "movie" : "tv";
     made = collections({
@@ -477,7 +478,8 @@ function collectionsOf(found: Shown, kind: TitleKind): Collections {
       metadata: (tmdbId) => metadata.get(tmdbKind, tmdbId),
       names: (tmdbId) => metadata.name(tmdbKind, tmdbId, language),
       services: metadata.services(tmdbKind),
-      now: Date.now(),
+      expiresAt: (id) => metadata.expiresAt(tmdbKind, id),
+      now,
     });
     // Older metadata only takes memory.
     for (const old of found.collections.keys()) {
