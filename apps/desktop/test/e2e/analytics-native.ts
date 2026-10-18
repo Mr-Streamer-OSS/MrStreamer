@@ -227,11 +227,13 @@ export async function runNativeTelemetry(c: Context) {
       assert((await c.read()).summaries?.unfinished, "No active journal at opt-out");
       await c.escape();
       await c.settings();
-      assert(
-        pending(await c.read()).some(
-          (item) => item.event.event === "stream_summary" && item.attempts === 0,
-        ),
-        "Body attempts were spent before Settings was ready",
+      // A refused connection briefly retains its reservation until the refund is saved.
+      await c.waitFor(
+        async () =>
+          pending(await c.read()).some(
+            (item) => item.event.event === "stream_summary" && item.attempts === 0,
+          ),
+        2500,
       );
       await c.capture("hold");
       let held: (typeof c.bodies)[number] | undefined;
