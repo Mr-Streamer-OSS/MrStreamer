@@ -225,6 +225,9 @@ export function StatusLine({ status, space }: { status: Status; space: number })
         style={{ maxHeight: most }}
         contentContainerStyle={styles.line}
         indicatorStyle="white"
+        // Retry and Settings take the first tap with Search's keyboard up, rather than it only
+        // dismissing the keyboard, as Search's results list does.
+        keyboardShouldPersistTaps="handled"
         testID="status-line"
       >
         <Text style={styles.text}>{text}</Text>
