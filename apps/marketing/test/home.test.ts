@@ -121,7 +121,7 @@ describe("the download page", () => {
     ]);
   });
 
-  it("puts the DMG first on a Mac, with its version", () => {
+  it("puts the DMG first on a Mac", () => {
     openDownload("mac", RELEASED);
     expect(mine()).toEqual([
       {
