@@ -209,6 +209,17 @@ export async function runDownloads(
         await wait(() => exists(element));
         actions.push({ action: label, at: now() });
         await page.evaluate(`${element}.scrollIntoView({ block: "nearest" })`);
+        // A dismissed search can still cover the newly mounted details during its exit.
+        // Wait until the real pointer can reach the control, rather than clicking its scrim.
+        await wait(() =>
+          page.evaluate<boolean>(`(() => {
+            const target = ${element};
+            if (!target || target.matches(":disabled")) return false;
+            const box = target.getBoundingClientRect();
+            return box.width > 0 && box.height > 0 &&
+              target.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+          })()`),
+        );
         const point = await page.evaluate<{ x: number; y: number }>(`(() => {
           const box = ${element}.getBoundingClientRect();
           return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
