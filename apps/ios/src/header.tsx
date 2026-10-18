@@ -2,12 +2,11 @@ import {
   router,
   useNavigation,
   useRootNavigationState,
-  useRoute,
   type NativeStackHeaderItem,
   type NativeStackNavigationOptions,
 } from "expo-router";
 import type { SFSymbol } from "expo-symbols";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Image, StyleSheet, Text, View } from "react-native";
 import { colors } from "./ui.tsx";
 
@@ -35,10 +34,15 @@ export const tabHref = (tab: Tab, screen: TabScreen) => `${BASE[tab]}/${screen}`
 /** Whether a route names a tab. */
 const isTab = (segment: string | undefined): segment is Tab => TABS.some((tab) => tab === segment);
 
-/** Navigation state as far as finding the tabs needs it. */
+/** Navigation state as far as finding the tabs and their stacks needs it. */
 interface Navigated {
+  readonly key?: string;
   readonly index?: number;
-  readonly routes: readonly { readonly name: string; readonly state?: Navigated }[];
+  readonly routes: readonly {
+    readonly key?: string;
+    readonly name: string;
+    readonly state?: Navigated;
+  }[];
 }
 
 /**
@@ -51,20 +55,31 @@ export interface TabsAt {
 }
 
 /**
- * The tabs nearest under what shows, in navigation's `state`: down the focused routes, the
- * `(tabs)` route at or below each stack's focus. Null when there are none: with no provider saved,
- * the root shows Connect and offline Downloads instead.
+ * The `(tabs)` route nearest under what shows, in navigation's `state`: down the focused routes,
+ * the one at or below each stack's focus, with how many routes lie above it in that stack.
  */
-export function tabsAt(state: Navigated | undefined): TabsAt | null {
+function nearestTabs(
+  state: Navigated | undefined,
+): { readonly tabs: Navigated | undefined; readonly above: number } | null {
   if (!state) return null;
   const focus = state.index ?? state.routes.length - 1;
   for (let at = focus; at >= 0; at--) {
     const route = state.routes[at];
-    if (route?.name !== "(tabs)") continue;
-    const name = route.state?.routes[route.state.index ?? 0]?.name;
-    return { tab: isTab(name) ? name : "(home)", above: focus - at };
+    if (route?.name === "(tabs)") return { tabs: route.state, above: focus - at };
   }
-  return tabsAt(state.routes[focus]?.state);
+  return nearestTabs(state.routes[focus]?.state);
+}
+
+/**
+ * The tabs nearest under what shows, in navigation's `state`, as `nearestTabs` finds them. Null
+ * when there are none: with no provider saved, the root shows Connect and offline Downloads
+ * instead.
+ */
+export function tabsAt(state: Navigated | undefined): TabsAt | null {
+  const found = nearestTabs(state);
+  if (!found) return null;
+  const name = found.tabs?.routes[found.tabs.index ?? 0]?.name;
+  return { tab: isTab(name) ? name : "(home)", above: found.above };
 }
 
 /** The tabs under what shows, from navigation's own state, as `tabsAt` finds them. */
@@ -128,37 +143,38 @@ export function tabScreenOptions(tab: Tab) {
 }
 
 /**
- * Closes what the top bar pushed on the calling tab's stack as the viewer leaves for another tab,
- * as Home always did: Downloads, Settings and the provider form, and anything above them. What
- * was under them, such as Movies' details, stays. A screen over all the tabs, as Search or Runtime
- * proof, isn't leaving the tab, so it leaves them open to go back to.
+ * Closes what the top bar pushed on a tab's stack once another tab is selected, as Home always
+ * did: Downloads, Settings and the provider form, and anything above them. What was under them,
+ * such as Movies' details, stays. Called once, by the tabs' layout. It follows which tab
+ * navigation's state selects, not a tab's blur: Search over the tabs blurs the tab first without
+ * changing the selection, so nothing closes then, and a Search result in another tab closes Search
+ * and selects that tab in one step, with no second blur to see.
  */
-export function useCloseOnLeave() {
+export function useCloseOnTabChange() {
   const navigation = useNavigation();
-  const { key } = useRoute();
-  useEffect(
-    () =>
-      navigation.addListener("blur", () => {
-        const tabs = navigation.getState();
-        if (!tabs || tabs.routes[tabs.index]?.key === key) return;
-        const stack = tabs.routes.find((route) => route.key === key)?.state;
-        if (!stack?.key) return;
-        const focus = stack.index ?? stack.routes.length - 1;
-        const top = stack.routes[focus]?.key;
-        const first = stack.routes.findIndex((route) => SHARED.includes(route.name));
-        if (!top || first < 1 || first > focus) return;
-        // From the stack's top screen down to the first shared one. This tab's navigation names
-        // the tab as the action's source, which the stack can't find among its own screens, and
-        // then pops nothing; the stack's own top screen as the source is what it pops from.
-        navigation.dispatch({
-          type: "POP",
-          payload: { count: focus - first + 1 },
-          source: top,
-          target: stack.key,
-        });
-      }),
-    [navigation, key],
-  );
+  const tabs = nearestTabs(useRootNavigationState())?.tabs;
+  const selected = tabs?.routes[tabs.index ?? 0]?.key;
+  const shown = useRef(selected);
+  useEffect(() => {
+    const left = shown.current;
+    shown.current = selected;
+    if (!tabs || !left || left === selected) return;
+    const stack = tabs.routes.find((route) => route.key === left)?.state;
+    if (!stack?.key) return;
+    const focus = stack.index ?? stack.routes.length - 1;
+    const top = stack.routes[focus]?.key;
+    const first = stack.routes.findIndex((route) => SHARED.includes(route.name));
+    if (!top || first < 1 || first > focus) return;
+    // From the stack's top screen down to the first shared one. The tabs' navigation names its
+    // own route as the action's source, which the stack can't find among its screens and then
+    // pops nothing; the stack's own top screen as the source is what it pops from.
+    navigation.dispatch({
+      type: "POP",
+      payload: { count: focus - first + 1 },
+      source: top,
+      target: stack.key,
+    });
+  }, [navigation, tabs, selected]);
 }
 
 /** The mark and the name, as the desktop's logo shows them. */

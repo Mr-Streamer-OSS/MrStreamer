@@ -1,5 +1,5 @@
 import { Stack } from "expo-router";
-import { tabScreenOptions, useCloseOnLeave } from "../../../header.tsx";
+import { tabScreenOptions } from "../../../header.tsx";
 
 /**
  * Home, with the shared top bar (`header.tsx`): Downloads and Settings open on its stack, and
@@ -7,7 +7,6 @@ import { tabScreenOptions, useCloseOnLeave } from "../../../header.tsx";
  * pushed closes as the viewer leaves for another tab.
  */
 export default function HomeLayout() {
-  useCloseOnLeave();
   return (
     <Stack screenOptions={tabScreenOptions("(home)")}>
       <Stack.Screen name="index" options={{ title: "", headerTransparent: true }} />

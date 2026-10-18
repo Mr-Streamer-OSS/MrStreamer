@@ -1,6 +1,7 @@
 import { NativeTabs } from "expo-router/native-tabs";
 import { useSegments } from "expo-router";
 import { NowPlaying } from "../../accessory.tsx";
+import { useCloseOnTabChange } from "../../header.tsx";
 import { usePlayback } from "../../playback.ts";
 import { useVirtualisedScreen } from "../../tab-bar.ts";
 
@@ -9,8 +10,10 @@ import { useVirtualisedScreen } from "../../tab-bar.ts";
 // Picture in Picture, on AirPlay or set aside for Downloads or Settings, the now playing accessory
 // sits above the bar. The bar shrinks as Home, the shelves of Movies and Series and their details
 // scroll: iOS can't follow a virtualised list, as Live's and the poster grids are, so there it
-// stays put.
+// stays put. Selecting another tab closes the Downloads, Settings and provider form the last one
+// had open (`useCloseOnTabChange`).
 export default function TabsLayout() {
+  useCloseOnTabChange();
   const { phase, watch, pip, external, aside } = usePlayback();
   const segments: readonly string[] = useSegments();
   const virtualised = useVirtualisedScreen();

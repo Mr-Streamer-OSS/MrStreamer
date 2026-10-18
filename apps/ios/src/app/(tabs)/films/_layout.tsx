@@ -1,5 +1,5 @@
 import { Stack } from "expo-router";
-import { tabScreenOptions, useCloseOnLeave } from "../../../header.tsx";
+import { tabScreenOptions } from "../../../header.tsx";
 
 /**
  * Movies: its tabs of shelves and grids, with collections and details pushed over them, and the
@@ -7,7 +7,6 @@ import { tabScreenOptions, useCloseOnLeave } from "../../../header.tsx";
  * details under them stay.
  */
 export default function FilmsLayout() {
-  useCloseOnLeave();
   return (
     <Stack screenOptions={tabScreenOptions("films")}>
       <Stack.Screen name="index" options={{ title: "Movies", headerLargeTitle: true }} />
