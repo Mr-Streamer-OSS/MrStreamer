@@ -80,6 +80,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { attempt, Database, transaction, unavailable } from "./database.ts";
 import { prepareVerifiedFiles, VERIFIED_FILES_TABLE } from "./verified-files.ts";
+import { prepareDetailCache, DETAIL_CACHE_TABLE } from "./detail-cache.ts";
 import {
   prepareSavedSubtitles,
   SAVED_SUBTITLES_TABLE,
@@ -294,6 +295,7 @@ export function observedViewingStoreLayer(
 function prepare(db: DatabaseSync): void {
   db.exec(SCHEMA);
   prepareVerifiedFiles(db);
+  prepareDetailCache(db);
   prepareSavedSubtitles(db);
   // Records from before movies and series lack the payload column, and later ones the time a
   // title left Continue watching. Checked and added under the write lock, since two copies of the
@@ -769,6 +771,7 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
             ...MARK_TABLES,
             ...WATCHLIST_TABLES,
             VERIFIED_FILES_TABLE,
+            DETAIL_CACHE_TABLE,
             SAVED_SUBTITLES_TABLE,
             SUBTITLE_RESULTS_TABLE,
             SUBTITLE_PROOFS_TABLE,
