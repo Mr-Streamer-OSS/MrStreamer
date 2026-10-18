@@ -312,10 +312,15 @@ function persist(owner: CatalogueOwner, kept: Loaded): void {
 function save(): Promise<void> {
   if (waiting) clearTimeout(waiting);
   waiting = null;
-  for (const { owner, kept } of unsaved.values()) {
+  for (const pending of unsaved.values()) {
+    const { owner, kept } = pending;
     writing = writing
       .then(async () => {
-        if (loaded.get(owner.subscriptionId) !== kept) return;
+        if (
+          loaded.get(owner.subscriptionId) !== kept ||
+          unsaved.get(owner.subscriptionId) !== pending
+        )
+          return;
         const { fetchedAt, catalogue } = kept;
         await writeJsonFile(cachePath(owner), {
           version: 2,
@@ -325,10 +330,12 @@ function save(): Promise<void> {
           ...catalogue,
         });
         await removeFile(legacyCachePath(owner));
+        if (unsaved.get(owner.subscriptionId) === pending) unsaved.delete(owner.subscriptionId);
       })
+      // Keep the newest still-owned snapshot dirty. A later save or flush tries once again;
+      // no retry loop can hold shutdown open or revive lists forgotten in the meantime.
       .catch(() => {});
   }
-  unsaved.clear();
   return writing;
 }
 

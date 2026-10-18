@@ -356,8 +356,11 @@ export function metadataStore(deps: MetadataDeps) {
         for (let page = 1, pages = 1; page <= Math.min(pages, SERVICE_PAGES); page++) {
           if (replaced() || unreachable()) return;
           const found = await ask(() => client.onService(kind, service.id, deps.region, page));
-          // A page TMDB won't give ends this service's list, not the others'.
-          if (!found || found === "missing") break;
+          // An exhausted transient failure abandons this crawl: partial membership must not
+          // replace a complete snapshot or receive another week of freshness. A missing page
+          // is terminal for this service only, as before.
+          if (!found) return;
+          if (found === "missing") break;
           ids.push(...found.ids);
           pages = found.pages;
           await new Promise((done) => setTimeout(done, 1000 / PER_SECOND));
@@ -365,6 +368,8 @@ export function metadataStore(deps: MetadataDeps) {
         lists[kind].push({ ...service, ids });
       }
     }
+    // Even the final request can settle after a new wanted list or language takes over.
+    if (replaced() || refused) return;
     file.services = { region: deps.region, at: now(), ...lists };
     changed("content", true);
   }
