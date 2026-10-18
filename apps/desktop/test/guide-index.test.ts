@@ -1114,7 +1114,7 @@ describe("a search that doesn't answer", () => {
     },
   );
 
-  it("is given up after its time, its worker ended, and the next search starts another", async () => {
+  it("reports a timed out search, ends its worker, and starts another for the next search", async () => {
     let started = 0;
     const { run, guide, serve } = await standalone({
       searchWorker: (options) => {
@@ -1126,8 +1126,14 @@ describe("a search that doesn't answer", () => {
     serve(tv(programme("one.test", "2000", "2100", "News")));
     await run(guide.refresh(ID));
 
-    expect(await run(guide.search("news"))).toEqual([]);
-    expect(await run(guide.search("news"))).toEqual([]);
+    await expect(run(guide.search("news"))).rejects.toMatchObject({
+      error: { kind: "unexpected", detail: "The guide's search took too long." },
+    });
+    await expect(
+      run(guide.searchChannels("news", [{ subscriptionId: ID, id: "1" }], NOW + 60_000)),
+    ).rejects.toMatchObject({
+      error: { kind: "unexpected", detail: "The guide's search took too long." },
+    });
     expect(started).toBe(2);
   });
 

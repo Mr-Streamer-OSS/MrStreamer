@@ -541,7 +541,7 @@ export class Guide extends Context.Service<
      */
     programme(channel: OwnedId, guide: string, start: number): Effect.Effect<Programme | null>;
     /** Programmes on now or later whose title matches, in any guide, on now first. */
-    search(query: string): Effect.Effect<readonly ProgrammeMatch[]>;
+    search(query: string): Effect.Effect<readonly ProgrammeMatch[], Failed>;
     /**
      * What a search finds in the programmes of the given channels, by each channel's `ownedKey`:
      * on now, and the first later one that starts before `until`. Every channel given is searched.
@@ -550,7 +550,7 @@ export class Guide extends Context.Service<
       query: string,
       channels: readonly OwnedId[],
       until: number,
-    ): Effect.Effect<Record<string, ListingMatch>>;
+    ): Effect.Effect<Record<string, ListingMatch>, Failed>;
     /**
      * For each saved subscription, in their order: how many channels its guides cover and from
      * which, what is under way with its own guide and how its latest download ended, or that it
@@ -2138,8 +2138,8 @@ function make() {
       });
 
     /**
-     * A search in the search worker, answering `fallback` when it fails. Stopped, it waits for
-     * the worker's answer all the same, so the files it reads are held until the worker is done.
+     * Operational search failures stay failures, rather than claiming a successful empty result.
+     * Removal returns the empty fallback; interruption waits for the worker before releasing files.
      */
     const searching = <A>(
       subscriptionId: string,
@@ -2152,15 +2152,15 @@ function make() {
         searches.set(subscriptionId, under.add(stop));
         const answer = search(stop.signal)
           .catch((cause: unknown) => {
-            if (!stop.signal.aborted) console.warn("[guide] a search failed", cause);
-            return fallback;
+            if (stop.signal.aborted) return fallback;
+            throw cause;
           })
           .finally(() => under.delete(stop));
-        return Effect.promise(() => answer).pipe(
+        return Effect.tryPromise({ try: () => answer, catch: failedWith }).pipe(
           Effect.onInterrupt(() =>
             Effect.promise(() => {
               stop.abort();
-              return answer;
+              return answer.catch(() => {});
             }),
           ),
         );
@@ -2172,13 +2172,13 @@ function make() {
      * What `lookup` answers per channel id, in each subscription's own guides, for those of
      * `channels` whose subscription is saved, by each channel's `ownedKey`.
      */
-    const perChannel = <A>(
+    const perChannel = <A, E = never>(
       channels: readonly OwnedId[],
       lookup: (
         found: Found,
         subscriptionId: string,
         ids: readonly string[],
-      ) => Effect.Effect<Record<string, A>>,
+      ) => Effect.Effect<Record<string, A>, E>,
     ) =>
       Effect.gen(function* () {
         // A list may hold tens of thousands of channels: other work gets its turn between slices.
