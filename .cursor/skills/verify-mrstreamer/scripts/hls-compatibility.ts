@@ -41,7 +41,7 @@ export async function hlsCompatibilityScenario(d: Driver, baseline: boolean) {
   }
   await d.wait(async () => {
     const v = await d.evaluate<Playing>(video);
-    return v.time > 0.3 && v.width > 0 && v.audio > 0;
+    return v.time > 1 && v.width > 0 && v.audio > 0 && !/Tuning|Reconnecting/.test(v.text);
   });
   d.observed["firstEpoch"] = await d.evaluate<Playing>(video);
   await d.capture("hls-first-epoch");
@@ -63,17 +63,30 @@ export async function hlsCompatibilityScenario(d: Driver, baseline: boolean) {
   );
   await d.wait(async () => {
     const v = await d.evaluate<Playing>(video);
-    return v.time > 0.3 && v.time < 7 && v.width > 0 && v.audio > 0;
+    return (
+      v.time > 1 && v.time < 7 && v.width > 0 && v.audio > 0 && !/Tuning|Reconnecting/.test(v.text)
+    );
   });
   d.observed["switchedSound"] = await d.evaluate<Playing>(video);
+  await d.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 800, y: 700 });
+  await d.click("Inspect the selected sound", "document.querySelector('[aria-label=More]')");
+  await d.click("Inspect Sound", "document.querySelector('[role=dialog] [aria-label=Sound]')");
+  const selectedSound = await d.evaluate<string>(
+    "document.querySelector('[role=dialog] [data-item][aria-pressed=true]')?.textContent ?? ''",
+  );
+  d.observed["selectedSound"] = selectedSound;
+  if (!selectedSound.includes("Nederlands")) throw new Error("Dutch sound was not selected.");
   await d.capture("hls-switched-sound");
+  await d.key("Escape", 27);
   await d.click("Stop the converted stream", "document.querySelector('[aria-label=Stop]')");
   await d.wait(async () => (await d.evaluate<Playing>(video)).paused);
   d.observed["stopped"] = await d.evaluate<Playing>(video);
   await d.click("Watch the channel again", "document.querySelector('[aria-label=Watch]')");
   await d.wait(async () => {
     const v = await d.evaluate<Playing>(video);
-    return v.width > 0 && v.audio > 0 && !v.paused;
+    return (
+      v.time > 1 && v.width > 0 && v.audio > 0 && !v.paused && !/Tuning|Reconnecting/.test(v.text)
+    );
   });
   d.observed["recovered"] = await d.evaluate<Playing>(video);
   await d.capture("hls-recovered");
