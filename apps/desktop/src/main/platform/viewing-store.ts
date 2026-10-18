@@ -311,13 +311,15 @@ function prepare(db: DatabaseSync): void {
     if (!has("titles", "since")) db.exec("alter table titles add column since integer");
   });
   // A build from before marks that erased an account deleted its events and left its marks.
+  // The same confirmed erasure also clears display details written by a newer build.
   const erased = db
     .prepare(
       "select distinct account from marked_series as kept where not exists (select 1 from events where events.account = kept.account)",
     )
     .all();
   for (const { account } of erased) {
-    if (typeof account === "string") deleteForGood(db, MARK_TABLES, account);
+    if (typeof account === "string")
+      deleteForGood(db, [...MARK_TABLES, DETAIL_CACHE_TABLE], account);
   }
   const stored = db.prepare("select value from meta where key = 'state-version'").get();
   if (stored?.["value"] !== String(STATE_VERSION)) rebuild(db);

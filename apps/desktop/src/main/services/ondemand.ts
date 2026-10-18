@@ -605,7 +605,7 @@ function make(deps: OnDemandDeps) {
           running = { source, token, fiber };
           refreshing.set(source.id, running);
         }
-        return yield* Fiber.join(running.fiber);
+        return yield* joinFlight(running.fiber, source);
       });
 
     /**
