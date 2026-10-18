@@ -1,6 +1,7 @@
 import type { Title } from "@mrstreamer/contracts/ondemand";
 import { describe, expect, it } from "vitest";
 import { indexCatalogue, searchPage } from "../src/ondemand/catalogue.ts";
+import type { FilterFiles } from "../src/ondemand/filters.ts";
 import type { OnDemandCatalogue, ProviderTitle } from "../src/provider.ts";
 
 const movie = (id: string, name: string, addedAt = 1): ProviderTitle => ({
@@ -29,6 +30,30 @@ const ids = (titles: readonly Title[]) =>
   titles.map((title) => `${title.subscriptionId}/${title.id}`);
 
 describe("the search relevance corpus", () => {
+  it("uses current alias values after warming, in-place edits, missing answers and language changes", () => {
+    const index = indexCatalogue([source([movie("film", "Provider")])], "en");
+    const names = ["Ancien"];
+    let alias = { title: "Displayed", original: "Original", names };
+    const read = () => alias;
+    const find = (query: string) => ids(searchPage(index, "movie", query, read).titles);
+    expect(find("ancien")).toEqual(["one/film"]);
+    expect(find("ancien")).toEqual(["one/film"]);
+    names[0] = "Nouveau";
+    expect(find("ancien")).toEqual([]);
+    expect(find("nouveau")).toEqual(["one/film"]);
+    alias = { title: "Vertaling", original: "Oorspronkelijk", names: [] };
+    expect(find("displayed")).toEqual([]);
+    expect(find("original")).toEqual([]);
+    expect(find("vertaling")).toEqual(["one/film"]);
+    expect(find("oorspronkelijk")).toEqual(["one/film"]);
+    alias = { title: "", original: "", names: [] };
+    expect(find("vertaling")).toEqual([]);
+    expect(find("oorspronkelijk")).toEqual([]);
+    expect(find("provider")).toEqual(["one/film"]);
+    alias = { title: "Displayed", original: "Original", names: ["Ancien"] };
+    expect(find("ancien")).toEqual(["one/film"]);
+  });
+
   it.each([0, 1, 6, 20, 300, Infinity])(
     "keeps filtered ranking, stable ties and both totals at limit %s",
     (limit) => {
@@ -49,7 +74,7 @@ describe("the search relevance corpus", () => {
         ],
         "en",
       );
-      const files = new Map();
+      const files: FilterFiles = new Map();
       const page = searchPage(index, "movie", "story", undefined, limit, {
         filters: { quality: "4k", language: "fr" },
         files,

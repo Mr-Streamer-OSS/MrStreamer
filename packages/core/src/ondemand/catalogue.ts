@@ -318,6 +318,42 @@ export interface TitleSearchAliases {
   readonly names: readonly string[];
 }
 
+interface PreparedAliases {
+  readonly title: string;
+  readonly original: string | null;
+  readonly names: readonly string[];
+  readonly indexed: SearchNames;
+}
+
+const preparedAliases = new WeakMap<Title, PreparedAliases>();
+
+/**
+ * The caller reads current metadata on every search, including expiry and missing answers.
+ * Reuse only the spelling work when those raw values still agree; retain a copy of the names
+ * so a caller changing its array in place cannot keep obsolete spellings alive.
+ */
+function aliasNames(title: Title, alias: string | TitleSearchAliases): SearchNames | undefined {
+  const displayed = typeof alias === "string" ? "" : (alias.title ?? "");
+  const original = typeof alias === "string" ? null : (alias.original ?? null);
+  const names = typeof alias === "string" ? (alias ? [alias] : []) : alias.names;
+  if (!displayed && !original && names.length === 0) {
+    preparedAliases.delete(title);
+    return undefined;
+  }
+  const kept = preparedAliases.get(title);
+  if (
+    kept &&
+    kept.title === displayed &&
+    kept.original === original &&
+    kept.names.length === names.length &&
+    kept.names.every((name, index) => name === names[index])
+  )
+    return kept.indexed;
+  const indexed = indexNames(displayed, original ? [original] : [], names);
+  preparedAliases.set(title, { title: displayed, original, names: [...names], indexed });
+  return indexed;
+}
+
 /**
  * Titles holding every query word across displayed, original, provider and translated names.
  * Exact names precede prefixes, word starts and substrings; each name scores independently so
@@ -363,13 +399,7 @@ export function searchPage(
   let unfiltered = 0;
   for (const [index, title] of titles.entries()) {
     if (title.adult) continue;
-    const alias = aliases(title);
-    const extra =
-      typeof alias === "string"
-        ? alias
-          ? indexNames("", [], [alias])
-          : undefined
-        : indexNames(alias.title ?? "", alias.original ? [alias.original] : [], alias.names);
+    const extra = aliasNames(title, aliases(title));
     const names = searchNames[index];
     if (!names) continue;
     let rank = scoreNames(asked, names, extra);
