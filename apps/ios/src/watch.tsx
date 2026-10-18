@@ -1,3 +1,4 @@
+import { router } from "expo-router";
 import { lockAsync, OrientationLock, unlockAsync } from "expo-screen-orientation";
 import { isPictureInPictureSupported, VideoAirPlayButton, VideoView } from "expo-video";
 import { useEffect, useRef, useState } from "react";
@@ -16,10 +17,12 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Glass, IconButton } from "./glass.tsx";
+import { tabHref, useTab, type TabScreen } from "./header.tsx";
 import {
   closeWatch,
   onEndPictureInPicture,
   pictureInPicture,
+  playbackState,
   player,
   playingItem,
   playNext,
@@ -28,6 +31,7 @@ import {
   retry,
   seekBy,
   seekTo,
+  setAside,
   showVersions,
   stop,
   togglePause,
@@ -39,18 +43,40 @@ import {
 import { colors } from "./ui.tsx";
 
 /**
- * Watch: the player full screen, over the tabs, with A3's controls: a close button, AirPlay and
- * Picture in Picture at the top, and everything else in one large glass panel. A movie or an
- * episode adds a scrubber, its sound and subtitle tracks and the next episode. It is the app's
- * own layer rather than a route, because the view that starts Picture in Picture has to stay
- * while it plays: Watch then hides, and the tabs and accessory take over. Closing it shows the
- * screen under it, a title's details among them. A movie or an episode turns Watch to landscape
- * while it shows; the screens under it turn as the phone does again once it closes.
+ * Watch: the player full screen, over the tabs, with A3's controls: a close button, AirPlay,
+ * Picture in Picture, Downloads and Settings at the top, and everything else in one large glass
+ * panel, all showing and hiding together. A movie or an episode adds a scrubber, its sound and
+ * subtitle tracks and the next episode. It is the app's own layer rather than a route, because
+ * the view that starts Picture in Picture has to stay while it plays: Watch then hides, and the
+ * tabs and accessory take over. Closing it shows the screen under it, a title's details among
+ * them. A movie or an episode turns Watch to landscape while it shows; the screens under it turn
+ * as the phone does again once it closes.
+ *
+ * Downloads and Settings open on the tab under Watch without stopping what plays: where Picture in
+ * Picture can, it takes the picture over, as its own button does; otherwise Watch is set aside,
+ * paused, until the accessory brings it back (`setAside`).
  */
 export function WatchLayer() {
   const { phase, watch, pip } = usePlayback();
   const view = useRef<VideoView>(null);
   const [controls, setControls] = useState(true);
+  const tab = useTab();
+  const openScreen = (screen: TabScreen) => {
+    router.push(tabHref(tab, screen));
+    const now = playbackState.get();
+    const shown = view.current;
+    if (now.phase.kind !== "playing" || now.external || !isPictureInPictureSupported() || !shown) {
+      return setAside();
+    }
+    // Picture in Picture reports starting, which closes Watch over the screen just opened. If it
+    // refuses, or doesn't start within a second, Watch is set aside instead of staying over it.
+    const item = now.phase.item;
+    const unless = () => {
+      const then = playbackState.get();
+      if (then.watch && !then.pip && playingItem(then.phase) === item) setAside();
+    };
+    void shown.startPictureInPicture().then(() => void setTimeout(unless, 1000), unless);
+  };
 
   useEffect(() => {
     onEndPictureInPicture(() => void view.current?.stopPictureInPicture());
@@ -128,7 +154,10 @@ export function WatchLayer() {
         />
       ) : null}
       {watch && controls ? (
-        <Controls onPictureInPicture={() => void view.current?.startPictureInPicture()} />
+        <Controls
+          onPictureInPicture={() => void view.current?.startPictureInPicture()}
+          onScreen={openScreen}
+        />
       ) : null}
     </View>
   );
@@ -140,7 +169,13 @@ function turn(change: () => Promise<void>) {
   turning = turning.then(change).catch(() => undefined);
 }
 
-function Controls({ onPictureInPicture }: { onPictureInPicture: () => void }) {
+function Controls({
+  onPictureInPicture,
+  onScreen,
+}: {
+  onPictureInPicture: () => void;
+  onScreen: (screen: TabScreen) => void;
+}) {
   const { phase } = usePlayback();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
@@ -153,24 +188,38 @@ function Controls({ onPictureInPicture }: { onPictureInPicture: () => void }) {
       <Glass style={[styles.circle, { top: insets.top + 12, left: edge.left }]}>
         <IconButton symbol="xmark" label="Close" onPress={closeWatch} testID="watch-close" />
       </Glass>
-      {streaming ? (
-        <Glass style={[styles.capsule, { top: insets.top + 12, right: edge.right }]}>
-          <VideoAirPlayButton
-            style={styles.airplay}
-            tint={colors.text}
-            activeTint={colors.text}
-            accessibilityLabel="AirPlay"
-          />
-          {isPictureInPictureSupported() ? (
-            <IconButton
-              symbol="pip.enter"
-              label="Picture in Picture"
-              onPress={onPictureInPicture}
-              testID="watch-pip"
+      <Glass style={[styles.capsule, { top: insets.top + 12, right: edge.right }]}>
+        {streaming ? (
+          <>
+            <VideoAirPlayButton
+              style={styles.airplay}
+              tint={colors.text}
+              activeTint={colors.text}
+              accessibilityLabel="AirPlay"
             />
-          ) : null}
-        </Glass>
-      ) : null}
+            {isPictureInPictureSupported() ? (
+              <IconButton
+                symbol="pip.enter"
+                label="Picture in Picture"
+                onPress={onPictureInPicture}
+                testID="watch-pip"
+              />
+            ) : null}
+          </>
+        ) : null}
+        <IconButton
+          symbol="arrow.down.circle"
+          label="Downloads"
+          onPress={() => onScreen("downloads")}
+          testID="watch-downloads"
+        />
+        <IconButton
+          symbol="gearshape"
+          label="Settings"
+          onPress={() => onScreen("settings")}
+          testID="watch-settings"
+        />
+      </Glass>
       <Glass style={[styles.panel, { bottom: insets.bottom + 12, ...edge }]}>
         <View style={[styles.top, !wide && styles.stacked]}>
           <View style={styles.names}>

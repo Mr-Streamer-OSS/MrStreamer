@@ -198,10 +198,13 @@ export function TextTabs<T extends string>({
   tabs,
   value,
   onChange,
+  lead,
 }: {
   tabs: readonly { readonly value: T; readonly label: string }[];
   value: T;
   onChange: (value: T) => void;
+  /** A control before the tabs, in the same row, as Live's country. */
+  lead?: ReactNode;
 }) {
   return (
     <ScrollView
@@ -210,6 +213,7 @@ export function TextTabs<T extends string>({
       contentContainerStyle={styles.tabs}
       accessibilityRole="tablist"
     >
+      {lead}
       {tabs.map((tab) => {
         const selected = tab.value === value;
         return (

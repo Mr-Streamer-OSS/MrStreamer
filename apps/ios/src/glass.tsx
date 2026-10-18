@@ -38,6 +38,11 @@ function useAccessibility() {
   return useStore(accessibility);
 }
 
+/** Whether Reduce Motion is on: what moves on its own, as Search arriving, fades instead. */
+export function useReduceMotion(): boolean {
+  return useAccessibility().reduceMotion;
+}
+
 /** Whether the app's controls are glass now. */
 export function useGlass(): boolean {
   return supported && !useAccessibility().reduceTransparency;

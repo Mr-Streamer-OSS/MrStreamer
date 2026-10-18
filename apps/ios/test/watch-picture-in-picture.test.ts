@@ -3,12 +3,14 @@ import { Window } from "happy-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Playing } from "../src/playback.ts";
 
-// Returns from Picture in Picture as Watch answers them. The real Watch layer and playback run
-// with React DOM on a happy-dom window, as details-screen.test.ts does. The native VideoView is a
-// stand-in for the patched one: every return it asks about carries a number, and Watch's answers
-// reach it later, as Expo runs a view's async functions on the main queue. It tells AVKit the
-// answer for the number still waiting; another return, Picture in Picture stopping and the view
-// going each tell AVKit no for the one waiting. The Swift itself is not run here.
+// Returns from Picture in Picture as Watch answers them, and Watch's Downloads and Settings, which
+// keep what plays going. The real Watch layer, top bar routes and playback run with React DOM on
+// a happy-dom window, as details-screen.test.ts does. The native VideoView is a stand-in for the
+// patched one: every return it asks about carries a number, and Watch's answers reach it later,
+// as Expo runs a view's async functions on the main queue. It tells AVKit the answer for the
+// number still waiting; another return, Picture in Picture stopping and the view going each tell
+// AVKit no for the one waiting. Asked to start Picture in Picture, it starts when the test says
+// the iPhone can. The Swift itself is not run here.
 
 const REACT_DOM = "react-dom/client";
 const window = new Window();
@@ -42,6 +44,12 @@ const native = vi.hoisted(() => ({
   answeredInHandler: false,
   /** The player's listeners, to fail what plays. */
   listeners: new Map<string, (event: object) => void>(),
+  /** Whether the iPhone has Picture in Picture, and whether asking for it starts it. */
+  pictureInPicture: { supported: false, starts: true },
+  /** What the player was told: "play", "pause" or "replace", in order. */
+  player: [] as string[],
+  /** Where the top bar's routes went. */
+  pushed: [] as string[],
 }));
 
 vi.mock("expo-video", async () => {
@@ -84,7 +92,9 @@ vi.mock("expo-video", async () => {
         if (this.waiting === request) this.tell(restored);
       });
     }
-    async startPictureInPicture() {}
+    async startPictureInPicture() {
+      if (native.pictureInPicture.starts) this.start();
+    }
     async stopPictureInPicture() {}
     private cancel() {
       if (this.waiting !== null) this.tell(false);
@@ -100,7 +110,7 @@ vi.mock("expo-video", async () => {
   return {
     VideoView,
     VideoAirPlayButton: () => null,
-    isPictureInPictureSupported: () => false,
+    isPictureInPictureSupported: () => native.pictureInPicture.supported,
     createVideoPlayer: () => ({
       muted: true,
       timeUpdateEventInterval: 0,
@@ -108,9 +118,9 @@ vi.mock("expo-video", async () => {
       duration: 0,
       addListener: (name: string, listener: (event: object) => void) =>
         native.listeners.set(name, listener),
-      replaceAsync: async () => undefined,
-      play: () => undefined,
-      pause: () => undefined,
+      replaceAsync: async () => void native.player.push("replace"),
+      play: () => void native.player.push("play"),
+      pause: () => void native.player.push("pause"),
     }),
   };
 });
@@ -125,6 +135,7 @@ vi.mock("react-native", async () => {
     Pressable: ({ children, testID, onPress }: Props) =>
       createElement("button", { "data-testid": testID, onClick: onPress }, children),
     StatusBar: () => null,
+    Image: () => null,
     StyleSheet: { create: <T>(styles: T) => styles, absoluteFill: {} },
     Keyboard: { dismiss: () => undefined },
     PanResponder: { create: () => ({ panHandlers: {} }) },
@@ -140,16 +151,22 @@ vi.mock("expo-screen-orientation", () => ({
   lockAsync: async () => undefined,
   unlockAsync: async () => undefined,
 }));
+vi.mock("expo-router", () => ({
+  router: { push: (href: string) => void native.pushed.push(href) },
+  useSegments: () => ["(tabs)", "live"],
+}));
 vi.mock("../src/glass.tsx", async () => {
   const { createElement } = await import("react");
+  type Props = { testID?: string; onPress: () => void };
   return {
     Glass: ({ children }: { children: React.ReactNode }) => createElement("div", null, children),
-    IconButton: () => null,
+    IconButton: ({ testID, onPress }: Props) =>
+      createElement("button", { "data-testid": testID, onClick: onPress }),
   };
 });
 vi.mock("../src/ui.tsx", () => ({ colors: { text: "#FFFFFF", dim: "#8E8E93" } }));
 
-const { play, playbackState, retry, stop } = await import("../src/playback.ts");
+const { openWatch, play, playbackState, retry, stop } = await import("../src/playback.ts");
 const { WatchLayer } = await import("../src/watch.tsx");
 
 const movie = (id: string): Playing => ({
@@ -180,7 +197,16 @@ function shown(): NativeView {
 let unmount = () => {};
 beforeEach(() => {
   stop();
-  Object.assign(native, { views: [], calls: [], sent: [], told: [], answeredInHandler: false });
+  Object.assign(native, {
+    views: [],
+    calls: [],
+    sent: [],
+    told: [],
+    answeredInHandler: false,
+    pictureInPicture: { supported: false, starts: true },
+    player: [],
+    pushed: [],
+  });
 });
 afterEach(() => unmount());
 
@@ -295,5 +321,120 @@ describe("returning from Picture in Picture", () => {
       { view: before.id, request: first, restored: false },
       { view: after.id, request: second, restored: true },
     ]);
+  });
+});
+
+/** Watch shows `item`, playing once `playing` says the player started. */
+async function watching(item: Playing, opens = open, { playing = true } = {}) {
+  const container = window.document.createElement("div");
+  const root = createRoot(container);
+  act(() => root.render(React.createElement(WatchLayer)));
+  unmount = () => act(() => root.unmount());
+  await act(() => play(item, opens, inWatch));
+  if (playing) started();
+  return {
+    press: (testID: string) =>
+      act(() => {
+        const button = container.querySelector(`[data-testid="${testID}"]`) as {
+          click(): void;
+        } | null;
+        if (!button) throw new Error(`No ${testID} in Watch`);
+        button.click();
+      }),
+  };
+}
+/** The player reports it plays, or stopped playing. */
+const started = (isPlaying = true) =>
+  act(() => native.listeners.get("playingChange")?.({ isPlaying }));
+const channel = (id: string): Playing => ({ ...movie(id), title: "A channel", live: true });
+
+describe("Downloads and Settings from Watch", () => {
+  it("opens Settings on the tab under Watch while Picture in Picture keeps it playing", async () => {
+    native.pictureInPicture.supported = true;
+    const watch = await watching(movie("1"));
+    native.player.length = 0;
+    await watch.press("watch-settings");
+    expect(native.pushed).toEqual(["/live/settings"]);
+    expect(playbackState.get()).toMatchObject({
+      phase: { kind: "playing" },
+      watch: false,
+      pip: true,
+      aside: false,
+    });
+    expect(native.player).toEqual([]);
+  });
+
+  it("pauses where Picture in Picture can't take it, and plays on from there on return", async () => {
+    const watch = await watching(movie("1"));
+    native.player.length = 0;
+    await watch.press("watch-downloads");
+    started(false);
+    expect(native.pushed).toEqual(["/live/downloads"]);
+    expect(playbackState.get()).toMatchObject({
+      phase: { kind: "paused" },
+      watch: false,
+      aside: true,
+    });
+    act(() => openWatch());
+    expect(playbackState.get()).toMatchObject({ watch: true, aside: false });
+    // The same stream goes on: nothing is opened or replaced.
+    expect(native.player).toEqual(["pause", "play"]);
+  });
+
+  it("sets Watch aside when Picture in Picture doesn't start", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      native.pictureInPicture = { supported: true, starts: false };
+      const watch = await watching(movie("1"));
+      await watch.press("watch-settings");
+      await act(async () => undefined);
+      expect(playbackState.get()).toMatchObject({ watch: true, aside: false });
+      act(() => vi.advanceTimersByTime(1000));
+      expect(playbackState.get()).toMatchObject({ watch: false, aside: true });
+      expect(native.player.at(-1)).toBe("pause");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("brings a channel back live rather than from where it paused", async () => {
+    let opened = 0;
+    const opens = async () => {
+      opened++;
+      return { url: "file:live", container: "m3u8" };
+    };
+    const watch = await watching(channel("9"), opens);
+    await watch.press("watch-settings");
+    started(false);
+    await act(async () => openWatch());
+    expect(opened).toBe(2);
+    expect(playbackState.get()).toMatchObject({ phase: { kind: "loading" }, watch: true });
+  });
+
+  it("pauses a stream still connecting once it starts, and leaves a paused one paused", async () => {
+    const connecting = await watching(movie("1"), open, { playing: false });
+    await connecting.press("watch-settings");
+    expect(playbackState.get()).toMatchObject({ phase: { kind: "loading" }, aside: true });
+    native.player.length = 0;
+    started();
+    expect(native.player).toEqual(["pause"]);
+    unmount();
+
+    const paused = await watching(movie("2"));
+    started(false);
+    native.player.length = 0;
+    await paused.press("watch-settings");
+    act(() => openWatch());
+    expect(native.player).toEqual([]);
+    expect(playbackState.get()).toMatchObject({ phase: { kind: "paused" }, watch: true });
+  });
+
+  it("keeps a failure as it is, for the accessory to show and Watch to offer again", async () => {
+    const watch = await watching(movie("1"));
+    act(() => failure());
+    await watch.press("watch-settings");
+    expect(playbackState.get()).toMatchObject({ phase: { kind: "failed" }, aside: true });
+    act(() => openWatch());
+    expect(playbackState.get()).toMatchObject({ phase: { kind: "failed" }, watch: true });
   });
 });

@@ -7,7 +7,7 @@ the desktop's install, build or packages.
 
 It connects Xtream subscriptions, one or several, and shows everything from all of them
 together, as the desktop does: there is no subscription to switch to. Live lists a country's channels with their
-providers' logos, its categories as text tabs, and plays them; Movies and Series browse the
+providers' logos, the country first in its row of category tabs, and plays them; Movies and Series browse the
 desktop's collections (For you, New, Genres, Services, 4K and All) and open details pushed on
 their tab, with seasons and episodes, the version menu, the watchlist and episodes marked by hand.
 A movie or an episode plays in Watch from where it stopped. Home leads with the preview, then
@@ -162,15 +162,24 @@ Each responsibility has one owner, a plain module with a store the screens read:
   after installing removes what an earlier install left there, by an index of the ids it wrote;
   writes, removals and clearing run one at a time so none loses another's change to the index.
 
-Routes are in `src/app` (Expo Router): `(tabs)` are the system's native tabs, Home's Downloads and
-Settings are pushed from its top bar, Settings' provider form (`provider`, Add provider or a
-provider's Edit) above Settings, and `connect` shows until a subscription is saved. With copies on
+Routes are in `src/app` (Expo Router): `(tabs)` are the system's native tabs, Home, Live, Movies
+and Series. Every screen of theirs has one top bar (`src/header.tsx`): the brand on the left, after
+the back button on a pushed screen, and Search, Downloads and Settings on the right, less the
+button of the screen it is on. Downloads, Settings and Settings' provider form (`provider`, Add
+provider or a provider's Edit) are Home's screens, pushed on the tab they were asked from (the other
+tabs' route files re-export them), and close as the viewer leaves that tab; Movies' and Series'
+details under them stay. `search` opens over the tabs, fading in, and closes back onto the screen
+it opened over; it keeps its text until the app ends, and says which providers' lists are still
+loading or failed. `connect` shows until a subscription is saved. With copies on
 the phone, Connect also opens `offline`, the same Downloads outside the tabs, so copies play with
 no provider saved, after a relaunch too. Connect and `provider` share `src/provider-form.tsx`. Settings lists each provider as a row with how it
 stands; pressing one offers Retry, its reloads, Edit and Remove as a system sheet, and Remove asks
 whether to delete its history too.
 Watch (`src/watch.tsx`) is a layer over the navigation rather than a route, because the view that
-starts Picture in Picture has to stay while it plays. A movie or an episode turns it to landscape
+starts Picture in Picture has to stay while it plays. Its Downloads and Settings open on the tab
+under it: Picture in Picture takes what plays where it can, else Watch is set aside paused
+(`setAside` in `playback.ts`) and the accessory brings it back, a title from where it paused and a
+channel live again. A movie or an episode turns it to landscape
 (`expo-screen-orientation`); closing it unlocks again, and iOS turns the screens under it as the
 phone is held. On the simulator the screens follow its device orientation (agent-device's
 `orientation`), not where Watch left them. `patches/` makes expo-video report Picture in Picture
