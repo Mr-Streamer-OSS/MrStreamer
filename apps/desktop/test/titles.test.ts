@@ -430,7 +430,9 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
             expect.objectContaining({ codec_type: "audio", codec_name: "aac" }),
           ]),
         );
-        expect(picturesOf(converted.body).decoded).toBeGreaterThan(0);
+        const decoded = picturesOf(converted.body);
+        expect(decoded.decoded).toBeGreaterThan(0);
+        expect(decoded.errors).toBe("");
         const seek = await play(`${opened.url}?start=9&audio=1`);
         expect(seek.response.headers.get("x-title-video")).toBe("convert");
         expect(seek.response.headers.get("x-start")).toBe("9");
@@ -1863,7 +1865,26 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
       const run = await play(`${session.url}?start=30`);
       expect(run.response.status).toBe(200);
       expect(performance.now() - began).toBeGreaterThan(timeout);
-      expect(Number(run.response.headers.get("x-start"))).toBeCloseTo(21.746, 2);
+      // FFmpeg 6 includes 46 ms of audio preroll in this file's origin; newer versions don't.
+      // The copied picture must still begin at the fixture's 29.2-second keyframe.
+      const origin = spawnSync(
+        FFPROBE,
+        [
+          "-v",
+          "error",
+          "-show_entries",
+          "format=start_time",
+          "-of",
+          "csv=p=0",
+          fileURLToPath(new URL("./fixtures/title-receiver.mkv", import.meta.url)),
+        ],
+        { encoding: "utf8" },
+      );
+      expect(origin.status).toBe(0);
+      expect(Number(run.response.headers.get("x-start")) + Number(origin.stdout)).toBeCloseTo(
+        29.2,
+        2,
+      );
       expect(picturesOf(run.body).decoded).toBeGreaterThan(0);
       expect(provider.mostFilesAtOnce()).toBe(1);
     } finally {
