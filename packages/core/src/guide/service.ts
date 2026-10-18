@@ -2170,7 +2170,8 @@ function make() {
 
     /**
      * What `lookup` answers per channel id, in each subscription's own guides, for those of
-     * `channels` whose subscription is saved, by each channel's `ownedKey`.
+     * `channels` whose subscription is saved, by each channel's `ownedKey`. Keeps successful
+     * reads when another subscription fails; fails only when none of the relevant reads succeed.
      */
     const perChannel = <A, E = never>(
       channels: readonly OwnedId[],
@@ -2193,12 +2194,21 @@ function make() {
           yield* rest(slice());
         }
         const answers: Record<string, A> = {};
+        let failure: E | undefined;
+        let succeeded = false;
         for (const subscription of yield* source.saved) {
           const ids = asked.get(subscription.id);
           if (!ids) continue;
-          const found = yield* withContext(subscription, (context) =>
-            lookup(context, subscription.id, ids),
+          const result = yield* Effect.result(
+            withContext(subscription, (context) => lookup(context, subscription.id, ids)),
           );
+          if (result._tag === "Failure") {
+            failure ??= result.failure;
+            continue;
+          }
+          const found = result.success;
+          if (found === null) continue;
+          succeeded = true;
           for (const id in found) {
             const answer = found[id];
             if (answer !== undefined)
@@ -2206,6 +2216,7 @@ function make() {
             yield* rest(slice());
           }
         }
+        if (!succeeded && failure !== undefined) return yield* Effect.fail(failure);
         return answers;
       });
 
@@ -2469,23 +2480,41 @@ function make() {
         Effect.gen(function* () {
           const matches: ProgrammeMatch[] = [];
           let at = 0;
+          let failure: Failed | undefined;
+          let succeeded = false;
           for (const subscription of yield* source.saved) {
             // Each subscription's own first fifty hold every one of the first fifty of them all.
-            const found = yield* withContext(subscription, (context) =>
-              Effect.map(
-                searching(
-                  subscription.id,
-                  (signal) =>
-                    searchAt(context.guides, context.channels, query, context.at, searcher, signal),
-                  [],
+            const result = yield* Effect.result(
+              withContext(subscription, (context) =>
+                Effect.map(
+                  searching(
+                    subscription.id,
+                    (signal) =>
+                      searchAt(
+                        context.guides,
+                        context.channels,
+                        query,
+                        context.at,
+                        searcher,
+                        signal,
+                      ),
+                    [],
+                  ),
+                  (programmes) => ({ at: context.at, programmes }),
                 ),
-                (programmes) => ({ at: context.at, programmes }),
               ),
             );
+            if (result._tag === "Failure") {
+              failure ??= result.failure;
+              continue;
+            }
+            const found = result.success;
             if (!found) continue;
+            succeeded = true;
             at = found.at;
             matches.push(...found.programmes);
           }
+          if (!succeeded && failure !== undefined) return yield* failure;
           const onNow = (match: ProgrammeMatch) => (match.programme.start <= at ? 0 : 1);
           return matches
             .sort((a, b) => onNow(a) - onNow(b) || a.programme.start - b.programme.start)
