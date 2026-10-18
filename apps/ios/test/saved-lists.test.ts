@@ -174,6 +174,7 @@ beforeEach(() => {
   rmSync(join(native.root, "cache"), { recursive: true, force: true });
   native.gate = null;
   native.undeletable = null;
+  native.sizeOf = null;
   memory.aliases = [];
   memory.keychain.clear();
   memory.holdSecrets = false;
@@ -392,6 +393,46 @@ describe("a launch with lists saved", () => {
     expect(saved()).toEqual(
       [`${a}.live.json`, `${b}.live.json`, `${b}.live.json.next`, `${b}.titles.json`].toSorted(),
     );
+  });
+
+  it("keeps writes a stopped app left halfway within 256 MiB, the oldest movie and series lists going first", async () => {
+    const app = await launch();
+    const three = { username: "six", password: "six-Pw6" };
+    const a = await added(app, one, ONE);
+    const b = await added(app, two, TWO);
+    const c = await added(app, await panelFor(three), three);
+    const ids = [a, b, c];
+    // Stopped as each list moved into place: only the new files are left, 55 MiB each.
+    ids.forEach((id, at) => {
+      for (const [kind, age] of [
+        ["titles", at + 1],
+        ["live", at + 4],
+      ] as const) {
+        const name = `${id}.${kind}.json`;
+        renameSync(pathOf(name), pathOf(`${name}.next`));
+        utimesSync(pathOf(`${name}.next`), age * 1000, age * 1000);
+      }
+    });
+    native.sizeOf = (path) => (path.includes("/catalogues/") ? 55 * 1024 * 1024 : undefined);
+    memory.holdLists = true;
+    const again = await launch();
+    await until(
+      () => ids.every((id) => member(again, id).live.kind === "ready"),
+      "the saved channel lists",
+    );
+    await until(() => member(again, c).titles.kind === "ready", "the newest movie lists");
+    expect(saved()).toEqual(
+      [`${a}.live.json`, `${b}.live.json`, `${c}.live.json`, `${c}.titles.json`].toSorted(),
+    );
+    // The two it deleted are not there, and load from the provider as any missing list does.
+    await until(
+      () => [a, b].every((id) => member(again, id).titles.kind === "loading"),
+      "the movie lists asked for",
+    );
+    for (const id of [a, b]) {
+      expect(member(again, id).titles).toMatchObject({ kind: "loading", last: null });
+    }
+    expect(member(again, c).titles).toMatchObject({ kind: "ready", from: "cache" });
   });
 });
 

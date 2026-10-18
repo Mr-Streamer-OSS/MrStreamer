@@ -205,7 +205,7 @@ export function writeList(
       return discard(pendingOf(id, kind));
     }
     if (!stands()) return discard(fileOf(id, kind));
-    shed(nameOf(id, kind));
+    shed(nameOf(id, kind), false);
   });
 }
 
@@ -246,7 +246,7 @@ export function pruneLists(ids: readonly string[]): void {
     for (const entry of at.list()) {
       if (!kept.has(entry.name)) entry.delete();
     }
-    shed(null);
+    shed(null, true);
   } catch {
     // Tried again at the next launch.
   }
@@ -254,17 +254,23 @@ export function pruneLists(ids: readonly string[]): void {
 
 /**
  * While the files take more than the budget, deletes copies, the movie and series lists before
- * the channel lists, each the least recently written first, but never `keep`.
+ * the channel lists, each the least recently written first, but never `keep`. With `pending`,
+ * which only launch passes before any list is read or written, writes left halfway go as copies
+ * do; later, one may be a write under way, and stays.
  */
-function shed(keep: string | null) {
+function shed(keep: string | null, pending: boolean) {
   const files = folder()
     .list()
     .filter((entry) => entry instanceof File);
   let total = files.reduce((sum, file) => sum + file.size, 0);
   if (total <= TOTAL_BYTES) return;
-  const order = (file: File) => (file.name.endsWith(".titles.json") ? 0 : 1);
+  const order = (file: File) => (file.name.includes(".titles.json") ? 0 : 1);
   const copies = files
-    .filter((file) => file.name.endsWith(".json") && file.name !== keep)
+    .filter(
+      (file) =>
+        (file.name.endsWith(".json") || (pending && file.name.endsWith(".json.next"))) &&
+        file.name !== keep,
+    )
     .toSorted(
       (a, b) => order(a) - order(b) || (a.modificationTime ?? 0) - (b.modificationTime ?? 0),
     );

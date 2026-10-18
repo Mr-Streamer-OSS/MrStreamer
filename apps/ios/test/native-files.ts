@@ -43,6 +43,11 @@ interface Native {
   gate: ((operation: FileOperation, path: string) => Promise<void> | undefined) | null;
   /** Answers true for a file whose deletion the disk refuses. Null: every deletion goes ahead. */
   undeletable: ((path: string) => boolean) | null;
+  /**
+   * The size a file reports in place of its own, when this answers one: a large file without its
+   * bytes. Null: every file reports its own.
+   */
+  sizeOf: ((path: string) => number | undefined) | null;
 }
 
 /**
@@ -60,6 +65,7 @@ export const native: Native = ((
   held: null,
   gate: null,
   undeletable: null,
+  sizeOf: null,
 });
 const { root } = native;
 
@@ -91,7 +97,8 @@ export class File {
     return existsSync(this.path) && statSync(this.path).isFile();
   }
   get size() {
-    return this.exists ? statSync(this.path).size : 0;
+    if (!this.exists) return 0;
+    return native.sizeOf?.(this.path) ?? statSync(this.path).size;
   }
   get modificationTime() {
     return this.exists ? statSync(this.path).mtimeMs : null;
