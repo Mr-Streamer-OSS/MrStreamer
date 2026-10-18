@@ -39,22 +39,29 @@ async function app(ffmpeg = FFMPEG) {
 }
 
 function decoded(bytes: Buffer) {
-  const decode = spawnSync(
-    FFMPEG,
-    ["-v", "error", "-i", "pipe:0", "-map", "0:v:0", "-map", "0:a:0", "-f", "null", "-"],
-    { input: bytes, encoding: "utf8" },
-  );
-  expect(decode.status, decode.stderr).toBe(0);
   const probe = spawnSync(
     FFPROBE,
-    ["-v", "error", "-show_streams", "-show_packets", "-of", "json", "pipe:0"],
+    ["-v", "error", "-count_frames", "-show_streams", "-show_packets", "-of", "json", "pipe:0"],
     { input: bytes, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
   );
   expect(probe.status, probe.stderr).toBe(0);
-  return JSON.parse(probe.stdout) as {
-    streams: { codec_name: string; codec_type: string; id: string; tags?: { language?: string } }[];
+  const output = JSON.parse(probe.stdout) as {
+    streams: {
+      codec_name: string;
+      codec_type: string;
+      id: string;
+      nb_read_frames?: string;
+      tags?: { language?: string };
+    }[];
     packets: { codec_type: string; pts_time?: string; dts_time?: string }[];
   };
+  for (const type of ["video", "audio"])
+    expect(
+      output.streams.some(
+        (stream) => stream.codec_type === type && Number(stream.nb_read_frames) > 0,
+      ),
+    ).toBe(true);
+  return output;
 }
 
 it("keeps compatible local HLS lazy and byte-preserving", async () => {

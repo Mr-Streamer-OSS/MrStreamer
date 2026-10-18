@@ -482,7 +482,6 @@ async function run(scenario: Scenario) {
       else
         await hlsCompatibilityScenario(
           {
-            profile,
             observed,
             evaluate: livePage.evaluate,
             send,
@@ -491,9 +490,6 @@ async function run(scenario: Scenario) {
             click,
             key,
             capture,
-            action,
-            launch,
-            quit,
           },
           scenario.endsWith("baseline"),
         );

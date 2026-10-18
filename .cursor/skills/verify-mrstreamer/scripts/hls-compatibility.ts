@@ -13,7 +13,13 @@ interface Playing {
 }
 
 /** Drive real search and Watch. The baseline observes the unchanged built app's rejected decode. */
-export async function hlsCompatibilityScenario(d: Driver, baseline: boolean) {
+export async function hlsCompatibilityScenario(
+  d: Pick<
+    Driver,
+    "observed" | "evaluate" | "send" | "wait" | "exists" | "click" | "key" | "capture"
+  >,
+  baseline: boolean,
+) {
   await d.click("Search channels", "document.querySelector('[aria-label=Search]')");
   await d.send("Input.insertText", { text: "TEST | HLS epochs" });
   await d.wait(() =>
@@ -21,7 +27,7 @@ export async function hlsCompatibilityScenario(d: Driver, baseline: boolean) {
   );
   await d.click(
     "Play the searched HLS channel",
-    `document.querySelector('[aria-label="Search results"] [aria-selected=true]')`,
+    `document.querySelector('[aria-label="Search results"] [aria-selected=true] button[data-group-row]')`,
   );
   if (baseline) {
     await d.wait(

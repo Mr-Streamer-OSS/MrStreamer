@@ -3,7 +3,7 @@
 // picture byte for byte and gets its sound re-encoded as AAC.
 import type { Codec } from "@mrstreamer/contracts/playback";
 import type { StreamLayout } from "./inspect.ts";
-import { AAC_STEREO_ARGUMENTS, H264_IMAGE_ARGUMENTS } from "./conversion-settings.ts";
+import { AAC_STEREO_ARGUMENTS, h264ImageArguments } from "./conversion-settings.ts";
 
 export interface Conversion {
   readonly video: "copy" | "h264" | "none";
@@ -86,8 +86,6 @@ export function ffmpegArguments(
   if (pids.subtitles.length > 0) args.push("-c:s", "copy");
   if (conversion.video === "copy") args.push("-c:v", "copy");
   if (conversion.video === "h264") {
-    const [filterOption, filter, ...pixelFormat] = H264_IMAGE_ARGUMENTS;
-    const picture = output?.picture;
     args.push(
       "-c:v",
       "libx264",
@@ -99,11 +97,7 @@ export function ffmpegArguments(
       "21",
       "-g",
       "50",
-      filterOption,
-      picture
-        ? `${filter},scale=${picture.width}:${picture.height}:force_original_aspect_ratio=decrease,pad=${picture.width}:${picture.height}:(ow-iw)/2:(oh-ih)/2,setsar=1`
-        : filter,
-      ...pixelFormat,
+      ...h264ImageArguments(output?.picture ?? null),
     );
   }
   if (conversion.audio === "copy") args.push("-c:a", "copy");
