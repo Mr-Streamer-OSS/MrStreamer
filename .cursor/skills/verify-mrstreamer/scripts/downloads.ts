@@ -215,6 +215,8 @@ export async function runDownloads(
           page.evaluate<boolean>(`(() => {
             const target = ${element};
             if (!target || target.matches(":disabled")) return false;
+            // Outer targets can intentionally dismiss a dialog through its backdrop.
+            if (!target.closest('[role="dialog"]')) return true;
             const box = target.getBoundingClientRect();
             return box.width > 0 && box.height > 0 &&
               target.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
