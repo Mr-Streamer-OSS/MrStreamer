@@ -12,9 +12,50 @@ Require a checked default and exactly one installation_observed plus one app_act
 
 Run once with `--observe-rollover` to also wait for an actual UTC five-minute transmission, without injected clocks. It records wall-clock boundary evidence separately; this optional natural-window wait can exceed the regular release UI scenario budget. Default verification seals usage through normal quit/restart. For a fixed six-channel surfing/browsing comparison, run `xvfb-run -a node apps/desktop/test/e2e/analytics-app.ts --volume-workload` on each built candidate. An archived old source build can be selected with `--built-desktop=/absolute/path/to/apps/desktop`; that directory must contain `source-revision.txt` naming its actual archive revision. The helper verifies the owned profile, command line and renderer path against the selected build and records its main hash. Its `volumeWorkload` observations retain actual HTTP bodies/counts/bytes, public main-process CPU/fs-write deltas and distinct observed atomic analytics temporary writes. CPU excludes renderer/GPU/FFmpeg; filesystem notification counts are not native rename-latency proof. Focused public-owner tests cover UTC rollover, Brussels/DST timestamps, rollback, channel envelopes, burst durability and exact delta counts. Then disable with the real checkbox, require no captures across restart and the same identity with no duplicate first/day observation after re-enable.
 
-A second profile is seeded with a format-one analytics.json holding daily counts and a queued app_summary_day beside a queued installation_observed. The app must send that installation_observed unchanged, under the seeded identity, never send the summary, and rewrite the file as format two without counts. A third fresh profile faces a refusing loopback capture server: it must retry a refused event with an identical body, hold actual pending events, then clear the persisted queue through Settings opt-out and make no further requests after restart. Unpackaged build attribution is `unknown`. The helper also accepts a packaged executable and optional app arguments, retains its hash/renderer identity and checks its actual version and Stable/Nightly channel. Native installed acceptance stays separate. Inspect screenshots and actual local payloads. Pointer and keys perform mutations; the decoded wire capture establishes results. All five translated controls are checked by focused renderer tests; native platform acceptance remains separate.
+A second profile is seeded with a format-one analytics.json holding daily counts and a queued app_summary_day beside a queued installation_observed. The app must send that installation_observed unchanged, under the seeded identity, never send the summary, and rewrite the file as format two without counts. A third fresh profile faces a refusing loopback capture server: it must retry a refused event with an identical body, hold actual pending events, then clear the persisted queue through Settings opt-out and make no further requests after restart. Unpackaged build attribution is `unknown`. For a packaged executable, pass `--expected-version=<version> --expected-source=<full SHA> <executable> [app arguments]`. It pins the running main executable, resources, app.asar, renderer path, About source and actual version independently of the checkout build. Optional `--installer=<path> --installer-sha256=<digest>` binds the inspected installer to its retained artifact digest. Native installed acceptance stays separate. Inspect screenshots and actual local payloads. Pointer and keys perform mutations; the decoded wire capture establishes results. All five translated controls are checked by focused renderer tests; native platform acceptance remains separate.
 
 The fixture uses a checkout-owned ffmpeg stream of the existing MPEG-TS recording; aborting the owned session ends it. No production broadcast is used for this telemetry acceptance.
+
+## Installed native telemetry
+
+The long workload is explicit and never enters the ordinary five-minute release-UI aggregate:
+
+```sh
+node apps/desktop/test/e2e/analytics-app.ts --native-telemetry \
+  --expected-version="$VERSION" --expected-source="$SHA" "$OWNED_INSTALLED_EXECUTABLE"
+```
+
+Use Xvfb on headless Linux. On the Mac mini, follow the mac-mini skill and run `onmac check` before any Mac action. Use only an owned DMG-installed bundle, not the daily-driver application or profile. The existing package workflow retains the normal Privacy workload for installed DMG, NSIS, deb, AppImage and test-signed MSIX. Its historical-source exception is restricted to releases through 0.0.15; a newer source without the verifier fails. Signing, Store certification and a Store-delivered update remain separate checks.
+
+Native cases are `consent`, `offline`, `checkpoint`, `periodic`, `seal-send-ack`, `ambiguous`, `quit`, `slow-write`, Windows-only `windows-rename`, and `compatibility` when a real prior executable or resolved installed pair is supplied. `--native-case=<name>` runs one case and records that limited coverage. Without a packaged executable the same mode drives this checkout's built Electron app; its proof explicitly leaves installed acceptance open. No clock is injected. `periodic` watches five actual counted minutes once, with a real UTC window transmission. Its 330-second failure bound belongs only to that explicit case. Ordinary scenario budgets and CI deadlines are unchanged.
+
+The helper uses actual main-process SIGKILL, not a renderer crash or restored crash snapshot. Public filesystem promise holds select actual before/after checkpoint, seal, attempt-reservation and acknowledged-retirement writes. The driver retains the actual atomic-path record, kills main inside the unchanged 1500 ms serializer deadline and checks recovered UUID/body/envelope/checkpoint time and saved duration without dead time. The loopback sink can close its port, retain a body without answering or accept it. It records raw bytes and socket-close times, reconciles identical retries by UUID and refuses changed bodies. This establishes local retry accounting, not PostHog ingestion/deduplication.
+
+Native close records exit code, signal, forced cleanup and already-exited status. A forced cleanup fails acceptance even if it removes the process. The held-response quit case records public `will-quit` and actual request-abort timing separately from whole-app shutdown. A native Windows run requires the existing disposable GitHub-hosted runner guard. The file case holds a real .NET read handle without delete sharing, records ordinary rename timings separately from failed replacements, and verifies intact consent/identity and fail-closed UI behavior. `slow-write` holds a public promise over the existing deadline while timers run. It is labelled injected delay and is never described as an OS slow disk.
+
+For Mac or Linux, install actual 0.0.15 and candidate bundles/AppImages in separate owned locations, retaining their published checksums/signature/package evidence, then add:
+
+```sh
+node apps/desktop/test/e2e/analytics-app.ts --native-telemetry --native-case=compatibility \
+  --expected-version="$VERSION" --expected-source="$SHA" \
+  --prior-executable="$OWNED_INSTALLED_015_EXECUTABLE" --prior-source="$SOURCE_015" \
+  "$OWNED_INSTALLED_EXECUTABLE"
+```
+
+Each sequence uses one actual profile for both installed binaries. It covers an enabled legacy queue, an opted-out old profile, old ordinary writes stripping optional work, old opt-out/re-enable without revival, and a no-write actual old launch with transport unconfigured. No-write proof requires byte-identical analytics.json across the complete old launch, not a debugger pause before loading. These commands do not install or upgrade a deb in place. Root must separately record actual native package installation/upgrading for that distribution; an AppImage sequence does not certify a deb installer transition. Do not add a generic installer service for these manual native checks.
+
+Windows NSIS replaces one executable path. Use the existing published-pair resolver and disposable installer owner instead of two paths allegedly holding different versions:
+
+```sh
+node apps/desktop/test/e2e/installed-upgrade.ts resolve --candidate "$CANDIDATE_TAG" \
+  --sha "$SHA" --out "$RUNNER_TEMP/installed-upgrade-packages"
+node apps/desktop/test/e2e/installed-upgrade.ts telemetry \
+  --packages "$RUNNER_TEMP/installed-upgrade-packages" --root "$RUNNER_TEMP/native-telemetry"
+```
+
+`telemetry` requires main, a fresh root under RUNNER_TEMP and the same GitHub-hosted Windows guard as the original upgrade check. It reuses the resolved tag/ancestry/asset/checksum receipt and checks its bytes before every native replacement. This frozen compatibility run requires stable tag v0.0.15 and the pinned candidate version/source. The upgrade workflow invokes it for 0.0.16 nightlies after its original general upgrade/offline-download check. It keeps existing deadlines and uploads evidence on success and failure, plus failed synthetic profiles for seven days.
+
+Every native case writes incremental `native-cases.json`, actual persisted record/boundary files and the common proof, screenshots and `wire.json`. Failed profiles are retained; successful owned profiles are removed after app/fixture cleanup. Inspect screenshots, original failures and each case's observations. A passing source run, selected subset, test-signed package or archived-loader run does not close an unexecuted installed OS/distribution gate. Actual first-nightly production ingestion and UUID reconciliation remain the release owner's separate check. Fake-provider events must never be sent to production.
 
 ## Archived 0.0.15 compatibility
 

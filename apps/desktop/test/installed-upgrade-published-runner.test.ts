@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { installPublished, runCommand } from "./e2e/installed-upgrade.ts";
+import { installPublished, runCommand, telemetryCommand } from "./e2e/installed-upgrade.ts";
 import type { Receipt } from "./e2e/installed-upgrade-packages.ts";
 import { disposableRunner, install, processes } from "./e2e/installed-upgrade-windows.ts";
 
@@ -72,6 +72,21 @@ describe("the installed upgrade run before and around native installation", () =
       executable: join(temp, "install", "app.exe"),
       tools: [],
     });
+  });
+
+  it("refuses telemetry outside main or against a different stable before creating a native root", async () => {
+    vi.stubEnv("GITHUB_REF", "refs/heads/feature");
+    await expect(telemetryCommand(["--packages", packages, "--root", root])).rejects.toThrow(
+      "main only",
+    );
+    vi.stubEnv("GITHUB_REF", "refs/heads/main");
+    await expect(telemetryCommand(["--packages", packages, "--root", root])).rejects.toThrow(
+      "v0.0.15",
+    );
+    await expect(readFile(join(root, "evidence", "proof.json"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    expect(install).not.toHaveBeenCalled();
   });
 
   afterEach(async () => {
