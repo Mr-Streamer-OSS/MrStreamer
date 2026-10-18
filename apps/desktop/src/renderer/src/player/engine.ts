@@ -254,7 +254,13 @@ function hlsEngine(
 
 /** Maps an HLS failure before teardown discards its loader and fragment context. */
 export function hlsError(data: ErrorData, source: string): EngineError {
-  const network = data.type === Hls.ErrorTypes.NETWORK_ERROR;
+  // hls.js also groups malformed/empty playlist content under NETWORK_ERROR.
+  const parsing = [
+    Hls.ErrorDetails.MANIFEST_PARSING_ERROR,
+    Hls.ErrorDetails.LEVEL_PARSING_ERROR,
+    Hls.ErrorDetails.LEVEL_EMPTY_ERROR,
+  ].includes(data.details);
+  const network = data.type === Hls.ErrorTypes.NETWORK_ERROR && !parsing;
   const unsupported =
     data.details === Hls.ErrorDetails.MANIFEST_INCOMPATIBLE_CODECS_ERROR ||
     data.details === Hls.ErrorDetails.BUFFER_INCOMPATIBLE_CODECS_ERROR;

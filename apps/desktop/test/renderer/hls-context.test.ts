@@ -68,6 +68,21 @@ function error(details: ErrorData["details"], fields: Partial<ErrorData> = {}): 
 const response = (url: string) => ({ url, code: 403, text: "Forbidden" });
 
 it.each([
+  Hls.ErrorDetails.MANIFEST_PARSING_ERROR,
+  Hls.ErrorDetails.LEVEL_PARSING_ERROR,
+  Hls.ErrorDetails.LEVEL_EMPTY_ERROR,
+])("keeps invalid playlist content on media recovery: %s", async (details) => {
+  const video = document.createElement("video");
+  engine = createEngine("hls", video, SOURCE, { audio: null, audioLanguage: null });
+  // hls.js reports these successful-response parser failures under NETWORK_ERROR.
+  events.error(error(details, { url: SOURCE, response: { url: SOURCE, code: 200 } }));
+  await expect(engine.started).rejects.toMatchObject({
+    kind: "media",
+    failure: { kind: "hls", requestId: null },
+  });
+});
+
+it.each([
   [
     "segment HTTP refusal",
     () =>
