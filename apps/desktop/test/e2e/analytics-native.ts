@@ -39,7 +39,7 @@ type Context = {
   read(): Promise<AnalyticsRecord>;
   events(): CaptureEvent[];
   bodies: { body: string; at: number; closedAt?: number }[];
-  capture(mode: "accept" | "reject" | "hold" | "offline"): Promise<void>;
+  capture(mode: "accept" | "reject" | "hold" | "hold-usage" | "offline"): Promise<void>;
   observations: Record<string, unknown>;
 };
 const checkbox = '[role="checkbox"][aria-label="Share basic usage statistics"]';
@@ -197,6 +197,9 @@ export async function runNativeTelemetry(c: Context) {
     ? await installedTelemetryPair(c.options.installedPair, c.evidence, c.candidate)
     : null;
   if (pair) await pair.select("candidate");
+  let primaryError: unknown;
+  let failed = false;
+  const cleanupErrors: string[] = [];
   try {
     await run("consent", async () => {
       await fresh();
@@ -224,6 +227,14 @@ export async function runNativeTelemetry(c: Context) {
             closedAt === undefined,
         ),
       );
+      const from = c.bodies.length;
+      const held = c.bodies.findLast(
+        ({ body, closedAt }) =>
+          JSON.parse(body).distinct_id === before.installationId &&
+          JSON.parse(body).event === "stream_summary" &&
+          closedAt === undefined,
+      );
+      assert(held, "No received request held at opt-out");
       const optedOutAt = Date.now();
       await c.click(checkbox);
       await c.waitFor(async () => !(await c.preference()).analyticsEnabled);
@@ -232,11 +243,15 @@ export async function runNativeTelemetry(c: Context) {
           .filter(({ body }) => JSON.parse(body).distinct_id === before.installationId)
           .every((wire) => wire.closedAt !== undefined),
       );
+      assert.equal(c.bodies.length, from, "Opt-out sent new work");
+      assert(
+        held.closedAt !== undefined && held.closedAt >= optedOutAt && held.closedAt - held.at < 900,
+        "Held request reached its ordinary HTTP timeout instead of being aborted by opt-out",
+      );
       const disabled = await saved("consent-off");
       assert.equal(disabled.enabled, false);
       assert.equal(disabled.summaries, undefined);
       assert.equal(disabled.pending.length, 0);
-      const from = c.bodies.length;
       await c.quit();
       await restart();
       await c.settings();
@@ -260,6 +275,7 @@ export async function runNativeTelemetry(c: Context) {
         enabled,
         disabledCaptures: 0,
         optedOutAt,
+        heldRequest: held,
       };
     });
 
@@ -326,19 +342,32 @@ export async function runNativeTelemetry(c: Context) {
       const checkpoint = await journal();
       assert.equal(checkpoint.uuid, admitted.uuid);
       assert(Date.now() - start >= 295_000, "Periodic checkpoint used fabricated elapsed time");
+      const checkpointAt = Date.now();
       const usage = c
         .events()
         .filter(
           (event) => event.event === "usage_window" && event.distinct_id === checkpoint.distinct_id,
         );
-      assert(usage.length > 0, "No actual UTC window transmission during five counted minutes");
+      assert(
+        usage.some((event) => {
+          if (event.event !== "usage_window") return false;
+          const end = Date.parse(event.properties.window_end);
+          return (
+            end >= start &&
+            end <= checkpointAt &&
+            end % 300_000 === 0 &&
+            wires(event.uuid).some((wire) => wire.at >= start && wire.at <= checkpointAt)
+          );
+        }),
+        "No actual five-minute UTC window ended and transmitted inside the measured run",
+      );
       await saved("periodic-checkpoint");
       await c.snapshot("periodic-watch");
       await c.kill();
       await restart();
       const proof = await recovered(checkpoint);
       await c.quit();
-      return { wallMs: Date.now() - start, usage, ...proof };
+      return { start, checkpointAt, wallMs: checkpointAt - start, usage, ...proof };
     });
 
     await run("seal-send-ack", async () => {
@@ -410,52 +439,81 @@ export async function runNativeTelemetry(c: Context) {
       await c.waitFor(async () => wires(admitted.uuid).length === 1);
       const held = await saved("body-held");
       assert.equal(pending(held).find((item) => item.event.uuid === admitted.uuid)?.attempts, 1);
-      await c.kill();
-      await restart();
-      await c.capture("hold");
-      await c.waitFor(async () => wires(admitted.uuid).length === 2);
-      // A ready direct failed-open incident must bypass the summary's persisted backoff.
-      await c.escape();
-      await c.namedButton("header button", "Movies");
-      await c.namedButton("nav button", "All movies");
-      await c.namedButton("button[title]", "Missing file", true);
-      await c.namedButton('[role="dialog"] button', "Play");
-      await c.waitFor(async () =>
-        c
-          .events()
-          .some(
-            (event) => event.event === "stream_error" && event.distinct_id === admitted.distinct_id,
-          ),
-      );
-      await c.waitFor(async () => wires(admitted.uuid).length === 3);
-      const incident = c
-        .events()
-        .find(
-          (event) => event.event === "stream_error" && event.distinct_id === admitted.distinct_id,
-        );
-      assert(incident);
+      assert.equal(wires(admitted.uuid)[0]!.closedAt, undefined);
+      const killedAt = await c.kill();
       assert(
-        wires(incident.uuid)[0]!.at < wires(admitted.uuid)[2]!.at,
-        "Ready direct incident waited for summary backoff",
+        killedAt - wires(admitted.uuid)[0]!.at < 1000,
+        "Main was not killed while its first body was held",
       );
+      await restart();
+      await c.waitFor(async () => wires(admitted.uuid).length === 3);
       await c.waitFor(
         async () => !pending(await c.read()).some((item) => item.event.uuid === admitted.uuid),
       );
-      const proof = reconcileBodies(wires(admitted.uuid).map((wire) => wire.body));
-      assert.equal(proof.deliveries, 3);
-      assert.equal(proof.logicalEvents, 1);
+      const replay = reconcileBodies(wires(admitted.uuid).map((wire) => wire.body));
+      assert.deepEqual(replay, { deliveries: 3, logicalEvents: 1 });
       await c.quit();
       await restart();
       await delay(2200);
       assert.equal(wires(admitted.uuid).length, 3);
       await c.quit();
-      return { held, ...proof };
+
+      // Stage the real dialog while the first request is held. Admit the direct incident
+      // before its first two-second backoff, with no navigation left inside that interval.
+      await fresh();
+      const priority = await play();
+      await c.capture("hold");
+      await stop();
+      await c.escape();
+      await c.namedButton("header button", "Movies");
+      await c.namedButton("nav button", "All movies");
+      await c.namedButton("button[title]", "Missing file", true);
+      const preparedAt = Date.now();
+      await c.namedButton('[role="dialog"] button', "Play");
+      await c.waitFor(async () =>
+        c
+          .events()
+          .some(
+            (event) => event.event === "stream_error" && event.distinct_id === priority.distinct_id,
+          ),
+      );
+      await c.waitFor(async () => wires(priority.uuid).length === 3);
+      const incident = c
+        .events()
+        .find(
+          (event) => event.event === "stream_error" && event.distinct_id === priority.distinct_id,
+        );
+      assert(incident);
+      assert(
+        wires(priority.uuid)[0]!.closedAt !== undefined &&
+          preparedAt <= wires(priority.uuid)[0]!.closedAt!,
+        "Navigation was not staged while the first request was held",
+      );
+      assert(
+        wires(incident.uuid)[0]!.at < wires(priority.uuid)[1]!.at,
+        "Ready direct incident waited for summary's first two-second backoff",
+      );
+      await c.waitFor(
+        async () => !pending(await c.read()).some((item) => item.event.uuid === priority.uuid),
+      );
+      const proof = reconcileBodies(wires(priority.uuid).map((wire) => wire.body));
+      assert.equal(proof.deliveries, 3);
+      assert.equal(proof.logicalEvents, 1);
+      await c.quit();
+      await restart();
+      assert(!pending(await c.read()).some((item) => item.event.uuid === priority.uuid));
+      await delay(2200);
+      assert.equal(wires(priority.uuid).length, 3);
+      await c.quit();
+      return { held, killedAt, replay, priority: { preparedAt, ...proof } };
     });
 
     await run("quit", async () => {
       await fresh();
       const admitted = await play();
-      await c.capture("hold");
+      // Accept the window-close summary; hold only the usage fragment sealed by will-quit.
+      // This distinguishes analytics.close's allowance from an earlier playback request.
+      await c.capture("hold-usage");
       const marker = join(c.evidence, "native-will-quit.json");
       await c
         .main()
@@ -464,18 +522,31 @@ export async function runNativeTelemetry(c: Context) {
         );
       await c.quit();
       const at = (JSON.parse(await readFile(marker, "utf8")) as { at: number }).at;
-      const held = wires(admitted.uuid).find(
-        (wire) => wire.closedAt !== undefined && wire.closedAt >= at,
+      const held = c.bodies.find((wire) => {
+        const event = JSON.parse(wire.body) as CaptureEvent;
+        return (
+          event.distinct_id === admitted.distinct_id &&
+          event.event === "usage_window" &&
+          wire.at >= at
+        );
+      });
+      assert(
+        held?.closedAt,
+        "Quit did not send and close its actual held usage request after will-quit",
       );
-      assert(held?.closedAt, "Quit did not send and abort its actual held summary request");
-      const retained = pending(await saved("quit-held")).find(
-        (item) => item.event.uuid === admitted.uuid,
+      // 500 ms product allowance plus at most 250 ms for OS/socket observation. A natural
+      // 1000 ms transport timeout cannot pass. Whole-app teardown has its own strict check.
+      assert(
+        held.closedAt - at <= 750,
+        "Analytics quit exceeded 500 ms + 250 ms observation tolerance",
       );
+      const uuid = (JSON.parse(held.body) as CaptureEvent).uuid;
+      const retained = pending(await saved("quit-held")).find((item) => item.event.uuid === uuid);
       assert(retained, "Quit lost its actual final outbox");
       await c.capture("accept");
       await restart();
-      await c.waitFor(async () => wires(admitted.uuid).length === 2);
-      assert.equal(reconcileBodies(wires(admitted.uuid).map((wire) => wire.body)).logicalEvents, 1);
+      await c.waitFor(async () => wires(uuid).length === 2);
+      assert.equal(reconcileBodies(wires(uuid).map((wire) => wire.body)).logicalEvents, 1);
       await c.quit();
       await fresh();
       const future = await play();
@@ -653,7 +724,12 @@ export async function runNativeTelemetry(c: Context) {
               );
             }
             const old = await saved(`compat-${variant}-015`);
-            await c.quit();
+            // .15 deliberately skips backoff at quit and spends all remaining refused-connect
+            // attempts. Kill its actual main with the admitted queue still durable instead.
+            if (variant === "legacy-queue") {
+              await c.kill();
+              assert.deepEqual((await c.read()).pending, old.pending);
+            } else await c.quit();
             await c.capture("accept");
             const from = c.bodies.length;
             await select("candidate");
@@ -755,6 +831,8 @@ export async function runNativeTelemetry(c: Context) {
       compatibility: !!prior,
       windows: process.platform === "win32",
       installed: !!c.candidate.executable,
+      productionEvidence:
+        "Separately owned by the release runner; local synthetic captures do not establish production ingestion",
       pending: [
         ...(!prior
           ? ["installed .15 compatibility requires --prior-executable or --installed-pair"]
@@ -762,12 +840,27 @@ export async function runNativeTelemetry(c: Context) {
         ...(!c.candidate.executable
           ? ["source-build evidence does not close installed native acceptance"]
           : []),
-        "actual production nightly ingestion/deduplication",
       ],
     };
     pair?.accepted();
+  } catch (error) {
+    primaryError = error;
+    failed = true;
   } finally {
-    await c.quit();
-    if (pair) await pair.close();
+    for (const close of [
+      () => c.quit(),
+      async () => {
+        if (pair) await pair.close();
+      },
+    ]) {
+      try {
+        await close();
+      } catch (error) {
+        cleanupErrors.push(String(error));
+      }
+    }
+    c.observations.nativeCleanupErrors = cleanupErrors;
   }
+  if (failed) throw primaryError;
+  if (cleanupErrors.length) throw new Error(cleanupErrors.join("\n"));
 }

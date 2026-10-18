@@ -364,6 +364,7 @@ jobs:
       ffmpeg-key: ${{ steps.ffmpeg-key.outputs.key }}
     env:
       VERSION: ${{ inputs.version }}
+      SHA: ${{ inputs.sha }}
     defaults:
       run:
         shell: bash

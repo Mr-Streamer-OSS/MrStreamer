@@ -1,4 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { closeNative } from "./e2e/analytics-exit.ts";
@@ -28,6 +32,80 @@ describe("native telemetry verification CLI", () => {
       appArgs: ["--no-sandbox"],
       native: false,
     });
+  });
+  it("resolves both executable entry paths against the invoking directory", () => {
+    expect(
+      analyticsOptions([
+        "--native-telemetry",
+        "--expected-version=0.0.16",
+        `--expected-source=${sha}`,
+        "dist/candidate.AppImage",
+        "--prior-executable=old/app",
+        `--prior-source=${sha}`,
+      ]),
+    ).toMatchObject({
+      executable: resolve("dist/candidate.AppImage"),
+      priorExecutable: resolve("old/app"),
+    });
+  });
+  it("retains a failed proof for a missing executable and starts a relative executable", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "analytics-cli-contract-"));
+    const entry = fileURLToPath(new URL("./e2e/analytics-app.ts", import.meta.url));
+    try {
+      for (const [relative, native] of [
+        ["missing.AppImage", false],
+        ["present.AppImage", false],
+        ["present.AppImage", true],
+      ] as const) {
+        if (relative === "present.AppImage")
+          await writeFile(
+            join(directory, relative),
+            "#!/bin/sh\necho owned-launch-marker >&2\nexit 42\n",
+            { mode: 0o700 },
+          );
+        const output = join(directory, relative + (native ? "-native" : "") + "-evidence");
+        const child = spawn(
+          process.execPath,
+          [
+            entry,
+            "--expected-version=0.0.16",
+            `--expected-source=${sha}`,
+            ...(native ? ["--native-telemetry", "--native-case=consent"] : []),
+            relative,
+          ],
+          {
+            cwd: directory,
+            env: { ...process.env, TMPDIR: directory, MR_STREAMER_VERIFICATION_OUTPUT: output },
+            stdio: "pipe",
+          },
+        );
+        child.stdout.resume();
+        child.stderr.resume();
+        const [code] = await once(child, "exit");
+        expect(code).not.toBe(0);
+        expect(JSON.parse(await readFile(join(output, "proof.json"), "utf8"))).toMatchObject({
+          status: "failed",
+          cleanup: { appExited: true, fixturesClosed: true, broadcastsExited: true },
+        });
+        if (native) {
+          const proof = JSON.parse(await readFile(join(output, "proof.json"), "utf8"));
+          expect(proof.error).toContain("code 42");
+          expect(proof.observed.nativeCleanupErrors).toEqual([
+            expect.stringContaining("Native quit was not graceful"),
+          ]);
+        }
+        if (relative === "present.AppImage")
+          expect(await readFile(join(output, "electron.log"), "utf8")).toContain(
+            "owned-launch-marker",
+          );
+        else
+          expect(JSON.parse(await readFile(join(output, "proof.json"), "utf8")).error).toContain(
+            "ENOENT",
+          );
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
   it("keeps expensive or installed compatibility options out of ordinary aggregate execution", () => {
     for (const flag of [

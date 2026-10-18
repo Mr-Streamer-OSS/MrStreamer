@@ -3,7 +3,7 @@ import { watch } from "node:fs";
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -41,25 +41,30 @@ const builtDesktop = options.builtDesktop;
 const desktop = builtDesktop ?? join(root, "apps/desktop");
 const volumeWorkload = options.volume;
 const evidence = await evidenceDirectory(join(root, ".local/verification"), "analytics-");
-const verificationFiles = [
-  "analytics-app.ts",
-  "analytics-native.ts",
-  "analytics-boundary.ts",
-  "analytics-exit.ts",
-  "analytics-options.ts",
-  "analytics-installed-pair.ts",
-  "analytics-windows-lock.ts",
-  "app.ts",
-  "installed-upgrade.ts",
-  "installed-upgrade-windows.ts",
-  "installed-upgrade-packages.ts",
-];
-await mkdir(join(evidence, "verification-source"), { recursive: true });
+// Retain the complete local verifier dependency surface, plus its dependency lock.
+const verificationFiles = execFileSync(
+  "git",
+  [
+    "ls-files",
+    "apps/desktop/test/e2e/*.ts",
+    "apps/desktop/test/fake-*.ts",
+    ".cursor/skills/verify-mrstreamer/scripts/*.ts",
+    "packages/contracts/src/*.ts",
+    "apps/desktop/src/main/analytics/model.ts",
+    "**/package.json",
+    "pnpm-lock.yaml",
+  ],
+  { cwd: root, encoding: "utf8" },
+)
+  .trim()
+  .split("\n");
 const verificationHashes = Object.fromEntries(
   await Promise.all(
     verificationFiles.map(async (name) => {
-      const bytes = await readFile(new URL(name, import.meta.url));
-      await writeFile(join(evidence, "verification-source", name), bytes);
+      const bytes = await readFile(join(root, name));
+      const destination = join(evidence, "verification-source", name);
+      await mkdir(resolve(destination, ".."), { recursive: true });
+      await writeFile(destination, bytes);
       return [name, createHash("sha256").update(bytes).digest("hex")];
     }),
   ),
@@ -68,19 +73,29 @@ const observeRollover = options.rollover;
 const packagedExecutable = options.executable;
 const packagedArgs = options.appArgs;
 const revision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
-const appVersion =
-  options.expectedVersion ??
-  (JSON.parse(await readFile(join(desktop, "package.json"), "utf8")) as { version: string })
-    .version;
+const sourceAppVersion = (
+  JSON.parse(await readFile(join(desktop, "package.json"), "utf8")) as { version: string }
+).version;
+const sourceDirty =
+  execFileSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" }).trim().length > 0;
+const verificationSource = {
+  revision,
+  appVersion: (
+    JSON.parse(await readFile(join(root, "apps/desktop/package.json"), "utf8")) as {
+      version: string;
+    }
+  ).version,
+  sourceKind: "verifier-checkout",
+  sourceDirty,
+};
+const appVersion = options.expectedVersion ?? sourceAppVersion;
 const build = {
   revision: builtDesktop
     ? (await readFile(join(desktop, "source-revision.txt"), "utf8")).trim()
     : revision,
-  appVersion,
+  appVersion: sourceAppVersion,
   sourceKind: builtDesktop ? "archived-source-build" : "checkout-source-build",
-  sourceDirty:
-    execFileSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" }).trim().length >
-    0,
+  sourceDirty: builtDesktop ? null : sourceDirty,
   ...(!packagedExecutable
     ? {
         mainSha256: createHash("sha256")
@@ -89,6 +104,19 @@ const build = {
       }
     : {}),
 };
+const bundleHashes: Record<string, string> = {};
+if (!packagedExecutable) {
+  const snapshot = join(evidence, "product-bundle");
+  await cp(join(desktop, "out"), snapshot, { recursive: true });
+  for (const entry of await readdir(snapshot, { recursive: true, withFileTypes: true })) {
+    if (entry.isFile()) {
+      const path = join(entry.parentPath, entry.name);
+      bundleHashes[path.slice(snapshot.length + 1)] = createHash("sha256")
+        .update(await readFile(path))
+        .digest("hex");
+    }
+  }
+}
 const candidate = {
   executable: packagedExecutable,
   version: appVersion,
@@ -116,6 +144,7 @@ const payloads: unknown[] = [];
 const payloadBytes: number[] = [];
 const rawBodies: { body: string; at: number; closedAt?: number }[] = [];
 let holdSummary = false;
+let holdUsageOnly = false;
 let rejectCapture = false;
 const capture = createServer(async (req, res) => {
   const bytes: Buffer[] = [];
@@ -129,7 +158,9 @@ const capture = createServer(async (req, res) => {
   });
   if (
     holdSummary &&
-    ["stream_summary", "usage_window"].includes(String(JSON.parse(body.toString()).event))
+    (holdUsageOnly ? ["usage_window"] : ["stream_summary", "usage_window"]).includes(
+      String(JSON.parse(body.toString()).event),
+    )
   )
     return;
   payloadBytes.push(body.byteLength);
@@ -285,6 +316,13 @@ async function launch() {
       },
     },
   );
+  await new Promise<void>((resolve, reject) => {
+    app!.once("error", reject);
+    app!.once("spawn", resolve);
+  }).catch((error: unknown) => {
+    app = undefined;
+    throw error;
+  });
   for (const stream of [app.stdout, app.stderr])
     stream?.on("data", (chunk: Buffer) => log.push(chunk.toString()));
   page = await connect(port, "page", { app });
@@ -397,6 +435,17 @@ async function launch() {
         }
       : {}),
   };
+  if (asar) {
+    const digest = createHash("sha256")
+      .update(await readFile(asar))
+      .digest("hex");
+    const snapshot = join(evidence, `product-${digest}.asar`);
+    try {
+      await access(snapshot);
+    } catch {
+      await cp(asar, snapshot);
+    }
+  }
   if (target.executable) {
     const key = JSON.stringify(target);
     const instance = observations["instance"];
@@ -877,24 +926,44 @@ async function productPaths() {
   await settings();
   await click('[role="checkbox"][aria-label="Next episode"]');
   await waitFor(async () => (await usageCount("setting_autoplay_next")) === 1);
-  offerUpdate = true;
-  await namedButton("button", "Check now");
-  await waitFor(
-    async () => count("update_check_ended", (e) => e.properties.outcome === "success") === 1,
+  const updateStatus = await live().evaluate<Result<UpdateStatus>>(
+    "window.mrStreamer.invoke('updates.status')",
   );
-  await keyEscape();
-  await click("[data-update-notice]");
-  await waitFor(async () => (await usageCount("action_update_seen")) === 1);
-  await namedButton("button", "Not now");
-  await waitFor(async () => (await usageCount("action_update_dismissed")) === 1);
-  await snapshot("update-panel-dismissed");
-  await settings();
-  rejectUpdate = true;
-  await namedButton("button", "Check now");
-  await waitFor(
-    async () => count("update_check_ended", (e) => e.properties.outcome === "failed") === 1,
-  );
-  await snapshot("update-check-failed");
+  if (!updateStatus.ok) throw new Error("Cannot observe update distribution");
+  if (updateStatus.value.distribution === "store") {
+    await waitFor(() =>
+      live().evaluate<boolean>(
+        "document.body.textContent.includes('Microsoft Store') && Array.from(document.querySelectorAll('button')).some(b => b.textContent === 'Open Store')",
+      ),
+    );
+    if (
+      count("update_check_ended") !== 0 ||
+      (await usageCount("action_update_seen")) !== 0 ||
+      (await usageCount("action_update_dismissed")) !== 0
+    )
+      throw new Error("Store installation emitted direct-updater captures");
+    observations.storeManagedUpdates = true;
+    await snapshot("store-managed-updates");
+  } else {
+    offerUpdate = true;
+    await namedButton("button", "Check now");
+    await waitFor(
+      async () => count("update_check_ended", (e) => e.properties.outcome === "success") === 1,
+    );
+    await keyEscape();
+    await click("[data-update-notice]");
+    await waitFor(async () => (await usageCount("action_update_seen")) === 1);
+    await namedButton("button", "Not now");
+    await waitFor(async () => (await usageCount("action_update_dismissed")) === 1);
+    await snapshot("update-panel-dismissed");
+    await settings();
+    rejectUpdate = true;
+    await namedButton("button", "Check now");
+    await waitFor(
+      async () => count("update_check_ended", (e) => e.properties.outcome === "failed") === 1,
+    );
+    await snapshot("update-check-failed");
+  }
   if (!mainPage) throw new Error("No owned main inspector.");
   // A real renderer crash in our disposable process, with main left alive to receive the exit.
   const electronModule = `process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktop, "package.json"))})('electron')`;
@@ -995,14 +1064,6 @@ async function productPaths() {
 }
 
 try {
-  if (options.installer) {
-    const sha256 = createHash("sha256")
-      .update(await readFile(options.installer))
-      .digest("hex");
-    if (sha256 !== options.installerSha256)
-      throw new Error("Installer differs from its pinned artifact digest");
-    observations["installer"] = { path: options.installer, sha256 };
-  }
   profile = await mkdtemp(join(tmpdir(), "mrstreamer-analytics-"));
   profiles.push(profile);
   provider = await startFakeProvider({
@@ -1047,14 +1108,6 @@ try {
   if (!updateAddress || typeof updateAddress === "string")
     throw new Error("No local update endpoint.");
   updateEndpoint = `http://127.0.0.1:${updateAddress.port}`;
-  if (packagedExecutable)
-    observations["packagedExecutable"] = {
-      path: packagedExecutable,
-      args: packagedArgs,
-      sha256: createHash("sha256")
-        .update(await readFile(packagedExecutable))
-        .digest("hex"),
-    };
   if (options.native) {
     await runNativeTelemetry({
       options,
@@ -1091,7 +1144,8 @@ try {
       bodies: rawBodies,
       events: sent,
       capture: async (mode) => {
-        holdSummary = mode === "hold";
+        holdSummary = mode === "hold" || mode === "hold-usage";
+        holdUsageOnly = mode === "hold-usage";
         rejectCapture = mode === "reject";
         if (mode === "offline") {
           capture.closeAllConnections();
@@ -1432,7 +1486,8 @@ try {
         pointerInputs,
         scenario: "analytics",
         build: packagedExecutable ? undefined : build,
-        verificationSource: packagedExecutable ? build : undefined,
+        verificationSource,
+        bundleHashes,
         mode: options.native
           ? "native-telemetry"
           : packagedExecutable

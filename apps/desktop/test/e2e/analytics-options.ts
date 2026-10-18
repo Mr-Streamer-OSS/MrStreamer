@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+
 /** Native acceptance is deliberately separate from the bounded release-UI scenario. */
 export function analyticsOptions(args: string[]) {
   const flags = new Set<string>();
@@ -7,7 +9,7 @@ export function analyticsOptions(args: string[]) {
     if (["--native-telemetry", "--observe-rollover", "--volume-workload"].includes(arg))
       flags.add(arg);
     else if (
-      /^--(built-desktop|expected-version|expected-source|native-case|prior-executable|prior-source|installed-pair|installer|installer-sha256)=/.test(
+      /^--(built-desktop|expected-version|expected-source|native-case|prior-executable|prior-source|installed-pair)=/.test(
         arg,
       )
     ) {
@@ -55,21 +57,19 @@ export function analyticsOptions(args: string[]) {
     throw new Error("Prior executable and source must be supplied together");
   if (values.has("--installed-pair") && values.has("--prior-executable"))
     throw new Error("Select an installed Windows pair or separate prior executable");
-  if (values.has("--installer") !== values.has("--installer-sha256"))
-    throw new Error("Installer path and SHA256 must be supplied together");
-  if (values.has("--installer-sha256") && !/^[a-f0-9]{64}$/.test(values.get("--installer-sha256")!))
-    throw new Error("Expected installer SHA256");
   return {
-    installer: values.get("--installer"),
-    installerSha256: values.get("--installer-sha256"),
-    executable,
+    executable: executable ? resolve(executable) : undefined,
     appArgs,
     native,
     expectedVersion,
     expectedSource,
-    builtDesktop: values.get("--built-desktop"),
+    builtDesktop: values.has("--built-desktop")
+      ? resolve(values.get("--built-desktop")!)
+      : undefined,
     nativeCase,
-    priorExecutable: values.get("--prior-executable"),
+    priorExecutable: values.has("--prior-executable")
+      ? resolve(values.get("--prior-executable")!)
+      : undefined,
     priorSource: values.get("--prior-source"),
     installedPair: values.get("--installed-pair"),
     volume: flags.has("--volume-workload"),

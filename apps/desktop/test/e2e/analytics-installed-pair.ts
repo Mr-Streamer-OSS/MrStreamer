@@ -65,7 +65,21 @@ export async function installedTelemetryPair(
       failed = false;
     },
     async close() {
-      if (!failed && current) uninstall(runner);
+      if (!failed && current) {
+        try {
+          await uninstall(runner);
+          await writeFile(
+            join(evidence, "native-uninstall.json"),
+            JSON.stringify({ status: "passed" }),
+          );
+        } catch (error) {
+          await writeFile(
+            join(evidence, "native-uninstall.json"),
+            JSON.stringify({ status: "failed", error: String(error) }),
+          );
+          throw error;
+        }
+      }
     },
   };
 }
