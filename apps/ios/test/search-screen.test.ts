@@ -39,13 +39,27 @@ const scenario = vi.hoisted(() => ({
 }));
 
 vi.mock("react-native", async () => {
-  const { createElement, Fragment } = await import("react");
+  const { createElement, Fragment, useEffect } = await import("react");
   type Props = { children?: React.ReactNode; testID?: string };
   const box = ({ children, testID }: Props) =>
     createElement("div", { "data-testid": testID }, children);
+  /** A view, which lays out once, as a phone's area under the search field. */
+  const View = ({
+    children,
+    testID,
+    onLayout,
+  }: Props & {
+    onLayout?: (event: { nativeEvent: { layout: { width: number; height: number } } }) => void;
+  }) => {
+    useEffect(() => {
+      onLayout?.({ nativeEvent: { layout: { width: 390, height: 600 } } });
+    }, []);
+    return createElement("div", { "data-testid": testID }, children);
+  };
   type Section = { title: string; data: readonly unknown[] };
   return {
-    View: box,
+    View,
+    ScrollView: box,
     Text: ({ children }: Props) => createElement("span", null, children),
     Image: () => null,
     Pressable: ({ children, testID, onPress }: Props & { onPress: () => void }) =>

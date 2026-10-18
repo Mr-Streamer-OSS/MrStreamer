@@ -206,6 +206,9 @@ export default function Search() {
   // The latest text isn't searched yet: the last results stay meanwhile.
   const pending = query.trim() !== "" && typed !== query;
   const keyboard = useKeyboardHeight();
+  // The height under the search field, for results and the status line together.
+  const [area, setArea] = useState(0);
+  const reserve = (keyboard > 0 ? keyboard : insets.bottom) + 8;
   const line = searchLine(
     query.trim() !== "" ? status : null,
     pending,
@@ -245,61 +248,64 @@ export default function Search() {
         </View>
         <TextButton label="Cancel" onPress={close} />
       </View>
-      <SectionList
-        style={styles.screen}
-        sections={sections}
-        keyExtractor={(row) => (row.kind === "title" ? row.title.key : row.channel.key)}
-        extraData={playing}
-        renderSectionHeader={({ section }) => (
-          <Text style={styles.section} accessibilityRole="header">
-            {section.total > section.data.length
-              ? `${section.title} · ${section.data.length} of ${section.total}`
-              : `${section.title} · ${section.total}`}
-          </Text>
-        )}
-        renderItem={({ item }) =>
-          item.kind === "title" ? (
-            <TitleRow title={item.title} height={height} onPress={open} />
-          ) : (
-            <ChannelRow
-              channel={item.channel}
-              detail={library?.placeOf.get(item.channel.key) ?? ""}
-              playing={item.channel.key === playing}
-              height={height}
-              onPress={watch}
-            />
-          )
-        }
-        stickySectionHeadersEnabled={false}
-        keyboardDismissMode="on-drag"
-        // A tap on a result opens it, with the keyboard up or not.
-        keyboardShouldPersistTaps="handled"
-        initialNumToRender={16}
-        // With the status line under it, the list ends above it; else it runs under the keyboard.
-        contentContainerStyle={{ paddingBottom: line ? 16 : insets.bottom + 16 }}
-        ListEmptyComponent={
-          // Nothing has the name only once the latest text was searched in every list. While one
-          // loads or failed, the status line says what was searched instead.
-          searching && typed === query && !status ? (
-            <Nothing query={typed.trim()} library={library} lists={lists} />
-          ) : undefined
-        }
-        testID="search-list"
-      />
-      {line ? (
-        <View
-          style={[
-            styles.dock,
-            {
-              marginLeft: insets.left + 12,
-              marginRight: insets.right + 12,
-              marginBottom: (keyboard > 0 ? keyboard : insets.bottom) + 8,
-            },
-          ]}
-        >
-          <StatusLine status={line} />
-        </View>
-      ) : null}
+      <View style={styles.screen} onLayout={(event) => setArea(event.nativeEvent.layout.height)}>
+        <SectionList
+          style={styles.screen}
+          sections={sections}
+          keyExtractor={(row) => (row.kind === "title" ? row.title.key : row.channel.key)}
+          extraData={playing}
+          renderSectionHeader={({ section }) => (
+            <Text style={styles.section} accessibilityRole="header">
+              {section.total > section.data.length
+                ? `${section.title} · ${section.data.length} of ${section.total}`
+                : `${section.title} · ${section.total}`}
+            </Text>
+          )}
+          renderItem={({ item }) =>
+            item.kind === "title" ? (
+              <TitleRow title={item.title} height={height} onPress={open} />
+            ) : (
+              <ChannelRow
+                channel={item.channel}
+                detail={library?.placeOf.get(item.channel.key) ?? ""}
+                playing={item.channel.key === playing}
+                height={height}
+                onPress={watch}
+              />
+            )
+          }
+          stickySectionHeadersEnabled={false}
+          keyboardDismissMode="on-drag"
+          // A tap on a result opens it, with the keyboard up or not.
+          keyboardShouldPersistTaps="handled"
+          initialNumToRender={16}
+          // With the status line under it, the list ends above it; else it runs under the keyboard.
+          contentContainerStyle={{ paddingBottom: line ? 16 : insets.bottom + 16 }}
+          ListEmptyComponent={
+            // Nothing has the name only once the latest text was searched in every list. While one
+            // loads or failed, the status line says what was searched instead.
+            searching && typed === query && !status ? (
+              <Nothing query={typed.trim()} library={library} lists={lists} />
+            ) : undefined
+          }
+          testID="search-list"
+        />
+        {line && area > 0 ? (
+          <View
+            style={[
+              styles.dock,
+              {
+                marginLeft: insets.left + 12,
+                marginRight: insets.right + 12,
+                marginBottom: reserve,
+              },
+            ]}
+          >
+            {/* Within what the keyboard leaves, so results keep most of it. */}
+            <StatusLine status={line} space={area - reserve - 8} />
+          </View>
+        ) : null}
+      </View>
     </Animated.View>
   );
 }

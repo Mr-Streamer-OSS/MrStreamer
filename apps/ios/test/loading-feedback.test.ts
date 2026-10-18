@@ -27,6 +27,10 @@ const scenario = vi.hoisted(() => ({
   /** Movies' collections once made; null until then. */
   made: null as object | null,
   focused: true,
+  /** Whether Watch is open over the tabs. */
+  watch: false,
+  /** How tall a view lays out: the screen's safe area and what lies in it. */
+  height: 600,
   /** What the screen did, in order. */
   did: [] as string[],
   /** What VoiceOver was given to read out. */
@@ -47,13 +51,24 @@ vi.mock("react-native", async () => {
     testID?: string;
     onLayout?: (event: { nativeEvent: { layout: { width: number; height: number } } }) => void;
   };
-  /** A view, which lays out once at 100 by 20 points. */
+  /** A view, which lays out once: 100 points wide, the status line's actions 88 tall. */
   const View = ({ children, testID, onLayout }: Props) => {
     useEffect(() => {
-      onLayout?.({ nativeEvent: { layout: { width: 100, height: 20 } } });
+      const height = testID === "status-actions" ? 88 : scenario.height;
+      onLayout?.({ nativeEvent: { layout: { width: 100, height } } });
     }, []);
     return createElement("div", { "data-testid": testID }, children);
   };
+  type Style = { maxHeight?: number } | readonly Style[] | undefined;
+  const flat = (style: Style): { maxHeight?: number } =>
+    style === undefined ? {} : "length" in style ? Object.assign({}, ...style.map(flat)) : style;
+  /** A scroll view, which shows the most height it may take. */
+  const ScrollView = ({ children, testID, style }: Props & { style?: Style }) =>
+    createElement(
+      "div",
+      { "data-testid": testID, "data-max-height": flat(style).maxHeight },
+      children,
+    );
   class Value {
     setValue() {}
     interpolate() {
@@ -62,7 +77,7 @@ vi.mock("react-native", async () => {
   }
   return {
     View,
-    ScrollView: View,
+    ScrollView,
     Text: ({ children }: Props) => createElement("span", null, children),
     Image: () => null,
     Pressable: ({ children, testID, onPress }: Props & { onPress?: () => void }) =>
@@ -147,7 +162,7 @@ vi.mock("../src/account.ts", () => ({
   retryTitles: () => scenario.did.push("retry titles"),
 }));
 vi.mock("../src/playback.ts", () => ({
-  usePlayback: () => ({ phase: { kind: "idle" } }),
+  usePlayback: () => ({ phase: { kind: "idle" }, watch: scenario.watch }),
   playingChannel: () => null,
 }));
 vi.mock("../src/storage.ts", () => ({ useSavedState: () => ({}), writeState: () => undefined }));
@@ -239,6 +254,8 @@ beforeEach(() => {
     lists: { kind: "loading" },
     made: null,
     focused: true,
+    watch: false,
+    height: 600,
     did: [],
     said: [],
     loops: [],
@@ -299,6 +316,64 @@ describe("Live while its channels load", () => {
     expect(line()).toBe("Enter the password for Harbor in Settings.Settings");
     press("Settings");
     expect(scenario.did).toEqual(["push /live/settings"]);
+  });
+});
+
+describe("the status line", () => {
+  it("is read out only while the viewer sees it, then its latest words once", () => {
+    const northwind = member("a", "Northwind", { live: { kind: "loading", last: null } });
+    scenario.members = [northwind];
+    open(React.createElement(Live));
+    expect(scenario.said).toEqual(["Loading channels from Northwind."]);
+
+    // Watch opens over Live, which stays in front in navigation, and Harbor fails meanwhile.
+    scenario.watch = true;
+    scenario.members = [
+      northwind,
+      member("b", "Harbor", { live: { kind: "failed", error: failure, last: null, since: 0 } }),
+    ];
+    draw(React.createElement(Live));
+    expect(scenario.said).toEqual(["Loading channels from Northwind."]);
+    scenario.watch = false;
+    draw(React.createElement(Live));
+    draw(React.createElement(Live));
+    expect(scenario.said).toEqual([
+      "Loading channels from Northwind.",
+      "Couldn't load channels from Harbor. Loading channels from Northwind.",
+    ]);
+
+    // In the background too.
+    React.act(() => scenario.appChanged?.("background"));
+    scenario.members = [northwind];
+    draw(React.createElement(Live));
+    expect(scenario.said).toHaveLength(2);
+    React.act(() => scenario.appChanged?.("active"));
+    expect(scenario.said.at(-1)).toBe("Loading channels from Northwind.");
+    expect(scenario.said).toHaveLength(3);
+  });
+
+  it("keeps two providers' long line within its share of the screen, Retry and Settings outside its scrolling text", () => {
+    const northwind = member("a", "Northwind", {
+      live: { kind: "failed", error: failure, last: catalogueOf, since: 0 },
+    });
+    const harbor = member("b", "Harbor", { needsSecret: true });
+    scenario.members = [northwind, harbor];
+    scenario.catalogue = { kind: "ready", library, failing: [northwind, harbor] };
+    open(React.createElement(Live));
+    const scroll = container.querySelector('[data-testid="status-text"]')!;
+    const actions = container.querySelector('[data-testid="status-actions"]')!;
+    expect(scroll.textContent).toBe(
+      "Couldn't update channels from Northwind. Showing the last list. Enter the password for Harbor in Settings.",
+    );
+    // The text scrolls past what's left of 40 percent of the safe area once the actions (88)
+    // have theirs; the actions stay outside it.
+    const most = Number(scroll.getAttribute("data-max-height") ?? NaN);
+    expect(most).toBeGreaterThan(0);
+    expect(most + 88).toBeLessThanOrEqual(600 * 0.4);
+    expect(scroll.contains(actions)).toBe(false);
+    expect(actions.textContent).toBe("RetrySettings");
+    // The channels under it stay.
+    expect(text()).toContain("NPO 1");
   });
 });
 
@@ -380,8 +455,28 @@ describe("the shapes' highlight", () => {
     scenario.focused = true;
     draw(group());
 
+    // Watch open over the screen, which stays in front in navigation, stops it; closing it
+    // starts it again.
+    scenario.watch = true;
+    draw(group());
+    expect(scenario.loops).toEqual(["start", "stop", "start", "stop", "start", "stop"]);
+    expect(count("highlight")).toBe(0);
+    scenario.watch = false;
+    draw(group());
+    expect(scenario.loops).toEqual(["start", "stop", "start", "stop", "start", "stop", "start"]);
+    expect(count("highlight")).toBe(3);
+
     // Content replacing the shapes stops it.
     draw(React.createElement("p", null, "Content"));
-    expect(scenario.loops).toEqual(["start", "stop", "start", "stop", "start", "stop"]);
+    expect(scenario.loops).toEqual([
+      "start",
+      "stop",
+      "start",
+      "stop",
+      "start",
+      "stop",
+      "start",
+      "stop",
+    ]);
   });
 });

@@ -13,6 +13,7 @@ import {
   Animated,
   AppState,
   Easing,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -22,6 +23,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { Loadable, Member } from "./account.ts";
 import { Glass, useMotionAllowed } from "./glass.tsx";
+import { usePlayback } from "./playback.ts";
 import { store, useStore } from "./store.ts";
 import { colors, TextButton } from "./ui.tsx";
 
@@ -29,10 +31,11 @@ import { colors, TextButton } from "./ui.tsx";
 // lists as account.ts and titles.ts keep them: nothing here reads, retries or times anything.
 //
 // Content that is missing gets still shapes where it will go, a few, never a count of results.
-// While the screen is in front, the app is active and iOS has said Reduce Motion is off, a soft
-// band crosses each shape about once every 2.7 seconds, one clock per group of shapes on the
-// native driver. What loads, updates or failed is one line of text in glass at the bottom of the
-// screen (`Docked`), over content that stays usable, which scrolls clear of it.
+// While the viewer sees them (the screen in front, Watch closed, the app active) and iOS has said
+// Reduce Motion is off, a soft band crosses each shape about once every 2.7 seconds, one clock per
+// group of shapes on the native driver. What loads, updates or failed is a line of text in glass
+// at the bottom of the screen (`Docked`), over content that stays usable and scrolls clear of it;
+// the line takes at most a share of the screen's height and scrolls its text beyond that.
 
 /** A button on the status line. */
 export interface Action {
@@ -154,28 +157,37 @@ export const useDockInset = () => useContext(DockInset);
 /**
  * A screen's content with its status line floating over the bottom, inside the screen's own safe
  * area: above the tab bar, the now playing accessory and the home indicator, however iOS sizes
- * them. Scrolling content below reads `useDockInset` to clear it.
+ * them. The line may take a share of that safe area's height, measured as laid out, and shows
+ * once it is known. Scrolling content below reads `useDockInset` to clear it.
  */
 export function Docked({ status, children }: { status: Status | null; children: ReactNode }) {
+  const [space, setSpace] = useState(0);
   const [height, setHeight] = useState(0);
+  const shown = status !== null && space > 0;
   return (
-    <DockInset.Provider value={status ? height : 0}>
+    <DockInset.Provider value={shown ? height : 0}>
       <View style={styles.fill}>
         {children}
-        {status ? (
-          <SafeAreaView
-            edges={["bottom", "left", "right"]}
-            style={styles.dock}
+        <SafeAreaView
+          edges={["top", "bottom", "left", "right"]}
+          style={styles.cover}
+          pointerEvents="box-none"
+        >
+          <View
+            style={styles.area}
             pointerEvents="box-none"
+            onLayout={(event) => setSpace(event.nativeEvent.layout.height)}
           >
-            <View
-              style={styles.room}
-              onLayout={(event) => setHeight(event.nativeEvent.layout.height + GAP * 2)}
-            >
-              <StatusLine status={status} />
-            </View>
-          </SafeAreaView>
-        ) : null}
+            {shown ? (
+              <View
+                style={styles.room}
+                onLayout={(event) => setHeight(event.nativeEvent.layout.height + GAP * 2)}
+              >
+                <StatusLine status={status} space={space - GAP * 2} />
+              </View>
+            ) : null}
+          </View>
+        </SafeAreaView>
       </View>
     </DockInset.Provider>
   );
@@ -183,26 +195,42 @@ export function Docked({ status, children }: { status: Status | null; children: 
 
 /** Space between the status line and content above it, and the screen's edge under it. */
 const GAP = 8;
+/** The share of its host's height the whole line may take: content keeps the rest. */
+const SHARE = 0.4;
+/** The text keeps at least this much, a line at the smallest sizes, however little is left. */
+const MIN_TEXT = 44;
 
 /**
- * The status line itself: white text that wraps at any text size, then its actions, on glass
- * (solid under Reduce Transparency and before iOS 26). Search places it above the keyboard.
+ * The status line itself, on glass (solid under Reduce Transparency and before iOS 26), within
+ * `space`, the height its host has for content and line together. Its actions and provider bar
+ * always show; its text takes what is left of the line's share and scrolls beyond that, so long
+ * provider states at any text size leave the screen's content usable. VoiceOver reads the text
+ * whole. Search places it above the keyboard.
  */
-export function StatusLine({ status }: { status: Status }) {
-  const focused = useIsFocused();
+export function StatusLine({ status, space }: { status: Status; space: number }) {
+  const shown = useShown();
   const { text, actions = [], progress, announce = true } = status;
-  // Read out once per change of words, and only on the screen in front: tabs behind it keep
-  // their own lines quiet until they are back.
+  const [footer, setFooter] = useState(0);
+  // Read out once per change of words, only while the viewer sees it: a line behind another tab,
+  // under Watch or in the background stays quiet, and says its latest words once it is back.
   const said = useRef<string | null>(null);
   useEffect(() => {
-    if (!focused || !announce || said.current === text) return;
+    if (!shown || !announce || said.current === text) return;
     said.current = text;
     AccessibilityInfo.announceForAccessibilityWithOptions(text, { queue: true });
-  }, [focused, announce, text]);
+  }, [shown, announce, text]);
+  const rail = progress !== undefined ? RAIL : 0;
+  const textMax = Math.max(MIN_TEXT, space * SHARE - footer - rail - PADDING * 2);
   return (
     <Glass style={styles.glass}>
       <View style={styles.line} testID="status-line">
-        <Text style={styles.text}>{text}</Text>
+        <ScrollView
+          style={[styles.textArea, { maxHeight: textMax }]}
+          indicatorStyle="white"
+          testID="status-text"
+        >
+          <Text style={styles.text}>{text}</Text>
+        </ScrollView>
         {progress !== undefined ? (
           // A fixed bar: it moves only as a provider's lists come in.
           <View style={styles.rail} accessibilityElementsHidden importantForAccessibility="no">
@@ -210,7 +238,11 @@ export function StatusLine({ status }: { status: Status }) {
           </View>
         ) : null}
         {actions.length > 0 ? (
-          <View style={styles.actions}>
+          <View
+            style={styles.actions}
+            onLayout={(event) => setFooter(event.nativeEvent.layout.height)}
+            testID="status-actions"
+          >
             {actions.map((action) => (
               <TextButton key={action.label} {...action} />
             ))}
@@ -219,6 +251,22 @@ export function StatusLine({ status }: { status: Status }) {
       </View>
     </Glass>
   );
+}
+
+/** The line's own top and bottom padding, and the provider bar's height with its margin. */
+const PADDING = 4;
+const RAIL = 8;
+
+/**
+ * Whether what the calling screen draws is what the viewer sees: it is in front in navigation,
+ * Watch isn't open over it (Watch lies over the tabs without leaving them; Picture in Picture
+ * and the accessory leave the screen in view) and the app is active.
+ */
+function useShown(): boolean {
+  const focused = useIsFocused();
+  const { watch } = usePlayback();
+  const active = useForeground();
+  return focused && !watch && active;
 }
 
 /** Whether the app is in front, not in the background or behind the app switcher. */
@@ -245,9 +293,9 @@ const Clock = createContext<Animated.Value | null>(null);
 
 /**
  * Still shapes standing in for content that hasn't come, hidden from VoiceOver, with one clock
- * for the highlight of every `Shape` in it. The clock runs only while the group is shown on the
- * screen in front, the app is active and Reduce Motion is known to be off; it stops, and the
- * band goes, the moment any of that changes or the content replaces the group.
+ * for the highlight of every `Shape` in it. The clock runs only while the viewer sees the group
+ * (its screen in front, Watch closed, the app active) and Reduce Motion is known to be off; it
+ * stops, and the band goes, the moment any of that changes or the content replaces the group.
  */
 export function Placeholders({
   style,
@@ -259,10 +307,9 @@ export function Placeholders({
   testID?: string;
 }) {
   const [clock] = useState(() => new Animated.Value(0));
-  const focused = useIsFocused();
-  const active = useForeground();
+  const shown = useShown();
   const motion = useMotionAllowed();
-  const moving = focused && active && motion;
+  const moving = shown && motion;
   useEffect(() => {
     if (!moving) return;
     const loop = Animated.loop(
@@ -351,7 +398,8 @@ export function PlaceholderLines({ widths }: { widths: readonly `${number}%`[] }
 
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: "#000000" },
-  dock: { position: "absolute", left: 0, right: 0, bottom: 0 },
+  cover: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
+  area: { flex: 1, justifyContent: "flex-end" },
   room: { marginHorizontal: 12, marginBottom: GAP },
   glass: { borderRadius: 22 },
   line: {
@@ -360,18 +408,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     columnGap: 20,
     paddingHorizontal: 16,
-    paddingVertical: 4,
+    paddingVertical: PADDING,
     minHeight: 44,
   },
   // Takes the row; actions follow on the same line when they fit, else on their own.
-  text: {
-    color: colors.text,
-    fontSize: 15,
-    flexGrow: 1,
-    flexShrink: 1,
-    flexBasis: 180,
-    paddingVertical: 8,
-  },
+  textArea: { flexGrow: 1, flexShrink: 1, flexBasis: 180 },
+  text: { color: colors.text, fontSize: 15, paddingVertical: 8 },
   rail: {
     flexBasis: "100%",
     height: 2,
