@@ -649,7 +649,10 @@ async function recover(
   paused: boolean,
 ): Promise<void> {
   const upstream = session
-    ? await call("playback.failure", { sessionId: session.id }).catch(() => null)
+    ? await call("playback.failure", {
+        sessionId: session.id,
+        ...(error.failure ? { selector: error.failure } : {}),
+      }).catch(() => null)
     : null;
   if (mine !== generation) return;
   const fallback = !upstream && !wasPlaying && !convertSound && error.kind !== "network";

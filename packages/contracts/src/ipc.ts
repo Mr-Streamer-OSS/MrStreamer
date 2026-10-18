@@ -318,7 +318,11 @@ export const ipcInputs = {
     type({ copy: "string > 0", decoders: decoders(), "measurement?": PlaybackControl() }),
   "playback.close": () => type({ sessionId: "string" }),
   "playback.closeAll": none,
-  "playback.failure": () => type({ sessionId: "string" }),
+  "playback.failure": () =>
+    type({
+      sessionId: "string",
+      "selector?": { kind: "'hls'", requestId: "string <= 256 | null" },
+    }),
   "playback.tracks": () => type({ sessionId: "string" }),
   "playback.playing": () => type({ sessionId: "string" }),
   "output.status": none,
@@ -783,6 +787,9 @@ export interface IpcOutputs {
 }
 
 export type IpcMethod = keyof IpcOutputs;
+/** An HLS cause belongs only to this opaque local proxy path. Null selects no HTTP cause. */
+export type PlaybackFailureSelector = NonNullable<IpcInput<"playback.failure">["selector"]>;
+
 export type IpcInput<M extends IpcMethod> = ReturnType<(typeof ipcInputs)[M]>["infer"];
 export type IpcOutput<M extends IpcMethod> = IpcOutputs[M];
 
