@@ -15,7 +15,10 @@ const JOINER = /(?<=[\p{L}\p{N}]\p{M}*)['’ʼ\p{Pd}](?=[\p{L}\p{N}])/gu;
 export function searchSpellings(text: string): readonly string[] {
   const normal = normalize(text);
   if (!normal) return [];
-  const joined = normalize(text.normalize("NFKC").replace(JOINER, ""));
+  const compatible = text.normalize("NFKC");
+  const withoutJoiners = compatible.replace(JOINER, "");
+  if (withoutJoiners === compatible) return [normal];
+  const joined = normalize(withoutJoiners);
   return normal === joined ? [normal] : [normal, joined];
 }
 
