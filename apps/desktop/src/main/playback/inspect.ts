@@ -33,6 +33,8 @@ interface SubtitleStream {
 export interface StreamLayout {
   /** The pid of the program table, which names the tracks. */
   readonly programPid: number;
+  /** The current program clock, which can move to another PID at an HLS epoch. */
+  readonly pcrPid?: number;
   readonly video: Track | null;
   readonly audio: readonly AudioStream[];
   readonly subtitles: readonly SubtitleStream[];
@@ -80,6 +82,7 @@ export function createInspector() {
     return {
       layout: {
         programPid: pmtPid,
+        pcrPid: table.pcrPid,
         video: video ? settled(video) : null,
         audio: table.tracks
           .filter((track) => track.kind === "audio")
@@ -192,6 +195,7 @@ interface TableTrack {
 }
 
 interface ProgramTable {
+  readonly pcrPid: number;
   readonly tracks: TableTrack[];
   readonly subtitles: readonly SubtitleStream[];
 }
@@ -218,7 +222,7 @@ function parsePmt(payload: Uint8Array): ProgramTable | null {
     const entry = classify(type, descriptors);
     if (entry) tracks.push({ pid, ...entry, ...audioFacts(descriptors) });
   }
-  return { tracks, subtitles };
+  return { tracks, subtitles, pcrPid: ((section[8]! & 0x1f) << 8) | section[9]! };
 }
 
 /** The language and purpose a track's descriptors give it. */
