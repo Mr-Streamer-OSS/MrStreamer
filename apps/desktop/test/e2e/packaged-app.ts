@@ -33,6 +33,7 @@ import { dirname, join } from "node:path";
 import { hlsCompatibilityScenario } from "../../../../.cursor/skills/verify-mrstreamer/scripts/hls-compatibility.ts";
 import { fixture, startFakeProvider } from "../fake-provider.ts";
 import { startFakeHls } from "../fake-hls.ts";
+import { fixtureTools } from "./fixture-tools.ts";
 import {
   connect,
   delay,
@@ -315,12 +316,12 @@ async function playVp9Movie(page: Page): Promise<{ ok: boolean; detail: string }
     "-y",
     output,
   ];
-  const made = spawnSync(ffmpeg, args, { encoding: "utf8" });
+  const tools = fixtureTools(ffmpeg, profile);
+  const made = spawnSync(tools.ffmpeg, args, { encoding: "utf8" });
   if (made.error) throw made.error;
   if (made.status !== 0) throw new Error(`VP9 fixture creation failed: ${made.stderr}`);
-  const ffprobe = join(dirname(ffmpeg), process.platform === "win32" ? "ffprobe.exe" : "ffprobe");
   const probe = spawnSync(
-    ffprobe,
+    tools.ffprobe,
     [
       "-v",
       "error",
@@ -357,7 +358,8 @@ async function playVp9Movie(page: Page): Promise<{ ok: boolean; detail: string }
     source,
     sha256: createHash("sha256").update(bytes).digest("hex"),
     bytes: bytes.length,
-    ffmpeg,
+    ffmpeg: tools.ffmpeg,
+    tools,
     args,
   };
   return playMovie(page, "Index at the end", "vp9-movie", 96);

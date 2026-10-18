@@ -278,7 +278,7 @@ pnpm build
 MR_STREAMER_FFMPEG="$PWD/apps/desktop/vendor/ffmpeg/linux-x64/ffmpeg" xvfb-run -a node apps/desktop/test/e2e/packaged-app.ts apps/desktop/node_modules/electron/dist/electron -- --no-sandbox "$PWD/apps/desktop"
 ```
 
-For macOS use the `mac-arm64` vendor pair and Electron path with `--use-mock-keychain` as above; Windows uses `win-x64/ffmpeg.exe`. Keep ffprobe beside ffmpeg. Installed smoke runs keep their packaged resource paths.
+For macOS use the `mac-arm64` vendor pair and Electron path with `--use-mock-keychain` as above; Windows uses `win-x64/ffmpeg.exe`. Keep ffprobe beside ffmpeg. For MSIX, the external smoke copies the exact installed static pair into its disposable profile and verifies both SHA-256 values before fixture generation or probing. The proof records source paths, executed paths and hashes. Installed apps keep their normal packaged tool resolution; no package ACL change is needed.
 
 `apps/desktop/test/e2e/live-subtitle-errors-app.ts` uses the built app and a loopback HLS host. It checks missing and stalled subtitle playlists and segments with moving video; six-second sliding playlists with delayed picture, a remembered language, racing Off and language switches, and initially empty subtitles; a real one-time selected segment 404 and repeated 503s keeping the language selected until cues resume; IMSC fallback; and CC left off for forty seconds with dead subtitle playlists or segments, with bounded requests and no video cancellations after the initial probe. A later genuine video stall must still reconnect. It needs ffmpeg and ffprobe. `MR_STREAMER_SUBTITLE_ERRORS_ONLY` selects comma-separated modes when investigating a failure.
 
