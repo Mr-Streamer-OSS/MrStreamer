@@ -59,18 +59,28 @@ const fileOf = (id: string, kind: SavedKind) => new File(folder(), nameOf(id, ki
 const pendingOf = (id: string, kind: SavedKind) => new File(folder(), `${nameOf(id, kind)}.next`);
 
 const Url = lazy(() => type(`string <= ${URL_LENGTH}`).or("null"));
+/**
+ * A row's number, or none. JSON reads `1e400` as Infinity, which ArkType's "number" lets through,
+ * while a copy this module writes never holds one (JSON writes it as null): a file that does was
+ * changed since, and doesn't check out.
+ */
+const Finite = lazy(() =>
+  type("number")
+    .narrow((value, ctx) => Number.isFinite(value) || ctx.mustBe("a finite number"))
+    .or("null"),
+);
 const Category = lazy(() => type({ "+": "reject", id: "string", name: "string" }));
 const Channel = lazy(() =>
   type({
     "+": "reject",
     id: "string",
     name: "string",
-    number: "number | null",
+    number: Finite(),
     logoUrl: Url(),
     categoryIds: "string[]",
     guideId: "string | null",
     "adult?": "boolean",
-    catchupDays: "number | null",
+    catchupDays: Finite(),
   }),
 );
 const Title = lazy(() =>
@@ -80,8 +90,8 @@ const Title = lazy(() =>
     name: "string",
     posterUrl: Url(),
     backdropUrl: Url(),
-    rating: "number | null",
-    addedAt: "number | null",
+    rating: Finite(),
+    addedAt: Finite(),
     releaseDate: "string | null",
     categoryIds: "string[]",
     adult: "boolean",

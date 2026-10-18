@@ -383,6 +383,73 @@ describe("a launch with lists saved", () => {
     }
   });
 
+  it("loads one kind from the provider when a saved number overflows to infinity, keeping the other's", async () => {
+    const id = await added(await launch(), one, ONE);
+    const original = new Map(
+      ["live", "titles"].map((kind) => [kind, readFileSync(pathOf(`${id}.${kind}.json`), "utf8")]),
+    );
+    /** `kind`'s file with `field` of its first `list` row set to `number`, as JSON text spells it. */
+    const write = (kind: string, list: string, field: string, number: string) => {
+      const envelope = JSON.parse(original.get(kind) ?? "");
+      envelope.catalogue[list][0][field] = "__number__";
+      writeFileSync(
+        pathOf(`${id}.${kind}.json`),
+        JSON.stringify(envelope).replace('"__number__"', number),
+      );
+    };
+    const restore = () => {
+      for (const [kind, text] of original) writeFileSync(pathOf(`${id}.${kind}.json`), text);
+    };
+    const overflows = [
+      ["titles", "movies", "rating", "1e400"],
+      ["titles", "movies", "addedAt", "-1e400"],
+      ["live", "channels", "number", "1e400"],
+      ["live", "channels", "catchupDays", "-1e400"],
+    ] as const;
+    for (const [kind, list, field, number] of overflows) {
+      const what = `${list} ${field} ${number}`;
+      restore();
+      write(kind, list, field, number);
+      const from = memory.requests.length;
+      const app = await launch();
+      await until(
+        () => member(app, id).live.kind === "ready" && member(app, id).titles.kind === "ready",
+        `both lists, ${what}`,
+      );
+      const other = kind === "live" ? "titles" : "live";
+      expect(member(app, id)[kind], what).toMatchObject({ from: "provider" });
+      expect(member(app, id)[other], what).toMatchObject({ from: "cache" });
+      expect(listsAskedSince(from), what).toContain(
+        kind === "live" ? "get_live_streams" : "get_vod_streams",
+      );
+      // Saved again from the provider's answer before the next case.
+      const path = pathOf(`${id}.${kind}.json`);
+      await until(
+        () => existsSync(path) && !readFileSync(path, "utf8").includes("e400"),
+        `the list saved again, ${what}`,
+      );
+    }
+    // Finite numbers and none stay saved lists.
+    for (const [kind, list, field, number] of [
+      ["titles", "movies", "rating", "9.5"],
+      ["titles", "movies", "addedAt", "null"],
+      ["live", "channels", "number", "-3"],
+      ["live", "channels", "catchupDays", "null"],
+    ] as const) {
+      restore();
+      write(kind, list, field, number);
+      const from = memory.requests.length;
+      const app = await launch();
+      await until(
+        () => member(app, id).live.kind === "ready" && member(app, id).titles.kind === "ready",
+        "both saved lists",
+      );
+      expect(member(app, id).live, `${field} ${number}`).toMatchObject({ from: "cache" });
+      expect(member(app, id).titles, `${field} ${number}`).toMatchObject({ from: "cache" });
+      expect(listsAskedSince(from)).toEqual([]);
+    }
+  });
+
   it("takes the new copy a write left halfway, and deletes every file not of a saved subscription", async () => {
     const id = await added(await launch(), one, ONE);
     // Stopped as iOS moves a write into place: the copy deleted, the new file still beside it.
