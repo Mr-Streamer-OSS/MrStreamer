@@ -467,6 +467,57 @@ describe("saving lists", () => {
     }
   });
 
+  it("writes as none artwork whose address within an address holds the password encoded again", async () => {
+    const login = { username: "five", password: "canary space" };
+    const { password } = login;
+    /** An image proxy's address for `inner`, encoded as its query value. */
+    const proxied = (inner: string) => {
+      const outer = new URL("https://proxy.example/image");
+      outer.searchParams.set("url", inner);
+      return outer.href;
+    };
+    const asked = (base: string, name: string, value: string) => {
+      const address = new URL(base);
+      address.searchParams.set(name, value);
+      return address.href;
+    };
+    const encodedPath = `https://panel.example/art/five/${encodeURIComponent(password)}/7.png`;
+    const unsafe = [
+      proxied(encodedPath),
+      `https://img.example/${encodeURIComponent(encodeURIComponent(password))}/logo.png`,
+      proxied(asked("https://panel.example/get.php", "password", password)),
+      proxied(proxied(encodedPath)),
+      // Encoding that doesn't decode can't be shown free of the login.
+      "https://img.example/logo.png?x=%E0%A4%A",
+    ];
+    const safe = [
+      proxied("https://img.example/art/7.png?size=w500"),
+      proxied(asked("https://panel.example/logo.png", "ref", "fivefold")),
+    ];
+    const art = [...unsafe, ...safe];
+    memory.channels = (rows) =>
+      rows.map((row, at) => (at < art.length ? { ...row, stream_icon: art[at] } : row));
+    const app = await launch();
+    const id = await added(app, await panelFor(login), login);
+    const listed = app.shownOf(member(app, id).live)?.channels ?? [];
+    const kept = contents(`${id}.live.json`).catalogue.channels as { logoUrl: string | null }[];
+    expect(kept).toHaveLength(listed.length);
+    expect(kept.slice(0, art.length).map((each) => each.logoUrl)).toEqual([
+      ...unsafe.map(() => null),
+      ...safe,
+    ]);
+    expect(listed.slice(0, art.length).map((each) => each.logoUrl)).toEqual(art);
+    const text = readFileSync(pathOf(`${id}.live.json`), "utf8");
+    for (const spelling of [
+      password,
+      password.replaceAll(" ", "+"),
+      encodeURIComponent(password),
+      encodeURIComponent(encodeURIComponent(password)),
+    ]) {
+      expect(text).not.toContain(spelling);
+    }
+  });
+
   for (const [what, password] of [
     ["a number", "90817"],
     ["a field's name", "catchupDays"],

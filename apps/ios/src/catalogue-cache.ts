@@ -360,27 +360,46 @@ const decoded = (text: string) => {
   }
 };
 
+/** How many layers of encoding, or addresses within addresses, are looked through. */
+const LAYERS = 4;
+
+type Login = { readonly username: string; readonly password: string };
+
 /**
- * `url` when the disk may keep it: an http(s) address of at most 2048 characters, with no login
- * before its host, no path part, query name or query value that is the username, and the password
- * nowhere in it: not as written, decoded whole, nor within any decoded path part, fragment, or
- * query name or value, which decode "+" as a space. Otherwise null.
+ * `url` when the disk may keep it: an http(s) address of at most 2048 characters that doesn't
+ * give the login away (`exposes`). Otherwise null.
  */
 function safeUrl(url: string | null, username: string, password: string): string | null {
   if (url === null || url.length > URL_LENGTH) return null;
   const parsed = URL.parse(url);
   if (!parsed || (parsed.protocol !== "http:" && parsed.protocol !== "https:")) return null;
-  if (parsed.username !== "" || parsed.password !== "") return null;
-  const parts = [
-    url,
-    decoded(url),
-    decoded(parsed.hash),
-    ...parsed.pathname.split("/").map(decoded),
-    ...[...parsed.searchParams].flat(),
-  ];
-  const named = (part: string | null) =>
-    part === null ||
-    (username !== "" && part === username) ||
-    (password !== "" && part.includes(password));
-  return parts.some(named) ? null : url;
+  return exposes(url, { username, password }, LAYERS, parsed) ? null : url;
+}
+
+/**
+ * Whether `text`, an address or a part of one, gives the login away: it is the username, or
+ * holds the password, as written or decoded as percent or form encoding ("+" a space) spells it,
+ * and so on for `layers` more decodings; an address within it, such as an image proxy's, counts
+ * with its own login, path parts, fragment, and query names and values. Text that won't decode,
+ * or still decodes or holds an address after the last layer, counts as giving it away.
+ */
+function exposes(
+  text: string,
+  login: Login,
+  layers: number,
+  address = text.includes(":") ? URL.parse(text) : null,
+): boolean {
+  const { username, password } = login;
+  if ((username !== "" && text === username) || (password !== "" && text.includes(password))) {
+    return true;
+  }
+  const next = new Set([decoded(text), decoded(text.replaceAll("+", " "))]);
+  next.delete(text);
+  if (!address && next.size === 0) return false;
+  if (layers === 0 || next.has(null)) return true;
+  if (address && (address.username !== "" || address.password !== "")) return true;
+  const parts = address
+    ? [address.hash.slice(1), ...address.pathname.split("/"), ...[...address.searchParams].flat()]
+    : [];
+  return [...parts, ...next].some((part) => part !== null && exposes(part, login, layers - 1));
 }
