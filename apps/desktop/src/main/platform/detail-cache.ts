@@ -61,11 +61,13 @@ export type DetailRecord =
       readonly value: readonly EpisodeAbout[] | null;
     };
 
+// Declare stripping on each object to avoid rebuilding the full schema on first use.
 const Person = lazy(() =>
-  type({ name: "string", character: "string | null", profile: "string | null" }),
+  type({ "+": "delete", name: "string", character: "string | null", profile: "string | null" }),
 );
 const About = lazy(() =>
   type({
+    "+": "delete",
     original: "string | null",
     language: "string | null",
     overview: "string | null",
@@ -79,6 +81,7 @@ const About = lazy(() =>
 );
 const Episode = lazy(() =>
   type({
+    "+": "delete",
     number: "number",
     name: "string | null",
     overview: "string | null",
@@ -92,6 +95,7 @@ const Episode = lazy(() =>
 );
 const Provider = lazy(() =>
   type({
+    "+": "delete",
     originalName: "string | null",
     plot: "string | null",
     genres: "string[]",
@@ -101,8 +105,14 @@ const Provider = lazy(() =>
     duration: "number | null",
     posterUrl: "string | null",
     backdropUrl: "string | null",
-    seasons: type({ number: "number", name: "string | null", posterUrl: "string | null" }).array(),
+    seasons: type({
+      "+": "delete",
+      number: "number",
+      name: "string | null",
+      posterUrl: "string | null",
+    }).array(),
     episodes: type({
+      "+": "delete",
       id: "string",
       season: "number",
       number: "number",
@@ -118,21 +128,31 @@ const Provider = lazy(() =>
     container: "string | null",
   }),
 );
-const Record = lazy(() =>
-  type
-    .or(
-      {
-        schema: "1",
-        kind: "'provider'",
-        at: "number",
-        catalogueStamp: "string",
-        value: Provider(),
-      },
-      { schema: "1", kind: "'about'", at: "number", value: About().or("null") },
-      { schema: "1", kind: "'season'", at: "number", value: Episode().array().or("null") },
-    )
-    .onDeepUndeclaredKey("delete"),
-);
+// Each namespace initializes only the schema needed for the requested record.
+const Records = {
+  provider: lazy(() =>
+    type({
+      "+": "delete",
+      schema: "1",
+      kind: "'provider'",
+      at: "number",
+      catalogueStamp: "string",
+      value: Provider(),
+    }),
+  ),
+  about: lazy(() =>
+    type({ "+": "delete", schema: "1", kind: "'about'", at: "number", value: About().or("null") }),
+  ),
+  season: lazy(() =>
+    type({
+      "+": "delete",
+      schema: "1",
+      kind: "'season'",
+      at: "number",
+      value: Episode().array().or("null"),
+    }),
+  ),
+};
 
 /** Also prepared by viewing erasure when the rest of the runtime has not opened the cache. */
 export function prepareDetailCache(db: DatabaseSync): void {
@@ -208,7 +228,7 @@ function make(db: DatabaseSync): DetailCache["Service"] {
         } catch {
           return discard();
         }
-        const record = Record()(payload);
+        const record = Records[key.kind]()(payload);
         if (record instanceof type.errors || record.kind !== key.kind) return discard();
         // A read-only disk must still be able to supply its last good cached details.
         try {
@@ -220,7 +240,7 @@ function make(db: DatabaseSync): DetailCache["Service"] {
       attempt(() => {
         if (record.kind !== key.kind) return;
         // Validate and remove undeclared fields at every depth. Only parsed display data reaches disk.
-        const parsed = Record()({ schema: 1, ...record });
+        const parsed = Records[key.kind]()({ schema: 1, ...record });
         if (parsed instanceof type.errors) return;
         const payload = JSON.stringify(parsed);
         const needed = Buffer.byteLength(payload);

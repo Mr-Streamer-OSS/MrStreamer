@@ -126,13 +126,15 @@ describe("opened title detail storage", () => {
     expect(await cache.read(providerKey)).toMatchObject(provider);
   });
   it("persists only parsed display fields, excluding undeclared stream locations and headers", async () => {
-    const { cache } = await started(await tempDir());
+    const dir = await tempDir();
+    const { cache } = await started(dir);
     const input = {
       ...provider,
       url: "private-stream",
       value: {
         ...provider.value,
         headers: { Authorization: "private" },
+        seasons: [{ number: 1, name: "Season 1", posterUrl: null, url: "private-season" }],
         episodes: [
           {
             id: "episode",
@@ -154,6 +156,64 @@ describe("opened title detail storage", () => {
     const result = await cache.read(providerKey);
     expect(result).toMatchObject({ kind: "provider", value: { episodes: [{ id: "episode" }] } });
     expect(JSON.stringify(result)).not.toContain("private");
+    expect(input.value.episodes[0]?.url).toBe("private-episode");
+    const disk = new DatabaseSync(join(dir, "mrstreamer.db"), { readOnly: true });
+    try {
+      expect(disk.prepare("select payload from title_detail_cache").get()?.payload).not.toContain(
+        "private",
+      );
+    } finally {
+      disk.close();
+    }
+  });
+
+  it("keeps only declared TMDB display fields in title and season records", async () => {
+    const dir = await tempDir();
+    const { cache } = await started(dir);
+    const cast = [{ name: "Actor", character: "Lead", profile: null, token: "private-cast" }];
+    const about = {
+      original: "Title",
+      language: "en",
+      overview: null,
+      poster: null,
+      backdrop: null,
+      genres: [],
+      runtime: null,
+      cast,
+      directors: [],
+      token: "private-title",
+    };
+    const episode = {
+      number: 1,
+      name: "Episode",
+      overview: null,
+      still: null,
+      airDate: null,
+      runtime: null,
+      rating: null,
+      cast,
+      directors: [],
+      token: "private-episode",
+    };
+    const titleKey = { kind: "about", titleKind: "series", id: "123", language: "en" } as const;
+    const seasonKey = { kind: "season", id: "123", number: 1, language: "en" } as const;
+    await cache.remember(titleKey, { kind: "about", at: 100, value: about });
+    await cache.remember(seasonKey, { kind: "season", at: 100, value: [episode] });
+    expect(await cache.read(titleKey)).toMatchObject({
+      value: { original: "Title", cast: [{ name: "Actor" }] },
+    });
+    expect(await cache.read(seasonKey)).toMatchObject({
+      value: [{ number: 1, cast: [{ name: "Actor" }] }],
+    });
+    const disk = new DatabaseSync(join(dir, "mrstreamer.db"), { readOnly: true });
+    try {
+      const rows = disk.prepare("select payload from title_detail_cache").all();
+      expect(rows).toHaveLength(2);
+      expect(JSON.stringify(rows)).not.toContain("private");
+    } finally {
+      disk.close();
+    }
+    expect(cast[0]?.token).toBe("private-cast");
   });
 
   it("evicts old records before live payload exceeds 64 MiB", async () => {
