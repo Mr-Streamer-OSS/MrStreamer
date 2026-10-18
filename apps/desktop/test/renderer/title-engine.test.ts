@@ -151,3 +151,123 @@ it.each([2, 3, 4])("classifies native code %s by its code in both engines", asyn
     engine = null;
   }
 });
+
+it.each(["paused", "seeking", "buffering", "seek-between-ticks"] as const)(
+  "counts clock progress, excluding %s time and jumps",
+  async (held) => {
+    let paused = false,
+      seeking = false;
+    const video = document.createElement("video");
+    Object.defineProperties(video, {
+      paused: { get: () => paused },
+      seeking: { get: () => seeking },
+      buffered: { get: () => ({ length: 1, start: () => 0, end: () => 1000 }) },
+    });
+    const title = titleEngine(video, run);
+    engine = title;
+    await vi.advanceTimersByTimeAsync(0);
+    video.currentTime = 0.2;
+    video.dispatchEvent(new Event("timeupdate"));
+    await title.started;
+    await vi.advanceTimersByTimeAsync(1000);
+    const before = title.played();
+
+    if (held === "paused") paused = true;
+    if (held === "seeking") seeking = true;
+    if (held === "seek-between-ticks") {
+      await vi.advanceTimersByTimeAsync(500);
+      video.dispatchEvent(new Event("seeking"));
+      video.currentTime += 100;
+      video.dispatchEvent(new Event("seeked"));
+    }
+    if (held !== "buffering" && held !== "seek-between-ticks") video.currentTime += 100;
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(title.played()).toBe(before);
+
+    paused = seeking = false;
+    // Seek completion prevents its last jump from being credited on the first resumed tick.
+    if (held === "seeking") video.dispatchEvent(new Event("seeked"));
+    for (let second = 0; second < 30; second++) {
+      video.currentTime += 1;
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    expect(title.played() - before).toBeCloseTo(30_000);
+  },
+);
+
+it("caps stability credit to elapsed time when the clock jumps or plays faster", async () => {
+  const video = document.createElement("video");
+  const title = titleEngine(video, run);
+  engine = title;
+  await vi.advanceTimersByTimeAsync(0);
+  video.currentTime = 100;
+  video.dispatchEvent(new Event("timeupdate"));
+  await title.started;
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(title.played()).toBe(1000);
+});
+
+it("cannot resume a destroyed title when its pending append completes", async () => {
+  const buffer = new Buffer();
+  vi.spyOn(buffer, "appendBuffer").mockImplementation(() => {});
+  vi.spyOn(Source.prototype, "addSourceBuffer").mockReturnValue(buffer);
+  const video = document.createElement("video");
+  const play = vi.spyOn(video, "play");
+  engine = titleEngine(video, { ...run, start: 42 });
+  await vi.advanceTimersByTimeAsync(0);
+  engine.destroy();
+  video.currentTime = 80;
+  buffer.dispatchEvent(new Event("updateend"));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(video.currentTime).toBe(80);
+  expect(play).not.toHaveBeenCalled();
+});
+
+it.each(["transport", "sync", "async"] as const)(
+  "classifies %s failure after playback starts and reports it once",
+  async (failure) => {
+    let source!: ReadableStreamDefaultController<Uint8Array>;
+    const feed = new ReadableStream<Uint8Array>({
+      start(controller) {
+        source = controller;
+      },
+    });
+    vi.stubGlobal("fetch", async () => new Response(feed));
+    const video = document.createElement("video");
+    engine = titleEngine(video, run);
+    await vi.advanceTimersByTimeAsync(0);
+    video.currentTime = 0.2;
+    video.dispatchEvent(new Event("timeupdate"));
+    await engine.started;
+    const failed = vi.fn();
+    engine.onFailure(failed);
+    if (failure === "transport") source.error(new TypeError("Body reset"));
+    else {
+      append = failure;
+      source.enqueue(new Uint8Array([2]));
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    expect(failed).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ kind: failure === "transport" ? "network" : "media" }),
+    );
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(failed).toHaveBeenCalledTimes(1);
+  },
+);
+
+it("cancels a pending body read on close without a playback failure", async () => {
+  const cancelled = vi.fn();
+  vi.stubGlobal("fetch", async () => new Response(new ReadableStream({ cancel: cancelled })));
+  const video = document.createElement("video");
+  engine = titleEngine(video, run);
+  await vi.advanceTimersByTimeAsync(0);
+  video.currentTime = 0.2;
+  video.dispatchEvent(new Event("timeupdate"));
+  await engine.started;
+  const failed = vi.fn();
+  engine.onFailure(failed);
+  engine.destroy();
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(cancelled).toHaveBeenCalledOnce();
+  expect(failed).not.toHaveBeenCalled();
+});
