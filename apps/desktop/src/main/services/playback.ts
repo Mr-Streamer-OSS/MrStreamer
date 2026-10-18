@@ -1407,19 +1407,11 @@ function make(deps: PlaybackDeps) {
       try {
         for await (const epoch of epochs) {
           signal.throwIfAborted();
-          const now = performance.now();
-          while (restarts[0] !== undefined && restarts[0] < now - 30_000) restarts.shift();
-          if (restarts.length >= 16)
-            throw new HlsInputFailure({
-              kind: "unsupported",
-              detail: t("The stream could not be converted."),
-              diagnostic: {
-                diagnostic_stage: "convert",
-                diagnostic_reason: "conversion_failed",
-                diagnostic_container: "hls",
-              },
-            });
-          restarts.push(now);
+          // The reader sums bounded positive EXTINF values. Use that presentation timeline,
+          // not the burst of wall time spent filling catch-up's PCR-paced read-ahead buffer.
+          while (restarts[0] !== undefined && restarts[0] < epoch.startS - 30) restarts.shift();
+          if (restarts.length >= 16) throw hlsSubsetFailure();
+          restarts.push(epoch.startS);
           if (session.receiver && epoch.startS > 0) session.receiver.epochs.push(epoch.startS);
           const layout = epoch.layout;
           const matching = layout.audio.filter(
@@ -1575,7 +1567,22 @@ function make(deps: PlaybackDeps) {
         }
         response.end();
       } catch (cause) {
-        if (!signal.aborted) session.failure = hlsFailure(cause);
+        if (!signal.aborted) {
+          const failure = hlsFailure(cause);
+          session.failure =
+            failure.kind === "unsupported" &&
+            failure.diagnostic?.diagnostic_reason === "hls_subset_unsupported"
+              ? {
+                  ...failure,
+                  diagnostic: {
+                    ...failure.diagnostic,
+                    ...session.diagnostic,
+                    diagnostic_stage: "inspect",
+                    diagnostic_reason: "hls_subset_unsupported",
+                  },
+                }
+              : failure;
+        }
         response.destroy();
       }
     }

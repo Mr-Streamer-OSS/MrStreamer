@@ -559,6 +559,136 @@ it("keeps Dutch sound across dut/nld aliases and reordered mixed-language epoch 
   expect(host.stats().peak).toBe(1);
 }, 20_000);
 
+it.each(["ended", "archive"] as const)(
+  "completes short per-segment discontinuities during %s playback",
+  async (mode) => {
+    const { host, playback, channel } = await app();
+    const count = mode === "archive" ? 40 : 24;
+    host.overrides.set("/media/compatible.m3u8", {
+      body: [
+        "#EXTM3U",
+        "#EXT-X-TARGETDURATION:4",
+        ...Array.from({ length: count }, (_, index) => [
+          ...(index ? ["#EXT-X-DISCONTINUITY"] : []),
+          "#EXTINF:3.02,",
+          `compatible-${index}.ts`,
+        ]).flat(),
+        "#EXT-X-ENDLIST",
+        "",
+      ].join("\n"),
+    });
+    const start = Date.now() - 600_000;
+    const session = await playback.open(channel("compatible"), ["h264", "aac"], {
+      repair: true,
+      ...(mode === "archive" ? { archive: { start, end: start + 50_000 } } : {}),
+    });
+    const bytes = Buffer.from(await (await fetch(session.url)).arrayBuffer());
+    const output = decoded(bytes);
+    expect(await playback.failure(session.sessionId)).toBeNull();
+    const requested = host.requests().filter((path) => /compatible-\d+.ts/.test(path));
+    expect(requested.length).toBeGreaterThanOrEqual(17);
+    if (mode === "ended") {
+      expect(requested).toHaveLength(count);
+      expect(output.streams.find((stream) => stream.codec_type === "video")?.nb_read_frames).toBe(
+        "1800",
+      );
+    } else {
+      const pictures = output.packets
+        .filter((packet) => packet.codec_type === "video")
+        .map((packet) => Number(packet.pts_time));
+      expect(Math.max(...pictures) - Math.min(...pictures)).toBeGreaterThan(50);
+      expect(Math.max(...pictures) - Math.min(...pictures)).toBeLessThan(56);
+      expect(requested.length).toBeLessThan(20);
+      expect(host.stats().bytes).toBeLessThan(20 * fixture("h264-aac.mpegts").length);
+    }
+    expect(host.stats().peak).toBe(1);
+    await playback.close(session.sessionId);
+    expect(host.stats().active).toBe(0);
+  },
+  45_000,
+);
+
+it("bounds discontinuity churn when segment durations falsely claim almost no media progress", async () => {
+  const { host, playback, channel } = await app();
+  host.overrides.set("/media/compatible.m3u8", {
+    body: [
+      "#EXTM3U",
+      "#EXT-X-TARGETDURATION:1",
+      ...Array.from({ length: 24 }, (_, index) => [
+        ...(index ? ["#EXT-X-DISCONTINUITY"] : []),
+        "#EXTINF:0.001,",
+        `compatible-${index}.ts`,
+      ]).flat(),
+      "#EXT-X-ENDLIST",
+      "",
+    ].join("\n"),
+  });
+  const session = await playback.open(channel("compatible"), ["h264", "aac"], { repair: true });
+  expect(
+    await fetch(session.url)
+      .then((answer) => answer.arrayBuffer())
+      .then(
+        () => "complete",
+        () => "broken",
+      ),
+  ).toBe("broken");
+  expect(await playback.failure(session.sessionId)).toMatchObject({
+    kind: "unsupported",
+    diagnostic: {
+      diagnostic_stage: "inspect",
+      diagnostic_reason: "hls_subset_unsupported",
+      diagnostic_delivery: "converted",
+      diagnostic_fallback: "repair",
+    },
+  });
+  expect(host.requests().filter((path) => /compatible-\d+.ts/.test(path))).toHaveLength(17);
+  expect(host.stats().peak).toBe(1);
+  await playback.close(session.sessionId);
+});
+
+it.each(['#EXT-X-KEY:METHOD=AES-128,URI="key.bin"', '#EXT-X-MAP:URI="init.mp4"'])(
+  "retains known converted delivery when a live refresh adds %s",
+  async (tag) => {
+    const { host, playback, channel } = await app();
+    let polls = 0;
+    host.overrides.set("/media/compatible.m3u8", {
+      body: () =>
+        [
+          "#EXTM3U",
+          "#EXT-X-TARGETDURATION:1",
+          ...[0, 1, 2].flatMap((index) => ["#EXTINF:3.02,", `compatible-${index}.ts`]),
+          ...(polls++ ? [tag, "#EXTINF:3.02,", "compatible-3.ts"] : []),
+          "",
+        ].join("\n"),
+    });
+    const session = await playback.open(channel("compatible"), ["h264", "aac"], { repair: true });
+    expect(
+      await fetch(session.url)
+        .then((answer) => answer.arrayBuffer())
+        .then(
+          () => "complete",
+          () => "broken",
+        ),
+    ).toBe("broken");
+    const plan = await playback.diagnostic(session.sessionId);
+    expect(plan).toMatchObject({ diagnostic_delivery: "converted" });
+    expect(await playback.failure(session.sessionId)).toMatchObject({
+      kind: "unsupported",
+      diagnostic: {
+        ...plan,
+        diagnostic_stage: "inspect",
+        diagnostic_reason: "hls_subset_unsupported",
+        diagnostic_delivery: "converted",
+      },
+    });
+    expect(host.requests().filter((path) => /compatible-\d+.ts/.test(path))).toEqual(
+      [0, 1, 2].map((index) => `/media/compatible-${index}.ts`),
+    );
+    expect(host.requests().some((path) => /key.bin|init.mp4/.test(path))).toBe(false);
+    await playback.close(session.sessionId);
+  },
+);
+
 it("converts ordered epochs with changed PIDs/PCR/codecs, stable selected sound and supported subtitles", async () => {
   const { host, playback, channel } = await app();
   const session = await playback.open(channel("epochs"), ["h264", "aac"], {
@@ -637,7 +767,12 @@ it.each([
         kind: "stream",
         failure: {
           kind: "unsupported",
-          diagnostic: { diagnostic_stage: "inspect", diagnostic_reason: "hls_subset_unsupported" },
+          diagnostic: {
+            diagnostic_stage: "inspect",
+            diagnostic_reason: "hls_subset_unsupported",
+            diagnostic_delivery: "direct",
+            diagnostic_fallback: "repair",
+          },
         },
       },
     });
