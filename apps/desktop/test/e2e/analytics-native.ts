@@ -34,6 +34,7 @@ type Context = {
   snapshot(name: string): Promise<void>;
   preference(): Promise<Preferences>;
   quit(): Promise<void>;
+  prepareExit(reason: string): void;
   kill(): Promise<number>;
   waitFor(check: () => Promise<boolean>, timeoutMs?: number): Promise<void>;
   read(): Promise<AnalyticsRecord>;
@@ -174,6 +175,15 @@ export async function runNativeTelemetry(c: Context) {
     assert(killedAt - hit.at < 1500, "Main kill completed after the serializer deadline");
     return hit;
   };
+  const observeQuit = async (name: string) => {
+    const marker = join(c.evidence, `${name}.json`);
+    await c
+      .main()
+      .evaluate(
+        `(() => { const {app}=process.getBuiltinModule('module').createRequire(process.execPath)('electron'); const fs=process.getBuiltinModule('fs'); app.once('will-quit',()=>fs.writeFileSync(${JSON.stringify(marker)},JSON.stringify({at:Date.now()}))); })()`,
+      );
+    return marker;
+  };
   const run = async (name: string, work: () => Promise<unknown>) => {
     if (selected && selected !== name) return;
     c.abort.throwIfAborted();
@@ -205,36 +215,38 @@ export async function runNativeTelemetry(c: Context) {
       await fresh();
       const before = await saved("consent-on");
       await play();
-      await c.capture("hold");
+      await c.capture("offline");
       await stop();
       await c.waitFor(async () =>
-        c.bodies.some(
-          ({ body, closedAt }) =>
-            JSON.parse(body).distinct_id === before.installationId &&
-            JSON.parse(body).event === "stream_summary" &&
-            !closedAt,
+        pending(await c.read()).some(
+          (item) =>
+            item.event.event === "stream_summary" && item.attempts === 0 && item.failures > 0,
         ),
       );
       await play();
       assert((await c.read()).summaries?.unfinished, "No active journal at opt-out");
       await c.escape();
       await c.settings();
-      await c.waitFor(async () =>
-        c.bodies.some(
-          ({ body, closedAt }) =>
+      assert(
+        pending(await c.read()).some(
+          (item) => item.event.event === "stream_summary" && item.attempts === 0,
+        ),
+        "Body attempts were spent before Settings was ready",
+      );
+      await c.capture("hold");
+      let held: (typeof c.bodies)[number] | undefined;
+      await c.waitFor(async () => {
+        held = c.bodies.findLast(
+          ({ body, at, closedAt }) =>
             JSON.parse(body).distinct_id === before.installationId &&
             JSON.parse(body).event === "stream_summary" &&
-            closedAt === undefined,
-        ),
-      );
+            closedAt === undefined &&
+            Date.now() - at <= 250,
+        );
+        return !!held;
+      });
+      assert(held && Date.now() - held.at <= 250, "No fresh received request held at opt-out");
       const from = c.bodies.length;
-      const held = c.bodies.findLast(
-        ({ body, closedAt }) =>
-          JSON.parse(body).distinct_id === before.installationId &&
-          JSON.parse(body).event === "stream_summary" &&
-          closedAt === undefined,
-      );
-      assert(held, "No received request held at opt-out");
       const optedOutAt = Date.now();
       await c.click(checkbox);
       await c.waitFor(async () => !(await c.preference()).analyticsEnabled);
@@ -314,6 +326,7 @@ export async function runNativeTelemetry(c: Context) {
         const admitted = await play();
         await delay(8000);
         const probe = await boundary(c.main(), c.profile());
+        c.prepareExit(`checkpoint-${phase}`);
         await probe.arm({ kind: "checkpoint", phase, uuid: admitted.uuid });
         await home();
         const hit = await killAt(probe);
@@ -363,6 +376,7 @@ export async function runNativeTelemetry(c: Context) {
       );
       await saved("periodic-checkpoint");
       await c.snapshot("periodic-watch");
+      c.prepareExit("periodic-checkpoint");
       await c.kill();
       await restart();
       const proof = await recovered(checkpoint);
@@ -384,6 +398,7 @@ export async function runNativeTelemetry(c: Context) {
         const admitted = await play();
         await delay(1100);
         const probe = await boundary(c.main(), c.profile());
+        c.prepareExit(`${spec.kind}-${spec.phase}`);
         await probe.arm({ ...spec, uuid: admitted.uuid });
         await stop();
         const hit = await killAt(probe);
@@ -434,6 +449,7 @@ export async function runNativeTelemetry(c: Context) {
     await run("ambiguous", async () => {
       await fresh();
       const admitted = await play();
+      c.prepareExit("body-held-first");
       await c.capture("hold");
       await stop();
       await c.waitFor(async () => wires(admitted.uuid).length === 1);
@@ -458,8 +474,8 @@ export async function runNativeTelemetry(c: Context) {
       assert.equal(wires(admitted.uuid).length, 3);
       await c.quit();
 
-      // Stage the real dialog while the first request is held. Admit the direct incident
-      // before its first two-second backoff, with no navigation left inside that interval.
+      // Prepare real UI across the first delivery/backoff. Prove the ready incident
+      // beats the actual persisted retry deadline after the second body, without a UI timer.
       await fresh();
       const priority = await play();
       await c.capture("hold");
@@ -469,6 +485,8 @@ export async function runNativeTelemetry(c: Context) {
       await c.namedButton("nav button", "All movies");
       await c.namedButton("button[title]", "Missing file", true);
       const preparedAt = Date.now();
+      await c.waitFor(async () => wires(priority.uuid).length >= 2);
+      const requestedAt = Date.now();
       await c.namedButton('[role="dialog"] button', "Play");
       await c.waitFor(async () =>
         c
@@ -477,7 +495,14 @@ export async function runNativeTelemetry(c: Context) {
             (event) => event.event === "stream_error" && event.distinct_id === priority.distinct_id,
           ),
       );
-      await c.waitFor(async () => wires(priority.uuid).length === 3);
+      const backoff = pending(await saved("priority-backoff")).find(
+        (item) => item.event.uuid === priority.uuid,
+      );
+      assert(
+        backoff && backoff.attempts === 2 && backoff.failures === 2,
+        "Incident missed the second summary backoff",
+      );
+      const eligibleAt = Date.parse(backoff.nextAttemptAt);
       const incident = c
         .events()
         .find(
@@ -485,13 +510,13 @@ export async function runNativeTelemetry(c: Context) {
         );
       assert(incident);
       assert(
-        wires(priority.uuid)[0]!.closedAt !== undefined &&
-          preparedAt <= wires(priority.uuid)[0]!.closedAt!,
-        "Navigation was not staged while the first request was held",
+        wires(incident.uuid)[0]!.at < eligibleAt,
+        "Ready direct incident waited until the summary became eligible",
       );
+      await c.waitFor(async () => wires(priority.uuid).length === 3);
       assert(
-        wires(incident.uuid)[0]!.at < wires(priority.uuid)[1]!.at,
-        "Ready direct incident waited for summary's first two-second backoff",
+        wires(priority.uuid)[2]!.at >= eligibleAt,
+        "Summary retried before its persisted backoff",
       );
       await c.waitFor(
         async () => !pending(await c.read()).some((item) => item.event.uuid === priority.uuid),
@@ -505,7 +530,12 @@ export async function runNativeTelemetry(c: Context) {
       await delay(2200);
       assert.equal(wires(priority.uuid).length, 3);
       await c.quit();
-      return { held, killedAt, replay, priority: { preparedAt, ...proof } };
+      return {
+        held,
+        killedAt,
+        replay,
+        priority: { preparedAt, requestedAt, eligibleAt, backoff, ...proof },
+      };
     });
 
     await run("quit", async () => {
@@ -513,13 +543,9 @@ export async function runNativeTelemetry(c: Context) {
       const admitted = await play();
       // Accept the window-close summary; hold only the usage fragment sealed by will-quit.
       // This distinguishes analytics.close's allowance from an earlier playback request.
+      c.prepareExit("quit-held-usage");
       await c.capture("hold-usage");
-      const marker = join(c.evidence, "native-will-quit.json");
-      await c
-        .main()
-        .evaluate(
-          `(async () => { const {app}=process.getBuiltinModule('module').createRequire(process.execPath)('electron'); const fs=process.getBuiltinModule('fs'); app.once('will-quit',()=>fs.writeFileSync(${JSON.stringify(marker)},JSON.stringify({at:Date.now()}))); })()`,
-        );
+      const marker = await observeQuit("native-will-quit");
       await c.quit();
       const at = (JSON.parse(await readFile(marker, "utf8")) as { at: number }).at;
       const held = c.bodies.find((wire) => {
@@ -550,6 +576,8 @@ export async function runNativeTelemetry(c: Context) {
       await c.quit();
       await fresh();
       const future = await play();
+      const backoffMarker = await observeQuit("native-backoff-will-quit");
+      c.prepareExit("quit-future-backoff");
       await c.capture("reject");
       await stop();
       await c.waitFor(async () =>
@@ -557,15 +585,22 @@ export async function runNativeTelemetry(c: Context) {
           (item) => item.event.uuid === future.uuid && Date.parse(item.nextAttemptAt) > Date.now(),
         ),
       );
+      const futureItem = pending(await c.read()).find((item) => item.event.uuid === future.uuid);
+      assert(futureItem);
+      const eligibleAt = Date.parse(futureItem.nextAttemptAt);
       const from = wires(future.uuid).length;
       const closing = Date.now();
       await c.quit();
+      const willQuitAt = (JSON.parse(await readFile(backoffMarker, "utf8")) as { at: number }).at;
+      assert(willQuitAt < eligibleAt, "Quit did not enter the actual future-backoff window");
       assert.equal(wires(future.uuid).length, from, "Quit bypassed a persisted future backoff");
       return {
         markerAt: at,
         requestAbortedAfterMs: held.closedAt - at,
         final: retained,
         backoffQuitAt: closing,
+        backoffWillQuitAt: willQuitAt,
+        backoffEligibleAt: eligibleAt,
       };
     });
 
@@ -723,6 +758,7 @@ export async function runNativeTelemetry(c: Context) {
                 (await c.read()).pending.some((item) => item.event.event === "feature_opened"),
               );
             }
+            if (variant === "legacy-queue") c.prepareExit("legacy-queue");
             const old = await saved(`compat-${variant}-015`);
             // .15 deliberately skips backoff at quit and spends all remaining refused-connect
             // attempts. Kill its actual main with the admitted queue still durable instead.

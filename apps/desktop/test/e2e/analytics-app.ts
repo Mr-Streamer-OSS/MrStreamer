@@ -208,6 +208,40 @@ let app: ChildProcess | undefined;
 let page: Page | undefined;
 let mainPage: Page | undefined;
 let nativeTree: ReturnType<typeof ownedTree> | undefined;
+let preparedExit:
+  | {
+      app: ChildProcess;
+      sample: {
+        pid: number | undefined;
+        reason: string;
+        startedAt: number;
+        completedAt: number;
+        wallMs: number;
+        windowsTree: boolean;
+      };
+    }
+  | undefined;
+
+// The Windows owner pins PID/start-time identity. Discover its live descendants at a quiet
+// point, before a held request or rename opens a product deadline. Consume once per exit.
+function prepareExit(reason: string) {
+  if (!app) throw new Error("No owned app to prepare for exit");
+  const startedAt = Date.now();
+  nativeTree?.sample();
+  const completedAt = Date.now();
+  const sample = {
+    pid: app.pid,
+    reason,
+    startedAt,
+    completedAt,
+    wallMs: completedAt - startedAt,
+    windowsTree: !!nativeTree,
+  };
+  preparedExit = { app, sample };
+  const samples = observations["nativeProcessSamples"];
+  observations["nativeProcessSamples"] = [...(Array.isArray(samples) ? samples : []), sample];
+}
+
 let debuggingPort = 0;
 const broadcasts = new Set<ChildProcess>();
 let failure: unknown;
@@ -276,6 +310,7 @@ async function send(method: string, params: Record<string, unknown> = {}) {
 }
 
 async function launch() {
+  preparedExit = undefined;
   const port = await freePort();
   debuggingPort = port;
   const inspectorPort = await freePort();
@@ -474,11 +509,13 @@ async function quit() {
     mainPage?.close();
     mainPage = undefined;
     if (options.native) {
-      nativeTree?.sample();
+      if (preparedExit?.app !== closing) prepareExit("quit-fallback");
+      const preparation = { ...preparedExit!.sample, usedAt: Date.now() };
+      preparedExit = undefined;
       const end = await closeNative(closing, async () => {
         await page?.send("Browser.close");
       });
-      exits.push(end);
+      exits.push({ ...end, preparation });
       if (end.forced && process.platform !== "win32" && closing.pid) {
         try {
           process.kill(-closing.pid, "SIGKILL");
@@ -1139,6 +1176,7 @@ try {
       snapshot,
       preference,
       quit,
+      prepareExit,
       waitFor,
       read: async () => AnalyticsRecord().assert(await analyticsFile()),
       bodies: rawBodies,
@@ -1160,7 +1198,9 @@ try {
         if (!app || app.exitCode !== null || app.signalCode !== null)
           throw new Error("No live owned main to kill");
         const owned = app;
-        nativeTree?.sample();
+        if (preparedExit?.app !== owned) prepareExit("kill-fallback");
+        const preparation = { ...preparedExit!.sample, usedAt: Date.now() };
+        preparedExit = undefined;
         const pid = await mainPage!.evaluate<number>("process.pid");
         if (pid !== owned.pid) throw new Error("Wrong main kill target");
         mainPage?.close();
@@ -1186,6 +1226,7 @@ try {
           signal: owned.signalCode,
           forced: true,
           kind: "intentional-main-kill",
+          preparation,
           at: Date.now(),
         });
         page?.close();
