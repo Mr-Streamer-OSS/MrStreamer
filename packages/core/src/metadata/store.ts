@@ -474,6 +474,15 @@ export function metadataStore(deps: MetadataDeps) {
       return { name, original: original && original !== name ? original : null };
     },
 
+    /** Raw, independent translations and original name for relevance and punctuation recall. */
+    searchAliases(kind: TmdbKind, tmdbId: string): readonly string[] {
+      const entry = current(kind, tmdbId);
+      if (!entry || entry.missing) return [];
+      return [...Object.values(entry.names ?? {}), entry.original].filter(
+        (name): name is string => typeof name === "string" && name !== "",
+      );
+    },
+
     /** Every name TMDB gave a title, folded for search, or "" before it said. */
     searchName(kind: TmdbKind, tmdbId: string): string {
       const key = keyOf(kind, tmdbId);

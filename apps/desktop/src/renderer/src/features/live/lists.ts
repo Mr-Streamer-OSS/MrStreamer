@@ -6,6 +6,7 @@ import type { Listing, ListingMatch } from "@mrstreamer/contracts/guide";
 import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
 import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { normalize, searchWords } from "@mrstreamer/core/text";
+import { indexNames, nameQuery, scoreNames, type SearchNames } from "@mrstreamer/core/search/names";
 import { searchResultGroups, type LiveSearchGroup } from "@mrstreamer/core/catalogue/search";
 import { t } from "@mrstreamer/core/i18n";
 import { useLocale } from "../../app/language.ts";
@@ -125,10 +126,11 @@ export function useListSearch(
     }
     const { query, matches } = answer;
     const names = searchNames(channels);
+    const asked = nameQuery(query);
     const found = channels.filter(
       (channel, index) =>
         matches[ownedKey(channel)] !== undefined ||
-        words.every((word) => names[index]?.includes(word)),
+        (names[index] !== undefined && scoreNames(asked, names[index]) !== undefined),
     );
     // Only fresh decisions join copies. Keep every current copy of a matching group, without
     // constructing display groups for the rest of a large list.
@@ -155,17 +157,20 @@ export function useListSearch(
 }
 
 /** Each list's names as search compares them, worked out at its first search. */
-const foldedNames = new WeakMap<readonly LiveChannel[], readonly string[]>();
+const foldedNames = new WeakMap<readonly LiveChannel[], readonly SearchNames[]>();
 
 /**
  * The names of each of a list's channels, folded and in the list's order: the one shown, then
  * each stream's as the provider wrote it.
  */
-function searchNames(channels: readonly LiveChannel[]): readonly string[] {
+function searchNames(channels: readonly LiveChannel[]): readonly SearchNames[] {
   let names = foldedNames.get(channels);
   if (!names) {
     names = channels.map((channel) =>
-      normalize([channel.title, ...channel.variants.map((variant) => variant.name)].join(" ")),
+      indexNames(
+        channel.title,
+        channel.variants.map((variant) => variant.name),
+      ),
     );
     foldedNames.set(channels, names);
   }

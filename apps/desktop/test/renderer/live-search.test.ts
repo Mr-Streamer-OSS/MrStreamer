@@ -80,11 +80,11 @@ const ready = (check: () => void) =>
   );
 
 /** Live TV on `list`, with the catalogue and the favourites at hand. */
-async function guidePage(list: ChannelList = { kind: "all" }) {
+async function guidePage(list: ChannelList = { kind: "all" }, channels = CHANNELS) {
   ipc.reset();
   useUi.setState({ view: "live", list, watching: false, searchOpen: false, searchFrom: "" });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const byId = new Map(CHANNELS.map((each) => [each.id, each]));
+  const byId = new Map(channels.map((each) => [each.id, each]));
   client.setQueryData(queries.categories().queryKey, [
     {
       ...own("uk"),
@@ -92,12 +92,12 @@ async function guidePage(list: ChannelList = { kind: "all" }) {
       name: "UK | NEWS",
       group: null,
       title: "News",
-      channelCount: CHANNELS.length,
+      channelCount: channels.length,
     },
   ]);
-  client.setQueryData(queries.channels(null).queryKey, CHANNELS);
+  client.setQueryData(queries.channels(null).queryKey, channels);
   ipc.always("library.searchGroups", []);
-  client.setQueryData(queries.channels(own("uk")).queryKey, CHANNELS);
+  client.setQueryData(queries.channels(own("uk")).queryKey, channels);
   client.setQueryData(
     queries.channelsOf(FAVOURITES).queryKey,
     FAVOURITES.flatMap(({ id }) => byId.get(id) ?? []),
@@ -107,7 +107,7 @@ async function guidePage(list: ChannelList = { kind: "all" }) {
     [
       {
         subscriptionId: own("uk").subscriptionId,
-        channelCount: CHANNELS.length,
+        channelCount: channels.length,
         fetchedAt: 1,
         failure: null,
         failedAt: null,
@@ -137,7 +137,7 @@ async function guidePage(list: ChannelList = { kind: "all" }) {
   };
   await ready(() =>
     expect(container.querySelectorAll("[data-index]")).toHaveLength(
-      list.kind === "favourites" ? FAVOURITES.length : CHANNELS.length,
+      list.kind === "favourites" ? FAVOURITES.length : channels.length,
     ),
   );
 
@@ -404,4 +404,16 @@ describe("searching the list Live TV shows", () => {
     // Opening it plays nothing: only the row itself watches the channel.
     expect(useUi.getState().watching).toBe(false);
   });
+});
+
+it("finds joined channel spellings in Live without changing list order or programme scope", async () => {
+  const page = await guidePage({ kind: "all" }, [
+    channel("1", "O’Brien"),
+    channel("2", "Spider-Man"),
+    channel("3", "Spider Man"),
+  ]);
+  await searched(page, "spiderman", ["Spider-Man"]);
+  expect(page.row("Spider-Man")?.querySelector("mark")?.textContent).toBe("Spider-Man");
+  await searched(page, "obrien", ["O’Brien"]);
+  expect(page.row("O’Brien")?.querySelector("mark")?.textContent).toBe("O’Brien");
 });

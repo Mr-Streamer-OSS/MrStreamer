@@ -586,10 +586,14 @@ async function finishRefresh({
 }
 
 /** TMDB's names for a title, so search finds it by its translations and its original name too. */
-function aliases(title: Title): string {
-  return title.tmdbId
-    ? metadata.searchName(title.kind === "movie" ? "movie" : "tv", title.tmdbId)
-    : "";
+function aliases(title: Title) {
+  if (!title.tmdbId) return "";
+  const kind = title.kind === "movie" ? "movie" : "tv";
+  const shown = metadata.name(kind, title.tmdbId, viewerLanguage);
+  return {
+    ...(shown ? { title: shown.name, original: shown.original } : {}),
+    names: metadata.searchAliases(kind, title.tmdbId),
+  };
 }
 
 /** TMDB's picture of a saved title the lists hold no more, when TMDB told of one. */

@@ -34,6 +34,7 @@ import { Failed, failedWith } from "@mrstreamer/core/failure";
 import type { CatalogueChannels, GuideChannels } from "@mrstreamer/core/guide/programmes";
 import type { LiveCatalogue } from "@mrstreamer/core/provider";
 import { normalize } from "@mrstreamer/core/text";
+import { indexNames, nameQuery, scoreNames, type SearchNames } from "@mrstreamer/core/search/names";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -528,7 +529,7 @@ function make(options: LibraryOptions) {
               );
             return plainChannels([...new Set(found)].map(lists.shown));
           }
-          if (query) return search(searched.channels, searched.searchNames, query);
+          if (query) return search(searched.channels, filter.query ?? "");
           if (!filter.category) return plainChannels(lists.channels);
           return plainChannels(lists.byCategory.get(ownedKey(filter.category)) ?? []);
         }),
@@ -741,22 +742,31 @@ function combine(members: readonly IndexedCatalogue[]): Combined {
   };
 }
 
+/** Independent name fields for relevance; guide mapping keeps its existing folded-name contract. */
+const rankedNames = new WeakMap<readonly LiveChannel[], readonly SearchNames[]>();
+
 /**
- * Every query word must appear in the channel name. Names that start with the query rank first,
- * then names with a word starting with it, then the rest. Ties keep the subscriptions' order,
- * and within one its provider's.
+ * Every query word must appear among the channel's names. Exact names precede prefixes, word
+ * starts and substrings, with the displayed name preferred within a tier. Ties keep the
+ * subscriptions' order, and within one its provider's. Grouping still uses the whole catalogue.
  */
-function search(
-  channels: readonly LiveChannel[],
-  names: readonly string[],
-  query: string,
-): readonly LiveChannel[] {
-  const words = query.split(" ");
+function search(channels: readonly LiveChannel[], query: string): readonly LiveChannel[] {
+  const asked = nameQuery(query);
+  let names = rankedNames.get(channels);
+  if (!names) {
+    names = channels.map((channel) =>
+      indexNames(
+        channel.title,
+        channel.variants.map((variant) => variant.name),
+      ),
+    );
+    rankedNames.set(channels, names);
+  }
   const ranked: { channel: LiveChannel; rank: number; order: number }[] = [];
   for (const [order, channel] of channels.entries()) {
-    const name = names[order] ?? "";
-    if (!words.every((word) => name.includes(word))) continue;
-    const rank = name.startsWith(query) ? 0 : ` ${name}`.includes(` ${query}`) ? 1 : 2;
+    const fields = names[order];
+    const rank = fields && scoreNames(asked, fields);
+    if (rank === undefined) continue;
     ranked.push({ channel, rank, order });
   }
   ranked.sort((a, b) => a.rank - b.rank || a.order - b.order);

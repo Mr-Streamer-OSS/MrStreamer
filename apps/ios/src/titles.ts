@@ -276,9 +276,14 @@ export function collectionOf(index: IndexedCatalogue, kind: TitleKind, id: Colle
 /** Titles of `kind` whose names hold every word of `query`, by any name TMDB gave them too. */
 export function searchTitles(index: IndexedCatalogue, kind: TitleKind, query: string) {
   const tk = tmdbKind(kind);
-  const page = searchPage(index, kind, query, (title) =>
-    title.tmdbId ? metadata.searchName(tk, title.tmdbId) : "",
-  );
+  const page = searchPage(index, kind, query, (title) => {
+    if (!title.tmdbId) return "";
+    const shown = metadata.name(tk, title.tmdbId, language);
+    return {
+      ...(shown ? { title: shown.name, original: shown.original } : {}),
+      names: metadata.searchAliases(tk, title.tmdbId),
+    };
+  });
   return { ...page, titles: page.titles.map(named) };
 }
 
