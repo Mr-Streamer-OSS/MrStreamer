@@ -182,8 +182,9 @@ button of the screen it is on. Downloads, Settings and Settings' provider form (
 provider or a provider's Edit) are Home's screens, pushed on the tab they were asked from (the other
 tabs' route files re-export them), and close as the viewer leaves that tab; Movies' and Series'
 details under them stay. `search` opens over the tabs, fading in, and closes back onto the screen
-it opened over; it keeps its text until the app ends, and says, above the keyboard, when the latest
-text is still being searched and which providers' lists are still loading or failed. `connect` shows until a subscription is saved. With copies on
+it opened over; it keeps its text until the app ends, and says, above the keyboard (or atop the
+results when too little room is left there), when the latest text is still being searched and which
+providers' lists are still loading or failed. `connect` shows until a subscription is saved. With copies on
 the phone, Connect also opens `offline`, the same Downloads outside the tabs, so copies play with
 no provider saved, after a relaunch too. Connect and `provider` share `src/provider-form.tsx`. Settings lists each provider as a row with how it
 stands; pressing one offers Retry, its reloads, Edit and Remove as a system sheet, and Remove asks

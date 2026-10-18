@@ -25,7 +25,7 @@ import {
 import { useReduceMotion } from "../glass.tsx";
 import { openOnTabs, useTabs } from "../header.tsx";
 import { searchChannels, type Channel, type Library } from "../library.ts";
-import { StatusLine, type Status } from "../loading.tsx";
+import { StatusLine, useStatusAnnouncement, useStatusFits, type Status } from "../loading.tsx";
 import { playingChannel, usePlayback } from "../playback.ts";
 import { openDetails } from "../resume.ts";
 import { onSearchText } from "../telemetry/index.ts";
@@ -126,7 +126,8 @@ let kept = "";
  * in, or only fades under Reduce Motion, with the keyboard up. Cancel or a swipe back closes it
  * onto that screen. A title closes it and opens its details in Movies or Series; a channel closes
  * it and plays in Watch, which closes onto that screen too. Searching, and what hasn't loaded or
- * failed, is the status line at the bottom, above the keyboard.
+ * failed, is the status line at the bottom, above the keyboard, or at the top of the results
+ * where the bottom has too little room for a line of it.
  */
 export default function Search() {
   const tabs = useTabs();
@@ -218,6 +219,15 @@ export default function Search() {
     () => status?.retry.forEach((id) => retry(id)),
     settings,
   );
+  // The line sits at the bottom, above the keyboard, where its share of the room shows at least
+  // a whole line of it. Where it doesn't, as with the largest text in landscape with the keyboard
+  // up, it leads the results instead, whole, in their one scroll; dismissing the keyboard (a drag
+  // or the Search key) frees room and brings it back down. Nothing shows until the area is laid out.
+  const docked = useStatusFits(room);
+  const place = !line || area === 0 ? null : docked ? "bottom" : "results";
+  // Read out from here, once per change, wherever the line sits.
+  useStatusAnnouncement(line?.text ?? null, line?.announce ?? false);
+  const shown = line ? { ...line, announce: false } : null;
   return (
     <Animated.View style={[styles.screen, { transform: [{ translateY: drop }] }]}>
       <View
@@ -283,7 +293,19 @@ export default function Search() {
           keyboardShouldPersistTaps="handled"
           initialNumToRender={16}
           // With the status line under it, the list ends above it; else it runs under the keyboard.
-          contentContainerStyle={{ paddingBottom: line ? 16 : insets.bottom + 16 }}
+          contentContainerStyle={{ paddingBottom: place === "bottom" ? 16 : insets.bottom + 16 }}
+          ListHeaderComponent={
+            shown && place === "results" ? (
+              <View
+                style={[
+                  styles.lead,
+                  { marginLeft: insets.left + 12, marginRight: insets.right + 12 },
+                ]}
+              >
+                <StatusLine status={shown} />
+              </View>
+            ) : undefined
+          }
           ListEmptyComponent={
             // Nothing has the name only once the latest text was searched in every list. While one
             // loads or failed, the status line says what was searched instead.
@@ -293,7 +315,7 @@ export default function Search() {
           }
           testID="search-list"
         />
-        {line && room > 0 ? (
+        {shown && place === "bottom" ? (
           <View
             style={[
               styles.dock,
@@ -304,7 +326,7 @@ export default function Search() {
               },
             ]}
           >
-            <StatusLine status={line} space={room} />
+            <StatusLine status={shown} space={room} />
           </View>
         ) : null}
       </View>
@@ -450,6 +472,7 @@ const styles = StyleSheet.create({
   input: { flex: 1, color: colors.text, fontSize: 17, paddingVertical: 8 },
   statusText: { color: colors.dim, fontSize: 15 },
   dock: { marginTop: 8 },
+  lead: { marginTop: 8 },
   nothing: { padding: 16, gap: 4 },
   nothingText: { color: colors.text, fontSize: 17, fontWeight: "600" },
   section: {

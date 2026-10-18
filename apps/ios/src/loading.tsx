@@ -16,6 +16,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
   type StyleProp,
   type ViewStyle,
@@ -36,6 +37,7 @@ import { colors, TextButton } from "./ui.tsx";
 // group of shapes on the native driver. What loads, updates or failed is a line of text in glass
 // at the bottom of the screen (`Docked`), over content that stays usable and scrolls clear of it;
 // the whole line takes at most 40% of the height its host measures and scrolls beyond that.
+// Search leads its results with the line instead where that share can't show a whole line.
 
 /** A button on the status line. */
 export interface Action {
@@ -198,25 +200,59 @@ const GAP = 8;
 /** The share of its host's height the whole line may take: content keeps the rest. */
 const SHARE = 0.4;
 
+/** The status text's size, and the padding around it inside the line, top and bottom together. */
+const TEXT_SIZE = 15;
+const TEXT_PADDING = 24;
+
 /**
- * The status line itself, on glass (solid under Reduce Transparency and before iOS 26), within
- * `space`, the height its host has for content and line together. Everything on it, its text,
+ * Whether a status line bounded to its share of `space` shows at least one whole line of its
+ * text at the current text size. A line is estimated from the text size the way `useRowHeight`
+ * sizes rows; under that the line would be a sliver that shows part of a word and no action.
+ */
+export function useStatusFits(space: number): boolean {
+  const { fontScale } = useWindowDimensions();
+  const line = Math.max(44, Math.ceil(TEXT_SIZE * fontScale * 1.2) + TEXT_PADDING);
+  return space * SHARE >= line;
+}
+
+/**
+ * The status line itself, on glass (solid under Reduce Transparency and before iOS 26). Given
+ * `space`, the height its host has for content and line together, everything on it, its text,
  * provider bar and actions, is one scrolling column no taller than its share of that space, so
  * long provider states and wrapped actions at any text size leave the screen's content usable
- * and stay reachable by scrolling. With no room at all it isn't drawn. Search places it above
- * the keyboard.
+ * and stay reachable by scrolling; with no room at all it isn't drawn. Without `space` it isn't
+ * bounded and its host scrolls it, as Search's results do where the bottom has too little room.
  */
-export function StatusLine({ status, space }: { status: Status; space: number }) {
-  const shown = useShown();
+export function StatusLine({ status, space }: { status: Status; space?: number }) {
   const { text, actions = [], progress, announce = true } = status;
-  // Read out once per change of words, only while the viewer sees it: a line behind another tab,
-  // under Watch or in the background stays quiet, and says its latest words once it is back.
-  const said = useRef<string | null>(null);
-  useEffect(() => {
-    if (!shown || !announce || said.current === text) return;
-    said.current = text;
-    AccessibilityInfo.announceForAccessibilityWithOptions(text, { queue: true });
-  }, [shown, announce, text]);
+  useStatusAnnouncement(text, announce);
+  const body = (
+    <>
+      <Text style={styles.text}>{text}</Text>
+      {progress !== undefined ? (
+        // A fixed bar: it moves only as a provider's lists come in.
+        <View style={styles.rail} accessibilityElementsHidden importantForAccessibility="no">
+          <View style={[styles.filled, { width: `${Math.round(progress * 100)}%` }]} />
+        </View>
+      ) : null}
+      {actions.length > 0 ? (
+        <View style={styles.actions}>
+          {actions.map((action) => (
+            <TextButton key={action.label} {...action} />
+          ))}
+        </View>
+      ) : null}
+    </>
+  );
+  if (space === undefined) {
+    return (
+      <Glass style={styles.glass}>
+        <View style={styles.line} testID="status-line">
+          {body}
+        </View>
+      </Glass>
+    );
+  }
   const most = Math.max(0, space * SHARE);
   if (most === 0) return null;
   return (
@@ -230,23 +266,25 @@ export function StatusLine({ status, space }: { status: Status; space: number })
         keyboardShouldPersistTaps="handled"
         testID="status-line"
       >
-        <Text style={styles.text}>{text}</Text>
-        {progress !== undefined ? (
-          // A fixed bar: it moves only as a provider's lists come in.
-          <View style={styles.rail} accessibilityElementsHidden importantForAccessibility="no">
-            <View style={[styles.filled, { width: `${Math.round(progress * 100)}%` }]} />
-          </View>
-        ) : null}
-        {actions.length > 0 ? (
-          <View style={styles.actions}>
-            {actions.map((action) => (
-              <TextButton key={action.label} {...action} />
-            ))}
-          </View>
-        ) : null}
+        {body}
       </ScrollView>
     </Glass>
   );
+}
+
+/**
+ * Reads `text` out once per change of words, only while the viewer sees the calling screen: a
+ * line behind another tab, under Watch or in the background stays quiet, and says its latest
+ * words once it is back. Search calls it once for a line it moves between places.
+ */
+export function useStatusAnnouncement(text: string | null, announce: boolean) {
+  const shown = useShown();
+  const said = useRef<string | null>(null);
+  useEffect(() => {
+    if (!shown || !announce || text === null || said.current === text) return;
+    said.current = text;
+    AccessibilityInfo.announceForAccessibilityWithOptions(text, { queue: true });
+  }, [shown, announce, text]);
 }
 
 /**
@@ -406,7 +444,7 @@ const styles = StyleSheet.create({
   // Takes the row; actions follow on the same line when they fit, else on their own.
   text: {
     color: colors.text,
-    fontSize: 15,
+    fontSize: TEXT_SIZE,
     flexGrow: 1,
     flexShrink: 1,
     flexBasis: 180,

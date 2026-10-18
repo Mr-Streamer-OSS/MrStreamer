@@ -36,6 +36,8 @@ const scenario = vi.hoisted(() => ({
   did: [] as string[],
   /** What VoiceOver was given to read out. */
   said: [] as string[],
+  /** The text size the viewer chose, as a multiple of the default. */
+  fontScale: 1,
   /** The keyboard's listeners, by event. */
   keyboard: new Map<string, (event: { endCoordinates: { screenY: number } }) => void>(),
 }));
@@ -90,7 +92,9 @@ vi.mock("react-native", async () => {
       renderSectionHeader,
       ListHeaderComponent,
       ListEmptyComponent,
+      testID,
     }: {
+      testID?: string;
       sections: readonly Section[];
       renderItem: (info: { item: unknown }) => React.ReactNode;
       renderSectionHeader: (info: { section: Section }) => React.ReactNode;
@@ -99,7 +103,7 @@ vi.mock("react-native", async () => {
     }) =>
       createElement(
         "div",
-        null,
+        { "data-testid": testID },
         ListHeaderComponent,
         sections.length === 0
           ? ListEmptyComponent
@@ -134,7 +138,7 @@ vi.mock("react-native", async () => {
       },
       scheduleLayoutAnimation: () => undefined,
     },
-    useWindowDimensions: () => ({ width: 390, height: 844, fontScale: 1 }),
+    useWindowDimensions: () => ({ width: 390, height: 844, fontScale: scenario.fontScale }),
   };
 });
 vi.mock("expo-router", () => ({
@@ -276,6 +280,7 @@ beforeEach(() => {
     titles: [dune],
     did: [],
     said: [],
+    fontScale: 1,
   });
   scenario.keyboard.clear();
 });
@@ -321,30 +326,45 @@ describe("Search over the tabs", () => {
     ]);
   });
 
+  /** Two providers in trouble: Northwind's channels didn't update, Southwind lost its password. */
+  const troubled = () => [
+    member("a", "Northwind", {
+      live: { kind: "failed", error: { kind: "unexpected", detail: "" }, last: {}, since: 0 },
+    } as Partial<Member>),
+    member("b", "Southwind", { needsSecret: true }),
+  ];
+  /** The keyboard covering the bottom of an 844-point window from `top` down, or going away. */
+  const keyboardTo = (top: number) =>
+    React.act(() =>
+      scenario.keyboard.get("keyboardWillChangeFrame")?.({ endCoordinates: { screenY: top } }),
+    );
+  const keyboardDown = () =>
+    React.act(() =>
+      scenario.keyboard.get("keyboardWillHide")?.({ endCoordinates: { screenY: 844 } }),
+    );
+  const statusLine = () => container.querySelector('[data-testid="status-line"]');
+  /** Where the line is: at the bottom with the most height it may take, or leading the results. */
+  const placed = () => {
+    const line = statusLine();
+    if (!line) return null;
+    return container.querySelector('[data-testid="search-list"]')!.contains(line)
+      ? "results"
+      : `bottom ${line.getAttribute("data-max-height")}`;
+  };
+
   it("keeps its line, Retry and Settings in one scroll that the keyboard shrinks and frees", () => {
-    scenario.members = [
-      member("a", "Northwind", {
-        live: { kind: "failed", error: { kind: "unexpected", detail: "" }, last: {}, since: 0 },
-      } as Partial<Member>),
-      member("b", "Southwind", { needsSecret: true }),
-    ];
+    scenario.members = troubled();
     open();
     type("dune");
-    const most = () => {
-      const panel = container.querySelector('[data-testid="status-line"]');
-      return panel ? Number(panel.getAttribute("data-max-height")) : null;
-    };
-    const open600 = most()!;
-    // A phone 844 points tall: the keyboard takes its bottom 500, leaving 100 of the 600 below
-    // the field for results and the line.
-    React.act(() =>
-      scenario.keyboard.get("keyboardWillChangeFrame")?.({ endCoordinates: { screenY: 344 } }),
-    );
-    const shrunk = most()!;
+    const open600 = placed();
+    expect(open600).toMatch(/^bottom \d/);
+    // The keyboard takes the bottom 400 of the window, leaving 200 of the 600 under the field.
+    keyboardTo(444);
+    const shrunk = Number(placed()!.split(" ")[1]);
     expect(shrunk).toBeGreaterThan(0);
-    expect(shrunk).toBeLessThan(100 / 2);
-    expect(shrunk).toBeLessThan(open600);
-    const panel = container.querySelector('[data-testid="status-line"]')!;
+    expect(shrunk).toBeLessThan(200 / 2);
+    expect(shrunk).toBeLessThan(Number(open600!.split(" ")[1]));
+    const panel = statusLine()!;
     expect(panel.textContent).toContain("Enter the password for Southwind in Settings.");
     // Retry and Settings are in that same bounded scroll.
     expect(panel.textContent).toMatch(/searched\.RetrySettings$/);
@@ -353,18 +373,37 @@ describe("Search over the tabs", () => {
     press("text-Settings");
     expect(scenario.did).toEqual(["retry a", "dismiss 1", "push /live/settings"]);
 
-    // A keyboard over the whole area leaves no room: no line at all, never a negative height.
-    React.act(() =>
-      scenario.keyboard.get("keyboardWillChangeFrame")?.({ endCoordinates: { screenY: 200 } }),
-    );
-    expect(most()).toBeNull();
-    expect(text()).toContain("Dune");
-
     // With the keyboard down the line has its room again.
-    React.act(() =>
-      scenario.keyboard.get("keyboardWillHide")?.({ endCoordinates: { screenY: 844 } }),
+    keyboardDown();
+    expect(placed()).toBe(open600);
+  });
+
+  it("leads the results with its line where the bottom can't show a whole line of it", () => {
+    scenario.members = troubled();
+    // The largest accessibility text size.
+    scenario.fontScale = 3.1;
+    open();
+    type("dune");
+    expect(placed()).toMatch(/^bottom \d/);
+    // The keyboard leaves 200 points under the field: at this size its share there would be
+    // less than a line, so the line moves above the results, whole, and they keep the rest.
+    keyboardTo(444);
+    expect(placed()).toBe("results");
+    expect(statusLine()!.textContent).toMatch(
+      /^Couldn't load channels from Northwind\..*RetrySettings$/,
     );
-    expect(most()).toBe(open600);
+    expect(text()).toContain("Dune");
+    press("text-Retry");
+    press("text-Settings");
+    expect(scenario.did).toEqual(["retry a", "dismiss 1", "push /live/settings"]);
+    // A keyboard over the whole area still leaves the line, and the results, in the one scroll.
+    keyboardTo(200);
+    expect(placed()).toBe("results");
+    expect(text()).toContain("Dune");
+    // Down again, the line returns to the bottom, and it was read out once throughout.
+    keyboardDown();
+    expect(placed()).toMatch(/^bottom \d/);
+    expect(scenario.said).toHaveLength(1);
   });
 
   it("says it is searching while the latest text waits, keeping the last results", () => {
