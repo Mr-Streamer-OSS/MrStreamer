@@ -486,7 +486,11 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
     if (mine === selection) {
       const error = appError(cause);
       observation.failure(playbackFailure(error), appDiagnostic(error));
-      store.setState({ phase: failed({ kind: "app", error: appError(cause) }) });
+      store.setState({
+        phase: failed(
+          error.kind === "stream" ? classify(error.failure, null) : { kind: "app", error },
+        ),
+      });
     }
     return;
   }
@@ -811,7 +815,7 @@ function retries(problem: PlaybackProblem): boolean {
  * The kind of thing that went wrong, from what the provider answered or else from how the engine
  * failed. What either said of it in words stays behind: those can name an address.
  */
-function classify(upstream: StreamFailure | null, error: EngineError): PlaybackProblem {
+function classify(upstream: StreamFailure | null, error: EngineError | null): PlaybackProblem {
   switch (upstream?.kind) {
     case "unavailable":
     case "refused":
@@ -822,7 +826,7 @@ function classify(upstream: StreamFailure | null, error: EngineError): PlaybackP
     case "unsupported":
       return { kind: "unsupported" };
     case undefined:
-      return error.kind === "network"
+      return error?.kind === "network"
         ? { kind: "network", unanswered: false }
         : { kind: "unsupported" };
   }

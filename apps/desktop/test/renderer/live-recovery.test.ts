@@ -478,6 +478,46 @@ describe("what a failure shows", () => {
     expect(asked()).toHaveLength(2);
   });
 
+  it("shows an excluded HLS repair as unsupported after the observed rejection, with one incident", async () => {
+    const starts = nextStream();
+    await watching();
+    await starts();
+    const repaired = ipc.hold("playback.open");
+    await stops(null);
+    expect(asked().at(-1)).toMatchObject({ repair: true });
+    expect(ipc.argsOf("analytics.playbackFailure")).toEqual([]);
+    await act(async () =>
+      repaired.reject({
+        kind: "stream",
+        failure: {
+          kind: "unsupported",
+          detail: "private upstream text",
+          diagnostic: {
+            diagnostic_stage: "inspect",
+            diagnostic_reason: "hls_subset_unsupported",
+            diagnostic_container: "hls",
+            diagnostic_delivery: "direct",
+            diagnostic_fallback: "repair",
+          },
+        },
+      }),
+    );
+    expect(text()).toContain("Can't play this stream");
+    expect(text()).not.toContain("Can't open this channel");
+    expect(text()).not.toContain("private upstream text");
+    expect(ipc.argsOf("analytics.playbackFailure")).toEqual([
+      expect.objectContaining({
+        failure: "unsupported",
+        diagnostic: expect.objectContaining({
+          diagnostic_stage: "inspect",
+          diagnostic_reason: "hls_subset_unsupported",
+        }),
+      }),
+    ]);
+    await wait(60_000);
+    expect(asked()).toHaveLength(2);
+  });
+
   it("offers a login update only when the provider rejected the login", async () => {
     const opened = ipc.hold("playback.open");
     await watching();
