@@ -689,6 +689,72 @@ it.each(['#EXT-X-KEY:METHOD=AES-128,URI="key.bin"', '#EXT-X-MAP:URI="init.mp4"']
   },
 );
 
+it.each(['#EXT-X-KEY:METHOD=AES-128,URI="key.bin"', '#EXT-X-MAP:URI="init.mp4"'])(
+  "retains known converted receiver diagnostics when a live refresh adds %s",
+  async (tag) => {
+    const { host, playback, channel } = await app();
+    let polls = 0;
+    host.overrides.set("/media/ac3.m3u8", {
+      body: () =>
+        [
+          "#EXTM3U",
+          "#EXT-X-TARGETDURATION:4",
+          ...[0, 1, 2].flatMap((index) => [
+            ...(index ? ["#EXT-X-DISCONTINUITY"] : []),
+            "#EXTINF:3.02,",
+            `ac3-${index}.ts`,
+          ]),
+          ...(polls++ ? [tag, "#EXTINF:3.02,", "ac3-3.ts"] : []),
+          "",
+        ].join("\n"),
+    });
+    const session = await playback.openReceiver(channel("ac3"), {
+      address: "127.0.0.1",
+      decoders: ["h264", "aac"],
+    });
+    const until = performance.now() + 10_000;
+    let failure = await playback.failure(session.sessionId);
+    while (!failure && performance.now() < until) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      failure = await playback.failure(session.sessionId);
+    }
+    const playlist = await (await fetch(session.url)).text();
+    const segments = playlist.split("\n").filter((line) => line && !line.startsWith("#"));
+    const bytes = Buffer.concat(
+      await Promise.all(
+        segments.map(async (line) => {
+          const response = await fetch(new URL(line, session.url));
+          expect(response.status).toBe(200);
+          return Buffer.from(await response.arrayBuffer());
+        }),
+      ),
+    );
+    const output = decoded(bytes);
+    expect(output.streams.map((stream) => stream.codec_name)).toEqual(["h264", "aac"]);
+    const plan = await playback.diagnostic(session.sessionId);
+    expect(plan).toEqual({
+      diagnostic_container: "hls",
+      diagnostic_video_codec: "h264",
+      diagnostic_audio_codec: "ac3",
+      diagnostic_delivery: "converted",
+      diagnostic_fallback: "none",
+    });
+    expect(failure?.kind).toBe("unsupported");
+    expect(failure?.diagnostic).toEqual({
+      ...plan,
+      diagnostic_stage: "inspect",
+      diagnostic_reason: "hls_subset_unsupported",
+    });
+    expect(host.requests().filter((path) => /ac3-\d+.ts/.test(path))).toEqual(
+      [0, 1, 2].map((index) => `/media/ac3-${index}.ts`),
+    );
+    expect(host.requests().some((path) => /key.bin|init.mp4/.test(path))).toBe(false);
+    await playback.close(session.sessionId);
+    expect(host.stats()).toMatchObject({ peak: 1, active: 0 });
+  },
+  15_000,
+);
+
 it("converts ordered epochs with changed PIDs/PCR/codecs, stable selected sound and supported subtitles", async () => {
   const { host, playback, channel } = await app();
   const session = await playback.open(channel("epochs"), ["h264", "aac"], {

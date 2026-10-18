@@ -1474,6 +1474,24 @@ function make(deps: PlaybackDeps) {
           PubSub.publishUnsafe(tracksChanged, session.id);
           yield* convertHlsEpoch(session, epoch, selected, output, signal);
         }
+      } catch (cause) {
+        if (
+          cause instanceof HlsInputFailure &&
+          cause.failure.kind === "unsupported" &&
+          cause.failure.diagnostic?.diagnostic_reason === "hls_subset_unsupported"
+        ) {
+          // Both local and receiver consumers need the running conversion's known facts.
+          throw new HlsInputFailure({
+            ...cause.failure,
+            diagnostic: {
+              ...cause.failure.diagnostic,
+              ...session.diagnostic,
+              diagnostic_stage: "inspect",
+              diagnostic_reason: "hls_subset_unsupported",
+            },
+          });
+        }
+        throw cause;
       } finally {
         await input.close();
       }
@@ -1567,22 +1585,7 @@ function make(deps: PlaybackDeps) {
         }
         response.end();
       } catch (cause) {
-        if (!signal.aborted) {
-          const failure = hlsFailure(cause);
-          session.failure =
-            failure.kind === "unsupported" &&
-            failure.diagnostic?.diagnostic_reason === "hls_subset_unsupported"
-              ? {
-                  ...failure,
-                  diagnostic: {
-                    ...failure.diagnostic,
-                    ...session.diagnostic,
-                    diagnostic_stage: "inspect",
-                    diagnostic_reason: "hls_subset_unsupported",
-                  },
-                }
-              : failure;
-        }
+        if (!signal.aborted) session.failure = hlsFailure(cause);
         response.destroy();
       }
     }
