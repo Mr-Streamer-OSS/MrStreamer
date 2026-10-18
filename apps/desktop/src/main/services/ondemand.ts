@@ -58,6 +58,7 @@ import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -366,6 +367,7 @@ function make(deps: OnDemandDeps) {
     const late = new Set<string>();
     const seasons = new Map<string, Timed<readonly EpisodeAbout[] | null>>();
     const seasonFlights = new Map<string, Flight<readonly EpisodeAbout[] | null | undefined>>();
+    const reconfigured = new WeakSet<Fiber.Fiber<unknown, unknown>>();
     /** A forgotten source cannot start new work while Roster still holds its saved login. */
     const forgotten = new Set<string>();
     const currentSources = new Map<string, Source>();
@@ -393,7 +395,8 @@ function make(deps: OnDemandDeps) {
       });
     const useSource = (source: Source) =>
       Effect.gen(function* () {
-        if (forgotten.has(sourceKey(source))) return yield* switched;
+        if (forgotten.has(sourceKey(source)) || !(yield* subscriptions.stands(source)))
+          return yield* switched;
         const previous = currentSources.get(source.id);
         if (previous && !sameSource(source, previous)) {
           currentSources.set(source.id, source);
@@ -433,18 +436,23 @@ function make(deps: OnDemandDeps) {
           return fiber;
         }),
       );
-    /** Owner invalidation settles consumers with a service error; their own cancellation still detaches. */
+    /** Only a key change permits metadata fallback. A caller's cancellation detaches its wait. */
     const joinFlight = <A, E>(
       fiber: Fiber.Fiber<A, E>,
       source: Source,
+      fallback?: Effect.Effect<A>,
     ): Effect.Effect<A, E | Failed> =>
-      Fiber.join(fiber).pipe(
-        Effect.catchCause((cause) =>
+      Fiber.await(fiber).pipe(
+        Effect.flatMap((exit) =>
           Effect.gen(function* () {
+            if (Exit.isSuccess(exit)) return exit.value;
+            const cause = exit.cause;
             if (!Cause.hasInterruptsOnly(cause)) return yield* Effect.failCause(cause);
             const saved = yield* subscriptions.saved;
             if (forgotten.has(sourceKey(source)) || !saved.some((each) => each.id === source.id))
               return yield* noSubscription;
+            if (fallback && reconfigured.has(fiber) && (yield* stands(source)))
+              return yield* fallback;
             return yield* switched;
           }),
         ),
@@ -874,7 +882,8 @@ function make(deps: OnDemandDeps) {
           source,
           evidence: downloaded,
           about: Effect.gen(function* () {
-            if (metadata.flight) yield* joinFlight(metadata.flight, source);
+            if (metadata.flight)
+              yield* joinFlight(metadata.flight, source, Effect.succeed(undefined));
             return metadata.key
               ? validAbout(metadata.key, yield* Clock.currentTimeMillis)
               : metadata.value;
@@ -1040,7 +1049,7 @@ function make(deps: OnDemandDeps) {
             return answer;
           }),
         );
-        const answer = yield* joinFlight(fiber, source);
+        const answer = yield* joinFlight(fiber, source, Effect.succeed(undefined));
         return answer === undefined ? usable : answer;
       });
 
@@ -1360,6 +1369,7 @@ function make(deps: OnDemandDeps) {
         asking.clear();
         seasonFlights.clear();
         late.clear();
+        for (const fiber of fibers) reconfigured.add(fiber);
         yield* Fiber.interruptAll(fibers);
         failures.clear();
         metadataProgress = { known: 0, wanted: 0, refused: false, fetching: false };

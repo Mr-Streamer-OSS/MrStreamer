@@ -3,6 +3,9 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
@@ -77,12 +80,18 @@ async function app({ metadata = false } = {}) {
 
 /** Hold the real provider response at its fetch boundary, including deliberately late completion. */
 function holdDetails() {
+  return holdResponse((url) => {
+    const action = url.searchParams.get("action");
+    return action === "get_series_info" || action === "get_vod_info";
+  });
+}
+
+function holdResponse(matches: (url: URL) => boolean) {
   const original = globalThis.fetch;
   let pending: { arrived: () => void; release: Promise<void>; aborted: () => void } | undefined;
   vi.stubGlobal("fetch", (async (input, init) => {
     const url = new URL(String(input));
-    const action = url.searchParams.get("action");
-    const gate = action === "get_series_info" || action === "get_vod_info" ? pending : undefined;
+    const gate = matches(url) ? pending : undefined;
     if (gate) pending = undefined;
     const response = await original(input, init);
     if (gate) {
@@ -359,6 +368,34 @@ describe("persistent opened details through OnDemand", { timeout: 20_000 }, () =
     await a.service.file(a.episode);
   });
 
+  it("rejects a captured old refresh source without cancelling current detail callers", async () => {
+    const hold = holdDetails();
+    const a = await app();
+    await a.service.refresh(a.subscriptionId);
+    const source = await a.subscriptions.sourceOf(a.subscriptionId);
+    await a.subscriptions.add(a.login);
+    const gate = hold();
+    const current = a.service.details("series", a.series).then(
+      (details) => ({ details }),
+      (error: unknown) => ({ error }),
+    );
+    await gate.arrived;
+    const joined = a.service.file(a.episode).then(
+      (file) => ({ file }),
+      (error: unknown) => ({ error }),
+    );
+    // A captured refresh can arrive after its saved source has already been replaced.
+    await expect(
+      a.service.refresh(a.subscriptionId, { source, read: Effect.never }),
+    ).rejects.toMatchObject({ error: { kind: "unexpected" } });
+    expect(gate.aborted()).toBe(false);
+    gate.release();
+    expect(await current).toHaveProperty("details.kind", "series");
+    expect(await joined).toHaveProperty("file.listingKey", expect.any(String));
+    expect(a.provider.detailRequests()).toBe(1);
+    expect((await a.service.file(a.episode)).revision).not.toBe(source.revision);
+  });
+
   it("rejects a response begun before a catalogue acceptance and renews against the new list", async () => {
     const hold = holdDetails();
     const a = await app();
@@ -434,6 +471,83 @@ describe("persistent opened details through OnDemand", { timeout: 20_000 }, () =
     await a.time(NOW + 182 * DAY);
     expect((await a.service.details("series", a.series)).plot).toMatch(/^All about/);
     expect((await a.service.season(a.series, 1))[0]?.plot).toBeNull();
+  });
+
+  it.each([false, true])(
+    "settles a held season on key rotation with usable metadata or provider fallback (cached: %s)",
+    async (cached) => {
+      const holdAbout = holdResponse(
+        (url) => url.searchParams.get("append_to_response") === "credits",
+      );
+      const holdSeason = holdResponse((url) => url.pathname.endsWith("/season/1"));
+      const a = await app({ metadata: true });
+      const network = vi.spyOn(globalThis, "fetch");
+      await a.settings.update({ titleLanguage: "nl" });
+      const before = cached ? await a.service.season(a.series, 1) : undefined;
+      if (cached) {
+        await expect
+          .poll(async () => (await a.service.details("series", a.series)).plot)
+          .toMatch(/^TMDB/);
+        await a.time(NOW + 150 * DAY);
+      }
+      const about = holdAbout();
+      const season = holdSeason();
+      const pending = a.service.season(a.series, 1).then(
+        (episodes) => ({ episodes }),
+        (error: unknown) => ({ error }),
+      );
+      await Promise.all([about.arrived, season.arrived]);
+      await a.settings.update({ tmdbKey: "replacement-key" });
+      await a.service.reconfigure();
+      const result = await pending;
+      expect(result).toHaveProperty("episodes");
+      if (!("episodes" in result)) throw new Error("Season failed during key rotation");
+      if (before) expect(result.episodes).toEqual(before);
+      else expect(result.episodes[0]?.plot).toBeNull();
+      expect(about.aborted()).toBe(true);
+      expect(season.aborted()).toBe(true);
+      about.release();
+      season.release();
+      const record = await a.cache.read({ kind: "season", id: "90000", number: 1, language: "nl" });
+      expect(record?.at ?? null).toBe(cached ? NOW : null);
+      const title = await a.cache.read({
+        kind: "about",
+        titleKind: "series",
+        id: "90000",
+        language: "nl",
+      });
+      expect(title?.at ?? null).toBe(cached ? NOW : null);
+      expect((await a.service.season(a.series, 1))[0]?.plot).toMatch(/^TMDB/);
+      expect(
+        network.mock.calls.some(([input]) => {
+          const url = new URL(String(input));
+          return (
+            url.pathname.endsWith("/season/1") &&
+            url.searchParams.get("api_key") === "replacement-key"
+          );
+        }),
+      ).toBe(true);
+    },
+  );
+
+  it("rejects a held season whose source was replaced before key rotation", async () => {
+    const a = await app({ metadata: true });
+    await a.settings.update({ titleLanguage: "nl" });
+    a.remote!.failSeasons("hold");
+    const pending = a.service.season(a.series, 1).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    await expect.poll(() => a.remote!.seasonRequests().length).toBe(1);
+    await a.subscriptions.add(a.login);
+    await a.settings.update({ tmdbKey: "replacement-key" });
+    await a.service.reconfigure();
+    expect(await pending).toMatchObject({ error: { kind: "unexpected" } });
+    a.remote!.failSeasons(null);
+    expect(
+      await a.cache.read({ kind: "season", id: "90000", number: 1, language: "nl" }),
+    ).toBeNull();
+    expect((await a.service.season(a.series, 1))[0]?.plot).toMatch(/^TMDB/);
   });
 
   it("retries persistent missing TMDB title and season answers after 24 hours", async () => {
@@ -528,6 +642,8 @@ describe("persistent opened details through OnDemand", { timeout: 20_000 }, () =
     await expect.poll(() => a.remote!.seasonRequests().length).toBe(1);
     const second = a.service.season(a.series, 1);
     await a.runtime.runPromise(Fiber.interrupt(first));
+    const interrupted = await a.runtime.runPromise(Fiber.await(first));
+    expect(Exit.isFailure(interrupted) && Cause.hasInterruptsOnly(interrupted.cause)).toBe(true);
     a.remote!.failSeasons(null);
     expect((await second)[0]?.plot).toMatch(/^TMDB/);
     expect(a.remote!.seasonRequests()).toEqual(["90000/1/nl"]);
