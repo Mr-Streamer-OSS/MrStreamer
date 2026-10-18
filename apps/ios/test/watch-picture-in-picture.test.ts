@@ -46,6 +46,8 @@ const native = vi.hoisted(() => ({
   listeners: new Map<string, (event: object) => void>(),
   /** Whether the iPhone has Picture in Picture, and whether asking for it starts it. */
   pictureInPicture: { supported: false, starts: true },
+  /** Set, the native answer to starting Picture in Picture waits until the test calls it. */
+  held: null as (() => void) | null,
   /** What the player was told: "play", "pause" or "replace", in order. */
   player: [] as string[],
   /** Where the top bar's routes went. */
@@ -96,6 +98,7 @@ vi.mock("expo-video", async () => {
       });
     }
     async startPictureInPicture() {
+      if (native.held !== null) await new Promise<void>((answer) => (native.held = answer));
       if (native.pictureInPicture.starts) this.start();
     }
     async stopPictureInPicture() {}
@@ -173,7 +176,7 @@ vi.mock("../src/glass.tsx", async () => {
 });
 vi.mock("../src/ui.tsx", () => ({ colors: { text: "#FFFFFF", dim: "#8E8E93" } }));
 
-const { closeWatch, openWatch, play, playbackState, retry, stop } =
+const { closeWatch, openWatch, play, playbackState, retry, stop, togglePause } =
   await import("../src/playback.ts");
 const { WatchLayer } = await import("../src/watch.tsx");
 
@@ -221,6 +224,7 @@ beforeEach(() => {
     told: [],
     answeredInHandler: false,
     pictureInPicture: { supported: false, starts: true },
+    held: null,
     player: [],
     pushed: [],
     root: onLive,
@@ -563,6 +567,88 @@ describe("Watch with no provider saved", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("Watch's Downloads and Settings, then the viewer's own choices", () => {
+  /** A press whose Picture in Picture never starts, then the stream failing and Try again. */
+  async function failedThenTriedAgain(watch: Awaited<ReturnType<typeof watching>>) {
+    act(() => failure());
+    await watch.press("watch-retry");
+    await act(async () => undefined);
+    started();
+    native.player.length = 0;
+  }
+
+  it("doesn't set aside Try again's stream for a press before it failed", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      native.pictureInPicture = { supported: true, starts: false };
+      const watch = await watching(movie("1"));
+      await watch.press("watch-settings");
+      await act(async () => undefined);
+      await failedThenTriedAgain(watch);
+      act(() => vi.advanceTimersByTime(1000));
+      expect(playbackState.get()).toMatchObject({
+        phase: { kind: "playing" },
+        watch: true,
+        aside: false,
+      });
+      expect(native.player).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ignores Picture in Picture's late answer to a press before the failure", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      native.pictureInPicture = { supported: true, starts: false };
+      native.held = () => undefined;
+      const watch = await watching(movie("1"));
+      await watch.press("watch-settings");
+      const answer = native.held;
+      await failedThenTriedAgain(watch);
+      await act(async () => answer?.());
+      act(() => vi.advanceTimersByTime(1000));
+      expect(playbackState.get()).toMatchObject({ watch: true, aside: false });
+      expect(native.player).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a Pause chosen from the accessory when Watch comes back", async () => {
+    const watch = await watching(movie("1"));
+    await watch.press("watch-settings");
+    started(false);
+    // The accessory's Play, then its Pause, as the player reports each.
+    act(() => togglePause());
+    started();
+    act(() => togglePause());
+    started(false);
+    native.player.length = 0;
+    act(() => openWatch());
+    expect(playbackState.get()).toMatchObject({ phase: { kind: "paused" }, watch: true });
+    expect(native.player).toEqual([]);
+  });
+
+  it("doesn't open a channel paused from the accessory again when Watch comes back", async () => {
+    let opened = 0;
+    const opens = async () => {
+      opened++;
+      return { url: "file:live", container: "m3u8" };
+    };
+    const watch = await watching(channel("9"), opens);
+    await watch.press("watch-settings");
+    started(false);
+    act(() => togglePause());
+    started();
+    act(() => togglePause());
+    started(false);
+    await act(async () => openWatch());
+    expect(opened).toBe(1);
+    expect(playbackState.get()).toMatchObject({ phase: { kind: "paused" }, watch: true });
   });
 });
 

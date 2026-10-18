@@ -462,7 +462,12 @@ export function stop() {
   }));
 }
 
+/**
+ * Play or Pause, the viewer's own: in Watch, or from the accessory while Watch is set aside, where
+ * it replaces setting aside's own pause, so bringing Watch back keeps whatever they chose last.
+ */
 export function togglePause() {
+  resumeOnReturn = false;
   const { phase } = state.get();
   if (phase.kind === "playing") player().pause();
   else if (phase.kind === "paused") player().play();

@@ -68,15 +68,17 @@ export function WatchLayer() {
   const tab = tabs?.tab ?? null;
   const pathname = usePathname();
   // The press waiting for Picture in Picture to take over, with its fallback's timer. Picture in
-  // Picture starting, Watch closing or showing again, another item, another tab or none, and
-  // Watch going each retire it, so a fallback acts only for the press, item and tabs it was for.
+  // Picture starting, Watch closing or showing again, the stream failing (its view goes, and Try
+  // again plays the same item anew), another item, another tab or none, and Watch going each
+  // retire it, so a fallback acts only for the press, stream and tabs it was for.
   const waiting = useRef<{ timer?: ReturnType<typeof setTimeout> } | null>(null);
   const retire = () => {
     clearTimeout(waiting.current?.timer);
     waiting.current = null;
   };
   const item = phase.kind === "idle" ? null : phase.item;
-  useEffect(() => retire, [watch, pip, item, tab]);
+  const failed = phase.kind === "failed";
+  useEffect(() => retire, [watch, pip, item, failed, tab]);
   useEffect(() => {
     if (!tab) unsetAside();
   }, [tab]);
