@@ -7,6 +7,7 @@ import type {
   AnalyticsRecord,
   CaptureEvent,
   StreamSummary,
+  UsageKey,
 } from "../../src/main/analytics/model.ts";
 import { delay, type Page } from "./app.ts";
 import { boundary, type Boundary } from "./analytics-boundary.ts";
@@ -68,7 +69,7 @@ export async function runNativeTelemetry(c: Context) {
   c.observations.nativeCases = cases;
   c.observations.nativeLimits = [
     "Loopback only; native package and production acceptance require separately pinned real candidate runs.",
-    "Filesystem holds are controlled promise delays around real rename, not physical slow-disk measurements.",
+    "Checkpoint/slow-write promise holds are controlled delays, not physical slow-disk measurements. The Windows reader case uses actual OS handles.",
   ];
   const selected = c.options.nativeCase;
   let boundaryIndex = 0;
@@ -640,6 +641,154 @@ export async function runNativeTelemetry(c: Context) {
       await c.quit();
       return { injectedPromiseHold: true, deadlineMs: 1500, hit, measurements };
     });
+
+    if (process.platform === "win32")
+      await run("windows-retry", async () => {
+        await fresh();
+        const identity = (await c.read()).installationId;
+        const counter = async (key: UsageKey) => {
+          const record = await c.read();
+          const events = new Map(
+            [
+              ...c.events(),
+              ...pending(record).map((item) => item.event),
+              record.summaries?.usage,
+            ].flatMap((event) =>
+              event?.event === "usage_window" && event.distinct_id === identity
+                ? [[event.uuid, event] as const]
+                : [],
+            ),
+          );
+          // A pending/received copy during acknowledgement is one fragment, not two actions.
+          return [...events.values()].reduce(
+            (sum, event) => sum + (event.properties.counts[key] ?? 0),
+            0,
+          );
+        };
+        await c.escape();
+        await c.namedButton("header button", "Live TV");
+        await c.waitFor(async () => (await counter("feature_live_tv")) > 0);
+        const probe = await boundary(c.main(), c.profile());
+        const denied = new Set(["EPERM", "EACCES", "EBUSY"]);
+        try {
+          for (const [mode, key, selector] of [
+            ["default", "action_epg_opened", 'button[aria-label="Later programmes"]'],
+            ["exclusive", "action_favourite_added", 'button[aria-label="Add to favourites"]'],
+          ] as const) {
+            await probe.reader(mode, key);
+            await c.click(selector);
+            await c.waitFor(async () => {
+              const result = (await probe.readers()).find((item) => item.mode === mode);
+              return (
+                !!result &&
+                (!!result.destinationSha256 ||
+                  result.attempts >= 4 ||
+                  (typeof result.lastCode === "string" && !denied.has(result.lastCode)))
+              );
+            });
+            const results = await probe.readers();
+            c.observations.windowsRetryReaders = results;
+            const result = results.find((item) => item.mode === mode)!;
+            assert(!result.captureError, result.captureError);
+            assert(
+              result.attempts >= 1 && result.attempts <= 4,
+              "Unbounded native rename attempts",
+            );
+            assert.equal(
+              result.destinationSha256,
+              result.tempSha256,
+              "Recovery changed temporary bytes",
+            );
+            assert.equal(await counter(key), 1, "Real handle action was not durably counted once");
+          }
+          const results = await probe.readers();
+          const recovered = results.filter(
+            (result) =>
+              !result.openError &&
+              typeof result.firstCode === "string" &&
+              denied.has(result.firstCode) &&
+              result.lastCode === null &&
+              result.attempts > 1,
+          );
+          assert(
+            recovered.length > 0,
+            "OPEN: neither real Windows handle denied replacement; retry recovery unproved",
+          );
+          const measurements = await probe.measurements();
+          for (const result of recovered) {
+            assert(result.openedAt && result.closedAt, "Missing actual handle lifetime");
+            const attempts = measurements.filter((item) => item.from === result.from);
+            assert.equal(attempts.length, result.attempts);
+            assert(denied.has(attempts[0]!.code!));
+            assert.equal(attempts.at(-1)!.code, null);
+            assert.equal(result.destinationSha256, result.tempSha256);
+          }
+        } finally {
+          try {
+            c.observations.windowsRetryReaders = await probe.readers();
+            const measurements = await probe.measurements();
+            c.observations.windowsRetryMeasurements = measurements;
+            await writeFile(
+              join(c.evidence, "windows-retry-boundary.json"),
+              JSON.stringify(
+                {
+                  scope:
+                    "Controlled real in-process Windows handles, actual native rename results; no mocked rejection. Default-reader outcome is diagnostic.",
+                  observed: await saved("windows-retry-observed"),
+                  readers: c.observations.windowsRetryReaders,
+                  measurements,
+                },
+                null,
+                2,
+              ),
+            );
+          } catch (error) {
+            cleanupErrors.push(`windows-retry evidence: ${String(error)}`);
+          }
+          try {
+            await probe.restore();
+          } catch (error) {
+            cleanupErrors.push(`windows-retry restore: ${String(error)}`);
+          }
+        }
+        // A later real UI action must persist and reach HTTP after the held handle was removed.
+        await c.click('button[aria-label="Search"]');
+        await c.page().send("Input.insertText", { text: "TEST | H.264 + AAC" });
+        await c.waitFor(async () => (await counter("action_search_used")) === 1);
+        await c.snapshot("windows-retry-recovered");
+        c.prepareExit("windows-retry-complete");
+        await c.quit();
+        const final = await saved("windows-retry-final");
+        assert.equal(final.installationId, identity);
+        assert.equal(final.enabled, true);
+        assert.equal(final.summaries?.usage, null);
+        assert.equal(pending(final).length, 0);
+        assert.equal(final.pending.length, 0);
+        const received = c
+          .events()
+          .filter((event) => event.event === "usage_window")
+          .filter((event) => event.distinct_id === identity);
+        assert.equal(
+          new Set(received.map((event) => event.uuid)).size,
+          received.length,
+          "Duplicate usage wire UUID",
+        );
+        for (const key of [
+          "action_epg_opened",
+          "action_favourite_added",
+          "action_search_used",
+        ] as const)
+          assert.equal(
+            received.reduce((sum, event) => sum + (event.properties.counts[key] ?? 0), 0),
+            1,
+          );
+        return {
+          readers: c.observations.windowsRetryReaders,
+          measurements: c.observations.windowsRetryMeasurements,
+          received,
+          final,
+        };
+      });
 
     if (process.platform === "win32")
       await run("windows-rename", async () => {

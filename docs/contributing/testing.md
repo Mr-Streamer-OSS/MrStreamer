@@ -397,6 +397,8 @@ xvfb-run -a node apps/desktop/test/e2e/measure-app.ts --runs 1 --subscriptions 2
 
 Use the platform's normal display and mock keychain arguments on macOS. For changes to instrumentation, calibrate and self-compare the same unchanged build for one fixed five-round alternating capture, with `--runs 1 --subscriptions 2`. For changes that may affect speed, run the normal repeated before/after comparison manually. CI's ordinary public-contract suite checks the result schema and CLI failure/warning behavior; full app comparisons remain outside the per-PR jobs. Report measured release-check cost from that host, rather than treating it as a fixed budget for other machines.
 
+The Windows installed package smoke also runs the focused `windows-retry` telemetry case after ordinary Privacy. Its real in-process reader handles, source/temp hashes, bounded attempt measurements and later-action HTTP proof are described in the [Privacy feature entry](../../.cursor/skills/verify-mrstreamer/features/privacy.md). The public atomic-writer tests use controlled platform/rename errors on real files and timers; they do not establish native Windows acceptance. The separate permanent-lock, slow-write and quit gates remain required.
+
 ## CI
 
 `.github/workflows/checks.yml` runs on every pull request and push to `main`; [CI](../maintainers/ci.md) shows how it fits with the release workflows.

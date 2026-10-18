@@ -110,6 +110,7 @@ describe("native telemetry verification CLI", () => {
   it("keeps expensive or installed compatibility options out of ordinary aggregate execution", () => {
     for (const flag of [
       "--native-case=periodic",
+      "--native-case=windows-retry",
       "--installed-pair=/packages",
       "--prior-source=" + sha,
     ])
@@ -123,6 +124,14 @@ describe("native telemetry verification CLI", () => {
     expect(() => analyticsOptions(["--native-telemetry", "--prior-executable=/old"])).toThrow(
       "together",
     );
+  });
+});
+describe("Windows retry acceptance CLI", () => {
+  it("requires the real Windows platform for its real-handle case", () => {
+    const args = ["--native-telemetry", "--native-case=windows-retry"];
+    if (process.platform === "win32")
+      expect(analyticsOptions(args)).toMatchObject({ nativeCase: "windows-retry" });
+    else expect(() => analyticsOptions(args)).toThrow("requires actual Windows");
   });
 });
 describe("ambiguous native HTTP delivery reconciliation", () => {

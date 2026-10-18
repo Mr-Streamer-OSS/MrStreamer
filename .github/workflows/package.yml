@@ -458,6 +458,9 @@ jobs:
             $env:MR_STREAMER_VERIFICATION_OUTPUT = "$env:RUNNER_TEMP\analytics-nsis"
             node test/e2e/analytics-app.ts --expected-version="$env:VERSION" --expected-source="$env:SHA" "$env:LOCALAPPDATA\Programs\mrstreamer\Mr. Streamer.exe"
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $env:MR_STREAMER_VERIFICATION_OUTPUT = "$env:RUNNER_TEMP\analytics-windows-retry"
+            node test/e2e/analytics-app.ts --native-telemetry --native-case=windows-retry --expected-version="$env:VERSION" --expected-source="$env:SHA" "$env:LOCALAPPDATA\Programs\mrstreamer\Mr. Streamer.exe"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           } else {
             node -e 'if (!/^0[.]0[.]([0-9]|1[0-5])(-|$)/.test(require("./package.json").version)) throw new Error("Missing native telemetry verifier"); console.log("Historical source predates native telemetry acceptance")'
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -467,7 +470,10 @@ jobs:
         if: always()
         with:
           name: analytics-win-x64-${{ inputs.version }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/analytics-nsis/
+          path: |
+            ${{ runner.temp }}/analytics-nsis/
+            ${{ runner.temp }}/analytics-windows-retry/
+          include-hidden-files: true
           retention-days: 14
           if-no-files-found: warn
 

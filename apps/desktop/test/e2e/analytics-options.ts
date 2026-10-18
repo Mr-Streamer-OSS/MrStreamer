@@ -34,6 +34,7 @@ export function analyticsOptions(args: string[]) {
       "quit",
       "slow-write",
       "windows-rename",
+      "windows-retry",
       "compatibility",
     ].includes(nativeCase)
   )
@@ -53,6 +54,8 @@ export function analyticsOptions(args: string[]) {
     )
   )
     throw new Error("Native options require --native-telemetry");
+  if (nativeCase === "windows-retry" && process.platform !== "win32")
+    throw new Error("windows-retry requires actual Windows");
   if (values.has("--prior-executable") !== values.has("--prior-source"))
     throw new Error("Prior executable and source must be supplied together");
   if (values.has("--installed-pair") && values.has("--prior-executable"))
