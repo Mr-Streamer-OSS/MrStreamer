@@ -93,7 +93,9 @@ function decoded(path: string) {
 const fixtures = [
   { file: "vp8.webm", codec: "vp8", format: "yuv420p" },
   { file: "vp9-10bit.mp4", codec: "vp9", format: "yuv420p10le" },
+  { file: "vp9-10bit.webm", codec: "vp9", format: "yuv420p10le" },
   { file: "av1-10bit.mkv", codec: "av1", format: "yuv420p10le" },
+  { file: "av1-10bit.mp4", codec: "av1", format: "yuv420p10le" },
 ];
 const scratch = mkdtempSync(join(tmpdir(), "mrstreamer-codecs-"));
 try {

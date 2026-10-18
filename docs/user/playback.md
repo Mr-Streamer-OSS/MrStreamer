@@ -37,7 +37,7 @@ Providers keep movies and episodes as files, mostly MKV and MP4 and a few AVI. M
 | Subtitles stored as pictures (Blu-ray, DVD, DVB)         | Drawn over the picture                                                    |
 | Teletext subtitles and closed captions                   | Shown under the picture, like text subtitles                              |
 
-VP8, VP9 and AV1 conversion supports WebM, MKV and MP4 files that contain those codecs. Converted video uses 8-bit SDR output; HDR preservation is not supported.
+From 0.0.16, VP8 conversion supports WebM and MKV files; VP9 and AV1 also support MP4. Converted video uses 8-bit SDR output; HDR preservation is not supported.
 
 A movie starts about a second after you choose it. Skipping into what's already loaded is instant; skipping further away starts it again from there, which takes about a second too. With subtitles on, the picture starts as soon as without them, and the subtitles already on screen at that moment follow as soon as Mr. Streamer has read them. While Mr. Streamer is still reading and no line shows, "Subtitles loading" shows at the top right and **CC** says "Loading" beside the track. Text that shows is never called loading, also while an earlier line is still being looked for or right after you move the timing.
 
