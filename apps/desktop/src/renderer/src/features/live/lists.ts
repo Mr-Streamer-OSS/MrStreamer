@@ -59,9 +59,8 @@ export function useListChannels(list: ChannelList): {
  * its programmes on now or later today. The names are at hand; the main process finds the
  * programmes in the guide it has loaded, so typing asks the provider nothing, and a list without
  * a guide still finds names.
- *   Rows change once the programmes for what was typed are in, names and programmes together:
- * until then the previous search still filters the current list. Grouping waits for its first
- * full-catalogue decision; a stale or failed decision keeps current copies apart during refresh.
+ * Names appear as soon as typing settles; programme matches join in list order. Old rows are
+ * inert during typing. A pending, stale or failed grouping decision keeps current copies apart.
  */
 export function useListSearch(
   list: ChannelList,
@@ -76,6 +75,9 @@ export function useListSearch(
   /** What it found in each channel's programmes today, by the channel's `ownedKey`. */
   readonly matches: Readonly<Record<string, ListingMatch>>;
   readonly groups: readonly LiveSearchGroup[] | null;
+  readonly actionable: boolean;
+  readonly pending: boolean;
+  readonly failed: boolean;
 } {
   // What was typed, once typing pauses. An emptied field counts at once: the whole list shows
   // without a wait, and what the field held before never searches the list shown next.
@@ -105,26 +107,30 @@ export function useListSearch(
     // Start the one catalogue decision during the typing delay, before programme search waits.
     enabled: searching,
   });
-  const found = useQuery(queries.listSearch(scope, query, until));
+  const actionable = text.trim() === "" || text === settled;
+  const programmeSearch = queries.listSearch(scope, actionable ? query : "", until);
+  const found = useQuery({
+    ...programmeSearch,
+    queryKey: actionable
+      ? programmeSearch.queryKey
+      : ["guide", "searchList", "paused", scope, query, until],
+    placeholderData: (previous) => (actionable ? undefined : previous),
+  });
+  const pending =
+    searching && (!actionable || found.isPending || found.isFetching || grouped.isPending);
+  const failed = searching && found.isError;
   useEffect(() => {
     if (!searching) return;
     // Fold names during the typing delay, alongside the catalogue decision.
     const timer = setTimeout(() => searchNames(channels), 0);
     return () => clearTimeout(timer);
   }, [channels, searching]);
-  // The answer the rows are drawn from: the latest, kept while the next search is asked for.
-  const [kept, keep] = useState(found.data);
-  const answer = query === "" ? undefined : (found.data ?? kept);
-  if (answer !== kept) keep(answer);
-
-  return useMemo(() => {
-    // Wait for the first catalogue decision. Once it has answered or failed, retries keep
-    // filtering the current list, with singletons until a fresh successful decision arrives.
-    const words = answer && grouped.isFetched ? searchWords(answer.query) : NO_WORDS;
-    if (!answer || words.length === 0) {
+  const matches = found.data?.matches ?? NO_MATCHES;
+  const result = useMemo(() => {
+    const words = searchWords(query);
+    if (!searching || words.length === 0) {
       return { channels, query: "", words: NO_WORDS, matches: NO_MATCHES, groups: null };
     }
-    const { query, matches } = answer;
     const names = searchNames(channels);
     const asked = nameQuery(query);
     const found = channels.filter(
@@ -153,7 +159,8 @@ export function useListSearch(
       words,
       matches,
     };
-  }, [channels, answer, grouped.data, grouped.isStale, grouped.isError, grouped.isFetched]);
+  }, [channels, query, matches, searching, grouped.data, grouped.isStale, grouped.isError]);
+  return { ...result, actionable, pending, failed };
 }
 
 /** Each list's names as search compares them, worked out at its first search. */

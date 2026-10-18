@@ -234,7 +234,7 @@ describe("searching the list Live TV shows", () => {
     await ready(() => expect(page.notice()).not.toContain("is no longer listed"));
   });
 
-  it("shows the channels found by a name or a programme together, one row each in the list's order", async () => {
+  it("shows names before programmes, then combines them in list order", async () => {
     const page = await guidePage();
     const answer = ipc.hold("guide.searchList");
 
@@ -243,9 +243,16 @@ describe("searching the list Live TV shows", () => {
       expect(ipc.argsOf("guide.searchList").at(-1)).toMatchObject({ query: "News" }),
     );
 
-    // The names are at hand, yet the rows wait for the programmes: they change once.
-    expect(page.rows()).toHaveLength(CHANNELS.length);
-    expect(ipc.argsOf("guide.searchList")).toEqual([{ query: "News", until: expect.any(Number) }]);
+    // Current name matches remain usable while the guide is still searching.
+    expect(page.rows()).toEqual(["BBC News", "Euronews"]);
+    expect(page.text()).toContain("Searching");
+    expect(ipc.argsOf("guide.searchList")).toEqual([
+      {
+        query: "News",
+        until: expect.any(Number),
+        request: { view: "live", id: expect.any(String) },
+      },
+    ]);
 
     answer.resolve(
       found({
@@ -358,6 +365,7 @@ describe("searching the list Live TV shows", () => {
     expect(page.rows()).toEqual(["Dave"]);
     expect(ipc.argsOf("guide.searchList").at(-1)).toEqual({
       query: "dave",
+      request: { view: "live", id: expect.any(String) },
       until: expect.any(Number),
     });
 

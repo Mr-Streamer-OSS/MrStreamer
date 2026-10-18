@@ -680,7 +680,9 @@ async function start(): Promise<void> {
       "guide.programme": ({ channel, guide: guideId, start }) =>
         guide.programme(channel, guideId, start),
       "guide.search": ({ query }) => guide.search(query),
-      "guide.searchList": ({ query, until, ...list }) =>
+      // The transport owns cancellation and validates sender/frame ownership.
+      "guide.cancelSearch": () => Effect.succeed(null),
+      "guide.searchList": ({ query, until, request: _request, ...list }) =>
         Effect.flatMap(library.channels(list), (channels) =>
           guide.searchChannels(query, channels, until),
         ),

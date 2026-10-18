@@ -1184,3 +1184,65 @@ describe("a search of many matching titles", () => {
     expect(found[49]?.programme.title).toBe("Ordinary show 49");
   });
 });
+
+it("drops abandoned queued guide searches and waits for active termination before starting useful work", async () => {
+  const ending = held();
+  const active = Promise.withResolvers<void>();
+  const launched: string[] = [];
+  let starts = 0;
+  const runtime = runtimeFor(
+    guideSearcherLayer((options) => {
+      starts++;
+      const worker = new Worker(
+        `
+      const { parentPort } = require("node:worker_threads");
+      parentPort.on("message", request => {
+        parentPort.postMessage({ observed: request.search.path });
+        if (request.search.path !== "blocked") parentPort.postMessage({ id: request.id, kind: "first", found: [] });
+      });
+    `,
+        { ...options, eval: true },
+      );
+      worker.on("message", (message: { observed?: string }) => {
+        if (!message.observed) return;
+        launched.push(message.observed);
+        if (message.observed === "blocked") active.resolve();
+      });
+      const terminate = worker.terminate.bind(worker);
+      if (starts === 1)
+        worker.terminate = async () => {
+          await ending.wait();
+          return terminate();
+        };
+      return worker;
+    }),
+  );
+  try {
+    const searcher = await runtime.runPromise(GuideSearcher);
+    const running = new AbortController(),
+      queued = new AbortController();
+    const ask = (path: string, signal: AbortSignal) =>
+      searcher.first({ path, words: ["fixture"], at: NOW, channels: [1], limit: 50 }, signal);
+    let stopped = false;
+    const first = ask("blocked", running.signal).catch(() => {
+      stopped = true;
+    });
+    await active.promise;
+    const abandoned = ask("abandoned", queued.signal);
+    const useful = ask("useful", new AbortController().signal);
+    queued.abort();
+    await expect(abandoned).rejects.toThrow();
+    running.abort();
+    await ending.arrived;
+    expect(stopped).toBe(false);
+    expect(launched).toEqual(["blocked"]);
+    ending.release();
+    await first;
+    expect(await useful).toEqual([]);
+    expect(launched).toEqual(["blocked", "useful"]);
+    expect(starts).toBe(2);
+  } finally {
+    ending.release();
+    await runtime.dispose();
+  }
+});
