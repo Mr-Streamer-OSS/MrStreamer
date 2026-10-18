@@ -51,11 +51,10 @@ vi.mock("react-native", async () => {
     testID?: string;
     onLayout?: (event: { nativeEvent: { layout: { width: number; height: number } } }) => void;
   };
-  /** A view, which lays out once: 100 points wide, the status line's actions 88 tall. */
+  /** A view, which lays out once, 100 points wide and as tall as the scenario has it. */
   const View = ({ children, testID, onLayout }: Props) => {
     useEffect(() => {
-      const height = testID === "status-actions" ? 88 : scenario.height;
-      onLayout?.({ nativeEvent: { layout: { width: 100, height } } });
+      onLayout?.({ nativeEvent: { layout: { width: 100, height: scenario.height } } });
     }, []);
     return createElement("div", { "data-testid": testID }, children);
   };
@@ -352,28 +351,30 @@ describe("the status line", () => {
     expect(scenario.said).toHaveLength(3);
   });
 
-  it("keeps two providers' long line within its share of the screen, Retry and Settings outside its scrolling text", () => {
+  it("keeps two providers' long line and both actions in one scroll within a small screen's share", () => {
     const northwind = member("a", "Northwind", {
       live: { kind: "failed", error: failure, last: catalogueOf, since: 0 },
     });
     const harbor = member("b", "Harbor", { needsSecret: true });
     scenario.members = [northwind, harbor];
     scenario.catalogue = { kind: "ready", library, failing: [northwind, harbor] };
+    // A safe area of 80 points: less than the text floor and two scaled actions took before.
+    scenario.height = 80;
     open(React.createElement(Live));
-    const scroll = container.querySelector('[data-testid="status-text"]')!;
-    const actions = container.querySelector('[data-testid="status-actions"]')!;
-    expect(scroll.textContent).toBe(
-      "Couldn't update channels from Northwind. Showing the last list. Enter the password for Harbor in Settings.",
-    );
-    // The text scrolls past what's left of 40 percent of the safe area once the actions (88)
-    // have theirs; the actions stay outside it.
-    const most = Number(scroll.getAttribute("data-max-height") ?? NaN);
+    const panel = container.querySelector('[data-testid="status-line"]')!;
+    const most = Number(panel.getAttribute("data-max-height") ?? NaN);
+    // The whole panel scrolls within less than half the screen's safe area; the channels keep
+    // the rest.
     expect(most).toBeGreaterThan(0);
-    expect(most + 88).toBeLessThanOrEqual(600 * 0.4);
-    expect(scroll.contains(actions)).toBe(false);
-    expect(actions.textContent).toBe("RetrySettings");
-    // The channels under it stay.
+    expect(most).toBeLessThan(80 / 2);
+    expect(panel.textContent).toBe(
+      "Couldn't update channels from Northwind. Showing the last list. Enter the password for Harbor in Settings.RetrySettings",
+    );
     expect(text()).toContain("NPO 1");
+    // Both actions are in that scroll and still work.
+    press("Retry");
+    press("Settings");
+    expect(scenario.did).toEqual(["retry a", "push /live/settings"]);
   });
 });
 

@@ -206,9 +206,12 @@ export default function Search() {
   // The latest text isn't searched yet: the last results stay meanwhile.
   const pending = query.trim() !== "" && typed !== query;
   const keyboard = useKeyboardHeight();
-  // The height under the search field, for results and the status line together.
+  // The height under the search field, for results and the status line together; measured as
+  // laid out, so a turn of the phone updates it, as the keyboard updates its reserve.
   const [area, setArea] = useState(0);
   const reserve = (keyboard > 0 ? keyboard : insets.bottom) + 8;
+  // What the keyboard leaves for results and the line, less the gap above the line.
+  const room = area - reserve - 8;
   const line = searchLine(
     query.trim() !== "" ? status : null,
     pending,
@@ -290,7 +293,7 @@ export default function Search() {
           }
           testID="search-list"
         />
-        {line && area > 0 ? (
+        {line && room > 0 ? (
           <View
             style={[
               styles.dock,
@@ -301,8 +304,7 @@ export default function Search() {
               },
             ]}
           >
-            {/* Within what the keyboard leaves, so results keep most of it. */}
-            <StatusLine status={line} space={area - reserve - 8} />
+            <StatusLine status={line} space={room} />
           </View>
         ) : null}
       </View>

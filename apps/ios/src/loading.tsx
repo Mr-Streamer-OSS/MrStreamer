@@ -35,7 +35,7 @@ import { colors, TextButton } from "./ui.tsx";
 // Reduce Motion is off, a soft band crosses each shape about once every 2.7 seconds, one clock per
 // group of shapes on the native driver. What loads, updates or failed is a line of text in glass
 // at the bottom of the screen (`Docked`), over content that stays usable and scrolls clear of it;
-// the line takes at most a share of the screen's height and scrolls its text beyond that.
+// the whole line takes at most 40% of the height its host measures and scrolls beyond that.
 
 /** A button on the status line. */
 export interface Action {
@@ -157,13 +157,13 @@ export const useDockInset = () => useContext(DockInset);
 /**
  * A screen's content with its status line floating over the bottom, inside the screen's own safe
  * area: above the tab bar, the now playing accessory and the home indicator, however iOS sizes
- * them. The line may take a share of that safe area's height, measured as laid out, and shows
- * once it is known. Scrolling content below reads `useDockInset` to clear it.
+ * them. The line takes at most its share of that safe area's height, measured as laid out, and
+ * shows once it is known. Scrolling content below reads `useDockInset` to clear it.
  */
 export function Docked({ status, children }: { status: Status | null; children: ReactNode }) {
   const [space, setSpace] = useState(0);
   const [height, setHeight] = useState(0);
-  const shown = status !== null && space > 0;
+  const shown = status !== null && space > GAP * 2;
   return (
     <DockInset.Provider value={shown ? height : 0}>
       <View style={styles.fill}>
@@ -197,20 +197,18 @@ export function Docked({ status, children }: { status: Status | null; children: 
 const GAP = 8;
 /** The share of its host's height the whole line may take: content keeps the rest. */
 const SHARE = 0.4;
-/** The text keeps at least this much, a line at the smallest sizes, however little is left. */
-const MIN_TEXT = 44;
 
 /**
  * The status line itself, on glass (solid under Reduce Transparency and before iOS 26), within
- * `space`, the height its host has for content and line together. Its actions and provider bar
- * always show; its text takes what is left of the line's share and scrolls beyond that, so long
- * provider states at any text size leave the screen's content usable. VoiceOver reads the text
- * whole. Search places it above the keyboard.
+ * `space`, the height its host has for content and line together. Everything on it, its text,
+ * provider bar and actions, is one scrolling column no taller than its share of that space, so
+ * long provider states and wrapped actions at any text size leave the screen's content usable
+ * and stay reachable by scrolling. With no room at all it isn't drawn. Search places it above
+ * the keyboard.
  */
 export function StatusLine({ status, space }: { status: Status; space: number }) {
   const shown = useShown();
   const { text, actions = [], progress, announce = true } = status;
-  const [footer, setFooter] = useState(0);
   // Read out once per change of words, only while the viewer sees it: a line behind another tab,
   // under Watch or in the background stays quiet, and says its latest words once it is back.
   const said = useRef<string | null>(null);
@@ -219,18 +217,17 @@ export function StatusLine({ status, space }: { status: Status; space: number })
     said.current = text;
     AccessibilityInfo.announceForAccessibilityWithOptions(text, { queue: true });
   }, [shown, announce, text]);
-  const rail = progress !== undefined ? RAIL : 0;
-  const textMax = Math.max(MIN_TEXT, space * SHARE - footer - rail - PADDING * 2);
+  const most = Math.max(0, space * SHARE);
+  if (most === 0) return null;
   return (
     <Glass style={styles.glass}>
-      <View style={styles.line} testID="status-line">
-        <ScrollView
-          style={[styles.textArea, { maxHeight: textMax }]}
-          indicatorStyle="white"
-          testID="status-text"
-        >
-          <Text style={styles.text}>{text}</Text>
-        </ScrollView>
+      <ScrollView
+        style={{ maxHeight: most }}
+        contentContainerStyle={styles.line}
+        indicatorStyle="white"
+        testID="status-line"
+      >
+        <Text style={styles.text}>{text}</Text>
         {progress !== undefined ? (
           // A fixed bar: it moves only as a provider's lists come in.
           <View style={styles.rail} accessibilityElementsHidden importantForAccessibility="no">
@@ -238,24 +235,16 @@ export function StatusLine({ status, space }: { status: Status; space: number })
           </View>
         ) : null}
         {actions.length > 0 ? (
-          <View
-            style={styles.actions}
-            onLayout={(event) => setFooter(event.nativeEvent.layout.height)}
-            testID="status-actions"
-          >
+          <View style={styles.actions}>
             {actions.map((action) => (
               <TextButton key={action.label} {...action} />
             ))}
           </View>
         ) : null}
-      </View>
+      </ScrollView>
     </Glass>
   );
 }
-
-/** The line's own top and bottom padding, and the provider bar's height with its margin. */
-const PADDING = 4;
-const RAIL = 8;
 
 /**
  * Whether what the calling screen draws is what the viewer sees: it is in front in navigation,
@@ -401,19 +390,25 @@ const styles = StyleSheet.create({
   cover: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
   area: { flex: 1, justifyContent: "flex-end" },
   room: { marginHorizontal: 12, marginBottom: GAP },
-  glass: { borderRadius: 22 },
+  glass: { borderRadius: 22, overflow: "hidden" },
   line: {
     flexDirection: "row",
     flexWrap: "wrap",
     alignItems: "center",
     columnGap: 20,
     paddingHorizontal: 16,
-    paddingVertical: PADDING,
+    paddingVertical: 4,
     minHeight: 44,
   },
   // Takes the row; actions follow on the same line when they fit, else on their own.
-  textArea: { flexGrow: 1, flexShrink: 1, flexBasis: 180 },
-  text: { color: colors.text, fontSize: 15, paddingVertical: 8 },
+  text: {
+    color: colors.text,
+    fontSize: 15,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 180,
+    paddingVertical: 8,
+  },
   rail: {
     flexBasis: "100%",
     height: 2,

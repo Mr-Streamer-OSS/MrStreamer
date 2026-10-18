@@ -36,6 +36,8 @@ const scenario = vi.hoisted(() => ({
   did: [] as string[],
   /** What VoiceOver was given to read out. */
   said: [] as string[],
+  /** The keyboard's listeners, by event. */
+  keyboard: new Map<string, (event: { endCoordinates: { screenY: number } }) => void>(),
 }));
 
 vi.mock("react-native", async () => {
@@ -56,10 +58,14 @@ vi.mock("react-native", async () => {
     }, []);
     return createElement("div", { "data-testid": testID }, children);
   };
+  type Style = { maxHeight?: number } | undefined;
+  /** A scroll view, which shows the most height it may take. */
+  const ScrollView = ({ children, testID, style }: Props & { style?: Style }) =>
+    createElement("div", { "data-testid": testID, "data-max-height": style?.maxHeight }, children);
   type Section = { title: string; data: readonly unknown[] };
   return {
     View,
-    ScrollView: box,
+    ScrollView,
     Text: ({ children }: Props) => createElement("span", null, children),
     Image: () => null,
     Pressable: ({ children, testID, onPress }: Props & { onPress: () => void }) =>
@@ -119,7 +125,13 @@ vi.mock("react-native", async () => {
     },
     AppState: { currentState: "active", addEventListener: () => undefined },
     Keyboard: {
-      addListener: () => ({ remove: () => undefined }),
+      addListener: (
+        event: string,
+        listener: (event: { endCoordinates: { screenY: number } }) => void,
+      ) => {
+        scenario.keyboard.set(event, listener);
+        return { remove: () => scenario.keyboard.delete(event) };
+      },
       scheduleLayoutAnimation: () => undefined,
     },
     useWindowDimensions: () => ({ width: 390, height: 844, fontScale: 1 }),
@@ -265,6 +277,7 @@ beforeEach(() => {
     did: [],
     said: [],
   });
+  scenario.keyboard.clear();
 });
 afterEach(() => unmount());
 
@@ -306,6 +319,52 @@ describe("Search over the tabs", () => {
     expect(scenario.said).toEqual([
       "Movies and series still loading, 1 of 2 providers. Channels searched.",
     ]);
+  });
+
+  it("keeps its line, Retry and Settings in one scroll that the keyboard shrinks and frees", () => {
+    scenario.members = [
+      member("a", "Northwind", {
+        live: { kind: "failed", error: { kind: "unexpected", detail: "" }, last: {}, since: 0 },
+      } as Partial<Member>),
+      member("b", "Southwind", { needsSecret: true }),
+    ];
+    open();
+    type("dune");
+    const most = () => {
+      const panel = container.querySelector('[data-testid="status-line"]');
+      return panel ? Number(panel.getAttribute("data-max-height")) : null;
+    };
+    const open600 = most()!;
+    // A phone 844 points tall: the keyboard takes its bottom 500, leaving 100 of the 600 below
+    // the field for results and the line.
+    React.act(() =>
+      scenario.keyboard.get("keyboardWillChangeFrame")?.({ endCoordinates: { screenY: 344 } }),
+    );
+    const shrunk = most()!;
+    expect(shrunk).toBeGreaterThan(0);
+    expect(shrunk).toBeLessThan(100 / 2);
+    expect(shrunk).toBeLessThan(open600);
+    const panel = container.querySelector('[data-testid="status-line"]')!;
+    expect(panel.textContent).toContain("Enter the password for Southwind in Settings.");
+    // Retry and Settings are in that same bounded scroll.
+    expect(panel.textContent).toMatch(/searched\.RetrySettings$/);
+    expect(text()).toContain("Dune");
+    press("text-Retry");
+    press("text-Settings");
+    expect(scenario.did).toEqual(["retry a", "dismiss 1", "push /live/settings"]);
+
+    // A keyboard over the whole area leaves no room: no line at all, never a negative height.
+    React.act(() =>
+      scenario.keyboard.get("keyboardWillChangeFrame")?.({ endCoordinates: { screenY: 200 } }),
+    );
+    expect(most()).toBeNull();
+    expect(text()).toContain("Dune");
+
+    // With the keyboard down the line has its room again.
+    React.act(() =>
+      scenario.keyboard.get("keyboardWillHide")?.({ endCoordinates: { screenY: 844 } }),
+    );
+    expect(most()).toBe(open600);
   });
 
   it("says it is searching while the latest text waits, keeping the last results", () => {
