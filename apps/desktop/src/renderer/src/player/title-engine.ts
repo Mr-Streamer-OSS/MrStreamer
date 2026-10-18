@@ -21,7 +21,7 @@ import { subtitleDecoder, type SubtitleCodec } from "@mrstreamer/core/subtitles/
 import { readFeedLine } from "@mrstreamer/core/subtitles/feed";
 import type { SubtitleChange } from "@mrstreamer/core/subtitles/screen";
 import { t } from "@mrstreamer/core/i18n";
-import type { EngineError, StreamInfo } from "./engine.ts";
+import { isEngineError, type EngineError, type StreamInfo } from "./engine.ts";
 import { readMp4Start } from "./mp4.ts";
 import {
   addTextCue,
@@ -201,7 +201,12 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
   const onError = () => {
     const error = video.error;
     fail({
-      kind: error?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED ? "unsupported" : "media",
+      kind:
+        error?.code === MediaError.MEDIA_ERR_NETWORK
+          ? "network"
+          : error?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
+            ? "unsupported"
+            : "media",
       detail: error?.message || t("The title could not be decoded."),
     });
   };
@@ -322,7 +327,11 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     if (run.audio !== null) query.set("audio", String(run.audio));
     if (run.subtitle !== null) query.set("subtitle", String(run.subtitle));
     if (run.convertSound) query.set("sound", "convert");
-    const response = await fetch(`${run.url}?${query}`, { signal: abort.signal });
+    // Only fetch and body reads describe delivery failures. Parsing and MSE refusals below
+    // belong to local media recovery, regardless of the exception's diagnostic text.
+    const response = await fetch(`${run.url}?${query}`, { signal: abort.signal }).catch(
+      networkFailure,
+    );
     if (!response.ok || !response.body) {
       throw {
         kind: response.status === 415 ? "unsupported" : "network",
@@ -339,7 +348,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     let head = new Uint8Array(0);
     let start = readMp4Start(head);
     while (start.codecs === null || start.firstFragment === null) {
-      const { value, done } = await reader.read();
+      const { value, done } = await reader.read().catch(networkFailure);
       if (done || head.length > HEAD_LIMIT) {
         throw {
           kind: "unsupported",
@@ -393,7 +402,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     for (;;) {
       await room();
       if (abort.signal.aborted) return;
-      const { value, done } = await reader.read();
+      const { value, done } = await reader.read().catch(networkFailure);
       if (done) break;
       await append(buffer, value);
     }
@@ -504,9 +513,9 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
   play().catch((error: unknown) => {
     if (abort.signal.aborted) return;
     fail(
-      typeof error === "object" && error !== null && "kind" in error && "detail" in error
-        ? (error as EngineError)
-        : { kind: "network", detail: error instanceof Error ? error.message : String(error) },
+      isEngineError(error)
+        ? error
+        : { kind: "media", detail: error instanceof Error ? error.message : String(error) },
     );
   });
 
@@ -574,6 +583,14 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
 }
 
 const CODECS: readonly SubtitleCodec[] = ["pgs", "dvb", "teletext", "captions"];
+
+/** Marks a rejected transport operation at its boundary, without interpreting its message. */
+function networkFailure(error: unknown): never {
+  throw {
+    kind: "network",
+    detail: error instanceof Error ? error.message : String(error),
+  } satisfies EngineError;
+}
 
 function isCodec(value: string | null): value is SubtitleCodec {
   return CODECS.some((codec) => codec === value);

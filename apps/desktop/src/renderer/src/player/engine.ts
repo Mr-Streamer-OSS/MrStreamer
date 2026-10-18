@@ -388,7 +388,12 @@ function lifecycle(video: HTMLVideoElement, teardown: () => void, ends: number |
     const error = video.error;
     const unsupported = error?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED;
     fail({
-      kind: unsupported ? "unsupported" : "media",
+      kind:
+        error?.code === MediaError.MEDIA_ERR_NETWORK
+          ? "network"
+          : unsupported
+            ? "unsupported"
+            : "media",
       detail: error?.message || t("The stream could not be decoded."),
     });
   };
