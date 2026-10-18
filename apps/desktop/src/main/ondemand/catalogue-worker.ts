@@ -12,6 +12,7 @@
 // A refresh takes two calls. The lists it fetches wait aside until the main process, which knows
 // the saved login, says whether they still count: only then do they show and reach the disk.
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { workerData, parentPort } from "node:worker_threads";
 import { type } from "arktype";
 import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
@@ -123,6 +124,7 @@ const CachedCatalogue = lazy(() =>
     key: "string",
     fetchedAt: "number",
     "importRevision?": "string",
+    "catalogueStamp?": "string",
     movieCategories: Category().array(),
     movies: ProviderTitle().array(),
     seriesCategories: Category().array(),
@@ -135,6 +137,7 @@ interface Loaded {
   /** The subscription whose titles these are. */
   readonly subscriptionId: string;
   readonly fetchedAt: number;
+  readonly catalogueStamp?: string;
   readonly importRevision?: string;
   readonly catalogue: OnDemandCatalogue;
   readonly movies: number;
@@ -227,10 +230,12 @@ function remember(
   fetchedAt: number,
   catalogue: OnDemandCatalogue,
   importRevision?: string,
+  catalogueStamp?: string,
 ): Loaded {
   const kept: Loaded = {
     subscriptionId,
     fetchedAt,
+    ...(catalogueStamp ? { catalogueStamp } : {}),
     ...(importRevision ? { importRevision } : {}),
     catalogue,
     movies: catalogue.movies.length,
@@ -326,6 +331,7 @@ function save(): Promise<void> {
           version: 2,
           key: owner.key,
           fetchedAt,
+          ...(kept.catalogueStamp ? { catalogueStamp: kept.catalogueStamp } : {}),
           ...(kept.importRevision ? { importRevision: kept.importRevision } : {}),
           ...catalogue,
         });
@@ -368,7 +374,13 @@ function current(owner: CatalogueOwner): Promise<Loaded | null> {
     if (file?.key !== key || readings.get(subscriptionId) !== token) return null;
     return (
       loaded.get(subscriptionId) ??
-      remember(subscriptionId, file.version === 2 ? file.fetchedAt : 0, file, file.importRevision)
+      remember(
+        subscriptionId,
+        file.version === 2 ? file.fetchedAt : 0,
+        file,
+        file.importRevision,
+        file.catalogueStamp,
+      )
     );
   })();
   reading.set(subscriptionId, done);
@@ -495,6 +507,7 @@ function statusOf(found: Loaded | null): WorkerStatus {
     movies: found?.movies ?? 0,
     series: found?.series ?? 0,
     fetchedAt: found?.fetchedAt ?? null,
+    ...(found?.catalogueStamp ? { catalogueStamp: found.catalogueStamp } : {}),
     ...(found?.importRevision ? { importRevision: found.importRevision } : {}),
   };
 }
@@ -577,7 +590,13 @@ async function finishRefresh({
   if (aside?.revision !== revision) return statusOf(await current(owner));
   fetched.delete(subscriptionId);
   if (!keep) return statusOf(await current(owner));
-  const kept = remember(subscriptionId, Date.now(), aside.catalogue, owner.importRevision);
+  const kept = remember(
+    subscriptionId,
+    Date.now(),
+    aside.catalogue,
+    owner.importRevision,
+    randomUUID(),
+  );
   // Written after answering, so the lists show without waiting for the disk. Quitting writes
   // them first; a write it cuts short all the same leaves the previous lists for the next start,
   // which refreshes them when due.
