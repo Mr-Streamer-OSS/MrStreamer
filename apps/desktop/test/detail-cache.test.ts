@@ -56,7 +56,7 @@ async function started(dir: string) {
 }
 
 describe("opened title detail storage", () => {
-  it("restores only the same source and keeps shared language records through account erasure", async () => {
+  it("restores only the same source and removes opened-title history on account erasure", async () => {
     const dir = await tempDir();
     const first = await started(dir);
     const about = { kind: "about", titleKind: "series", id: "123", language: "en" } as const;
@@ -70,12 +70,17 @@ describe("opened title detail storage", () => {
     expect(await second.cache.read({ ...providerKey, sourceStamp: "new-login" })).toBeNull();
     expect(await second.cache.read({ ...providerKey, importRevision: "new-mapping" })).toBeNull();
     expect(await second.cache.read({ ...about, language: "nl" })).toBeNull();
-    await second.viewing.erase("account");
+    await second.cache.forget("saved");
     expect(await second.cache.read(providerKey)).toBeNull();
     expect(await second.cache.read(about)).toMatchObject(missing);
     await second.cache.remember(providerKey, provider);
-    await second.cache.forget("saved");
+    const other = { ...providerKey, account: "other", subscriptionId: "other-saved" };
+    await second.cache.remember(other, provider);
+    await second.viewing.erase("account");
     expect(await second.cache.read(providerKey)).toBeNull();
+    // Shared detail keys and timestamps still reveal which titles were opened.
+    expect(await second.cache.read(about)).toBeNull();
+    expect(await second.cache.read(other)).toMatchObject(provider);
   });
 
   it("treats corrupt and unknown disk formats as misses without breaking later writes", async () => {

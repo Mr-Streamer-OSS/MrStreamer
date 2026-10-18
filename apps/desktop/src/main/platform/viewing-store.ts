@@ -333,7 +333,11 @@ function deleteForGood(db: DatabaseSync, tables: readonly string[], account: str
   db.exec("pragma secure_delete = on");
   try {
     transaction(db, () => {
-      for (const table of tables) db.prepare(`delete from ${table} where account = ?`).run(account);
+      for (const table of tables) {
+        // Shared descriptions still retain an opened-title history through their ids/timestamps.
+        const shared = table === DETAIL_CACHE_TABLE ? " or account = ''" : "";
+        db.prepare(`delete from ${table} where account = ?${shared}`).run(account);
+      }
     });
   } finally {
     db.exec("pragma secure_delete = off");
