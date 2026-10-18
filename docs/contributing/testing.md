@@ -269,7 +269,16 @@ xvfb-run -a node apps/desktop/test/e2e/multiple-subscriptions.ts node_modules/el
 node apps/desktop/test/e2e/multiple-subscriptions.ts node_modules/electron/dist/Electron.app/Contents/MacOS/Electron -- --use-mock-keychain "$PWD/apps/desktop"
 ```
 
-`--use-mock-keychain` keeps a macOS run away from the real Keychain. Without FUSE, run an AppImage with `APPIMAGE_EXTRACT_AND_RUN=1` in the environment. A development build runs it too, after `pnpm build`: `xvfb-run -a node apps/desktop/test/e2e/packaged-app.ts node_modules/electron/dist/electron -- --no-sandbox "$PWD"`.
+`--use-mock-keychain` keeps a macOS run away from the real Keychain. Without FUSE, run an AppImage with `APPIMAGE_EXTRACT_AND_RUN=1` in the environment. For a development build, prepare this checkout's bundled tools using [the native build instructions](development.md#installers), then run the same smoke with an explicit pair. On Linux, from the repository root:
+
+```sh
+apps/desktop/scripts/build-ffmpeg.sh linux-x64
+node apps/desktop/scripts/verify-ffmpeg.ts linux-x64
+pnpm build
+MR_STREAMER_FFMPEG="$PWD/apps/desktop/vendor/ffmpeg/linux-x64/ffmpeg" xvfb-run -a node apps/desktop/test/e2e/packaged-app.ts apps/desktop/node_modules/electron/dist/electron -- --no-sandbox "$PWD/apps/desktop"
+```
+
+For macOS use the `mac-arm64` vendor pair and Electron path with `--use-mock-keychain` as above; Windows uses `win-x64/ffmpeg.exe`. Keep ffprobe beside ffmpeg. Installed smoke runs keep their packaged resource paths.
 
 `apps/desktop/test/e2e/live-subtitle-errors-app.ts` uses the built app and a loopback HLS host. It checks missing and stalled subtitle playlists and segments with moving video; six-second sliding playlists with delayed picture, a remembered language, racing Off and language switches, and initially empty subtitles; a real one-time selected segment 404 and repeated 503s keeping the language selected until cues resume; IMSC fallback; and CC left off for forty seconds with dead subtitle playlists or segments, with bounded requests and no video cancellations after the initial probe. A later genuine video stall must still reconnect. It needs ffmpeg and ffprobe. `MR_STREAMER_SUBTITLE_ERRORS_ONLY` selects comma-separated modes when investigating a failure.
 

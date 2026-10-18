@@ -78,6 +78,83 @@ it("keeps compatible local HLS lazy and byte-preserving", async () => {
   expect((await fetch(segment)).status).toBe(410);
 });
 
+it("preserves anamorphic display proportions and a stable square-pixel canvas when epoch SAR changes", async () => {
+  const { host, playback, channel } = await app();
+  // Change only the committed H.264 VUI. Both segments still decode the same 149 pictures.
+  const remuxed = spawnSync(
+    FFMPEG,
+    [
+      "-v",
+      "error",
+      "-i",
+      "pipe:0",
+      "-map",
+      "0:v:0",
+      "-map",
+      "0:a:0",
+      "-c",
+      "copy",
+      "-bsf:v",
+      "h264_metadata=sample_aspect_ratio=4/3",
+      "-f",
+      "mpegts",
+      "pipe:1",
+    ],
+    { input: fixture("hls-epoch-1.mpegts"), maxBuffer: 4 * 1024 * 1024 },
+  );
+  expect(remuxed.status, remuxed.stderr.toString()).toBe(0);
+  host.overrides.set("/media/epochs.m3u8", {
+    body: "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6,\nepochs-0.ts\n#EXT-X-DISCONTINUITY\n#EXTINF:6,\nepochs-1.ts\n#EXT-X-ENDLIST\n",
+  });
+  host.overrides.set("/media/epochs-0.ts", { body: remuxed.stdout });
+  host.overrides.set("/media/epochs-1.ts", { body: fixture("hls-epoch-1.mpegts") });
+  const session = await playback.open(channel("epochs"), ["h264", "aac"], { repair: true });
+  expect(session.format).toBe("mpegts");
+  const bytes = Buffer.from(await (await fetch(session.url)).arrayBuffer());
+  decoded(bytes);
+  const probe = spawnSync(
+    FFPROBE,
+    [
+      "-v",
+      "error",
+      "-select_streams",
+      "v:0",
+      "-show_frames",
+      "-show_entries",
+      "frame=width,height,sample_aspect_ratio",
+      "-of",
+      "json",
+      "pipe:0",
+    ],
+    { input: bytes, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 },
+  );
+  expect(probe.status, probe.stderr).toBe(0);
+  const { frames } = JSON.parse(probe.stdout) as {
+    frames: { width: number; height: number; sample_aspect_ratio: string }[];
+  };
+  expect(frames).toHaveLength(298);
+  const first = frames[0]!;
+  expect(first.sample_aspect_ratio).toBe("1:1");
+  // Integer, even dimensions can differ from DAR 64:27 by less than two horizontal pixels.
+  expect(Math.abs(first.width - (first.height * 64) / 27)).toBeLessThan(2);
+  expect(first.width % 2).toBe(0);
+  expect(first.height % 2).toBe(0);
+  expect(first.width).toBeLessThanOrEqual(1920);
+  expect(first.height).toBeLessThanOrEqual(1080);
+  // The later 1:1 input changes the fitted picture, not the session canvas or output SAR.
+  expect(
+    frames.every(
+      (frame) =>
+        frame.width === first.width &&
+        frame.height === first.height &&
+        frame.sample_aspect_ratio === "1:1",
+    ),
+  ).toBe(true);
+  expect(await playback.failure(session.sessionId)).toBeNull();
+  expect(host.stats().peak).toBe(1);
+  await playback.close(session.sessionId);
+}, 15_000);
+
 it("reports a post-open provider refusal from converted HLS without borrowing an HLS selector", async () => {
   const { host, playback, channel } = await app();
   const session = await playback.open(channel("epochs"), ["h264", "aac"], { repair: true });
@@ -212,7 +289,7 @@ it("fails a post-open 188KB HLS media stall without treating the segment as comp
 
 // Read public output PMTs across the entire stream, including descriptor changes after an epoch.
 function programTracks(bytes: Buffer) {
-  const tracks: { type: number; pid: number; language: string }[] = [];
+  const tracks: { type: number; pid: number; language: string; hearingImpaired: boolean }[] = [];
   for (let offset = 0; offset + 188 <= bytes.length; offset += 188) {
     const packet = bytes.subarray(offset, offset + 188);
     if (packet[0] !== 0x47 || !(packet[1]! & 0x40)) continue;
@@ -231,6 +308,8 @@ function programTracks(bytes: Buffer) {
               type: section[at]!,
               pid: ((section[at + 1]! & 31) << 8) | section[at + 2]!,
               language: section.subarray(d + 2, d + 5).toString("ascii"),
+              hearingImpaired:
+                section[d] === 89 && section[d + 5]! >= 0x20 && section[d + 5]! <= 0x24,
             });
       }
       at += 5 + length;
@@ -238,6 +317,183 @@ function programTracks(bytes: Buffer) {
   }
   return tracks;
 }
+
+// FFmpeg preserves DVB's descriptor subtype from extradata over a disposition override.
+// Change the fixture's real PMT and CRC to distinguish normal and hard-of-hearing tracks.
+function hearingImpairedDvb(bytes: Buffer, pid: number) {
+  for (let at = 0; at + 188 <= bytes.length; at += 188) {
+    const packet = bytes.subarray(at, at + 188);
+    if (!(packet[1]! & 0x40)) continue;
+    const mode = (packet[3]! >> 4) & 3;
+    if (mode !== 1 && mode !== 3) continue;
+    const payload = packet.subarray(mode === 3 ? 5 + packet[4]! : 4);
+    const section = payload.subarray(1 + payload[0]!);
+    if (section[0] !== 2) continue;
+    const end = 3 + (((section[1]! & 15) << 8) | section[2]!);
+    for (let entry = 12 + (((section[10]! & 15) << 8) | section[11]!); entry + 5 <= end - 4;) {
+      const length = ((section[entry + 3]! & 15) << 8) | section[entry + 4]!;
+      if ((((section[entry + 1]! & 31) << 8) | section[entry + 2]!) === pid)
+        for (let d = entry + 5; d + 2 <= entry + 5 + length; d += 2 + section[d + 1]!)
+          if (section[d] === 0x59) section[d + 5] = 0x20;
+      entry += 5 + length;
+    }
+    let crc = 0xffffffff;
+    for (const byte of section.subarray(0, end - 4)) {
+      crc ^= byte << 24;
+      for (let bit = 0; bit < 8; bit++) crc = crc & 0x80000000 ? (crc << 1) ^ 0x04c11db7 : crc << 1;
+    }
+    section.writeUInt32BE(crc >>> 0, end - 4);
+  }
+  return bytes;
+}
+
+it.each([false, true])(
+  "keeps duplicate Dutch DVB subtitles on distinct stable PIDs, hearing-impaired=%s",
+  async (hearingImpaired) => {
+    const { host, playback, channel } = await app();
+    for (const epoch of [0, 1]) {
+      const subtitles = epoch ? 3 : 2;
+      const changed = spawnSync(
+        FFMPEG,
+        [
+          "-v",
+          "error",
+          "-i",
+          "pipe:0",
+          "-map",
+          "0:v:0",
+          "-map",
+          "0:a:0",
+          ...Array.from({ length: subtitles }, () => ["-map", "0:s:0"]).flat(),
+          "-c",
+          "copy",
+          ...Array.from({ length: subtitles }, (_, index) => [
+            `-metadata:s:s:${index}`,
+            `language=${epoch ? "nld" : "dut"}`,
+            `-disposition:s:${index}`,
+            hearingImpaired && index === (epoch ? 0 : 1) ? "hearing_impaired" : "0",
+          ]).flat(),
+          ...Array.from({ length: subtitles + 2 }, (_, index) => [
+            "-streamid",
+            `${index}:${(epoch ? 512 : 256) + index}`,
+          ]).flat(),
+          "-f",
+          "mpegts",
+          "pipe:1",
+        ],
+        { input: fixture(`hls-epoch-${epoch}.mpegts`), maxBuffer: 4 * 1024 * 1024 },
+      );
+      expect(changed.status, changed.stderr.toString()).toBe(0);
+      const body = hearingImpaired
+        ? hearingImpairedDvb(changed.stdout, (epoch ? 512 : 256) + 2 + (epoch ? 0 : 1))
+        : changed.stdout;
+      host.overrides.set(`/media/epochs-${epoch}.ts`, { body });
+    }
+    host.overrides.set("/media/epochs-selected.m3u8", {
+      body: "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6,\nepochs-0.ts\n#EXT-X-DISCONTINUITY\n#EXTINF:6,\nepochs-1.ts\n#EXT-X-ENDLIST\n",
+    });
+    const session = await playback.open(channel("epochs"), ["h264", "aac"], { repair: true });
+    const output = Buffer.from(await (await fetch(session.url)).arrayBuffer());
+    const streams = decoded(output).streams;
+    expect(streams.find((track) => track.codec_type === "video")?.nb_read_frames).toBe("298");
+    expect(
+      streams.filter((track) => track.codec_name === "dvb_subtitle").map((track) => track.id),
+    ).toEqual(["0x102", "0x103"]);
+    const tracks = programTracks(output).filter((track) => track.type === 6);
+    for (const pid of [258, 259]) {
+      const carried = tracks.filter((track) => track.pid === pid);
+      expect(new Set(carried.map((track) => track.language))).toEqual(new Set(["dut", "nld"]));
+      expect(new Set(carried.map((track) => track.hearingImpaired))).toEqual(
+        new Set([hearingImpaired && pid === 259]),
+      );
+    }
+    expect(await playback.failure(session.sessionId)).toBeNull();
+    expect(host.stats().peak).toBe(1);
+    await playback.close(session.sessionId);
+  },
+  20_000,
+);
+
+it.each([false, true])(
+  "keeps selected sound when a later segment's secondary AAC PID is silent, discontinuity=%s",
+  async (discontinuity) => {
+    const { host, playback, channel } = await app();
+    for (const epoch of [0, 1]) {
+      const remuxed = spawnSync(
+        FFMPEG,
+        [
+          "-v",
+          "error",
+          "-i",
+          "pipe:0",
+          "-map",
+          "0:v:0",
+          "-map",
+          "0:a:0",
+          "-map",
+          "0:a:0",
+          "-c",
+          "copy",
+          "-output_ts_offset",
+          String(epoch * 3),
+          "-f",
+          "mpegts",
+          "pipe:1",
+        ],
+        { input: fixture("h264-aac.mpegts"), maxBuffer: 4 * 1024 * 1024 },
+      );
+      expect(remuxed.status, remuxed.stderr.toString()).toBe(0);
+      const packets: Buffer[] = [];
+      for (let at = 0; at + 188 <= remuxed.stdout.length; at += 188) {
+        const packet = remuxed.stdout.subarray(at, at + 188);
+        const pid = ((packet[1]! & 31) << 8) | packet[2]!;
+        if (!epoch || pid !== 258) packets.push(packet);
+      }
+      host.overrides.set(`/media/compatible-${epoch}.ts`, { body: Buffer.concat(packets) });
+    }
+    host.overrides.set("/media/compatible.m3u8", {
+      body: [
+        "#EXTM3U",
+        "#EXT-X-TARGETDURATION:3",
+        "#EXTINF:3,",
+        "compatible-0.ts",
+        ...(discontinuity ? ["#EXT-X-DISCONTINUITY"] : []),
+        "#EXTINF:3,",
+        "compatible-1.ts",
+        "#EXT-X-ENDLIST",
+        "",
+      ].join("\n"),
+    });
+    const session = await playback.open(channel("compatible"), ["h264", "aac"], { repair: true });
+    const bytes = Buffer.from(await (await fetch(session.url)).arrayBuffer());
+    const streams = decoded(bytes).streams;
+    const frames = Number(streams.find((track) => track.codec_type === "video")?.nb_read_frames);
+    expect(frames).toBeGreaterThanOrEqual(149);
+    expect(frames).toBeLessThanOrEqual(150);
+    expect(
+      streams.filter((track) => track.codec_type === "audio").map((track) => track.id),
+    ).toEqual(["0x101"]);
+    // Each converter declares its first TS packet discontinuous. A silent unused PID must
+    // not add a discontinuity within an otherwise unchanged PMT epoch.
+    let boundaries = 0;
+    for (let at = 0; at + 188 <= bytes.length; at += 188) {
+      const packet = bytes.subarray(at, at + 188);
+      if (
+        (((packet[1]! & 31) << 8) | packet[2]!) === 256 &&
+        packet[3]! & 0x20 &&
+        packet[4]! > 0 &&
+        packet[5]! & 0x80
+      )
+        boundaries++;
+    }
+    expect(boundaries).toBe(discontinuity ? 2 : 1);
+    expect(await playback.tracks(session.sessionId)).toMatchObject({ playing: 257 });
+    expect(await playback.failure(session.sessionId)).toBeNull();
+    expect(host.stats().peak).toBe(1);
+    await playback.close(session.sessionId);
+  },
+  20_000,
+);
 
 it("keeps Dutch sound across dut/nld aliases and reordered mixed-language epoch PIDs", async () => {
   const { host, playback, channel } = await app();
@@ -522,6 +778,50 @@ it("polls one selected live playlist in sequence without a parallel adaptive rea
   );
   expect(host.stats().peak).toBe(1);
 }, 20_000);
+
+it.each(["live", "ended", "archive"] as const)(
+  "classifies a forward playlist sequence gap during %s playback",
+  async (mode) => {
+    const { host, playback, channel } = await app();
+    let polls = 0;
+    host.overrides.set("/media/epochs.m3u8", {
+      body: () => {
+        const from = polls++ ? 4 : 0;
+        return [
+          "#EXTM3U",
+          "#EXT-X-TARGETDURATION:1",
+          `#EXT-X-MEDIA-SEQUENCE:${from}`,
+          ...[from, from + 1, from + 2].flatMap((index) => ["#EXTINF:6,", `epochs-${index}.ts`]),
+          ...(mode === "ended" && from ? ["#EXT-X-ENDLIST"] : []),
+          "",
+        ].join("\n");
+      },
+    });
+    const session = await playback.open(channel("epochs"), ["h264", "aac"], {
+      repair: true,
+      ...(mode === "archive" ? { archive: { start: 0, end: 60_000 } } : {}),
+    });
+    expect(
+      await fetch(session.url)
+        .then((answer) => answer.arrayBuffer())
+        .then(
+          () => "complete",
+          () => "broken",
+        ),
+    ).toBe("broken");
+    expect(await playback.failure(session.sessionId)).toMatchObject(
+      mode === "live"
+        ? { kind: "network" }
+        : { kind: "unsupported", diagnostic: { diagnostic_reason: "malformed_input" } },
+    );
+    expect(polls).toBe(2);
+    expect(host.requests().filter((path) => /epochs-\d.ts/.test(path))).toEqual(
+      [0, 1, 2].map((index) => `/media/epochs-${index}.ts`),
+    );
+    await playback.close(session.sessionId);
+  },
+  20_000,
+);
 
 it("accepts an explicit clear key reset without fetching a key", async () => {
   const { host, playback, channel } = await app();

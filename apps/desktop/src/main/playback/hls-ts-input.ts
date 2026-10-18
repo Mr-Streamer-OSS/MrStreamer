@@ -264,8 +264,15 @@ export async function openHlsTsInput(
         lifetime.throwIfAborted();
         const next = list.segments.find((segment) => segment.sequence >= nextSequence);
         if (next) {
-          // A sliding window must not silently omit part of a converted recording/epoch.
-          if (next.sequence !== nextSequence) malformed();
+          if (next.sequence !== nextSequence) {
+            // Reconnect live playback at the current window, but never skip archive media.
+            if (!archive && !list.ended)
+              throw new HlsInputFailure({
+                kind: "network",
+                detail: "The HLS playlist moved past the next segment.",
+              });
+            malformed();
+          }
           nextSequence++;
           stagnant = 0;
           return next;
@@ -294,7 +301,7 @@ export async function openHlsTsInput(
           });
       }
     };
-    const inspect = async (segment: Segment) => {
+    const inspect = async (segment: Segment, initial = false) => {
       const answer = await open(segment.address, lifetime);
       const reader = answer.body?.getReader();
       if (!reader) malformed();
@@ -303,6 +310,7 @@ export async function openHlsTsInput(
       const head: Uint8Array[] = [];
       let size = 0;
       let layout: StreamLayout | null = null;
+      let signature: string | null = null;
       let settled = false;
       const deadline = performance.now() + 2500;
       while (size < PREFIX_BYTES) {
@@ -313,16 +321,19 @@ export async function openHlsTsInput(
         size += next.value.length;
         const found = inspector.push(next.value);
         layout = found?.layout ?? layout;
+        signature = found?.signature ?? signature;
         settled = found?.open.length === 0;
-        if (found && found.open.length === 0 && size >= 32 * 1024) {
-          settled = true;
-          break;
-        }
+        if (found && (!initial || settled) && size >= 32 * 1024) break;
         if (inspector.notTransportStream) break;
       }
-      if (!layout || layout.pcrPid === undefined || (!layout.video && !layout.audio.length))
+      if (
+        !layout ||
+        !signature ||
+        layout.pcrPid === undefined ||
+        (!layout.video && !layout.audio.length)
+      )
         throw hlsSubsetFailure();
-      if (!settled)
+      if (initial && !settled)
         throw new HlsInputFailure({
           kind: "unsupported",
           detail: "The HLS tracks could not be determined.",
@@ -332,15 +343,22 @@ export async function openHlsTsInput(
             diagnostic_container: "hls",
           },
         });
-      return { segment, reader, head, layout: { ...layout, pcrPid: layout.pcrPid }, size };
+      return {
+        segment,
+        reader,
+        head,
+        layout: { ...layout, pcrPid: layout.pcrPid },
+        signature,
+        size,
+      };
     };
-    let pending = await inspect((await nextSegment())!);
+    let pending = await inspect((await nextSegment())!, true);
     const firstLayout = pending.layout;
     async function* epochs(): AsyncGenerator<HlsTsEpoch> {
       try {
         while (!done) {
           const first = pending;
-          const signature = JSON.stringify(first.layout);
+          const signature = first.signature;
           let consumed = false;
           const chunks = (async function* () {
             for (;;) {
@@ -370,7 +388,8 @@ export async function openHlsTsInput(
               pending = await inspect(segment);
               if (
                 segment.epoch !== first.segment.epoch ||
-                JSON.stringify(pending.layout) !== signature
+                pending.layout.programPid !== first.layout.programPid ||
+                pending.signature !== signature
               ) {
                 consumed = true;
                 return;

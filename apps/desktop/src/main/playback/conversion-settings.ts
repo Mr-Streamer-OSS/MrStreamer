@@ -10,7 +10,7 @@ export const H264_IMAGE_ARGUMENTS = [
   "yuv420p",
 ] as const;
 
-/** The same image policy, with HLS epochs fitted inside the first converted picture. */
+/** Fit each HLS epoch by display aspect ratio inside a stable square-pixel canvas. */
 export function h264ImageArguments(
   picture: { readonly width: number; readonly height: number } | null,
 ) {
@@ -18,7 +18,7 @@ export function h264ImageArguments(
   return [
     filterOption,
     picture
-      ? `${filter},scale=${picture.width}:${picture.height}:force_original_aspect_ratio=decrease,pad=${picture.width}:${picture.height}:(ow-iw)/2:(oh-ih)/2,setsar=1`
+      ? `${filter},scale=w='max(2,round(min(${picture.width},${picture.height}*dar)/2)*2)':h='max(2,round(min(${picture.height},${picture.width}/dar)/2)*2)',setsar=1,pad=${picture.width}:${picture.height}:(ow-iw)/2:(oh-ih)/2`
       : filter,
     ...pixelFormat,
   ];

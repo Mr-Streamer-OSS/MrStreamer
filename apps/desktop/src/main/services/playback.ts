@@ -1294,7 +1294,7 @@ function make(deps: PlaybackDeps) {
           "-select_streams",
           "v:0",
           "-show_entries",
-          "stream=width,height",
+          "stream=width,height,sample_aspect_ratio",
           "-of",
           "json",
         ],
@@ -1336,8 +1336,8 @@ function make(deps: PlaybackDeps) {
         !("height" in picture) ||
         typeof picture.width !== "number" ||
         typeof picture.height !== "number" ||
-        !Number.isFinite(picture.width) ||
-        !Number.isFinite(picture.height) ||
+        !Number.isSafeInteger(picture.width) ||
+        !Number.isSafeInteger(picture.height) ||
         picture.width <= 0 ||
         picture.height <= 0
       )
@@ -1350,9 +1350,24 @@ function make(deps: PlaybackDeps) {
             diagnostic_container: "hls",
           },
         });
-      const scale = Math.min(1, 1920 / picture.width, 1080 / picture.height);
+      const aspect =
+        "sample_aspect_ratio" in picture && typeof picture.sample_aspect_ratio === "string"
+          ? /^(\d+):(\d+)$/.exec(picture.sample_aspect_ratio)
+          : null;
+      const numerator = Number(aspect?.[1]);
+      const denominator = Number(aspect?.[2]);
+      // Missing/unknown SAR is square. Only positive rational probe facts change the canvas.
+      const sar =
+        Number.isSafeInteger(numerator) &&
+        Number.isSafeInteger(denominator) &&
+        numerator > 0 &&
+        denominator > 0
+          ? numerator / denominator
+          : 1;
+      const width = picture.width * sar;
+      const scale = Math.min(1, 1920 / width, 1080 / picture.height);
       return {
-        width: Math.max(2, Math.floor((picture.width * scale) / 2) * 2),
+        width: Math.max(2, Math.floor((width * scale) / 2) * 2),
         height: Math.max(2, Math.floor((picture.height * scale) / 2) * 2),
       };
     }
@@ -1430,15 +1445,22 @@ function make(deps: PlaybackDeps) {
               subtitles: [...new Set(layout.subtitles.map((track) => track.pid))],
             },
           };
+          const assignedSubtitles = new Set<number>();
           const subtitles = conversion.pids.subtitles.flatMap((pid) => {
             const track = layout.subtitles.find((track) => track.pid === pid)!;
-            const stable = first.subtitles.find(
-              (original) =>
-                original.format === track.format &&
-                languageCode(original.language) === languageCode(track.language) &&
-                original.page === track.page,
-            );
-            return stable ? [{ source: pid, output: stable.pid }] : [];
+            const matches = (candidate: StreamLayout["subtitles"][number]) =>
+              candidate.format === track.format &&
+              languageCode(candidate.language) === languageCode(track.language) &&
+              candidate.page === track.page &&
+              candidate.hearingImpaired === track.hearingImpaired;
+            const ordinal = layout.subtitles
+              .filter(matches)
+              .findIndex((track) => track.pid === pid);
+            const stable = first.subtitles.filter(matches)[ordinal];
+            // Extra or multi-page source tracks must never collide on an output PID.
+            if (!stable || assignedSubtitles.has(stable.pid)) return [];
+            assignedSubtitles.add(stable.pid);
+            return [{ source: pid, output: stable.pid }];
           });
           const selected: Conversion = {
             ...conversion,
