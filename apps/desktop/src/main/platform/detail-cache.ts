@@ -260,9 +260,9 @@ function make(db: DatabaseSync): DetailCache["Service"] {
               if (total <= PAYLOAD_BYTES && count <= RECORDS) break;
             }
           }
-          // Bounded pruning is preferable to stalling playback for a large cache sweep.
-          if (total > PAYLOAD_BYTES || count > RECORDS) return;
+          // Every bounded pass frees space, even when this write still cannot fit.
           for (const old of evict) remove.run(old);
+          if (total > PAYLOAD_BYTES || count > RECORDS) return;
           write.run(
             id,
             key.kind === "provider" ? key.account : "",

@@ -229,4 +229,35 @@ describe("opened title detail storage", () => {
     expect(await cache.read({ ...providerKey, id: "0" })).toBeNull();
     expect(await cache.read({ ...providerKey, id: "10" })).toMatchObject({ kind: "provider" });
   });
+
+  it("makes room for a new series when the oldest cached details are small", async () => {
+    const dir = await tempDir();
+    const { cache, runtime } = await started(dir);
+    for (let id = 0; id < 65; id++)
+      await cache.remember(
+        { kind: "about", titleKind: "movie", id: String(id), language: "en" },
+        { kind: "about", at: 100, value: null },
+      );
+    const large = { ...provider, value: { ...provider.value, plot: "x".repeat(7 * 1024 * 1024) } };
+    for (let id = 0; id < 9; id++) await cache.remember({ ...providerKey, id: String(id) }, large);
+    const next = { ...provider, value: { ...provider.value, plot: "y".repeat(2 * 1024 * 1024) } };
+    const key = { ...providerKey, id: "next" };
+    for (let attempt = 0; attempt < 4; attempt++) await cache.remember(key, next);
+    await runtime.dispose();
+    const restarted = await started(dir);
+    const restored = await restarted.cache.read(key);
+    expect(restored?.kind).toBe("provider");
+    expect(restored?.kind === "provider" && restored.value?.plot?.length).toBe(
+      next.value.plot.length,
+    );
+    const disk = new DatabaseSync(join(dir, "mrstreamer.db"), { readOnly: true });
+    try {
+      expect(
+        Number(disk.prepare("select sum(bytes) as bytes from title_detail_cache").get()?.bytes),
+      ).toBeLessThanOrEqual(64 * 1024 * 1024);
+    } finally {
+      disk.close();
+      await restarted.runtime.dispose();
+    }
+  });
 });
