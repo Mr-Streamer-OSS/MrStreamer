@@ -240,6 +240,15 @@ function make(options: LibraryOptions) {
     const fetchOne = (yield* Semaphore.make(FETCHES_AT_ONCE)).withPermits(1);
     /** Each subscription's catalogue, by its id, once read from disk or fetched. */
     const catalogues = new Map<string, IndexedCatalogue>();
+    /** Concurrent first reads share one disk read, without tying its life to one caller. */
+    const loading = new Map<
+      string,
+      {
+        readonly subscription: SavedSubscription;
+        readonly token: object;
+        readonly fiber: Fiber.Fiber<IndexedCatalogue | null>;
+      }
+    >();
     const refreshing = new Map<
       string,
       {
@@ -266,15 +275,50 @@ function make(options: LibraryOptions) {
       Effect.gen(function* () {
         const kept = catalogues.get(subscription.id);
         if (kept) return kept;
-        const stored = yield* Effect.promise(() =>
-          readJsonFile(cachePath(subscription), CachedCatalogue()),
-        );
-        if (stored?.key !== subscription.key) return null;
-        const file = readCatalogue(stored);
-        // Read by another call meanwhile, or fetched: that one stands.
-        const now = catalogues.get(subscription.id) ?? index(file, subscription.id, file.outdated);
-        catalogues.set(subscription.id, now);
-        return now;
+        const under = loading.get(subscription.id);
+        let running =
+          under &&
+          sameSource(subscription, under.subscription) &&
+          subscription.importRevision === under.subscription.importRevision
+            ? under
+            : null;
+        if (!running) {
+          if (under) {
+            loading.delete(subscription.id);
+            yield* Fiber.interrupt(under.fiber);
+          }
+          const token = {};
+          const fiber = yield* Effect.forkIn(
+            Effect.gen(function* () {
+              const stored = yield* Effect.promise(() =>
+                readJsonFile(cachePath(subscription), CachedCatalogue()),
+              );
+              if (
+                stored?.key !== subscription.key ||
+                loading.get(subscription.id)?.token !== token ||
+                !(yield* subscriptions.stands(subscription))
+              )
+                return null;
+              const file = readCatalogue(stored);
+              // A refresh accepted while disk was being read takes precedence.
+              const now =
+                catalogues.get(subscription.id) ?? index(file, subscription.id, file.outdated);
+              catalogues.set(subscription.id, now);
+              return now;
+            }).pipe(
+              Effect.ensuring(
+                Effect.sync(() => {
+                  if (loading.get(subscription.id)?.token === token)
+                    loading.delete(subscription.id);
+                }),
+              ),
+            ),
+            scope,
+          );
+          running = { subscription, token, fiber };
+          loading.set(subscription.id, running);
+        }
+        return yield* Fiber.join(running.fiber);
       });
 
     const statusOf = (subscriptionId: string, shown: IndexedCatalogue | null): CatalogueStatus => {
@@ -556,6 +600,9 @@ function make(options: LibraryOptions) {
 
       forget: (subscription: SavedSubscription) =>
         Effect.gen(function* () {
+          const pending = loading.get(subscription.id);
+          loading.delete(subscription.id);
+          if (pending) yield* Fiber.interrupt(pending.fiber);
           catalogues.delete(subscription.id);
           failures.delete(subscription.id);
           // An added subscription's cache went with its folder.
