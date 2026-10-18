@@ -10,7 +10,7 @@
 // line that the app's own styles know, and skips past them. Then it asks what the build sends
 // playback to: AirPlay on macOS, which takes the helper the app comes with, Google Cast on
 // Windows, nothing on Linux. Last, it opens Chromium's and Node.js's notices, which come from
-// the credits page the installer must keep. It also reopens the first movie after the provider
+// the credits page the installer must keep. It also opens another movie after the provider
 // replaces it with a bounded VP9/AAC clip, and plays converted HLS across a changed epoch with
 // CEA-608 captions through the same maintained scenario as source-build verification.
 //
@@ -215,6 +215,7 @@ async function homeAndBack(page: Page): Promise<{ ok: boolean; detail: string }>
 /** Plays the test movie with two sound tracks from Movies, skips ahead, then leaves it. */
 async function playMovie(
   page: Page,
+  title = "Two sound tracks",
   captureName?: string,
   expectedWidth?: number,
 ): Promise<{ ok: boolean; detail: string }> {
@@ -226,7 +227,7 @@ async function playMovie(
   const allTab = `[...document.querySelectorAll("nav button")].find((b) => b.textContent.trim() === "All movies")`;
   await waitFor(() => page.evaluate<boolean>(`!!${allTab}`), 60_000);
   await page.evaluate(`${allTab}.click()`);
-  const poster = `[...document.querySelectorAll("button[title]")].find((b) => b.title.includes("Two sound tracks"))`;
+  const poster = `[...document.querySelectorAll("button[title]")].find((b) => b.title.includes(${JSON.stringify(title)}))`;
   await waitFor(() => page.evaluate<boolean>(`!!${poster}`), 60_000);
   await page.evaluate(`${poster}.click()`);
   const play = `[...document.querySelectorAll('[role="dialog"] button')].find((b) => /^(Play|Resume)$/.test(b.textContent.trim()))`;
@@ -282,7 +283,7 @@ async function playMovie(
   };
 }
 
-/** Reuses the previously opened address with new identity and actual VP9/AAC bytes. */
+/** A previously unopened address makes main probe the actual replacement VP9/AAC bytes. */
 async function playVp9Movie(page: Page): Promise<{ ok: boolean; detail: string }> {
   const output = join(profile, "vp9-aac.mp4");
   const args = [
@@ -349,8 +350,8 @@ async function playVp9Movie(page: Page): Promise<{ ok: boolean; detail: string }
   )
     throw new Error("Expected a finite 24-second VP9/AAC fixture");
   const bytes = readFileSync(output);
-  const movie = provider.titles.movies.find((each) => each.name.includes("Two sound tracks"));
-  if (!movie) throw new Error("No previously played movie to replace");
+  const movie = provider.titles.movies.find((each) => each.name.includes("Index at the end"));
+  if (!movie) throw new Error("No unopened MP4 movie to replace");
   provider.replaceMovieFile(movie.id, bytes);
   observed["vp9Source"] = {
     source,
@@ -359,7 +360,7 @@ async function playVp9Movie(page: Page): Promise<{ ok: boolean; detail: string }
     ffmpeg,
     args,
   };
-  return playMovie(page, "vp9-movie", 96);
+  return playMovie(page, "Index at the end", "vp9-movie", 96);
 }
 
 /** Real Settings/M3U connection, then the existing epoch/sound/caption scenario. */
