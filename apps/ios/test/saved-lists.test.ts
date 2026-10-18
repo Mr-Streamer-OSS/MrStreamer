@@ -120,10 +120,38 @@ afterAll(async () => {
 });
 /** Panels a test starts for a login of its own, closed after it. */
 const started: FakeProvider[] = [];
-async function panelFor(login: typeof ONE) {
-  const panel = await startFakeProvider({ ...login, channels: 10, titles: 10 });
+async function panelFor(login: typeof ONE, size = { channels: 10, titles: 10 }) {
+  const panel = await startFakeProvider({ ...login, ...size });
   started.push(panel);
   return panel;
+}
+
+/** What a test set going that ends with it. */
+const cleanups: Array<() => void> = [];
+
+/**
+ * Makes each reading of the clock 10 ms later than the last, as on a phone busy enough that every
+ * slice of work fills a task: `inTasks` then works one slice per task. No time is measured.
+ */
+function slowClock() {
+  const real = Date.now.bind(Date);
+  let ahead = 0;
+  const spy = vi.spyOn(Date, "now").mockImplementation(() => real() + (ahead += 10));
+  cleanups.push(() => spy.mockRestore());
+}
+
+/** Other work the app's tasks leave room for: a timer that runs again each time it runs. */
+function ticker() {
+  const counted = { ticks: 0 };
+  let on = true;
+  const tick = () => {
+    if (!on) return;
+    counted.ticks++;
+    setTimeout(tick, 0);
+  };
+  setTimeout(tick, 0);
+  cleanups.push(() => (on = false));
+  return counted;
 }
 
 const folder = join(native.root, "cache", "catalogues");
@@ -193,6 +221,7 @@ beforeEach(async () => {
     new Directory(each).create({ idempotent: true });
 });
 afterEach(async () => {
+  for (const cleanup of cleanups.splice(0)) cleanup();
   for (const go of memory.heldLists.splice(0)) go();
   vi.useRealTimers();
   await Promise.all(started.splice(0).map((panel) => panel.close()));
@@ -723,5 +752,126 @@ describe("a login replaced or removed", () => {
     await until(() => memory.heldLists.length > waiting, "a list request");
     expect(member(again, id).live).toMatchObject({ kind: "loading", last: null });
     expect(member(again, id).titles.kind).not.toBe("ready");
+  });
+});
+
+describe("a large provider's lists", () => {
+  const BIG = { username: "big", password: "big-Pw7" };
+  const SIZE = { channels: 600, titles: 3000 };
+  /** The ticks when the titles first show as `from`, kept as the roster changes. */
+  const shownWhen = (app: App, from: "provider" | "cache", counted: { ticks: number }) => {
+    const seen = { at: -1 };
+    const off = app.onRoster(() => {
+      const titles = app.members()[0]?.titles;
+      if (seen.at < 0 && titles?.kind === "ready" && titles.from === from) seen.at = counted.ticks;
+    });
+    cleanups.push(off);
+    return seen;
+  };
+  /** By file name, the ticks when each pending file is first written. */
+  const writtenWhen = (counted: { ticks: number }) => {
+    const seen = new Map<string, number>();
+    native.gate = (operation, path) => {
+      const name = path.slice(path.lastIndexOf("/") + 1);
+      if (operation === "write" && !seen.has(name)) seen.set(name, counted.ticks);
+      return undefined;
+    };
+    return seen;
+  };
+  /** The ticks when `id`'s titles file is first read, or -1. */
+  const readWhen = (id: string, counted: { ticks: number }) => {
+    const seen = { at: -1 };
+    native.gate = (operation, path) => {
+      if (operation === "text" && path.endsWith(`/${id}.titles.json`) && seen.at < 0) {
+        seen.at = counted.ticks;
+      }
+      return undefined;
+    };
+    return seen;
+  };
+
+  it("leaves room for other work while it copies the lists to the phone", async () => {
+    const panel = await panelFor(BIG, SIZE);
+    slowClock();
+    const app = await launch();
+    const counted = ticker();
+    const shown = shownWhen(app, "provider", counted);
+    const written = writtenWhen(counted);
+    const id = await added(app, panel, BIG);
+    expect(savedOf(id)).toEqual([`${id}.live.json`, `${id}.titles.json`]);
+    // Tens of tasks ran between the lists showing and their copy being written.
+    expect((written.get(`${id}.titles.json.next`) ?? -1) - shown.at).toBeGreaterThanOrEqual(20);
+  });
+
+  it("leaves room for other work while it checks the saved lists, then shows them whole", async () => {
+    const panel = await panelFor(BIG, SIZE);
+    const first = await launch();
+    const id = await added(first, panel, BIG);
+    const listed = first.shownOf(member(first, id).titles);
+    slowClock();
+    const counted = ticker();
+    const read = readWhen(id, counted);
+    const app = await launch();
+    const shown = shownWhen(app, "cache", counted);
+    await until(() => member(app, id).titles.kind === "ready", "the saved lists");
+    expect(member(app, id).titles).toMatchObject({ from: "cache" });
+    expect(shown.at - read.at).toBeGreaterThanOrEqual(20);
+    expect(app.shownOf(member(app, id).titles)).toEqual(listed);
+  });
+
+  it("shows nothing of a saved list whose row near its end doesn't check out", async () => {
+    const panel = await panelFor(BIG, SIZE);
+    const id = await added(await launch(), panel, BIG);
+    const name = `${id}.titles.json`;
+    const envelope = contents(name);
+    const movies = envelope.catalogue.movies as Record<string, unknown>[];
+    movies[movies.length - 3] = { ...movies[movies.length - 3], streamUrl: "http://x" };
+    writeFileSync(pathOf(name), JSON.stringify(envelope));
+    slowClock();
+    const counted = ticker();
+    const from = memory.requests.length;
+    const app = await launch();
+    const fromCache = shownWhen(app, "cache", counted);
+    await until(() => member(app, id).titles.kind === "ready", "the movie lists");
+    expect(member(app, id).titles).toMatchObject({ from: "provider" });
+    expect(fromCache.at).toBe(-1);
+    expect(listsAskedSince(from)).toContain("get_vod_streams");
+    expect(member(app, id).live).toMatchObject({ from: "cache" });
+  });
+
+  it("shows and keeps nothing of lists checked while their subscription is removed", async () => {
+    const panel = await panelFor(BIG, SIZE);
+    const id = await added(await launch(), panel, BIG);
+    slowClock();
+    const counted = ticker();
+    const read = readWhen(id, counted);
+    const app = await launch();
+    const fromCache = shownWhen(app, "cache", counted);
+    await until(() => read.at >= 0 && counted.ticks >= read.at + 5, "the rows being checked");
+    expect(member(app, id).titles.kind).toBe("idle");
+    await app.remove(id, { keepHistory: true });
+    await until(() => savedOf(id).length === 0, "its files deleted");
+    await settle(300);
+    expect(fromCache.at).toBe(-1);
+    expect(app.members()).toEqual([]);
+    expect(savedOf(id)).toEqual([]);
+  });
+
+  it("writes nothing of lists being copied while their subscription is removed", async () => {
+    const panel = await panelFor(BIG, SIZE);
+    slowClock();
+    const app = await launch();
+    const counted = ticker();
+    const shown = shownWhen(app, "provider", counted);
+    const written = writtenWhen(counted);
+    const id = await app.add({ server: panel.url, ...BIG });
+    if (!id) throw new Error("The add was cancelled");
+    await until(() => shown.at >= 0 && counted.ticks >= shown.at + 5, "the copy under way");
+    expect(written.has(`${id}.titles.json.next`)).toBe(false);
+    await app.remove(id, { keepHistory: true });
+    await settle(300);
+    expect(written.has(`${id}.titles.json.next`)).toBe(false);
+    expect(savedOf(id).filter((name) => name.includes(".titles."))).toEqual([]);
+    await until(() => savedOf(id).length === 0, "its files deleted");
   });
 });

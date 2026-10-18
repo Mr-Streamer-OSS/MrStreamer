@@ -6,8 +6,10 @@ import type {
   ProviderChannel,
   ProviderTitle,
 } from "@mrstreamer/core/provider";
-import { type } from "arktype";
+import { pacer, type Steps } from "@mrstreamer/core/steps";
+import { type, type ArkErrors } from "arktype";
 import { Directory, File, Paths } from "expo-file-system";
+import { inTasks } from "./library.ts";
 
 // Each subscription's last channel list and movie and series lists, as its provider gave them,
 // kept in Caches/catalogues so a launch can show them before, or instead of, asking again.
@@ -24,6 +26,9 @@ import { Directory, File, Paths } from "expo-file-system";
 // before anything shows.
 // Each subscription's lists are read, written and deleted one operation at a time, per list, so a
 // deletion waits for a write under way and a write never recreates what was deleted after it.
+// A read checks the rows, and a write copies them, a few slices per task (library.ts `inTasks`),
+// so taps go through meanwhile; one whose login is replaced or removed in between stops there,
+// shows and writes nothing, and leaves the file to the deletion that follows it in the queue.
 // A write goes to a file beside the copy, then takes its place; on iOS that move deletes the copy
 // first, so an app stopped in between leaves only the new file, which a read takes once it checks.
 
@@ -92,28 +97,79 @@ const Head = {
   subscriptionId: "string",
   fetchedAt: "number",
 } as const;
+/** A list as the envelope checks it: an array within the row bound. `rows` checks each row. */
+const List = lazy(() => type("unknown[]").atMostLength(ROWS));
+/** Each file's envelope and its lists; the rows are checked a slice at a time, each by its own schema. */
 const Envelopes = lazy(() => ({
   live: type({
     ...Head,
     kind: "'live'",
-    catalogue: type({
-      "+": "reject",
-      categories: Category().array().atMostLength(ROWS),
-      channels: Channel().array().atMostLength(ROWS),
-    }),
+    catalogue: type({ "+": "reject", categories: List(), channels: List() }),
   }),
   titles: type({
     ...Head,
     kind: "'titles'",
     catalogue: type({
       "+": "reject",
-      movieCategories: Category().array().atMostLength(ROWS),
-      movies: Title().array().atMostLength(ROWS),
-      seriesCategories: Category().array().atMostLength(ROWS),
-      series: Title().array().atMostLength(ROWS),
+      movieCategories: List(),
+      movies: List(),
+      seriesCategories: List(),
+      series: List(),
     }),
   }),
 }));
+
+/** Each of `list` as `row` checks it, a slice at a time; null at the first that doesn't check. */
+function* rows<R>(
+  list: readonly unknown[],
+  row: (data: unknown) => R | ArkErrors,
+): Steps<R[] | null> {
+  const due = pacer();
+  const checked: R[] = [];
+  for (const each of list) {
+    if (due()) yield;
+    const result = row(each);
+    if (result instanceof type.errors) return null;
+    checked.push(result);
+  }
+  return checked;
+}
+
+/**
+ * `json` as `id`'s saved `kind`, or "invalid": its envelope, its age, then every row of every list.
+ * Nothing of it is answered until all have checked.
+ */
+function* checked(json: unknown, id: string, kind: SavedKind): Steps<Saved | "invalid"> {
+  const fresh = (fetchedAt: number) => {
+    const age = Date.now() - fetchedAt;
+    return age <= MAX_AGE && age >= -MAX_AHEAD;
+  };
+  if (kind === "live") {
+    const head = Envelopes().live(json);
+    if (head instanceof type.errors || head.subscriptionId !== id || !fresh(head.fetchedAt)) {
+      return "invalid";
+    }
+    const categories = yield* rows(head.catalogue.categories, Category());
+    if (!categories) return "invalid";
+    const channels = yield* rows(head.catalogue.channels, Channel());
+    if (!channels) return "invalid";
+    return { kind, catalogue: { categories, channels }, fetchedAt: head.fetchedAt };
+  }
+  const head = Envelopes().titles(json);
+  if (head instanceof type.errors || head.subscriptionId !== id || !fresh(head.fetchedAt)) {
+    return "invalid";
+  }
+  const movieCategories = yield* rows(head.catalogue.movieCategories, Category());
+  if (!movieCategories) return "invalid";
+  const movies = yield* rows(head.catalogue.movies, Title());
+  if (!movies) return "invalid";
+  const seriesCategories = yield* rows(head.catalogue.seriesCategories, Category());
+  if (!seriesCategories) return "invalid";
+  const series = yield* rows(head.catalogue.series, Title());
+  if (!series) return "invalid";
+  const catalogue = { movieCategories, movies, seriesCategories, series };
+  return { kind, catalogue, fetchedAt: head.fetchedAt };
+}
 
 /** The last operation on each list's files, settled or not, by file name. */
 const queues = new Map<string, Promise<unknown>>();
@@ -135,39 +191,52 @@ function discard(file: File) {
   }
 }
 
-/** The file's list if it reads whole and checks out as `id`'s `kind`; otherwise deletes it. */
-async function load(file: File, id: string, kind: SavedKind): Promise<Saved | null> {
-  if (!file.exists) return null;
+/**
+ * The file's list if it reads whole and checks out as `id`'s `kind`; "none" when there is none or
+ * it doesn't, which deletes it. "stopped" when `wanted` failed while its rows were checked: the
+ * file is left as it is, for the deletion queued behind.
+ */
+async function load(
+  file: File,
+  id: string,
+  kind: SavedKind,
+  wanted: () => boolean,
+): Promise<Saved | "none" | "stopped"> {
+  if (!file.exists) return "none";
   try {
     if (file.size > FILE_BYTES) throw new RangeError("Too large");
-    const parsed = Envelopes()[kind](JSON.parse(await file.text()));
-    if (parsed instanceof type.errors || parsed.subscriptionId !== id) throw new TypeError();
-    const age = Date.now() - parsed.fetchedAt;
-    if (age > MAX_AGE || age < -MAX_AHEAD) throw new RangeError("Out of date");
-    return parsed.kind === "live"
-      ? { kind: "live", catalogue: parsed.catalogue, fetchedAt: parsed.fetchedAt }
-      : { kind: "titles", catalogue: parsed.catalogue, fetchedAt: parsed.fetchedAt };
+    // In this order: every schema, each built on its first use, before the text as it was when
+    // the rows were checked at once; the text; one parse; then the envelope and the rows.
+    for (const schema of [Envelopes, Category, Channel, Title]) schema();
+    const json: unknown = JSON.parse(await file.text());
+    const saved = await inTasks(checked(json, id, kind), wanted);
+    if (saved === null) return "stopped";
+    if (saved === "invalid") throw new TypeError();
+    return saved;
   } catch {
     discard(file);
-    return null;
+    return "none";
   }
 }
 
 /**
  * `id`'s saved `kind`, or null when there is none that checks out. A write left halfway takes the
  * copy's place while `stands` holds, as the app was stopped before it could; every other file of
- * the list that doesn't check out is deleted.
+ * the list that doesn't check out is deleted. Null too, leaving the files, once `stands` fails
+ * while the rows are checked.
  */
 export function readList(id: string, kind: SavedKind, stands: () => boolean) {
   return queued(id, kind, null, async () => {
     const pending = pendingOf(id, kind);
-    const kept = await load(fileOf(id, kind), id, kind);
-    if (kept) {
+    const kept = await load(fileOf(id, kind), id, kind, stands);
+    if (kept === "stopped") return null;
+    if (kept !== "none") {
       discard(pending);
       return kept;
     }
-    const left = await load(pending, id, kind);
-    if (!left || !stands()) {
+    const left = await load(pending, id, kind, stands);
+    if (left === "stopped") return null;
+    if (left === "none" || !stands()) {
       discard(pending);
       return null;
     }
@@ -179,8 +248,9 @@ export function readList(id: string, kind: SavedKind, stands: () => boolean) {
 }
 
 /**
- * Saves `saved` as `id`'s copy of its list, while `stands` holds: checked before the write, while
- * it waits on the disk, and once the copy is in place, which goes again when it no longer holds.
+ * Saves `saved` as `id`'s copy of its list, while `stands` holds: checked between the slices that
+ * copy its rows, before the write, while it waits on the disk, and once the copy is in place,
+ * which goes again when it no longer holds.
  * `login` is what signs the subscription in, kept out of the copy. Never rejects.
  */
 export function writeList(
@@ -192,8 +262,9 @@ export function writeList(
   const { kind } = saved;
   return queued(id, kind, undefined, async () => {
     if (!stands()) return;
-    const text = textOf(id, saved, login);
-    if (text === null) return;
+    // Stopped once `stands` fails, or not kept when the password is in the provider's text.
+    const text = await inTasks(textOf(id, saved, login), stands);
+    if (text === null || text === false) return;
     folder().create({ intermediates: true, idempotent: true });
     const pending = pendingOf(id, kind);
     try {
@@ -282,16 +353,43 @@ function shed(keep: string | null, pending: boolean) {
 }
 
 /**
- * The file's text for `saved`: its rows with the fields the app reads, artwork addresses that may
- * carry the login as none. Null when any other text of the rows holds the password, as nothing
- * then says what else of the login a row carries; their numbers and field names aren't text.
+ * The file's text for `saved`, a slice of rows at a time: its rows with the fields the app reads,
+ * artwork addresses that may carry the login as none. False when any other text of a row holds
+ * the password, as nothing then says what else of the login a row carries; their numbers and
+ * field names aren't text.
  */
-function textOf(id: string, saved: Saved, login: readonly string[]): string | null {
+function* textOf(id: string, saved: Saved, login: readonly string[]): Steps<string | false> {
   const [username = "", password = ""] = login;
   const art = (url: string | null) => safeUrl(url, username, password);
-  const catalogue =
-    saved.kind === "live" ? liveCopy(saved.catalogue, art) : titlesCopy(saved.catalogue, art);
-  if (password !== "" && holds(catalogue, password)) return null;
+  let catalogue: LiveCatalogue | OnDemandCatalogue;
+  if (saved.kind === "live") {
+    const categories = yield* copies(saved.catalogue.categories, categoryCopy, password);
+    if (!categories) return false;
+    const channels = yield* copies(
+      saved.catalogue.channels,
+      (each) => channelCopy(each, art),
+      password,
+    );
+    if (!channels) return false;
+    catalogue = { categories, channels } satisfies LiveCatalogue;
+  } else {
+    const { movieCategories, movies, seriesCategories, series } = saved.catalogue;
+    const titleOf = (each: ProviderTitle) => titleCopy(each, art);
+    const movieCopies = yield* copies(movieCategories, categoryCopy, password);
+    if (!movieCopies) return false;
+    const movieRows = yield* copies(movies, titleOf, password);
+    if (!movieRows) return false;
+    const seriesCopies = yield* copies(seriesCategories, categoryCopy, password);
+    if (!seriesCopies) return false;
+    const seriesRows = yield* copies(series, titleOf, password);
+    if (!seriesRows) return false;
+    catalogue = {
+      movieCategories: movieCopies,
+      movies: movieRows,
+      seriesCategories: seriesCopies,
+      series: seriesRows,
+    } satisfies OnDemandCatalogue;
+  }
   return JSON.stringify({
     version: VERSION,
     subscriptionId: id,
@@ -301,7 +399,24 @@ function textOf(id: string, saved: Saved, login: readonly string[]): string | nu
   });
 }
 
-/** Whether a text within `value`, a copy's rows, holds `password`. Artwork kept has none. */
+/** `list` copied by `copy`, a slice at a time; false at the first copy whose text holds `password`. */
+function* copies<A, B extends object>(
+  list: readonly A[],
+  copy: (each: A) => B,
+  password: string,
+): Steps<B[] | false> {
+  const due = pacer();
+  const copied: B[] = [];
+  for (const each of list) {
+    if (due()) yield;
+    const row = copy(each);
+    if (password !== "" && holds(row, password)) return false;
+    copied.push(row);
+  }
+  return copied;
+}
+
+/** Whether a text within `value`, a copied row, holds `password`. Artwork kept has none. */
 function holds(value: unknown, password: string): boolean {
   if (typeof value === "string") return value.includes(password);
   return (
@@ -315,23 +430,17 @@ type Art = (url: string | null) => string | null;
 
 const categoryCopy = ({ id, name }: ProviderCategory) => ({ id, name }) satisfies ProviderCategory;
 
-const liveCopy = (catalogue: LiveCatalogue, art: Art) =>
+const channelCopy = (channel: ProviderChannel, art: Art) =>
   ({
-    categories: catalogue.categories.map(categoryCopy),
-    channels: catalogue.channels.map(
-      (channel) =>
-        ({
-          id: channel.id,
-          name: channel.name,
-          number: channel.number,
-          logoUrl: art(channel.logoUrl),
-          categoryIds: [...channel.categoryIds],
-          guideId: channel.guideId,
-          ...(channel.adult === undefined ? {} : { adult: channel.adult }),
-          catchupDays: channel.catchupDays,
-        }) satisfies ProviderChannel,
-    ),
-  }) satisfies LiveCatalogue;
+    id: channel.id,
+    name: channel.name,
+    number: channel.number,
+    logoUrl: art(channel.logoUrl),
+    categoryIds: [...channel.categoryIds],
+    guideId: channel.guideId,
+    ...(channel.adult === undefined ? {} : { adult: channel.adult }),
+    catchupDays: channel.catchupDays,
+  }) satisfies ProviderChannel;
 
 const titleCopy = (title: ProviderTitle, art: Art) =>
   ({
@@ -349,14 +458,6 @@ const titleCopy = (title: ProviderTitle, art: Art) =>
     ...(title.metadata === undefined ? {} : { metadata: title.metadata }),
     ...(title.episodeFiles === undefined ? {} : { episodeFiles: [...title.episodeFiles] }),
   }) satisfies ProviderTitle;
-
-const titlesCopy = (catalogue: OnDemandCatalogue, art: Art) =>
-  ({
-    movieCategories: catalogue.movieCategories.map(categoryCopy),
-    movies: catalogue.movies.map((title) => titleCopy(title, art)),
-    seriesCategories: catalogue.seriesCategories.map(categoryCopy),
-    series: catalogue.series.map((title) => titleCopy(title, art)),
-  }) satisfies OnDemandCatalogue;
 
 const decoded = (text: string) => {
   try {
