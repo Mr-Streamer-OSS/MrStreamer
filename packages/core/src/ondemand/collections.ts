@@ -79,7 +79,10 @@ export interface Collections {
   validAt(now: number): boolean;
   /** A collection's titles, in `sort` or the collection's own order. */
   list(id: CollectionId, sort?: CollectionSort): readonly Title[];
-  /** How many titles a collection holds, without sorting them. */
+  /**
+   * How many titles a collection holds: its list's length once made, else its members counted
+   * without sorting them. Titles like one (`like:`) are still sorted by how alike they are.
+   */
   size(id: CollectionId): number;
   /** A collection's name to show: "Comedy", "Netflix", "New this week". */
   name(id: CollectionId): string | null;
