@@ -50,8 +50,21 @@ its address, which AVKit's logs print. The player's failures reach the screen th
 `withoutLogin` (`src/errors.ts`). `patches/` also makes expo-file-system's two handlers of
 background session wakes answer at once for a session not theirs: Expo calls the system's handler
 only once every handler answered, and theirs would wait forever on the app's download session.
+
+On iOS 26.1 and later react-native-screens 4.29.0 lost a tab the viewer picked whenever a React
+commit landed between UIKit's `shouldSelectTab:` and `didSelectTab:`: the tab showed, but JS kept
+the one before, so the tab took no touches and leaving a tab closed nothing. `patches/` carries
+upstream's fix to `RNSTabBarController.mm`, unchanged: it marks the controller's own selections
+instead of the viewer's. It is the v4 backport of
+[#4862](https://github.com/software-mansion/react-native-screens/pull/4862),
+97ec4e250282bf4bdf376da9cd293ee9dfb385da, which applies to 4.29.0 byte for byte, then the
+follow-up [#4894](https://github.com/software-mansion/react-native-screens/pull/4894) (#4890),
+23127222c39b6d44aded6ef11130a7513dbb2735, both in react-native-screens 4.30.0
+([issue #4855](https://github.com/software-mansion/react-native-screens/issues/4855)). Drop it
+once the SDK's react-native-screens is 4.30.0 or later.
+
 SDK 58 links prebuilt modules, which a patch can't reach, so `package.json` has autolinking build
-ExpoFileSystem and ExpoVideo from their patched source.
+ExpoFileSystem, ExpoVideo and RNScreens from their patched source.
 
 ## How it is built
 
