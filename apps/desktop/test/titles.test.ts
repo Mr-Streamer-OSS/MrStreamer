@@ -430,10 +430,7 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
             expect.objectContaining({ codec_type: "audio", codec_name: "aac" }),
           ]),
         );
-        const decoded = spawnSync(FFMPEG, ["-v", "error", "-i", "pipe:0", "-f", "null", "-"], {
-          input: converted.body,
-        });
-        expect(decoded.status, decoded.stderr.toString()).toBe(0);
+        expect(picturesOf(converted.body).decoded).toBeGreaterThan(0);
         const seek = await play(`${opened.url}?start=9&audio=1`);
         expect(seek.response.headers.get("x-title-video")).toBe("convert");
         expect(seek.response.headers.get("x-start")).toBe("9");
