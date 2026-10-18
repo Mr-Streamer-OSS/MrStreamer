@@ -1,8 +1,8 @@
 import {
   router,
   useNavigation,
+  useRootNavigationState,
   useRoute,
-  useSegments,
   type NativeStackHeaderItem,
   type NativeStackNavigationOptions,
 } from "expo-router";
@@ -32,20 +32,41 @@ const BASE = { "(home)": "", live: "/live", films: "/films", series: "/series" }
 /** Where `screen` opens on `tab`: Home's at the root, the others' under their tab. */
 export const tabHref = (tab: Tab, screen: TabScreen) => `${BASE[tab]}/${screen}` as const;
 
-/** Whether a route segment or parameter names a tab. */
-export const isTab = (segment: string | undefined): segment is Tab =>
-  TABS.some((tab) => tab === segment);
+/** Whether a route names a tab. */
+const isTab = (segment: string | undefined): segment is Tab => TABS.some((tab) => tab === segment);
 
-/** The tab the viewer is on, or was on under a screen over all the tabs: Home if none. */
-export function useTab(): Tab {
-  const segments: readonly string[] = useSegments();
-  const [first, second] = segments;
-  return first === "(tabs)" && isTab(second) ? second : "(home)";
+/** Navigation state as far as finding the tabs needs it. */
+interface Navigated {
+  readonly index?: number;
+  readonly routes: readonly { readonly name: string; readonly state?: Navigated }[];
 }
 
-/** Search, over the tabs, from `tab`: its Settings goes back there. */
-export function openSearch(tab: Tab) {
-  router.push({ pathname: "/search", params: { from: tab } });
+/** The tab selected in the tabs `state` holds, or null when it holds none. */
+function tabIn(state: Navigated | undefined): Tab | null {
+  for (const route of state?.routes ?? []) {
+    if (route.name === "(tabs)") {
+      const tabs = route.state;
+      const name = tabs?.routes[tabs.index ?? 0]?.name;
+      return isTab(name) ? name : "(home)";
+    }
+    const found = tabIn(route.state);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * The tab selected in the tabs, also under a screen over all of them such as Search, read from
+ * navigation's own state. Null when there are no tabs: with no provider saved, the root shows
+ * Connect and offline Downloads instead.
+ */
+export function useTab(): Tab | null {
+  return tabIn(useRootNavigationState());
+}
+
+/** Search, over the tabs. What it opens goes on the tab under it. */
+export function openSearch() {
+  router.push("/search");
 }
 
 const ACTIONS: readonly {
@@ -66,7 +87,7 @@ function actions(tab: Tab, current: string): NativeStackHeaderItem[] {
     icon: { type: "sfSymbol", name: symbol },
     // The same item on the next screen, so the glass group carries over as a screen is pushed.
     identifier: screen,
-    onPress: () => (screen === "search" ? openSearch(tab) : router.push(tabHref(tab, screen))),
+    onPress: () => (screen === "search" ? openSearch() : router.push(tabHref(tab, screen))),
   }));
 }
 

@@ -50,6 +50,9 @@ const native = vi.hoisted(() => ({
   player: [] as string[],
   /** Where the top bar's routes went. */
   pushed: [] as string[],
+  /** Navigation's state, from the root, and the path on show. */
+  root: { index: 0, routes: [] as object[] },
+  pathname: "/live",
 }));
 
 vi.mock("expo-video", async () => {
@@ -153,7 +156,8 @@ vi.mock("expo-screen-orientation", () => ({
 }));
 vi.mock("expo-router", () => ({
   router: { push: (href: string) => void native.pushed.push(href) },
-  useSegments: () => ["(tabs)", "live"],
+  useRootNavigationState: () => native.root,
+  usePathname: () => native.pathname,
 }));
 vi.mock("../src/glass.tsx", async () => {
   const { createElement } = await import("react");
@@ -166,7 +170,8 @@ vi.mock("../src/glass.tsx", async () => {
 });
 vi.mock("../src/ui.tsx", () => ({ colors: { text: "#FFFFFF", dim: "#8E8E93" } }));
 
-const { openWatch, play, playbackState, retry, stop } = await import("../src/playback.ts");
+const { closeWatch, openWatch, play, playbackState, retry, stop } =
+  await import("../src/playback.ts");
 const { WatchLayer } = await import("../src/watch.tsx");
 
 const movie = (id: string): Playing => ({
@@ -194,6 +199,15 @@ function shown(): NativeView {
   return view;
 }
 
+/** The tabs with Live selected, alone or under Search. */
+const tabsOnLive = {
+  name: "(tabs)",
+  state: { index: 1, routes: [{ name: "(home)" }, { name: "live" }] },
+};
+const onLive = { index: 0, routes: [tabsOnLive] };
+/** No provider saved: Connect, and offline Downloads over it, where copies play. */
+const offline = { index: 1, routes: [{ name: "connect" }, { name: "offline" }] };
+
 let unmount = () => {};
 beforeEach(() => {
   stop();
@@ -206,6 +220,8 @@ beforeEach(() => {
     pictureInPicture: { supported: false, starts: true },
     player: [],
     pushed: [],
+    root: onLive,
+    pathname: "/live",
   });
 });
 afterEach(() => unmount());
@@ -397,6 +413,61 @@ describe("Downloads and Settings from Watch", () => {
     }
   });
 
+  it("keeps Watch open when the viewer brings it back before the fallback's second", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      native.pictureInPicture.supported = true;
+      const watch = await watching(movie("1"));
+      await watch.press("watch-settings");
+      await act(async () => undefined);
+      const view = shown();
+      act(() => view.restore());
+      deliver();
+      act(() => view.stopped());
+      act(() => vi.advanceTimersByTime(1000));
+      expect(playbackState.get()).toMatchObject({ watch: true, pip: false, aside: false });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drops the fallback once Watch closes or another title plays in it", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      native.pictureInPicture = { supported: true, starts: false };
+      const closed = await watching(movie("1"));
+      await closed.press("watch-settings");
+      await act(async () => undefined);
+      act(() => closeWatch());
+      act(() => vi.advanceTimersByTime(1000));
+      expect(playbackState.get()).toMatchObject({ watch: false, aside: false });
+      unmount();
+
+      const replaced = await watching(movie("2"));
+      await replaced.press("watch-settings");
+      await act(async () => undefined);
+      await act(() => play(movie("3"), open, inWatch));
+      act(() => vi.advanceTimersByTime(1000));
+      expect(playbackState.get()).toMatchObject({ watch: true, aside: false });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("opens on Live when Watch came back over Search on Live", async () => {
+    native.pictureInPicture.supported = true;
+    const watch = await watching(movie("1"));
+    const view = shown();
+    act(() => view.start());
+    native.root = { index: 1, routes: [tabsOnLive, { name: "search" }] };
+    native.pathname = "/search";
+    act(() => view.restore());
+    deliver();
+    act(() => view.stopped());
+    await watch.press("watch-settings");
+    expect(native.pushed).toEqual(["/live/settings"]);
+  });
+
   it("brings a channel back live rather than from where it paused", async () => {
     let opened = 0;
     const opens = async () => {
@@ -436,5 +507,55 @@ describe("Downloads and Settings from Watch", () => {
     expect(playbackState.get()).toMatchObject({ phase: { kind: "failed" }, aside: true });
     act(() => openWatch());
     expect(playbackState.get()).toMatchObject({ phase: { kind: "failed" }, watch: true });
+  });
+});
+
+describe("Watch with no provider saved", () => {
+  beforeEach(() => {
+    native.root = offline;
+    native.pathname = "/offline";
+  });
+
+  it("offers Downloads, the list under it, only for Picture in Picture to take the copy", async () => {
+    native.pictureInPicture.supported = true;
+    const watch = await watching(movie("copy"));
+    expect(() => watch.press("watch-settings")).toThrow("No watch-settings");
+    native.player.length = 0;
+    await watch.press("watch-downloads");
+    expect(native.pushed).toEqual([]);
+    expect(playbackState.get()).toMatchObject({ phase: { kind: "playing" }, pip: true });
+    expect(native.player).toEqual([]);
+  });
+
+  it("opens offline Downloads when Watch is over Connect", async () => {
+    native.pictureInPicture.supported = true;
+    native.root = { index: 0, routes: [{ name: "connect" }] };
+    native.pathname = "/connect";
+    const watch = await watching(movie("copy"));
+    await watch.press("watch-downloads");
+    expect(native.pushed).toEqual(["/offline"]);
+  });
+
+  it("keeps Watch, its picture and its controls where nothing could bring it back", async () => {
+    const watch = await watching(movie("copy"));
+    expect(() => watch.press("watch-downloads")).toThrow("No watch-downloads");
+    expect(() => watch.press("watch-settings")).toThrow("No watch-settings");
+    expect(playbackState.get()).toMatchObject({ phase: { kind: "playing" }, watch: true });
+  });
+
+  it("stays in Watch when Picture in Picture doesn't start", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      native.pictureInPicture = { supported: true, starts: false };
+      const watch = await watching(movie("copy"));
+      native.player.length = 0;
+      await watch.press("watch-downloads");
+      await act(async () => undefined);
+      act(() => vi.advanceTimersByTime(1000));
+      expect(playbackState.get()).toMatchObject({ watch: true, aside: false });
+      expect(native.player).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

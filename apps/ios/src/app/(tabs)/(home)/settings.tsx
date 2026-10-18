@@ -44,7 +44,7 @@ import { ChannelLogo, colors, TextButton } from "../../../ui.tsx";
 export default function Settings() {
   const roster = useRoster();
   const statistics = useStatistics();
-  const tab = useTab();
+  const tab = useTab() ?? "(home)";
   if (roster.kind !== "ready") return null;
   return (
     <ScrollView style={styles.screen} contentInsetAdjustmentBehavior="automatic">

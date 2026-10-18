@@ -123,7 +123,7 @@ const clock = store(0);
 const length = store(0);
 
 export const usePlayback = () => useStore(state);
-/** Read-only, for telemetry, which follows the player without a screen, and event handlers. */
+/** Read-only, for telemetry, which follows the player without a screen. */
 export const playbackState: Pick<Store<Playback>, "get" | "subscribe"> = state;
 export const playbackClock: Pick<Store<number>, "get" | "subscribe"> = clock;
 export const usePlaybackClock = () => useStore(clock);

@@ -1,5 +1,5 @@
 import type { Title } from "@mrstreamer/contracts/ondemand";
-import { router, useLocalSearchParams } from "expo-router";
+import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Pressable, SectionList, StyleSheet, Text, TextInput, View } from "react-native";
@@ -13,7 +13,7 @@ import {
   type Member,
 } from "../account.ts";
 import { useReduceMotion } from "../glass.tsx";
-import { isTab, tabHref } from "../header.tsx";
+import { tabHref, useTab } from "../header.tsx";
 import { searchChannels, type Channel, type Library } from "../library.ts";
 import { playingChannel, usePlayback } from "../playback.ts";
 import { openDetails } from "../resume.ts";
@@ -109,7 +109,7 @@ function searchStatus(
 let kept = "";
 
 /**
- * Search, over the tab it opened from (`from`), which stays as it was under it: movies, series
+ * Search, over the tab it opened from, which stays as it was under it: movies, series
  * and live channels by name, matched as the desktop's search matches words, titles by any of
  * their names, TMDB's translations included, the best first. It comes down a little as it fades
  * in, or only fades under Reduce Motion, with the keyboard up. Cancel or a swipe back closes it
@@ -118,8 +118,7 @@ let kept = "";
  * above the results.
  */
 export default function Search() {
-  const { from } = useLocalSearchParams<{ from?: string }>();
-  const tab = isTab(from) ? from : "(home)";
+  const tab = useTab() ?? "(home)";
   const insets = useSafeAreaInsets();
   const roster = useRoster();
   const catalogue = useCatalogue();
@@ -269,9 +268,10 @@ export default function Search() {
         initialNumToRender={16}
         contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
         ListEmptyComponent={
-          // Nothing found only once the latest text was searched and nothing more is to come.
-          searching && typed === query && !status?.loading ? (
-            <Nothing query={typed.trim()} library={status ? null : library} lists={lists} />
+          // Nothing has the name only once the latest text was searched in every list. While one
+          // loads or failed, the status above says what was searched instead.
+          searching && typed === query && !status ? (
+            <Nothing query={typed.trim()} library={library} lists={lists} />
           ) : undefined
         }
         testID="search-list"

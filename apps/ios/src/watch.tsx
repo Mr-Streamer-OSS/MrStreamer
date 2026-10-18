@@ -1,4 +1,4 @@
-import { router } from "expo-router";
+import { router, usePathname } from "expo-router";
 import { lockAsync, OrientationLock, unlockAsync } from "expo-screen-orientation";
 import { isPictureInPictureSupported, VideoAirPlayButton, VideoView } from "expo-video";
 import { useEffect, useRef, useState } from "react";
@@ -22,7 +22,6 @@ import {
   closeWatch,
   onEndPictureInPicture,
   pictureInPicture,
-  playbackState,
   player,
   playingItem,
   playNext,
@@ -54,26 +53,45 @@ import { colors } from "./ui.tsx";
  *
  * Downloads and Settings open on the tab under Watch without stopping what plays: where Picture in
  * Picture can, it takes the picture over, as its own button does; otherwise Watch is set aside,
- * paused, until the accessory brings it back (`setAside`).
+ * paused, until the accessory brings it back (`setAside`). With no provider saved there are no
+ * tabs and no accessory: Downloads is the offline list, offered only while Picture in Picture can
+ * take the picture, and Settings isn't offered.
  */
 export function WatchLayer() {
-  const { phase, watch, pip } = usePlayback();
+  const { phase, watch, pip, external } = usePlayback();
   const view = useRef<VideoView>(null);
   const [controls, setControls] = useState(true);
   const tab = useTab();
+  const pathname = usePathname();
+  // Each press that asks Picture in Picture to take over gets a number, and its fallback acts only
+  // while that number is the latest: Picture in Picture starting, Watch closing or showing again,
+  // or another item playing each retire it.
+  const attempt = useRef(0);
+  const item = phase.kind === "idle" ? null : phase.item;
+  useEffect(() => {
+    attempt.current++;
+  }, [watch, pip, item]);
+  const pictureCanTake = phase.kind === "playing" && !external && isPictureInPictureSupported();
+  const screens: readonly TabScreen[] = tab
+    ? ["downloads", "settings"]
+    : pictureCanTake
+      ? ["downloads"]
+      : [];
   const openScreen = (screen: TabScreen) => {
-    router.push(tabHref(tab, screen));
-    const now = playbackState.get();
+    // Offline Downloads is usually the screen Watch opened over: then it only has to show.
+    const href = tab ? tabHref(tab, screen) : pathname === "/offline" ? null : "/offline";
+    if (href) router.push(href);
     const shown = view.current;
-    if (now.phase.kind !== "playing" || now.external || !isPictureInPictureSupported() || !shown) {
-      return setAside();
+    if (!pictureCanTake || !shown) {
+      if (tab) setAside();
+      return;
     }
     // Picture in Picture reports starting, which closes Watch over the screen just opened. If it
-    // refuses, or doesn't start within a second, Watch is set aside instead of staying over it.
-    const item = now.phase.item;
+    // refuses, or doesn't start within a second, Watch is set aside instead of staying over it;
+    // with no tabs to come back from, Watch stays as it was.
+    const mine = ++attempt.current;
     const unless = () => {
-      const then = playbackState.get();
-      if (then.watch && !then.pip && playingItem(then.phase) === item) setAside();
+      if (attempt.current === mine && tab) setAside();
     };
     void shown.startPictureInPicture().then(() => void setTimeout(unless, 1000), unless);
   };
@@ -156,6 +174,7 @@ export function WatchLayer() {
       {watch && controls ? (
         <Controls
           onPictureInPicture={() => void view.current?.startPictureInPicture()}
+          screens={screens}
           onScreen={openScreen}
         />
       ) : null}
@@ -171,9 +190,12 @@ function turn(change: () => Promise<void>) {
 
 function Controls({
   onPictureInPicture,
+  screens,
   onScreen,
 }: {
   onPictureInPicture: () => void;
+  /** The screens Watch can open from here. */
+  screens: readonly TabScreen[];
   onScreen: (screen: TabScreen) => void;
 }) {
   const { phase } = usePlayback();
@@ -188,38 +210,44 @@ function Controls({
       <Glass style={[styles.circle, { top: insets.top + 12, left: edge.left }]}>
         <IconButton symbol="xmark" label="Close" onPress={closeWatch} testID="watch-close" />
       </Glass>
-      <Glass style={[styles.capsule, { top: insets.top + 12, right: edge.right }]}>
-        {streaming ? (
-          <>
-            <VideoAirPlayButton
-              style={styles.airplay}
-              tint={colors.text}
-              activeTint={colors.text}
-              accessibilityLabel="AirPlay"
-            />
-            {isPictureInPictureSupported() ? (
-              <IconButton
-                symbol="pip.enter"
-                label="Picture in Picture"
-                onPress={onPictureInPicture}
-                testID="watch-pip"
+      {streaming || screens.length > 0 ? (
+        <Glass style={[styles.capsule, { top: insets.top + 12, right: edge.right }]}>
+          {streaming ? (
+            <>
+              <VideoAirPlayButton
+                style={styles.airplay}
+                tint={colors.text}
+                activeTint={colors.text}
+                accessibilityLabel="AirPlay"
               />
-            ) : null}
-          </>
-        ) : null}
-        <IconButton
-          symbol="arrow.down.circle"
-          label="Downloads"
-          onPress={() => onScreen("downloads")}
-          testID="watch-downloads"
-        />
-        <IconButton
-          symbol="gearshape"
-          label="Settings"
-          onPress={() => onScreen("settings")}
-          testID="watch-settings"
-        />
-      </Glass>
+              {isPictureInPictureSupported() ? (
+                <IconButton
+                  symbol="pip.enter"
+                  label="Picture in Picture"
+                  onPress={onPictureInPicture}
+                  testID="watch-pip"
+                />
+              ) : null}
+            </>
+          ) : null}
+          {screens.includes("downloads") ? (
+            <IconButton
+              symbol="arrow.down.circle"
+              label="Downloads"
+              onPress={() => onScreen("downloads")}
+              testID="watch-downloads"
+            />
+          ) : null}
+          {screens.includes("settings") ? (
+            <IconButton
+              symbol="gearshape"
+              label="Settings"
+              onPress={() => onScreen("settings")}
+              testID="watch-settings"
+            />
+          ) : null}
+        </Glass>
+      ) : null}
       <Glass style={[styles.panel, { bottom: insets.bottom + 12, ...edge }]}>
         <View style={[styles.top, !wide && styles.stacked]}>
           <View style={styles.names}>

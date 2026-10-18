@@ -107,7 +107,14 @@ vi.mock("expo-router", () => ({
     replace: (href: string) => scenario.did.push(`replace ${href}`),
     push: (href: string) => scenario.did.push(`push ${href}`),
   },
-  useLocalSearchParams: () => ({ from: "live" }),
+  // Live is the tab under Search.
+  useRootNavigationState: () => ({
+    index: 1,
+    routes: [
+      { name: "(tabs)", state: { index: 1, routes: [{ name: "(home)" }, { name: "live" }] } },
+      { name: "search" },
+    ],
+  }),
 }));
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 vi.mock("react-native-safe-area-context", () => ({
@@ -278,6 +285,23 @@ describe("Search over the tabs", () => {
     press("text-Retry");
     press("text-Settings");
     expect(scenario.did).toEqual(["retry b", "back", "push /live/settings"]);
+  });
+
+  it("doesn't say nothing has the name when a provider's lists failed", () => {
+    scenario.members = [
+      member("a", "Northwind", {
+        live: { kind: "failed", error: { kind: "unexpected", detail: "" }, last: null, since: 0 },
+      }),
+    ];
+    scenario.catalogue = {
+      kind: "failed",
+      error: { kind: "unexpected", detail: "" },
+      member: scenario.members[0]!,
+    };
+    open();
+    type("zzq");
+    expect(text()).toContain("Couldn't load channels from Northwind. Movies and series searched.");
+    expect(text()).not.toContain("Nothing named");
   });
 
   it("says nothing has the name only with everything in, and how much it looked through", () => {

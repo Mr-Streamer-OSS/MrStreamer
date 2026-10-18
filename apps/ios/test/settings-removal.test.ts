@@ -69,7 +69,7 @@ vi.mock("react-native", async () => {
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.0.0" } } }));
 vi.mock("expo-router", () => ({
   router: { push: () => undefined },
-  useSegments: () => ["(tabs)", "(home)", "settings"],
+  useRootNavigationState: () => ({ index: 0, routes: [{ name: "(tabs)" }] }),
 }));
 vi.mock("expo-video", () => ({ isPictureInPictureSupported: () => true }));
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
